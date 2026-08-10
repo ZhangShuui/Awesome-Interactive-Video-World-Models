@@ -136,16 +136,24 @@ class TestRejudge(unittest.TestCase):
     because they were logged rather than dropped."""
 
     def setUp(self):
+        # ROOT is patched too, not just REJECTED: candidates_from_rejections
+        # filters against ROOT/data/papers.jsonl, so without this the test
+        # silently depends on whether the real list happens to contain the
+        # fixture ids -- and starts failing the day someone adds one.
         self.tmp = Path(tempfile.mkdtemp())
+        (self.tmp / "data").mkdir()
+        (self.tmp / "data" / "papers.jsonl").write_text("", encoding="utf-8")
+        (self.tmp / "data" / "arxiv-ignore.txt").write_text("", encoding="utf-8")
         self.log = self.tmp / "agent-rejected.jsonl"
         self.log.write_text(
             "# a comment survives\n"
             '{"id": "2608.05976", "title": "Diff-VF", "rejected_on": "2026-08-10", "reason": "no action conditioning"}\n'
             '{"id": "2607.26529", "title": "CineWeaver", "rejected_on": "2026-08-10", "reason": "no per-step action"}\n',
             encoding="utf-8")
-        self._patch = mock.patch.object(ar, "REJECTED", self.log)
-        self._patch.start()
-        self.addCleanup(self._patch.stop)
+        for target, value in (("REJECTED", self.log), ("ROOT", self.tmp)):
+            patch = mock.patch.object(ar, target, value)
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def test_rejection_date_is_not_used_as_the_paper_date(self):
         # The row records when the call was made. Reusing it would stamp every
@@ -160,15 +168,10 @@ class TestRejudge(unittest.TestCase):
         self.assertTrue(all(c["prior_reason"] for c in cands))
 
     def test_papers_already_in_the_list_are_not_reproposed(self):
-        papers = self.tmp / "papers.jsonl"
-        papers.write_text(json.dumps({"id": "2608.05976", "title": "Diff-VF"}) + "\n",
-                          encoding="utf-8")
-        with mock.patch.object(ar, "ROOT", self.tmp):
-            (self.tmp / "data").mkdir(exist_ok=True)
-            (self.tmp / "data" / "papers.jsonl").write_text(
-                json.dumps({"id": "2608.05976"}) + "\n", encoding="utf-8")
-            (self.tmp / "data" / "arxiv-ignore.txt").write_text("", encoding="utf-8")
-            _, cands = ar.candidates_from_rejections()
+        (self.tmp / "data" / "papers.jsonl").write_text(
+            json.dumps({"id": "2608.05976", "title": "Diff-VF"}) + "\n",
+            encoding="utf-8")
+        _, cands = ar.candidates_from_rejections()
         self.assertEqual([c["id"] for c in cands], ["2607.26529"])
 
     def test_recovered_papers_leave_the_log_and_the_rest_stay(self):

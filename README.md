@@ -5,7 +5,7 @@ A curated list of **interactive video world models** — generative models you c
 Video generation stopped being a movie and became a place. This list tracks that shift: systems where a user or a policy issues an action, the model produces the next frames causally, and the world is still there when you look back — together with the work those systems are built out of, on action control, real-time generation, and long-horizon memory. General world-model lists cover robotics, driving, and 3D generation alongside this; here the narrow focus is the point.
 
 <!-- BEGIN:STATS -->
-**403 papers** across 9 sections &nbsp;·&nbsp; **133** read in depth and profiled in the comparison table &nbsp;·&nbsp; **34** with released weights or code &nbsp;·&nbsp; **51** reporting ≥10 FPS &nbsp;·&nbsp; newest entry 2026-08-07
+**409 papers** across 9 sections &nbsp;·&nbsp; **133** read in depth and profiled in the comparison table &nbsp;·&nbsp; **34** with released weights or code &nbsp;·&nbsp; **51** reporting ≥10 FPS &nbsp;·&nbsp; newest entry 2026-08-07
 <!-- END:STATS -->
 
 Every entry is screened against the [scope](#scope) below. Those that clear the strict bar — a closed loop, causal generation, persistent state — are profiled on backbone, action space, frame rate, and memory mechanism where the paper has been read in depth; see [System Comparison](#system-comparison).
@@ -96,10 +96,10 @@ Several excellent lists cover the wider field — see [Related lists](#related-l
 - [Foundations & Prehistory](#foundations--prehistory) (5)
 - [Blogs & Technical Reports](#blogs--technical-reports) (6)
 - [Interactive Video World Models](#interactive-video-world-models) (109)
-- [Action Control & Interfaces](#action-control--interfaces) (30)
+- [Action Control & Interfaces](#action-control--interfaces) (32)
 - [Real-Time & Streaming Generation](#real-time--streaming-generation) (108)
-- [Long-Horizon Memory & Consistency](#long-horizon-memory--consistency) (95)
-- [Benchmarks & Evaluation](#benchmarks--evaluation) (22)
+- [Long-Horizon Memory & Consistency](#long-horizon-memory--consistency) (98)
+- [Benchmarks & Evaluation](#benchmarks--evaluation) (23)
 - [Datasets & Environments](#datasets--environments) (4)
 - [System Comparison](#system-comparison)
 - [Contributing](#contributing)
@@ -277,15 +277,17 @@ _The main list: systems that meet all three criteria. Newest first._ &nbsp;·&nb
 
 ## Action Control & Interfaces
 
-_How an action reaches the generator: action spaces, injection mechanisms, latent actions learned without labels, and control-fidelity analysis._ &nbsp;·&nbsp; **30 entries**
+_How an action reaches the generator: action spaces, injection mechanisms, latent actions learned without labels, and control-fidelity analysis._ &nbsp;·&nbsp; **32 entries**
 
 * **`GeniWorld`**, A Generalizable Interactive World Model for Robotic Manipulation via Visual Actions. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06332)]
 * **`LAWM-3D`**, Learning 3D-Aware Latent Actions from Human Videos for Generalizable Robot World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05706)]
 * **`UniWorld-View`**, Large-Baseline View Synthesis via Video Diffusion Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.04701)]
 * Overcoming Statistical Bias in Action-Controllable World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.04653)]
+* **`EmbodiedVAE`**, Disentangled Video VAE for Efficient and Controllable Embodied Manipulation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.02990)]
 * **`BWM`**, A Low-Cost High-Fidelity World Simulator for Robot Learning. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.29302)]
 * Video Models as Native 4D Renderers: World-Grounded Conditioning from Animated Mesh. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2608.00094)]
 * **`ShadowDancer`**, Teaching Video World Models Any Action by Learning Unified Dynamics Representations from a Video and Its Shadow. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.28362)]
+* **`ContactFlow`**, A video action conditioning that transfers across embodiments. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26579)]
 * Causally Debiased Latent Action Model for Embodied Action Conditioned World Models. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.09185)]
 * **`CLAW`**, Learning Continuous Latent Action World Models via Adversarial Latent Regularization. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.04130)]
 * World Models as Group Actions. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.24578)]
@@ -425,13 +427,16 @@ _Meeting the per-frame latency budget: causal and autoregressive backbones, few-
 
 ## Long-Horizon Memory & Consistency
 
-_Keeping the world stable when the camera comes back: long context, explicit spatial and 3D memory, retrieval, and state persistence._ &nbsp;·&nbsp; **95 entries**
+_Keeping the world stable when the camera comes back: long context, explicit spatial and 3D memory, retrieval, and state persistence._ &nbsp;·&nbsp; **98 entries**
 
 * Addressable Memory for Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.07408)]
+* **`Diff-VF`**, Training-free High-quality Long Video Generation via Diffusion Model. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05976)]
 * **`Vorch-Director`**, Interactive World Story Model via Noise-Aware Error Rectification. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05776)]
 * **`WorldCycle`**, Self-Verifiable Reinforcement Learning for Long-Horizon Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.04964)]
+* **`ODEWorld`**, A Continuous Predictive Architecture via Physical-Time Flow. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.27924)]
 * **`FreqForcing`**, Autoregressive Long Video Generation via Spectral Self-Anchoring. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.27110)]
 * Mitigating Compounding Error via Video Representation Regularization. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.27036)]
+* **`CineWeaver`**, Training-Free Reference-Controllable Multi-Shot Long Video Generation for Cinematic Storytelling. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26529)]
 * **`Cycle-World`**, Mitigating Error Accumulation in Long-term Video World Models via Reverse-Prediction Cycle Consistency. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.11836)]
 * **`MemLearner`**, Learning to Query Context memory for Video World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.31734)]
 * Compression and Retrieval: Implicit Memory Retrieval for Video World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.23105)]
@@ -525,9 +530,10 @@ _Keeping the world stable when the camera comes back: long context, explicit spa
 
 ## Benchmarks & Evaluation
 
-_Benchmarks and evaluation protocols aimed at interactive world models, including memory, control-following, and long-horizon stability._ &nbsp;·&nbsp; **22 entries**
+_Benchmarks and evaluation protocols aimed at interactive world models, including memory, control-following, and long-horizon stability._ &nbsp;·&nbsp; **23 entries**
 
 * **`GAUGE`**, A Measurement-Grounded Benchmark for Physical Fidelity in Simulation Engines and Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05948)]
+* **`XEWorld`**, Can Action-Conditioned World Models Generalize to Unseen Robot Embodiments?. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05799)]
 * **`WorldExam`**, Benchmarking World Models from Apparent Appearance to Inherent Reactivity. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.02603)]
 * **`WorldRoamBench`**, An Open-World Benchmark for Long-Horizon Stability of Interactive World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.31672)]
 * **`MemoBench`**, Benchmarking World Modeling in Dynamically Changing Environments. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.27537)]
