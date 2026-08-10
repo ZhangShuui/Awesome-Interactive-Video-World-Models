@@ -108,6 +108,29 @@ class TestToolPinning(unittest.TestCase):
         self.assertNotIn("--disallowed-tools", cmd)
 
 
+class TestAwaitingMerge(unittest.TestCase):
+    """Without this a second run re-judges everything the first run decided and
+    pays for it twice: the run never ticks the inbox, and the records it wrote
+    live on an unmerged branch."""
+
+    BODY = ("## Accepted\n"
+            "| [Wonder](https://arxiv.org/abs/2607.26037) | `systems` | ... |\n"
+            "## Rejected\n"
+            "- `2608.07420` Beyond Myopic World Models — one forward pass\n")
+
+    def test_accepted_and_rejected_ids_are_both_found(self):
+        with mock.patch.object(ar, "gh", return_value=json.dumps([{"body": self.BODY}])):
+            self.assertEqual(ar.ids_awaiting_merge(), {"2607.26037", "2608.07420"})
+
+    def test_no_open_prs(self):
+        with mock.patch.object(ar, "gh", return_value="[]"):
+            self.assertEqual(ar.ids_awaiting_merge(), set())
+
+    def test_unreadable_pr_list_does_not_abort_the_run(self):
+        with mock.patch.object(ar, "gh", return_value="not json"):
+            self.assertEqual(ar.ids_awaiting_merge(), set())
+
+
 class TestPrompts(unittest.TestCase):
     def test_scope_comes_from_the_published_readme(self):
         scope = ar.scope_text()

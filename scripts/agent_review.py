@@ -165,6 +165,28 @@ def gh(*args, check=True):
     return proc.stdout
 
 
+BARE_ARXIV_ID_RE = re.compile(r"\b\d{4}\.\d{4,5}\b")
+
+
+def ids_awaiting_merge():
+    """Papers this agent has already judged but whose PR is still open.
+
+    A run leaves the inbox untouched -- the Issue is the cloud workflow's to
+    manage -- so without this a second run re-screens everything the first one
+    decided, and pays for it twice. The PR body names every accepted id as a
+    link and every rejected id in backticks, so scanning it covers both."""
+    raw = gh("pr", "list", "--state", "open", "--limit", "50", "--json", "body",
+             check=False)
+    try:
+        prs = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return set()
+    ids = set()
+    for pr in prs:
+        ids |= set(BARE_ARXIV_ID_RE.findall(pr.get("body") or ""))
+    return ids
+
+
 def candidates_from_issue():
     """-> (issue_number, [candidate]). Abstracts are not in the Issue body, so
     they are refetched from the arXiv API."""
@@ -181,7 +203,18 @@ def candidates_from_issue():
             payload["section"] = match.group("section")
             payload["checked"] = match.group("checked").lower() == "x"
             found.append(payload)
-    return issues[0]["number"], [c for c in found if not c["checked"]]
+
+    import arxiv_candidates as ac
+    handled = (ac.known_ids(ROOT / "data" / "papers.jsonl")
+               | ac.ignored_ids(ROOT / "data" / "arxiv-ignore.txt")
+               | rejected_ids()
+               | ids_awaiting_merge())
+    fresh = [c for c in found if not c["checked"] and c["id"] not in handled]
+    skipped = len(found) - len(fresh) - sum(1 for c in found if c["checked"])
+    if skipped:
+        print(f"[agent] skipping {skipped} candidate(s) already in the list, "
+              f"already rejected, or sitting in an open PR")
+    return issues[0]["number"], fresh
 
 
 def candidates_locally(days, max_results):
