@@ -10,14 +10,27 @@ GitHub Action (daily, cloud)     arXiv -> candidate Issue
         │
         ▼
 scripts/agent_review.py (daily, your machine)
-        ├─ 1 screening call over all candidates      title + abstract
-        ├─ 1 attribute call per accepted `systems`   reads the paper
+        ├─ screening calls, 8 papers each            title + abstract, no tools
+        ├─ 1 attribute call per accepted `systems`   reads the paper, WebFetch only
         ├─ writes data/papers.jsonl, data/agent-rejected.jsonl
         └─ opens a pull request
         │
         ▼
 you                              merge, or don't
 ```
+
+Screening is batched (`--screen-batch`, default 8) so a slow or malformed
+response costs one batch rather than the run; the papers in a failed batch stay
+`unsure` and come back next time.
+
+**The toolset is pinned on both passes.** Screening runs with every tool denied
+so it answers from the prompt, and the attribute pass gets `WebFetch` and
+nothing else. This is not a detail: left unrestricted, the headless agent
+inherits the full default toolset and goes exploring — fetching each arXiv page
+during what should be a one-shot classification — and a screening call that
+should take a minute runs past ten. Note that passing an *empty*
+`--allowed-tools` is not a restriction; the flag has to be absent or the tools
+have to be named, so denial is explicit.
 
 The agent never pushes to `main`, and the script aborts if the working tree is
 dirty. Every entry it adds is marked `"section_source": "agent"`, so

@@ -63,6 +63,35 @@ class TestCallClaude(unittest.TestCase):
         self.assertEqual(parsed, {"ok": True})
 
 
+class TestToolPinning(unittest.TestCase):
+    """An unrestricted headless agent goes exploring instead of answering, which
+    turned a one-shot classification into a >10 minute session."""
+
+    def _cmd(self, tools):
+        with mock.patch("subprocess.run", return_value=FakeProc(envelope("{}"))) as run:
+            ar.call_claude("p", "m", tools, 60)
+        return run.call_args[0][0]
+
+    def test_screening_denies_every_tool(self):
+        cmd = self._cmd(ar.SCREEN_TOOLS)
+        self.assertIn("--disallowed-tools", cmd)
+        for tool in ("WebFetch", "Bash", "Read", "Task"):
+            self.assertIn(tool, cmd)
+        self.assertNotIn("--allowed-tools", cmd)
+
+    def test_attribute_pass_gets_webfetch_only(self):
+        cmd = ar.SCREEN_TOOLS and self._cmd(ar.ATTR_TOOLS)
+        allowed = cmd[cmd.index("--allowed-tools") + 1:cmd.index("--disallowed-tools")]
+        self.assertEqual(allowed, ["WebFetch"])
+        self.assertNotIn("WebFetch", cmd[cmd.index("--disallowed-tools"):])
+        self.assertIn("Bash", cmd)
+
+    def test_no_tool_spec_passes_no_flag(self):
+        cmd = self._cmd(None)
+        self.assertNotIn("--allowed-tools", cmd)
+        self.assertNotIn("--disallowed-tools", cmd)
+
+
 class TestPrompts(unittest.TestCase):
     def test_scope_comes_from_the_published_readme(self):
         scope = ar.scope_text()

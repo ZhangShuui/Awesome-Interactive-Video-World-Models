@@ -7,10 +7,13 @@ main list, read the paper and fill in the comparison-table row. It stops there.
 Merging is a human's job and this script never pushes to the default branch.
 
     inbox Issue (or a local arXiv query)
-      -> one screening call over all candidates      (title + abstract)
+      -> screening calls in small batches           (title + abstract, no tools)
       -> one attribute call per accepted `systems` paper (reads the paper)
       -> data/papers.jsonl + data/agent-rejected.jsonl
       -> branch, commit, `gh pr create`
+
+Both passes run with the toolset pinned: screening gets no tools at all so it
+answers from the prompt, and the attribute pass gets WebFetch and nothing else.
 
 Rejections are written to data/agent-rejected.jsonl rather than dropped, so the
 next inbox refresh does not propose them forever and so a human can see, in the
@@ -39,8 +42,17 @@ ROOT = Path(__file__).resolve().parent.parent
 PROMPTS = ROOT / "agent" / "prompts"
 FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
 
-SCREEN_TOOLS = ""            # judging from supplied text needs no tools
-ATTR_TOOLS = "WebFetch"      # reading the paper does
+# Screening judges text that is already in the prompt. Left unrestricted the
+# headless agent inherits the full default toolset and goes looking -- fetching
+# each arXiv page, reading the repo -- which turns a one-shot classification
+# into a many-minute session. Naming the tools to deny is the only way to say
+# "answer from what you were given"; an empty --allowed-tools is not a
+# restriction, it is no flag at all.
+DENY_ALL_TOOLS = ["Bash", "Read", "Write", "Edit", "Glob", "Grep",
+                  "WebFetch", "WebSearch", "Task", "NotebookEdit", "TodoWrite"]
+SCREEN_TOOLS = {"disallowed": DENY_ALL_TOOLS}
+ATTR_TOOLS = {"allowed": ["WebFetch"],
+              "disallowed": [t for t in DENY_ALL_TOOLS if t != "WebFetch"]}
 
 
 # --- claude headless ---------------------------------------------------------
@@ -52,8 +64,10 @@ class AgentError(RuntimeError):
 def call_claude(prompt, model, tools, timeout):
     """-> (parsed_json, cost_usd). Raises AgentError on anything unusable."""
     cmd = ["claude", "-p", prompt, "--model", model, "--output-format", "json"]
-    if tools:
-        cmd += ["--allowed-tools", tools]
+    for flag, key in (("--allowed-tools", "allowed"), ("--disallowed-tools", "disallowed")):
+        names = (tools or {}).get(key)
+        if names:
+            cmd += [flag, *names]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -249,17 +263,33 @@ def require_clean_tree():
 
 # --- main --------------------------------------------------------------------
 
-def screen(candidates, model, timeout):
-    prompt = render("screen.md", SCOPE=scope_text(), SECTIONS=sections_text(),
-                    CANDIDATES=candidates_block(candidates))
-    verdicts, cost = call_with_retry(prompt, model, SCREEN_TOOLS, timeout)
-    if not isinstance(verdicts, list):
-        raise AgentError("screening did not return a JSON array")
-    by_id = {v.get("id"): v for v in verdicts if isinstance(v, dict)}
+def screen(candidates, model, timeout, batch_size):
+    """Batched so one slow or malformed response costs one batch, not the run.
+    Anything without a verdict stays unsure, which keeps it in the inbox."""
+    by_id, cost = {}, 0.0
+    batches = [candidates[i:i + batch_size]
+               for i in range(0, len(candidates), batch_size)]
+    for n, chunk in enumerate(batches, 1):
+        prompt = render("screen.md", SCOPE=scope_text(), SECTIONS=sections_text(),
+                        CANDIDATES=candidates_block(chunk))
+        print(f"  batch {n}/{len(batches)} ({len(chunk)} papers)", flush=True)
+        try:
+            verdicts, call_cost = call_with_retry(prompt, model, SCREEN_TOOLS, timeout)
+        except AgentError as exc:
+            print(f"  batch {n} failed, its papers stay unsure: {exc}", file=sys.stderr)
+            continue
+        cost += call_cost
+        if not isinstance(verdicts, list):
+            print(f"  batch {n} did not return an array, its papers stay unsure",
+                  file=sys.stderr)
+            continue
+        for v in verdicts:
+            if isinstance(v, dict) and v.get("id"):
+                by_id[v["id"]] = v
     missing = [c["id"] for c in candidates if c["id"] not in by_id]
     if missing:
-        print(f"  warning: no verdict for {len(missing)} candidate(s); "
-              f"treating as unsure: {', '.join(missing)}", file=sys.stderr)
+        print(f"  no verdict for {len(missing)} candidate(s); treating as unsure",
+              file=sys.stderr)
     return by_id, cost
 
 
@@ -285,11 +315,17 @@ def main():
                     help="query arXiv directly instead of reading the inbox Issue")
     ap.add_argument("--days", type=int, default=3)
     ap.add_argument("--max-results", type=int, default=400)
+    ap.add_argument("--screen-batch", type=int, default=8,
+                    help="candidates per screening call (default: %(default)s)")
     ap.add_argument("--screen-timeout", type=float, default=600)
     ap.add_argument("--attr-timeout", type=float, default=600)
     ap.add_argument("--dry-run", action="store_true",
                     help="judge and report; write nothing, commit nothing")
     args = ap.parse_args()
+    # Under systemd or a background shell stdout is block-buffered, so a run
+    # that is working looks identical to one that is wedged. Progress is the
+    # only thing you have while a call takes minutes.
+    sys.stdout.reconfigure(line_buffering=True)
 
     if not args.dry_run:
         require_clean_tree()
@@ -307,7 +343,8 @@ def main():
     fetch_abstracts(candidates)
 
     print(f"[agent] screening {len(candidates)} candidate(s) with {args.screen_model}")
-    verdicts, cost = screen(candidates, args.screen_model, args.screen_timeout)
+    verdicts, cost = screen(candidates, args.screen_model, args.screen_timeout,
+                            args.screen_batch)
 
     accepted, rejected, unsure = [], [], []
     valid = {s["key"] for s in json.loads((ROOT / "data" / "sections.json").read_text())}
