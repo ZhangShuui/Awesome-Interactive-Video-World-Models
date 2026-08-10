@@ -94,6 +94,28 @@ CRITERIA = {
     ],
 }
 
+# Efficiency work on video diffusion is the substrate the real-time sections
+# are built on, but a paper about quadratic attention cost has no reason to say
+# "causal", "streaming" or "interactive" anywhere -- it scores 0/3 on the
+# criteria above and would never reach the inbox. Requiring a video anchor
+# alongside the efficiency vocabulary keeps image-only and LLM-only efficiency
+# work out.
+VIDEO_ANCHOR_RE = re.compile(r"\bvideo\b|\bframes?\b|\bvdits?\b|\bworld model", re.I)
+EFFICIENCY_RE = re.compile(
+    r"\bsparse attention\b|\bsparsit|\bkv[- ]?cache|\bquadratic\b|\bearly[- ]exit\b|"
+    r"\bdistill|\bfew[- ]step\b|\bone[- ]step\b|\bquantiz|\bcaching\b|\bthroughput\b|"
+    r"\bspeed-?up\b|\bacceler|\bflops\b|\btoken (?:prun|merg|reduc|select)|"
+    r"\binference (?:cost|latency|efficien)|\befficient (?:infer|attention|generation)",
+    re.I)
+
+
+def is_efficiency_substrate(title, abstract):
+    """True for video-generation efficiency papers that meet no scope criterion
+    but still belong under Real-Time & Streaming Generation."""
+    blob = f"{title} {abstract or ''}"
+    return bool(VIDEO_ANCHOR_RE.search(blob) and EFFICIENCY_RE.search(blob))
+
+
 NAME_STOPWORDS = {
     "a", "an", "the", "toward", "towards", "is", "can", "what", "how", "why",
     "from", "beyond", "learning", "understanding", "exploring", "rethinking",

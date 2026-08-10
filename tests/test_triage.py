@@ -69,6 +69,52 @@ class TestTriage(unittest.TestCase):
         self.assertLess(met, 3)
 
 
+class TestEfficiencySubstrate(unittest.TestCase):
+    """Real papers the criteria gate dropped at 0/3 while the realtime section
+    already held a dozen of exactly their genre."""
+
+    RECOVERED = [
+        ("SPADE: An Input-Adaptive Sparse Attention Engine for Fast Video Diffusion Models",
+         "Video diffusion transformers (vDiTs) generate high quality but pay quadratic "
+         "self-attention cost, making inference prohibitive at video-token scales."),
+        ("Token Radius Attention for Efficient Video Generation",
+         "Video Diffusion Transformers enable high-fidelity generation but incur "
+         "quadratic cost from dense 3D self-attention."),
+        ("Adaptive-WAM: Quality-Guided Early-Exit Planning from Intermediate Video-Diffusion",
+         "Large video diffusion models provide rich spatiotemporal priors, but existing "
+         "world-action models inherit the cost of iterative future-video generation."),
+    ]
+
+    def test_they_still_meet_no_criterion(self):
+        # If this ever starts failing the escape hatch is no longer what saves them.
+        for title, abstract in self.RECOVERED:
+            _, met, _ = triage.triage(title, abstract)
+            self.assertEqual(met, 0, title)
+
+    def test_the_escape_hatch_admits_them(self):
+        for title, abstract in self.RECOVERED:
+            self.assertTrue(triage.is_efficiency_substrate(title, abstract), title)
+
+    def test_they_land_in_realtime(self):
+        for title, abstract in self.RECOVERED:
+            section, _, _ = triage.triage(title, abstract)
+            self.assertEqual(section, "realtime", title)
+
+    def test_efficiency_without_video_is_not_admitted(self):
+        for title, abstract in [
+            ("SnapFusion: Text-to-Image Diffusion on Mobile Devices in Two Seconds",
+             "We accelerate image diffusion with step distillation and sparse attention."),
+            ("Efficient KV-Cache Compression for Long-Context Language Models",
+             "We halve the KV cache of a 70B model with negligible perplexity loss."),
+        ]:
+            self.assertFalse(triage.is_efficiency_substrate(title, abstract), title)
+
+    def test_video_without_efficiency_is_not_admitted(self):
+        self.assertFalse(triage.is_efficiency_substrate(
+            "A Photorealistic Video Dataset of Kitchen Scenes",
+            "We release 500 hours of annotated kitchen video."))
+
+
 class TestExtractName(unittest.TestCase):
     def test_system_names(self):
         for title, expected in [

@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import apply_issue_selections as apply_mod  # noqa: E402
 import arxiv_candidates as ac  # noqa: E402
+import triage  # noqa: E402
 
 FEED = Path(__file__).resolve().parent / "data" / "sample-feed.xml"
 SECTIONS = {s["key"] for s in json.loads((ROOT / "data" / "sections.json").read_text())}
@@ -43,6 +44,17 @@ class TestFilters(unittest.TestCase):
     def test_video_papers_pass_the_gate(self):
         self.assertIsNotNone(ac.VISUAL_GATE_RE.search(
             "Matrix-Game 2.0: streaming interactive video generation"))
+
+    def test_zero_criteria_efficiency_papers_are_not_dropped(self):
+        """The admission gate must consult the escape hatch, not just `met`."""
+        title = "SPADE: An Input-Adaptive Sparse Attention Engine for Fast Video Diffusion Models"
+        abstract = ("Video diffusion transformers pay quadratic self-attention cost, "
+                    "making inference prohibitive at video-token scales.")
+        section, met, _ = triage.triage(title, abstract)
+        self.assertEqual(met, 0)
+        admitted = (met > 0 or section in ("surveys", "benchmarks")
+                    or triage.is_efficiency_substrate(title, abstract))
+        self.assertTrue(admitted)
 
 
 class TestRoundTrip(unittest.TestCase):

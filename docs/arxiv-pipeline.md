@@ -18,10 +18,18 @@ So recall is phrase-based over title and abstract (see `QUERY_PHRASES` in
    internal world model is out no matter how well it scores.
 4. Each survivor is scored for evidence of the three scope criteria. A paper
    showing evidence for all three is proposed for `systems`; otherwise it is
-   proposed for the supporting section its keywords fit.
+   proposed for the supporting section its keywords fit. Scoring zero drops it.
+5. **Except** for surveys, benchmarks, and the *efficiency substrate*: video
+   diffusion work on sparse attention, KV caching, distillation, early exit and
+   the like. Those papers have no reason to say "causal" or "streaming"
+   anywhere, so they score 0/3 and were being dropped — while the `realtime`
+   section already held a dozen of exactly their genre. `is_efficiency_substrate`
+   in `scripts/triage.py` admits them, and requires a video anchor so that
+   image-only and LLM-only efficiency work stays out.
 
 Scoring is evidence of a criterion, not satisfaction of it. It decides what is
-worth two minutes of a maintainer's attention, nothing more.
+worth two minutes of a maintainer's attention, nothing more. Measured over one
+7-day window, the escape hatch costs about one extra candidate per day.
 
 ## How it runs
 

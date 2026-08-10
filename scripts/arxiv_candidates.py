@@ -288,8 +288,10 @@ def main():
         if OFF_TOPIC_RE.search(blob) or not VISUAL_GATE_RE.search(blob):
             continue
         section, met, evidence = triage.triage(paper["title"], paper["abstract"])
-        # Surveys and benchmarks are worth a look even when no criterion fires.
-        if met == 0 and section not in ("surveys", "benchmarks"):
+        # Surveys, benchmarks and the efficiency substrate are worth a look even
+        # when no criterion fires.
+        if (met == 0 and section not in ("surveys", "benchmarks")
+                and not triage.is_efficiency_substrate(paper["title"], paper["abstract"])):
             continue
         candidates.append({
             "id": pid,
