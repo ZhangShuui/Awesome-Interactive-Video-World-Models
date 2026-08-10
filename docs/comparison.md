@@ -7,10 +7,66 @@ A missing field means the paper does not report it, not that the value is zero. 
 rates are the numbers the authors claim, on the hardware they claim them on; they are
 not measured here and are not comparable across rows without reading the setups.
 
-103 interactive systems, plus 26 components and analyses profiled
+106 interactive systems, plus 26 components and analyses profiled
 on the same axes.
 
 ## Interactive systems
+
+### MASS ([paper](https://arxiv.org/abs/2608.06257))
+
+_MASS: Multiplayer World Models with Authoritative Shared State_ — 2026-08-06
+
+- **Backbone:** other:causal AR-transformer advances symbolic state, separate feedforward U-Net renders frames (no diffusion)
+- **Action space:** Joint per-tick multi-player discrete actions serialized as a fixed-width ACTION token segment, one slot per player (worked example, §6.2: tokens [4, 2, 0, 0, 0, 0, 0, 0] = player 0 right, player 1 up, rest no-op). Demonstrated on matched multiplayer Snake, 48×48 arena, populations N∈{2,4,8}, 192 transitions/episode (§7.1); scaled to 1,024 simulated player entities (§4.5); cross-game generalization on Breakout, Tile Merger, Crate Pusher, Pac-Man, Tank Battle, Lunar Touchdown, Frogger, Tron, Bomberman (§4.5).
+- **Horizon / context:** Headline claim (Abstract, §4.5): advances the world for 10,000 recurrent ticks with 1,024 concurrent player entities, but that specific run reports no structural-validity/collapse metrics. Quantified coherence: through H=4096 on populations of 2/4/8 players, zero structurally-invalid steps, full roster and all 64 food slots retained, no collapse — but the trajectory falls into a recurrent attractor after visiting only 277-306 unique states by H=4096 (302-1,850 unique states by a 100,000-update checkpoint) (Table 8.2, §8.3).
+- **Memory mechanism:** other:persistent typed symbolic entity-state, not a 3D geometric map
+- **Open source:** no
+
+<details><summary>Where these came from</summary>
+
+- **horizon:** Abstract + §4.5 'Main results' for the 10,000-tick/1,024-player headline (unquantified there: 'The same transition architecture also advances worlds with 1,024 simulated player entities for 10,000 recurrent ticks'). Table 8.2 + §8.3 long-horizon stress test (held-out initial states, fixed no-op action stream) for the quantified H=4096 structural-validity numbers and the 277-306 / 302-1,850 unique-state attractor figures.
+- **memory:** §3.1 (Eq. 2/Eq. 10) define s_t as K_g typed entity records, each holding 'the current values of that entity's fields' (positions among them, e.g. Snake body coordinates); §3.2: the Logic Engine advances these records every tick and the result is 'the recurrent input, synchronization object, and source of every client view' — an explicit, persistent structured store queried at inference by the Rendering Engine, not a context-window-only, retrieval, or SSM memory. Used 'other' rather than 'explicit-spatial-storage' because the paper frames it as a symbolic/relational typed game state (life status, heading, entity counts, etc.), not a geometric/3D scene map.
+- **backbone:** §6.2 'Logic Engine': decoder-only causal Transformer, width 256, 6 layers, 8 heads, MLP ratio 4, 5.66M params, max length 1,024 — advances state autoregressively ('each record conditions on its own prefix and its previously decoded tokens', §3.2). §6.2 'Rendering Engine': geometry-aware residual U-Net, 64-channel stem over a 16-channel semantic projection, 3 downsampling stages, 5 dilated residual blocks at the bottleneck, 3 skip-connected upsampling stages, sigmoid RGB output — a single feedforward pass per view, no diffusion, no pixel-level autoregression. Labeled 'other' because the frame pixels themselves come from the U-Net, not the AR-transformer.
+
+</details>
+
+### HelloWorld ([paper](https://arxiv.org/abs/2608.05070))
+
+_HelloWorld: Enabling Socially Interactive Characters in Video World Models_ — 2026-08-05
+
+- **Backbone:** bidirectional-diffusion
+- **Action space:** Camera trajectory C={c^i} over the output frames, set via 'keyboard inputs' (no literal key bindings enumerated in the paper; trajectory types used are static/scan/dolly-in/orbit) plus a single interaction button labeled 'F' whose press at time τs opens an interaction window W=[τs,τe] prompting the on-screen character to respond toward the camera (turn to viewer, wave, nod, or speak a short greeting). Demonstrated on 120 open-domain first-frame photos collected from Unsplash (humans, animals, toys, robots, diverse scenes/styles) via HelloWorldBench, 400 evaluation samples; no game or simulator environment.
+- **Reported FPS:** 24
+- **Horizon / context:** 10 seconds / 241 frames at 1280x704, 24 fps — the only clip length generated and evaluated (Table 4: 241 frames, 60.2s total, 0.26s/frame; Sec 5.2 implementation details). No longer rollout is reported; Limitations section lists 'supporting long video generation' as unresolved future work.
+- **Memory mechanism:** explicit-spatial-reconstruction
+- **Open source:** no
+
+<details><summary>Where these came from</summary>
+
+- **fps:** Sec 5.2: 'The resolution and frame rate of HelloWorld are set to 1280×704 and 24 fps.' This is the generated video's playback rate, not a real-time rate — Table 4 gives 0.26s compute per frame (60.2s for the 241-frame/10s clip), and the Limitations section states HelloWorld 'does not yet support real-time interaction with users.'
+- **horizon:** Table 4 (241 frames, 1280x704, 60.2s) combined with Sec 5.2's 24 fps setting → ~10s clips; Limitations section explicitly names long video generation as future work, confirming no longer-horizon number exists in the paper.
+- **memory:** Sec 3.1/Eq.(1): given the first frame x0 and a camera trajectory C, the model computes warp(x0,C) by lifting x0 into a point cloud with an off-the-shelf 3D reconstructor (Pi3X, also used in the Sec 3.2 data pipeline) and reprojecting it along C into a 'warp video' fed to the DiT as a history/geometry condition; the inference description ('keyboard inputs are translated into a camera trajectory C, from which the warp video is constructed via Eq. (1)') confirms this reconstruction runs at inference, not training-only, so 'explicit-spatial-reconstruction' rather than 'none'. It is not 'explicit-spatial-storage': the point cloud is recomputed fresh from a single first frame on every call, nothing is persisted, and there is no stated mechanism carrying state across separate generation calls/sessions.
+- **backbone:** Base model 'LTX-2.3' finetuned with a rank-32 LoRA on the self-attention projections of the 'video branch' (Sec 5.2), trained with a flow-matching loss (Sec 3). The paper never explicitly labels the temporal generation causal/autoregressive vs. bidirectional, but every generation call produces one fixed-length 241-frame clip at once (Table 4) with no block-wise/streaming rollout mechanism described, and the Limitations section lists long-video generation as unaddressed future work — consistent with LTX-2.3 being a standard full-sequence (bidirectional) flow-matching video DiT rather than a causal/AR sampler; flagged here as inferred, not paper-stated.
+
+</details>
+
+### StatePlay ([paper](https://arxiv.org/abs/2607.26754))
+
+_StatePlay: State-Aware Game World Models for Mechanics-Consistent Generation_ — 2026-07-29
+
+- **Backbone:** bidirectional-diffusion
+- **Action space:** 11-dimensional action space: 4 movement actions, 6 normal attacks, 1 super art; demonstrated on Street Fighter 3 only, episodes segmented at round-ending knockouts
+- **Horizon / context:** 5-second clips (100 frames at 20 FPS), the fixed length used for both training and the 100-sample test set; paper reports no analysis of consistency degradation over time and no rollout beyond a single clip
+- **Memory mechanism:** other:explicit non-spatial game-state branch (health points, skill meters, timers) jointly denoised with frames and cross-attended into the visual branch
+- **Open source:** no
+
+<details><summary>Where these came from</summary>
+
+- **horizon:** Sec. 3.1: episodes are 'segmented into 5-second clips at 20 FPS'; Sec. 4.1 evaluation uses '100 generated samples' of the same clip length; no explicit longer-horizon or degradation-over-time metric reported
+- **memory:** Sec. 3.2: dedicated state branch predicts a state representation (H_s) capturing HP/meters/timers jointly with the visual branch via cross-modal attention/injection; 'During inference, the state of the first frame is provided as a condition, while the states of the remaining frames are initialized from noise and predicted by the model.' Not spatial/geometric (rules out explicit-spatial-storage/reconstruction), not an external index (rules out retrieval), not an SSM/recurrent compression (rules out compression-ssm), and it's more than the raw attention context (rules out implicit-context) since it's an explicit numeric mechanics state — hence 'other'. No cross-clip persistence mechanism is described.
+- **backbone:** Sec. 3.2: mixture-of-transformers (MoT)-style architecture built on Wan2.2-TI2V-5B (5B visual branch + 0.76B state branch), trained with the 'standard flow matching objective adopted by Wan-based game world models'. The paper itself does not state causal vs. bidirectional attention explicitly, but describes whole-clip generation with no block-causal masking or chunked-autoregressive rollout, consistent with Wan2.2-TI2V-5B's bidirectional video-diffusion design.
+
+</details>
 
 ### WanToFight ([paper](https://arxiv.org/abs/2607.12592))
 
