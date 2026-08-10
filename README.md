@@ -2,13 +2,13 @@
 
 A curated list of **interactive video world models** — generative models you can act inside, one step at a time.
 
-Video generation stopped being a movie and became a place. This list tracks that shift and only that shift: systems where a user or a policy issues an action, the model produces the next frames causally, and the world is still there when you look back. General world-model lists cover robotics, driving, and 3D generation alongside this; here the narrow scope is the point.
+Video generation stopped being a movie and became a place. This list tracks that shift: systems where a user or a policy issues an action, the model produces the next frames causally, and the world is still there when you look back — together with the work those systems are built out of, on action control, real-time generation, and long-horizon memory. General world-model lists cover robotics, driving, and 3D generation alongside this; here the narrow focus is the point.
 
 <!-- BEGIN:STATS -->
 **403 papers** across 9 sections &nbsp;·&nbsp; **133** read in depth and profiled in the comparison table &nbsp;·&nbsp; **34** with released weights or code &nbsp;·&nbsp; **51** reporting ≥10 FPS &nbsp;·&nbsp; newest entry 2026-08-07
 <!-- END:STATS -->
 
-Every entry is screened against three criteria and, where the paper has been read in depth, profiled on backbone, action space, frame rate, and memory mechanism — see [System Comparison](#system-comparison).
+Every entry is screened against the [scope](#scope) below. Those that clear the strict bar — a closed loop, causal generation, persistent state — are profiled on backbone, action space, frame rate, and memory mechanism where the paper has been read in depth; see [System Comparison](#system-comparison).
 
 > ### Please read this first
 >
@@ -38,17 +38,56 @@ Every entry is screened against three criteria and, where the paper has been rea
 
 ## Scope
 
-A paper belongs in **[Interactive Video World Models](#interactive-video-world-models)** when it satisfies all three:
+Scope works at two levels: a wide one that decides whether a paper is in the list
+at all, and a strict one that decides whether it counts as an interactive video
+world model.
 
-1. **Per-step action conditioning.** The model consumes an action at each step and the next observation depends on it. A single prompt or a fixed trajectory supplied up front does not count; the loop has to be closeable.
-2. **Causal or streaming generation.** Frames are produced in causal order, so the user can react to what they just saw. Bidirectional denoising over a whole clip is out, however good the clip is.
-3. **Persistent world state.** Something survives across steps — context, an explicit spatial store, a retrievable memory — so revisiting a place does not resample it from scratch.
+### What gets in
 
-Camera and navigation control counts as an action space: it closes the same loop with a restricted set of actions.
+**Generated video, bearing on at least one of three axes.** The paper has to be
+about generating video — an architecture, a component, an analysis, a benchmark,
+a dataset — and it has to touch one of:
 
-The supporting sections are scoped more loosely on purpose. **Action Control**, **Real-Time & Streaming Generation**, **Long-Horizon Memory** and **Datasets** collect work that a system in the main list depends on, even when that work is a component or an analysis rather than a full interactive system. **Benchmarks** covers evaluation aimed at these systems.
+- **Action control** — how an action reaches the generator, including latent
+  actions learned without labels.
+- **Real-time and streaming generation** — meeting a per-frame latency budget:
+  causal backbones, distillation, caching, sparse attention, serving.
+- **Long-horizon consistency and memory** — staying coherent past the context
+  window, and still being the same world when you come back to it.
 
-Out of scope: text-to-video without a closed loop, robotics and driving world models that predict latents but never render an interactive stream, static 3D scene generation, and reinforcement-learning world models with no video decoder. Several excellent lists already cover those — see [Related lists](#related-lists).
+Action conditioning is **not** required for membership. A training-free method
+for minute-long video, or a sparse-attention kernel for video diffusion
+transformers, is squarely in scope: interactive world models are built out of
+exactly that work, and a list that admitted only closed-loop systems would omit
+most of what makes them possible.
+
+### What counts as an interactive video world model
+
+The strict bar, which decides the `systems` designation and the rows of the
+[System Comparison](#system-comparison) table. All three:
+
+1. **Per-step action conditioning.** The model consumes an action at each step
+   and the next observation depends on it. A single prompt or a fixed trajectory
+   supplied up front does not count; the loop has to be closeable.
+2. **Causal or streaming generation.** Frames are produced in causal order, so
+   the user can react to what they just saw. Bidirectional denoising over a whole
+   clip is out, however good the clip is.
+3. **Persistent world state.** Something survives across steps — context, an
+   explicit spatial store, a retrievable memory — so revisiting a place does not
+   resample it from scratch.
+
+Camera and navigation control counts as an action space: it closes the same loop
+with a restricted set of actions.
+
+### What stays out
+
+Video work that touches none of the three axes — restoration, relighting, shadow
+removal, portrait and face shaders, editing an existing clip — is out no matter
+how good it is. So is work with no generated video at all: latent-only prediction
+with no decoder, reinforcement-learning world models that never render, symbolic
+or text-based world state, and static 3D asset and scene generation.
+
+Several excellent lists cover the wider field — see [Related lists](#related-lists).
 
 ## Contents
 

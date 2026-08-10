@@ -131,6 +131,54 @@ class TestAwaitingMerge(unittest.TestCase):
             self.assertEqual(ar.ids_awaiting_merge(), set())
 
 
+class TestRejudge(unittest.TestCase):
+    """Widening the scope makes past rejections wrong. They are recoverable only
+    because they were logged rather than dropped."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.log = self.tmp / "agent-rejected.jsonl"
+        self.log.write_text(
+            "# a comment survives\n"
+            '{"id": "2608.05976", "title": "Diff-VF", "rejected_on": "2026-08-10", "reason": "no action conditioning"}\n'
+            '{"id": "2607.26529", "title": "CineWeaver", "rejected_on": "2026-08-10", "reason": "no per-step action"}\n',
+            encoding="utf-8")
+        self._patch = mock.patch.object(ar, "REJECTED", self.log)
+        self._patch.start()
+        self.addCleanup(self._patch.stop)
+
+    def test_rejection_date_is_not_used_as_the_paper_date(self):
+        # The row records when the call was made. Reusing it would stamp every
+        # recovered paper with the day it was re-judged.
+        _, cands = ar.candidates_from_rejections()
+        for cand in cands:
+            self.assertNotIn("date", cand)
+
+    def test_prior_reason_travels_with_the_candidate(self):
+        _, cands = ar.candidates_from_rejections()
+        self.assertEqual({c["id"] for c in cands}, {"2608.05976", "2607.26529"})
+        self.assertTrue(all(c["prior_reason"] for c in cands))
+
+    def test_papers_already_in_the_list_are_not_reproposed(self):
+        papers = self.tmp / "papers.jsonl"
+        papers.write_text(json.dumps({"id": "2608.05976", "title": "Diff-VF"}) + "\n",
+                          encoding="utf-8")
+        with mock.patch.object(ar, "ROOT", self.tmp):
+            (self.tmp / "data").mkdir(exist_ok=True)
+            (self.tmp / "data" / "papers.jsonl").write_text(
+                json.dumps({"id": "2608.05976"}) + "\n", encoding="utf-8")
+            (self.tmp / "data" / "arxiv-ignore.txt").write_text("", encoding="utf-8")
+            _, cands = ar.candidates_from_rejections()
+        self.assertEqual([c["id"] for c in cands], ["2607.26529"])
+
+    def test_recovered_papers_leave_the_log_and_the_rest_stay(self):
+        ar.drop_rejections({"2608.05976"})
+        text = self.log.read_text(encoding="utf-8")
+        self.assertNotIn("2608.05976", text)
+        self.assertIn("2607.26529", text)
+        self.assertIn("# a comment survives", text)
+
+
 class TestPrompts(unittest.TestCase):
     def test_scope_comes_from_the_published_readme(self):
         scope = ar.scope_text()

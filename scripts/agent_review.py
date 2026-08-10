@@ -242,6 +242,42 @@ def candidates_locally(days, max_results):
     return None, out
 
 
+def candidates_from_rejections():
+    """Re-open everything a past run turned down, to be judged against the
+    scope as it reads today.
+
+    A rejection is a decision made under one set of rules. Widen the scope and
+    some of those decisions were right at the time and wrong now -- which is
+    only recoverable because rejections are logged with their reasons instead of
+    being dropped. Papers already in the list are not re-proposed."""
+    import arxiv_candidates as ac
+    rows = []
+    if REJECTED.exists():
+        for line in REJECTED.read_text(encoding="utf-8").splitlines():
+            if line.strip() and not line.lstrip().startswith("#"):
+                rows.append(json.loads(line))
+    have = ac.known_ids(ROOT / "data" / "papers.jsonl")
+    # Deliberately no `date`: the rejection row records when it was rejected,
+    # not when the paper was published. fetch_abstracts fills the real one.
+    return None, [{"id": r["id"], "title": r["title"], "section": None,
+                   "prior_reason": r.get("reason", "")}
+                  for r in rows if r["id"] not in have]
+
+
+def drop_rejections(ids):
+    """Remove recovered papers from the rejection log."""
+    if not REJECTED.exists():
+        return
+    kept = []
+    for line in REJECTED.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            kept.append(line)
+            continue
+        if json.loads(line)["id"] not in ids:
+            kept.append(line)
+    REJECTED.write_text("".join(l + "\n" for l in kept), encoding="utf-8")
+
+
 def fetch_abstracts(candidates):
     """Issue bodies carry no abstract; screening without one is guesswork."""
     import arxiv_candidates as ac
@@ -358,6 +394,9 @@ def main():
     ap.add_argument("--max-attrs", type=int, default=5,
                     help="hard cap on full-text reads in one run; the rest are "
                          "added with empty attrs and picked up next time")
+    ap.add_argument("--rejudge", action="store_true",
+                    help="re-judge everything in data/agent-rejected.jsonl "
+                         "against the scope as it reads today")
     ap.add_argument("--local", action="store_true",
                     help="query arXiv directly instead of reading the inbox Issue")
     ap.add_argument("--days", type=int, default=3)
@@ -377,9 +416,12 @@ def main():
     if not args.dry_run:
         require_clean_tree()
 
-    issue_number, candidates = (
-        candidates_locally(args.days, args.max_results) if args.local
-        else candidates_from_issue())
+    if args.rejudge:
+        issue_number, candidates = candidates_from_rejections()
+    elif args.local:
+        issue_number, candidates = candidates_locally(args.days, args.max_results)
+    else:
+        issue_number, candidates = candidates_from_issue()
     if not candidates:
         print("[agent] nothing to review")
         return
@@ -460,7 +502,10 @@ def main():
         **({"evidence": evidence_by_id[row["id"]]}
            if evidence_by_id.get(row["id"]) else {}),
     } for row in accepted]
-    rejections = [{"id": row["id"], "title": row["title"], "date": stamp,
+    # `rejected_on`, not `date`: this is when the call was made, not when the
+    # paper was published. Conflating them once set every recovered paper to
+    # the day it was re-judged.
+    rejections = [{"id": row["id"], "title": row["title"], "rejected_on": stamp,
                    "reason": row["reason"], "model": args.screen_model}
                   for row in rejected]
 
@@ -473,7 +518,11 @@ def main():
         return
 
     added = append_records(records)
-    append_rejections(rejections)
+    if args.rejudge:
+        # They are already in the log; only the recovered ones move.
+        drop_rejections({r["id"] for r in added})
+    else:
+        append_rejections(rejections)
     subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py")], check=True)
     subprocess.run([sys.executable, str(ROOT / "scripts" / "build_readme.py")], check=True)
 
