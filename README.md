@@ -5,7 +5,7 @@ A curated list of **interactive video world models** — generative models you c
 Video generation stopped being a movie and became a place. This list tracks that shift and only that shift: systems where a user or a policy issues an action, the model produces the next frames causally, and the world is still there when you look back. General world-model lists cover robotics, driving, and 3D generation alongside this; here the narrow scope is the point.
 
 <!-- BEGIN:STATS -->
-**387 papers** across 9 sections &nbsp;·&nbsp; **130** read in depth and profiled in the comparison table &nbsp;·&nbsp; **34** with released weights or code &nbsp;·&nbsp; **50** reporting ≥10 FPS &nbsp;·&nbsp; newest entry 2026-08-06
+**403 papers** across 9 sections &nbsp;·&nbsp; **133** read in depth and profiled in the comparison table &nbsp;·&nbsp; **34** with released weights or code &nbsp;·&nbsp; **51** reporting ≥10 FPS &nbsp;·&nbsp; newest entry 2026-08-07
 <!-- END:STATS -->
 
 Every entry is screened against three criteria and, where the paper has been read in depth, profiled on backbone, action space, frame rate, and memory mechanism — see [System Comparison](#system-comparison).
@@ -56,11 +56,11 @@ Out of scope: text-to-video without a closed loop, robotics and driving world mo
 - [Surveys & Related Lists](#surveys--related-lists) (24)
 - [Foundations & Prehistory](#foundations--prehistory) (5)
 - [Blogs & Technical Reports](#blogs--technical-reports) (6)
-- [Interactive Video World Models](#interactive-video-world-models) (105)
-- [Action Control & Interfaces](#action-control--interfaces) (27)
-- [Real-Time & Streaming Generation](#real-time--streaming-generation) (104)
-- [Long-Horizon Memory & Consistency](#long-horizon-memory--consistency) (91)
-- [Benchmarks & Evaluation](#benchmarks--evaluation) (21)
+- [Interactive Video World Models](#interactive-video-world-models) (109)
+- [Action Control & Interfaces](#action-control--interfaces) (30)
+- [Real-Time & Streaming Generation](#real-time--streaming-generation) (108)
+- [Long-Horizon Memory & Consistency](#long-horizon-memory--consistency) (95)
+- [Benchmarks & Evaluation](#benchmarks--evaluation) (22)
 - [Datasets & Environments](#datasets--environments) (4)
 - [System Comparison](#system-comparison)
 - [Contributing](#contributing)
@@ -124,8 +124,12 @@ _Systems that would sit in the main list if they had a paper. Announced through 
 
 ## Interactive Video World Models
 
-_The main list: systems that meet all three criteria. Newest first._ &nbsp;·&nbsp; **105 entries**
+_The main list: systems that meet all three criteria. Newest first._ &nbsp;·&nbsp; **109 entries**
 
+* **`MASS`**, Multiplayer World Models with Authoritative Shared State. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06257)]
+* **`HelloWorld`**, Enabling Socially Interactive Characters in Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05070)]
+* **`StatePlay`**, State-Aware Game World Models for Mechanics-Consistent Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26754)]
+* **`Visko Orbis 1.0`**, A Live Model for Real-Time Interactive Long Video Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26694)]
 * **`Wonder`**, Video World Model Done Better. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26037)]
 * **`ABot-World-0`**, Infinite Interactive World Rollout on a Single Desktop GPU. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.19191)]
 * **`WanToFight`**, Real-Time Generative Game Engine for Multi-Player Combat Interaction. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.12592)]
@@ -234,12 +238,15 @@ _The main list: systems that meet all three criteria. Newest first._ &nbsp;·&nb
 
 ## Action Control & Interfaces
 
-_How an action reaches the generator: action spaces, injection mechanisms, latent actions learned without labels, and control-fidelity analysis._ &nbsp;·&nbsp; **27 entries**
+_How an action reaches the generator: action spaces, injection mechanisms, latent actions learned without labels, and control-fidelity analysis._ &nbsp;·&nbsp; **30 entries**
 
 * **`GeniWorld`**, A Generalizable Interactive World Model for Robotic Manipulation via Visual Actions. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06332)]
 * **`LAWM-3D`**, Learning 3D-Aware Latent Actions from Human Videos for Generalizable Robot World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05706)]
 * **`UniWorld-View`**, Large-Baseline View Synthesis via Video Diffusion Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.04701)]
 * Overcoming Statistical Bias in Action-Controllable World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.04653)]
+* **`BWM`**, A Low-Cost High-Fidelity World Simulator for Robot Learning. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.29302)]
+* Video Models as Native 4D Renderers: World-Grounded Conditioning from Animated Mesh. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2608.00094)]
+* **`ShadowDancer`**, Teaching Video World Models Any Action by Learning Unified Dynamics Representations from a Video and Its Shadow. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.28362)]
 * Causally Debiased Latent Action Model for Embodied Action Conditioned World Models. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.09185)]
 * **`CLAW`**, Learning Continuous Latent Action World Models via Adversarial Latent Regularization. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.04130)]
 * World Models as Group Actions. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.24578)]
@@ -266,10 +273,14 @@ _How an action reaches the generator: action spaces, injection mechanisms, laten
 
 ## Real-Time & Streaming Generation
 
-_Meeting the per-frame latency budget: causal and autoregressive backbones, few-step distillation, KV caching, and inference systems._ &nbsp;·&nbsp; **104 entries**
+_Meeting the per-frame latency budget: causal and autoregressive backbones, few-step distillation, KV caching, and inference systems._ &nbsp;·&nbsp; **108 entries**
 
 * **`In-Context Forcing`**, Uncovering Context Effects in Autoregressive Video Diffusion. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05237)]
+* **`SPADE`**, An Input-Adaptive Sparse Attention Engine for Fast Video Diffusion Models Inference. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.03335)]
+* Token Radius Attention for Efficient Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.02504)]
+* **`WorldDynCache`**, Risk-Controlled Latent Dynamics Approximation for Diffusion World Model. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.01845)]
 * **`MiniWorld`**, Democratizing the Training of Video World Models from Scratch. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.01127)]
+* Parallel Decoding Distillation for Fast Image and Video Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26004)]
 * **`FlashDecoder`**, Real-Time Latent-to-Pixel Streaming Decoder with Transformers. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.14898)]
 * Stateful Worlds, Stateless Elasticity: Exact-State Serving for Interactive World Models. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.10389)]
 * **`OPSD-V`**, On-Policy Self-Distillation for Post-Training Few-Step Autoregressive Video Generators. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.08766)]
@@ -375,9 +386,13 @@ _Meeting the per-frame latency budget: causal and autoregressive backbones, few-
 
 ## Long-Horizon Memory & Consistency
 
-_Keeping the world stable when the camera comes back: long context, explicit spatial and 3D memory, retrieval, and state persistence._ &nbsp;·&nbsp; **91 entries**
+_Keeping the world stable when the camera comes back: long context, explicit spatial and 3D memory, retrieval, and state persistence._ &nbsp;·&nbsp; **95 entries**
 
+* Addressable Memory for Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.07408)]
 * **`Vorch-Director`**, Interactive World Story Model via Noise-Aware Error Rectification. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05776)]
+* **`WorldCycle`**, Self-Verifiable Reinforcement Learning for Long-Horizon Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.04964)]
+* **`FreqForcing`**, Autoregressive Long Video Generation via Spectral Self-Anchoring. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.27110)]
+* Mitigating Compounding Error via Video Representation Regularization. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.27036)]
 * **`Cycle-World`**, Mitigating Error Accumulation in Long-term Video World Models via Reverse-Prediction Cycle Consistency. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.11836)]
 * **`MemLearner`**, Learning to Query Context memory for Video World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.31734)]
 * Compression and Retrieval: Implicit Memory Retrieval for Video World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.23105)]
@@ -471,8 +486,9 @@ _Keeping the world stable when the camera comes back: long context, explicit spa
 
 ## Benchmarks & Evaluation
 
-_Benchmarks and evaluation protocols aimed at interactive world models, including memory, control-following, and long-horizon stability._ &nbsp;·&nbsp; **21 entries**
+_Benchmarks and evaluation protocols aimed at interactive world models, including memory, control-following, and long-horizon stability._ &nbsp;·&nbsp; **22 entries**
 
+* **`GAUGE`**, A Measurement-Grounded Benchmark for Physical Fidelity in Simulation Engines and Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05948)]
 * **`WorldExam`**, Benchmarking World Models from Apparent Appearance to Inherent Reactivity. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.02603)]
 * **`WorldRoamBench`**, An Open-World Benchmark for Long-Horizon Stability of Interactive World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.31672)]
 * **`MemoBench`**, Benchmarking World Modeling in Dynamically Changing Environments. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.27537)]
@@ -516,6 +532,9 @@ These are notes taken while reading, not measurements. Frame rates are the numbe
 <!-- BEGIN:TABLE -->
 | System | Date | Backbone | Action | FPS | Memory | Open |
 | --- | --- | --- | --- | --- | --- | --- |
+| [MASS](https://arxiv.org/abs/2608.06257) | 2026-08 | other | embodied | — | other | no |
+| [HelloWorld](https://arxiv.org/abs/2608.05070) | 2026-08 | bidir. diffusion | keyboard + camera + language | 24 | spatial (recon) | no |
+| [StatePlay](https://arxiv.org/abs/2607.26754) | 2026-07 | bidir. diffusion | other | — | other | no |
 | [Wonder](https://arxiv.org/abs/2607.26037) | 2026-07 | causal diffusion | keyboard + camera | 16 | hybrid: retrieval+context | no |
 | [WanToFight](https://arxiv.org/abs/2607.12592) | 2026-07 | causal diffusion | keyboard | 30 | context | no |
 | [Infinite Worlds with Versatile Interactions](https://arxiv.org/abs/2607.07534) | 2026-07 | AR + diffusion | camera + language + embodied | 60 | context | yes |
@@ -553,11 +572,8 @@ These are notes taken while reading, not measurements. Frame rates are the numbe
 | [ActionParty](https://arxiv.org/abs/2604.02330) | 2026-04 | causal diffusion | keyboard | — | hybrid: context+spatial (store) | no |
 | [EgoSim](https://arxiv.org/abs/2604.01001) | 2026-04 | bidir. diffusion | embodied | 16 | spatial (recon) | no |
 | [MemCam](https://arxiv.org/abs/2603.26193) | 2026-03 | bidir. diffusion | camera | — | retrieval | yes |
-| [ShotStream](https://arxiv.org/abs/2603.25746) | 2026-03 | causal diffusion | language | 16 | context | yes |
-| [WorldCam](https://arxiv.org/abs/2603.16871) | 2026-03 | AR + diffusion | keyboard + mouse + camera | — | retrieval | no |
-| [InSpatio-WorldFM](https://arxiv.org/abs/2603.11911) | 2026-03 | other | camera | 25 | hybrid: spatial (recon)+context | yes |
 
-_Showing the 40 most recent of 104 profiled systems. Full table with horizons and verbatim action spaces: [docs/comparison.md](docs/comparison.md)._
+_Showing the 40 most recent of 107 profiled systems. Full table with horizons and verbatim action spaces: [docs/comparison.md](docs/comparison.md)._
 <!-- END:TABLE -->
 
 ## Contributing
