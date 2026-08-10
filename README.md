@@ -516,7 +516,7 @@ These are notes taken while reading, not measurements. Frame rates are the numbe
 <!-- BEGIN:TABLE -->
 | System | Date | Backbone | Action | FPS | Memory | Open |
 | --- | --- | --- | --- | --- | --- | --- |
-| [Wonder](https://arxiv.org/abs/2607.26037) | 2026-07 | causal diffusion | keyboard + camera | 16 | hybrid: retrieval+implicit-context — sparse full-fidelity attention+recent chunks always retained, plus top-k content-similar middle-history chunks). Retrieval is content-based, not geometric | no |
+| [Wonder](https://arxiv.org/abs/2607.26037) | 2026-07 | causal diffusion | keyboard + camera | 16 | hybrid: retrieval+context | no |
 | [WanToFight](https://arxiv.org/abs/2607.12592) | 2026-07 | causal diffusion | keyboard | 30 | context | no |
 | [Infinite Worlds with Versatile Interactions](https://arxiv.org/abs/2607.07534) | 2026-07 | AR + diffusion | camera + language + embodied | 60 | context | yes |
 | [AlayaWorld](https://arxiv.org/abs/2607.06291) | 2026-07 | bidir. diffusion | camera + language | 24 | hybrid: spatial (recon)+compressive | no |
