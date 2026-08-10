@@ -7,7 +7,26 @@ Video generation stopped being a movie and became a place. This list tracks that
 <!-- BEGIN:STATS -->
 <!-- END:STATS -->
 
-Every entry is screened against three criteria and, where we have read the paper in depth, profiled on backbone, action space, frame rate, and memory mechanism — see [System Comparison](#system-comparison).
+Every entry is screened against three criteria and, where the paper has been read in depth, profiled on backbone, action space, frame rate, and memory mechanism — see [System Comparison](#system-comparison).
+
+> ### Please read this first
+>
+> **This is a personal reading record, not an authoritative or community-curated list.** It is
+> maintained by one person as working notes for a survey in progress. Inclusion, exclusion,
+> section placement, and every value in the comparison table are one reader's judgement, made
+> from the papers themselves and revised as that reading continues. Treat it as a starting point
+> for your own reading, not as a citation-grade source.
+>
+> **It was initialized from [Awesome-World-Models](https://github.com/leofan90/Awesome-World-Models)**
+> (BSD-3-Clause) by Leo Fan and contributors. That list seeded the initial paper pool — one of
+> the collection channels parsed its README — and supplied the website and code links for entries
+> that appear in both. The repository layout and the arXiv review-inbox workflow are adapted from
+> it as well. If you want broad, actively maintained coverage of world models, go there; this list
+> only narrows the same field to one slice of it.
+>
+> No affiliation with, or endorsement by, the authors of any listed paper or of the upstream lists
+> is claimed. Mistakes here are the maintainer's, not the papers' authors'. Corrections are
+> welcome — please [open an issue or a PR](how-to-contribute.md).
 
 ## Scope
 
@@ -39,7 +58,9 @@ Entries are newest first within each section. Venue tags show `arXiv YYMM` when 
 
 ## System Comparison
 
-What separates this list from a bibliography: for every system we have read in depth, the axes that decide whether you can actually act inside it. `Action` is a normalized summary of the paper's own action space; `Memory` is the mechanism that carries state across steps, not a quality judgement. `—` means the paper does not report the value.
+What separates this list from a bibliography: for every system read in depth, the axes that decide whether you can actually act inside it. `Action` is a normalized summary of the paper's own action space; `Memory` is the mechanism that carries state across steps, not a quality judgement. `—` means the paper does not report the value.
+
+These are notes taken while reading, not measurements. Frame rates are the numbers the authors claim on the hardware they claim them on, and are not comparable across rows without reading the setups. Check anything you intend to rely on against the paper.
 
 <!-- BEGIN:TABLE -->
 <!-- END:TABLE -->
@@ -82,4 +103,6 @@ If this list helps your work, a star is plenty. If you want to cite it:
 
 ## Acknowledgements
 
-Structure and the arXiv review-inbox workflow adapted from [Awesome-World-Models](https://github.com/leofan90/Awesome-World-Models) (BSD-3-Clause), which in turn follows [Awesome-LLM-Robotics](https://github.com/GT-RIPL/Awesome-LLM-Robotics). Paper metadata comes from the [arXiv API](https://info.arxiv.org/help/api/index.html) — thank you to arXiv for its open access interoperability.
+This list would not exist without [Awesome-World-Models](https://github.com/leofan90/Awesome-World-Models) (BSD-3-Clause), which seeded it, and which in turn follows [Awesome-LLM-Robotics](https://github.com/GT-RIPL/Awesome-LLM-Robotics) — see [the notice above](#please-read-this-first) for what was taken from it. Paper metadata comes from the [arXiv API](https://info.arxiv.org/help/api/index.html); thank you to arXiv for its open access interoperability.
+
+Above all, thanks to the authors of every paper listed here.
