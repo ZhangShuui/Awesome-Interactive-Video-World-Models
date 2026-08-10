@@ -1,0 +1,133 @@
+"""Agent plumbing. Nothing here calls a model or the network."""
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import agent_review as ar  # noqa: E402
+import arxiv_candidates as ac  # noqa: E402
+
+
+class FakeProc:
+    def __init__(self, stdout, returncode=0, stderr=""):
+        self.stdout, self.returncode, self.stderr = stdout, returncode, stderr
+
+
+def envelope(result, **extra):
+    return json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                       "total_cost_usd": 0.5, "result": result, **extra})
+
+
+class TestCallClaude(unittest.TestCase):
+    def _run(self, stdout, **kw):
+        with mock.patch("subprocess.run", return_value=FakeProc(stdout, **kw)):
+            return ar.call_claude("p", "m", "", 60)
+
+    def test_plain_json(self):
+        parsed, cost = self._run(envelope('{"a": 1}'))
+        self.assertEqual(parsed, {"a": 1})
+        self.assertEqual(cost, 0.5)
+
+    def test_code_fence_is_stripped(self):
+        # Observed in practice: the model fences its JSON despite being told not to.
+        parsed, _ = self._run(envelope('```json\n{"a": 1}\n```'))
+        self.assertEqual(parsed, {"a": 1})
+
+    def test_bare_fence_is_stripped(self):
+        parsed, _ = self._run(envelope('```\n[{"id": "x"}]\n```'))
+        self.assertEqual(parsed, [{"id": "x"}])
+
+    def test_prose_is_an_error_not_a_guess(self):
+        with self.assertRaises(ar.AgentError):
+            self._run(envelope("Sure! Here is the answer."))
+
+    def test_nonzero_exit(self):
+        with self.assertRaises(ar.AgentError):
+            self._run("", returncode=1, stderr="boom")
+
+    def test_error_subtype(self):
+        payload = json.dumps({"type": "result", "subtype": "error_max_turns",
+                              "is_error": True, "result": "..."})
+        with self.assertRaises(ar.AgentError):
+            self._run(payload)
+
+    def test_retry_then_succeed(self):
+        procs = [FakeProc("not json"), FakeProc(envelope('{"ok": true}'))]
+        with mock.patch("subprocess.run", side_effect=procs), \
+             mock.patch("time.sleep"):
+            parsed, _ = ar.call_with_retry("p", "m", "", 60)
+        self.assertEqual(parsed, {"ok": True})
+
+
+class TestPrompts(unittest.TestCase):
+    def test_scope_comes_from_the_published_readme(self):
+        scope = ar.scope_text()
+        self.assertTrue(scope.startswith("## Scope"))
+        for phrase in ("Per-step action conditioning", "Causal or streaming",
+                       "Persistent world state"):
+            self.assertIn(phrase, scope)
+
+    def test_sections_list_covers_every_section(self):
+        keys = {s["key"] for s in json.loads(
+            (ROOT / "data" / "sections.json").read_text(encoding="utf-8"))}
+        text = ar.sections_text()
+        for key in keys:
+            self.assertIn(f"`{key}`", text)
+
+    def test_render_fills_every_placeholder(self):
+        out = ar.render("screen.md", SCOPE="S", SECTIONS="X", CANDIDATES="C")
+        self.assertNotIn("{{", out)
+
+    def test_unfilled_placeholder_is_fatal(self):
+        with self.assertRaises(SystemExit):
+            ar.render("screen.md", SCOPE="S")
+
+    def test_attrs_prompt_carries_the_paper(self):
+        out = ar.render("attrs.md", ID="2508.13009", TITLE="Matrix-Game 2.0")
+        self.assertIn("arxiv.org/abs/2508.13009", out)
+        self.assertIn("Matrix-Game 2.0", out)
+
+    def test_candidates_block_flags_a_missing_abstract(self):
+        block = ar.candidates_block([{"id": "1", "title": "T", "section": "systems"}])
+        self.assertIn("say unsure", block)
+
+
+class TestRejections(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.path = self.tmp / "agent-rejected.jsonl"
+
+    def test_ids_are_read_and_comments_skipped(self):
+        self.path.write_text(
+            "# a comment\n"
+            '{"id": "2608.07463", "reason": "out of scope"}\n'
+            "\n"
+            '{"id": "2608.07420", "reason": "driving"}\n', encoding="utf-8")
+        self.assertEqual(ac.agent_rejected_ids(self.path),
+                         {"2608.07463", "2608.07420"})
+
+    def test_missing_file_is_empty(self):
+        self.assertEqual(ac.agent_rejected_ids(self.tmp / "nope.jsonl"), set())
+
+    def test_rejected_papers_are_not_proposed_again(self):
+        feed = Path(__file__).resolve().parent / "data" / "sample-feed.xml"
+        first = ac.parse_feed(feed.read_bytes())[0]
+        self.path.write_text(json.dumps({"id": first["id"], "reason": "x"}) + "\n",
+                             encoding="utf-8")
+        papers = self.tmp / "papers.jsonl"
+        papers.write_text("", encoding="utf-8")
+        report = self.tmp / "inbox.md"
+        import subprocess
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "arxiv_candidates.py"),
+                        "--feed-file", str(feed), "--papers", str(papers),
+                        "--rejected", str(self.path), "--output", str(report)],
+                       check=True, capture_output=True)
+        self.assertNotIn(first["id"], report.read_text(encoding="utf-8"))
+
+
+if __name__ == "__main__":
+    unittest.main()

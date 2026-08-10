@@ -244,6 +244,16 @@ def render_comparison_doc(records, sections):
                 out.append(f"- **{name}:** {attrs[key]}")
         if "open_source" in attrs:
             out.append(f"- **Open source:** {'yes' if attrs['open_source'] else 'no'}")
+        evidence = rec.get("evidence") or {}
+        if evidence:
+            out.append("")
+            out.append("<details><summary>Where these came from</summary>")
+            out.append("")
+            for key in ("fps", "horizon", "memory", "backbone", "action_space"):
+                if evidence.get(key):
+                    out.append(f"- **{key}:** {evidence[key]}")
+            out.append("")
+            out.append("</details>")
         out.append("")
 
     out.append("## Interactive systems")

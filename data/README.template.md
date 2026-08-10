@@ -17,6 +17,13 @@ Every entry is screened against three criteria and, where the paper has been rea
 > from the papers themselves and revised as that reading continues. Treat it as a starting point
 > for your own reading, not as a citation-grade source.
 >
+> **New entries are screened by an [automated agent](docs/agent-review.md) before a human sees
+> them.** The agent proposes; a person merges. Anything it placed without human confirmation is
+> marked `"section_source": "agent"` in [`data/papers.jsonl`](data/papers.jsonl) and is listed by
+> `python3 scripts/validate.py --review`, so you can always tell which entries have been read by
+> a person and which have not. Papers it turned down are recorded, with reasons, in
+> [`data/agent-rejected.jsonl`](data/agent-rejected.jsonl) rather than silently dropped.
+>
 > **It was initialized from [Awesome-World-Models](https://github.com/leofan90/Awesome-World-Models)**
 > (BSD-3-Clause) by Leo Fan and contributors. That list seeded the initial paper pool — one of
 > the collection channels parsed its README — and supplied the website and code links for entries
@@ -71,7 +78,7 @@ Pull requests are welcome, including for entries already here — a wrong frame 
 
 `README.md` is **generated**. Edit [`data/papers.jsonl`](data/papers.jsonl) instead and run `python3 scripts/build_readme.py`. See [how-to-contribute.md](how-to-contribute.md) for the record format and the review criteria.
 
-Maintainers: the [arXiv candidate pipeline](docs/arxiv-pipeline.md) proposes recent papers in a review inbox every day.
+Maintainers: the [arXiv candidate pipeline](docs/arxiv-pipeline.md) proposes recent papers in a review inbox every day, and a local [review agent](docs/agent-review.md) turns that inbox into a pull request for a human to merge.
 
 ## Related lists
 

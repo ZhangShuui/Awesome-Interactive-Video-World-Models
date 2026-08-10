@@ -158,6 +158,18 @@ def ignored_ids(path):
     return ids
 
 
+def agent_rejected_ids(path):
+    """Papers a review agent has already turned down. Kept out of the inbox so
+    the same rejection is not re-litigated daily; reversible by deleting the
+    line, unlike data/arxiv-ignore.txt which is meant to be permanent."""
+    ids = set()
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip() and not line.lstrip().startswith("#"):
+                ids.add(json.loads(line)["id"])
+    return ids
+
+
 def ids_in_text(text):
     return set(ARXIV_ID_RE.findall(text or ""))
 
@@ -246,6 +258,9 @@ def parse_args():
     ap.add_argument("--papers", type=Path, default=ROOT / "data" / "papers.jsonl")
     ap.add_argument("--sections", type=Path, default=ROOT / "data" / "sections.json")
     ap.add_argument("--ignore", type=Path, default=ROOT / "data" / "arxiv-ignore.txt")
+    ap.add_argument("--rejected", type=Path,
+                    default=ROOT / "data" / "agent-rejected.jsonl",
+                    help="papers a review agent already turned down")
     ap.add_argument("--existing-issue-body", type=Path,
                     help="current inbox body; ticks and section edits are preserved")
     ap.add_argument("--known-file", type=Path,
@@ -270,7 +285,8 @@ def main():
 
     issue_body = (args.existing_issue_body.read_text(encoding="utf-8")
                   if args.existing_issue_body and args.existing_issue_body.exists() else "")
-    known = known_ids(args.papers) | ignored_ids(args.ignore)
+    known = (known_ids(args.papers) | ignored_ids(args.ignore)
+             | agent_rejected_ids(args.rejected))
     if args.known_file and args.known_file.exists():
         known |= ids_in_text(args.known_file.read_text(encoding="utf-8"))
     ticked = checked_ids(issue_body)

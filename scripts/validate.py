@@ -86,8 +86,10 @@ def main():
     ap.add_argument("--papers", type=Path, default=ROOT / "data" / "papers.jsonl")
     ap.add_argument("--sections", type=Path, default=ROOT / "data" / "sections.json")
     ap.add_argument("--review", nargs="?", const="*", metavar="SECTION",
-                    help="list entries whose section is an unconfirmed keyword guess")
+                    help="list entries whose section was not settled by a human")
     args = ap.parse_args()
+
+    unconfirmed = {"rule", "agent"}
 
     sections = {s["key"] for s in json.loads(args.sections.read_text(encoding="utf-8"))}
     records = load(args.papers)
@@ -95,13 +97,14 @@ def main():
 
     if args.review:
         pending = [r for _, r in records
-                   if r.get("section_source") == "rule"
+                   if r.get("section_source") in unconfirmed
                    and (args.review == "*" or r.get("section") == args.review)]
         pending.sort(key=lambda r: (r["section"], r.get("date") or ""), reverse=True)
         for rec in pending:
-            print(f"{rec['section']:<11} {rec['id']:<11} {rec['title'][:88]}")
+            print(f"{rec.get('section_source', '?'):<6} {rec['section']:<11} "
+                  f"{rec['id']:<11} {rec['title'][:80]}")
         print(f"\n{len(pending)} entr{'y' if len(pending) == 1 else 'ies'} "
-              f"still on a keyword-suggested section.")
+              f"placed by a keyword rule or a review agent, not by a human.")
         return
 
     for warning in warnings:
@@ -111,10 +114,10 @@ def main():
     if errors:
         sys.exit(f"\n{len(errors)} error(s) in data/papers.jsonl")
 
-    unreviewed = sum(1 for _, r in records if r.get("section_source") == "rule")
+    pending = sum(1 for _, r in records if r.get("section_source") in unconfirmed)
     print(f"[validate] {len(records)} records, {len(sections)} sections, no errors")
-    if unreviewed:
-        print(f"[validate] {unreviewed} on a keyword-suggested section "
+    if pending:
+        print(f"[validate] {pending} not yet confirmed by a human "
               f"(scripts/validate.py --review)")
 
 
