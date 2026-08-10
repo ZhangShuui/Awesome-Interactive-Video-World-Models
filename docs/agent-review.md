@@ -25,12 +25,21 @@ response costs one batch rather than the run; the papers in a failed batch stay
 
 **The toolset is pinned on both passes.** Screening runs with every tool denied
 so it answers from the prompt, and the attribute pass gets `WebFetch` and
-nothing else. This is not a detail: left unrestricted, the headless agent
-inherits the full default toolset and goes exploring — fetching each arXiv page
-during what should be a one-shot classification — and a screening call that
-should take a minute runs past ten. Note that passing an *empty*
-`--allowed-tools` is not a restriction; the flag has to be absent or the tools
-have to be named, so denial is explicit.
+nothing else.
+
+This is not a detail. Left unrestricted the headless agent inherits the full
+default toolset and goes exploring instead of answering. Measured on the same
+5-paper screening prompt:
+
+| | wall clock | turns | cost | outcome |
+| --- | --- | --- | --- | --- |
+| default toolset | 241s | **24** | $1.15 | `error_during_execution` |
+| every tool denied | 148s | **2** | $0.49 | success |
+
+Twenty-four turns to classify five abstracts that were already in the prompt,
+and it still fell over. Note that passing an *empty* `--allowed-tools` is not a
+restriction — it is the same as passing no flag at all, which is exactly how
+this shipped broken the first time. The tools have to be named.
 
 The agent never pushes to `main`, and the script aborts if the working tree is
 dirty. Every entry it adds is marked `"section_source": "agent"`, so
@@ -97,14 +106,35 @@ Two tiers, because the two jobs are not equally hard:
 
 | Pass | Default | Why |
 | --- | --- | --- |
-| Screening | `claude-sonnet-5` | One batched call over all candidates. Cheap, and the decision is mostly "is this even about generated video". |
+| Screening | `claude-sonnet-5` | Batched. The decision is mostly "is this even about generated video". |
 | Reading papers | `claude-opus-5` | One call per paper, full text, and the output goes into a comparison table people may rely on. |
 
 Override with `--screen-model` / `--judge-model`.
 
-Measured: about **$0.27** for a screening pass over a day's candidates, and
-about **$0.55** per paper read. `--max-papers` (default 25) and `--max-attrs`
-(default 5) cap a single run; anything over the cap stays in the inbox.
+Measured on a real run of 16 candidates: **$0.99** to screen them in two batches
+of eight, and **$0.41** to read the one paper that reached `systems` — $1.39 for
+the run.
+
+Every `claude -p` is a fresh session that re-sends the whole Claude Code system
+prompt, so there is a fixed cost of roughly **$0.13 per call** regardless of how
+much you ask. That is the entire argument for batching: sixteen papers screened
+one-per-call would have spent $2 on overhead alone before answering anything.
+
+A normal day is a 3-day window and a handful of candidates — one screening batch
+and at most a paper or two read, so about **$1**. Today's figures are inflated
+because the inbox was backfilled over 14 days.
+
+To spend less: raise `--screen-batch` (fewer calls, less overhead, but one
+timeout costs more work), or lower `--max-attrs` — reading papers is the
+expensive half, and `--max-attrs 0` skips it entirely. `--max-papers` (default
+25) and `--max-attrs` (default 5) cap a single run; anything over the cap stays
+in the inbox for next time.
+
+The reported figure comes from `total_cost_usd` in the CLI's result envelope,
+which prices the session's tokens at API rates. Whether that lands as a
+per-token bill or against a subscription's limits depends on how your `claude`
+is authenticated. A run that is killed mid-call reports nothing, so the number
+is a floor, not an audit.
 
 ## Accuracy
 

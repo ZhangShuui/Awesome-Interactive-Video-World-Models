@@ -82,11 +82,25 @@ def call_claude(prompt, model, tools, timeout):
         raise AgentError(f"claude reported {envelope.get('subtype')}: "
                          f"{str(envelope.get('result'))[:300]}")
     cost = float(envelope.get("total_cost_usd") or 0.0)
-    body = FENCE_RE.sub("", (envelope.get("result") or "").strip())
+    return extract_json(envelope.get("result") or ""), cost
+
+
+def extract_json(result):
+    """First complete JSON value in the model's reply.
+
+    Told to return only JSON, the model still sometimes fences it, prefaces it,
+    or appends a sentence of commentary. `json.loads` rejects all three and the
+    retry costs a whole extra call, so parse the first value and ignore what
+    surrounds it."""
+    body = FENCE_RE.sub("", result.strip())
+    start = min((i for i in (body.find("{"), body.find("[")) if i != -1), default=-1)
+    if start == -1:
+        raise AgentError(f"no JSON in model output: {body[:300]}")
     try:
-        return json.loads(body), cost
+        value, _ = json.JSONDecoder().raw_decode(body[start:])
     except json.JSONDecodeError as exc:
         raise AgentError(f"model output was not JSON ({exc}): {body[:300]}")
+    return value
 
 
 def call_with_retry(prompt, model, tools, timeout, attempts=2):

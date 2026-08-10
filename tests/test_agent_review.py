@@ -41,9 +41,25 @@ class TestCallClaude(unittest.TestCase):
         parsed, _ = self._run(envelope('```\n[{"id": "x"}]\n```'))
         self.assertEqual(parsed, [{"id": "x"}])
 
-    def test_prose_is_an_error_not_a_guess(self):
+    def test_trailing_commentary_is_ignored(self):
+        # Observed live: the attribute pass emitted valid JSON then kept talking,
+        # json.loads rejected the lot, and the retry cost another $0.40.
+        parsed, _ = self._run(envelope(
+            '{"id": "2607.26037", "in_scope": true}\n\nNote: the paper is unclear '
+            'about the frame rate.'))
+        self.assertEqual(parsed["id"], "2607.26037")
+
+    def test_preamble_before_the_json_is_ignored(self):
+        parsed, _ = self._run(envelope('Here you go:\n{"a": 1}'))
+        self.assertEqual(parsed, {"a": 1})
+
+    def test_prose_with_no_json_is_an_error_not_a_guess(self):
         with self.assertRaises(ar.AgentError):
-            self._run(envelope("Sure! Here is the answer."))
+            self._run(envelope("I could not determine this."))
+
+    def test_truncated_json_is_an_error(self):
+        with self.assertRaises(ar.AgentError):
+            self._run(envelope('{"id": "x", "attrs": {"backbone":'))
 
     def test_nonzero_exit(self):
         with self.assertRaises(ar.AgentError):
