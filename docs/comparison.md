@@ -7,10 +7,30 @@ A missing field means the paper does not report it, not that the value is zero. 
 rates are the numbers the authors claim, on the hardware they claim them on; they are
 not measured here and are not comparable across rows without reading the setups.
 
-103 interactive systems, plus 26 components and analyses profiled
+104 interactive systems, plus 26 components and analyses profiled
 on the same axes.
 
 ## Interactive systems
+
+### Wonder ([paper](https://arxiv.org/abs/2607.26037))
+
+_Wonder: Video World Model Done Better_ — 2026-07-28
+
+- **Backbone:** causal-diffusion
+- **Action space:** User-streamed camera trajectory (6-DoF poses / 'user-specified camera trajectory'), injected not as pose embeddings but as a rendered 'Pixel-Space Coordinate Field' — 'a colored spherical environment map at infinity and a dense 3D lattice scaffold inside it' rendered from the target trajectory and concatenated with the scene input, so translation reads out as parallax and rotation as environment-map appearance change (Sec 4.1.1, Fig 4). Training data derives 'discrete camera actions' from poses estimated by Depth Anything 3 (Fig 2), but the paper gives no action vocabulary and never describes a keyboard/button interface at inference. Demonstrated on image-to-world and video-to-world exploration of natural scenes — public real-world video (DL3DV), self-rendered Unreal Engine and Blender environments, MultiCamVideo/CamXTime paired videos (Fig 2, Sec 5.1); evaluated on a custom I2V benchmark and a V2V benchmark with dynamic subjects over five camera trajectories of varying translation scale and rotation speed. No game/keyboard environments.
+- **Reported FPS:** 16
+- **Horizon / context:** 'minute-scale' rollouts at 16 FPS with stable latency as the history grows — the paper states no explicit second count or frame count for the longest rollout; the caveat is that training used progressively longer 5s/10s/20s clips and minute-scale is reached only at inference via the rolling sparse KV cache (Sec 4.2.1, Sec 4.3). Table 1 reports quality/pose-error metrics but is not broken out by duration, so no coherence-vs-time number is available.
+- **Memory mechanism:** hybrid:retrieval+implicit-context — sparse full-fidelity attention: the entire history KV cache is kept in full fidelity and a constant-size active subset is selected per step by pooled query-key similarity (initial frame + recent chunks always retained, plus top-k content-similar middle-history chunks). Retrieval is content-based, not geometric: no scene reconstruction is maintained or queried at inference — the 3D lattice/environment map is a synthetic control scaffold rendered from the requested camera, not stored scene geometry.
+- **Open source:** no
+
+<details><summary>Where these came from</summary>
+
+- **fps:** Abstract ('synthesize diverse, minute-scale videos at 16 FPS'); restated in Sec 1 ('minute-scale rollouts at 16 FPS with stable latency as the history grows') and Sec 4.3 Inference-time Optimization ('enabling minute-scale generation at 16 FPS with stable inference latency'). Inference GPU/hardware is not reported, so the rate is unqualified.
+- **horizon:** Abstract and Sec 1 ('minute-scale'); Sec 4.2.1 Sparse Context Forcing ('active attention context remains constant regardless of rollout length, enabling long-horizon generation with stable latency'); training clip durations 5s/10s/20s from the training-setup section. No table or figure reports a measured coherence duration.
+- **memory:** Sec 4.2.1 'Sparse Context Forcing' and Fig 5 — 'keep the entire KV cache in full fidelity and let the model retrieve relevant chunks through content-aware sparse attention'; Fig 3 (bidirectional teacher → sparse-context causal student → few-step autoregressive generator → resident streaming runtime). Absence of inference-time geometry confirmed against Fig 4, which contrasts Wonder's synthetic coordinate field with prior methods that 're-render reconstructed point clouds'.
+- **backbone:** Fig 3 caption: 'Wonder first learns high-quality camera control in a bidirectional teacher, then converts the model to a sparse-context causal student, distills it into a few-step autoregressive generator'; Sec 4.4/Fig 6 (4-step sampler, Mixture-of-Students, DMD distillation). Base model Wan2.1-I2V-14B. Classified causal-diffusion per the distilled-deployed-model rule.
+
+</details>
 
 ### WanToFight ([paper](https://arxiv.org/abs/2607.12592))
 
