@@ -317,7 +317,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--screen-model", default="claude-sonnet-5",
                     help="model for the bulk in/out pass (default: %(default)s)")
-    ap.add_argument("--judge-model", default="claude-opus-5",
+    ap.add_argument("--judge-model", default="claude-sonnet-5",
                     help="model for reading papers and filling attributes "
                          "(default: %(default)s)")
     ap.add_argument("--max-papers", type=int, default=25,

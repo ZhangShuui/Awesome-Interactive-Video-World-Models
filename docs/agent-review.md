@@ -102,18 +102,22 @@ belong.
 
 ## Models and cost
 
-Two tiers, because the two jobs are not equally hard:
+Both passes default to Sonnet. The split is kept because the two jobs are not
+equally hard, and reading papers is the one worth paying more for if the
+comparison table starts drifting:
 
 | Pass | Default | Why |
 | --- | --- | --- |
 | Screening | `claude-sonnet-5` | Batched. The decision is mostly "is this even about generated video". |
-| Reading papers | `claude-opus-5` | One call per paper, full text, and the output goes into a comparison table people may rely on. |
+| Reading papers | `claude-sonnet-5` | One call per paper, full text. Matched the hand-read reference paper on every field; see [Accuracy](#accuracy) for where it and Opus disagree. |
 
 Override with `--screen-model` / `--judge-model`.
 
 Measured on a real run of 16 candidates: **$0.99** to screen them in two batches
 of eight, and **$0.41** to read the one paper that reached `systems` — $1.39 for
-the run.
+the run. Reading a paper costs about **$0.45–0.50** either way; the two tiers
+differ far less here than the model names suggest, because the cost is dominated
+by pulling the paper into context.
 
 Every `claude -p` is a fresh session that re-sends the whole Claude Code system
 prompt, so there is a fixed cost of roughly **$0.13 per call** regardless of how
@@ -139,12 +143,19 @@ is a floor, not an audit.
 ## Accuracy
 
 Checked against a paper that had already been read by hand — Matrix-Game 2.0
-([2508.13009](https://arxiv.org/abs/2508.13009)) — the agent matched the human
-values on all five fields (`causal-diffusion`, 25 FPS, `implicit-context`,
-open-source, and the same action space and horizon), and cited Section 4.2 and
-Table 3 for the frame rate.
+([2508.13009](https://arxiv.org/abs/2508.13009)). Both Sonnet and Opus matched
+the human values on every field: `causal-diffusion`, 25 FPS, `implicit-context`,
+open-source, and the same action space and horizon, with Section 4.2 and Table 3
+cited for the frame rate.
 
-One paper is a sanity check, not an evaluation. Spot-check the comparison-table
+Run head to head on a second paper ([2607.26037](https://arxiv.org/abs/2607.26037)),
+they agreed on `backbone`, `fps` and `open_source` and split on `memory`: Opus
+read it as `hybrid:retrieval+implicit-context` (an always-retained sink chunk
+plus top-k retrieval), Sonnet as `retrieval`. Opus is closer, but this is the
+field where a reader should expect judgement rather than transcription, and it
+is the reason `memory` disagreements are worth a look during review.
+
+Two papers is a sanity check, not an evaluation. Spot-check the comparison-table
 rows in a PR before merging; those are the numbers a reader is most likely to
 quote.
 

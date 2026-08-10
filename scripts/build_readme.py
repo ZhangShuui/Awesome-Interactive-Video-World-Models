@@ -58,20 +58,39 @@ ACTION_LABELS = [
 ]
 
 
+def leading_token(value, vocabulary):
+    """The controlled token a value starts with, ignoring whatever explanation
+    follows it.
+
+    These fields are supposed to hold one vocabulary token, but a contributor --
+    human or agent -- reliably appends the reasoning: `retrieval — sparse
+    attention over a growing KV-cache: ...`. Splitting on punctuation only works
+    when the punctuation happens to come first, so match the vocabulary instead.
+    The prose is not lost; comparison.md prints the field in full."""
+    text = value.strip()
+    for token in sorted(vocabulary, key=len, reverse=True):
+        if text == token or re.match(rf"{re.escape(token)}\b", text):
+            return token
+    return re.split(r"\s+[-—–]\s+|[:(]", text)[0].strip()
+
+
 def norm_backbone(value):
-    head = value.split(":")[0].split("+")[0].strip()
+    head = leading_token(value, BACKBONE_LABELS).split("+")[0].strip()
     return BACKBONE_LABELS.get(head, head)
 
 
 def _memory_atom(value):
-    head = re.split(r"[:(]", value)[0].strip()
+    head = leading_token(value, MEMORY_LABELS)
     return MEMORY_LABELS.get(head, head)
 
 
 def norm_memory(value):
     if value.startswith("hybrid"):
-        parts = value.split(":", 1)[1] if ":" in value else ""
-        labels = [_memory_atom(p) for p in parts.split("+") if p.strip()]
+        rest = value.split(":", 1)[1] if ":" in value else ""
+        # Stop at the first separator so an explanation after the pair does not
+        # become a third "component".
+        rest = re.split(r"\s+[-—–]\s+|[;.]", rest)[0]
+        labels = [_memory_atom(p) for p in rest.split("+") if p.strip()]
         return "hybrid: " + "+".join(labels) if labels else "hybrid"
     return _memory_atom(value)
 

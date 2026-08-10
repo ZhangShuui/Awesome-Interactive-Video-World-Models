@@ -44,6 +44,11 @@ An announced intention to release is `false`.
 
 ## Rules
 
+- **`backbone` and `memory` must be the vocabulary token and nothing else.**
+  These two feed a table column, so `retrieval` is a valid value and
+  `retrieval — sparse attention over a growing KV-cache` is not. Everything you
+  want to say about *why* goes in `evidence`, which has room for it. The other
+  fields are free text and want detail.
 - **Omit any field the paper does not report.** A missing field means "not
   reported", which is useful information. Never infer a frame rate from a
   latency figure, never round, never carry a number over from a cited baseline.
@@ -62,7 +67,7 @@ Return **only** a JSON object. No prose, no code fence.
   "in_scope": true|false,
   "note": "<one sentence; if in_scope is false, why>",
   "attrs": { "backbone": "...", "action_space": "...", "fps": "...", "horizon": "...", "memory": "...", "open_source": true|false },
-  "evidence": { "fps": "<where the number came from>", "horizon": "...", "memory": "..." },
+  "evidence": { "fps": "<where the number came from>", "horizon": "...", "memory": "<where, and why this token rather than a neighbouring one>", "backbone": "..." },
   "source": "full-text" | "abstract-only"
 }
 ```

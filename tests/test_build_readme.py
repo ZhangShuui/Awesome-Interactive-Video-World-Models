@@ -74,6 +74,28 @@ class TestAttributeNormalisation(unittest.TestCase):
         self.assertEqual(br.norm_backbone("other:pure-Transformer frame-causal decoder"),
                          "other")
 
+    def test_explanation_after_the_token_stays_out_of_the_table(self):
+        # Verbatim from a live agent run: the vocabulary token, then an essay.
+        self.assertEqual(br.norm_memory(
+            "retrieval — sparse attention over a growing, full-fidelity historical "
+            "KV-cache: an initial 'sink' chunk plus top-k retrieved chunks"),
+            "retrieval")
+
+    def test_explanation_after_a_hybrid_pair(self):
+        self.assertEqual(br.norm_memory(
+            "hybrid:retrieval+implicit-context — sparse full-fidelity attention: the "
+            "entire history KV cache is kept and a subset selected per step"),
+            "hybrid: retrieval+context")
+
+    def test_explanation_after_a_backbone(self):
+        self.assertEqual(br.norm_backbone(
+            "causal-diffusion — distilled from a bidirectional teacher"),
+            "causal diffusion")
+
+    def test_unknown_value_still_collapses_to_one_cell(self):
+        cell = br.norm_memory("something-new — with a long explanation that follows")
+        self.assertEqual(cell, "something-new")
+
     def test_action_space_is_summarised(self):
         self.assertEqual(
             br.norm_action("keyboard (multi-key) + continuous mouse (camera)"),
