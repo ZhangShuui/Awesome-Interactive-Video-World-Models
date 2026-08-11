@@ -1,4 +1,5 @@
 """Rendering rules that are easy to break and hard to notice."""
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -114,6 +115,35 @@ class TestTable(unittest.TestCase):
         label = br.short_label(rec(name=None, title="A " + "very " * 20 + "long title"))
         self.assertLessEqual(len(label), 44)
         self.assertTrue(label.endswith("…"))
+
+
+class TestNoTallies(unittest.TestCase):
+    """The generated files report papers, not counts of papers.
+
+    A tally is noise that goes stale on every merge and tells a reader nothing
+    they came for. These crept in one at a time -- a stats banner, a number
+    beside each table-of-contents line, an entry count under each section
+    heading, a "showing 40 of 107" footer -- so they are pinned out.
+    """
+
+    SECTIONS = json.loads((ROOT / "data" / "sections.json").read_text())
+
+    def test_the_contents_list_is_names_only(self):
+        contents = br.render_contents(self.SECTIONS)
+        self.assertNotRegex(contents, r"\(\d+\)")
+
+    def test_section_headings_carry_no_entry_count(self):
+        body = br.render_list(self.SECTIONS, {"systems": [rec(id="1")]})
+        self.assertNotIn("entries", body)
+
+    def test_no_stats_banner_is_rendered(self):
+        self.assertFalse(hasattr(br, "render_stats"))
+
+    def test_the_readme_states_no_totals(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        head = readme.split("<!-- BEGIN:LIST -->")[0]
+        for pattern in (r"\d+ papers", r"\d+ entries", r"Showing the \d+"):
+            self.assertNotRegex(head, pattern)
 
 
 class TestGeneratedFilesAreCurrent(unittest.TestCase):

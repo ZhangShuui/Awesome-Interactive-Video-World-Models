@@ -4,37 +4,11 @@ A curated list of **interactive video world models** — generative models you c
 
 Video generation stopped being a movie and became a place. This list tracks that shift: systems where a user or a policy issues an action, the model produces the next frames causally, and the world is still there when you look back — together with the work those systems are built out of, on action control, real-time generation, and long-horizon memory. General world-model lists cover robotics, driving, and 3D generation alongside this; here the narrow focus is the point.
 
-<!-- BEGIN:STATS -->
-**409 papers** across 9 sections &nbsp;·&nbsp; **133** read in depth and profiled in the comparison table &nbsp;·&nbsp; **34** with released weights or code &nbsp;·&nbsp; **51** reporting ≥10 FPS &nbsp;·&nbsp; newest entry 2026-08-07
-<!-- END:STATS -->
-
-Every entry is screened against the [scope](#scope) below. Those that clear the strict bar — a closed loop, causal generation, persistent state — are profiled on backbone, action space, frame rate, and memory mechanism where the paper has been read in depth; see [System Comparison](#system-comparison).
-
-> ### Please read this first
->
-> **This is a personal reading record, not an authoritative or community-curated list.** It is
-> maintained by one person as working notes for a survey in progress. Inclusion, exclusion,
-> section placement, and every value in the comparison table are one reader's judgement, made
-> from the papers themselves and revised as that reading continues. Treat it as a starting point
-> for your own reading, not as a citation-grade source.
->
-> **New entries are screened by an [automated agent](docs/agent-review.md) before a human sees
-> them.** The agent proposes; a person merges. Anything it placed without human confirmation is
-> marked `"section_source": "agent"` in [`data/papers.jsonl`](data/papers.jsonl) and is listed by
-> `python3 scripts/validate.py --review`, so you can always tell which entries have been read by
-> a person and which have not. Papers it turned down are recorded, with reasons, in
-> [`data/agent-rejected.jsonl`](data/agent-rejected.jsonl) rather than silently dropped.
->
-> **It was initialized from [Awesome-World-Models](https://github.com/leofan90/Awesome-World-Models)**
-> (BSD-3-Clause) by Leo Fan and contributors. That list seeded the initial paper pool — one of
-> the collection channels parsed its README — and supplied the website and code links for entries
-> that appear in both. The repository layout and the arXiv review-inbox workflow are adapted from
-> it as well. If you want broad, actively maintained coverage of world models, go there; this list
-> only narrows the same field to one slice of it.
->
-> No affiliation with, or endorsement by, the authors of any listed paper or of the upstream lists
-> is claimed. Mistakes here are the maintainer's, not the papers' authors'. Corrections are
-> welcome — please [open an issue or a PR](how-to-contribute.md).
+> A personal reading record, not an authoritative or community-curated list: every inclusion,
+> section placement, and comparison-table value is one reader's judgement, revised as that reading
+> continues. New entries are screened by an [automated agent](docs/agent-review.md) and carry
+> `"section_source": "agent"` until a person confirms them; what it turned down is kept, with
+> reasons, in [`data/agent-rejected.jsonl`](data/agent-rejected.jsonl).
 
 ## Scope
 
@@ -92,15 +66,15 @@ Several excellent lists cover the wider field — see [Related lists](#related-l
 ## Contents
 
 <!-- BEGIN:CONTENTS -->
-- [Surveys & Related Lists](#surveys--related-lists) (24)
-- [Foundations & Prehistory](#foundations--prehistory) (5)
-- [Blogs & Technical Reports](#blogs--technical-reports) (6)
-- [Interactive Video World Models](#interactive-video-world-models) (109)
-- [Action Control & Interfaces](#action-control--interfaces) (32)
-- [Real-Time & Streaming Generation](#real-time--streaming-generation) (108)
-- [Long-Horizon Memory & Consistency](#long-horizon-memory--consistency) (98)
-- [Benchmarks & Evaluation](#benchmarks--evaluation) (23)
-- [Datasets & Environments](#datasets--environments) (4)
+- [Surveys & Related Lists](#surveys--related-lists)
+- [Foundations & Prehistory](#foundations--prehistory)
+- [Blogs & Technical Reports](#blogs--technical-reports)
+- [Interactive Video World Models](#interactive-video-world-models)
+- [Action Control & Interfaces](#action-control--interfaces)
+- [Real-Time & Streaming Generation](#real-time--streaming-generation)
+- [Long-Horizon Memory & Consistency](#long-horizon-memory--consistency)
+- [Benchmarks & Evaluation](#benchmarks--evaluation)
+- [Datasets & Environments](#datasets--environments)
 - [System Comparison](#system-comparison)
 - [Contributing](#contributing)
 - [Citation](#citation)
@@ -113,7 +87,7 @@ Entries are newest first within each section. Venue tags show `arXiv YYMM` when 
 <!-- BEGIN:LIST -->
 ## Surveys & Related Lists
 
-_Surveys that cover world models, video generation, or interactive generation. Read these first to place a paper in context._ &nbsp;·&nbsp; **24 entries**
+_Surveys that cover world models, video generation, or interactive generation. Read these first to place a paper in context._
 
 * World Action Models: A Survey. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.20781)]
 * World Models for Robotic Manipulation: A Survey. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2606.00113)]
@@ -142,7 +116,7 @@ _Surveys that cover world models, video generation, or interactive generation. R
 
 ## Foundations & Prehistory
 
-_Work that defined the problem before interactive video world models became a category of their own: latent world models, neural game engines, and playable video generation._ &nbsp;·&nbsp; **5 entries**
+_Work that defined the problem before interactive video world models became a category of their own: latent world models, neural game engines, and playable video generation._
 
 * **`Genie`**, Generative Interactive Environments. **`DeepMind`** [[Paper](https://arxiv.org/abs/2402.15391)] [[Blog](https://sites.google.com/view/genie-2024/home)]
 * Playable Environments: Video Manipulation in Space and Time. **`arXiv 2022.03`** [[Paper](https://arxiv.org/abs/2203.01914)]
@@ -152,7 +126,7 @@ _Work that defined the problem before interactive video world models became a ca
 
 ## Blogs & Technical Reports
 
-_Systems that would sit in the main list if they had a paper. Announced through a blog post or technical report, documented well enough to place, and too important to leave out — every URL here has been checked by hand._ &nbsp;·&nbsp; **6 entries**
+_Systems that would sit in the main list if they had a paper. Announced through a blog post or technical report, documented well enough to place, and too important to leave out — every URL here has been checked by hand._
 
 * **`PixVerse R1`**, A Real-Time World Model That Redefines AI Video Generation. **`PixVerse 2026`** [[Blog](https://pixverse.ai/en/blog/pixverse-launches-r1-real-time-world-model)]
 * **`Happy Oyster`**, Happy Oyster (Kuaile Shenghao): Real-Time Interactive Open-World Model. **`Alibaba 2026`** [[Blog](https://happyoyster.cn/)]
@@ -163,7 +137,7 @@ _Systems that would sit in the main list if they had a paper. Announced through 
 
 ## Interactive Video World Models
 
-_The main list: systems that meet all three criteria. Newest first._ &nbsp;·&nbsp; **109 entries**
+_The main list: systems that meet all three criteria. Newest first._
 
 * **`MASS`**, Multiplayer World Models with Authoritative Shared State. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06257)]
 * **`HelloWorld`**, Enabling Socially Interactive Characters in Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05070)]
@@ -277,7 +251,7 @@ _The main list: systems that meet all three criteria. Newest first._ &nbsp;·&nb
 
 ## Action Control & Interfaces
 
-_How an action reaches the generator: action spaces, injection mechanisms, latent actions learned without labels, and control-fidelity analysis._ &nbsp;·&nbsp; **32 entries**
+_How an action reaches the generator: action spaces, injection mechanisms, latent actions learned without labels, and control-fidelity analysis._
 
 * **`GeniWorld`**, A Generalizable Interactive World Model for Robotic Manipulation via Visual Actions. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06332)]
 * **`LAWM-3D`**, Learning 3D-Aware Latent Actions from Human Videos for Generalizable Robot World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05706)]
@@ -314,7 +288,7 @@ _How an action reaches the generator: action spaces, injection mechanisms, laten
 
 ## Real-Time & Streaming Generation
 
-_Meeting the per-frame latency budget: causal and autoregressive backbones, few-step distillation, KV caching, and inference systems._ &nbsp;·&nbsp; **108 entries**
+_Meeting the per-frame latency budget: causal and autoregressive backbones, few-step distillation, KV caching, and inference systems._
 
 * **`In-Context Forcing`**, Uncovering Context Effects in Autoregressive Video Diffusion. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05237)]
 * **`SPADE`**, An Input-Adaptive Sparse Attention Engine for Fast Video Diffusion Models Inference. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.03335)]
@@ -427,7 +401,7 @@ _Meeting the per-frame latency budget: causal and autoregressive backbones, few-
 
 ## Long-Horizon Memory & Consistency
 
-_Keeping the world stable when the camera comes back: long context, explicit spatial and 3D memory, retrieval, and state persistence._ &nbsp;·&nbsp; **98 entries**
+_Keeping the world stable when the camera comes back: long context, explicit spatial and 3D memory, retrieval, and state persistence._
 
 * Addressable Memory for Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.07408)]
 * **`Diff-VF`**, Training-free High-quality Long Video Generation via Diffusion Model. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05976)]
@@ -530,7 +504,7 @@ _Keeping the world stable when the camera comes back: long context, explicit spa
 
 ## Benchmarks & Evaluation
 
-_Benchmarks and evaluation protocols aimed at interactive world models, including memory, control-following, and long-horizon stability._ &nbsp;·&nbsp; **23 entries**
+_Benchmarks and evaluation protocols aimed at interactive world models, including memory, control-following, and long-horizon stability._
 
 * **`GAUGE`**, A Measurement-Grounded Benchmark for Physical Fidelity in Simulation Engines and Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05948)]
 * **`XEWorld`**, Can Action-Conditioned World Models Generalize to Unseen Robot Embodiments?. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05799)]
@@ -558,7 +532,7 @@ _Benchmarks and evaluation protocols aimed at interactive world models, includin
 
 ## Datasets & Environments
 
-_Action-annotated video corpora and simulators used to train and probe interactive world models._ &nbsp;·&nbsp; **4 entries**
+_Action-annotated video corpora and simulators used to train and probe interactive world models._
 
 * **`PhysEditWorld`**, A Large-Scale Dataset Toward Physics-Editable World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.26694)]
 * **`EgoCS-400K`**, An Egocentric Gameplay Dataset for World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.18180)]
@@ -618,7 +592,7 @@ These are notes taken while reading, not measurements. Frame rates are the numbe
 | [EgoSim](https://arxiv.org/abs/2604.01001) | 2026-04 | bidir. diffusion | embodied | 16 | spatial (recon) | no |
 | [MemCam](https://arxiv.org/abs/2603.26193) | 2026-03 | bidir. diffusion | camera | — | retrieval | yes |
 
-_Showing the 40 most recent of 107 profiled systems. Full table with horizons and verbatim action spaces: [docs/comparison.md](docs/comparison.md)._
+_Most recent systems only. Full table, with horizons and verbatim action spaces: [docs/comparison.md](docs/comparison.md)._
 <!-- END:TABLE -->
 
 ## Contributing
@@ -633,7 +607,7 @@ Maintainers: the [candidate pipeline](docs/candidate-pipeline.md) proposes paper
 
 This list is deliberately narrow. For the wider field:
 
-- [Awesome-World-Models](https://github.com/leofan90/Awesome-World-Models) — world models for robotics, embodied AI, and autonomous driving. The daily-candidate pipeline here is adapted from theirs.
+- [Awesome-World-Models](https://github.com/leofan90/Awesome-World-Models) — world models for robotics, embodied AI, and autonomous driving.
 - [Awesome-World-Model](https://github.com/LMD0311/Awesome-World-Model) — world models with a strong autonomous-driving section.
 - [Awesome-LLM-Robotics](https://github.com/GT-RIPL/Awesome-LLM-Robotics) — the template both lists descend from.
 - [Awesome-Video-Diffusion](https://github.com/showlab/Awesome-Video-Diffusion) — video diffusion broadly, interactive or not.
@@ -659,6 +633,10 @@ If this list helps your work, a star is plenty. If you want to cite it:
 
 ## Acknowledgements
 
-This list would not exist without [Awesome-World-Models](https://github.com/leofan90/Awesome-World-Models) (BSD-3-Clause), which seeded it, and which in turn follows [Awesome-LLM-Robotics](https://github.com/GT-RIPL/Awesome-LLM-Robotics) — see [the notice above](#please-read-this-first) for what was taken from it. Paper metadata comes from the [arXiv API](https://info.arxiv.org/help/api/index.html); thank you to arXiv for its open access interoperability.
+Initialized from [Awesome-World-Models](https://github.com/leofan90/Awesome-World-Models) (BSD-3-Clause) by Leo Fan and contributors. That list seeded the initial paper pool — one of the collection channels parsed its README — and supplied the website and code links for entries that appear in both; the repository layout and the review-inbox workflow are adapted from it as well. It in turn follows [Awesome-LLM-Robotics](https://github.com/GT-RIPL/Awesome-LLM-Robotics). If you want broad, actively maintained coverage of world models, go there — this list only narrows the same field to one slice of it.
+
+Paper metadata comes from the [arXiv API](https://info.arxiv.org/help/api/index.html); thank you to arXiv for its open access interoperability.
+
+No affiliation with, or endorsement by, the authors of any listed paper or of the upstream lists is claimed. Mistakes here are the maintainer's, not the papers' authors'. Corrections are welcome — please [open an issue or a PR](how-to-contribute.md).
 
 Above all, thanks to the authors of every paper listed here.

@@ -4,36 +4,11 @@ A curated list of **interactive video world models** — generative models you c
 
 Video generation stopped being a movie and became a place. This list tracks that shift: systems where a user or a policy issues an action, the model produces the next frames causally, and the world is still there when you look back — together with the work those systems are built out of, on action control, real-time generation, and long-horizon memory. General world-model lists cover robotics, driving, and 3D generation alongside this; here the narrow focus is the point.
 
-<!-- BEGIN:STATS -->
-<!-- END:STATS -->
-
-Every entry is screened against the [scope](#scope) below. Those that clear the strict bar — a closed loop, causal generation, persistent state — are profiled on backbone, action space, frame rate, and memory mechanism where the paper has been read in depth; see [System Comparison](#system-comparison).
-
-> ### Please read this first
->
-> **This is a personal reading record, not an authoritative or community-curated list.** It is
-> maintained by one person as working notes for a survey in progress. Inclusion, exclusion,
-> section placement, and every value in the comparison table are one reader's judgement, made
-> from the papers themselves and revised as that reading continues. Treat it as a starting point
-> for your own reading, not as a citation-grade source.
->
-> **New entries are screened by an [automated agent](docs/agent-review.md) before a human sees
-> them.** The agent proposes; a person merges. Anything it placed without human confirmation is
-> marked `"section_source": "agent"` in [`data/papers.jsonl`](data/papers.jsonl) and is listed by
-> `python3 scripts/validate.py --review`, so you can always tell which entries have been read by
-> a person and which have not. Papers it turned down are recorded, with reasons, in
-> [`data/agent-rejected.jsonl`](data/agent-rejected.jsonl) rather than silently dropped.
->
-> **It was initialized from [Awesome-World-Models](https://github.com/leofan90/Awesome-World-Models)**
-> (BSD-3-Clause) by Leo Fan and contributors. That list seeded the initial paper pool — one of
-> the collection channels parsed its README — and supplied the website and code links for entries
-> that appear in both. The repository layout and the arXiv review-inbox workflow are adapted from
-> it as well. If you want broad, actively maintained coverage of world models, go there; this list
-> only narrows the same field to one slice of it.
->
-> No affiliation with, or endorsement by, the authors of any listed paper or of the upstream lists
-> is claimed. Mistakes here are the maintainer's, not the papers' authors'. Corrections are
-> welcome — please [open an issue or a PR](how-to-contribute.md).
+> A personal reading record, not an authoritative or community-curated list: every inclusion,
+> section placement, and comparison-table value is one reader's judgement, revised as that reading
+> continues. New entries are screened by an [automated agent](docs/agent-review.md) and carry
+> `"section_source": "agent"` until a person confirms them; what it turned down is kept, with
+> reasons, in [`data/agent-rejected.jsonl`](data/agent-rejected.jsonl).
 
 ## Scope
 
@@ -123,7 +98,7 @@ Maintainers: the [candidate pipeline](docs/candidate-pipeline.md) proposes paper
 
 This list is deliberately narrow. For the wider field:
 
-- [Awesome-World-Models](https://github.com/leofan90/Awesome-World-Models) — world models for robotics, embodied AI, and autonomous driving. The daily-candidate pipeline here is adapted from theirs.
+- [Awesome-World-Models](https://github.com/leofan90/Awesome-World-Models) — world models for robotics, embodied AI, and autonomous driving.
 - [Awesome-World-Model](https://github.com/LMD0311/Awesome-World-Model) — world models with a strong autonomous-driving section.
 - [Awesome-LLM-Robotics](https://github.com/GT-RIPL/Awesome-LLM-Robotics) — the template both lists descend from.
 - [Awesome-Video-Diffusion](https://github.com/showlab/Awesome-Video-Diffusion) — video diffusion broadly, interactive or not.
@@ -149,6 +124,10 @@ If this list helps your work, a star is plenty. If you want to cite it:
 
 ## Acknowledgements
 
-This list would not exist without [Awesome-World-Models](https://github.com/leofan90/Awesome-World-Models) (BSD-3-Clause), which seeded it, and which in turn follows [Awesome-LLM-Robotics](https://github.com/GT-RIPL/Awesome-LLM-Robotics) — see [the notice above](#please-read-this-first) for what was taken from it. Paper metadata comes from the [arXiv API](https://info.arxiv.org/help/api/index.html); thank you to arXiv for its open access interoperability.
+Initialized from [Awesome-World-Models](https://github.com/leofan90/Awesome-World-Models) (BSD-3-Clause) by Leo Fan and contributors. That list seeded the initial paper pool — one of the collection channels parsed its README — and supplied the website and code links for entries that appear in both; the repository layout and the review-inbox workflow are adapted from it as well. It in turn follows [Awesome-LLM-Robotics](https://github.com/GT-RIPL/Awesome-LLM-Robotics). If you want broad, actively maintained coverage of world models, go there — this list only narrows the same field to one slice of it.
+
+Paper metadata comes from the [arXiv API](https://info.arxiv.org/help/api/index.html); thank you to arXiv for its open access interoperability.
+
+No affiliation with, or endorsement by, the authors of any listed paper or of the upstream lists is claimed. Mistakes here are the maintainer's, not the papers' authors'. Corrections are welcome — please [open an issue or a PR](how-to-contribute.md).
 
 Above all, thanks to the authors of every paper listed here.

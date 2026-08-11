@@ -6,7 +6,6 @@ data/papers.jsonl + data/sections.json + data/README.template.md -> README.md
 The template owns all prose. This script only fills the marked blocks:
 
     <!-- BEGIN:CONTENTS -->  ... <!-- END:CONTENTS -->
-    <!-- BEGIN:STATS -->     ... <!-- END:STATS -->
     <!-- BEGIN:LIST -->      ... <!-- END:LIST -->
     <!-- BEGIN:TABLE -->     ... <!-- END:TABLE -->
 
@@ -149,7 +148,7 @@ def render_list(sections, by_section):
         recs = by_section.get(sec["key"], [])
         out.append(f"## {sec['title']}")
         out.append("")
-        out.append(f"_{sec['blurb']}_ &nbsp;·&nbsp; **{len(recs)} entries**")
+        out.append(f"_{sec['blurb']}_")
         out.append("")
         if not recs:
             out.append("_Nothing here yet — contributions welcome._")
@@ -160,29 +159,14 @@ def render_list(sections, by_section):
     return "\n".join(out).rstrip()
 
 
-def render_contents(sections, by_section):
+def render_contents(sections):
     lines = []
     for sec in sections:
-        n = len(by_section.get(sec["key"], []))
-        lines.append(f"- [{sec['title']}](#{anchor(sec['title'])}) ({n})")
+        lines.append(f"- [{sec['title']}](#{anchor(sec['title'])})")
     lines.append("- [System Comparison](#system-comparison)")
     lines.append("- [Contributing](#contributing)")
     lines.append("- [Citation](#citation)")
     return "\n".join(lines)
-
-
-def render_stats(records, sections):
-    total = len(records)
-    with_attrs = sum(1 for r in records if r["attrs"].get("backbone"))
-    open_src = sum(1 for r in records if r["attrs"].get("open_source") is True)
-    realtime = sum(1 for r in records
-                   if _fps(r) is not None and _fps(r) >= 10)
-    newest = max((r.get("date") or "") for r in records)
-    return (f"**{total} papers** across {len(sections)} sections &nbsp;·&nbsp; "
-            f"**{with_attrs}** read in depth and profiled in the comparison table "
-            f"&nbsp;·&nbsp; **{open_src}** with released weights or code "
-            f"&nbsp;·&nbsp; **{realtime}** reporting ≥10 FPS "
-            f"&nbsp;·&nbsp; newest entry {newest}")
 
 
 def _fps(rec):
@@ -243,9 +227,7 @@ def render_comparison_doc(records, sections):
            "Every value is taken from the paper it describes, verbatim where the phrasing matters.",
            "A missing field means the paper does not report it, not that the value is zero. Frame",
            "rates are the numbers the authors claim, on the hardware they claim them on; they are",
-           "not measured here and are not comparable across rows without reading the setups.", "",
-           f"{len(systems)} interactive systems, plus {len(others)} components and analyses profiled",
-           "on the same axes.", ""]
+           "not measured here and are not comparable across rows without reading the setups.", ""]
 
     def block(rec, note=None):
         attrs = rec["attrs"]
@@ -325,13 +307,11 @@ def main():
     table, total_rows, shown_rows = render_table(
         records, args.table_limit or None)
     if total_rows > shown_rows:
-        table += (f"\n\n_Showing the {shown_rows} most recent of {total_rows} profiled "
-                  f"systems. Full table with horizons and verbatim action spaces: "
-                  f"[docs/comparison.md](docs/comparison.md)._")
+        table += ("\n\n_Most recent systems only. Full table, with horizons and verbatim "
+                  "action spaces: [docs/comparison.md](docs/comparison.md)._")
 
     readme = (DATA / "README.template.md").read_text(encoding="utf-8")
-    readme = fill(readme, "CONTENTS", render_contents(sections, by_section))
-    readme = fill(readme, "STATS", render_stats(records, sections))
+    readme = fill(readme, "CONTENTS", render_contents(sections))
     readme = fill(readme, "LIST", render_list(sections, by_section))
     readme = fill(readme, "TABLE", table)
 

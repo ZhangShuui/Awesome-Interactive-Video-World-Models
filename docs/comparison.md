@@ -7,9 +7,6 @@ A missing field means the paper does not report it, not that the value is zero. 
 rates are the numbers the authors claim, on the hardware they claim them on; they are
 not measured here and are not comparable across rows without reading the setups.
 
-107 interactive systems, plus 26 components and analyses profiled
-on the same axes.
-
 ## Interactive systems
 
 ### MASS ([paper](https://arxiv.org/abs/2608.06257))
