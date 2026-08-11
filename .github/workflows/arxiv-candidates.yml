@@ -1,4 +1,11 @@
-name: Refresh arXiv candidate inbox
+name: Refresh candidate inbox
+
+# The daily half of recall: arXiv, which is date-windowed, and the blog
+# watchlist, whose feeds are incremental for free. OpenReview and the
+# conference proceedings cannot be windowed by date, so they are swept on
+# demand from a machine that can run the review agent:
+#   python3 scripts/agent_review.py --openreview
+#   python3 scripts/agent_review.py --venue CVPR2025
 
 on:
   schedule:
@@ -9,6 +16,10 @@ on:
         description: Number of days to search
         required: false
         default: "3"
+      blog_days:
+        description: How far back to look on the blog watchlist
+        required: false
+        default: "30"
 
 permissions:
   contents: read
@@ -51,13 +62,31 @@ jobs:
         id: candidates
         env:
           SEARCH_DAYS: ${{ github.event.inputs.days || '3' }}
+          BLOG_DAYS: ${{ github.event.inputs.blog_days || '30' }}
         run: |
-          count="$(python3 scripts/arxiv_candidates.py \
+          arxiv="$(python3 scripts/arxiv_candidates.py \
             --days "$SEARCH_DAYS" \
             --existing-issue-body "$RUNNER_TEMP/existing-inbox.md" \
             --known-file "$RUNNER_TEMP/open-arxiv-prs.md" \
             --output "$RUNNER_TEMP/arxiv-candidates.md")"
-          echo "count=$count" >> "$GITHUB_OUTPUT"
+          # A watchlist source being down must not cost the day's arXiv report,
+          # so the blog step is allowed to fail into an empty section.
+          blog=0
+          if python3 scripts/blog_candidates.py \
+            --days "$BLOG_DAYS" \
+            --existing-issue-body "$RUNNER_TEMP/existing-inbox.md" \
+            --output "$RUNNER_TEMP/blog-candidates.md" > "$RUNNER_TEMP/blog-count"; then
+            blog="$(cat "$RUNNER_TEMP/blog-count")"
+          else
+            echo "::warning::the blog watchlist failed; the inbox has arXiv only"
+            : > "$RUNNER_TEMP/blog-candidates.md"
+          fi
+          cat "$RUNNER_TEMP/arxiv-candidates.md" > "$RUNNER_TEMP/inbox.md"
+          if [ "$blog" -gt 0 ]; then
+            printf '\n---\n\n' >> "$RUNNER_TEMP/inbox.md"
+            cat "$RUNNER_TEMP/blog-candidates.md" >> "$RUNNER_TEMP/inbox.md"
+          fi
+          echo "count=$((arxiv + blog))" >> "$GITHUB_OUTPUT"
 
       - name: Update review inbox
         env:
@@ -68,13 +97,13 @@ jobs:
           if [ "$CANDIDATE_COUNT" -gt 0 ]; then
             if [ -n "$ISSUE_NUMBER" ]; then
               gh issue edit "$ISSUE_NUMBER" \
-                --title "Review recent arXiv candidates" \
-                --body-file "$RUNNER_TEMP/arxiv-candidates.md"
+                --title "Review recent candidates" \
+                --body-file "$RUNNER_TEMP/inbox.md"
             else
               gh issue create \
-                --title "Review recent arXiv candidates" \
+                --title "Review recent candidates" \
                 --label arxiv-candidates \
-                --body-file "$RUNNER_TEMP/arxiv-candidates.md"
+                --body-file "$RUNNER_TEMP/inbox.md"
             fi
           elif [ -n "$ISSUE_NUMBER" ]; then
             gh issue close "$ISSUE_NUMBER" \

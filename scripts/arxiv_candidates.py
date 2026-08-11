@@ -15,7 +15,6 @@ Usage:
   python3 scripts/arxiv_candidates.py --feed-file tests/data/feed.xml --output -
 """
 import argparse
-import base64
 import json
 import re
 import sys
@@ -28,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import sources  # noqa: E402
 import triage  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,40 +39,11 @@ USER_AGENT = "awesome-interactive-video-world-models/1.0 (+https://github.com/)"
 
 ALLOWED_CATEGORIES = {"cs.CV", "cs.LG", "cs.AI", "cs.RO", "cs.GR", "cs.MM", "eess.IV"}
 
-QUERY_PHRASES = [
-    "world model",
-    "world simulator",
-    "interactive video",
-    "interactive generation",
-    "playable",
-    "action-conditioned video",
-    "neural game engine",
-    "game generation",
-    "streaming video generation",
-    "real-time video generation",
-    "long video generation",
-    "video diffusion",
-]
+# The field's vocabulary lives in sources.py, shared with every other source.
+# Every phrase is OR'd into one query here, so an extra phrase costs no extra
+# API call -- only precision, which the gates and the review agent absorb.
+QUERY_PHRASES = sources.QUERY_PHRASES
 
-# "World model" is popular vocabulary well outside vision. These never belong.
-# Stems, not whole words -- a trailing \b here would silently disable every
-# entry that is a prefix ("econom" would stop matching "Economic").
-OFF_TOPIC_RE = re.compile(
-    r"\b(?:protein|molecul|genomic|clinical|surgical|financ|econom|portfolio|"
-    r"supply chain|digital twin|traffic forecast|weather|climate|seismic|"
-    r"recommend(?:er|ation)|speech recognition)", re.I)
-
-# The list is about generated *video*. A world model with no pixels in it --
-# an LLM's internal world model, an agentic-RL dynamics model -- is out of
-# scope no matter how many of the three criteria its abstract appears to meet.
-VISUAL_GATE_RE = re.compile(
-    r"\bvideo\b|\bframes?\b|\bvisual\b|\bpixel|\brender|\bimages?\b|"
-    r"\bscene\b|\bview(?:point|s)?\b|\bdiffusion\b", re.I)
-
-CANDIDATE_RE = re.compile(
-    r"^- \[(?P<checked>[ xX])\]\s+`(?P<section>[a-z-]+)`\s+.*?"
-    r"<!-- candidate:(?P<payload>[A-Za-z0-9+/=]+) -->",
-    re.M | re.S)
 ARXIV_ID_RE = re.compile(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})", re.I)
 
 
@@ -121,96 +92,66 @@ def fetch_page(query, start, max_results, timeout, retries, retry_delay):
     raise SystemExit(f"arXiv API request failed after {retries + 1} attempts: {last}")
 
 
+TOTAL_RE = re.compile(r"<opensearch:totalResults[^>]*>(\d+)<")
+
+
+def total_results(payload):
+    """How many papers the window actually holds, as arXiv reports it."""
+    match = TOTAL_RE.search(payload.decode("utf-8", "replace"))
+    return int(match.group(1)) if match else None
+
+
 def fetch_papers(days, max_results, timeout, retries, retry_delay):
     end = datetime.now(timezone.utc)
     query = build_query(end - timedelta(days=days), end)
-    papers, start = [], 0
+    papers, start, total = [], 0, None
     while start < max_results:
         page = fetch_page(query, start, min(PAGE_SIZE, max_results - start),
                           timeout, retries, retry_delay)
+        if total is None:
+            total = total_results(page)
         batch = parse_feed(page)
         papers.extend(batch)
         if len(batch) < PAGE_SIZE:
             break
         start += PAGE_SIZE
         time.sleep(MIN_DELAY_S)
+    # A daily 3-day window returns a couple of dozen papers and never comes near
+    # the cap. A hand-run backfill over a month does: the window silently lost
+    # its oldest papers and the report looked complete. Say so.
+    if total is not None and total > max_results:
+        print(f"warning: the {days}-day window holds {total} papers but "
+              f"--max-results is {max_results}; {total - max_results} were not "
+              f"fetched. Re-run with --max-results {total} or a shorter window.",
+              file=sys.stderr)
     return papers
 
 
+def fill_abstracts(candidates, timeout=60.0, retries=2, retry_delay=5.0):
+    """Refetch abstracts for inbox candidates, 50 ids per request."""
+    missing = [c for c in candidates if not c.get("abstract")]
+    for start in range(0, len(missing), 50):
+        batch = missing[start:start + 50]
+        query = " OR ".join(f"id:{c['id']}" for c in batch)
+        by_id = {p["id"]: p for p in parse_feed(
+            fetch_page(query, 0, len(batch), timeout, retries, retry_delay))}
+        for cand in batch:
+            paper = by_id.get(cand["id"])
+            if paper:
+                cand["abstract"] = paper["abstract"]
+                cand.setdefault("date", paper["date"])
+        if start + 50 < len(missing):
+            time.sleep(MIN_DELAY_S)
+    return candidates
+
+
 # --- state -------------------------------------------------------------------
-
-def known_ids(papers_path):
-    ids = set()
-    if papers_path.exists():
-        for line in papers_path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                ids.add(json.loads(line)["id"])
-    return ids
-
-
-def ignored_ids(path):
-    ids = set()
-    if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            entry = line.split("#", 1)[0].strip()
-            if entry:
-                ids.add(entry)
-    return ids
-
-
-def agent_rejected_ids(path):
-    """Papers a review agent has already turned down. Kept out of the inbox so
-    the same rejection is not re-litigated daily; reversible by deleting the
-    line, unlike data/arxiv-ignore.txt which is meant to be permanent."""
-    ids = set()
-    if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if line.strip() and not line.lstrip().startswith("#"):
-                ids.add(json.loads(line)["id"])
-    return ids
-
 
 def ids_in_text(text):
     return set(ARXIV_ID_RE.findall(text or ""))
 
 
-def checked_ids(issue_body):
-    """Papers the maintainer already ticked survive an inbox refresh."""
-    out = set()
-    for m in CANDIDATE_RE.finditer(issue_body or ""):
-        if m.group("checked").lower() == "x":
-            payload = decode(m.group("payload"))
-            if payload:
-                out.add(payload["id"])
-    return out
-
-
-def edited_sections(issue_body):
-    """Section corrections the maintainer typed survive an inbox refresh."""
-    out = {}
-    for m in CANDIDATE_RE.finditer(issue_body or ""):
-        payload = decode(m.group("payload"))
-        if payload and m.group("section") != payload.get("section"):
-            out[payload["id"]] = m.group("section")
-    return out
-
-
-def encode(record):
-    raw = json.dumps(record, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    return base64.b64encode(raw).decode("ascii")
-
-
-def decode(payload):
-    try:
-        return json.loads(base64.b64decode(payload).decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
-        return None
-
-
 # --- report ------------------------------------------------------------------
-
-TICKS = {True: "yes", False: "--"}
-
 
 def render(candidates, days, sections):
     lines = [
@@ -233,17 +174,7 @@ def render(candidates, days, sections):
         "---",
         "",
     ]
-    for cand in candidates:
-        ev = cand["evidence"]
-        marks = " · ".join(
-            f"{key} {TICKS[bool(ev.get(key))]}" for key in ("action", "causal", "state"))
-        payload = encode({k: cand[k] for k in ("id", "name", "title", "date", "section")})
-        lines.append(
-            f"- [ ] `{cand['section']}` **{cand['id']}** — {cand['title']} "
-            f"<!-- candidate:{payload} -->")
-        lines.append(f"      https://arxiv.org/abs/{cand['id']} · {cand['date']} · "
-                     f"criteria {cand['met']}/3 ({marks})")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines + sources.render_candidates(candidates)) + "\n"
 
 
 # --- main --------------------------------------------------------------------
@@ -285,12 +216,12 @@ def main():
 
     issue_body = (args.existing_issue_body.read_text(encoding="utf-8")
                   if args.existing_issue_body and args.existing_issue_body.exists() else "")
-    known = (known_ids(args.papers) | ignored_ids(args.ignore)
-             | agent_rejected_ids(args.rejected))
+    known = (sources.known_ids(args.papers) | sources.ignored_ids(args.ignore)
+             | sources.rejected_ids(args.rejected))
     if args.known_file and args.known_file.exists():
         known |= ids_in_text(args.known_file.read_text(encoding="utf-8"))
-    ticked = checked_ids(issue_body)
-    overrides = edited_sections(issue_body)
+    ticked = sources.checked_ids(issue_body)
+    overrides = sources.edited_sections(issue_body)
 
     seen, candidates = set(), []
     for paper in papers:
@@ -298,16 +229,13 @@ def main():
         if pid in known or pid in seen:
             continue
         seen.add(pid)
+        # The only filter this source owns: everything else about scope is
+        # shared with OpenReview, the proceedings backfill and the watchlist.
         if not set(paper["categories"]) & ALLOWED_CATEGORIES:
             continue
-        blob = f"{paper['title']} {paper['abstract']}"
-        if OFF_TOPIC_RE.search(blob) or not VISUAL_GATE_RE.search(blob):
-            continue
-        section, met, evidence = triage.triage(paper["title"], paper["abstract"])
-        # Surveys, benchmarks and the efficiency substrate are worth a look even
-        # when no criterion fires.
-        if (met == 0 and section not in ("surveys", "benchmarks")
-                and not triage.is_efficiency_substrate(paper["title"], paper["abstract"])):
+        propose, section, met, evidence = sources.proposal(
+            paper["title"], paper["abstract"])
+        if not propose:
             continue
         candidates.append({
             "id": pid,
@@ -320,18 +248,7 @@ def main():
         })
 
     candidates.sort(key=lambda c: (c["met"], c["date"], c["id"]), reverse=True)
-    report = render(candidates, args.days, sections)
-
-    # Re-tick what the maintainer already ticked, so a refresh loses no work.
-    if ticked:
-        lines = report.splitlines(keepends=True)
-        for i, line in enumerate(lines):
-            m = CANDIDATE_RE.match(line)
-            if m:
-                payload = decode(m.group("payload"))
-                if payload and payload["id"] in ticked:
-                    lines[i] = line.replace("- [ ]", "- [x]", 1)
-        report = "".join(lines)
+    report = sources.retick(render(candidates, args.days, sections), ticked)
 
     if args.output == "-":
         sys.stdout.write(report)

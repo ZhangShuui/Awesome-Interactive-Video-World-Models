@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import apply_issue_selections as apply_mod  # noqa: E402
 import arxiv_candidates as ac  # noqa: E402
+import sources  # noqa: E402
 import triage  # noqa: E402
 
 FEED = Path(__file__).resolve().parent / "data" / "sample-feed.xml"
@@ -34,15 +35,15 @@ class TestFeedParsing(unittest.TestCase):
 
 class TestFilters(unittest.TestCase):
     def test_off_topic_is_dropped(self):
-        self.assertTrue(ac.OFF_TOPIC_RE.search(
+        self.assertTrue(sources.OFF_TOPIC_RE.search(
             "A Systems Blueprint for Economic World Models"))
 
     def test_text_only_world_models_are_dropped(self):
-        self.assertIsNone(ac.VISUAL_GATE_RE.search(
+        self.assertIsNone(sources.VISUAL_GATE_RE.search(
             "EnvACE: Internalizing Environment Dynamics for Agentic Reinforcement Learning"))
 
     def test_video_papers_pass_the_gate(self):
-        self.assertIsNotNone(ac.VISUAL_GATE_RE.search(
+        self.assertIsNotNone(sources.VISUAL_GATE_RE.search(
             "Matrix-Game 2.0: streaming interactive video generation"))
 
     def test_zero_criteria_efficiency_papers_are_not_dropped(self):
@@ -109,11 +110,11 @@ class TestRoundTrip(unittest.TestCase):
     def test_refresh_preserves_ticks(self):
         run_candidates("--papers", str(self.papers), output=self.report)
         self._tick_first()
-        before = ac.checked_ids(self.report.read_text(encoding="utf-8"))
+        before = sources.checked_ids(self.report.read_text(encoding="utf-8"))
         refreshed = self.tmp / "inbox2.md"
         run_candidates("--papers", str(self.papers),
                        "--existing-issue-body", str(self.report), output=refreshed)
-        self.assertEqual(ac.checked_ids(refreshed.read_text(encoding="utf-8")), before)
+        self.assertEqual(sources.checked_ids(refreshed.read_text(encoding="utf-8")), before)
 
     def test_known_papers_are_not_proposed_again(self):
         run_candidates("--papers", str(self.papers), output=self.report)

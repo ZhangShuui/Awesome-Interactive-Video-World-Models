@@ -35,8 +35,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import sources  # noqa: E402
 import triage  # noqa: E402
-from arxiv_candidates import CANDIDATE_RE, decode  # noqa: E402
+from sources import CANDIDATE_RE, decode  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 PROMPTS = ROOT / "agent" / "prompts"
@@ -204,9 +205,8 @@ def candidates_from_issue():
             payload["checked"] = match.group("checked").lower() == "x"
             found.append(payload)
 
-    import arxiv_candidates as ac
-    handled = (ac.known_ids(ROOT / "data" / "papers.jsonl")
-               | ac.ignored_ids(ROOT / "data" / "arxiv-ignore.txt")
+    handled = (sources.known_ids(ROOT / "data" / "papers.jsonl")
+               | sources.ignored_ids(ROOT / "data" / "arxiv-ignore.txt")
                | rejected_ids()
                | ids_awaiting_merge())
     fresh = [c for c in found if not c["checked"] and c["id"] not in handled]
@@ -220,26 +220,57 @@ def candidates_from_issue():
 def candidates_locally(days, max_results):
     import arxiv_candidates as ac
     papers = ac.fetch_papers(days, max_results, 60.0, 2, 5.0)
-    known = ac.known_ids(ROOT / "data" / "papers.jsonl")
-    known |= ac.ignored_ids(ROOT / "data" / "arxiv-ignore.txt")
+    known = sources.known_ids(ROOT / "data" / "papers.jsonl")
+    known |= sources.ignored_ids(ROOT / "data" / "arxiv-ignore.txt")
     known |= rejected_ids()
     out = []
     for paper in papers:
         if paper["id"] in known:
             continue
-        blob = f"{paper['title']} {paper['abstract']}"
         if not set(paper["categories"]) & ac.ALLOWED_CATEGORIES:
             continue
-        if ac.OFF_TOPIC_RE.search(blob) or not ac.VISUAL_GATE_RE.search(blob):
-            continue
-        section, met, _ = triage.triage(paper["title"], paper["abstract"])
-        if (met == 0 and section not in ("surveys", "benchmarks")
-                and not triage.is_efficiency_substrate(paper["title"], paper["abstract"])):
+        propose, section, _, _ = sources.proposal(paper["title"], paper["abstract"])
+        if not propose:
             continue
         out.append({"id": paper["id"], "title": paper["title"],
                     "abstract": paper["abstract"], "date": paper["date"],
                     "section": section})
     return None, out
+
+
+def candidates_from_sweep(kind, venue=None):
+    """Judge an OpenReview or proceedings sweep without going through the Issue.
+
+    Neither source can be windowed by date -- OpenReview's search ranks by
+    relevance and a proceedings page is published once -- so neither belongs in
+    the daily inbox, which is a record of "what is new". They are swept when a
+    conference lands, and the result goes straight to a pull request where the
+    additions and the rejections are reviewed together, exactly as the daily
+    run does.
+    """
+    if kind == "openreview":
+        import openreview_candidates as source
+        notes = source.fetch_notes(sources.QUERY_PHRASES, 3, 60.0, 2, 5.0)
+        found = source.collect(
+            notes,
+            sources.known_ids(ROOT / "data" / "papers.jsonl")
+            | sources.ignored_ids(ROOT / "data" / "arxiv-ignore.txt")
+            | rejected_ids(),
+            sources.known_titles(ROOT / "data" / "papers.jsonl"),
+            {}, source.VENUE_RE, True)
+    else:
+        import venue_candidates as source
+        _, spec, url, year = source.dialect_for(venue)
+        papers = source.parse_listing(
+            spec, source.get(url, 90.0, 2, 5.0), venue, year)
+        known = sources.known_titles(ROOT / "data" / "papers.jsonl")
+        found = [{"id": source.paper_id(venue, p["url"]), "title": p["title"],
+                  "url": p["url"], "origin": venue, "section": None, "date": None}
+                 for p in papers
+                 if source.TITLE_PREFILTER.search(p["title"])
+                 and sources.norm_title(p["title"]) not in known]
+    print(f"[agent] {len(found)} candidate(s) from the {kind} sweep")
+    return None, found
 
 
 def candidates_from_rejections():
@@ -250,13 +281,12 @@ def candidates_from_rejections():
     some of those decisions were right at the time and wrong now -- which is
     only recoverable because rejections are logged with their reasons instead of
     being dropped. Papers already in the list are not re-proposed."""
-    import arxiv_candidates as ac
     rows = []
     if REJECTED.exists():
         for line in REJECTED.read_text(encoding="utf-8").splitlines():
             if line.strip() and not line.lstrip().startswith("#"):
                 rows.append(json.loads(line))
-    have = ac.known_ids(ROOT / "data" / "papers.jsonl")
+    have = sources.known_ids(ROOT / "data" / "papers.jsonl")
     # Deliberately no `date`: the rejection row records when it was rejected,
     # not when the paper was published. fetch_abstracts fills the real one.
     return None, [{"id": r["id"], "title": r["title"], "section": None,
@@ -279,22 +309,12 @@ def drop_rejections(ids):
 
 
 def fetch_abstracts(candidates):
-    """Issue bodies carry no abstract; screening without one is guesswork."""
-    import arxiv_candidates as ac
-    missing = [c for c in candidates if not c.get("abstract")]
-    for batch_start in range(0, len(missing), 50):
-        batch = missing[batch_start:batch_start + 50]
-        query = " OR ".join(f"id:{c['id']}" for c in batch)
-        raw = ac.fetch_page(query, 0, len(batch), 60.0, 2, 5.0)
-        by_id = {p["id"]: p for p in ac.parse_feed(raw)}
-        for cand in batch:
-            paper = by_id.get(cand["id"])
-            if paper:
-                cand["abstract"] = paper["abstract"]
-                cand.setdefault("date", paper["date"])
-        if batch_start + 50 < len(missing):
-            time.sleep(3.2)
-    return candidates
+    """Issue bodies carry no abstract; screening without one is guesswork.
+
+    The inbox now mixes arXiv preprints, OpenReview submissions, proceedings
+    pages and blog posts, and each is refetched from where it came from --
+    see sources.fill_abstracts."""
+    return sources.fill_abstracts(candidates)
 
 
 # --- data files --------------------------------------------------------------
@@ -397,6 +417,10 @@ def main():
     ap.add_argument("--rejudge", action="store_true",
                     help="re-judge everything in data/agent-rejected.jsonl "
                          "against the scope as it reads today")
+    ap.add_argument("--openreview", action="store_true",
+                    help="sweep OpenReview instead of reading the inbox")
+    ap.add_argument("--venue",
+                    help="sweep one conference's proceedings, e.g. CVPR2025")
     ap.add_argument("--local", action="store_true",
                     help="query arXiv directly instead of reading the inbox Issue")
     ap.add_argument("--days", type=int, default=3)
@@ -418,6 +442,10 @@ def main():
 
     if args.rejudge:
         issue_number, candidates = candidates_from_rejections()
+    elif args.openreview:
+        issue_number, candidates = candidates_from_sweep("openreview")
+    elif args.venue:
+        issue_number, candidates = candidates_from_sweep("venue", args.venue)
     elif args.local:
         issue_number, candidates = candidates_locally(args.days, args.max_results)
     else:
@@ -493,11 +521,12 @@ def main():
         "id": row["id"],
         "name": triage.extract_name(row["title"]),
         "title": row["title"],
-        "venue": None,
+        "venue": row.get("origin"),
         "date": row.get("date"),
         "section": row["section"],
         "section_source": "agent",
-        "links": {"paper": f"https://arxiv.org/abs/{row['id']}"},
+        "links": {"blog" if sources.source_of(row["id"]) == "blog" else "paper":
+                  sources.url_for(row["id"], row.get("url"))},
         "attrs": attrs_by_id.get(row["id"], {}),
         **({"evidence": evidence_by_id[row["id"]]}
            if evidence_by_id.get(row["id"]) else {}),
@@ -567,14 +596,15 @@ def pr_body(added, attrs_by_id, notes, rejections, unsure, cost, screen_model,
             if attrs and len(attrs) > 3:
                 summary += ", …"
             lines.append(
-                f"| [{rec['name'] or rec['title'][:40]}]({rec['links']['paper']}) "
+                f"| [{rec['name'] or rec['title'][:40]}]"
+                f"({next(iter(rec['links'].values()), '')}) "
                 f"| `{rec['section']}` | {notes.get(rec['id'], '') or '—'} "
                 f"| {summary or '_not read_'} |")
     if unsure:
         lines += ["", "## Left for you", "",
                   "The agent could not decide these from the title and abstract. They "
                   "stay in the inbox.", ""]
-        lines += [f"- [{r['id']}](https://arxiv.org/abs/{r['id']}) — {r['title']}"
+        lines += [f"- [{r['id']}]({sources.url_for(r['id'], r.get('url'))}) — {r['title']}"
                   for r in unsure]
     if rejections:
         lines += ["", "## Rejected", "",

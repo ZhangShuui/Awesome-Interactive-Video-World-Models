@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import agent_review as ar  # noqa: E402
 import arxiv_candidates as ac  # noqa: E402
+import sources  # noqa: E402
 
 
 class FakeProc:
@@ -226,11 +227,11 @@ class TestRejections(unittest.TestCase):
             '{"id": "2608.07463", "reason": "out of scope"}\n'
             "\n"
             '{"id": "2608.07420", "reason": "driving"}\n', encoding="utf-8")
-        self.assertEqual(ac.agent_rejected_ids(self.path),
+        self.assertEqual(sources.rejected_ids(self.path),
                          {"2608.07463", "2608.07420"})
 
     def test_missing_file_is_empty(self):
-        self.assertEqual(ac.agent_rejected_ids(self.tmp / "nope.jsonl"), set())
+        self.assertEqual(sources.rejected_ids(self.tmp / "nope.jsonl"), set())
 
     def test_rejected_papers_are_not_proposed_again(self):
         feed = Path(__file__).resolve().parent / "data" / "sample-feed.xml"

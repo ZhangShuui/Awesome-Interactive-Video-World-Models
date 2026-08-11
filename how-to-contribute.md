@@ -84,5 +84,5 @@ that cannot be automated. Only add a field you have read out of the paper:
 
 ## Maintainers
 
-The [arXiv pipeline](docs/arxiv-pipeline.md) opens a review inbox every day.
+The [candidate pipeline](docs/candidate-pipeline.md) opens a review inbox every day.
 Nothing it finds enters the list without someone ticking a box.

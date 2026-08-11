@@ -6,7 +6,7 @@ delegated to a local Claude Code agent. The half that decides what the list
 says — merging — is not.
 
 ```
-GitHub Action (daily, cloud)     arXiv -> candidate Issue
+GitHub Action (daily, cloud)     arXiv + blog watchlist -> candidate Issue
         │
         ▼
 scripts/agent_review.py (daily, your machine)
@@ -18,6 +18,18 @@ scripts/agent_review.py (daily, your machine)
         ▼
 you                              merge, or don't
 ```
+
+The same script also drives the two sources that cannot be windowed by date and
+so never reach the daily Issue — see [the pipeline](candidate-pipeline.md):
+
+```bash
+python3 scripts/agent_review.py --openreview      # ICLR / NeurIPS / ICML sweep
+python3 scripts/agent_review.py --venue CVPR2025  # one conference's proceedings
+```
+
+Both are the same machinery pointed at a different door: sweep, screen, write,
+open a PR. They deduplicate by normalised title, because a paper that reaches
+this list from OpenReview and from arXiv shares no identifier at all.
 
 Screening is batched (`--screen-batch`, default 8) so a slow or malformed
 response costs one batch rather than the run; the papers in a failed batch stay
@@ -52,7 +64,14 @@ human.
 python3 scripts/agent_review.py --dry-run     # judge and print, write nothing
 python3 scripts/agent_review.py               # judge, commit, open a PR
 python3 scripts/agent_review.py --local --days 7   # skip the Issue, query arXiv
+python3 scripts/agent_review.py --openreview       # sweep OpenReview
+python3 scripts/agent_review.py --venue ECCV2024   # sweep one proceedings
 ```
+
+A sweep proposes far more at once than a morning's arXiv does — OpenReview held
+103 unseen candidates the first time it ran — so `--max-papers` (default 25)
+matters there. Anything over the cap is simply not judged this run; sweep again
+after merging.
 
 Daily, in the background:
 

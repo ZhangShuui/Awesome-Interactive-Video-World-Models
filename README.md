@@ -627,7 +627,7 @@ Pull requests are welcome, including for entries already here — a wrong frame 
 
 `README.md` is **generated**. Edit [`data/papers.jsonl`](data/papers.jsonl) instead and run `python3 scripts/build_readme.py`. See [how-to-contribute.md](how-to-contribute.md) for the record format and the review criteria.
 
-Maintainers: the [arXiv candidate pipeline](docs/arxiv-pipeline.md) proposes recent papers in a review inbox every day, and a local [review agent](docs/agent-review.md) turns that inbox into a pull request for a human to merge.
+Maintainers: the [candidate pipeline](docs/candidate-pipeline.md) proposes papers in a review inbox every day — from arXiv and a watchlist of lab blogs, with OpenReview and conference proceedings swept on demand — and a local [review agent](docs/agent-review.md) turns that inbox into a pull request for a human to merge.
 
 ## Related lists
 

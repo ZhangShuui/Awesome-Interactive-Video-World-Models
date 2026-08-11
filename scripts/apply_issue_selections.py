@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from arxiv_candidates import CANDIDATE_RE, decode  # noqa: E402
+from sources import CANDIDATE_RE, decode, source_of, url_for  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -46,15 +46,24 @@ def parse_selections(issue_body, valid_sections):
         if section not in valid_sections:
             warnings.append(f"{pid}: no usable section, skipped")
             continue
+        url = url_for(pid, payload.get("url"))
+        if not url:
+            warnings.append(f"{pid}: no usable link, skipped")
+            continue
+        # A blog post is not a paper, and the README renders the two under
+        # different labels. `origin` carries the venue an inbox source knew
+        # about -- "NeurIPS 2025 poster" -- which is exactly the field a
+        # hand-added record would have had to be looked up by hand.
+        link_key = "blog" if source_of(pid) == "blog" else "paper"
         records.append({
             "id": pid,
             "name": payload.get("name"),
             "title": payload.get("title", "").strip(),
-            "venue": None,
+            "venue": payload.get("origin"),
             "date": payload.get("date"),
             "section": section,
             "section_source": "curated",
-            "links": {"paper": f"https://arxiv.org/abs/{pid}"},
+            "links": {link_key: url},
             "attrs": {},
         })
     return records, warnings
@@ -64,7 +73,8 @@ def write_summary(path, added, skipped, warnings):
     lines = [f"Added **{len(added)}** paper(s) from the review inbox.", ""]
     for rec in added:
         label = rec["name"] or rec["title"]
-        lines.append(f"- `{rec['section']}` — [{label}]({rec['links']['paper']})")
+        link = next(iter(rec["links"].values()), "")
+        lines.append(f"- `{rec['section']}` — [{label}]({link})")
     if skipped:
         lines += ["", f"Already in the list, skipped: {', '.join(sorted(skipped))}."]
     if warnings:
