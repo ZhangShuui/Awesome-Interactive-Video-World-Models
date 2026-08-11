@@ -24,6 +24,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -73,6 +74,36 @@ def parse_feed(payload):
     return out
 
 
+# Being rate-limited is not the same failure as a flaky socket and must not
+# share its budget. arXiv limits by IP, and a GitHub Actions runner shares its
+# address with everything else on that subnet, so the scheduled run collects
+# 429s a laptop never sees. The 5s/10s backoff that covers a dropped connection
+# gave up fifteen seconds into a limit measured in minutes -- and a lost run is
+# a lost day of recall, silently, because the 3-day window only tolerates two.
+RATE_LIMIT_RETRIES = 4
+RATE_LIMIT_BACKOFF_S = 30.0
+RATE_LIMIT_MAX_WAIT_S = 300.0
+
+
+def retry_after(exc):
+    """How long the server asked us to wait, if it said. Seconds or HTTP-date."""
+    headers = getattr(exc, "headers", None)
+    raw = headers.get("Retry-After") if headers else None
+    if not raw:
+        return None
+    raw = raw.strip()
+    try:
+        return min(float(raw), RATE_LIMIT_MAX_WAIT_S)
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        return None
+    delay = (when - datetime.now(when.tzinfo or timezone.utc)).total_seconds()
+    return min(max(delay, 0.0), RATE_LIMIT_MAX_WAIT_S)
+
+
 def fetch_page(query, start, max_results, timeout, retries, retry_delay):
     params = urllib.parse.urlencode({
         "search_query": query, "start": start, "max_results": max_results,
@@ -80,16 +111,34 @@ def fetch_page(query, start, max_results, timeout, retries, retry_delay):
     })
     request = urllib.request.Request(f"{API_URL}?{params}",
                                      headers={"User-Agent": USER_AGENT})
-    last = None
-    for attempt in range(retries + 1):
+    last, failures, throttled = None, 0, 0
+    while True:
         try:
             with urllib.request.urlopen(request, timeout=timeout) as resp:
                 return resp.read()
+        except urllib.error.HTTPError as exc:
+            last = exc
+            if exc.code == 429:
+                throttled += 1
+                if throttled > RATE_LIMIT_RETRIES:
+                    break
+                wait = retry_after(exc) or RATE_LIMIT_BACKOFF_S * throttled
+                print(f"arXiv rate-limited this request; waiting {wait:.0f}s "
+                      f"({throttled}/{RATE_LIMIT_RETRIES})", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            failures += 1
+            if failures > retries:
+                break
+            time.sleep(retry_delay * failures)
         except (urllib.error.URLError, TimeoutError, ET.ParseError) as exc:
             last = exc
-            if attempt < retries:
-                time.sleep(retry_delay * (attempt + 1))
-    raise SystemExit(f"arXiv API request failed after {retries + 1} attempts: {last}")
+            failures += 1
+            if failures > retries:
+                break
+            time.sleep(retry_delay * failures)
+    raise SystemExit(f"arXiv API request failed after {failures + throttled} "
+                     f"attempt(s): {last}")
 
 
 TOTAL_RE = re.compile(r"<opensearch:totalResults[^>]*>(\d+)<")

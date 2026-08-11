@@ -1,10 +1,15 @@
 """The inbox round trip: feed -> report -> ticks -> records."""
+import contextlib
+import email.message
 import json
 import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -56,6 +61,66 @@ class TestFilters(unittest.TestCase):
         admitted = (met > 0 or section in ("surveys", "benchmarks")
                     or triage.is_efficiency_substrate(title, abstract))
         self.assertTrue(admitted)
+
+
+class TestRateLimit(unittest.TestCase):
+    """A 429 killed the scheduled run on 2026-08-11 after fifteen seconds of
+    backoff. Rate limiting gets its own budget; a lost run is a lost day."""
+
+    def _http_error(self, code, retry_after=None):
+        headers = email.message.Message()
+        if retry_after is not None:
+            headers["Retry-After"] = retry_after
+        return urllib.error.HTTPError("http://x", code, "nope", headers, None)
+
+    def _fetch(self, responses):
+        """Run fetch_page against a scripted sequence, returning the sleeps."""
+        slept = []
+        calls = iter(responses)
+
+        def fake_urlopen(*_a, **_kw):
+            outcome = next(calls)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return contextlib.nullcontext(SimpleNamespace(read=lambda: outcome))
+
+        with mock.patch.object(ac.urllib.request, "urlopen", fake_urlopen), \
+                mock.patch.object(ac.time, "sleep", slept.append):
+            body = ac.fetch_page("q", 0, 10, 60.0, 2, 5.0)
+        return body, slept
+
+    def test_a_429_is_waited_out_not_given_up_on(self):
+        body, slept = self._fetch([self._http_error(429), b"<feed/>"])
+        self.assertEqual(body, b"<feed/>")
+        self.assertEqual(slept, [ac.RATE_LIMIT_BACKOFF_S])
+
+    def test_retry_after_is_honoured_when_the_server_sends_one(self):
+        _, slept = self._fetch([self._http_error(429, "120"), b"<feed/>"])
+        self.assertEqual(slept, [120.0])
+
+    def test_a_hostile_retry_after_is_capped(self):
+        _, slept = self._fetch([self._http_error(429, "999999"), b"<feed/>"])
+        self.assertEqual(slept, [ac.RATE_LIMIT_MAX_WAIT_S])
+
+    def test_backoff_grows_across_repeated_throttling(self):
+        _, slept = self._fetch(
+            [self._http_error(429), self._http_error(429), b"<feed/>"])
+        self.assertEqual(slept, [ac.RATE_LIMIT_BACKOFF_S, 2 * ac.RATE_LIMIT_BACKOFF_S])
+
+    def test_throttling_does_not_spend_the_transient_retry_budget(self):
+        """Two 429s then a dropped socket: the socket still gets its retries."""
+        _, slept = self._fetch([self._http_error(429), self._http_error(429),
+                                urllib.error.URLError("reset"), b"<feed/>"])
+        self.assertEqual(slept[-1], 5.0)
+
+    def test_a_relentless_429_eventually_fails_loudly(self):
+        with self.assertRaises(SystemExit):
+            self._fetch([self._http_error(429)] * (ac.RATE_LIMIT_RETRIES + 1))
+
+    def test_other_http_errors_keep_the_short_budget(self):
+        """A 500 is not a rate limit and must not wait five minutes."""
+        _, slept = self._fetch([self._http_error(500), b"<feed/>"])
+        self.assertEqual(slept, [5.0])
 
 
 class TestRoundTrip(unittest.TestCase):
