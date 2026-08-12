@@ -98,9 +98,16 @@ help — titles are where zero forcing and tidal forcing live too.
 
 It is in the list anyway, as a maintainer's call: the bet is that the genre
 keeps growing and eventually produces a paper that drops the vocabulary the rest
-of the query depends on. Narrowing the category gate at the same time took most
-of the cost back. If the inbox starts filling with haptics, this is the phrase
-to remove first.
+of the query depends on.
+
+**First week after, for calibration.** One candidate in seven days had "forcing"
+in its title — *Stream Forcing* — and it matched `world model`, `video
+generation` and `video diffusion` as well, so the phrase again contributed
+nothing. Its cost was also near zero, and that is the part worth remembering:
+the 45 above were measured while cs.RO was still in the whitelist, and dropping
+it removed the grasp-force and force-torque papers that were most of the bill.
+The two changes only make sense together. If cs.RO ever comes back, this phrase
+gets expensive again and is the first one to reconsider.
 
 ## The daily job
 
