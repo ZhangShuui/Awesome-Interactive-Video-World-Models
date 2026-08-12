@@ -261,6 +261,16 @@ class TestVenueListings(unittest.TestCase):
         self.assertTrue(venue.TITLE_PREFILTER.search("Playable World Models"))
         self.assertFalse(venue.TITLE_PREFILTER.search("Source-Free Machine Unlearning"))
 
+    def test_forcing_is_matched_literally_here_unlike_on_arxiv(self):
+        """A regex does not stem, so this catches the genre without the physics.
+
+        On arXiv the same word costs ~37 irrelevant candidates a month because
+        the search backend expands it to force/forced. Nothing expands it here.
+        """
+        self.assertTrue(venue.TITLE_PREFILTER.search("Rolling Forcing: Autoregressive Video"))
+        self.assertFalse(venue.TITLE_PREFILTER.search("Vision-Informed Grasp Force Prediction"))
+        self.assertFalse(venue.TITLE_PREFILTER.search("Phonetic forced alignment"))
+
 
 class TestNonArxivRecords(unittest.TestCase):
     """A ticked blog post must not become an arxiv.org/abs link."""

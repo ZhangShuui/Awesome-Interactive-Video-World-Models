@@ -79,12 +79,17 @@ LISTINGS = {
 # The cheap pre-filter over titles. Wider than the shared query vocabulary
 # because it is the only chance a paper gets: nothing that fails here is ever
 # read. Still far narrower than "video", which alone is a third of CVPR.
+#
+# "forcing" is worth far more here than in the arXiv query. This is a Python
+# regex over a literal title, not a search engine, so nothing stems it to
+# "force" -- and a paper titled "<Something> Forcing" in the CVPR or ICCV
+# proceedings is the video genre, not graph theory or tidal dynamics.
 TITLE_PREFILTER = re.compile(
     r"world model|world simulat|interactive|playable|action[- ]condition|"
     r"controllable video|autoregressive video|video game|game engine|"
     r"video generat|video diffusion|video predict|frame predict|video synthes|"
     r"streaming|real[- ]?time|long video|neural (?:game|render)|simulator|"
-    r"generative (?:game|world)", re.I)
+    r"generative (?:game|world)|forcing", re.I)
 
 TAG_RE = re.compile(r"<[^>]+>")
 SPACE_RE = re.compile(r"\s+")

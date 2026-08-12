@@ -28,8 +28,12 @@ economics and climate paper that borrowed the phrase "world model".
 So recall is phrase-based over title and abstract (`QUERY_PHRASES` in
 `scripts/sources.py`), and the narrowing happens afterwards:
 
-1. Provenance. For arXiv, the category must be one of cs.CV, cs.LG, cs.AI,
-   cs.RO, cs.GR, cs.MM, eess.IV.
+1. Provenance. For arXiv, the paper must carry one of cs.CV, cs.LG, cs.AI,
+   cs.MM, eess.IV — *any* of its categories will do, so this only excludes work
+   that never cross-listed into vision or learning. cs.RO and cs.GR were
+   removed: this list is about generated video you can act inside, not about
+   robots or renderers, and the robot world models it does want cross-list
+   cs.CV or cs.LG anyway.
 2. Off-topic stems (protein, econom, climate, …) are dropped outright.
 3. A **visual gate** requires the paper to be about pixels at all — an LLM's
    internal world model is out no matter how well it scores.
@@ -67,6 +71,36 @@ Two rules keep that from coming back, both pinned in `tests/test_sources.py`:
 When you add a phrase, measure it: run the window before and after and count
 what it actually adds. An extra phrase is free in API calls — they are OR'd
 into one query — and costs only precision, which the review agent absorbs.
+
+### What "forcing" cost, measured
+
+Worth writing down, because the answer was not the obvious one and the next
+person to notice the naming genre will want to add it again.
+
+"X Forcing" is a naming convention in this field — Diffusion Forcing, Self
+Forcing, Rolling Forcing, Memory Forcing, Causal Forcing — and the list holds 33
+of them, so the phrase looks overdue. Measured over 30 days:
+
+| | |
+| --- | --- |
+| the 33 papers already caught by the other phrases | **31** |
+| `all:"forcing"` raw hits | 800+ (paging cap) |
+| dropped by the category gate | 553 — `math.CO` zero forcing, `physics.flu-dyn` and `math.AP` baroclinic and tidal forcing, `cond-mat` |
+| reaching the inbox | 45 |
+| of those, new *and* relevant | **0** |
+
+Papers in the genre say "video generation" or "autoregressive video" in their
+abstracts as a matter of course, so the query already had them. What the phrase
+adds instead is force: search stems `forcing` to `force`/`forced`, and
+grasp-force, contact-force and force-torque papers discuss scenes and images, so
+they clear the visual gate and land in the inbox. Restricting to `ti:` does not
+help — titles are where zero forcing and tidal forcing live too.
+
+It is in the list anyway, as a maintainer's call: the bet is that the genre
+keeps growing and eventually produces a paper that drops the vocabulary the rest
+of the query depends on. Narrowing the category gate at the same time took most
+of the cost back. If the inbox starts filling with haptics, this is the phrase
+to remove first.
 
 ## The daily job
 

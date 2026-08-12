@@ -38,7 +38,17 @@ PAGE_SIZE = 100
 MIN_DELAY_S = 3.1
 USER_AGENT = "awesome-interactive-video-world-models/1.0 (+https://github.com/)"
 
-ALLOWED_CATEGORIES = {"cs.CV", "cs.LG", "cs.AI", "cs.RO", "cs.GR", "cs.MM", "eess.IV"}
+# A paper passes on *any* of its categories, so this only excludes work that
+# never cross-listed into vision or learning at all.
+#
+# cs.RO and cs.GR were dropped deliberately. This list is about generated video
+# you can act inside, not about robots or renderers, and the two categories were
+# paying their way in noise rather than papers: robotics contributes grasp-force,
+# contact-force and force-torque work that talks about scenes and images and so
+# clears the visual gate, and a pure-graphics paper with no vision cross-listing
+# is a renderer, not a world model. Robotics world models that matter here are
+# cross-listed cs.CV or cs.LG and still arrive.
+ALLOWED_CATEGORIES = {"cs.CV", "cs.LG", "cs.AI", "cs.MM", "eess.IV"}
 
 # The field's vocabulary lives in sources.py, shared with every other source.
 # Every phrase is OR'd into one query here, so an extra phrase costs no extra

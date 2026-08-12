@@ -116,6 +116,20 @@ QUERY_PHRASES = [
     # says "recent video models support generation, conditioning and editing"
     # without ever putting "video" next to "generation".
     "video model",
+    # "X Forcing" has become a naming genre here -- Diffusion Forcing, Self
+    # Forcing, Rolling Forcing, Memory Forcing, Causal Forcing -- and the list
+    # already holds 33 of them.
+    #
+    # Measured before adding, and the measurement argues against it: 31 of those
+    # 33 were already caught by the phrases above, because a paper in this genre
+    # says "video generation" or "autoregressive video" in its abstract as a
+    # matter of course. Search stems forcing -> force/forced, so the phrase also
+    # returns grasp-force, contact-force and force-torque work, which reads as
+    # ~37 extra candidates a month and no extra papers. Kept anyway, as a
+    # maintainer's call, on the bet that the genre keeps growing and a future
+    # member of it drops the vocabulary the rest of the query depends on.
+    # Narrowing the category gate takes most of the cost back.
+    "forcing",
 ]
 
 

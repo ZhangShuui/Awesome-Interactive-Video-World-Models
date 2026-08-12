@@ -63,6 +63,31 @@ class TestFilters(unittest.TestCase):
         self.assertTrue(admitted)
 
 
+class TestCategoryGate(unittest.TestCase):
+    """The list is about generated video, not about robots or renderers."""
+
+    def test_robotics_and_graphics_are_not_admitted_on_their_own(self):
+        self.assertNotIn("cs.RO", ac.ALLOWED_CATEGORIES)
+        self.assertNotIn("cs.GR", ac.ALLOWED_CATEGORIES)
+
+    def test_vision_and_learning_still_are(self):
+        for category in ("cs.CV", "cs.LG", "cs.AI", "cs.MM", "eess.IV"):
+            self.assertIn(category, ac.ALLOWED_CATEGORIES)
+
+    def test_a_cross_listed_robotics_paper_still_arrives(self):
+        """Dropping cs.RO excludes only work that never reached vision at all.
+
+        A paper passes on any of its categories, so the robot world models this
+        list wants -- which cross-list cs.CV or cs.LG as a matter of course --
+        are unaffected. Losing that distinction is the way this change could
+        quietly go wrong.
+        """
+        cross_listed = {"cs.RO", "cs.CV"}
+        pure_robotics = {"cs.RO", "eess.SY"}
+        self.assertTrue(cross_listed & ac.ALLOWED_CATEGORIES)
+        self.assertFalse(pure_robotics & ac.ALLOWED_CATEGORIES)
+
+
 class TestRateLimit(unittest.TestCase):
     """A 429 killed the scheduled run on 2026-08-11 after fifteen seconds of
     backoff. Rate limiting gets its own budget; a lost run is a lost day."""
