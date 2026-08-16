@@ -16,6 +16,7 @@ Usage:
 """
 import argparse
 import json
+import random
 import re
 import sys
 import time
@@ -90,9 +91,23 @@ def parse_feed(payload):
 # 429s a laptop never sees. The 5s/10s backoff that covers a dropped connection
 # gave up fifteen seconds into a limit measured in minutes -- and a lost run is
 # a lost day of recall, silently, because the 3-day window only tolerates two.
-RATE_LIMIT_RETRIES = 4
+#
+# The first version of this budget waited 30/60/90/120s and still lost 08-13,
+# 08-15 and 08-16: growing linearly spends most of the patience on the early
+# attempts, and arXiv was flatly refusing six minutes in. Doubling reaches the
+# ceiling in half the attempts and then sits there, which buys a quarter of an
+# hour from seven. Each wait is jittered down by up to a quarter so that a
+# runner subnet throttled in lockstep does not re-collide on the way back.
+RATE_LIMIT_RETRIES = 7
 RATE_LIMIT_BACKOFF_S = 30.0
 RATE_LIMIT_MAX_WAIT_S = 300.0
+RATE_LIMIT_JITTER = 0.25
+
+
+def backoff_for(throttled):
+    """The n-th rate-limit wait: exponential, capped, jittered downward."""
+    base = min(RATE_LIMIT_BACKOFF_S * 2 ** (throttled - 1), RATE_LIMIT_MAX_WAIT_S)
+    return base * (1.0 - RATE_LIMIT_JITTER * random.random())
 
 
 def retry_after(exc):
@@ -132,7 +147,7 @@ def fetch_page(query, start, max_results, timeout, retries, retry_delay):
                 throttled += 1
                 if throttled > RATE_LIMIT_RETRIES:
                     break
-                wait = retry_after(exc) or RATE_LIMIT_BACKOFF_S * throttled
+                wait = retry_after(exc) or backoff_for(throttled)
                 print(f"arXiv rate-limited this request; waiting {wait:.0f}s "
                       f"({throttled}/{RATE_LIMIT_RETRIES})", file=sys.stderr)
                 time.sleep(wait)

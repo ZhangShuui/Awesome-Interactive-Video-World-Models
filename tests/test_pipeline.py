@@ -109,7 +109,9 @@ class TestRateLimit(unittest.TestCase):
                 raise outcome
             return contextlib.nullcontext(SimpleNamespace(read=lambda: outcome))
 
+        # Jitter off, so a wait can be asserted exactly; it has its own tests.
         with mock.patch.object(ac.urllib.request, "urlopen", fake_urlopen), \
+                mock.patch.object(ac.random, "random", lambda: 0.0), \
                 mock.patch.object(ac.time, "sleep", slept.append):
             body = ac.fetch_page("q", 0, 10, 60.0, 2, 5.0)
         return body, slept
@@ -146,6 +148,25 @@ class TestRateLimit(unittest.TestCase):
         """A 500 is not a rate limit and must not wait five minutes."""
         _, slept = self._fetch([self._http_error(500), b"<feed/>"])
         self.assertEqual(slept, [5.0])
+
+    def _backoffs(self, rand):
+        with mock.patch.object(ac.random, "random", lambda: rand):
+            return [ac.backoff_for(n)
+                    for n in range(1, ac.RATE_LIMIT_RETRIES + 1)]
+
+    def test_backoff_holds_at_the_cap_rather_than_growing_without_bound(self):
+        self.assertEqual(self._backoffs(0.0)[-1], ac.RATE_LIMIT_MAX_WAIT_S)
+
+    def test_jitter_only_ever_shortens_a_wait(self):
+        """Never longer than the cap says, never so short it stops helping."""
+        for jittered, base in zip(self._backoffs(1.0), self._backoffs(0.0)):
+            self.assertLessEqual(jittered, base)
+            self.assertGreater(jittered, base * 0.5)
+
+    def test_the_budget_outlasts_a_quarter_hour_of_throttling(self):
+        """08-16 was still being refused six minutes in and the run was lost.
+        Worst-case jitter, so this is the floor the schedule can count on."""
+        self.assertGreaterEqual(sum(self._backoffs(1.0)), 15 * 60)
 
 
 class TestRoundTrip(unittest.TestCase):
