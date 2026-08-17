@@ -3,16 +3,18 @@
 
 data/papers.jsonl + data/tags.json + data/README.template.md -> README.md
 
-A paper carries tags, so it is listed under each of them. That is deliberate
-duplication: someone reading the control list wants Incantation in it even
-though Incantation is also a system, and the old one-section model could only
-put it in one place.
+There are no sections. One list, newest first, every paper once, each carrying
+the one to three tags that say what it is. A paper is rarely about a single
+thing and the reader is rarely after a single thing either; splitting the list
+into buckets made both of those unsayable, and repeating a paper under every
+bucket it belongs to just moved the problem. Find by tag with the browser's
+find, not by scrolling to a heading.
 
 The template owns all prose. This script only fills the marked blocks:
 
-    <!-- BEGIN:CONTENTS -->  ... <!-- END:CONTENTS -->
-    <!-- BEGIN:LIST -->      ... <!-- END:LIST -->
-    <!-- BEGIN:TABLE -->     ... <!-- END:TABLE -->
+    <!-- BEGIN:TAGKEY -->  ... <!-- END:TAGKEY -->
+    <!-- BEGIN:LIST -->    ... <!-- END:LIST -->
+    <!-- BEGIN:TABLE -->   ... <!-- END:TABLE -->
 
 README.md is generated. Edit data/papers.jsonl, never the README.
 
@@ -120,10 +122,9 @@ def venue_of(rec):
     return venue or None
 
 
-def entry_line(rec, under=None):
-    """One bullet. `under` is the tag whose list this is, which is left off the
-    trailing tag run: a heading does not need to repeat itself, and the useful
-    information is the *other* places the same paper appears."""
+def entry_line(rec):
+    """One bullet, ending in its tags. The tags are the only thing saying what
+    the paper is about, so every one of them is on the line."""
     parts = ["*"]
     title = rec["title"].rstrip(". ")
     name = rec.get("name")
@@ -140,44 +141,22 @@ def entry_line(rec, under=None):
     for key, label in LINK_ORDER:
         if links.get(key):
             parts.append(f"[[{label}]({links[key]})]")
-    others = [t for t in rec.get("tags", []) if t != under]
-    if others:
-        parts.append("· " + " ".join(f"`{t}`" for t in others))
+    tags = rec.get("tags") or []
+    if tags:
+        parts.append("· " + " ".join(f"`{t}`" for t in tags))
     return " ".join(parts)
 
 
-def anchor(title):
-    """GitHub's heading slug. Punctuation is dropped *before* spaces become
-    hyphens, so '&' leaves a gap behind: 'A & B' -> 'a--b'. Do not collapse."""
-    slug = re.sub(r"[^\w\s-]", "", title.lower())
-    return re.sub(r"\s", "-", slug.strip())
+def render_list(records):
+    """Every paper once, newest first."""
+    rows = sorted(records, key=lambda r: (r.get("date") or "", r["id"]), reverse=True)
+    return "\n".join(entry_line(r) for r in rows)
 
 
-def render_list(tags, by_tag):
-    out = []
-    for tag in tags:
-        recs = by_tag.get(tag["key"], [])
-        out.append(f"## {tag['title']}")
-        out.append("")
-        out.append(f"_{tag['blurb']}_")
-        out.append("")
-        if not recs:
-            out.append("_Nothing here yet — contributions welcome._")
-            out.append("")
-            continue
-        out.extend(entry_line(r, under=tag["key"]) for r in recs)
-        out.append("")
-    return "\n".join(out).rstrip()
-
-
-def render_contents(tags):
-    lines = []
-    for tag in tags:
-        lines.append(f"- [{tag['title']}](#{anchor(tag['title'])})")
-    lines.append("- [System Comparison](#system-comparison)")
-    lines.append("- [Contributing](#contributing)")
-    lines.append("- [Citation](#citation)")
-    return "\n".join(lines)
+def render_tag_key(tags):
+    """What each tag means. A key, not a table of contents -- there is nothing
+    to jump to, because the list is not divided."""
+    return "\n".join(f"- **`{tag['key']}`** — {tag['blurb']}" for tag in tags)
 
 
 def _fps(rec):
@@ -321,13 +300,6 @@ def main():
             if tag not in known:
                 sys.exit(f"{rec['id']}: unknown tag {tag!r}")
 
-    by_tag = {}
-    for rec in records:
-        for tag in rec["tags"]:
-            by_tag.setdefault(tag, []).append(rec)
-    for recs in by_tag.values():
-        recs.sort(key=lambda r: (r.get("date") or "", r["id"]), reverse=True)
-
     table, total_rows, shown_rows = render_table(
         records, args.table_limit or None)
     if total_rows > shown_rows:
@@ -335,8 +307,8 @@ def main():
                   "action spaces: [docs/comparison.md](docs/comparison.md)._")
 
     readme = (DATA / "README.template.md").read_text(encoding="utf-8")
-    readme = fill(readme, "CONTENTS", render_contents(tags))
-    readme = fill(readme, "LIST", render_list(tags, by_tag))
+    readme = fill(readme, "TAGKEY", render_tag_key(tags))
+    readme = fill(readme, "LIST", render_list(records))
     readme = fill(readme, "TABLE", table)
 
     comparison = render_comparison_doc(records, tags)

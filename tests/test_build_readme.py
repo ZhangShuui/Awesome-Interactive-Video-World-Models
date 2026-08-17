@@ -16,13 +16,29 @@ def rec(**kw):
     return base
 
 
-class TestAnchors(unittest.TestCase):
-    def test_ampersand_leaves_a_gap(self):
-        # GitHub drops the '&' first, so two spaces become two hyphens.
-        self.assertEqual(br.anchor("Benchmarks & Evaluation"), "benchmarks--evaluation")
+class TestOneList(unittest.TestCase):
+    """No sections. One list, each paper once, tags on the line."""
 
-    def test_plain_heading(self):
-        self.assertEqual(br.anchor("System Comparison"), "system-comparison")
+    def test_every_paper_appears_exactly_once(self):
+        records = [rec(id="1", date="2026-01-01", tags=["systems", "control"]),
+                   rec(id="2", date="2026-02-01", tags=["control"])]
+        self.assertEqual(len(br.render_list(records).splitlines()), 2)
+
+    def test_newest_first_across_the_whole_list(self):
+        records = [rec(id="1", date="2025-01-01", title="Older"),
+                   rec(id="2", date="2026-01-01", title="Newer")]
+        body = br.render_list(records)
+        self.assertLess(body.index("Newer"), body.index("Older"))
+
+    def test_a_line_carries_all_of_its_tags(self):
+        line = br.entry_line(rec(tags=["systems", "control", "realtime"]))
+        self.assertTrue(line.endswith("· `systems` `control` `realtime`"), line)
+
+    def test_nothing_generated_is_a_heading(self):
+        """Heading-per-section rendering is what this replaced. If it comes
+        back the list is categorised again, whatever the data says."""
+        body = br.render_list([rec(id="1"), rec(id="2")])
+        self.assertNotIn("#", body)
 
 
 class TestEntryLine(unittest.TestCase):
@@ -141,12 +157,12 @@ class TestNoTallies(unittest.TestCase):
 
     TAGS = json.loads((ROOT / "data" / "tags.json").read_text())
 
-    def test_the_contents_list_is_names_only(self):
-        contents = br.render_contents(self.TAGS)
-        self.assertNotRegex(contents, r"\(\d+\)")
+    def test_the_tag_key_is_definitions_only(self):
+        key = br.render_tag_key(self.TAGS)
+        self.assertNotRegex(key, r"\(\d+\)")
 
-    def test_tag_headings_carry_no_entry_count(self):
-        body = br.render_list(self.TAGS, {"systems": [rec(id="1")]})
+    def test_the_list_carries_no_entry_count(self):
+        body = br.render_list([rec(id="1")])
         self.assertNotIn("entries", body)
 
     def test_no_stats_banner_is_rendered(self):

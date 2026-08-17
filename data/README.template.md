@@ -63,12 +63,14 @@ or text-based world state, and static 3D asset and scene generation.
 
 Several excellent lists cover the wider field — see [Related lists](#related-lists).
 
-## Contents
+## Tags
 
-<!-- BEGIN:CONTENTS -->
-<!-- END:CONTENTS -->
+There are no sections. Every paper sits in one list, newest first, carrying one to three tags that say what it is about — a system whose contribution is its action interface is `systems` `control`, and it is one entry, not two. To read everything on a topic, search the page for its tag.
 
-Papers carry tags rather than a single category, so a paper appears under each tag it holds — a system whose contribution is its action interface is listed in both places, and the trailing `` `tag` `` run on each line says where else to find it. Entries are newest first within each list. Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
+<!-- BEGIN:TAGKEY -->
+<!-- END:TAGKEY -->
+
+Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 
 ---
 

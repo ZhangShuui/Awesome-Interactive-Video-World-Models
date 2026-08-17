@@ -106,8 +106,8 @@ BENCHMARK_RE = re.compile(
 # and language vocabulary -- a corpus far denser in text-to-video than a day's
 # window is, so an upper bound on the noise. It admitted four papers that were
 # being dropped, two of them wanted, and lost none. It also moves Incantation,
-# Pandora, LongLive and ShotStream from a supporting section to `systems`,
-# which is where a human had already filed them by hand.
+# Pandora, LongLive and ShotStream onto `systems`, which is what a human had
+# already tagged them by hand.
 LANGUAGE_ACTION = [
     r"\b(?:natural language|language|text|prompts?)\s+as\s+(?:an?|the)?\s*"
     r"(?:action|control|interface)",

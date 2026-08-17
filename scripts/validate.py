@@ -60,6 +60,11 @@ def check(records, known_tags):
             for tag in tags:
                 if tag not in known_tags:
                     errors.append(f"{where}: unknown tag {tag!r}")
+            # One to three is the shape. Four happens and is sometimes true;
+            # past that the tags have stopped narrowing anything.
+            if len(tags) > 3:
+                warnings.append(f"{where}: {len(tags)} tags — tag what the paper "
+                                f"contributes, not what it mentions")
             source = rec.get("tags_source") or {}
             if not isinstance(source, dict):
                 errors.append(f"{where}: tags_source must be an object keyed by tag")

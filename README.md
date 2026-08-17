@@ -63,611 +63,457 @@ or text-based world state, and static 3D asset and scene generation.
 
 Several excellent lists cover the wider field — see [Related lists](#related-lists).
 
-## Contents
+## Tags
 
-<!-- BEGIN:CONTENTS -->
-- [Surveys & Related Lists](#surveys--related-lists)
-- [Foundations & Prehistory](#foundations--prehistory)
-- [Blogs & Technical Reports](#blogs--technical-reports)
-- [Interactive Video World Models](#interactive-video-world-models)
-- [Action Control & Interfaces](#action-control--interfaces)
-- [Real-Time & Streaming Generation](#real-time--streaming-generation)
-- [Long-Horizon Memory & Consistency](#long-horizon-memory--consistency)
-- [Benchmarks & Evaluation](#benchmarks--evaluation)
-- [Datasets & Environments](#datasets--environments)
-- [System Comparison](#system-comparison)
-- [Contributing](#contributing)
-- [Citation](#citation)
-<!-- END:CONTENTS -->
+There are no sections. Every paper sits in one list, newest first, carrying one to three tags that say what it is about — a system whose contribution is its action interface is `systems` `control`, and it is one entry, not two. To read everything on a topic, search the page for its tag.
 
-Papers carry tags rather than a single category, so a paper appears under each tag it holds — a system whose contribution is its action interface is listed in both places, and the trailing `` `tag` `` run on each line says where else to find it. Entries are newest first within each list. Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
+<!-- BEGIN:TAGKEY -->
+- **`surveys`** — A survey, review or related list. Read one first to place the rest in context.
+- **`foundations`** — Work that defined the problem before interactive video world models were a category of their own: latent world models, neural game engines, playable video generation.
+- **`reports`** — No paper — announced through a blog post or technical report, documented well enough to place. Every URL carrying this tag has been checked by hand.
+- **`systems`** — Meets all three scope criteria: per-step action conditioning, causal or streaming generation, persistent world state. The strict bar, and the only tag that feeds the comparison table.
+- **`control`** — How an action reaches the generator: action spaces, injection mechanisms, latent actions learned without labels, control-fidelity analysis. A prompt issued per step, per entity or mid-rollout is an action too, so language interfaces carry this tag alongside the ones about buttons.
+- **`realtime`** — Meeting the per-frame latency budget: causal and autoregressive backbones, few-step distillation, KV caching, inference systems.
+- **`memory`** — Keeping the world stable when the camera comes back: long context, explicit spatial and 3D memory, retrieval, state persistence.
+- **`benchmarks`** — A benchmark or evaluation protocol aimed at interactive world models — memory, control-following, long-horizon stability.
+- **`datasets`** — An action-annotated video corpus or a simulator used to train and probe interactive world models.
+<!-- END:TAGKEY -->
+
+Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 
 ---
 
 <!-- BEGIN:LIST -->
-## Surveys & Related Lists
-
-_Surveys that cover world models, video generation, or interactive generation. Read these first to place a paper in context._
-
-* World Action Models: A Survey. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.20781)]
-* World Models for Robotic Manipulation: A Survey. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2606.00113)]
-* World Model for Robot Learning: A Comprehensive Survey. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2605.00080)] [[Website](https://ntumars.github.io/wm-robot-survey/)] [[Code](https://github.com/NTUMARS/Awesome-World-Model-for-Robotics-Policy)]
-* Simulating the Visual World with Artificial Intelligence: A Roadmap. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.08585)] [[Website](https://world-model-roadmap.github.io/)] [[Code](https://github.com/ziqihuangg/Awesome-From-Video-Generation-to-World-Model)]
-* A Step Toward World Models: A Survey on Robotic Manipulation. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2511.02097)]
-* A Survey on Cache Methods in Diffusion Models: Toward Efficient Multi-Modal Generation. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.19755)] · `realtime`
-* A Comprehensive Survey on World Models for Embodied AI. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.16732)] [[Website](https://github.com/Li-Zn-H/AwesomeWorldModels)]
-* 3D and 4D World Modeling: A Survey. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.07996)]
-* Controllable Video Generation: A Survey. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.16869)] · `control`
-* A Survey on Long-Video Storytelling Generation: Architectures, Consistency, and Cinematic Quality. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.07202)] · `memory`
-* A Survey: Learning Embodied Intelligence from Physical Simulators and World Models. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.00917)] [[Code](https://github.com/NJU3DV-LoongGroup/Embodied-World-Models-Survey)]
-* From 2D to 3D Cognition: A Brief Survey of General World Models. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.20134)]
-* A Survey of Interactive Generative Video. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.21853)]
-* Exploring the Evolution of Physics Cognition in Video Generation: A Survey. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.21765)] [[Code](https://github.com/minnie-lin/Awesome-Physics-Cognition-based-Video-Generation)]
-* Simulating the Real World: A Unified Survey of Multimodal Generative Models. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.04641)] [[Code](https://github.com/ALEEEHU/World-Simulator)]
-* Generative Physical AI in Vision: A Survey. **`arXiv 2025.01`** [[Paper](https://arxiv.org/abs/2501.10928)]
-* Understanding World or Predicting Future? A Comprehensive Survey of World Models. **`arXiv 2024.11`** [[Paper](https://arxiv.org/abs/2411.14499)]
-* From Efficient Multimodal Models to World Models: A Survey. **`arXiv 2024.06`** [[Paper](https://arxiv.org/abs/2407.00118)]
-* From Sora What We Can See: A Survey of Text-to-Video Generation. **`arXiv 2024.05`** [[Paper](https://arxiv.org/abs/2405.10674)]
-* Is Sora a World Simulator? A Comprehensive Survey on General World Models and Beyond. **`arXiv 2024.05`** [[Paper](https://arxiv.org/abs/2405.03520)] [[Code](https://github.com/GigaAI-research/General-World-Models-Survey)]
-* Video Diffusion Models: A Survey. **`arXiv 2024.05`** [[Paper](https://arxiv.org/abs/2405.03150)]
-* A Survey on Long Video Generation: Challenges, Methods, and Prospects. **`arXiv 2024.03`** [[Paper](https://arxiv.org/abs/2403.16407)]
-* Sora as a World Model? A Complete Survey on Text-to-Video Generation. **`arXiv 2024.03`** [[Paper](https://arxiv.org/abs/2403.05131)]
-* **`Sora`**, A Review on Background, Technology, Limitations, and Opportunities of Large Vision Models. **`arXiv 2024.02`** [[Paper](https://arxiv.org/abs/2402.17177)]
-* A Survey on Future Frame Synthesis: Bridging Deterministic and Generative Approaches. **`arXiv 2024.01`** [[Paper](https://arxiv.org/abs/2401.14718)]
-
-## Foundations & Prehistory
-
-_Work that defined the problem before interactive video world models became a category of their own: latent world models, neural game engines, and playable video generation._
-
-* **`Genie`**, Generative Interactive Environments. **`DeepMind`** [[Paper](https://arxiv.org/abs/2402.15391)] [[Blog](https://sites.google.com/view/genie-2024/home)]
-* Playable Environments: Video Manipulation in Space and Time. **`arXiv 2022.03`** [[Paper](https://arxiv.org/abs/2203.01914)]
-* Playable Video Generation. **`arXiv 2021.01`** [[Paper](https://arxiv.org/abs/2101.12195)]
-* Learning to Simulate Dynamic Environments With GameGAN. **`arXiv 2020.05`** [[Paper](https://arxiv.org/abs/2005.12126)]
-* World Models. **`NIPS 2018 Oral`** [[Paper](https://arxiv.org/abs/1803.10122)] [[Website](https://worldmodels.github.io/)]
-
-## Blogs & Technical Reports
-
-_Systems that would sit in the main list if they had a paper. Announced through a blog post or technical report, documented well enough to place, and too important to leave out — every URL here has been checked by hand._
-
-* **`PixVerse R1`**, A Real-Time World Model That Redefines AI Video Generation. **`PixVerse 2026`** [[Blog](https://pixverse.ai/en/blog/pixverse-launches-r1-real-time-world-model)] · `realtime`
-* **`Happy Oyster`**, Happy Oyster (Kuaile Shenghao): Real-Time Interactive Open-World Model. **`Alibaba 2026`** [[Blog](https://happyoyster.cn/)] · `realtime`
-* **`Genie 3`**, A new frontier for world models. **`DeepMind 2025`** [[Blog](https://deepmind.google/blog/genie-3-a-new-frontier-for-world-models/)]
-* **`Genie 2`**, A large-scale foundation world model. **`DeepMind 2024`** [[Blog](https://deepmind.google/discover/blog/genie-2-a-large-scale-foundation-world-model/)]
-* **`Oasis`**, A Universe in a Transformer. **`Decart & Etched 2024`** [[Blog](https://oasis-model.github.io/)]
-* **`Sora`**, Video generation models as world simulators. **`OpenAI 2024`** [[Blog](https://openai.com/index/video-generation-models-as-world-simulators/)]
-
-## Interactive Video World Models
-
-_The main list: systems that meet all three criteria. Newest first._
-
-* **`ForgeWM`**, Progressive Causal Training for Few-Step Action-Conditioned Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.14022)] · `control` `realtime`
-* **`Context-Matched Distillation`**, Teacher Causality for Autoregressive Video Distillation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13391)] · `realtime`
-* **`MASS`**, Multiplayer World Models with Authoritative Shared State. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06257)]
-* **`HelloWorld`**, Enabling Socially Interactive Characters in Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05070)] · `control`
-* **`StatePlay`**, State-Aware Game World Models for Mechanics-Consistent Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26754)] · `memory`
-* **`Visko Orbis 1.0`**, A Live Model for Real-Time Interactive Long Video Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26694)] · `realtime`
-* **`Wonder`**, Video World Model Done Better. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26037)]
-* **`ABot-World-0`**, Infinite Interactive World Rollout on a Single Desktop GPU. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.19191)]
-* **`WanToFight`**, Real-Time Generative Game Engine for Multi-Player Combat Interaction. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.12592)] · `realtime`
-* Infinite Worlds with Versatile Interactions. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.07534)] · `control`
-* **`AlayaWorld`**, Long-Horizon and Playable Video World Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.06291)] · `control` `memory`
-* **`MoWorld`**, A Flash World Model. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.06216)]
-* Multiplayer Interactive World Models with Representation Autoencoders. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.05352)]
-* **`Worldscape-MoE`**, A Unified Mixture-of-Experts World Model for Scalable Heterogeneous Action Control. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.03964)]
-* **`WorldDirector`**, Building Controllable World Simulators with Persistent Dynamic Memory. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.02517)] · `control` `memory`
-* **`DreamForge-World 0.1`**, DreamForge-World 0.1 Preview: A Low-Compute Real-Time Controllable World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.30292)] · `control` `realtime`
-* Walking in the Implicit: Interactive World Exploration via Neural Scene Representation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.30045)]
-* Directing the World: Fast Autoregressive Video Generation with Compositional Human-Camera Control. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.27964)] · `control`
-* **`MaineCoon`**, Pursuing A Real-Time Audio-Visual Social World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.17800)] · `control` `realtime`
-* **`ActWorld`**, From Explorable to Interactive World Model via Action-Aware Memory. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.17730)] · `memory`
-* **`DreamX-World 1.0`**, A General-Purpose Interactive World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.16993)] · `control`
-* **`GeoStream`**, Toward Precise Camera Controlled Streaming Video Generation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.15162)] · `realtime`
-* **`MoVerse`**, Real-Time Video World Modeling with Panoramic Gaussian Scaffold. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.13376)] · `realtime`
-* **`BiWM`**, Advancing Open-Source Interactive Video World Models with Bidirectional Autoregression. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.10135)] · `control`
-* **`Prisma-World`**, Camera-Controllable Multi-Agent Video World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.09507)] · `control`
-* **`DisCo`**, World Models with Discrete Camera Motion Control. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.07967)]
-* Streaming Video Generation with Streaming Force Control. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.07508)] · `realtime`
-* **`AnchorWorld`**, Embodied Egocentric World Simulation with View-based Evolution Customization. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.07326)]
-* **`MetaWorld`**, Scaling Multi-Agent Video World Model from Single-view Video Data. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.02753)]
-* From Zero to Hero: Training-Free Custom Concept Spawning in World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.02575)]
-* **`Gamma-World`**, Generative Multi-Agent World Modeling Beyond Two Players. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.28816)] [[Website](https://research.nvidia.com/labs/sil/projects/gamma-world)]
-* **`WorldCraft`**, From Camera Navigation to Object Manipulation in Interactive Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.25077)] [[Website](https://nevsdev.github.io/WorldCraft/)]
-* **`SCOPE`**, Simulating Cross-game Operations in Playable Environments for FPS World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.23345)] [[Website](https://z2tong.github.io/SCOPE/)] [[Code](https://github.com/z2tong/SCOPE)]
-* **`Incantation`**, Natural Language as the Action Interface for Multi-Entity Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.18601)] · `control`
-* **`ReactiveGWM`**, Steering NPC in Reactive Game World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.15256)] [[Website](https://inv-wzq.github.io/ReactiveGWM/)]
-* **`SANA-WM`**, Efficient Minute-Scale World Modeling with Hybrid Linear Diffusion Transformer. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.15178)] [[Website](https://nvlabs.github.io/Sana/WM/)]
-* **`CausalCine`**, Real-Time Autoregressive Generation for Multi-Shot Video Narratives. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.12496)] · `control` `realtime`
-* **`PROWL`**, Prioritized Regret-Driven Optimization for World Model Learning. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.18803)]
-* **`MultiWorld`**, Scalable Multi-Agent Multi-View Video World Models. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.18564)] [[Website](https://multi-world.github.io/)]
-* **`Matrix-Game 3.0`**, Real-Time and Streaming Interactive World Model with Long-Horizon Memory. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.08995)] [[Website](https://matrix-game-v3.github.io/)] · `realtime` `memory`
-* **`INSPATIO-WORLD`**, A Real-Time 4D World Simulator via Spatiotemporal Autoregressive Modeling. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.07209)] · `realtime`
-* **`ActionParty`**, Multi-Subject Action Binding in Generative Video Games. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.02330)]
-* **`EgoSim`**, Egocentric World Simulator for Embodied Interaction Generation. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.01001)] [[Website](http://egosimulator.github.io/)]
-* **`MemCam`**, Memory-Augmented Camera Control for Consistent Video Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.26193)] · `control` `memory`
-* **`ShotStream`**, Streaming Multi-Shot Video Generation for Interactive Storytelling. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.25746)] · `control` `realtime`
-* **`WorldCam`**, Interactive Autoregressive 3D Gaming Worlds with Camera Pose as a Unifying Geometric Representation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.16871)] [[Website](https://cvlab-kaist.github.io/WorldCam/)]
-* **`InSpatio-WorldFM`**, An Open-Source Real-Time Generative Frame Model. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.11911)] · `realtime`
-* **`RealWonder`**, Real-Time Physical Action-Conditioned Video Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.05449)] · `control` `realtime`
-* **`MultiGen`**, Level-Design for Editable Multiplayer Worlds in Diffusion Game Engines. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.06679)]
-* Beyond Pixel Histories: World Models with Persistent 3D State. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.03482)] [[Website](https://francelico.github.io/persist.github.io)] · `memory`
-* **`COMBAT`**, Conditional World Models for Behavioral Agent Training. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2603.00825)]
-* **`UCM`**, Unifying Camera Control and Memory with Time-aware Positional Encoding Warping for World Models. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.22960)] [[Website](https://humanaigc.github.io/ucm-webpage/)] · `control` `memory`
-* **`Solaris`**, Building a Multiplayer Video World Model in Minecraft. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.22208)] [[Website](https://solaris-wm.github.io/)]
-* **`Generated Reality`**, Human-centric World Simulation using Interactive Video Generation with Hand and Camera Control. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.18422)] · `control`
-* **`Hand2World`**, Autoregressive Egocentric Interaction Generation via Free-Space Hand Gestures. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.09600)] [[Website](https://hand2world.github.io/)]
-* **`LIVE`**, Long-horizon Interactive Video World Modeling. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.03747)] [[Website](https://junchao-cs.github.io/LIVE-demo/)] · `memory`
-* **`Infinite-World`**, Scaling Interactive World Models to 1000-Frame Horizons via Pose-Free Hierarchical Memory. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.02393)] · `memory`
-* Scalable Generative Game Engine: Breaking the Resolution Wall via Hardware-Algorithm Co-Design. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2602.00608)]
-* **`lingbot-world`**, Advancing Open-source World Models. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.20540)] [[Website](https://technology.robbyant.com/lingbot-world)] [[Code](https://github.com/robbyant/lingbot-world)]
-* **`TeleWorld`**, Towards Dynamic Multimodal Synthesis with a 4D World Model. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2601.00051)]
-* **`Yume-1.5`**, A Text-Controlled Interactive World Generation Model. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.22096)] [[Website](https://stdstu12.github.io/YUME-Project)] [[Code](https://github.com/stdstu12/YUME)] · `control`
-* **`CustomX`**, Unified Character, Action, and Scene Customization in Video World Models. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.17796)] · `control`
-* **`Spatia`**, Video Generation with Updatable Spatial Memory. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.15716)] · `control` `memory`
-* **`WorldPlay`**, Towards Long-Term Geometric Consistency for Real-Time Interactive World Modeling. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.14614)] [[Website](https://3d-models.hunyuan.tencent.com/world/)] · `control` `realtime` `memory`
-* **`Astra`**, General Interactive World Model with Autoregressive Denoising. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.08931)] [[Website](https://eternalevan.github.io/Astra-project/)] [[Code](https://github.com/EternalEvan/Astra)]
-* **`RELIC`**, Interactive Video World Model with Long-Horizon Memory. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.04040)] [[Website](https://relic-worldmodel.github.io/)] · `memory`
-* **`WorldPack`**, Compressed Memory Improves Spatial Consistency in Video World Modeling. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.02473)] · `memory`
-* **`SpriteHand`**, Real-Time Versatile Hand-Object Interaction with Autoregressive Video Generation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.01960)] · `realtime`
-* **`AVWM`**, Audio-Visual World Models: Towards Multisensory Imagination in Sight and Sound. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2512.00883)]
-* **`Hunyuan-GameCraft-2`**, Instruction-following Interactive Game World Model. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.23429)] [[Website](https://hunyuan-gamecraft-2.github.io/)] · `control`
-* **`Captain Safari`**, A World Engine. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.22815)] [[Website](https://johnson111788.github.io/open-safari/)]
-* **`MagicWorld`**, Towards Long-Horizon Stability for Interactive Video World Exploration. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.18886)] [[Website](https://vivocameraresearch.github.io/magicworld/)] [[Code](https://github.com/vivoCameraResearch/Magic-World)] · `memory`
-* **`PAN`**, A World Model for General, Interactable, and Long-Horizon World Simulation. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.09057)] · `control` `memory`
-* Co-Evolving Latent Action World Models. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.26433)] · `control`
-* Memory Forcing: Spatio-Temporal Memory for Consistent Scene Generation on Minecraft. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.03198)] · `memory`
-* **`EvoWorld`**, Evolving Panoramic World Generation with Explicit 3D Memory. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.01183)] [[Code](https://github.com/JiahaoPlus/EvoWorld)] · `memory`
-* **`Dreamer4`**, Training Agents Inside of Scalable World Models. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.24527)] [[Website](https://danijar.com/dreamer4/)]
-* **`LongLive`**, Real-time Interactive Long Video Generation. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.22622)] · `control` `realtime`
-* **`Matrix-Game 2.0`**, An open-source real-time and streaming interactive world model. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.13009)] [[Website](https://matrix-game-v2.github.io/)] · `realtime`
-* **`Yan`**, Foundational Interactive Video Generation. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.08601)]
-* **`Yume`**, An Interactive World Generation Model. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.17744)] [[Website](https://stdstu12.github.io/YUME-Project/)] [[Code](https://github.com/stdstu12/YUME)]
-* From Virtual Games to Real-World Play. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.18901)]
-* **`Matrix-Game`**, Interactive World Foundation Model. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.18701)] [[Code](https://github.com/SkyworkAI/Matrix-Game)]
-* **`Hunyuan-GameCraft`**, High-dynamic Interactive Game Video Generation with Hybrid History Condition. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.17201)]
-* **`PlayerOne`**, Egocentric World Simulator. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.09995)]
-* Autoregressive Adversarial Post-Training for Real-Time Interactive Video Generation. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.09350)] · `realtime`
-* Video World Models with Long-term Spatial Memory. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.05284)] [[Website](https://spmem.github.io/)] · `control` `memory`
-* Context as Memory: Scene-Consistent Interactive Long Video Generation with Memory Retrieval. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.03141)] · `memory`
-* **`DeepVerse`**, 4D Autoregressive Video Generation as a World Model. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.01103)] · `control`
-* **`VRAG`**, Learning World Models for Interactive Video Generation. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.21996)]
-* Long-Context State-Space Video World Models. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.20171)] [[Website](https://ryanpo.com/ssm_wm)]
-* **`Vid2World`**, Crafting Video Diffusion Models to Interactive World Models. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.14357)] [[Website](http://knightnemo.github.io/vid2world/)]
-* Learning 3D Persistent Embodied World Models. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.05495)] · `memory`
-* **`WorldMem`**, Long-term Consistent World Simulation with Memory. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.12369)] · `memory`
-* **`MineWorld`**, a Real-Time and Open-Source Interactive World Model on Minecraft. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.08388)] · `realtime`
-* Exploration-Driven Generative Interactive Environments. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.02515)]
-* **`AnimeGamer`**, Infinite Anime Life Simulation with Next Game State Prediction. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.01014)] · `control`
-* Model as a Game: On Numerical and Spatial Consistency for Generative Games. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.21172)] · `memory`
-* **`AdaWorld`**, Learning Adaptable World Models with Latent Actions. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.18938)] [[Website](https://adaptable-world-model.github.io/)] · `control`
-* Pre-Trained Video Generative Models as World Simulators. **`arXiv 2025.02`** [[Paper](https://arxiv.org/abs/2502.07825)]
-* **`GameFactorly`**, Creating New Games with Generative Interactive Videos. **`arXiv 2025.01`** [[Paper](https://arxiv.org/abs/2501.08325)]
-* **`GenEx`**, Generating an Explorable World. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.09624)]
-* The Matrix: Infinite-Horizon World Generation with Real-Time Moving Control. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.03568)] · `control` `realtime`
-* Playable Game Generation. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.00887)]
-* **`GameGen-X`**, Interactive Open-world Game Video Generation. **`arXiv 2024.11`** [[Paper](https://arxiv.org/abs/2411.00769)] · `control`
-* **`SlowFast-VGen`**, Slow-Fast Learning for Action-Driven Long Video Generation. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2410.23277)] · `control`
-* Learning Generative Interactive Environments By Trained Agent Exploration. **`arXiv 2024.09`** [[Paper](https://arxiv.org/abs/2409.06445)]
-* Diffusion Models Are Real-Time Game Engines. **`arXiv 2024.08`** [[Paper](https://arxiv.org/abs/2408.14837)] · `realtime`
-* **`Pandora`**, Towards General World Model with Natural Language Actions and Video States. **`arXiv 2024.06`** [[Paper](https://arxiv.org/abs/2406.09455)] [[Code](https://github.com/maitrix-org/Pandora)] · `control`
-* iVideoGPT: Interactive VideoGPTs are Scalable World Models. **`arXiv 2024.05`** [[Paper](https://arxiv.org/abs/2405.15223)]
-* Learning Interactive Real-World Simulators. **`arXiv 2023.10`** [[Paper](https://arxiv.org/abs/2310.06114)] · `control`
-
-## Action Control & Interfaces
-
-_How an action reaches the generator: action spaces, injection mechanisms, latent actions learned without labels, and control-fidelity analysis. Language belongs here too — a prompt issued per step, per entity or mid-rollout is an action, and the papers about that interface sit alongside the ones about buttons._
-
-* **`ForgeWM`**, Progressive Causal Training for Few-Step Action-Conditioned Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.14022)] · `systems` `realtime`
-* **`DreamX-Phi 1.0`**, Action-Conditioned Video World Model for Robotic Manipulation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13489)]
-* Spatially-Grounded Text-to-Video Generation via Inference-Time Gradient-Free Optimization. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13037)]
-* **`GeniWorld`**, A Generalizable Interactive World Model for Robotic Manipulation via Visual Actions. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06332)]
-* **`XEWorld`**, Can Action-Conditioned World Models Generalize to Unseen Robot Embodiments?. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05799)] · `benchmarks`
-* **`LAWM-3D`**, Learning 3D-Aware Latent Actions from Human Videos for Generalizable Robot World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05706)]
-* **`HelloWorld`**, Enabling Socially Interactive Characters in Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05070)] · `systems`
-* **`UniWorld-View`**, Large-Baseline View Synthesis via Video Diffusion Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.04701)]
-* Overcoming Statistical Bias in Action-Controllable World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.04653)]
-* **`EmbodiedVAE`**, Disentangled Video VAE for Efficient and Controllable Embodied Manipulation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.02990)]
-* **`BWM`**, A Low-Cost High-Fidelity World Simulator for Robot Learning. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.29302)]
-* Video Models as Native 4D Renderers: World-Grounded Conditioning from Animated Mesh. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2608.00094)]
-* **`ShadowDancer`**, Teaching Video World Models Any Action by Learning Unified Dynamics Representations from a Video and Its Shadow. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.28362)]
-* **`ContactFlow`**, A video action conditioning that transfers across embodiments. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26579)]
-* **`CineWeaver`**, Training-Free Reference-Controllable Multi-Shot Long Video Generation for Cinematic Storytelling. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26529)] · `memory`
-* Causally Debiased Latent Action Model for Embodied Action Conditioned World Models. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.09185)]
-* Infinite Worlds with Versatile Interactions. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.07534)] · `systems`
-* **`AlayaWorld`**, Long-Horizon and Playable Video World Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.06291)] · `systems` `memory`
-* **`WorldDirector`**, Building Controllable World Simulators with Persistent Dynamic Memory. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.02517)] · `systems` `memory`
-* World Narrative Model for Highly Controllable Video Generation: A Paradigm Shift from Pixel Sampling to Physical World Orchestration. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.31946)]
-* **`DreamForge-World 0.1`**, DreamForge-World 0.1 Preview: A Low-Compute Real-Time Controllable World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.30292)] · `systems` `realtime`
-* **`TempAct`**, Advancing Temporal Plausibility in Autoregressive Video Generation via Planner-Executor RL. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.28016)] · `realtime`
-* Directing the World: Fast Autoregressive Video Generation with Compositional Human-Camera Control. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.27964)] · `systems`
-* **`LiveEdit`**, Towards Real-Time Diffusion-Based Streaming Video Editing. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.26740)] · `realtime`
-* **`MaineCoon`**, Pursuing A Real-Time Audio-Visual Social World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.17800)] · `systems` `realtime`
-* **`DreamX-World 1.0`**, A General-Purpose Interactive World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.16993)] · `systems`
-* **`Next Forcing`**, Causal World Modeling with Multi-Chunk Prediction. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.11187)] · `realtime`
-* **`BiWM`**, Advancing Open-Source Interactive Video World Models with Bidirectional Autoregression. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.10135)] · `systems`
-* **`Prisma-World`**, Camera-Controllable Multi-Agent Video World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.09507)] · `systems`
-* **`CLAW`**, Learning Continuous Latent Action World Models via Adversarial Latent Regularization. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.04130)]
-* World Models as Group Actions. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.24578)]
-* **`Incantation`**, Natural Language as the Action Interface for Multi-Entity Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.18601)] · `systems`
-* **`Nano World Models`**, A Minimalist Implementation of Future Video Prediction. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.23993)] [[Website](https://simchowitzlabpublic.github.io/nano-world-model/)]
-* **`DiLA`**, Disentangled Latent Action World Models. **`ICML 2026`** [[Paper](https://arxiv.org/abs/2605.15725)] [[Website](http://disentangled-latent-action-world-models.github.io)]
-* **`CausalCine`**, Real-Time Autoregressive Generation for Multi-Shot Video Narratives. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.12496)] · `systems` `realtime`
-* **`ACWM-Phys`**, Investigating Generalized Physical Interaction in Action-Conditioned Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.08567)] [[Website](https://xavihart.github.io/ACWM-Phys)] [[Code](https://github.com/xavihart/ACWM-Phys-dev)] · `benchmarks`
-* Render, Don't Decode: Weight-Space World Models with Latent Structural Disentanglement. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.06298)]
-* **`MemCam`**, Memory-Augmented Camera Control for Consistent Video Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.26193)] · `systems` `memory`
-* **`ShotStream`**, Streaming Multi-Shot Video Generation for Interactive Storytelling. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.25746)] · `systems` `realtime`
-* **`DCARL`**, A Divide-and-Conquer Framework for Autoregressive Long-Trajectory Video Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.24835)]
-* **`MosaicMem`**, Hybrid Spatial Memory for Controllable Video World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.17117)] [[Website](https://mosaicmem.github.io/mosaicmem/)] · `memory`
-* Hierarchical Latent Action Model. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.05815)]
-* **`RealWonder`**, Real-Time Physical Action-Conditioned Video Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.05449)] · `systems` `realtime`
-* **`UCM`**, Unifying Camera Control and Memory with Time-aware Positional Encoding Warping for World Models. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.22960)] [[Website](https://humanaigc.github.io/ucm-webpage/)] · `systems` `memory`
-* **`Generated Reality`**, Human-centric World Simulation using Interactive Video Generation with Hand and Camera Control. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.18422)] · `systems`
-* Factored Latent Action World Models. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.16229)]
-* **`Olaf-World`**, Orienting Latent Actions for Video World Modeling. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.10104)] [[Website](https://showlab.github.io/Olaf-World/)] [[Code](https://github.com/showlab/Olaf-World)]
-* Rethinking Global Text Conditioning in Diffusion Transformers. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.09268)]
-* Learning Latent Action World Models In The Wild. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.05230)]
-* **`Yume-1.5`**, A Text-Controlled Interactive World Generation Model. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.22096)] [[Website](https://stdstu12.github.io/YUME-Project)] [[Code](https://github.com/stdstu12/YUME)] · `systems`
-* **`CustomX`**, Unified Character, Action, and Scene Customization in Video World Models. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.17796)] · `systems`
-* **`Spatia`**, Video Generation with Updatable Spatial Memory. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.15716)] · `systems` `memory`
-* **`WorldPlay`**, Towards Long-Term Geometric Consistency for Real-Time Interactive World Modeling. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.14614)] [[Website](https://3d-models.hunyuan.tencent.com/world/)] · `systems` `realtime` `memory`
-* **`LongVie 2`**, Multimodal Controllable Ultra-Long Video World Model. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.13604)] [[Website](https://vchitect.github.io/LongVie2-project/)]
-* **`TV2TV`**, A Unified Framework for Interleaved Language and Video Generation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.05103)]
-* **`Hunyuan-GameCraft-2`**, Instruction-following Interactive Game World Model. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.23429)] [[Website](https://hunyuan-gamecraft-2.github.io/)] · `systems`
-* **`Infinity-RoPE`**, Action-Controllable Infinite Video Generation Emerges From Autoregressive Self-Rollout. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.20649)]
-* **`In-Video Instructions`**, Visual Signals as Generative Control. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.19401)]
-* **`Plan-X`**, Instruct Video Generation via Semantic Planning. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.17986)]
-* **`PAN`**, A World Model for General, Interactable, and Long-Horizon World Simulation. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.09057)] · `systems` `memory`
-* Co-Evolving Latent Action World Models. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.26433)] · `systems`
-* **`Video-As-Prompt`**, Unified Semantic Control for Video Generation. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.20888)]
-* **`TGT`**, Text-Grounded Trajectories for Locally Controlled Video Generation. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.15104)]
-* Real-Time Motion-Controllable Autoregressive Video Diffusion. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.08131)] · `realtime`
-* **`MorphoSim`**, An Interactive, Controllable, and Editable Language-guided 4D World Simulator. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.04390)]
-* When and Where do Events Switch in Multi-Event Video Generation?. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.03049)]
-* Reinforcement Learning with Inverse Rewards for World Model Post-training. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.23958)]
-* **`LongLive`**, Real-time Interactive Long Video Generation. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.22622)] · `systems` `realtime`
-* **`CausNVS`**, Autoregressive Multi-view Diffusion for Flexible 3D Novel View Synthesis. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.06579)]
-* Controllable Video Generation: A Survey. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.16869)] · `surveys`
-* Video World Models with Long-term Spatial Memory. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.05284)] [[Website](https://spmem.github.io/)] · `systems` `memory`
-* **`DeepVerse`**, 4D Autoregressive Video Generation as a World Model. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.01103)] · `systems`
-* **`AnimeGamer`**, Infinite Anime Life Simulation with Next Game State Prediction. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.01014)] · `systems`
-* **`AdaWorld`**, Learning Adaptable World Models with Latent Actions. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.18938)] [[Website](https://adaptable-world-model.github.io/)] · `systems`
-* Inter-environmental world modeling for continuous and compositional dynamics. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.09911)]
-* **`Gen3C`**, 3D-Informed World-Consistent Video Generation with Precise Camera Control. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.03751)] · `memory`
-* **`PlaySlot`**, Learning Inverse Latent Dynamics for Controllable Object-Centric Video Prediction and Planning. **`arXiv 2025.02`** [[Paper](https://arxiv.org/abs/2502.07600)]
-* The Matrix: Infinite-Horizon World Generation with Real-Time Moving Control. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.03568)] · `systems` `realtime`
-* **`GameGen-X`**, Interactive Open-world Game Video Generation. **`arXiv 2024.11`** [[Paper](https://arxiv.org/abs/2411.00769)] · `systems`
-* **`SlowFast-VGen`**, Slow-Fast Learning for Action-Driven Long Video Generation. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2410.23277)] · `systems`
-* **`IGOR`**, Image-GOal Representations are the Atomic Control Units for Foundation Models in Embodied AI. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2411.00785)]
-* **`Pandora`**, Towards General World Model with Natural Language Actions and Video States. **`arXiv 2024.06`** [[Paper](https://arxiv.org/abs/2406.09455)] [[Code](https://github.com/maitrix-org/Pandora)] · `systems`
-* **`InteractiveVideo`**, User-Centric Controllable Video Generation with Synergistic Multimodal Instructions. **`arXiv 2024.02`** [[Paper](https://arxiv.org/abs/2402.03040)]
-* Learning to Act without Actions. **`arXiv 2023.12`** [[Paper](https://arxiv.org/abs/2312.10812)]
-* Learning Interactive Real-World Simulators. **`arXiv 2023.10`** [[Paper](https://arxiv.org/abs/2310.06114)] · `systems`
-* Learning what you can do before doing anything. **`arXiv 2018.06`** [[Paper](https://arxiv.org/abs/1806.09655)]
-
-## Real-Time & Streaming Generation
-
-_Meeting the per-frame latency budget: causal and autoregressive backbones, few-step distillation, KV caching, and inference systems._
-
-* **`ForgeWM`**, Progressive Causal Training for Few-Step Action-Conditioned Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.14022)] · `systems` `control`
-* **`Context-Matched Distillation`**, Teacher Causality for Autoregressive Video Distillation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13391)] · `systems`
-* **`HPSD`**, Hybrid-Policy Self-Distillation for Text-Image-to-Video Diffusion Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13205)]
-* From Local Mismatch to Global Impact: Optimizing Cache Reuse Policy for Efficient Diffusion. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13043)]
-* **`In-Context Forcing`**, Uncovering Context Effects in Autoregressive Video Diffusion. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05237)]
-* **`SPADE`**, An Input-Adaptive Sparse Attention Engine for Fast Video Diffusion Models Inference. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.03335)]
-* Token Radius Attention for Efficient Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.02504)]
-* **`WorldDynCache`**, Risk-Controlled Latent Dynamics Approximation for Diffusion World Model. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.01845)]
-* **`MiniWorld`**, Democratizing the Training of Video World Models from Scratch. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.01127)]
-* **`Visko Orbis 1.0`**, A Live Model for Real-Time Interactive Long Video Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26694)] · `systems`
-* Parallel Decoding Distillation for Fast Image and Video Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26004)]
-* **`FlashDecoder`**, Real-Time Latent-to-Pixel Streaming Decoder with Transformers. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.14898)]
-* **`WanToFight`**, Real-Time Generative Game Engine for Multi-Player Combat Interaction. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.12592)] · `systems`
-* Stateful Worlds, Stateless Elasticity: Exact-State Serving for Interactive World Models. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.10389)]
-* **`OPSD-V`**, On-Policy Self-Distillation for Post-Training Few-Step Autoregressive Video Generators. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.08766)]
-* **`SAGA`**, Stable Acceleration Guidance for Autoregressive Video Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.08020)]
-* **`Flex-Forcing`**, Towards a Unified Autoregressive and Bidirectional Video Diffusion Model. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.03509)]
-* Towards Memory-Efficient Autoregressive Video Generation via Instance-Specific Parametric Absorption. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.00712)]
-* **`DreamForge-World 0.1`**, DreamForge-World 0.1 Preview: A Low-Compute Real-Time Controllable World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.30292)] · `systems` `control`
-* **`TempAct`**, Advancing Temporal Plausibility in Autoregressive Video Generation via Planner-Executor RL. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.28016)] · `control`
-* **`LiveEdit`**, Towards Real-Time Diffusion-Based Streaming Video Editing. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.26740)] · `control`
-* **`Causal-rCM`**, A Unified Teacher-Forcing and Self-Forcing Open Recipe for Autoregressive Diffusion Distillation in Streaming Video Generation and Interactive World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.25473)]
-* **`TurboServe`**, Serving Streaming Video Generation Efficiently and Economically. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.19271)]
-* **`UniTemp`**, Unlocking Video Generation in Any Temporal Order via Bidirectional Distillation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.18702)]
-* **`MaineCoon`**, Pursuing A Real-Time Audio-Visual Social World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.17800)] · `systems` `control`
-* Adaptive Resource Management and Quality Control for Streaming Video Generation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.15319)]
-* **`GeoStream`**, Toward Precise Camera Controlled Streaming Video Generation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.15162)] · `systems`
-* **`MoVerse`**, Real-Time Video World Modeling with Panoramic Gaussian Scaffold. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.13376)] · `systems`
-* **`Next Forcing`**, Causal World Modeling with Multi-Chunk Prediction. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.11187)] · `control`
-* **`SwiftVR`**, Real-Time One-Step Generative Video Restoration. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.09516)]
-* Ultra Flash: Scaling Real-Time Streaming Video Generation to High Resolutions. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.09150)]
-* Streaming Video Generation with Streaming Force Control. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.07508)] · `systems`
-* **`DSA`**, Dynamic Step Allocation for Fast Autoregressive Video Generation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.04432)]
-* **`AAD-1`**, Asymmetric Adversarial Distillation for One-Step Autoregressive Video Generation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.03972)]
-* **`Video-Mirai`**, Autoregressive Video Diffusion Models Need Foresight. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.03971)]
-* Light Interaction: Training-Free Inference Acceleration for Interactive Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.31158)]
-* **`SlotMemory`**, Object-Centric KV Memory for Streaming Long-Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.31033)] · `memory`
-* **`SANA-Streaming`**, Real-time Streaming Video Editing with Hybrid Diffusion Transformer. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.30409)]
-* **`VideoMLA`**, Low-Rank Latent KV Cache for Minute-Scale Autoregressive Video Diffusion. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.30351)]
-* **`AdaState`**, Self-Evolving Anchors for Streaming Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.30349)]
-* **`minWM`**, A Full-Stack Open-Source Framework for Real-Time Interactive Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.30263)] [[Website](https://github.com/shengshu-ai/minWM)]
-* **`SGMD`**, Score Gradient Matching Distillation for Few-Step Video Diffusion Distillation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.30116)]
-* Quantized Keys Steal Attention: Bias Correction for KV-Cache Compression in Video Diffusion. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.26266)]
-* On-Policy Adversarial Flow Distillation for Autoregressive Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.26105)]
-* **`One-Forcing`**, Towards Stable One-Step Autoregressive Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.23458)]
-* **`Q-ARVD`**, Quantizing Autoregressive Video Diffusion Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.21072)]
-* **`LongLive-2.0`**, An NVFP4 Parallel Infrastructure for Long Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.18739)]
-* Focused Forcing: Content-Aware Per-Frame KV Selection for Efficient Autoregressive Video Diffusion. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.18346)]
-* **`RAVEN`**, Real-time Autoregressive Video Extrapolation with Consistency-model GRPO. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.15190)] · `memory`
-* Causal Forcing++: Scalable Few-Step Autoregressive Diffusion Distillation for Real-Time Interactive Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.15141)]
-* Delta Forcing: Trust Region Steering for Interactive Autoregressive Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.14382)]
-* **`KVPO`**, ODE-Native GRPO for Autoregressive Video Alignment via KV Semantic Exploration. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.14278)]
-* Pyramid Forcing: Head-Aware Pyramid KV Cache Policy for High-Quality Long Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.13111)]
-* **`CausalCine`**, Real-Time Autoregressive Generation for Multi-Shot Video Narratives. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.12496)] · `systems` `control`
-* **`Forcing-KV`**, Hybrid KV Cache Compression for Efficient Autoregressive Video Diffusion Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.09681)]
-* **`Stream-T1`**, Test-Time Scaling for Streaming Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.04461)]
-* **`Stream-R1`**, Reliability-Perplexity Aware Reward Distillation for Streaming Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.03849)]
-* Sparse Forcing: Native Trainable Sparse Attention for Real-time Autoregressive Diffusion Video Generation. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.21221)]
-* **`X-Cache`**, Cross-Chunk Block Caching for Few-Step Autoregressive World Models Inference. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.20289)]
-* Speculative Decoding for Autoregressive Video Generation. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.17397)]
-* **`DiT as Real-Time Rerenderer`**, Streaming Video Stylization with Autoregressive Diffusion Transformer. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.13509)]
-* Long-Horizon Streaming Video Generation via Hybrid Attention with Decoupled Distillation. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.10103)] · `memory`
-* **`Matrix-Game 3.0`**, Real-Time and Streaming Interactive World Model with Long-Horizon Memory. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.08995)] [[Website](https://matrix-game-v3.github.io/)] · `systems` `memory`
-* **`INSPATIO-WORLD`**, A Real-Time 4D World Simulator via Spatiotemporal Autoregressive Modeling. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.07209)] · `systems`
-* **`ShotStream`**, Streaming Multi-Shot Video Generation for Interactive Storytelling. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.25746)] · `systems` `control`
-* **`WorldCache`**, Content-Aware Caching for Accelerated Video World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.22286)] [[Website](https://umair1221.github.io/World-Cache/)]
-* **`Astrolabe`**, Steering Forward-Process Reinforcement Learning for Distilled Autoregressive Video Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.17051)]
-* Anchor Forcing: Anchor Memory and Tri-Region RoPE for Interactive Streaming Video Diffusion. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.13405)] · `memory`
-* **`InSpatio-WorldFM`**, An Open-Source Real-Time Generative Frame Model. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.11911)] · `systems`
-* **`OmniForcing`**, Unleashing Real-time Joint Audio-Visual Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.11647)]
-* Streaming Autoregressive Video Generation via Diagonal Distillation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.09488)]
-* **`WorldCache`**, Accelerating World Models for Free via Heterogeneous Token Caching. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.06331)] [[Website](https://github.com/FofGofx/WorldCache)]
-* **`RealWonder`**, Real-Time Physical Action-Conditioned Video Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.05449)] · `systems` `control`
-* **`Helios`**, Real Real-Time Long Video Generation Model. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.04379)] [[Website](https://pku-yuangroup.github.io/Helios-Page/)] [[Code](https://github.com/PKU-YuanGroup/Helios)]
-* Accelerating Video Generation Inference with Sequential-Parallel 3D Positional Encoding Using a Global Time Index. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.06664)]
-* Adapting VACE for Real-Time Autoregressive Video Diffusion. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.14381)]
-* A Causal Diffusion Model for Video Reconstruction from Ultra-Low-Bitrate Representations. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.13837)]
-* **`MonarchRT`**, Efficient Attention for Real-Time Video Generation. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.12271)]
-* Causality in Video Diffusers is Separable from Denoising. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.10095)]
-* Light Forcing: Accelerating Autoregressive Video Diffusion via Sparse Attention. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.04789)]
-* **`Quant VideoGen`**, Auto-Regressive Long Video Generation via 2-Bit KV-Cache Quantization. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.02958)]
-* Causal Forcing: Autoregressive Diffusion Distillation Done Right for High-Quality Real-Time Interactive Video Generation. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.02214)]
-* Fast Autoregressive Video Diffusion and World Models with Temporal Cache Compression and Sparse Attention. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.01801)]
-* Past- and Future-Informed KV Cache Policy with Salience Estimation in Autoregressive Video Diffusion. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.21896)]
-* **`Reward-Forcing`**, Autoregressive Video Generation with Reward Feedback. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.16933)]
-* **`LoL`**, Longer than Longer, Scaling Video Generation to Hour. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.16914)]
-* **`S2DiT`**, Sandwich Diffusion Transformer for Mobile Streaming Video Generation. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.12719)]
-* Transition Matching Distillation for Fast Video Generation. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.09881)]
-* **`PixVerse R1`**, A Real-Time World Model That Redefines AI Video Generation. **`PixVerse 2026`** [[Blog](https://pixverse.ai/en/blog/pixverse-launches-r1-real-time-world-model)] · `reports`
-* **`Happy Oyster`**, Happy Oyster (Kuaile Shenghao): Real-Time Interactive Open-World Model. **`Alibaba 2026`** [[Blog](https://happyoyster.cn/)] · `reports`
-* **`LiveTalk`**, Real-Time Multimodal Interactive Video Diffusion via Improved On-Policy Distillation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.23576)]
-* **`Memorize-and-Generate`**, Towards Long-Term Consistency in Real-Time Video Generation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.18741)] · `memory`
-* **`WorldPlay`**, Towards Long-Term Geometric Consistency for Real-Time Interactive World Modeling. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.14614)] [[Website](https://3d-models.hunyuan.tencent.com/world/)] · `systems` `control` `memory`
-* **`SneakPeek`**, Future-Guided Instructional Streaming Video Generation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.13019)]
-* Endless World: Real-Time 3D-Aware Long Video Generation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.12430)]
-* **`AutoRefiner`**, Improving Autoregressive Video Diffusion Models via Reflective Refinement Over the Stochastic Sampling Path. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.11203)]
-* Deep Forcing: Training-Free Long Video Generation with Deep Sink and Participative Compression. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.05081)]
-* Reward Forcing: Efficient Streaming Video Generation with Rewarded Distribution Matching Distillation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.04678)]
-* **`SpriteHand`**, Real-Time Versatile Hand-Object Interaction with Autoregressive Video Generation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.01960)] · `systems`
-* **`Inferix`**, A Block-Diffusion based Next-Generation Inference Engine for World Simulation. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.20714)] [[Code](https://github.com/alibaba-damo-academy/Inferix)]
-* Block Cascading: Training Free Acceleration of Block-Causal Video Models. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.20426)]
-* **`StreamDiffusionV2`**, A Streaming System for Dynamic and Interactive Video Generation. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.07399)]
-* Towards One-step Causal Video Generation via Adversarial Self-Distillation. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.01419)]
-* **`MotionStream`**, Real-Time Video Generation with Interactive Motion Controls. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.01266)]
-* A Survey on Cache Methods in Diffusion Models: Toward Efficient Multi-Modal Generation. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.19755)] · `surveys`
-* **`CanvasMAR`**, Improving Masked Autoregressive Video Prediction With Canvas. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.13669)]
-* Real-Time Motion-Controllable Autoregressive Video Diffusion. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.08131)] · `control`
-* Streaming Drag-Oriented Interactive Video Manipulation: Drag Anything, Anytime!. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.03550)]
-* Rolling Forcing: Autoregressive Long Video Diffusion in Real Time. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.25161)]
-* **`SANA-Video`**, Efficient Video Generation with Block Linear Diffusion Transformer. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.24695)]
-* **`LongLive`**, Real-time Interactive Long Video Generation. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.22622)] · `systems` `control`
-* **`Matrix-Game 2.0`**, An open-source real-time and streaming interactive world model. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.13009)] [[Website](https://matrix-game-v2.github.io/)] · `systems`
-* **`StreamDiT`**, Real-Time Streaming Text-to-Video Generation. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.03745)]
-* Autoregressive Adversarial Post-Training for Real-Time Interactive Video Generation. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.09350)] · `systems`
-* Self Forcing: Bridging the Train-Test Gap in Autoregressive Video Diffusion. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.08009)]
-* Playing with Transformer at 30+ FPS via Next-Frame Diffusion. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.01380)]
-* **`MAGI-1`**, Autoregressive Video Generation at Scale. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.13211)]
-* **`SkyReels-V2`**, Infinite-length Film Generative Model. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.13074)]
-* **`MineWorld`**, a Real-Time and Open-Source Interactive World Model on Minecraft. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.08388)] · `systems`
-* One-Minute Video Generation with Test-Time Training. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.05298)]
-* **`AR-Diffusion`**, Asynchronous Video Generation with Auto-Regressive Diffusion. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.07418)]
-* Next Block Prediction: Video Generation via Semi-Autoregressive Modeling. **`arXiv 2025.02`** [[Paper](https://arxiv.org/abs/2502.07737)]
-* Taming Teacher Forcing for Masked Autoregressive Video Generation. **`arXiv 2025.01`** [[Paper](https://arxiv.org/abs/2501.12389)]
-* Diffusion Adversarial Post-Training for One-Step Video Generation. **`arXiv 2025.01`** [[Paper](https://arxiv.org/abs/2501.08316)]
-* **`MSC`**, Multi-Scale Spatio-Temporal Causal Attention for Autoregressive Video Diffusion. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.09828)]
-* Video Creation by Demonstration. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.09551)]
-* From Slow Bidirectional to Fast Autoregressive Video Diffusion Models. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.07772)]
-* The Matrix: Infinite-Horizon World Generation with Real-Time Moving Control. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.03568)] · `systems` `control`
-* **`Ca2-VDM`**, Efficient Autoregressive Video Diffusion Model with Causal Generation and Cache Sharing. **`arXiv 2024.11`** [[Paper](https://arxiv.org/abs/2411.16375)]
-* Pyramidal Flow Matching for Efficient Video Generative Modeling. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2410.05954)]
-* **`Loong`**, Generating Minute-level Long Videos with Autoregressive Language Models. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2410.02757)]
-* Diffusion Models Are Real-Time Game Engines. **`arXiv 2024.08`** [[Paper](https://arxiv.org/abs/2408.14837)] · `systems`
-* Real-Time Video Generation with Pyramid Attention Broadcast. **`arXiv 2024.08`** [[Paper](https://arxiv.org/abs/2408.12588)]
-* Diffusion Forcing: Next-token Prediction Meets Full-Sequence Diffusion. **`arXiv 2024.07`** [[Paper](https://arxiv.org/abs/2407.01392)]
-* Motion Consistency Model: Accelerating Video Diffusion with Disentangled Motion-Appearance Distillation. **`arXiv 2024.06`** [[Paper](https://arxiv.org/abs/2406.06890)] · `memory`
-* Lifelong Learning of Video Diffusion Models From a Single Video Stream. **`arXiv 2024.06`** [[Paper](https://arxiv.org/abs/2406.04814)]
-* **`SF-V`**, Single Forward Video Generation Model. **`arXiv 2024.06`** [[Paper](https://arxiv.org/abs/2406.04324)]
-* Streaming Video Diffusion: Online Video Editing with Diffusion Models. **`arXiv 2024.05`** [[Paper](https://arxiv.org/abs/2405.19726)]
-* Looking Backward: Streaming Video-to-Video Translation with Feature Banks. **`arXiv 2024.05`** [[Paper](https://arxiv.org/abs/2405.15757)]
-* Rolling Diffusion Models. **`arXiv 2024.02`** [[Paper](https://arxiv.org/abs/2402.09470)]
-* Language Model Beats Diffusion -- Tokenizer is Key to Visual Generation. **`arXiv 2023.10`** [[Paper](https://arxiv.org/abs/2310.05737)]
-
-## Long-Horizon Memory & Consistency
-
-_Keeping the world stable when the camera comes back: long context, explicit spatial and 3D memory, retrieval, and state persistence._
-
-* **`Marionette`**, Predicting World States, Rendering Geometry, Painting Appearance. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.14530)]
-* **`PlayWorld`**, Benchmarking World Models with Agent Players over Long-Horizon Objectives. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13552)] · `benchmarks`
-* **`Alaya-EVOKE`**, From Linear-Scaling Supervision to Endless World. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13546)]
-* **`AlayaWorld`**, Interactive Long-Horizon World Modeling - Full Technical Report (v1.1). **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13492)]
-* Addressable Memory for Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.07408)]
-* **`Diff-VF`**, Training-free High-quality Long Video Generation via Diffusion Model. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05976)]
-* **`Vorch-Director`**, Interactive World Story Model via Noise-Aware Error Rectification. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05776)]
-* **`WorldCycle`**, Self-Verifiable Reinforcement Learning for Long-Horizon Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.04964)]
-* **`ODEWorld`**, A Continuous Predictive Architecture via Physical-Time Flow. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.27924)]
-* **`FreqForcing`**, Autoregressive Long Video Generation via Spectral Self-Anchoring. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.27110)]
-* Mitigating Compounding Error via Video Representation Regularization. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.27036)]
-* **`StatePlay`**, State-Aware Game World Models for Mechanics-Consistent Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26754)] · `systems`
-* **`CineWeaver`**, Training-Free Reference-Controllable Multi-Shot Long Video Generation for Cinematic Storytelling. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26529)] · `control`
-* **`Cycle-World`**, Mitigating Error Accumulation in Long-term Video World Models via Reverse-Prediction Cycle Consistency. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.11836)]
-* **`AlayaWorld`**, Long-Horizon and Playable Video World Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.06291)] · `systems` `control`
-* **`WorldDirector`**, Building Controllable World Simulators with Persistent Dynamic Memory. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.02517)] · `systems` `control`
-* **`MemLearner`**, Learning to Query Context memory for Video World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.31734)]
-* **`WorldRoamBench`**, An Open-World Benchmark for Long-Horizon Stability of Interactive World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.31672)] · `benchmarks`
-* Compression and Retrieval: Implicit Memory Retrieval for Video World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.23105)]
-* Current World Models Lack a Persistent State Core. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.20545)] · `benchmarks`
-* **`ActWorld`**, From Explorable to Interactive World Model via Action-Aware Memory. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.17730)] · `systems`
-* **`PermaVid`**, Consistent Video Generation Across Edits via Disentangled Context Memory. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.16449)]
-* **`TetherCache`**, Stabilizing Autoregressive Long-Form Video Generation with Gated Recall and Trusted Alignment. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.13035)]
-* **`FadeMem`**, Distance-Aware Memory Consolidation for Autoregressive Video Diffusion. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.10671)]
-* Latent Spatial Memory for Video World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.09828)]
-* **`Echo-Memory`**, A Controlled Study of Memory in Action World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.09803)]
-* What Makes Video World Model Latents Action-Relevant: Prediction over Reconstruction. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.07687)]
-* **`Steady-Forcing`**, Balancing Spatial Persistence and Motion Continuity in Long-Horizon Nature Video Diffusion. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.14732)]
-* **`LongLive-RAG`**, A General Retrieval-Augmented Framework for Long Video Generation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.02553)]
-* Retrieve What's Missing: Coverage-Maximizing Retrieval for Consistent Long Video Generation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.02479)]
-* Geometry-Aware Implicit Memory for Video World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.02436)] [[Website](https://gim-world.github.io/)]
-* **`MBench`**, A Comprehensive Benchmark on Memory Capability for Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2606.00793)] [[Website](https://peanutup.github.io/MBench-project/)] [[Code](https://github.com/study-overflow/MBench)] · `benchmarks`
-* **`DecMem`**, Towards Minute-Long Consistent World Generation with Decoupled Memory. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.31336)]
-* **`SlotMemory`**, Object-Centric KV Memory for Streaming Long-Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.31033)] · `realtime`
-* Robust Dreamer: Deviation-Aware Latent Gaussian Memory for Action-Controlled AR Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.30855)]
-* **`OmniMem`**, Scalable and Adaptive Memory Retrieval for Long Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.30519)]
-* Teaching Video Generators to Remember: Eliciting Dynamic Memory for Out-of-Sight State Evolution. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.25333)]
-* **`WorldKV`**, Efficient World Memory with World Retrieval and Compression. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.22718)] [[Website](https://cvlab-kaist.github.io/WorldKV/)]
-* **`DySink`**, Dynamic Frame Sinks for Autoregressive Long Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.21028)]
-* Advancing Narrative Long Video Generation via Training-Free Identity-Aware Memory. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.18733)]
-* Attend Locally, Remember Linearly: Linear Attention as Cross-Frame Memory for Autoregressive Video Diffusion. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.16579)]
-* Identifiable Token Correspondence for World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.16457)] [[Code](https://github.com/snu-mllab/Identifiable-Token-Correspondence)]
-* **`Echo-Forcing`**, A Scene Memory Framework for Interactive Long Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.16003)]
-* **`RAVEN`**, Real-time Autoregressive Video Extrapolation with Consistency-model GRPO. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.15190)] · `realtime`
-* Quantitative Video World Model Evaluation for Geometric-Consistency. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.15185)] [[Website](https://pdi-bench.github.io/)] · `benchmarks`
-* Head Forcing: Long Autoregressive Video Generation via Head Heterogeneity. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.14487)]
-* Composition of Memory Experts for Diffusion World Models. **`ICLR 2026`** [[Paper](https://arxiv.org/abs/2605.18813)]
-* **`SWIFT`**, Prompt-Adaptive Memory for Efficient Interactive Long Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.09442)]
-* Memorize When Needed: Decoupled Memory Control for Spatially Consistent Long-Horizon Video Generation. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.18215)]
-* **`Lyra 2.0`**, Explorable Generative 3D Worlds. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.13036)]
-* Long-Horizon Streaming Video Generation via Hybrid Attention with Decoupled Distillation. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.10103)] · `realtime`
-* **`Matrix-Game 3.0`**, Real-Time and Streaming Interactive World Model with Long-Horizon Memory. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.08995)] [[Website](https://matrix-game-v3.github.io/)] · `systems` `realtime`
-* Grounded Forcing: Bridging Time-Independent Semantics and Proximal Dynamics in Autoregressive Video Synthesis. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.06939)]
-* **`MemCam`**, Memory-Augmented Camera Control for Consistent Video Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.26193)] · `systems` `control`
-* **`PackForcing`**, Short Video Training Suffices for Long Video Sampling and Long Context Inference. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.25730)]
-* Out of Sight but Not Out of Mind: Hybrid Memory for Dynamic Video World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.25716)]
-* **`I3DM`**, Implicit 3D-aware Memory Retrieval and Injection for Consistent Video Scene Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.23413)]
-* Relax Forcing: Relaxed KV-Memory for Consistent Long Video Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.21366)]
-* **`MosaicMem`**, Hybrid Spatial Memory for Controllable Video World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.17117)] [[Website](https://mosaicmem.github.io/mosaicmem/)] · `control`
-* Out of Sight, Out of Mind? Evaluating State Evolution in Video World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.13215)] [[Website](https://glab-caltech.github.io/STEVOBench/)] · `benchmarks`
-* Anchor Forcing: Anchor Memory and Tri-Region RoPE for Interactive Streaming Video Diffusion. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.13405)] · `realtime`
-* **`MemRoPE`**, Training-Free Infinite Video Generation via Evolving Memory Tokens. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.12513)]
-* **`LiveWorld`**, Simulating Out-of-Sight Dynamics in Generative Video World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.07145)] [[Website](https://zichengduan.github.io/LiveWorld/index.html)]
-* Beyond Pixel Histories: World Models with Persistent 3D State. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.03482)] [[Website](https://francelico.github.io/persist.github.io)] · `systems`
-* **`UCM`**, Unifying Camera Control and Memory with Time-aware Positional Encoding Warping for World Models. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.22960)] [[Website](https://humanaigc.github.io/ucm-webpage/)] · `systems` `control`
-* **`AnchorWeave`**, World-Consistent Video Generation with Retrieved Local Spatial Memories. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.14941)]
-* Train Short, Inference Long: Training-free Horizon Extension for Autoregressive Video Generation. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.14027)]
-* **`WorldCompass`**, Reinforcement Learning for Long-Horizon World Models. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.09022)] [[Website](https://3d-models.hunyuan.tencent.com/world/)]
-* **`MIND`**, Benchmarking Memory Consistency and Action Control in World Models. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.08025)] [[Code](https://github.com/CSU-JPG/MIND)] · `benchmarks`
-* Geometry-Aware Rotary Position Embedding for Consistent Video World Model. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.07854)]
-* Rolling Sink: Bridging Limited-Horizon Training and Open-Ended Testing in Autoregressive Video Diffusion. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.07775)]
-* Context Forcing: Consistent Autoregressive Video Generation with Long Context. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.06028)]
-* **`LIVE`**, Long-horizon Interactive Video World Modeling. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.03747)] [[Website](https://junchao-cs.github.io/LIVE-demo/)] · `systems`
-* **`Infinite-World`**, Scaling Interactive World Models to 1000-Frame Horizons via Pose-Free Hierarchical Memory. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.02393)] · `systems`
-* **`TokenTrim`**, Inference-Time Token Pruning for Autoregressive Long Video Generation. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2602.00268)]
-* Efficient Autoregressive Video Diffusion with Dummy Head. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.20499)]
-* Entropy-Guided k-Guard Sampling for Long-Horizon Autoregressive Video Generation. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.19488)]
-* **`StableWorld`**, Towards Stable and Consistent Long Interactive Video Generation. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.15281)]
-* Plenoptic Video Generation. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.05239)]
-* **`TinyHistory`**, Lightweight Video History Embeddings via Two-Stage Context Learning. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.23851)]
-* **`Memorize-and-Generate`**, Towards Long-Term Consistency in Real-Time Video Generation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.18741)] · `realtime`
-* **`FrameDiffuser`**, G-Buffer-Conditioned Diffusion for Neural Forward Frame Rendering. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.16670)]
-* **`Spatia`**, Video Generation with Updatable Spatial Memory. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.15716)] · `systems` `control`
-* End-to-End Training for Autoregressive Video Diffusion via Self-Resampling. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.15702)]
-* **`MemFlow`**, Flowing Adaptive Memory for Consistent and Efficient Long Video Narratives. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.14699)]
-* **`WorldPlay`**, Towards Long-Term Geometric Consistency for Real-Time Interactive World Modeling. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.14614)] [[Website](https://3d-models.hunyuan.tencent.com/world/)] · `systems` `control` `realtime`
-* **`BAgger`**, Backwards Aggregation for Mitigating Drift in Autoregressive Video Diffusion Models. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.12080)]
-* **`On Memory`**, A comparison of memory mechanisms in world models. **`World Modeling Workshop 2026`** [[Paper](https://arxiv.org/abs/2512.06983)]
-* **`VideoSSM`**, Autoregressive Long Video Generation with Hybrid State-Space Memory. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.04519)]
-* **`EgoLCD`**, Egocentric Video Generation with Long Context Diffusion. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.04515)]
-* **`RELIC`**, Interactive Video World Model with Long-Horizon Memory. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.04040)] [[Website](https://relic-worldmodel.github.io/)] · `systems`
-* **`WorldPack`**, Compressed Memory Improves Spatial Consistency in Video World Modeling. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.02473)] · `systems`
-* **`GrndCtrl`**, Grounding World Models via Self-Supervised Reward Alignment. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.01952)]
-* **`BIFE`**, Better Interaction, Fewer Errors for Minute-Long Video Generation. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.22973)]
-* **`UltraViCo`**, Breaking Extrapolation Limits in Video Diffusion Transformers. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.20123)]
-* **`MagicWorld`**, Towards Long-Horizon Stability for Interactive Video World Exploration. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.18886)] [[Website](https://vivocameraresearch.github.io/magicworld/)] [[Code](https://github.com/vivoCameraResearch/Magic-World)] · `systems`
-* Recurrent Autoregressive Diffusion: Global Memory Meets Local Attention. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.12940)]
-* Adaptive Begin-of-Video Tokens for Autoregressive Video Diffusion Models. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.12099)]
-* **`PAN`**, A World Model for General, Interactable, and Long-Horizon World Simulation. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.09057)] · `systems` `control`
-* Generative View Stitching. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.24718)]
-* Stable Video Infinity: Infinite-Length Video Generation with Error Recycling. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.09212)]
-* Memory Forcing: Spatio-Temporal Memory for Consistent Scene Generation on Minecraft. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.03198)] · `systems`
-* **`Self-Forcing++`**, Towards Minute-Scale High-Quality Video Generation. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.02283)]
-* **`EvoWorld`**, Evolving Panoramic World Generation with Explicit 3D Memory. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.01183)] [[Code](https://github.com/JiahaoPlus/EvoWorld)] · `systems`
-* **`FantasyWorld`**, Geometry-Consistent World Modeling via Unified Video and 3D Prediction. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.21657)]
-* **`SAMPO`**, Scale-wise Autoregression with Motion PrOmpt for generative world models. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.15536)]
-* Mixture of Contexts for Long Video Generation. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.21058)]
-* **`HERO`**, Hierarchical Extrapolation and Refresh for Efficient World Models. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.17588)]
-* **`WorldWeaver`**, Generating Long-Horizon Video Worlds via Rich Perception. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.15720)]
-* **`Geometry Forcing`**, Marrying Video Diffusion and 3D Representation for Consistent World Modeling. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.07982)] [[Website](https://GeometryForcing.github.io)]
-* A Survey on Long-Video Storytelling Generation: Architectures, Consistency, and Cinematic Quality. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.07202)] · `surveys`
-* **`VMem`**, Consistent Interactive Video Scene Generation with Surfel-Indexed View Memory. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.18903)]
-* Video World Models with Long-term Spatial Memory. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.05284)] [[Website](https://spmem.github.io/)] · `systems` `control`
-* Context as Memory: Scene-Consistent Interactive Long Video Generation with Memory Retrieval. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.03141)] · `systems`
-* Toward Memory-Aided World Models: Benchmarking via Spatial Consistency. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.22976)] [[Code](https://github.com/Kevin-lkw/LoopNav)] · `benchmarks`
-* **`StateSpaceDiffuser`**, Bringing Long Context to Diffusion World Models. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.22246)]
-* Generative Pre-trained Autoregressive Diffusion Transformer. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.07344)]
-* Learning 3D Persistent Embodied World Models. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.05495)] · `systems`
-* Frame Context Packing and Drift Prevention in Next-Frame-Prediction Video Diffusion Models. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.12626)]
-* **`WorldMem`**, Long-term Consistent World Simulation with Memory. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.12369)] · `systems`
-* Model as a Game: On Numerical and Spatial Consistency for Generative Games. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.21172)] · `systems`
-* Long-Context Autoregressive Video Modeling with Next-Frame Prediction. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.19325)] [[Website](https://farlongctx.github.io/)] [[Code](https://github.com/showlab/FAR)]
-* Long Context Tuning for Video Generation. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.10589)]
-* Error Analyses of Auto-Regressive Video Diffusion Models: A Unified Framework. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.10704)]
-* **`Gen3C`**, 3D-Informed World-Consistent Video Generation with Precise Camera Control. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.03751)] · `control`
-* History-Guided Video Diffusion. **`arXiv 2025.02`** [[Paper](https://arxiv.org/abs/2502.06764)]
-* **`Owl-1`**, Omni World Model for Consistent Long Video Generation. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.09600)]
-* **`ACDiT`**, Interpolating Autoregressive Conditional Modeling and Diffusion Transformer. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.07720)]
-* **`ARLON`**, Boosting Diffusion Transformers with Autoregressive Models for Long Video Generation. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2410.20502)]
-* Progressive Autoregressive Video Diffusion Models. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2410.08151)]
-* **`ACDC`**, Autoregressive Coherent Multimodal Generation using Diffusion Correction. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2410.04721)]
-* **`MovieDreamer`**, Hierarchical Generation for Coherent Long Visual Sequence. **`arXiv 2024.07`** [[Paper](https://arxiv.org/abs/2407.16655)]
-* **`Streetscapes`**, Large-scale Consistent Street View Generation Using Autoregressive Video Diffusion. **`arXiv 2024.07`** [[Paper](https://arxiv.org/abs/2407.13759)]
-* Motion Consistency Model: Accelerating Video Diffusion with Disentangled Motion-Appearance Distillation. **`arXiv 2024.06`** [[Paper](https://arxiv.org/abs/2406.06890)] · `realtime`
-* **`FIFO-Diffusion`**, Generating Infinite Videos from Text without Training. **`arXiv 2024.05`** [[Paper](https://arxiv.org/abs/2405.11473)]
-* **`StreamingT2V`**, Consistent, Dynamic, and Extendable Long Video Generation from Text. **`arXiv 2024.03`** [[Paper](https://arxiv.org/abs/2403.14773)]
-* Temporally Consistent Transformers for Video Generation. **`arXiv 2022.10`** [[Paper](https://arxiv.org/abs/2210.02396)]
-
-## Benchmarks & Evaluation
-
-_Benchmarks and evaluation protocols aimed at interactive world models, including memory, control-following, and long-horizon stability._
-
-* **`PlayWorld`**, Benchmarking World Models with Agent Players over Long-Horizon Objectives. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13552)] · `memory`
-* **`GAUGE`**, A Measurement-Grounded Benchmark for Physical Fidelity in Simulation Engines and Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05948)]
-* **`XEWorld`**, Can Action-Conditioned World Models Generalize to Unseen Robot Embodiments?. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05799)] · `control`
-* **`WorldExam`**, Benchmarking World Models from Apparent Appearance to Inherent Reactivity. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.02603)]
-* **`WorldRoamBench`**, An Open-World Benchmark for Long-Horizon Stability of Interactive World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.31672)] · `memory`
-* **`MemoBench`**, Benchmarking World Modeling in Dynamically Changing Environments. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.27537)]
-* Hallucination in World Models is Predictable and Preventable. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.27326)]
-* Current World Models Lack a Persistent State Core. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.20545)] · `memory`
-* **`WorldOlympiad`**, Can Your World Model Survive a Triathlon?. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.11129)]
-* **`MBench`**, A Comprehensive Benchmark on Memory Capability for Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2606.00793)] [[Website](https://peanutup.github.io/MBench-project/)] [[Code](https://github.com/study-overflow/MBench)] · `memory`
-* **`WBench`**, A Comprehensive Multi-turn Benchmark for Interactive Video World Model Evaluation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.25874)] [[Website](https://meituan-longcat.github.io/WBench/)]
-* Quantitative Video World Model Evaluation for Geometric-Consistency. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.15185)] [[Website](https://pdi-bench.github.io/)] · `memory`
-* **`WorldReasonBench`**, Human-Aligned Stress Testing of Video Generators as Future World-State Predictors. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.10434)]
-* **`ACWM-Phys`**, Investigating Generalized Physical Interaction in Action-Conditioned Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.08567)] [[Website](https://xavihart.github.io/ACWM-Phys)] [[Code](https://github.com/xavihart/ACWM-Phys-dev)] · `control`
-* **`iWorld-Bench`**, A Benchmark for Interactive World Models with a Unified Action Generation Framework. **`ICML 2026`** [[Paper](https://arxiv.org/abs/2605.03941)]
-* **`WorldMark`**, A Unified Benchmark Suite for Interactive Video World Models. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.21686)]
-* World Reasoning Arena. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.25887)] [[Code](https://github.com/MBZUAI-IFM/WR-Arena)]
-* **`Omni-WorldBench`**, Towards a Comprehensive Interaction-Centric Evaluation for World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.22212)]
-* Out of Sight, Out of Mind? Evaluating State Evolution in Video World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.13215)] [[Website](https://glab-caltech.github.io/STEVOBench/)] · `memory`
-* **`MIND`**, Benchmarking Memory Consistency and Action Control in World Models. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.08025)] [[Code](https://github.com/CSU-JPG/MIND)] · `memory`
-* **`World-in-World`**, World Models in a Closed-Loop World. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.18135)] [[Website](https://github.com/World-In-World/world-in-world)]
-* **`UNIVERSE`**, Adapting Vision-Language Models for Evaluating World Models. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.17967)]
-* Toward Memory-Aided World Models: Benchmarking via Spatial Consistency. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.22976)] [[Code](https://github.com/Kevin-lkw/LoopNav)] · `memory`
-* Toward Stable World Models: Measuring and Addressing World Instability in Generative Environments. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.08122)]
-
-## Datasets & Environments
-
-_Action-annotated video corpora and simulators used to train and probe interactive world models._
-
-* **`PhysEditWorld`**, A Large-Scale Dataset Toward Physics-Editable World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.26694)]
-* **`EgoCS-400K`**, An Egocentric Gameplay Dataset for World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.18180)]
-* **`WildWorld`**, A Large-Scale Dataset for Dynamic World Modeling with Actions and Explicit State toward Generative ARPG. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.23497)] [[Website](https://shandaai.github.io/wildworld-project/)] [[Code](https://github.com/ShandaAI/WildWorld)]
-* **`EgoVid-5M`**, A Large-Scale Video-Action Dataset for Egocentric Video Generation. **`arXiv 2024.11`** [[Paper](https://arxiv.org/abs/2411.08380)]
+* **`Marionette`**, Predicting World States, Rendering Geometry, Painting Appearance. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.14530)] · `memory`
+* **`ForgeWM`**, Progressive Causal Training for Few-Step Action-Conditioned Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.14022)] · `systems` `control` `realtime`
+* **`PlayWorld`**, Benchmarking World Models with Agent Players over Long-Horizon Objectives. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13552)] · `memory` `benchmarks`
+* **`Alaya-EVOKE`**, From Linear-Scaling Supervision to Endless World. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13546)] · `memory`
+* **`AlayaWorld`**, Interactive Long-Horizon World Modeling - Full Technical Report (v1.1). **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13492)] · `memory`
+* **`DreamX-Phi 1.0`**, Action-Conditioned Video World Model for Robotic Manipulation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13489)] · `control`
+* **`Context-Matched Distillation`**, Teacher Causality for Autoregressive Video Distillation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13391)] · `systems` `realtime`
+* **`HPSD`**, Hybrid-Policy Self-Distillation for Text-Image-to-Video Diffusion Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13205)] · `realtime`
+* From Local Mismatch to Global Impact: Optimizing Cache Reuse Policy for Efficient Diffusion. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13043)] · `realtime`
+* Spatially-Grounded Text-to-Video Generation via Inference-Time Gradient-Free Optimization. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13037)] · `control`
+* Addressable Memory for Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.07408)] · `memory`
+* **`GeniWorld`**, A Generalizable Interactive World Model for Robotic Manipulation via Visual Actions. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06332)] · `control`
+* **`MASS`**, Multiplayer World Models with Authoritative Shared State. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06257)] · `systems`
+* **`Diff-VF`**, Training-free High-quality Long Video Generation via Diffusion Model. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05976)] · `memory`
+* **`GAUGE`**, A Measurement-Grounded Benchmark for Physical Fidelity in Simulation Engines and Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05948)] · `benchmarks`
+* **`XEWorld`**, Can Action-Conditioned World Models Generalize to Unseen Robot Embodiments?. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05799)] · `control` `benchmarks`
+* **`Vorch-Director`**, Interactive World Story Model via Noise-Aware Error Rectification. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05776)] · `memory`
+* **`LAWM-3D`**, Learning 3D-Aware Latent Actions from Human Videos for Generalizable Robot World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05706)] · `control`
+* **`In-Context Forcing`**, Uncovering Context Effects in Autoregressive Video Diffusion. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05237)] · `realtime`
+* **`HelloWorld`**, Enabling Socially Interactive Characters in Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05070)] · `systems` `control`
+* **`WorldCycle`**, Self-Verifiable Reinforcement Learning for Long-Horizon Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.04964)] · `memory`
+* **`UniWorld-View`**, Large-Baseline View Synthesis via Video Diffusion Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.04701)] · `control`
+* Overcoming Statistical Bias in Action-Controllable World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.04653)] · `control`
+* **`SPADE`**, An Input-Adaptive Sparse Attention Engine for Fast Video Diffusion Models Inference. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.03335)] · `realtime`
+* **`EmbodiedVAE`**, Disentangled Video VAE for Efficient and Controllable Embodied Manipulation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.02990)] · `control`
+* **`WorldExam`**, Benchmarking World Models from Apparent Appearance to Inherent Reactivity. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.02603)] · `benchmarks`
+* Token Radius Attention for Efficient Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.02504)] · `realtime`
+* **`WorldDynCache`**, Risk-Controlled Latent Dynamics Approximation for Diffusion World Model. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.01845)] · `realtime`
+* **`MiniWorld`**, Democratizing the Training of Video World Models from Scratch. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.01127)] · `realtime`
+* **`BWM`**, A Low-Cost High-Fidelity World Simulator for Robot Learning. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.29302)] · `control`
+* Video Models as Native 4D Renderers: World-Grounded Conditioning from Animated Mesh. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2608.00094)] · `control`
+* **`ShadowDancer`**, Teaching Video World Models Any Action by Learning Unified Dynamics Representations from a Video and Its Shadow. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.28362)] · `control`
+* **`ODEWorld`**, A Continuous Predictive Architecture via Physical-Time Flow. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.27924)] · `memory`
+* **`FreqForcing`**, Autoregressive Long Video Generation via Spectral Self-Anchoring. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.27110)] · `memory`
+* Mitigating Compounding Error via Video Representation Regularization. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.27036)] · `memory`
+* **`StatePlay`**, State-Aware Game World Models for Mechanics-Consistent Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26754)] · `systems` `memory`
+* **`Visko Orbis 1.0`**, A Live Model for Real-Time Interactive Long Video Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26694)] · `systems` `realtime`
+* **`ContactFlow`**, A video action conditioning that transfers across embodiments. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26579)] · `control`
+* **`CineWeaver`**, Training-Free Reference-Controllable Multi-Shot Long Video Generation for Cinematic Storytelling. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26529)] · `control` `memory`
+* **`Wonder`**, Video World Model Done Better. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26037)] · `systems`
+* Parallel Decoding Distillation for Fast Image and Video Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26004)] · `realtime`
+* **`ABot-World-0`**, Infinite Interactive World Rollout on a Single Desktop GPU. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.19191)] · `systems`
+* **`FlashDecoder`**, Real-Time Latent-to-Pixel Streaming Decoder with Transformers. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.14898)] · `realtime`
+* **`WanToFight`**, Real-Time Generative Game Engine for Multi-Player Combat Interaction. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.12592)] · `systems` `realtime`
+* **`Cycle-World`**, Mitigating Error Accumulation in Long-term Video World Models via Reverse-Prediction Cycle Consistency. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.11836)] · `memory`
+* Stateful Worlds, Stateless Elasticity: Exact-State Serving for Interactive World Models. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.10389)] · `realtime`
+* Causally Debiased Latent Action Model for Embodied Action Conditioned World Models. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.09185)] · `control`
+* **`OPSD-V`**, On-Policy Self-Distillation for Post-Training Few-Step Autoregressive Video Generators. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.08766)] · `realtime`
+* **`SAGA`**, Stable Acceleration Guidance for Autoregressive Video Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.08020)] · `realtime`
+* Infinite Worlds with Versatile Interactions. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.07534)] · `systems` `control`
+* **`AlayaWorld`**, Long-Horizon and Playable Video World Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.06291)] · `systems` `control` `memory`
+* **`MoWorld`**, A Flash World Model. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.06216)] · `systems`
+* Multiplayer Interactive World Models with Representation Autoencoders. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.05352)] · `systems`
+* **`Worldscape-MoE`**, A Unified Mixture-of-Experts World Model for Scalable Heterogeneous Action Control. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.03964)] · `systems`
+* **`Flex-Forcing`**, Towards a Unified Autoregressive and Bidirectional Video Diffusion Model. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.03509)] · `realtime`
+* **`WorldDirector`**, Building Controllable World Simulators with Persistent Dynamic Memory. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.02517)] · `systems` `control` `memory`
+* Towards Memory-Efficient Autoregressive Video Generation via Instance-Specific Parametric Absorption. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.00712)] · `realtime`
+* World Narrative Model for Highly Controllable Video Generation: A Paradigm Shift from Pixel Sampling to Physical World Orchestration. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.31946)] · `control`
+* **`MemLearner`**, Learning to Query Context memory for Video World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.31734)] · `memory`
+* **`WorldRoamBench`**, An Open-World Benchmark for Long-Horizon Stability of Interactive World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.31672)] · `memory` `benchmarks`
+* **`DreamForge-World 0.1`**, DreamForge-World 0.1 Preview: A Low-Compute Real-Time Controllable World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.30292)] · `systems` `control` `realtime`
+* Walking in the Implicit: Interactive World Exploration via Neural Scene Representation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.30045)] · `systems`
+* **`TempAct`**, Advancing Temporal Plausibility in Autoregressive Video Generation via Planner-Executor RL. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.28016)] · `control` `realtime`
+* Directing the World: Fast Autoregressive Video Generation with Compositional Human-Camera Control. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.27964)] · `systems` `control`
+* **`MemoBench`**, Benchmarking World Modeling in Dynamically Changing Environments. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.27537)] · `benchmarks`
+* Hallucination in World Models is Predictable and Preventable. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.27326)] · `benchmarks`
+* **`LiveEdit`**, Towards Real-Time Diffusion-Based Streaming Video Editing. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.26740)] · `control` `realtime`
+* **`PhysEditWorld`**, A Large-Scale Dataset Toward Physics-Editable World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.26694)] · `datasets`
+* **`Causal-rCM`**, A Unified Teacher-Forcing and Self-Forcing Open Recipe for Autoregressive Diffusion Distillation in Streaming Video Generation and Interactive World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.25473)] · `realtime`
+* Compression and Retrieval: Implicit Memory Retrieval for Video World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.23105)] · `memory`
+* World Action Models: A Survey. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.20781)] · `surveys`
+* Current World Models Lack a Persistent State Core. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.20545)] · `memory` `benchmarks`
+* **`TurboServe`**, Serving Streaming Video Generation Efficiently and Economically. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.19271)] · `realtime`
+* **`UniTemp`**, Unlocking Video Generation in Any Temporal Order via Bidirectional Distillation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.18702)] · `realtime`
+* **`EgoCS-400K`**, An Egocentric Gameplay Dataset for World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.18180)] · `datasets`
+* **`MaineCoon`**, Pursuing A Real-Time Audio-Visual Social World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.17800)] · `systems` `control` `realtime`
+* **`ActWorld`**, From Explorable to Interactive World Model via Action-Aware Memory. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.17730)] · `systems` `memory`
+* **`DreamX-World 1.0`**, A General-Purpose Interactive World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.16993)] · `systems` `control`
+* **`PermaVid`**, Consistent Video Generation Across Edits via Disentangled Context Memory. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.16449)] · `memory`
+* Adaptive Resource Management and Quality Control for Streaming Video Generation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.15319)] · `realtime`
+* **`GeoStream`**, Toward Precise Camera Controlled Streaming Video Generation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.15162)] · `systems` `realtime`
+* **`MoVerse`**, Real-Time Video World Modeling with Panoramic Gaussian Scaffold. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.13376)] · `systems` `realtime`
+* **`TetherCache`**, Stabilizing Autoregressive Long-Form Video Generation with Gated Recall and Trusted Alignment. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.13035)] · `memory`
+* **`Next Forcing`**, Causal World Modeling with Multi-Chunk Prediction. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.11187)] · `control` `realtime`
+* **`WorldOlympiad`**, Can Your World Model Survive a Triathlon?. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.11129)] · `benchmarks`
+* **`FadeMem`**, Distance-Aware Memory Consolidation for Autoregressive Video Diffusion. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.10671)] · `memory`
+* **`BiWM`**, Advancing Open-Source Interactive Video World Models with Bidirectional Autoregression. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.10135)] · `systems` `control`
+* Latent Spatial Memory for Video World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.09828)] · `memory`
+* **`Echo-Memory`**, A Controlled Study of Memory in Action World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.09803)] · `memory`
+* **`SwiftVR`**, Real-Time One-Step Generative Video Restoration. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.09516)] · `realtime`
+* **`Prisma-World`**, Camera-Controllable Multi-Agent Video World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.09507)] · `systems` `control`
+* Ultra Flash: Scaling Real-Time Streaming Video Generation to High Resolutions. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.09150)] · `realtime`
+* **`DisCo`**, World Models with Discrete Camera Motion Control. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.07967)] · `systems`
+* What Makes Video World Model Latents Action-Relevant: Prediction over Reconstruction. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.07687)] · `memory`
+* Streaming Video Generation with Streaming Force Control. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.07508)] · `systems` `realtime`
+* **`AnchorWorld`**, Embodied Egocentric World Simulation with View-based Evolution Customization. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.07326)] · `systems`
+* **`DSA`**, Dynamic Step Allocation for Fast Autoregressive Video Generation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.04432)] · `realtime`
+* **`Steady-Forcing`**, Balancing Spatial Persistence and Motion Continuity in Long-Horizon Nature Video Diffusion. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.14732)] · `memory`
+* **`CLAW`**, Learning Continuous Latent Action World Models via Adversarial Latent Regularization. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.04130)] · `control`
+* **`AAD-1`**, Asymmetric Adversarial Distillation for One-Step Autoregressive Video Generation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.03972)] · `realtime`
+* **`Video-Mirai`**, Autoregressive Video Diffusion Models Need Foresight. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.03971)] · `realtime`
+* **`MetaWorld`**, Scaling Multi-Agent Video World Model from Single-view Video Data. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.02753)] · `systems`
+* From Zero to Hero: Training-Free Custom Concept Spawning in World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.02575)] · `systems`
+* **`LongLive-RAG`**, A General Retrieval-Augmented Framework for Long Video Generation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.02553)] · `memory`
+* Retrieve What's Missing: Coverage-Maximizing Retrieval for Consistent Long Video Generation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.02479)] · `memory`
+* Geometry-Aware Implicit Memory for Video World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.02436)] [[Website](https://gim-world.github.io/)] · `memory`
+* **`MBench`**, A Comprehensive Benchmark on Memory Capability for Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2606.00793)] [[Website](https://peanutup.github.io/MBench-project/)] [[Code](https://github.com/study-overflow/MBench)] · `memory` `benchmarks`
+* **`DecMem`**, Towards Minute-Long Consistent World Generation with Decoupled Memory. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.31336)] · `memory`
+* Light Interaction: Training-Free Inference Acceleration for Interactive Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.31158)] · `realtime`
+* **`SlotMemory`**, Object-Centric KV Memory for Streaming Long-Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.31033)] · `realtime` `memory`
+* Robust Dreamer: Deviation-Aware Latent Gaussian Memory for Action-Controlled AR Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.30855)] · `memory`
+* **`OmniMem`**, Scalable and Adaptive Memory Retrieval for Long Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.30519)] · `memory`
+* **`SANA-Streaming`**, Real-time Streaming Video Editing with Hybrid Diffusion Transformer. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.30409)] · `realtime`
+* **`VideoMLA`**, Low-Rank Latent KV Cache for Minute-Scale Autoregressive Video Diffusion. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.30351)] · `realtime`
+* **`AdaState`**, Self-Evolving Anchors for Streaming Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.30349)] · `realtime`
+* **`minWM`**, A Full-Stack Open-Source Framework for Real-Time Interactive Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.30263)] [[Website](https://github.com/shengshu-ai/minWM)] · `realtime`
+* **`SGMD`**, Score Gradient Matching Distillation for Few-Step Video Diffusion Distillation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.30116)] · `realtime`
+* World Models for Robotic Manipulation: A Survey. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2606.00113)] · `surveys`
+* **`Gamma-World`**, Generative Multi-Agent World Modeling Beyond Two Players. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.28816)] [[Website](https://research.nvidia.com/labs/sil/projects/gamma-world)] · `systems`
+* Quantized Keys Steal Attention: Bias Correction for KV-Cache Compression in Video Diffusion. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.26266)] · `realtime`
+* On-Policy Adversarial Flow Distillation for Autoregressive Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.26105)] · `realtime`
+* **`WBench`**, A Comprehensive Multi-turn Benchmark for Interactive Video World Model Evaluation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.25874)] [[Website](https://meituan-longcat.github.io/WBench/)] · `benchmarks`
+* Teaching Video Generators to Remember: Eliciting Dynamic Memory for Out-of-Sight State Evolution. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.25333)] · `memory`
+* **`WorldCraft`**, From Camera Navigation to Object Manipulation in Interactive Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.25077)] [[Website](https://nevsdev.github.io/WorldCraft/)] · `systems`
+* World Models as Group Actions. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.24578)] · `control`
+* **`One-Forcing`**, Towards Stable One-Step Autoregressive Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.23458)] · `realtime`
+* **`SCOPE`**, Simulating Cross-game Operations in Playable Environments for FPS World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.23345)] [[Website](https://z2tong.github.io/SCOPE/)] [[Code](https://github.com/z2tong/SCOPE)] · `systems`
+* **`WorldKV`**, Efficient World Memory with World Retrieval and Compression. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.22718)] [[Website](https://cvlab-kaist.github.io/WorldKV/)] · `memory`
+* **`Q-ARVD`**, Quantizing Autoregressive Video Diffusion Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.21072)] · `realtime`
+* **`DySink`**, Dynamic Frame Sinks for Autoregressive Long Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.21028)] · `memory`
+* **`LongLive-2.0`**, An NVFP4 Parallel Infrastructure for Long Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.18739)] · `realtime`
+* Advancing Narrative Long Video Generation via Training-Free Identity-Aware Memory. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.18733)] · `memory`
+* **`Incantation`**, Natural Language as the Action Interface for Multi-Entity Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.18601)] · `systems` `control`
+* Focused Forcing: Content-Aware Per-Frame KV Selection for Efficient Autoregressive Video Diffusion. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.18346)] · `realtime`
+* **`Nano World Models`**, A Minimalist Implementation of Future Video Prediction. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.23993)] [[Website](https://simchowitzlabpublic.github.io/nano-world-model/)] · `control`
+* Attend Locally, Remember Linearly: Linear Attention as Cross-Frame Memory for Autoregressive Video Diffusion. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.16579)] · `memory`
+* Identifiable Token Correspondence for World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.16457)] [[Code](https://github.com/snu-mllab/Identifiable-Token-Correspondence)] · `memory`
+* **`Echo-Forcing`**, A Scene Memory Framework for Interactive Long Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.16003)] · `memory`
+* **`DiLA`**, Disentangled Latent Action World Models. **`ICML 2026`** [[Paper](https://arxiv.org/abs/2605.15725)] [[Website](http://disentangled-latent-action-world-models.github.io)] · `control`
+* **`ReactiveGWM`**, Steering NPC in Reactive Game World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.15256)] [[Website](https://inv-wzq.github.io/ReactiveGWM/)] · `systems`
+* **`RAVEN`**, Real-time Autoregressive Video Extrapolation with Consistency-model GRPO. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.15190)] · `realtime` `memory`
+* Quantitative Video World Model Evaluation for Geometric-Consistency. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.15185)] [[Website](https://pdi-bench.github.io/)] · `memory` `benchmarks`
+* **`SANA-WM`**, Efficient Minute-Scale World Modeling with Hybrid Linear Diffusion Transformer. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.15178)] [[Website](https://nvlabs.github.io/Sana/WM/)] · `systems`
+* Causal Forcing++: Scalable Few-Step Autoregressive Diffusion Distillation for Real-Time Interactive Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.15141)] · `realtime`
+* Head Forcing: Long Autoregressive Video Generation via Head Heterogeneity. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.14487)] · `memory`
+* Delta Forcing: Trust Region Steering for Interactive Autoregressive Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.14382)] · `realtime`
+* **`KVPO`**, ODE-Native GRPO for Autoregressive Video Alignment via KV Semantic Exploration. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.14278)] · `realtime`
+* Pyramid Forcing: Head-Aware Pyramid KV Cache Policy for High-Quality Long Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.13111)] · `realtime`
+* Composition of Memory Experts for Diffusion World Models. **`ICLR 2026`** [[Paper](https://arxiv.org/abs/2605.18813)] · `memory`
+* **`CausalCine`**, Real-Time Autoregressive Generation for Multi-Shot Video Narratives. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.12496)] · `systems` `control` `realtime`
+* **`PROWL`**, Prioritized Regret-Driven Optimization for World Model Learning. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.18803)] · `systems`
+* **`WorldReasonBench`**, Human-Aligned Stress Testing of Video Generators as Future World-State Predictors. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.10434)] · `benchmarks`
+* **`Forcing-KV`**, Hybrid KV Cache Compression for Efficient Autoregressive Video Diffusion Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.09681)] · `realtime`
+* **`SWIFT`**, Prompt-Adaptive Memory for Efficient Interactive Long Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.09442)] · `memory`
+* **`ACWM-Phys`**, Investigating Generalized Physical Interaction in Action-Conditioned Video World Models. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.08567)] [[Website](https://xavihart.github.io/ACWM-Phys)] [[Code](https://github.com/xavihart/ACWM-Phys-dev)] · `control` `benchmarks`
+* Render, Don't Decode: Weight-Space World Models with Latent Structural Disentanglement. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.06298)] · `control`
+* **`Stream-T1`**, Test-Time Scaling for Streaming Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.04461)] · `realtime`
+* **`iWorld-Bench`**, A Benchmark for Interactive World Models with a Unified Action Generation Framework. **`ICML 2026`** [[Paper](https://arxiv.org/abs/2605.03941)] · `benchmarks`
+* **`Stream-R1`**, Reliability-Perplexity Aware Reward Distillation for Streaming Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.03849)] · `realtime`
+* World Model for Robot Learning: A Comprehensive Survey. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2605.00080)] [[Website](https://ntumars.github.io/wm-robot-survey/)] [[Code](https://github.com/NTUMARS/Awesome-World-Model-for-Robotics-Policy)] · `surveys`
+* **`WorldMark`**, A Unified Benchmark Suite for Interactive Video World Models. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.21686)] · `benchmarks`
+* Sparse Forcing: Native Trainable Sparse Attention for Real-time Autoregressive Diffusion Video Generation. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.21221)] · `realtime`
+* **`X-Cache`**, Cross-Chunk Block Caching for Few-Step Autoregressive World Models Inference. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.20289)] · `realtime`
+* **`MultiWorld`**, Scalable Multi-Agent Multi-View Video World Models. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.18564)] [[Website](https://multi-world.github.io/)] · `systems`
+* Memorize When Needed: Decoupled Memory Control for Spatially Consistent Long-Horizon Video Generation. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.18215)] · `memory`
+* Speculative Decoding for Autoregressive Video Generation. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.17397)] · `realtime`
+* **`DiT as Real-Time Rerenderer`**, Streaming Video Stylization with Autoregressive Diffusion Transformer. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.13509)] · `realtime`
+* **`Lyra 2.0`**, Explorable Generative 3D Worlds. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.13036)] · `memory`
+* Long-Horizon Streaming Video Generation via Hybrid Attention with Decoupled Distillation. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.10103)] · `realtime` `memory`
+* **`Matrix-Game 3.0`**, Real-Time and Streaming Interactive World Model with Long-Horizon Memory. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.08995)] [[Website](https://matrix-game-v3.github.io/)] · `systems` `realtime` `memory`
+* **`INSPATIO-WORLD`**, A Real-Time 4D World Simulator via Spatiotemporal Autoregressive Modeling. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.07209)] · `systems` `realtime`
+* Grounded Forcing: Bridging Time-Independent Semantics and Proximal Dynamics in Autoregressive Video Synthesis. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.06939)] · `memory`
+* **`ActionParty`**, Multi-Subject Action Binding in Generative Video Games. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.02330)] · `systems`
+* **`EgoSim`**, Egocentric World Simulator for Embodied Interaction Generation. **`arXiv 2026.04`** [[Paper](https://arxiv.org/abs/2604.01001)] [[Website](http://egosimulator.github.io/)] · `systems`
+* **`MemCam`**, Memory-Augmented Camera Control for Consistent Video Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.26193)] · `systems` `control` `memory`
+* World Reasoning Arena. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.25887)] [[Code](https://github.com/MBZUAI-IFM/WR-Arena)] · `benchmarks`
+* **`ShotStream`**, Streaming Multi-Shot Video Generation for Interactive Storytelling. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.25746)] · `systems` `control` `realtime`
+* **`PackForcing`**, Short Video Training Suffices for Long Video Sampling and Long Context Inference. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.25730)] · `memory`
+* Out of Sight but Not Out of Mind: Hybrid Memory for Dynamic Video World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.25716)] · `memory`
+* **`DCARL`**, A Divide-and-Conquer Framework for Autoregressive Long-Trajectory Video Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.24835)] · `control`
+* **`WildWorld`**, A Large-Scale Dataset for Dynamic World Modeling with Actions and Explicit State toward Generative ARPG. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.23497)] [[Website](https://shandaai.github.io/wildworld-project/)] [[Code](https://github.com/ShandaAI/WildWorld)] · `datasets`
+* **`I3DM`**, Implicit 3D-aware Memory Retrieval and Injection for Consistent Video Scene Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.23413)] · `memory`
+* **`WorldCache`**, Content-Aware Caching for Accelerated Video World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.22286)] [[Website](https://umair1221.github.io/World-Cache/)] · `realtime`
+* **`Omni-WorldBench`**, Towards a Comprehensive Interaction-Centric Evaluation for World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.22212)] · `benchmarks`
+* Relax Forcing: Relaxed KV-Memory for Consistent Long Video Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.21366)] · `memory`
+* **`MosaicMem`**, Hybrid Spatial Memory for Controllable Video World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.17117)] [[Website](https://mosaicmem.github.io/mosaicmem/)] · `control` `memory`
+* **`Astrolabe`**, Steering Forward-Process Reinforcement Learning for Distilled Autoregressive Video Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.17051)] · `realtime`
+* **`WorldCam`**, Interactive Autoregressive 3D Gaming Worlds with Camera Pose as a Unifying Geometric Representation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.16871)] [[Website](https://cvlab-kaist.github.io/WorldCam/)] · `systems`
+* Out of Sight, Out of Mind? Evaluating State Evolution in Video World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.13215)] [[Website](https://glab-caltech.github.io/STEVOBench/)] · `memory` `benchmarks`
+* Anchor Forcing: Anchor Memory and Tri-Region RoPE for Interactive Streaming Video Diffusion. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.13405)] · `realtime` `memory`
+* **`MemRoPE`**, Training-Free Infinite Video Generation via Evolving Memory Tokens. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.12513)] · `memory`
+* **`InSpatio-WorldFM`**, An Open-Source Real-Time Generative Frame Model. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.11911)] · `systems` `realtime`
+* **`OmniForcing`**, Unleashing Real-time Joint Audio-Visual Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.11647)] · `realtime`
+* Streaming Autoregressive Video Generation via Diagonal Distillation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.09488)] · `realtime`
+* **`LiveWorld`**, Simulating Out-of-Sight Dynamics in Generative Video World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.07145)] [[Website](https://zichengduan.github.io/LiveWorld/index.html)] · `memory`
+* **`WorldCache`**, Accelerating World Models for Free via Heterogeneous Token Caching. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.06331)] [[Website](https://github.com/FofGofx/WorldCache)] · `realtime`
+* Hierarchical Latent Action Model. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.05815)] · `control`
+* **`RealWonder`**, Real-Time Physical Action-Conditioned Video Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.05449)] · `systems` `control` `realtime`
+* **`Helios`**, Real Real-Time Long Video Generation Model. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.04379)] [[Website](https://pku-yuangroup.github.io/Helios-Page/)] [[Code](https://github.com/PKU-YuanGroup/Helios)] · `realtime`
+* **`MultiGen`**, Level-Design for Editable Multiplayer Worlds in Diffusion Game Engines. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.06679)] · `systems`
+* Beyond Pixel Histories: World Models with Persistent 3D State. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.03482)] [[Website](https://francelico.github.io/persist.github.io)] · `systems` `memory`
+* Accelerating Video Generation Inference with Sequential-Parallel 3D Positional Encoding Using a Global Time Index. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.06664)] · `realtime`
+* **`COMBAT`**, Conditional World Models for Behavioral Agent Training. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2603.00825)] · `systems`
+* **`UCM`**, Unifying Camera Control and Memory with Time-aware Positional Encoding Warping for World Models. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.22960)] [[Website](https://humanaigc.github.io/ucm-webpage/)] · `systems` `control` `memory`
+* **`Solaris`**, Building a Multiplayer Video World Model in Minecraft. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.22208)] [[Website](https://solaris-wm.github.io/)] · `systems`
+* **`Generated Reality`**, Human-centric World Simulation using Interactive Video Generation with Hand and Camera Control. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.18422)] · `systems` `control`
+* Factored Latent Action World Models. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.16229)] · `control`
+* **`AnchorWeave`**, World-Consistent Video Generation with Retrieved Local Spatial Memories. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.14941)] · `memory`
+* Adapting VACE for Real-Time Autoregressive Video Diffusion. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.14381)] · `realtime`
+* Train Short, Inference Long: Training-free Horizon Extension for Autoregressive Video Generation. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.14027)] · `memory`
+* A Causal Diffusion Model for Video Reconstruction from Ultra-Low-Bitrate Representations. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.13837)] · `realtime`
+* **`MonarchRT`**, Efficient Attention for Real-Time Video Generation. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.12271)] · `realtime`
+* **`Olaf-World`**, Orienting Latent Actions for Video World Modeling. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.10104)] [[Website](https://showlab.github.io/Olaf-World/)] [[Code](https://github.com/showlab/Olaf-World)] · `control`
+* Causality in Video Diffusers is Separable from Denoising. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.10095)] · `realtime`
+* **`Hand2World`**, Autoregressive Egocentric Interaction Generation via Free-Space Hand Gestures. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.09600)] [[Website](https://hand2world.github.io/)] · `systems`
+* Rethinking Global Text Conditioning in Diffusion Transformers. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.09268)] · `control`
+* **`WorldCompass`**, Reinforcement Learning for Long-Horizon World Models. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.09022)] [[Website](https://3d-models.hunyuan.tencent.com/world/)] · `memory`
+* **`MIND`**, Benchmarking Memory Consistency and Action Control in World Models. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.08025)] [[Code](https://github.com/CSU-JPG/MIND)] · `memory` `benchmarks`
+* Geometry-Aware Rotary Position Embedding for Consistent Video World Model. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.07854)] · `memory`
+* Rolling Sink: Bridging Limited-Horizon Training and Open-Ended Testing in Autoregressive Video Diffusion. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.07775)] · `memory`
+* Context Forcing: Consistent Autoregressive Video Generation with Long Context. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.06028)] · `memory`
+* Light Forcing: Accelerating Autoregressive Video Diffusion via Sparse Attention. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.04789)] · `realtime`
+* **`LIVE`**, Long-horizon Interactive Video World Modeling. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.03747)] [[Website](https://junchao-cs.github.io/LIVE-demo/)] · `systems` `memory`
+* **`Quant VideoGen`**, Auto-Regressive Long Video Generation via 2-Bit KV-Cache Quantization. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.02958)] · `realtime`
+* **`Infinite-World`**, Scaling Interactive World Models to 1000-Frame Horizons via Pose-Free Hierarchical Memory. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.02393)] · `systems` `memory`
+* Causal Forcing: Autoregressive Diffusion Distillation Done Right for High-Quality Real-Time Interactive Video Generation. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.02214)] · `realtime`
+* Fast Autoregressive Video Diffusion and World Models with Temporal Cache Compression and Sparse Attention. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.01801)] · `realtime`
+* Scalable Generative Game Engine: Breaking the Resolution Wall via Hardware-Algorithm Co-Design. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2602.00608)] · `systems`
+* **`TokenTrim`**, Inference-Time Token Pruning for Autoregressive Long Video Generation. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2602.00268)] · `memory`
+* Past- and Future-Informed KV Cache Policy with Salience Estimation in Autoregressive Video Diffusion. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.21896)] · `realtime`
+* **`lingbot-world`**, Advancing Open-source World Models. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.20540)] [[Website](https://technology.robbyant.com/lingbot-world)] [[Code](https://github.com/robbyant/lingbot-world)] · `systems`
+* Efficient Autoregressive Video Diffusion with Dummy Head. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.20499)] · `memory`
+* Entropy-Guided k-Guard Sampling for Long-Horizon Autoregressive Video Generation. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.19488)] · `memory`
+* **`Reward-Forcing`**, Autoregressive Video Generation with Reward Feedback. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.16933)] · `realtime`
+* **`LoL`**, Longer than Longer, Scaling Video Generation to Hour. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.16914)] · `realtime`
+* **`StableWorld`**, Towards Stable and Consistent Long Interactive Video Generation. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.15281)] · `memory`
+* **`S2DiT`**, Sandwich Diffusion Transformer for Mobile Streaming Video Generation. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.12719)] · `realtime`
+* Transition Matching Distillation for Fast Video Generation. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.09881)] · `realtime`
+* Plenoptic Video Generation. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.05239)] · `memory`
+* Learning Latent Action World Models In The Wild. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.05230)] · `control`
+* **`PixVerse R1`**, A Real-Time World Model That Redefines AI Video Generation. **`PixVerse 2026`** [[Blog](https://pixverse.ai/en/blog/pixverse-launches-r1-real-time-world-model)] · `reports` `realtime`
+* **`Happy Oyster`**, Happy Oyster (Kuaile Shenghao): Real-Time Interactive Open-World Model. **`Alibaba 2026`** [[Blog](https://happyoyster.cn/)] · `reports` `realtime`
+* **`TeleWorld`**, Towards Dynamic Multimodal Synthesis with a 4D World Model. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2601.00051)] · `systems`
+* **`TinyHistory`**, Lightweight Video History Embeddings via Two-Stage Context Learning. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.23851)] · `memory`
+* **`LiveTalk`**, Real-Time Multimodal Interactive Video Diffusion via Improved On-Policy Distillation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.23576)] · `realtime`
+* **`Yume-1.5`**, A Text-Controlled Interactive World Generation Model. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.22096)] [[Website](https://stdstu12.github.io/YUME-Project)] [[Code](https://github.com/stdstu12/YUME)] · `systems` `control`
+* **`Memorize-and-Generate`**, Towards Long-Term Consistency in Real-Time Video Generation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.18741)] · `realtime` `memory`
+* **`CustomX`**, Unified Character, Action, and Scene Customization in Video World Models. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.17796)] · `systems` `control`
+* **`FrameDiffuser`**, G-Buffer-Conditioned Diffusion for Neural Forward Frame Rendering. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.16670)] · `memory`
+* **`Spatia`**, Video Generation with Updatable Spatial Memory. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.15716)] · `systems` `control` `memory`
+* End-to-End Training for Autoregressive Video Diffusion via Self-Resampling. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.15702)] · `memory`
+* **`MemFlow`**, Flowing Adaptive Memory for Consistent and Efficient Long Video Narratives. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.14699)] · `memory`
+* **`WorldPlay`**, Towards Long-Term Geometric Consistency for Real-Time Interactive World Modeling. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.14614)] [[Website](https://3d-models.hunyuan.tencent.com/world/)] · `systems` `control` `realtime` `memory`
+* **`LongVie 2`**, Multimodal Controllable Ultra-Long Video World Model. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.13604)] [[Website](https://vchitect.github.io/LongVie2-project/)] · `control`
+* **`SneakPeek`**, Future-Guided Instructional Streaming Video Generation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.13019)] · `realtime`
+* Endless World: Real-Time 3D-Aware Long Video Generation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.12430)] · `realtime`
+* **`BAgger`**, Backwards Aggregation for Mitigating Drift in Autoregressive Video Diffusion Models. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.12080)] · `memory`
+* **`AutoRefiner`**, Improving Autoregressive Video Diffusion Models via Reflective Refinement Over the Stochastic Sampling Path. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.11203)] · `realtime`
+* **`Astra`**, General Interactive World Model with Autoregressive Denoising. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.08931)] [[Website](https://eternalevan.github.io/Astra-project/)] [[Code](https://github.com/EternalEvan/Astra)] · `systems`
+* **`On Memory`**, A comparison of memory mechanisms in world models. **`World Modeling Workshop 2026`** [[Paper](https://arxiv.org/abs/2512.06983)] · `memory`
+* **`TV2TV`**, A Unified Framework for Interleaved Language and Video Generation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.05103)] · `control`
+* Deep Forcing: Training-Free Long Video Generation with Deep Sink and Participative Compression. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.05081)] · `realtime`
+* Reward Forcing: Efficient Streaming Video Generation with Rewarded Distribution Matching Distillation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.04678)] · `realtime`
+* **`VideoSSM`**, Autoregressive Long Video Generation with Hybrid State-Space Memory. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.04519)] · `memory`
+* **`EgoLCD`**, Egocentric Video Generation with Long Context Diffusion. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.04515)] · `memory`
+* **`RELIC`**, Interactive Video World Model with Long-Horizon Memory. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.04040)] [[Website](https://relic-worldmodel.github.io/)] · `systems` `memory`
+* **`WorldPack`**, Compressed Memory Improves Spatial Consistency in Video World Modeling. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.02473)] · `systems` `memory`
+* **`SpriteHand`**, Real-Time Versatile Hand-Object Interaction with Autoregressive Video Generation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.01960)] · `systems` `realtime`
+* **`GrndCtrl`**, Grounding World Models via Self-Supervised Reward Alignment. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.01952)] · `memory`
+* **`AVWM`**, Audio-Visual World Models: Towards Multisensory Imagination in Sight and Sound. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2512.00883)] · `systems`
+* **`Hunyuan-GameCraft-2`**, Instruction-following Interactive Game World Model. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.23429)] [[Website](https://hunyuan-gamecraft-2.github.io/)] · `systems` `control`
+* **`BIFE`**, Better Interaction, Fewer Errors for Minute-Long Video Generation. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.22973)] · `memory`
+* **`Captain Safari`**, A World Engine. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.22815)] [[Website](https://johnson111788.github.io/open-safari/)] · `systems`
+* **`Inferix`**, A Block-Diffusion based Next-Generation Inference Engine for World Simulation. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.20714)] [[Code](https://github.com/alibaba-damo-academy/Inferix)] · `realtime`
+* **`Infinity-RoPE`**, Action-Controllable Infinite Video Generation Emerges From Autoregressive Self-Rollout. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.20649)] · `control`
+* Block Cascading: Training Free Acceleration of Block-Causal Video Models. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.20426)] · `realtime`
+* **`UltraViCo`**, Breaking Extrapolation Limits in Video Diffusion Transformers. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.20123)] · `memory`
+* **`In-Video Instructions`**, Visual Signals as Generative Control. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.19401)] · `control`
+* **`MagicWorld`**, Towards Long-Horizon Stability for Interactive Video World Exploration. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.18886)] [[Website](https://vivocameraresearch.github.io/magicworld/)] [[Code](https://github.com/vivoCameraResearch/Magic-World)] · `systems` `memory`
+* **`Plan-X`**, Instruct Video Generation via Semantic Planning. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.17986)] · `control`
+* Recurrent Autoregressive Diffusion: Global Memory Meets Local Attention. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.12940)] · `memory`
+* Adaptive Begin-of-Video Tokens for Autoregressive Video Diffusion Models. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.12099)] · `memory`
+* **`PAN`**, A World Model for General, Interactable, and Long-Horizon World Simulation. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.09057)] · `systems` `control` `memory`
+* Simulating the Visual World with Artificial Intelligence: A Roadmap. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.08585)] [[Website](https://world-model-roadmap.github.io/)] [[Code](https://github.com/ziqihuangg/Awesome-From-Video-Generation-to-World-Model)] · `surveys`
+* **`StreamDiffusionV2`**, A Streaming System for Dynamic and Interactive Video Generation. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.07399)] · `realtime`
+* Towards One-step Causal Video Generation via Adversarial Self-Distillation. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.01419)] · `realtime`
+* **`MotionStream`**, Real-Time Video Generation with Interactive Motion Controls. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.01266)] · `realtime`
+* A Step Toward World Models: A Survey on Robotic Manipulation. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2511.02097)] · `surveys`
+* Co-Evolving Latent Action World Models. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.26433)] · `systems` `control`
+* Generative View Stitching. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.24718)] · `memory`
+* **`Video-As-Prompt`**, Unified Semantic Control for Video Generation. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.20888)] · `control`
+* A Survey on Cache Methods in Diffusion Models: Toward Efficient Multi-Modal Generation. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.19755)] · `surveys` `realtime`
+* **`World-in-World`**, World Models in a Closed-Loop World. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.18135)] [[Website](https://github.com/World-In-World/world-in-world)] · `benchmarks`
+* A Comprehensive Survey on World Models for Embodied AI. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.16732)] [[Website](https://github.com/Li-Zn-H/AwesomeWorldModels)] · `surveys`
+* **`TGT`**, Text-Grounded Trajectories for Locally Controlled Video Generation. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.15104)] · `control`
+* **`CanvasMAR`**, Improving Masked Autoregressive Video Prediction With Canvas. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.13669)] · `realtime`
+* Stable Video Infinity: Infinite-Length Video Generation with Error Recycling. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.09212)] · `memory`
+* Real-Time Motion-Controllable Autoregressive Video Diffusion. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.08131)] · `control` `realtime`
+* **`MorphoSim`**, An Interactive, Controllable, and Editable Language-guided 4D World Simulator. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.04390)] · `control`
+* Streaming Drag-Oriented Interactive Video Manipulation: Drag Anything, Anytime!. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.03550)] · `realtime`
+* Memory Forcing: Spatio-Temporal Memory for Consistent Scene Generation on Minecraft. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.03198)] · `systems` `memory`
+* When and Where do Events Switch in Multi-Event Video Generation?. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.03049)] · `control`
+* **`Self-Forcing++`**, Towards Minute-Scale High-Quality Video Generation. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.02283)] · `memory`
+* **`EvoWorld`**, Evolving Panoramic World Generation with Explicit 3D Memory. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.01183)] [[Code](https://github.com/JiahaoPlus/EvoWorld)] · `systems` `memory`
+* Rolling Forcing: Autoregressive Long Video Diffusion in Real Time. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.25161)] · `realtime`
+* **`SANA-Video`**, Efficient Video Generation with Block Linear Diffusion Transformer. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.24695)] · `realtime`
+* **`Dreamer4`**, Training Agents Inside of Scalable World Models. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.24527)] [[Website](https://danijar.com/dreamer4/)] · `systems`
+* Reinforcement Learning with Inverse Rewards for World Model Post-training. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.23958)] · `control`
+* **`LongLive`**, Real-time Interactive Long Video Generation. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.22622)] · `systems` `control` `realtime`
+* **`FantasyWorld`**, Geometry-Consistent World Modeling via Unified Video and 3D Prediction. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.21657)] · `memory`
+* **`SAMPO`**, Scale-wise Autoregression with Motion PrOmpt for generative world models. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.15536)] · `memory`
+* **`CausNVS`**, Autoregressive Multi-view Diffusion for Flexible 3D Novel View Synthesis. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.06579)] · `control`
+* 3D and 4D World Modeling: A Survey. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.07996)] · `surveys`
+* Mixture of Contexts for Long Video Generation. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.21058)] · `memory`
+* **`HERO`**, Hierarchical Extrapolation and Refresh for Efficient World Models. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.17588)] · `memory`
+* **`WorldWeaver`**, Generating Long-Horizon Video Worlds via Rich Perception. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.15720)] · `memory`
+* **`Matrix-Game 2.0`**, An open-source real-time and streaming interactive world model. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.13009)] [[Website](https://matrix-game-v2.github.io/)] · `systems` `realtime`
+* **`Yan`**, Foundational Interactive Video Generation. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.08601)] · `systems`
+* **`Genie 3`**, A new frontier for world models. **`DeepMind 2025`** [[Blog](https://deepmind.google/blog/genie-3-a-new-frontier-for-world-models/)] · `reports`
+* **`Yume`**, An Interactive World Generation Model. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.17744)] [[Website](https://stdstu12.github.io/YUME-Project/)] [[Code](https://github.com/stdstu12/YUME)] · `systems`
+* Controllable Video Generation: A Survey. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.16869)] · `surveys` `control`
+* **`Geometry Forcing`**, Marrying Video Diffusion and 3D Representation for Consistent World Modeling. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.07982)] [[Website](https://GeometryForcing.github.io)] · `memory`
+* A Survey on Long-Video Storytelling Generation: Architectures, Consistency, and Cinematic Quality. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.07202)] · `surveys` `memory`
+* **`StreamDiT`**, Real-Time Streaming Text-to-Video Generation. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.03745)] · `realtime`
+* A Survey: Learning Embodied Intelligence from Physical Simulators and World Models. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.00917)] [[Code](https://github.com/NJU3DV-LoongGroup/Embodied-World-Models-Survey)] · `surveys`
+* From 2D to 3D Cognition: A Brief Survey of General World Models. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.20134)] · `surveys`
+* **`VMem`**, Consistent Interactive Video Scene Generation with Surfel-Indexed View Memory. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.18903)] · `memory`
+* From Virtual Games to Real-World Play. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.18901)] · `systems`
+* **`Matrix-Game`**, Interactive World Foundation Model. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.18701)] [[Code](https://github.com/SkyworkAI/Matrix-Game)] · `systems`
+* **`UNIVERSE`**, Adapting Vision-Language Models for Evaluating World Models. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.17967)] · `benchmarks`
+* **`Hunyuan-GameCraft`**, High-dynamic Interactive Game Video Generation with Hybrid History Condition. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.17201)] · `systems`
+* **`PlayerOne`**, Egocentric World Simulator. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.09995)] · `systems`
+* Autoregressive Adversarial Post-Training for Real-Time Interactive Video Generation. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.09350)] · `systems` `realtime`
+* Self Forcing: Bridging the Train-Test Gap in Autoregressive Video Diffusion. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.08009)] · `realtime`
+* Video World Models with Long-term Spatial Memory. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.05284)] [[Website](https://spmem.github.io/)] · `systems` `control` `memory`
+* Context as Memory: Scene-Consistent Interactive Long Video Generation with Memory Retrieval. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.03141)] · `systems` `memory`
+* Playing with Transformer at 30+ FPS via Next-Frame Diffusion. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.01380)] · `realtime`
+* **`DeepVerse`**, 4D Autoregressive Video Generation as a World Model. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.01103)] · `systems` `control`
+* Toward Memory-Aided World Models: Benchmarking via Spatial Consistency. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.22976)] [[Code](https://github.com/Kevin-lkw/LoopNav)] · `memory` `benchmarks`
+* **`StateSpaceDiffuser`**, Bringing Long Context to Diffusion World Models. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.22246)] · `memory`
+* **`VRAG`**, Learning World Models for Interactive Video Generation. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.21996)] · `systems`
+* Long-Context State-Space Video World Models. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.20171)] [[Website](https://ryanpo.com/ssm_wm)] · `systems`
+* **`Vid2World`**, Crafting Video Diffusion Models to Interactive World Models. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.14357)] [[Website](http://knightnemo.github.io/vid2world/)] · `systems`
+* **`MAGI-1`**, Autoregressive Video Generation at Scale. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.13211)] · `realtime`
+* Generative Pre-trained Autoregressive Diffusion Transformer. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.07344)] · `memory`
+* Learning 3D Persistent Embodied World Models. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.05495)] · `systems` `memory`
+* A Survey of Interactive Generative Video. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.21853)] · `surveys`
+* **`SkyReels-V2`**, Infinite-length Film Generative Model. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.13074)] · `realtime`
+* Frame Context Packing and Drift Prevention in Next-Frame-Prediction Video Diffusion Models. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.12626)] · `memory`
+* **`WorldMem`**, Long-term Consistent World Simulation with Memory. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.12369)] · `systems` `memory`
+* **`MineWorld`**, a Real-Time and Open-Source Interactive World Model on Minecraft. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.08388)] · `systems` `realtime`
+* One-Minute Video Generation with Test-Time Training. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.05298)] · `realtime`
+* Exploration-Driven Generative Interactive Environments. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.02515)] · `systems`
+* **`AnimeGamer`**, Infinite Anime Life Simulation with Next Game State Prediction. **`arXiv 2025.04`** [[Paper](https://arxiv.org/abs/2504.01014)] · `systems` `control`
+* Exploring the Evolution of Physics Cognition in Video Generation: A Survey. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.21765)] [[Code](https://github.com/minnie-lin/Awesome-Physics-Cognition-based-Video-Generation)] · `surveys`
+* Model as a Game: On Numerical and Spatial Consistency for Generative Games. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.21172)] · `systems` `memory`
+* Long-Context Autoregressive Video Modeling with Next-Frame Prediction. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.19325)] [[Website](https://farlongctx.github.io/)] [[Code](https://github.com/showlab/FAR)] · `memory`
+* **`AdaWorld`**, Learning Adaptable World Models with Latent Actions. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.18938)] [[Website](https://adaptable-world-model.github.io/)] · `systems` `control`
+* Long Context Tuning for Video Generation. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.10589)] · `memory`
+* Inter-environmental world modeling for continuous and compositional dynamics. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.09911)] · `control`
+* Error Analyses of Auto-Regressive Video Diffusion Models: A Unified Framework. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.10704)] · `memory`
+* Toward Stable World Models: Measuring and Addressing World Instability in Generative Environments. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.08122)] · `benchmarks`
+* **`AR-Diffusion`**, Asynchronous Video Generation with Auto-Regressive Diffusion. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.07418)] · `realtime`
+* Simulating the Real World: A Unified Survey of Multimodal Generative Models. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.04641)] [[Code](https://github.com/ALEEEHU/World-Simulator)] · `surveys`
+* **`Gen3C`**, 3D-Informed World-Consistent Video Generation with Precise Camera Control. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.03751)] · `control` `memory`
+* Next Block Prediction: Video Generation via Semi-Autoregressive Modeling. **`arXiv 2025.02`** [[Paper](https://arxiv.org/abs/2502.07737)] · `realtime`
+* **`PlaySlot`**, Learning Inverse Latent Dynamics for Controllable Object-Centric Video Prediction and Planning. **`arXiv 2025.02`** [[Paper](https://arxiv.org/abs/2502.07600)] · `control`
+* Pre-Trained Video Generative Models as World Simulators. **`arXiv 2025.02`** [[Paper](https://arxiv.org/abs/2502.07825)] · `systems`
+* History-Guided Video Diffusion. **`arXiv 2025.02`** [[Paper](https://arxiv.org/abs/2502.06764)] · `memory`
+* Taming Teacher Forcing for Masked Autoregressive Video Generation. **`arXiv 2025.01`** [[Paper](https://arxiv.org/abs/2501.12389)] · `realtime`
+* Generative Physical AI in Vision: A Survey. **`arXiv 2025.01`** [[Paper](https://arxiv.org/abs/2501.10928)] · `surveys`
+* **`GameFactorly`**, Creating New Games with Generative Interactive Videos. **`arXiv 2025.01`** [[Paper](https://arxiv.org/abs/2501.08325)] · `systems`
+* Diffusion Adversarial Post-Training for One-Step Video Generation. **`arXiv 2025.01`** [[Paper](https://arxiv.org/abs/2501.08316)] · `realtime`
+* **`MSC`**, Multi-Scale Spatio-Temporal Causal Attention for Autoregressive Video Diffusion. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.09828)] · `realtime`
+* **`GenEx`**, Generating an Explorable World. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.09624)] · `systems`
+* **`Owl-1`**, Omni World Model for Consistent Long Video Generation. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.09600)] · `memory`
+* Video Creation by Demonstration. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.09551)] · `realtime`
+* From Slow Bidirectional to Fast Autoregressive Video Diffusion Models. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.07772)] · `realtime`
+* **`ACDiT`**, Interpolating Autoregressive Conditional Modeling and Diffusion Transformer. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.07720)] · `memory`
+* **`Genie 2`**, A large-scale foundation world model. **`DeepMind 2024`** [[Blog](https://deepmind.google/discover/blog/genie-2-a-large-scale-foundation-world-model/)] · `reports`
+* The Matrix: Infinite-Horizon World Generation with Real-Time Moving Control. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.03568)] · `systems` `control` `realtime`
+* Playable Game Generation. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.00887)] · `systems`
+* **`Ca2-VDM`**, Efficient Autoregressive Video Diffusion Model with Causal Generation and Cache Sharing. **`arXiv 2024.11`** [[Paper](https://arxiv.org/abs/2411.16375)] · `realtime`
+* Understanding World or Predicting Future? A Comprehensive Survey of World Models. **`arXiv 2024.11`** [[Paper](https://arxiv.org/abs/2411.14499)] · `surveys`
+* **`EgoVid-5M`**, A Large-Scale Video-Action Dataset for Egocentric Video Generation. **`arXiv 2024.11`** [[Paper](https://arxiv.org/abs/2411.08380)] · `datasets`
+* **`GameGen-X`**, Interactive Open-world Game Video Generation. **`arXiv 2024.11`** [[Paper](https://arxiv.org/abs/2411.00769)] · `systems` `control`
+* **`Oasis`**, A Universe in a Transformer. **`Decart & Etched 2024`** [[Blog](https://oasis-model.github.io/)] · `reports`
+* **`SlowFast-VGen`**, Slow-Fast Learning for Action-Driven Long Video Generation. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2410.23277)] · `systems` `control`
+* **`ARLON`**, Boosting Diffusion Transformers with Autoregressive Models for Long Video Generation. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2410.20502)] · `memory`
+* **`IGOR`**, Image-GOal Representations are the Atomic Control Units for Foundation Models in Embodied AI. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2411.00785)] · `control`
+* Progressive Autoregressive Video Diffusion Models. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2410.08151)] · `memory`
+* Pyramidal Flow Matching for Efficient Video Generative Modeling. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2410.05954)] · `realtime`
+* **`ACDC`**, Autoregressive Coherent Multimodal Generation using Diffusion Correction. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2410.04721)] · `memory`
+* **`Loong`**, Generating Minute-level Long Videos with Autoregressive Language Models. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2410.02757)] · `realtime`
+* Learning Generative Interactive Environments By Trained Agent Exploration. **`arXiv 2024.09`** [[Paper](https://arxiv.org/abs/2409.06445)] · `systems`
+* Diffusion Models Are Real-Time Game Engines. **`arXiv 2024.08`** [[Paper](https://arxiv.org/abs/2408.14837)] · `systems` `realtime`
+* Real-Time Video Generation with Pyramid Attention Broadcast. **`arXiv 2024.08`** [[Paper](https://arxiv.org/abs/2408.12588)] · `realtime`
+* **`MovieDreamer`**, Hierarchical Generation for Coherent Long Visual Sequence. **`arXiv 2024.07`** [[Paper](https://arxiv.org/abs/2407.16655)] · `memory`
+* **`Streetscapes`**, Large-scale Consistent Street View Generation Using Autoregressive Video Diffusion. **`arXiv 2024.07`** [[Paper](https://arxiv.org/abs/2407.13759)] · `memory`
+* Diffusion Forcing: Next-token Prediction Meets Full-Sequence Diffusion. **`arXiv 2024.07`** [[Paper](https://arxiv.org/abs/2407.01392)] · `realtime`
+* From Efficient Multimodal Models to World Models: A Survey. **`arXiv 2024.06`** [[Paper](https://arxiv.org/abs/2407.00118)] · `surveys`
+* **`Pandora`**, Towards General World Model with Natural Language Actions and Video States. **`arXiv 2024.06`** [[Paper](https://arxiv.org/abs/2406.09455)] [[Code](https://github.com/maitrix-org/Pandora)] · `systems` `control`
+* Motion Consistency Model: Accelerating Video Diffusion with Disentangled Motion-Appearance Distillation. **`arXiv 2024.06`** [[Paper](https://arxiv.org/abs/2406.06890)] · `realtime` `memory`
+* Lifelong Learning of Video Diffusion Models From a Single Video Stream. **`arXiv 2024.06`** [[Paper](https://arxiv.org/abs/2406.04814)] · `realtime`
+* **`SF-V`**, Single Forward Video Generation Model. **`arXiv 2024.06`** [[Paper](https://arxiv.org/abs/2406.04324)] · `realtime`
+* Streaming Video Diffusion: Online Video Editing with Diffusion Models. **`arXiv 2024.05`** [[Paper](https://arxiv.org/abs/2405.19726)] · `realtime`
+* Looking Backward: Streaming Video-to-Video Translation with Feature Banks. **`arXiv 2024.05`** [[Paper](https://arxiv.org/abs/2405.15757)] · `realtime`
+* iVideoGPT: Interactive VideoGPTs are Scalable World Models. **`arXiv 2024.05`** [[Paper](https://arxiv.org/abs/2405.15223)] · `systems`
+* **`FIFO-Diffusion`**, Generating Infinite Videos from Text without Training. **`arXiv 2024.05`** [[Paper](https://arxiv.org/abs/2405.11473)] · `memory`
+* From Sora What We Can See: A Survey of Text-to-Video Generation. **`arXiv 2024.05`** [[Paper](https://arxiv.org/abs/2405.10674)] · `surveys`
+* Is Sora a World Simulator? A Comprehensive Survey on General World Models and Beyond. **`arXiv 2024.05`** [[Paper](https://arxiv.org/abs/2405.03520)] [[Code](https://github.com/GigaAI-research/General-World-Models-Survey)] · `surveys`
+* Video Diffusion Models: A Survey. **`arXiv 2024.05`** [[Paper](https://arxiv.org/abs/2405.03150)] · `surveys`
+* A Survey on Long Video Generation: Challenges, Methods, and Prospects. **`arXiv 2024.03`** [[Paper](https://arxiv.org/abs/2403.16407)] · `surveys`
+* **`StreamingT2V`**, Consistent, Dynamic, and Extendable Long Video Generation from Text. **`arXiv 2024.03`** [[Paper](https://arxiv.org/abs/2403.14773)] · `memory`
+* Sora as a World Model? A Complete Survey on Text-to-Video Generation. **`arXiv 2024.03`** [[Paper](https://arxiv.org/abs/2403.05131)] · `surveys`
+* **`Sora`**, A Review on Background, Technology, Limitations, and Opportunities of Large Vision Models. **`arXiv 2024.02`** [[Paper](https://arxiv.org/abs/2402.17177)] · `surveys`
+* **`Genie`**, Generative Interactive Environments. **`DeepMind`** [[Paper](https://arxiv.org/abs/2402.15391)] [[Blog](https://sites.google.com/view/genie-2024/home)] · `foundations`
+* **`Sora`**, Video generation models as world simulators. **`OpenAI 2024`** [[Blog](https://openai.com/index/video-generation-models-as-world-simulators/)] · `reports`
+* Rolling Diffusion Models. **`arXiv 2024.02`** [[Paper](https://arxiv.org/abs/2402.09470)] · `realtime`
+* **`InteractiveVideo`**, User-Centric Controllable Video Generation with Synergistic Multimodal Instructions. **`arXiv 2024.02`** [[Paper](https://arxiv.org/abs/2402.03040)] · `control`
+* A Survey on Future Frame Synthesis: Bridging Deterministic and Generative Approaches. **`arXiv 2024.01`** [[Paper](https://arxiv.org/abs/2401.14718)] · `surveys`
+* Learning to Act without Actions. **`arXiv 2023.12`** [[Paper](https://arxiv.org/abs/2312.10812)] · `control`
+* Learning Interactive Real-World Simulators. **`arXiv 2023.10`** [[Paper](https://arxiv.org/abs/2310.06114)] · `systems` `control`
+* Language Model Beats Diffusion -- Tokenizer is Key to Visual Generation. **`arXiv 2023.10`** [[Paper](https://arxiv.org/abs/2310.05737)] · `realtime`
+* Temporally Consistent Transformers for Video Generation. **`arXiv 2022.10`** [[Paper](https://arxiv.org/abs/2210.02396)] · `memory`
+* Playable Environments: Video Manipulation in Space and Time. **`arXiv 2022.03`** [[Paper](https://arxiv.org/abs/2203.01914)] · `foundations`
+* Playable Video Generation. **`arXiv 2021.01`** [[Paper](https://arxiv.org/abs/2101.12195)] · `foundations`
+* Learning to Simulate Dynamic Environments With GameGAN. **`arXiv 2020.05`** [[Paper](https://arxiv.org/abs/2005.12126)] · `foundations`
+* Learning what you can do before doing anything. **`arXiv 2018.06`** [[Paper](https://arxiv.org/abs/1806.09655)] · `control`
+* World Models. **`NIPS 2018 Oral`** [[Paper](https://arxiv.org/abs/1803.10122)] [[Website](https://worldmodels.github.io/)] · `foundations`
 <!-- END:LIST -->
 
 ---
