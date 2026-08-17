@@ -174,6 +174,7 @@ class TestRoundTrip(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.papers = self.tmp / "papers.jsonl"
         self.papers.write_text("", encoding="utf-8")
+        self.rejects = self.tmp / "maintainer-rejected.jsonl"
         self.report = self.tmp / "inbox.md"
 
     def _empty_feed(self):
@@ -344,6 +345,83 @@ class TestRoundTrip(unittest.TestCase):
         self.assertEqual([c["id"] for c in carried], [post["id"]])
         self.assertEqual(carried[0]["url"], post["url"])
         self.assertEqual(carried[0]["origin"], post["origin"])
+
+    def _cross_first(self):
+        """Tick the nested drop box on the first candidate."""
+        lines = self.report.read_text(encoding="utf-8").splitlines(keepends=True)
+        for i, line in enumerate(lines):
+            if sources.REJECT_RE.match(line):
+                lines[i] = line.replace("- [ ]", "- [x]", 1)
+                break
+        self.report.write_text("".join(lines), encoding="utf-8")
+
+    def _apply(self, *extra):
+        return subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "apply_issue_selections.py"),
+             "--issue-body", str(self.report), "--papers", str(self.papers),
+             "--maintainer-rejected", str(self.rejects), *extra],
+            capture_output=True, text=True, check=True)
+
+    def test_every_candidate_offers_both_verdicts(self):
+        run_candidates("--papers", str(self.papers), output=self.report)
+        body = self.report.read_text(encoding="utf-8")
+        ids = self._ids(self.report)
+        self.assertTrue(ids)
+        offered = {m.group("id") for m in sources.REJECT_RE.finditer(body)}
+        self.assertEqual(offered, ids)
+        # Nothing is decided until someone clicks.
+        self.assertFalse(sources.checked_ids(body))
+        self.assertFalse(sources.rejected_in_issue(body))
+
+    def test_a_crossed_box_is_recorded_and_stops_the_candidate_coming_back(self):
+        run_candidates("--papers", str(self.papers), output=self.report)
+        self._cross_first()
+        dropped = sources.rejected_in_issue(self.report.read_text(encoding="utf-8"))
+        self.assertEqual(len(dropped), 1)
+        self.assertEqual(self._apply().stdout.strip(), "1")
+        recorded = [json.loads(l) for l in self.rejects.read_text(encoding="utf-8")
+                    .splitlines() if l.strip()]
+        self.assertEqual({r["id"] for r in recorded}, dropped)
+        self.assertTrue(recorded[0]["title"])
+        # Rejected, so not proposed again -- from the window or from the inbox.
+        again = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers),
+                       "--maintainer-rejected", str(self.rejects),
+                       "--existing-issue-body", str(self.report), output=again)
+        self.assertFalse(self._ids(again) & dropped)
+
+    def test_a_cross_survives_a_refresh_before_it_is_recorded(self):
+        """The click and the /create-pr that records it can be days apart, and
+        the refresh in between rewrites the body."""
+        run_candidates("--papers", str(self.papers), output=self.report)
+        self._cross_first()
+        dropped = sources.rejected_in_issue(self.report.read_text(encoding="utf-8"))
+        refreshed = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers), "--feed-file", str(self._empty_feed()),
+                       "--existing-issue-body", str(self.report), output=refreshed)
+        body = refreshed.read_text(encoding="utf-8")
+        self.assertEqual(sources.rejected_in_issue(body), dropped)
+        self.assertTrue(dropped <= self._ids(refreshed))
+
+    def test_ticked_and_crossed_at_once_keeps_the_tick_and_says_so(self):
+        run_candidates("--papers", str(self.papers), output=self.report)
+        self._tick_first()
+        self._cross_first()
+        result = self._apply()
+        self.assertEqual(result.stdout.strip(), "1")
+        self.assertIn("ticked and crossed", result.stderr)
+        # Nothing rejected, so the file is never even created.
+        self.assertFalse(self.rejects.exists())
+        self.assertEqual(len(self.papers.read_text(encoding="utf-8").splitlines()), 1)
+
+    def test_recording_a_rejection_twice_does_not_duplicate_it(self):
+        run_candidates("--papers", str(self.papers), output=self.report)
+        self._cross_first()
+        self.assertEqual(self._apply().stdout.strip(), "1")
+        self.assertEqual(self._apply().stdout.strip(), "0")
+        lines = [l for l in self.rejects.read_text(encoding="utf-8").splitlines()
+                 if l.strip()]
+        self.assertEqual(len(lines), 1)
 
     def test_apply_is_idempotent(self):
         run_candidates("--papers", str(self.papers), output=self.report)

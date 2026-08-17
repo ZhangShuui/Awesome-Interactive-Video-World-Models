@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""Turn the ticked candidates in the inbox Issue into data/papers.jsonl records.
+"""Turn the reviewed candidates in the inbox Issue into data files.
+
+Two boxes, two destinations. Ticked papers become data/papers.jsonl records;
+crossed ones become data/maintainer-rejected.jsonl lines so the pipeline stops
+proposing them. Both have to be written here, in the one place the maintainer
+reaches by commenting /create-pr, because the Issue body is rewritten daily and
+is nobody's record of anything.
 
 The README is generated, so nothing here edits markdown: new records are
 appended to the data file and scripts/build_readme.py renders the result. That
 is the whole reason this pipeline cannot corrupt the list -- the worst a bad
 parse can do is add a row.
 
-Prints the number of records added, for the workflow to branch on.
+Prints the number of changes -- papers added plus papers rejected -- for the
+workflow to branch on.
 
 Usage:
   python3 scripts/apply_issue_selections.py --issue-body body.md \
@@ -18,7 +25,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from sources import CANDIDATE_RE, decode, source_of, url_for  # noqa: E402
+from sources import (CANDIDATE_RE, decode, rejected_in_issue,  # noqa: E402
+                     source_of, url_for)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -69,12 +77,43 @@ def parse_selections(issue_body, valid_sections):
     return records, warnings
 
 
-def write_summary(path, added, skipped, warnings):
+def parse_rejections(issue_body, records):
+    """-> ([{id, title, date}], warnings) for every crossed candidate.
+
+    A paper both ticked and crossed is a contradiction only the maintainer can
+    settle. Honouring the cross would throw away the tick, so the tick wins and
+    the disagreement is reported instead of resolved quietly.
+    """
+    crossed = rejected_in_issue(issue_body)
+    ticked = {r["id"] for r in records}
+    out, warnings, seen = [], [], set()
+    for match in CANDIDATE_RE.finditer(issue_body):
+        payload = decode(match.group("payload"))
+        if not payload or "id" not in payload:
+            continue
+        pid = payload["id"]
+        if pid not in crossed or pid in seen:
+            continue
+        seen.add(pid)
+        if pid in ticked:
+            warnings.append(f"{pid}: ticked and crossed at once; kept the tick")
+            continue
+        out.append({"id": pid, "title": payload.get("title", "").strip(),
+                    "date": payload.get("date")})
+    return out, warnings
+
+
+def write_summary(path, added, skipped, rejected, warnings):
     lines = [f"Added **{len(added)}** paper(s) from the review inbox.", ""]
     for rec in added:
         label = rec["name"] or rec["title"]
         link = next(iter(rec["links"].values()), "")
         lines.append(f"- `{rec['section']}` — [{label}]({link})")
+    if rejected:
+        lines += ["", f"Crossed out, and recorded in "
+                      f"`data/maintainer-rejected.jsonl` so they stop coming back "
+                      f"(**{len(rejected)}**):", ""]
+        lines += [f"- `{r['id']}` — {r['title']}" for r in rejected]
     if skipped:
         lines += ["", f"Already in the list, skipped: {', '.join(sorted(skipped))}."]
     if warnings:
@@ -85,11 +124,33 @@ def write_summary(path, added, skipped, warnings):
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def append_rejections(path, rejected):
+    """-> the ones that were not already recorded. Append-only and idempotent,
+    so re-running /create-pr on the same body is a no-op rather than a pile of
+    duplicate lines."""
+    have = {r["id"] for r in _existing_rejections(path)}
+    fresh = [r for r in rejected if r["id"] not in have]
+    if fresh:
+        with path.open("a", encoding="utf-8") as fh:
+            for rec in fresh:
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return fresh
+
+
+def _existing_rejections(path):
+    if not path.exists():
+        return []
+    return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()
+            if l.strip() and not l.lstrip().startswith("#")]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--issue-body", type=Path, required=True)
     ap.add_argument("--papers", type=Path, default=ROOT / "data" / "papers.jsonl")
     ap.add_argument("--sections", type=Path, default=ROOT / "data" / "sections.json")
+    ap.add_argument("--maintainer-rejected", type=Path,
+                    default=ROOT / "data" / "maintainer-rejected.jsonl")
     ap.add_argument("--summary-output", type=Path)
     args = ap.parse_args()
 
@@ -112,11 +173,15 @@ def main():
             "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in merged),
             encoding="utf-8")
 
+    rejected, conflicts = parse_rejections(body, selected)
+    warnings += conflicts
+    rejected_new = append_rejections(args.maintainer_rejected, rejected)
+
     if args.summary_output:
-        write_summary(args.summary_output, added, skipped, warnings)
+        write_summary(args.summary_output, added, skipped, rejected_new, warnings)
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)
-    print(len(added))
+    print(len(added) + len(rejected_new))
 
 
 if __name__ == "__main__":

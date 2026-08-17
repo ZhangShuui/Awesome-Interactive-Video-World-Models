@@ -256,6 +256,12 @@ CRITERIA_RE = re.compile(
     r"criteria (?P<met>\d)/3 \(action (?P<action>yes|--) · "
     r"causal (?P<causal>yes|--) · state (?P<state>yes|--)\)")
 
+# The second box, on the indented detail line. Its id is in the clear rather
+# than base64: the entry above already carries the payload, and this one only
+# has to say which entry it belongs to.
+REJECT_RE = re.compile(
+    r"^\s+- \[(?P<checked>[ xX])\].*?<!-- reject:(?P<id>[^\s>]+) -->", re.M)
+
 PAYLOAD_FIELDS = ("id", "name", "title", "date", "section", "url", "origin")
 
 
@@ -280,6 +286,20 @@ def checked_ids(issue_body):
             if payload:
                 out.add(payload["id"])
     return out
+
+
+def rejected_in_issue(issue_body):
+    """Papers the maintainer crossed out in the inbox.
+
+    A cross is not durable on its own -- it lives in an Issue body that the
+    next refresh rewrites -- so it is honoured here and recorded for good in
+    data/maintainer-rejected.jsonl when /create-pr runs. Until that happens the
+    entry stays in the inbox wearing its cross, exactly as a ticked entry stays
+    until a PR carries it off. Neither mark is allowed to be the only copy of
+    itself.
+    """
+    return {m.group("id") for m in REJECT_RE.finditer(issue_body or "")
+            if m.group("checked").lower() == "x"}
 
 
 def edited_sections(issue_body):
@@ -330,7 +350,15 @@ TICKS = {True: "yes", False: "--"}
 
 
 def render_candidates(candidates):
-    """The checkbox lines for one source's candidates."""
+    """The checkbox lines for one source's candidates.
+
+    Two boxes each, because a candidate has three fates and one box only spells
+    two. Ticking the first accepts it; ticking the second says never propose
+    this again; leaving both empty means nobody has looked yet, which is not
+    the same as no. The second box is the detail line rather than a line of its
+    own -- that line already existed and had nothing interactive on it, so the
+    inbox gains a verdict without gaining any length.
+    """
     lines = []
     for cand in candidates:
         ev = cand.get("evidence") or {}
@@ -344,7 +372,8 @@ def render_candidates(candidates):
         if cand.get("origin"):
             detail.append(cand["origin"])
         detail.append(f"criteria {cand['met']}/3 ({marks})")
-        lines.append("      " + " · ".join(d for d in detail if d))
+        lines.append("  - [ ] **drop** · " + " · ".join(d for d in detail if d)
+                     + f" <!-- reject:{cand['id']} -->")
     return lines
 
 
@@ -393,4 +422,16 @@ def retick(report, ticked):
             payload = decode(m.group("payload"))
             if payload and payload["id"] in ticked:
                 lines[i] = line.replace("- [ ]", "- [x]", 1)
+    return "".join(lines)
+
+
+def recross(report, rejected):
+    """The same, for the drop box. A verdict survives a refresh either way."""
+    if not rejected:
+        return report
+    lines = report.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        m = REJECT_RE.match(line)
+        if m and m.group("id") in rejected:
+            lines[i] = line.replace("- [ ]", "- [x]", 1)
     return "".join(lines)

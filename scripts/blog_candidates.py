@@ -251,9 +251,10 @@ def render(candidates, sections, polled, failed, carried=0):
         "feed summary is not that. Titles from `page` sources are scraped from "
         "anchor text and are provisional — fix them in place if they are wrong.",
         "",
-        "Tick what belongs. The section in backticks defaults to `reports`; edit "
-        "it if the post is really a dataset or a survey. Comment `/create-pr` "
-        "when done.",
+        "Tick the top box for what belongs, the nested **drop** box for what "
+        "should stop coming back. The section in backticks defaults to `reports`; "
+        "edit it if the post is really a dataset or a survey. Comment "
+        "`/create-pr` when done.",
         "",
         f"Valid sections: {', '.join(f'`{s}`' for s in sections)}.",
         "",
@@ -279,6 +280,9 @@ def parse_args():
     ap.add_argument("--papers", type=Path, default=ROOT / "data" / "papers.jsonl")
     ap.add_argument("--sections", type=Path, default=ROOT / "data" / "sections.json")
     ap.add_argument("--ignore", type=Path, default=ROOT / "data" / "arxiv-ignore.txt")
+    ap.add_argument("--maintainer-rejected", type=Path,
+                    default=ROOT / "data" / "maintainer-rejected.jsonl",
+                    help="posts crossed out by hand in the inbox")
     ap.add_argument("--rejected", type=Path,
                     default=ROOT / "data" / "agent-rejected.jsonl")
     ap.add_argument("--existing-issue-body", type=Path,
@@ -295,12 +299,14 @@ def main():
     watchlist = json.loads(args.watchlist.read_text(encoding="utf-8"))
 
     known_ids = (sources.known_ids(args.papers) | sources.ignored_ids(args.ignore)
-                 | sources.rejected_ids(args.rejected))
+                 | sources.rejected_ids(args.rejected)
+                 | sources.rejected_ids(args.maintainer_rejected))
     known_titles = sources.known_titles(args.papers)
     known_urls = sources.known_urls(args.papers)
     issue_body = (args.existing_issue_body.read_text(encoding="utf-8")
                   if args.existing_issue_body and args.existing_issue_body.exists() else "")
     overrides = sources.edited_sections(issue_body)
+    crossed = sources.rejected_in_issue(issue_body)
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=args.days)).date().isoformat()
     candidates, seen, failed = [], set(), 0
@@ -366,9 +372,10 @@ def main():
         carried += 1
 
     candidates.sort(key=lambda c: (c["date"] or "", c["id"]), reverse=True)
-    report = sources.retick(
-        render(candidates, sections, len(watchlist), failed, carried),
-        sources.checked_ids(issue_body))
+    report = sources.recross(
+        sources.retick(render(candidates, sections, len(watchlist), failed, carried),
+                       sources.checked_ids(issue_body)),
+        crossed)
     if args.output == "-":
         sys.stdout.write(report)
         print(len(candidates), file=sys.stderr)
