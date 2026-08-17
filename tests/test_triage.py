@@ -4,73 +4,94 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+import sources  # noqa: E402
 import triage  # noqa: E402
 
 
-class TestSuggestSection(unittest.TestCase):
+class TestSuggestTags(unittest.TestCase):
     def test_title_beats_abstract(self):
         # The abstract is all about memory; the title says the paper is a cache.
-        section = triage.suggest_section(
+        tags = triage.suggest_tags(
             "WorldCache: Content-Aware Caching for Accelerated Video World Models",
             "We keep long-term memory consistent across revisits using retrieval.")
-        self.assertEqual(section, "realtime")
+        self.assertEqual(tags, ["realtime"])
 
     def test_memory_efficient_is_about_vram(self):
-        section = triage.suggest_section(
+        tags = triage.suggest_tags(
             "Towards Memory-Efficient Autoregressive Video Generation", "")
-        self.assertEqual(section, "realtime")
+        self.assertEqual(tags, ["realtime"])
 
     def test_real_memory_paper_still_routes_to_memory(self):
-        section = triage.suggest_section(
+        tags = triage.suggest_tags(
             "FadeMem: Distance-Aware Memory Consolidation for Video Diffusion", "")
-        self.assertEqual(section, "memory")
+        self.assertEqual(tags, ["memory"])
 
     def test_dataset_needs_the_title(self):
         # Every method paper names its training data; that must not make it a dataset.
-        method = triage.suggest_section(
+        method = triage.suggest_tags(
             "CanvasMAR: Improving Masked Autoregressive Video Prediction",
             "We train on a large dataset of gameplay videos and a second dataset.")
-        self.assertNotEqual(method, "datasets")
-        real = triage.suggest_section(
+        self.assertNotIn("datasets", method)
+        real = triage.suggest_tags(
             "EgoVid-5M: A Large-Scale Video-Action Dataset", "")
-        self.assertEqual(real, "datasets")
+        self.assertIn("datasets", real)
 
     def test_serving_paper_is_not_memory(self):
-        section = triage.suggest_section(
+        tags = triage.suggest_tags(
             "Stateful Worlds, Stateless Elasticity: Exact-State Serving for World Models", "")
-        self.assertEqual(section, "realtime")
+        self.assertEqual(tags, ["realtime"])
 
 
 class TestTriage(unittest.TestCase):
     def test_all_three_criteria_reach_the_main_list(self):
-        section, met, _ = triage.triage(
+        tags, met, _ = triage.triage(
             "Matrix-Game 2.0: An Open-Source Real-Time Interactive World Model",
             "Frame-level keyboard and mouse actions drive an autoregressive causal "
             "diffusion model that streams at 25 FPS with long-term memory of the scene.")
-        self.assertEqual(section, "systems")
+        # `systems` first, then what the title says the paper is about. It is a
+        # real-time paper as well, and under sections that was unsayable.
+        self.assertEqual(tags, ["systems", "realtime"])
         self.assertEqual(met, 3)
 
     def test_survey_wins_over_criteria(self):
-        section, _, _ = triage.triage(
+        tags, _, _ = triage.triage(
             "A Survey of Interactive Generative Video",
             "Real-time action-conditioned streaming with persistent memory.")
-        self.assertEqual(section, "surveys")
+        self.assertEqual(tags, ["surveys"])
 
     def test_benchmark_wins_over_criteria(self):
-        section, _, _ = triage.triage(
+        tags, _, _ = triage.triage(
             "WorldMark: A Unified Benchmark Suite for Interactive Video World Models",
             "Real-time action-conditioned streaming with persistent memory.")
-        self.assertEqual(section, "benchmarks")
+        self.assertEqual(tags, ["benchmarks"])
 
-    def test_partial_evidence_lands_in_a_supporting_section(self):
-        section, met, _ = triage.triage(
+    def test_partial_evidence_does_not_earn_the_systems_tag(self):
+        tags, met, _ = triage.triage(
             "Rolling Diffusion Models", "A progressive noise schedule over frames.")
-        self.assertNotEqual(section, "systems")
+        self.assertNotIn("systems", tags)
         self.assertLess(met, 3)
+
+    def test_a_title_that_claims_two_things_gets_two_tags(self):
+        """The whole point of tags. Under sections this was a coin flip that
+        emptied whichever list lost."""
+        tags, _, _ = triage.triage(
+            "Action-Conditioned Video World Models via Few-Step Distillation",
+            "A progressive noise schedule over frames.")
+        self.assertEqual(tags, ["control", "realtime"])
+
+    def test_a_system_keeps_the_tags_for_what_it_is_about(self):
+        tags, met, _ = triage.triage(
+            "Incantation: Natural Language as the Action Interface for "
+            "Multi-Entity Video World Models",
+            "Per-entity free-form sentences drive an autoregressive causal model "
+            "that streams in real time with persistent long-term memory.")
+        self.assertEqual(met, 3)
+        self.assertEqual(tags[0], "systems")
+        self.assertIn("control", tags)
 
 
 class TestEfficiencySubstrate(unittest.TestCase):
-    """Real papers the criteria gate dropped at 0/3 while the realtime section
+    """Real papers the criteria gate dropped at 0/3 while the realtime list
     already held a dozen of exactly their genre."""
 
     RECOVERED = [
@@ -97,8 +118,8 @@ class TestEfficiencySubstrate(unittest.TestCase):
 
     def test_they_land_in_realtime(self):
         for title, abstract in self.RECOVERED:
-            section, _, _ = triage.triage(title, abstract)
-            self.assertEqual(section, "realtime", title)
+            tags, _, _ = triage.triage(title, abstract)
+            self.assertIn("realtime", tags, title)
 
     def test_efficiency_without_video_is_not_admitted(self):
         for title, abstract in [
@@ -134,6 +155,64 @@ class TestExtractName(unittest.TestCase):
         ]:
             self.assertIsNone(triage.extract_name(title), title)
 
+
+
+class TestLanguageAsAnAction(unittest.TestCase):
+    """Typing at a world is a way of acting in it.
+
+    The action criterion was written around joysticks -- keyboard, mouse,
+    camera trajectory, latent action -- and a paper whose interface is a
+    sentence matched none of it. The systems in the list that work this way
+    (Incantation, Pandora, LongLive) all scored on some *other* phrase in their
+    abstracts, so the gap stayed invisible until someone asked why the control
+    list had no prompt-controlled papers in it.
+    """
+
+    def test_a_language_interface_counts_as_an_action(self):
+        evidence = triage.criteria_evidence(
+            "Incantation: Natural Language as the Action Interface for "
+            "Multi-Entity Video World Models",
+            "Each entity is driven by its own free-form sentence at 0.25s "
+            "granularity.")
+        self.assertTrue(evidence["action"])
+
+    def test_a_paper_that_is_only_an_interface_now_reaches_the_inbox(self):
+        """0/3 is dropped before a human ever sees it -- see sources.proposal."""
+        title = "In-Video Instructions: Visual Signals as Generative Control"
+        abstract = ("We interpret visual signals embedded within the frames as "
+                    "instructions, a paradigm we term In-Video Instruction. In "
+                    "contrast to prompt-based control, which is global and coarse, "
+                    "this encodes user guidance directly into the visual domain, "
+                    "assigning distinct instructions to different objects.")
+        propose, tags, met, _ = sources.proposal(title, abstract)
+        self.assertTrue(propose)
+        self.assertEqual(tags, ["control"])
+        self.assertGreater(met, 0)
+
+    def test_a_caption_is_not_an_action(self):
+        """The guard on all of this.
+
+        Text-to-video is an enormous literature and none of it belongs here. If
+        a global prompt written before generation starts scored on the action
+        criterion, every one of those papers would arrive in the inbox at 2/3.
+        """
+        evidence = triage.criteria_evidence(
+            "Photorealistic Text-to-Video Generation with Cascaded Diffusion",
+            "Given a text prompt, our text-guided model synthesises a "
+            "high-resolution video clip conditioned on the caption.")
+        self.assertFalse(evidence["action"])
+
+    def test_a_control_paper_that_never_says_controllable_still_lands_there(self):
+        """The title rules were a list of joysticks, so a paper about the
+        conditioning channel itself fell through to whatever the abstract
+        happened to score -- `memory` here, on "consistency" and "retrieval"."""
+        tags, _, _ = triage.triage(
+            "Video-As-Prompt: Unified Semantic Control for Video Generation",
+            "We reframe the problem as in-context generation, using a reference "
+            "video as a direct semantic prompt that guides a frozen video "
+            "diffusion transformer, with position embeddings for robust context "
+            "retrieval and consistency across conditions.")
+        self.assertEqual(tags, ["control"])
 
 if __name__ == "__main__":
     unittest.main()

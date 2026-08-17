@@ -20,10 +20,10 @@ build, because the next regeneration would silently discard the change.
 
 ## Adding a paper
 
-Append a line like this. Only `id`, `title`, `section` and `links` are required:
+Append a line like this. Only `id`, `title`, `tags` and `links` are required:
 
 ```json
-{"id": "2508.13009", "name": "Matrix-Game 2.0", "title": "Matrix-Game 2.0: An Open-Source Real-Time and Streaming Interactive World Model", "venue": null, "date": "2025-08-18", "section": "systems", "section_source": "curated", "links": {"paper": "https://arxiv.org/abs/2508.13009", "code": "https://github.com/SkyworkAI/Matrix-Game"}, "attrs": {}}
+{"id": "2508.13009", "name": "Matrix-Game 2.0", "title": "Matrix-Game 2.0: An Open-Source Real-Time and Streaming Interactive World Model", "venue": null, "date": "2025-08-18", "tags": ["systems", "realtime"], "tags_source": {"systems": "curated", "realtime": "curated"}, "links": {"paper": "https://arxiv.org/abs/2508.13009", "code": "https://github.com/SkyworkAI/Matrix-Game"}, "attrs": {}}
 ```
 
 | field | meaning |
@@ -33,12 +33,12 @@ Append a line like this. Only `id`, `title`, `section` and `links` are required:
 | `title` | the paper's title, verbatim. A leading `Name:` is stripped at render time |
 | `venue` | real venue only (`ICLR 2026`). Leave `null` and the arXiv month is derived from `date` |
 | `date` | `YYYY-MM-DD`, or `YYYY` when only the year is known. Sorts the list |
-| `section` | one of the keys in [`data/sections.json`](data/sections.json) |
-| `section_source` | `curated` once a human has confirmed the section, `rule` if a keyword guessed it |
+| `tags` | one or more keys from [`data/tags.json`](data/tags.json), in that file's order |
+| `tags_source` | per tag: `curated` once a human has confirmed it, `rule` if a keyword guessed it |
 | `links` | any of `paper`, `website`, `code`, `blog` |
 | `attrs` | comparison-table fields, see below. `{}` until someone reads the paper |
 
-## Which section
+## Which tags
 
 The main list, `systems`, has a hard bar — all three criteria in the
 [Scope](README.md#scope) section:
@@ -47,9 +47,14 @@ The main list, `systems`, has a hard bar — all three criteria in the
 2. causal or streaming generation,
 3. persistent world state.
 
-If you are unsure whether a paper clears all three, put it in the supporting
-section it fits best (`control`, `realtime`, `memory`, `datasets`) and say so in
-the PR. Moving it up later is one field.
+Tags are not exclusive, so this is not a choice. A paper that clears the bar
+gets `systems` **and** a tag for each thing it contributes — `control` for an
+action interface, `realtime` for a latency result, `memory` for a persistence
+mechanism. If you are unsure whether it clears all three, leave `systems` off
+and tag the rest; adding it later is one entry in a list.
+
+Tag what the paper contributes, not what it mentions. Every video model has an
+action space and a frame rate; two or three tags is a lot, five is wrong.
 
 Papers that are out of scope entirely — driving world models, robot policies
 without a rendered interactive stream, static 3D scene generation — belong in

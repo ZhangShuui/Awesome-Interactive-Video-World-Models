@@ -152,22 +152,22 @@ VISUAL_GATE_RE = re.compile(
 
 
 def proposal(title, abstract):
-    """-> (propose, section, met, evidence). The one admission decision.
+    """-> (propose, tags, met, evidence). The one admission decision.
 
     Scoring is evidence of a criterion, not satisfaction of it: it decides what
     is worth two minutes of a reviewer's attention, nothing more. Surveys,
     benchmarks and the efficiency substrate are admitted at 0/3 because they
     have no reason to say "causal" or "streaming" anywhere and were being
-    dropped while the realtime section already held a dozen of their genre.
+    dropped while the realtime list already held a dozen of their genre.
     """
     blob = f"{title} {abstract or ''}"
     if OFF_TOPIC_RE.search(blob) or not VISUAL_GATE_RE.search(blob):
-        return False, None, 0, {}
-    section, met, evidence = triage.triage(title, abstract)
-    if (met == 0 and section not in ("surveys", "benchmarks")
+        return False, [], 0, {}
+    tags, met, evidence = triage.triage(title, abstract)
+    if (met == 0 and not {"surveys", "benchmarks"} & set(tags)
             and not triage.is_efficiency_substrate(title, abstract)):
-        return False, section, met, evidence
-    return True, section, met, evidence
+        return False, tags, met, evidence
+    return True, tags, met, evidence
 
 
 # --- known state -------------------------------------------------------------
@@ -233,12 +233,18 @@ def rejected_ids(path):
 
 # --- inbox format ------------------------------------------------------------
 
-# The visible line is editable -- the section in backticks is a guess and the
+# The visible line is editable -- the tags in backticks are a guess and the
 # maintainer's correction wins -- so the machine-readable copy rides along in an
 # HTML comment. Nothing constrains the id, which is what lets a blog post and an
 # arXiv preprint share one inbox.
+#
+# Tags are comma-separated, and editing them means typing a list: `systems` ->
+# `systems,control`. A trailing comma or a space after one is accepted, because
+# the field is edited by a human on a phone as often as not.
+TAGS = r"[a-z-]+(?:\s*,\s*[a-z-]+)*,?"
+
 CANDIDATE_RE = re.compile(
-    r"^- \[(?P<checked>[ xX])\]\s+`(?P<section>[a-z-]+)`\s+.*?"
+    rf"^- \[(?P<checked>[ xX])\]\s+`(?P<tags>{TAGS})`\s+.*?"
     r"<!-- candidate:(?P<payload>[A-Za-z0-9+/=]+) -->",
     re.M | re.S)
 
@@ -247,7 +253,7 @@ CANDIDATE_RE = re.compile(
 # not identity -- but re-deriving them needs the abstract, and the inbox does
 # not carry one, so a carried candidate reads them back off its own report.
 CARRIED_RE = re.compile(
-    r"^- \[(?P<checked>[ xX])\]\s+`(?P<section>[a-z-]+)`\s+.*?"
+    rf"^- \[(?P<checked>[ xX])\]\s+`(?P<tags>{TAGS})`\s+.*?"
     r"<!-- candidate:(?P<payload>[A-Za-z0-9+/=]+) -->\n"
     r"[ ]+(?P<detail>\S.*)$",
     re.M)
@@ -262,7 +268,18 @@ CRITERIA_RE = re.compile(
 REJECT_RE = re.compile(
     r"^\s+- \[(?P<checked>[ xX])\].*?<!-- reject:(?P<id>[^\s>]+) -->", re.M)
 
-PAYLOAD_FIELDS = ("id", "name", "title", "date", "section", "url", "origin")
+PAYLOAD_FIELDS = ("id", "name", "title", "date", "tags", "url", "origin")
+
+
+def parse_tags(raw):
+    """`systems, control,` -> ['systems', 'control']. Order is the maintainer's."""
+    seen, out = set(), []
+    for tag in (raw or "").split(","):
+        tag = tag.strip()
+        if tag and tag not in seen:
+            seen.add(tag)
+            out.append(tag)
+    return out
 
 
 def encode(record):
@@ -302,13 +319,16 @@ def rejected_in_issue(issue_body):
             if m.group("checked").lower() == "x"}
 
 
-def edited_sections(issue_body):
-    """Section corrections the maintainer typed survive an inbox refresh."""
+def edited_tags(issue_body):
+    """Tag corrections the maintainer typed survive an inbox refresh."""
     out = {}
     for m in CANDIDATE_RE.finditer(issue_body or ""):
         payload = decode(m.group("payload"))
-        if payload and m.group("section") != payload.get("section"):
-            out[payload["id"]] = m.group("section")
+        if not payload:
+            continue
+        tags = parse_tags(m.group("tags"))
+        if tags != (payload.get("tags") or []):
+            out[payload["id"]] = tags
     return out
 
 
@@ -335,9 +355,9 @@ def carried_candidates(issue_body):
             continue
         criteria = CRITERIA_RE.search(m.group("detail"))
         candidate = dict(payload)
-        # The visible section is the maintainer's if they edited it, and the
+        # The visible tags are the maintainer's if they edited them, and the
         # payload's otherwise; either way the line is what to believe.
-        candidate["section"] = m.group("section")
+        candidate["tags"] = parse_tags(m.group("tags"))
         candidate["met"] = int(criteria.group("met")) if criteria else 0
         candidate["evidence"] = {
             key: bool(criteria and criteria.group(key) == "yes")
@@ -366,7 +386,7 @@ def render_candidates(candidates):
             f"{key} {TICKS[bool(ev.get(key))]}" for key in ("action", "causal", "state"))
         payload = encode({k: cand[k] for k in PAYLOAD_FIELDS if cand.get(k)})
         lines.append(
-            f"- [ ] `{cand['section']}` **{cand['id']}** — {cand['title']} "
+            f"- [ ] `{','.join(cand['tags'])}` **{cand['id']}** — {cand['title']} "
             f"<!-- candidate:{payload} -->")
         detail = [url_for(cand["id"], cand.get("url")), cand.get("date") or "?"]
         if cand.get("origin"):

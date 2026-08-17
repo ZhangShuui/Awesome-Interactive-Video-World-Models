@@ -140,7 +140,7 @@ def fill_abstracts(candidates):
 
 # --- report ------------------------------------------------------------------
 
-def render(candidates, sections, swept):
+def render(candidates, tags, swept):
     lines = [
         "## Review OpenReview candidates",
         "",
@@ -149,10 +149,10 @@ def render(candidates, sections, swept):
         "",
         "These are matched against the list by **title**, not by id — a paper "
         "here may already be present under its arXiv id if the titles differ. "
-        "Tick what belongs; the section in backticks is a keyword guess and your "
+        "Tick what belongs; the tags in backticks are a keyword guess and your "
         "edit wins. Comment `/create-pr` when done.",
         "",
-        f"Valid sections: {', '.join(f'`{s}`' for s in sections)}.",
+        f"Valid tags: {', '.join(f'`{t}`' for t in tags)}.",
         "",
         "The venue shown is what OpenReview reports, and it is recorded on the "
         "entry — this is the one source here that knows a paper became a "
@@ -181,12 +181,12 @@ def parse_args():
                     help="also propose papers under review, which may be withdrawn "
                          "and carry no venue")
     ap.add_argument("--papers", type=Path, default=ROOT / "data" / "papers.jsonl")
-    ap.add_argument("--sections", type=Path, default=ROOT / "data" / "sections.json")
+    ap.add_argument("--tags", type=Path, default=ROOT / "data" / "tags.json")
     ap.add_argument("--ignore", type=Path, default=ROOT / "data" / "arxiv-ignore.txt")
     ap.add_argument("--rejected", type=Path,
                     default=ROOT / "data" / "agent-rejected.jsonl")
     ap.add_argument("--existing-issue-body", type=Path,
-                    help="current inbox body; ticks and section edits are preserved")
+                    help="current inbox body; ticks and tag edits are preserved")
     ap.add_argument("--notes-file", type=Path,
                     help="read a saved search response instead of calling the API")
     ap.add_argument("--timeout", type=float, default=60.0)
@@ -213,7 +213,7 @@ def collect(notes, known_ids, known_titles, overrides, venue_re, accepted_only):
         key = sources.norm_title(title)
         if pid in known_ids or key in known_titles:
             continue
-        propose, section, met, evidence = sources.proposal(title, abstract)
+        propose, tags_, met, evidence = sources.proposal(title, abstract)
         if not propose:
             continue
         cand = {
@@ -221,7 +221,7 @@ def collect(notes, known_ids, known_titles, overrides, venue_re, accepted_only):
             "name": triage.extract_name(title),
             "title": title,
             "date": note_date(note),
-            "section": overrides.get(pid, section),
+            "tags": overrides.get(pid, tags_),
             "met": met,
             "evidence": evidence,
             "url": f"https://openreview.net/forum?id={forum}",
@@ -240,7 +240,7 @@ def collect(notes, known_ids, known_titles, overrides, venue_re, accepted_only):
 
 def main():
     args = parse_args()
-    sections = [s["key"] for s in json.loads(args.sections.read_text(encoding="utf-8"))]
+    tags = [t["key"] for t in json.loads(args.tags.read_text(encoding="utf-8"))]
     venue_re = re.compile(args.venue_re, re.I) if args.venue_re else VENUE_RE
 
     if args.notes_file:
@@ -255,7 +255,7 @@ def main():
     known_ids = (sources.known_ids(args.papers) | sources.ignored_ids(args.ignore)
                  | sources.rejected_ids(args.rejected))
     candidates = collect(notes, known_ids, sources.known_titles(args.papers),
-                         sources.edited_sections(issue_body), venue_re,
+                         sources.edited_tags(issue_body), venue_re,
                          not args.include_submissions)
 
     if len(candidates) > args.limit:
@@ -264,7 +264,7 @@ def main():
               f"to see the rest", file=sys.stderr)
         candidates = candidates[:args.limit]
 
-    report = sources.retick(render(candidates, sections, len(notes)),
+    report = sources.retick(render(candidates, tags, len(notes)),
                             sources.checked_ids(issue_body))
     if args.output == "-":
         sys.stdout.write(report)

@@ -3,7 +3,7 @@
 
 Genie, Oasis, Sora, Marble, RTFM: the systems this list exists to track are
 routinely announced in a blog post and never reach arXiv, which is why
-`reports` is a section at all. Until now that section was filled entirely by
+`reports` is a tag at all. Until now that tag was applied entirely by
 hand and grew six entries; the daily pipeline could not see a single one of
 them. This polls the watchlist in data/sources.json instead.
 
@@ -238,7 +238,7 @@ def fill_abstracts(candidates, watchlist=None, timeout=60.0, retries=2, retry_de
 
 # --- report ------------------------------------------------------------------
 
-def render(candidates, sections, polled, failed, carried=0):
+def render(candidates, tags, polled, failed, carried=0):
     lines = [
         "## Review blog and technical-report candidates",
         "",
@@ -247,16 +247,16 @@ def render(candidates, sections, polled, failed, carried=0):
         + (f", plus {carried} still open from an earlier poll" if carried else "") + ".",
         "",
         "**Every one of these needs the link opened before it is merged.** The "
-        "`reports` section promises hand-checked URLs, and a keyword match on a "
+        "`reports` tag promises hand-checked URLs, and a keyword match on a "
         "feed summary is not that. Titles from `page` sources are scraped from "
         "anchor text and are provisional — fix them in place if they are wrong.",
         "",
         "Tick the top box for what belongs, the nested **drop** box for what "
-        "should stop coming back. The section in backticks defaults to `reports`; "
+        "should stop coming back. The tags in backticks default to `reports`; "
         "edit it if the post is really a dataset or a survey. Comment "
         "`/create-pr` when done.",
         "",
-        f"Valid sections: {', '.join(f'`{s}`' for s in sections)}.",
+        f"Valid tags: {', '.join(f'`{t}`' for t in tags)}.",
         "",
         "Sources live in `data/sources.json` — add a lab there when it starts "
         "publishing work this list should track.",
@@ -278,7 +278,7 @@ def parse_args():
                     help="ignore posts older than this; posts with no date always pass")
     ap.add_argument("--watchlist", type=Path, default=ROOT / "data" / "sources.json")
     ap.add_argument("--papers", type=Path, default=ROOT / "data" / "papers.jsonl")
-    ap.add_argument("--sections", type=Path, default=ROOT / "data" / "sections.json")
+    ap.add_argument("--tags", type=Path, default=ROOT / "data" / "tags.json")
     ap.add_argument("--ignore", type=Path, default=ROOT / "data" / "arxiv-ignore.txt")
     ap.add_argument("--maintainer-rejected", type=Path,
                     default=ROOT / "data" / "maintainer-rejected.jsonl",
@@ -286,7 +286,7 @@ def parse_args():
     ap.add_argument("--rejected", type=Path,
                     default=ROOT / "data" / "agent-rejected.jsonl")
     ap.add_argument("--existing-issue-body", type=Path,
-                    help="current inbox body; ticks and section edits are preserved")
+                    help="current inbox body; ticks and tag edits are preserved")
     ap.add_argument("--timeout", type=float, default=60.0)
     ap.add_argument("--retries", type=int, default=2)
     ap.add_argument("--retry-delay", type=float, default=5.0)
@@ -295,7 +295,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    sections = [s["key"] for s in json.loads(args.sections.read_text(encoding="utf-8"))]
+    tags = [t["key"] for t in json.loads(args.tags.read_text(encoding="utf-8"))]
     watchlist = json.loads(args.watchlist.read_text(encoding="utf-8"))
 
     known_ids = (sources.known_ids(args.papers) | sources.ignored_ids(args.ignore)
@@ -305,7 +305,7 @@ def main():
     known_urls = sources.known_urls(args.papers)
     issue_body = (args.existing_issue_body.read_text(encoding="utf-8")
                   if args.existing_issue_body and args.existing_issue_body.exists() else "")
-    overrides = sources.edited_sections(issue_body)
+    overrides = sources.edited_tags(issue_body)
     crossed = sources.rejected_in_issue(issue_body)
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=args.days)).date().isoformat()
@@ -341,10 +341,10 @@ def main():
                 "name": triage.extract_name(item["title"]),
                 "title": item["title"],
                 "date": item["date"],
-                # Always `reports`: that section is defined as the systems that
+                # Always `reports`: that tag is defined as the systems that
                 # would be in the main list if they had a paper. The maintainer
                 # moves it if the post turns out to be something else.
-                "section": overrides.get(pid, "reports"),
+                "tags": overrides.get(pid, ["reports"]),
                 "met": met,
                 "evidence": evidence,
                 "url": url,
@@ -373,7 +373,7 @@ def main():
 
     candidates.sort(key=lambda c: (c["date"] or "", c["id"]), reverse=True)
     report = sources.recross(
-        sources.retick(render(candidates, sections, len(watchlist), failed, carried),
+        sources.retick(render(candidates, tags, len(watchlist), failed, carried),
                        sources.checked_ids(issue_body)),
         crossed)
     if args.output == "-":

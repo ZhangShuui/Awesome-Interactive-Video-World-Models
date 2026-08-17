@@ -54,7 +54,7 @@ restriction — it is the same as passing no flag at all, which is exactly how
 this shipped broken the first time. The tools have to be named.
 
 The agent never pushes to `main`, and the script aborts if the working tree is
-dirty. Every entry it adds is marked `"section_source": "agent"`, so
+dirty. Every tag it adds is marked `"agent"` in `tags_source`, so
 `scripts/validate.py --review` always shows what has not been confirmed by a
 human.
 
@@ -85,13 +85,13 @@ Requires `claude` and `gh` on PATH, both already logged in.
 
 ## What the agent decides
 
-**In, out, or unsure**, plus a section, from the title and abstract. `unsure` is
+**In, out, or unsure**, plus tags, from the title and abstract. `unsure` is
 a first-class verdict: those papers stay in the inbox and are listed in the PR
 under "Left for you". The prompt pushes toward `unsure` rather than a guess,
 because a wrong `in` quietly corrupts the list.
 
 **Attributes**, for accepted papers going to `systems` only. Those are the rows
-the comparison table renders; a paper in a supporting section never needs them.
+the comparison table renders; a paper without the `systems` tag never needs them.
 The agent fetches the paper, extracts backbone, action space, frame rate,
 horizon and memory mechanism, and records **where each number came from** —
 section, table or figure. That evidence is stored on the record and rendered in

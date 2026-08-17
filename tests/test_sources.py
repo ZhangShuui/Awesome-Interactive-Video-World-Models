@@ -19,7 +19,7 @@ import openreview_candidates as orv  # noqa: E402
 import sources  # noqa: E402
 import venue_candidates as venue  # noqa: E402
 
-SECTIONS = {s["key"] for s in json.loads((ROOT / "data" / "sections.json").read_text())}
+TAGS = {t["key"] for t in json.loads((ROOT / "data" / "tags.json").read_text())}
 
 
 class TestIdentity(unittest.TestCase):
@@ -75,21 +75,30 @@ class TestSharedScope(unittest.TestCase):
         self.assertFalse(propose)
 
     def test_efficiency_substrate_survives_zero_criteria(self):
-        propose, section, met, _ = sources.proposal(
+        propose, tags, met, _ = sources.proposal(
             "SPADE: a sparse attention engine for fast video diffusion",
             "Video diffusion transformers pay quadratic self-attention cost.")
         self.assertEqual(met, 0)
         self.assertTrue(propose)
-        self.assertEqual(section, "realtime")
+        self.assertEqual(tags, ["realtime"])
 
     def test_all_three_criteria_suggest_the_main_list(self):
-        propose, section, met, _ = sources.proposal(
+        propose, tags, met, _ = sources.proposal(
             "PlayNet: a playable video world model",
             "Per-step keyboard actions drive causal streaming video generation "
             "with a persistent spatial memory across revisits.")
         self.assertTrue(propose)
         self.assertEqual(met, 3)
-        self.assertEqual(section, "systems")
+        self.assertIn("systems", tags)
+
+    def test_a_dropped_candidate_comes_back_with_no_tags(self):
+        """`proposal` used to return None for the section on a rejection, which
+        a caller could still index into. An empty list cannot be mistaken for a
+        placement."""
+        propose, tags, _, _ = sources.proposal(
+            "A Systems Blueprint for Economic World Models", "Portfolio dynamics.")
+        self.assertFalse(propose)
+        self.assertEqual(tags, [])
 
 
 class TestQueryPhrases(unittest.TestCase):
@@ -275,17 +284,22 @@ class TestVenueListings(unittest.TestCase):
 class TestNonArxivRecords(unittest.TestCase):
     """A ticked blog post must not become an arxiv.org/abs link."""
 
-    def _issue_line(self, payload, section):
-        return (f"- [x] `{section}` **{payload['id']}** — {payload['title']} "
+    def _issue_line(self, payload, tags):
+        return (f"- [x] `{tags}` **{payload['id']}** — {payload['title']} "
                 f"<!-- candidate:{sources.encode(payload)} -->\n")
+
+    def _apply(self, body):
+        order = [t["key"] for t in json.loads(
+            (ROOT / "data" / "tags.json").read_text(encoding="utf-8"))]
+        return apply_mod.parse_selections(body, set(order), order)
 
     def test_a_blog_candidate_keeps_its_url_and_venue(self):
         body = self._issue_line({
             "id": "blog:genie-4", "title": "Genie 4", "name": "Genie 4",
-            "date": "2026-08-01", "section": "reports",
+            "date": "2026-08-01", "tags": ["reports"],
             "url": "https://example.test/blog/genie-4/",
             "origin": "Google DeepMind"}, "reports")
-        records, warnings = apply_mod.parse_selections(body, SECTIONS)
+        records, warnings = self._apply(body)
         self.assertFalse(warnings)
         self.assertEqual(records[0]["links"], {"blog": "https://example.test/blog/genie-4/"})
         self.assertEqual(records[0]["venue"], "Google DeepMind")
@@ -293,8 +307,8 @@ class TestNonArxivRecords(unittest.TestCase):
     def test_an_openreview_candidate_becomes_a_paper_link(self):
         body = self._issue_line({
             "id": "openreview:abc", "title": "PlayNet", "date": "2026-01-26",
-            "section": "systems", "origin": "ICLR 2026 Poster"}, "systems")
-        records, _ = apply_mod.parse_selections(body, SECTIONS)
+            "tags": ["systems"], "origin": "ICLR 2026 Poster"}, "systems")
+        records, _ = self._apply(body)
         self.assertEqual(records[0]["links"],
                          {"paper": "https://openreview.net/forum?id=abc"})
         self.assertEqual(records[0]["venue"], "ICLR 2026 Poster")
@@ -302,16 +316,16 @@ class TestNonArxivRecords(unittest.TestCase):
     def test_an_arxiv_candidate_is_unchanged(self):
         body = self._issue_line({
             "id": "2608.07463", "title": "A paper", "date": "2026-08-07",
-            "section": "realtime"}, "realtime")
-        records, _ = apply_mod.parse_selections(body, SECTIONS)
+            "tags": ["realtime"]}, "realtime")
+        records, _ = self._apply(body)
         self.assertEqual(records[0]["links"],
                          {"paper": "https://arxiv.org/abs/2608.07463"})
         self.assertIsNone(records[0]["venue"])
 
     def test_a_candidate_with_no_usable_link_is_skipped_with_a_warning(self):
         body = self._issue_line({
-            "id": "blog:mystery", "title": "No link", "section": "reports"}, "reports")
-        records, warnings = apply_mod.parse_selections(body, SECTIONS)
+            "id": "blog:mystery", "title": "No link", "tags": ["reports"]}, "reports")
+        records, warnings = self._apply(body)
         self.assertEqual(records, [])
         self.assertTrue(warnings)
 

@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """Render README.md and docs/comparison.md from data/.
 
-data/papers.jsonl + data/sections.json + data/README.template.md -> README.md
+data/papers.jsonl + data/tags.json + data/README.template.md -> README.md
+
+There are no sections. One list, newest first, every paper once, each carrying
+the one to three tags that say what it is. A paper is rarely about a single
+thing and the reader is rarely after a single thing either; splitting the list
+into buckets made both of those unsayable, and repeating a paper under every
+bucket it belongs to just moved the problem. Find by tag with the browser's
+find, not by scrolling to a heading.
 
 The template owns all prose. This script only fills the marked blocks:
 
-    <!-- BEGIN:CONTENTS -->  ... <!-- END:CONTENTS -->
-    <!-- BEGIN:LIST -->      ... <!-- END:LIST -->
-    <!-- BEGIN:TABLE -->     ... <!-- END:TABLE -->
+    <!-- BEGIN:TAGKEY -->  ... <!-- END:TAGKEY -->
+    <!-- BEGIN:LIST -->    ... <!-- END:LIST -->
+    <!-- BEGIN:TABLE -->   ... <!-- END:TABLE -->
 
 README.md is generated. Edit data/papers.jsonl, never the README.
 
@@ -116,6 +123,8 @@ def venue_of(rec):
 
 
 def entry_line(rec):
+    """One bullet, ending in its tags. The tags are the only thing saying what
+    the paper is about, so every one of them is on the line."""
     parts = ["*"]
     title = rec["title"].rstrip(". ")
     name = rec.get("name")
@@ -132,41 +141,22 @@ def entry_line(rec):
     for key, label in LINK_ORDER:
         if links.get(key):
             parts.append(f"[[{label}]({links[key]})]")
+    tags = rec.get("tags") or []
+    if tags:
+        parts.append("· " + " ".join(f"`{t}`" for t in tags))
     return " ".join(parts)
 
 
-def anchor(title):
-    """GitHub's heading slug. Punctuation is dropped *before* spaces become
-    hyphens, so '&' leaves a gap behind: 'A & B' -> 'a--b'. Do not collapse."""
-    slug = re.sub(r"[^\w\s-]", "", title.lower())
-    return re.sub(r"\s", "-", slug.strip())
+def render_list(records):
+    """Every paper once, newest first."""
+    rows = sorted(records, key=lambda r: (r.get("date") or "", r["id"]), reverse=True)
+    return "\n".join(entry_line(r) for r in rows)
 
 
-def render_list(sections, by_section):
-    out = []
-    for sec in sections:
-        recs = by_section.get(sec["key"], [])
-        out.append(f"## {sec['title']}")
-        out.append("")
-        out.append(f"_{sec['blurb']}_")
-        out.append("")
-        if not recs:
-            out.append("_Nothing here yet — contributions welcome._")
-            out.append("")
-            continue
-        out.extend(entry_line(r) for r in recs)
-        out.append("")
-    return "\n".join(out).rstrip()
-
-
-def render_contents(sections):
-    lines = []
-    for sec in sections:
-        lines.append(f"- [{sec['title']}](#{anchor(sec['title'])})")
-    lines.append("- [System Comparison](#system-comparison)")
-    lines.append("- [Contributing](#contributing)")
-    lines.append("- [Citation](#citation)")
-    return "\n".join(lines)
+def render_tag_key(tags):
+    """What each tag means. A key, not a table of contents -- there is nothing
+    to jump to, because the list is not divided."""
+    return "\n".join(f"- **`{tag['key']}`** — {tag['blurb']}" for tag in tags)
 
 
 def _fps(rec):
@@ -175,12 +165,18 @@ def _fps(rec):
     return float(m.group()) if m else None
 
 
-def table_rows(records, sections=("systems",)):
+def table_rows(records, tags=("systems",), without=()):
     """Only the main list. A decoder or a scheduler also has a frame rate, but
     putting it in a column headed 'System' invites the reader to compare it
-    against an interactive system's frame rate, which is not the same number."""
+    against an interactive system's frame rate, which is not the same number.
+
+    `without` exists because tags overlap: almost every system also carries a
+    tech tag, so "everything that is not a system" has to be said by exclusion
+    rather than by listing the other tags."""
     rows = [r for r in records
-            if r["attrs"].get("backbone") and r["section"] in sections]
+            if r["attrs"].get("backbone")
+            and set(r.get("tags", [])) & set(tags)
+            and not set(r.get("tags", [])) & set(without)]
     rows.sort(key=lambda r: (r.get("date") or "", r["id"]), reverse=True)
     return rows
 
@@ -217,10 +213,12 @@ def render_table(records, limit=None):
     return "\n".join(out), len(rows), len(shown)
 
 
-def render_comparison_doc(records, sections):
+def render_comparison_doc(records, tags):
     systems = table_rows(records)
-    others = table_rows(records, tuple(s["key"] for s in sections if s["key"] != "systems"))
-    titles = {s["key"]: s["title"] for s in sections}
+    others = table_rows(records,
+                        tuple(t["key"] for t in tags if t["key"] != "systems"),
+                        without=("systems",))
+    titles = {t["key"]: t["title"] for t in tags}
 
     out = ["# System comparison (full)", "",
            "Generated by `scripts/build_readme.py` from `data/papers.jsonl` — do not edit by hand.", "",
@@ -269,7 +267,8 @@ def render_comparison_doc(records, sections):
                    "the stack and do not belong in the same column as an end-to-end frame rate.")
         out.append("")
         for rec in others:
-            block(rec, note=titles.get(rec["section"], rec["section"]))
+            note = " · ".join(titles.get(t, t) for t in rec.get("tags", []))
+            block(rec, note=note or None)
     return "\n".join(out)
 
 
@@ -290,19 +289,16 @@ def main():
                     help="rows kept in the README table (0 = all)")
     args = ap.parse_args()
 
-    sections = json.loads((DATA / "sections.json").read_text(encoding="utf-8"))
+    tags = json.loads((DATA / "tags.json").read_text(encoding="utf-8"))
     records = [json.loads(l) for l in (DATA / "papers.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
-    known = {s["key"] for s in sections}
+    known = {t["key"] for t in tags}
     for rec in records:
         rec.setdefault("attrs", {})
-        if rec["section"] not in known:
-            sys.exit(f"{rec['id']}: unknown section {rec['section']!r}")
-
-    by_section = {}
-    for rec in records:
-        by_section.setdefault(rec["section"], []).append(rec)
-    for recs in by_section.values():
-        recs.sort(key=lambda r: (r.get("date") or "", r["id"]), reverse=True)
+        if not rec.get("tags"):
+            sys.exit(f"{rec['id']}: no tags")
+        for tag in rec["tags"]:
+            if tag not in known:
+                sys.exit(f"{rec['id']}: unknown tag {tag!r}")
 
     table, total_rows, shown_rows = render_table(
         records, args.table_limit or None)
@@ -311,11 +307,11 @@ def main():
                   "action spaces: [docs/comparison.md](docs/comparison.md)._")
 
     readme = (DATA / "README.template.md").read_text(encoding="utf-8")
-    readme = fill(readme, "CONTENTS", render_contents(sections))
-    readme = fill(readme, "LIST", render_list(sections, by_section))
+    readme = fill(readme, "TAGKEY", render_tag_key(tags))
+    readme = fill(readme, "LIST", render_list(records))
     readme = fill(readme, "TABLE", table)
 
-    comparison = render_comparison_doc(records, sections)
+    comparison = render_comparison_doc(records, tags)
 
     targets = [(ROOT / "README.md", readme),
                (ROOT / "docs" / "comparison.md", comparison)]

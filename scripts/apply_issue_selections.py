@@ -25,13 +25,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from sources import (CANDIDATE_RE, decode, rejected_in_issue,  # noqa: E402
-                     source_of, url_for)
+from sources import (CANDIDATE_RE, decode, parse_tags,  # noqa: E402
+                     rejected_in_issue, source_of, url_for)
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def parse_selections(issue_body, valid_sections):
+def parse_selections(issue_body, valid_tags, tag_order):
     """-> (records, warnings). Skips anything malformed rather than guessing."""
     records, warnings, seen = [], [], set()
     for match in CANDIDATE_RE.finditer(issue_body):
@@ -45,15 +45,21 @@ def parse_selections(issue_body, valid_sections):
         if pid in seen:
             continue
         seen.add(pid)
-        section = match.group("section")
-        if section not in valid_sections:
-            warnings.append(
-                f"{pid}: `{section}` is not a known section, "
-                f"fell back to `{payload.get('section')}`")
-            section = payload.get("section")
-        if section not in valid_sections:
-            warnings.append(f"{pid}: no usable section, skipped")
+        # An unknown tag is dropped on its own rather than taking the whole
+        # line with it: a maintainer adding `systems,contorl` should still get
+        # the paper, with one complaint, not silence.
+        typed = parse_tags(match.group("tags"))
+        tags = [t for t in typed if t in valid_tags]
+        for bad in [t for t in typed if t not in valid_tags]:
+            warnings.append(f"{pid}: `{bad}` is not a known tag, dropped")
+        if not tags:
+            tags = [t for t in (payload.get("tags") or []) if t in valid_tags]
+            if tags:
+                warnings.append(f"{pid}: no usable tag typed, kept {','.join(tags)}")
+        if not tags:
+            warnings.append(f"{pid}: no usable tag, skipped")
             continue
+        tags.sort(key=tag_order.index)
         url = url_for(pid, payload.get("url"))
         if not url:
             warnings.append(f"{pid}: no usable link, skipped")
@@ -69,8 +75,9 @@ def parse_selections(issue_body, valid_sections):
             "title": payload.get("title", "").strip(),
             "venue": payload.get("origin"),
             "date": payload.get("date"),
-            "section": section,
-            "section_source": "curated",
+            "tags": tags,
+            # Every tag on a ticked line was seen by the person who ticked it.
+            "tags_source": {t: "curated" for t in tags},
             "links": {link_key: url},
             "attrs": {},
         })
@@ -108,7 +115,7 @@ def write_summary(path, added, skipped, rejected, warnings):
     for rec in added:
         label = rec["name"] or rec["title"]
         link = next(iter(rec["links"].values()), "")
-        lines.append(f"- `{rec['section']}` — [{label}]({link})")
+        lines.append(f"- {' '.join(f'`{t}`' for t in rec['tags'])} — [{label}]({link})")
     if rejected:
         lines += ["", f"Crossed out, and recorded in "
                       f"`data/maintainer-rejected.jsonl` so they stop coming back "
@@ -148,15 +155,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--issue-body", type=Path, required=True)
     ap.add_argument("--papers", type=Path, default=ROOT / "data" / "papers.jsonl")
-    ap.add_argument("--sections", type=Path, default=ROOT / "data" / "sections.json")
+    ap.add_argument("--tags", type=Path, default=ROOT / "data" / "tags.json")
     ap.add_argument("--maintainer-rejected", type=Path,
                     default=ROOT / "data" / "maintainer-rejected.jsonl")
     ap.add_argument("--summary-output", type=Path)
     args = ap.parse_args()
 
-    valid = {s["key"] for s in json.loads(args.sections.read_text(encoding="utf-8"))}
+    order = [t["key"] for t in json.loads(args.tags.read_text(encoding="utf-8"))]
     body = args.issue_body.read_text(encoding="utf-8")
-    selected, warnings = parse_selections(body, valid)
+    selected, warnings = parse_selections(body, set(order), order)
 
     existing = []
     if args.papers.exists():

@@ -162,7 +162,7 @@ def fill_abstracts(candidates, timeout=60.0, retries=2, retry_delay=5.0):
 
 # --- report ------------------------------------------------------------------
 
-def render(candidates, sections, venue, listed, examined):
+def render(candidates, tags, venue, listed, examined):
     lines = [
         f"## Review {venue} proceedings candidates",
         "",
@@ -171,10 +171,10 @@ def render(candidates, sections, venue, listed, examined):
         "",
         "Everything already in the list under another identifier has been "
         "dropped by title, so what remains is mostly work that never went to "
-        "arXiv. Tick what belongs; the section in backticks is a keyword guess "
+        "arXiv. Tick what belongs; the tags in backticks are a keyword guess "
         "and your edit wins. Comment `/create-pr` when done.",
         "",
-        f"Valid sections: {', '.join(f'`{s}`' for s in sections)}.",
+        f"Valid tags: {', '.join(f'`{t}`' for t in tags)}.",
         "",
         "---",
         "",
@@ -196,12 +196,12 @@ def parse_args():
     ap.add_argument("--max-fetch", type=int, default=400,
                     help="most abstracts to read in one run")
     ap.add_argument("--papers", type=Path, default=ROOT / "data" / "papers.jsonl")
-    ap.add_argument("--sections", type=Path, default=ROOT / "data" / "sections.json")
+    ap.add_argument("--tags", type=Path, default=ROOT / "data" / "tags.json")
     ap.add_argument("--ignore", type=Path, default=ROOT / "data" / "arxiv-ignore.txt")
     ap.add_argument("--rejected", type=Path,
                     default=ROOT / "data" / "agent-rejected.jsonl")
     ap.add_argument("--existing-issue-body", type=Path,
-                    help="current inbox body; ticks and section edits are preserved")
+                    help="current inbox body; ticks and tag edits are preserved")
     ap.add_argument("--listing-file", type=Path,
                     help="read a saved proceedings index instead of fetching it")
     ap.add_argument("--timeout", type=float, default=90.0)
@@ -212,7 +212,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    sections = [s["key"] for s in json.loads(args.sections.read_text(encoding="utf-8"))]
+    tags = [t["key"] for t in json.loads(args.tags.read_text(encoding="utf-8"))]
     kind, spec, url, year = dialect_for(args.venue)
     title_re = re.compile(args.title_re, re.I) if args.title_re else TITLE_PREFILTER
 
@@ -227,7 +227,7 @@ def main():
     known_titles = sources.known_titles(args.papers)
     issue_body = (args.existing_issue_body.read_text(encoding="utf-8")
                   if args.existing_issue_body and args.existing_issue_body.exists() else "")
-    overrides = sources.edited_sections(issue_body)
+    overrides = sources.edited_tags(issue_body)
 
     shortlist = [p for p in papers
                  if title_re.search(p["title"])
@@ -243,7 +243,7 @@ def main():
     for index, paper in enumerate(shortlist, 1):
         print(f"  [{index}/{len(shortlist)}] {paper['title'][:70]}", file=sys.stderr)
         fill_abstracts([paper], args.timeout, args.retries, args.retry_delay)
-        propose, section, met, evidence = sources.proposal(
+        propose, tags_, met, evidence = sources.proposal(
             paper["title"], paper.get("abstract"))
         if not propose:
             continue
@@ -253,7 +253,7 @@ def main():
             "name": triage.extract_name(paper["title"]),
             "title": paper["title"],
             "date": None,
-            "section": overrides.get(pid, section),
+            "tags": overrides.get(pid, tags_),
             "met": met,
             "evidence": evidence,
             "url": paper["url"],
@@ -262,7 +262,7 @@ def main():
 
     candidates.sort(key=lambda c: (c["met"], c["title"]), reverse=True)
     report = sources.retick(
-        render(candidates, sections, args.venue, len(papers), len(shortlist)),
+        render(candidates, tags, args.venue, len(papers), len(shortlist)),
         sources.checked_ids(issue_body))
     if args.output == "-":
         sys.stdout.write(report)
