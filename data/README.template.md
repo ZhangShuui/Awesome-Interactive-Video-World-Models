@@ -65,7 +65,9 @@ Several excellent lists cover the wider field — see [Related lists](#related-l
 
 ## Tags
 
-There are no sections. Every paper sits in one list, newest first, carrying one to three tags that say what it is about — a system whose contribution is its action interface is `systems` `control`, and it is one entry, not two. To read everything on a topic, search the page for its tag.
+There are no sections. Every paper sits in one list, newest first, carrying one to three tags that say what it is about — a system whose contribution is its action interface is 🌍`systems` 🕹️`control`, and it is one entry, not two.
+
+To read everything on a topic, search the page for its **glyph**. Searching for `control` also hits every title with the word in it; searching for 🕹️ hits exactly the papers tagged with it and nothing else.
 
 <!-- BEGIN:TAGKEY -->
 <!-- END:TAGKEY -->

@@ -34,6 +34,21 @@ class TestOneList(unittest.TestCase):
         line = br.entry_line(rec(tags=["systems", "control", "realtime"]))
         self.assertTrue(line.endswith("· `systems` `control` `realtime`"), line)
 
+    def test_each_tag_is_rendered_with_its_glyph(self):
+        line = br.entry_line(rec(tags=["systems", "control"]),
+                             {"systems": "🌍", "control": "🕹️"})
+        self.assertTrue(line.endswith("· 🌍`systems` 🕹️`control`"), line)
+
+    def test_every_tag_has_a_glyph(self):
+        """The glyph is how a tag is found -- searching for `control` also
+        matches every title containing the word. A tag without one is
+        unsearchable, and renders as a bare backtick run with no colour."""
+        tags = json.loads((ROOT / "data" / "tags.json").read_text(encoding="utf-8"))
+        for tag in tags:
+            self.assertTrue(tag.get("icon"), tag["key"])
+        glyphs = [t["icon"] for t in tags]
+        self.assertEqual(len(set(glyphs)), len(glyphs), "two tags share a glyph")
+
     def test_nothing_generated_is_a_heading(self):
         """Heading-per-section rendering is what this replaced. If it comes
         back the list is categorised again, whatever the data says."""

@@ -122,7 +122,7 @@ def venue_of(rec):
     return venue or None
 
 
-def entry_line(rec):
+def entry_line(rec, icons=None):
     """One bullet, ending in its tags. The tags are the only thing saying what
     the paper is about, so every one of them is on the line."""
     parts = ["*"]
@@ -143,20 +143,27 @@ def entry_line(rec):
             parts.append(f"[[{label}]({links[key]})]")
     tags = rec.get("tags") or []
     if tags:
-        parts.append("· " + " ".join(f"`{t}`" for t in tags))
+        icons = icons or {}
+        parts.append("·")
+        parts += [f"{icons.get(t, '')}`{t}`".strip() for t in tags]
     return " ".join(parts)
 
 
-def render_list(records):
+def render_list(records, icons=None):
     """Every paper once, newest first."""
     rows = sorted(records, key=lambda r: (r.get("date") or "", r["id"]), reverse=True)
-    return "\n".join(entry_line(r) for r in rows)
+    return "\n".join(entry_line(r, icons) for r in rows)
 
 
 def render_tag_key(tags):
-    """What each tag means. A key, not a table of contents -- there is nothing
-    to jump to, because the list is not divided."""
-    return "\n".join(f"- **`{tag['key']}`** — {tag['blurb']}" for tag in tags)
+    """What each tag means, with the glyph that stands for it in the list.
+
+    A key, not a table of contents -- there is nothing to jump to, because the
+    list is not divided. The glyph earns its place by being searchable: every
+    tag name is also an English word that appears in titles, so finding the
+    control papers means searching for 🕹️, not for "control"."""
+    return "\n".join(f"- {tag['icon']} **`{tag['key']}`** — {tag['blurb']}"
+                     for tag in tags)
 
 
 def _fps(rec):
@@ -307,8 +314,9 @@ def main():
                   "action spaces: [docs/comparison.md](docs/comparison.md)._")
 
     readme = (DATA / "README.template.md").read_text(encoding="utf-8")
+    icons = {t["key"]: t["icon"] for t in tags}
     readme = fill(readme, "TAGKEY", render_tag_key(tags))
-    readme = fill(readme, "LIST", render_list(records))
+    readme = fill(readme, "LIST", render_list(records, icons))
     readme = fill(readme, "TABLE", table)
 
     comparison = render_comparison_doc(records, tags)
