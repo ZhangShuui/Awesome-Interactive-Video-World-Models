@@ -97,6 +97,7 @@ _Surveys that cover world models, video generation, or interactive generation. R
 * A Survey on Cache Methods in Diffusion Models: Toward Efficient Multi-Modal Generation. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.19755)]
 * A Comprehensive Survey on World Models for Embodied AI. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.16732)] [[Website](https://github.com/Li-Zn-H/AwesomeWorldModels)]
 * 3D and 4D World Modeling: A Survey. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.07996)]
+* Controllable Video Generation: A Survey. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.16869)]
 * A Survey on Long-Video Storytelling Generation: Architectures, Consistency, and Cinematic Quality. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.07202)]
 * A Survey: Learning Embodied Intelligence from Physical Simulators and World Models. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.00917)] [[Code](https://github.com/NJU3DV-LoongGroup/Embodied-World-Models-Survey)]
 * From 2D to 3D Cognition: A Brief Survey of General World Models. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.20134)]
@@ -253,7 +254,7 @@ _The main list: systems that meet all three criteria. Newest first._
 
 ## Action Control & Interfaces
 
-_How an action reaches the generator: action spaces, injection mechanisms, latent actions learned without labels, and control-fidelity analysis._
+_How an action reaches the generator: action spaces, injection mechanisms, latent actions learned without labels, and control-fidelity analysis. Language belongs here too — a prompt issued per step, per entity or mid-rollout is an action, and the papers about that interface sit alongside the ones about buttons._
 
 * **`DreamX-Phi 1.0`**, Action-Conditioned Video World Model for Robotic Manipulation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13489)]
 * Spatially-Grounded Text-to-Video Generation via Inference-Time Gradient-Free Optimization. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13037)]
@@ -267,6 +268,7 @@ _How an action reaches the generator: action spaces, injection mechanisms, laten
 * **`ShadowDancer`**, Teaching Video World Models Any Action by Learning Unified Dynamics Representations from a Video and Its Shadow. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.28362)]
 * **`ContactFlow`**, A video action conditioning that transfers across embodiments. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26579)]
 * Causally Debiased Latent Action Model for Embodied Action Conditioned World Models. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.09185)]
+* World Narrative Model for Highly Controllable Video Generation: A Paradigm Shift from Pixel Sampling to Physical World Orchestration. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.31946)]
 * **`CLAW`**, Learning Continuous Latent Action World Models via Adversarial Latent Regularization. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.04130)]
 * World Models as Group Actions. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.24578)]
 * **`Nano World Models`**, A Minimalist Implementation of Future Video Prediction. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.23993)] [[Website](https://simchowitzlabpublic.github.io/nano-world-model/)]
@@ -277,16 +279,25 @@ _How an action reaches the generator: action spaces, injection mechanisms, laten
 * Hierarchical Latent Action Model. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.05815)]
 * Factored Latent Action World Models. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.16229)]
 * **`Olaf-World`**, Orienting Latent Actions for Video World Modeling. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.10104)] [[Website](https://showlab.github.io/Olaf-World/)] [[Code](https://github.com/showlab/Olaf-World)]
+* Rethinking Global Text Conditioning in Diffusion Transformers. **`arXiv 2026.02`** [[Paper](https://arxiv.org/abs/2602.09268)]
 * Learning Latent Action World Models In The Wild. **`arXiv 2026.01`** [[Paper](https://arxiv.org/abs/2601.05230)]
 * **`LongVie 2`**, Multimodal Controllable Ultra-Long Video World Model. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.13604)] [[Website](https://vchitect.github.io/LongVie2-project/)]
+* **`TV2TV`**, A Unified Framework for Interleaved Language and Video Generation. **`arXiv 2025.12`** [[Paper](https://arxiv.org/abs/2512.05103)]
 * **`Infinity-RoPE`**, Action-Controllable Infinite Video Generation Emerges From Autoregressive Self-Rollout. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.20649)]
+* **`In-Video Instructions`**, Visual Signals as Generative Control. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.19401)]
+* **`Plan-X`**, Instruct Video Generation via Semantic Planning. **`arXiv 2025.11`** [[Paper](https://arxiv.org/abs/2511.17986)]
+* **`Video-As-Prompt`**, Unified Semantic Control for Video Generation. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.20888)]
+* **`TGT`**, Text-Grounded Trajectories for Locally Controlled Video Generation. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.15104)]
 * Real-Time Motion-Controllable Autoregressive Video Diffusion. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.08131)]
+* **`MorphoSim`**, An Interactive, Controllable, and Editable Language-guided 4D World Simulator. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.04390)]
+* When and Where do Events Switch in Multi-Event Video Generation?. **`arXiv 2025.10`** [[Paper](https://arxiv.org/abs/2510.03049)]
 * Reinforcement Learning with Inverse Rewards for World Model Post-training. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.23958)]
 * **`CausNVS`**, Autoregressive Multi-view Diffusion for Flexible 3D Novel View Synthesis. **`arXiv 2025.09`** [[Paper](https://arxiv.org/abs/2509.06579)]
 * Inter-environmental world modeling for continuous and compositional dynamics. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.09911)]
 * **`Gen3C`**, 3D-Informed World-Consistent Video Generation with Precise Camera Control. **`arXiv 2025.03`** [[Paper](https://arxiv.org/abs/2503.03751)]
 * **`PlaySlot`**, Learning Inverse Latent Dynamics for Controllable Object-Centric Video Prediction and Planning. **`arXiv 2025.02`** [[Paper](https://arxiv.org/abs/2502.07600)]
 * **`IGOR`**, Image-GOal Representations are the Atomic Control Units for Foundation Models in Embodied AI. **`arXiv 2024.10`** [[Paper](https://arxiv.org/abs/2411.00785)]
+* **`InteractiveVideo`**, User-Centric Controllable Video Generation with Synergistic Multimodal Instructions. **`arXiv 2024.02`** [[Paper](https://arxiv.org/abs/2402.03040)]
 * Learning to Act without Actions. **`arXiv 2023.12`** [[Paper](https://arxiv.org/abs/2312.10812)]
 * Learning what you can do before doing anything. **`arXiv 2018.06`** [[Paper](https://arxiv.org/abs/1806.09655)]
 

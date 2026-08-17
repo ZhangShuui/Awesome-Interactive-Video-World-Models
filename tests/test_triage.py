@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+import sources  # noqa: E402
 import triage  # noqa: E402
 
 
@@ -137,3 +138,61 @@ class TestExtractName(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLanguageAsAnAction(unittest.TestCase):
+    """Typing at a world is a way of acting in it.
+
+    The action criterion was written around joysticks -- keyboard, mouse,
+    camera trajectory, latent action -- and a paper whose interface is a
+    sentence matched none of it. The systems in the list that work this way
+    (Incantation, Pandora, LongLive) all scored on some *other* phrase in their
+    abstracts, so the gap stayed invisible until someone asked why the control
+    section had no prompt-controlled papers in it.
+    """
+
+    def test_a_language_interface_counts_as_an_action(self):
+        evidence = triage.criteria_evidence(
+            "Incantation: Natural Language as the Action Interface for "
+            "Multi-Entity Video World Models",
+            "Each entity is driven by its own free-form sentence at 0.25s "
+            "granularity.")
+        self.assertTrue(evidence["action"])
+
+    def test_a_paper_that_is_only_an_interface_now_reaches_the_inbox(self):
+        """0/3 is dropped before a human ever sees it -- see sources.proposal."""
+        title = "In-Video Instructions: Visual Signals as Generative Control"
+        abstract = ("We interpret visual signals embedded within the frames as "
+                    "instructions, a paradigm we term In-Video Instruction. In "
+                    "contrast to prompt-based control, which is global and coarse, "
+                    "this encodes user guidance directly into the visual domain, "
+                    "assigning distinct instructions to different objects.")
+        propose, section, met, _ = sources.proposal(title, abstract)
+        self.assertTrue(propose)
+        self.assertEqual(section, "control")
+        self.assertGreater(met, 0)
+
+    def test_a_caption_is_not_an_action(self):
+        """The guard on all of this.
+
+        Text-to-video is an enormous literature and none of it belongs here. If
+        a global prompt written before generation starts scored on the action
+        criterion, every one of those papers would arrive in the inbox at 2/3.
+        """
+        evidence = triage.criteria_evidence(
+            "Photorealistic Text-to-Video Generation with Cascaded Diffusion",
+            "Given a text prompt, our text-guided model synthesises a "
+            "high-resolution video clip conditioned on the caption.")
+        self.assertFalse(evidence["action"])
+
+    def test_a_control_paper_that_never_says_controllable_still_lands_there(self):
+        """The title rules were a list of joysticks, so a paper about the
+        conditioning channel itself fell through to whatever the abstract
+        happened to score -- `memory` here, on "consistency" and "retrieval"."""
+        section, _, _ = triage.triage(
+            "Video-As-Prompt: Unified Semantic Control for Video Generation",
+            "We reframe the problem as in-context generation, using a reference "
+            "video as a direct semantic prompt that guides a frozen video "
+            "diffusion transformer, with position embeddings for robust context "
+            "retrieval and consistency across conditions.")
+        self.assertEqual(section, "control")

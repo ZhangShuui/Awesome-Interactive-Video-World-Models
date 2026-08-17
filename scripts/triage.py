@@ -21,6 +21,12 @@ DECISIVE_TITLE_RULES = {
         r"\blatent[- ]action", r"\baction[- ]condition", r"\bcontrollab",
         r"\binstruction[- ]follow", r"\bcamera control\b", r"\baction space\b",
         r"\bkeyboard\b", r"\bmouse\b", r"\baction model\b",
+        # The prompt is the control channel. Kept to titles that say so:
+        # "text-guided" and "text-to-video" are not here, because a caption is
+        # not an interface -- see LANGUAGE_ACTION.
+        r"\baction interface\b", r"\blanguage[- ]guided\b", r"\bsemantic control\b",
+        r"\btext conditioning\b", r"\btext[- ]grounded\b", r"\bmulti[- ]event\b",
+        r"\bas[- ]prompt\b", r"\bgenerative control\b",
     ],
     "memory": [
         r"\bmemor(?:y|ies)\b", r"\bmem[A-Z]", r"\blong[- ]term\b",
@@ -47,7 +53,10 @@ ABSTRACT_RULES = {
     "control": [(4, r"\blatent action"), (4, r"\baction[- ]condition"),
                 (3, r"\bcontrollab"), (3, r"\binstruction[- ]follow"),
                 (2, r"\bcamera control\b"), (2, r"\bkeyboard\b"), (2, r"\bmouse\b"),
-                (2, r"\baction space\b")],
+                (2, r"\baction space\b"),
+                (4, r"\baction interface\b"), (3, r"\bsemantic control\b"),
+                (2, r"\blanguage[- ]guided\b"), (2, r"\btext intervention"),
+                (2, r"\bprompt switch"), (2, r"\bstreaming prompt")],
     "memory": [(4, r"\bmemory\b"), (3, r"\blong[- ]term\b"), (3, r"\blong[- ]horizon\b"),
                (3, r"\bpersisten"), (2, r"\bconsisten"), (2, r"\brevisit"),
                (2, r"\bretriev"), (2, r"\bspatial memory\b"), (2, r"\bforget"),
@@ -73,6 +82,36 @@ SURVEY_RE = re.compile(r"\bsurvey\b|\ba roadmap\b|\breview\b(?!er)", re.I)
 BENCHMARK_RE = re.compile(
     r"\bbenchmark|\bevaluat(?:ion|ing)\b|\bmetrics?\b|\btest-?bed\b|\barena\b", re.I)
 
+# An action expressed as words. The list holds a dozen systems you steer by
+# typing at them -- Incantation, PAN, Pandora, LongLive, Yume-1.5,
+# Hunyuan-GameCraft-2 -- and every one of them cleared the action criterion by
+# accident, on a "playable" or an "interactive control" elsewhere in the
+# abstract. A paper whose whole contribution is the language interface says
+# none of those words, scored 0/3, and was dropped before the inbox.
+#
+# The scope section rules out "a single prompt supplied up front", so every
+# pattern below requires the prompt to be doing per-step, per-entity or
+# mid-rollout work. "text prompt", "text-to-video" and "text-guided" are
+# deliberately absent: they match a caption written before generation starts,
+# which is the whole of text-to-video and none of this list.
+#
+# Measured before keeping, on 1055 papers pulled by searching arXiv for prompt
+# and language vocabulary -- a corpus far denser in text-to-video than a day's
+# window is, so an upper bound on the noise. It admitted four papers that were
+# being dropped, two of them wanted, and lost none. It also moves Incantation,
+# Pandora, LongLive and ShotStream from a supporting section to `systems`,
+# which is where a human had already filed them by hand.
+LANGUAGE_ACTION = [
+    r"\b(?:natural language|language|text|prompts?)\s+as\s+(?:an?|the)?\s*"
+    r"(?:action|control|interface)",
+    r"\baction interface\b", r"\bnatural language action",
+    r"\b(?:per|each)[- ](?:step|frame|chunk|shot|entity|event)\s+"
+    r"(?:text|prompt|instruction|caption)",
+    r"\bprompt switch", r"\bswitching prompts\b", r"\bstreaming prompts?\b",
+    r"\bmulti[- ]event prompt", r"\btext intervention", r"\bin[- ]video instruction",
+    r"\btext[- ]controlled\b", r"\binstruction[- ]following (?:world|game|video|interactive)",
+]
+
 # Evidence for each of the three scope criteria. Presence is suggestive, not
 # proof -- a human still reads the paper before it enters the main list.
 CRITERIA = {
@@ -81,7 +120,7 @@ CRITERIA = {
         r"\bmouse\b", r"\bcontrol signal", r"\buser (?:input|action|control)",
         r"\bagent action", r"\binteractive control", r"\bplayable\b",
         r"\bcamera (?:control|trajector)", r"\blatent action",
-    ],
+    ] + LANGUAGE_ACTION,
     "causal": [
         r"\bcausal\b", r"\bautoregressive\b", r"\bstreaming\b", r"\breal[- ]?time\b",
         r"\bframe[- ]by[- ]frame\b", r"\bon[- ]the[- ]fly\b", r"\bnext[- ]frame\b",
