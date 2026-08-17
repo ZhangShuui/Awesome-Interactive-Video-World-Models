@@ -33,7 +33,7 @@ Append a line like this. Only `id`, `title`, `tags` and `links` are required:
 | `title` | the paper's title, verbatim. A leading `Name:` is stripped at render time |
 | `venue` | real venue only (`ICLR 2026`). Leave `null` and the arXiv month is derived from `date` |
 | `date` | `YYYY-MM-DD`, or `YYYY` when only the year is known. Sorts the list |
-| `tags` | one or more keys from [`data/tags.json`](data/tags.json), in that file's order |
+| `tags` | one or more keys from [`data/tags.json`](data/tags.json), in that file's order. A new tag needs a `key`, an `icon` nobody else uses, a `title` and a `blurb` |
 | `tags_source` | per tag: `curated` once a human has confirmed it, `rule` if a keyword guessed it |
 | `links` | any of `paper`, `website`, `code`, `blog` |
 | `attrs` | comparison-table fields, see below. `{}` until someone reads the paper |
