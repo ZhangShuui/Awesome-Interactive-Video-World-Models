@@ -2,8 +2,8 @@
 """Run the daily review with a local Claude Code agent, then open a pull request.
 
 The agent does what a maintainer does: read the candidates, judge each against
-the three scope criteria, place it in a section, and for anything entering the
-main list, read the paper and fill in the comparison-table row. It stops there.
+the three scope criteria, tag it, and for anything entering the main list, read
+the paper and fill in the comparison-table row. It stops there.
 Merging is a human's job and this script never pushes to the default branch.
 
     inbox Issue (or a local arXiv query)
@@ -129,9 +129,9 @@ def scope_text():
     return match.group(0).strip()
 
 
-def sections_text():
-    sections = json.loads((ROOT / "data" / "sections.json").read_text(encoding="utf-8"))
-    return "\n".join(f"- `{s['key']}` — {s['title']}. {s['blurb']}" for s in sections)
+def tags_text():
+    tags = json.loads((ROOT / "data" / "tags.json").read_text(encoding="utf-8"))
+    return "\n".join(f"- `{t['key']}` — {t['title']}. {t['blurb']}" for t in tags)
 
 
 def render(template_name, **fields):
@@ -151,7 +151,7 @@ def candidates_block(candidates):
         out.append(textwrap.dedent(f"""\
             ### {i}. {cand['id']}
             Title: {cand['title']}
-            Keyword suggestion (not authoritative): {cand.get('section') or '-'}
+            Keyword suggestion (not authoritative): {','.join(cand.get('tags') or []) or '-'}
             Abstract: {abstract or '(not available — judge from the title and say unsure if you cannot)'}
             """))
     return "\n".join(out)
@@ -201,7 +201,7 @@ def candidates_from_issue():
     for match in CANDIDATE_RE.finditer(body):
         payload = decode(match.group("payload"))
         if payload:
-            payload["section"] = match.group("section")
+            payload["tags"] = sources.parse_tags(match.group("tags"))
             payload["checked"] = match.group("checked").lower() == "x"
             found.append(payload)
 
@@ -229,12 +229,12 @@ def candidates_locally(days, max_results):
             continue
         if not set(paper["categories"]) & ac.ALLOWED_CATEGORIES:
             continue
-        propose, section, _, _ = sources.proposal(paper["title"], paper["abstract"])
+        propose, tags, _, _ = sources.proposal(paper["title"], paper["abstract"])
         if not propose:
             continue
         out.append({"id": paper["id"], "title": paper["title"],
                     "abstract": paper["abstract"], "date": paper["date"],
-                    "section": section})
+                    "tags": tags})
     return None, out
 
 
@@ -265,7 +265,7 @@ def candidates_from_sweep(kind, venue=None):
             spec, source.get(url, 90.0, 2, 5.0), venue, year)
         known = sources.known_titles(ROOT / "data" / "papers.jsonl")
         found = [{"id": source.paper_id(venue, p["url"]), "title": p["title"],
-                  "url": p["url"], "origin": venue, "section": None, "date": None}
+                  "url": p["url"], "origin": venue, "tags": [], "date": None}
                  for p in papers
                  if source.TITLE_PREFILTER.search(p["title"])
                  and sources.norm_title(p["title"]) not in known]
@@ -289,7 +289,7 @@ def candidates_from_rejections():
     have = sources.known_ids(ROOT / "data" / "papers.jsonl")
     # Deliberately no `date`: the rejection row records when it was rejected,
     # not when the paper was published. fetch_abstracts fills the real one.
-    return None, [{"id": r["id"], "title": r["title"], "section": None,
+    return None, [{"id": r["id"], "title": r["title"], "tags": [],
                    "prior_reason": r.get("reason", "")}
                   for r in rows if r["id"] not in have]
 
@@ -373,7 +373,7 @@ def screen(candidates, model, timeout, batch_size):
     batches = [candidates[i:i + batch_size]
                for i in range(0, len(candidates), batch_size)]
     for n, chunk in enumerate(batches, 1):
-        prompt = render("screen.md", SCOPE=scope_text(), SECTIONS=sections_text(),
+        prompt = render("screen.md", SCOPE=scope_text(), TAGS=tags_text(),
                         CANDIDATES=candidates_block(chunk))
         print(f"  batch {n}/{len(batches)} ({len(chunk)} papers)", flush=True)
         try:
@@ -464,17 +464,23 @@ def main():
                             args.screen_batch)
 
     accepted, rejected, unsure = [], [], []
-    valid = {s["key"] for s in json.loads((ROOT / "data" / "sections.json").read_text())}
+    order = [t["key"] for t in json.loads((ROOT / "data" / "tags.json").read_text())]
+    valid = set(order)
     for cand in candidates:
         v = verdicts.get(cand["id"]) or {"verdict": "unsure", "reason": "no verdict returned"}
         verdict = v.get("verdict")
         if verdict == "in":
-            section = v.get("section")
-            if section not in valid:
-                print(f"  warning: {cand['id']} -> invalid section {section!r}, "
+            returned = v.get("tags") or []
+            tags = [t for t in dict.fromkeys(returned) if t in valid]
+            if len(tags) != len(set(returned)):
+                print(f"  warning: {cand['id']} -> dropped unknown tag(s) "
+                      f"{sorted(set(returned) - valid)}", file=sys.stderr)
+            if not tags:
+                print(f"  warning: {cand['id']} -> no usable tag, "
                       f"falling back to the keyword suggestion", file=sys.stderr)
-                section = cand.get("section") if cand.get("section") in valid else "realtime"
-            accepted.append({**cand, "section": section, "reason": v.get("reason", ""),
+                tags = [t for t in (cand.get("tags") or []) if t in valid] or ["realtime"]
+            tags.sort(key=order.index)
+            accepted.append({**cand, "tags": tags, "reason": v.get("reason", ""),
                              "criteria": v.get("criteria") or {}})
         elif verdict == "out":
             rejected.append({**cand, "reason": v.get("reason", "")})
@@ -484,15 +490,15 @@ def main():
     print(f"[agent] in {len(accepted)} · out {len(rejected)} · unsure {len(unsure)} "
           f"· ${cost:.3f}")
     for row in accepted:
-        print(f"    IN     {row['section']:<11} {row['id']}  {row['title'][:58]}")
+        print(f"    IN     {','.join(row['tags']):<24} {row['id']}  {row['title'][:58]}")
     for row in unsure:
-        print(f"    UNSURE {'':<11} {row['id']}  {row['title'][:58]}")
+        print(f"    UNSURE {'':<24} {row['id']}  {row['title'][:58]}")
     for row in rejected:
-        print(f"    OUT    {'':<11} {row['id']}  {row['title'][:58]}")
+        print(f"    OUT    {'':<24} {row['id']}  {row['title'][:58]}")
 
     # Attributes only matter for the main list -- the comparison table is the
     # only consumer, and it renders `systems` rows and nothing else.
-    targets = [r for r in accepted if r["section"] == "systems"][:args.max_attrs]
+    targets = [r for r in accepted if "systems" in r["tags"]][:args.max_attrs]
     attrs_by_id, evidence_by_id, notes = {}, {}, {}
     for i, row in enumerate(targets, 1):
         print(f"[agent] reading {row['id']} ({i}/{len(targets)}) with {args.judge_model}")
@@ -523,8 +529,8 @@ def main():
         "title": row["title"],
         "venue": row.get("origin"),
         "date": row.get("date"),
-        "section": row["section"],
-        "section_source": "agent",
+        "tags": row["tags"],
+        "tags_source": {t: "agent" for t in row["tags"]},
         "links": {"blog" if sources.source_of(row["id"]) == "blog" else "paper":
                   sources.url_for(row["id"], row.get("url"))},
         "attrs": attrs_by_id.get(row["id"], {}),
@@ -598,7 +604,7 @@ def pr_body(added, attrs_by_id, notes, rejections, unsure, cost, screen_model,
             lines.append(
                 f"| [{rec['name'] or rec['title'][:40]}]"
                 f"({next(iter(rec['links'].values()), '')}) "
-                f"| `{rec['section']}` | {notes.get(rec['id'], '') or '—'} "
+                f"| {' '.join(f'`{t}`' for t in rec['tags'])} | {notes.get(rec['id'], '') or '—'} "
                 f"| {summary or '_not read_'} |")
     if unsure:
         lines += ["", "## Left for you", "",

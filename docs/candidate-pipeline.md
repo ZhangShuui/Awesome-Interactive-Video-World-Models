@@ -39,12 +39,12 @@ So recall is phrase-based over title and abstract (`QUERY_PHRASES` in
    internal world model is out no matter how well it scores.
 4. Each survivor is scored for evidence of the three scope criteria. A paper
    showing evidence for all three is proposed for `systems`; otherwise it is
-   proposed for the supporting section its keywords fit. Scoring zero drops it.
+   proposed with whatever tags its keywords earn. Scoring zero drops it.
 5. **Except** for surveys, benchmarks, and the *efficiency substrate*: video
    diffusion work on sparse attention, KV caching, distillation, early exit and
    the like. Those papers have no reason to say "causal" or "streaming"
    anywhere, so they score 0/3 and were being dropped — while the `realtime`
-   section already held a dozen of exactly their genre. `is_efficiency_substrate`
+   realtime list already held a dozen of exactly their genre. `is_efficiency_substrate`
    in `scripts/triage.py` admits them, and requires a video anchor so that
    image-only and LLM-only efficiency work stays out.
 
@@ -117,7 +117,7 @@ gets expensive again and is the first one to reconsider.
 3. Papers already in `data/papers.jsonl`, listed in `data/arxiv-ignore.txt`,
    already rejected, or sitting in an open pipeline PR are skipped.
 4. One Issue labeled `arxiv-candidates` is created or updated with both
-   reports. Refreshing preserves ticks and section corrections, so review in
+   reports. Refreshing preserves ticks and tag corrections, so review in
    progress is never lost.
 5. A maintainer comments `/create-pr`.
 6. `.github/workflows/arxiv-candidates-create-pr.yml` runs
@@ -171,14 +171,15 @@ is the claim to be a *world*, a *simulator*, or something you can *play*.
 
 Titles from `page` sources are scraped from anchor text and are provisional.
 Nothing from this source should be merged without opening the link — the
-`reports` section promises hand-checked URLs, and a keyword match on a feed
+`reports` tag promises hand-checked URLs, and a keyword match on a feed
 summary is not that.
 
 ## Reviewing an inbox
 
 1. Open the Issue labeled `arxiv-candidates`.
 2. Tick the papers that belong.
-3. The section in backticks is a keyword guess. Edit it in place if it is wrong;
+3. The tags in backticks are a keyword guess, comma-separated. Edit them in
+   place if they are wrong — `systems` becomes `systems,control` by typing it;
    your edit wins over the guess.
 4. Comment `/create-pr`.
 5. Review the PR. Unticked candidates return in the next refresh.
@@ -207,7 +208,8 @@ python3 scripts/arxiv_candidates.py --feed-file tests/data/sample-feed.xml --out
 - `proposal()` in `scripts/sources.py` — the one admission decision.
 - `OFF_TOPIC_RE`, `VISUAL_GATE_RE` — precision.
 - `CRITERIA` in `scripts/triage.py` — the three-criteria evidence patterns.
-- `DECISIVE_TITLE_RULES` / `ABSTRACT_RULES` — which supporting section is suggested.
+- `DECISIVE_TITLE_RULES` / `ABSTRACT_RULES` — which tags are suggested. Title
+  rules all fire; the abstract fallback yields one.
 - `VENUE_RE`, `NOT_ACCEPTED_RE` in `scripts/openreview_candidates.py` — which
   venues count and which submissions are real.
 - `TITLE_PREFILTER` in `scripts/venue_candidates.py` — what gets read at all.

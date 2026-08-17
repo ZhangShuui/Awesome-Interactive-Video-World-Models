@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
-"""Shared triage rules: does a paper belong here, and in which section.
+"""Shared triage rules: does a paper belong here, and what is it about.
 
 Used by the daily arXiv pipeline and by the offline importer. Keep every rule
 in this file -- two copies of a keyword table drift within a month.
 
-The rules only ever *suggest*. A section written into data/papers.jsonl by a
-human is authoritative and nothing here overrides it.
+Papers carry tags, not a category. A paper is rarely about one thing, and the
+old one-section-per-paper model had to throw the rest away: Incantation is both
+an interactive world model and the paper on language as an action interface, and
+filing it under `systems` made the control list read as though prompt-based
+control did not exist. So the rules keep every tag that fires instead of
+picking a winner.
+
+The rules only ever *suggest*. Tags written into data/papers.jsonl by a human
+are authoritative and nothing here overrides them.
 """
 import re
 
-# Tie-break order, most specific claim first.
-TECH_SECTIONS = ("datasets", "control", "memory", "realtime")
+# Ordered most specific claim first, which is also the order tags render in.
+TECH_TAGS = ("datasets", "control", "memory", "realtime")
 
-# High-precision patterns. A hit in the *title* settles the section outright:
-# a paper that is about caching says so in its title; a paper that merely uses
-# a cache says so in its abstract.
+# High-precision patterns. A hit in the *title* earns the tag outright: a paper
+# that is about caching says so in its title; a paper that merely uses a cache
+# says so in its abstract.
 DECISIVE_TITLE_RULES = {
     "datasets": [r"\bdatasets?\b", r"\bcorpus\b", r"\bdata engine\b"],
     "control": [
@@ -76,7 +83,7 @@ MEMORY_FALSE_FRIENDS = re.compile(
 
 SURVEY_RE = re.compile(r"\bsurvey\b|\ba roadmap\b|\breview\b(?!er)", re.I)
 
-# Checked only by triage(), not by suggest_section(): a paper the screening
+# Checked only by triage(), not by suggest_tags(): a paper the screening
 # already filed as a method should not be reclassified because it happens to
 # ship a benchmark alongside.
 BENCHMARK_RE = re.compile(
@@ -165,24 +172,46 @@ NAME_STOPWORDS = {
 NAMEY_RE = re.compile(r"[A-Z0-9].*[A-Z0-9]|\d|-")
 
 
-def suggest_section(title, abstract):
-    """Title keywords decide; the abstract only breaks a title-level silence."""
-    low_title = title.lower()
-    hits = {key: sum(bool(re.search(p, low_title)) for p in pats)
+def title_tags(title):
+    """-> every tech tag the title claims outright, and nothing on a silence.
+
+    Separate from suggest_tags because it is used to *enrich*: a survey about
+    long-horizon memory is still a survey, and a fallback tag bolted onto it
+    would be a guess wearing the same clothes as a claim.
+    """
+    low = title.lower()
+    hits = {key: sum(bool(re.search(p, low)) for p in pats)
             for key, pats in DECISIVE_TITLE_RULES.items()}
     if MEMORY_FALSE_FRIENDS.search(title):
         hits["memory"] = 0
         hits["realtime"] += 1
-    if any(hits.values()):
-        return max(TECH_SECTIONS, key=lambda k: (hits[k], -TECH_SECTIONS.index(k)))
+    return [k for k in TECH_TAGS if hits[k]]
+
+
+def suggest_tags(title, abstract):
+    """-> every tech tag the paper earns, most specific first.
+
+    A title that says three things gets three tags. This is the one place where
+    tags differ from the sections they replaced, and it is the entire point:
+    "Action-Conditioned Video World Models with Few-Step Distillation" is a
+    control paper *and* a real-time paper, and picking one used to be a coin
+    flip that silently emptied the other list.
+
+    The abstract still only breaks a title-level silence, and still yields a
+    single tag: an abstract mentions everything the work touches, so scoring it
+    for multiple tags would give nearly every paper nearly every tag.
+    """
+    earned = title_tags(title)
+    if earned:
+        return earned
 
     low_abs = (abstract or "").lower()
     scores = {key: sum(w for w, p in pats if re.search(p, low_abs))
               for key, pats in ABSTRACT_RULES.items()}
     scores["datasets"] = 0
     if any(scores.values()):
-        return max(TECH_SECTIONS, key=lambda k: (scores[k], -TECH_SECTIONS.index(k)))
-    return "realtime"
+        return [max(TECH_TAGS, key=lambda k: (scores[k], -TECH_TAGS.index(k)))]
+    return ["realtime"]
 
 
 def criteria_evidence(title, abstract):
@@ -200,17 +229,24 @@ def criteria_evidence(title, abstract):
 
 
 def triage(title, abstract):
-    """-> (section, met_criteria_count, evidence). section is 'systems' only
-    when all three criteria show evidence; otherwise a supporting section."""
+    """-> (tags, met_criteria_count, evidence).
+
+    `systems` is earned only when all three criteria show evidence, and it does
+    not stand alone: a system is also whatever its title says it is about, so
+    "Action-Conditioned Video World Models with Few-Step Distillation" comes
+    back as systems + control + realtime rather than as a choice between them.
+    """
     evidence = criteria_evidence(title, abstract)
     met = sum(1 for hits in evidence.values() if hits)
     if SURVEY_RE.search(title):
-        return "surveys", met, evidence
-    if BENCHMARK_RE.search(title):
-        return "benchmarks", met, evidence
-    if met == 3:
-        return "systems", met, evidence
-    return suggest_section(title, abstract), met, evidence
+        primary = "surveys"
+    elif BENCHMARK_RE.search(title):
+        primary = "benchmarks"
+    elif met == 3:
+        primary = "systems"
+    else:
+        return suggest_tags(title, abstract), met, evidence
+    return [primary] + title_tags(title), met, evidence
 
 
 def extract_name(title):

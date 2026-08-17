@@ -5,9 +5,9 @@ A curated list of **interactive video world models** — generative models you c
 Video generation stopped being a movie and became a place. This list tracks that shift: systems where a user or a policy issues an action, the model produces the next frames causally, and the world is still there when you look back — together with the work those systems are built out of, on action control, real-time generation, and long-horizon memory. General world-model lists cover robotics, driving, and 3D generation alongside this; here the narrow focus is the point.
 
 > A personal reading record, not an authoritative or community-curated list: every inclusion,
-> section placement, and comparison-table value is one reader's judgement, revised as that reading
+> tagging, and comparison-table value is one reader's judgement, revised as that reading
 > continues. New entries are screened by an [automated agent](docs/agent-review.md) and carry
-> `"section_source": "agent"` until a person confirms them; what it turned down is kept, with
+> `"tags_source": {"...": "agent"}` until a person confirms them; what it turned down is kept, with
 > reasons, in [`data/agent-rejected.jsonl`](data/agent-rejected.jsonl).
 
 ## Scope
@@ -68,7 +68,7 @@ Several excellent lists cover the wider field — see [Related lists](#related-l
 <!-- BEGIN:CONTENTS -->
 <!-- END:CONTENTS -->
 
-Entries are newest first within each section. Venue tags show `arXiv YYMM` when a paper has no published venue recorded yet.
+Papers carry tags rather than a single category, so a paper appears under each tag it holds — a system whose contribution is its action interface is listed in both places, and the trailing `` `tag` `` run on each line says where else to find it. Entries are newest first within each list. Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 
 ---
 

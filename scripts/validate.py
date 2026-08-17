@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Check data/papers.jsonl before it reaches the README.
 
-Errors fail the build. Warnings are review debt -- notably `section_source:
-rule` entries, whose section came from a keyword guess and has never been
-confirmed by a human.
+Errors fail the build. Warnings are review debt -- notably tags whose
+`tags_source` is `rule`, meaning they came from a keyword guess and have never
+been confirmed by a human. Provenance is per tag: a paper can be a system
+because someone read it and carry `control` because a rule guessed.
 
 Usage:
   python3 scripts/validate.py
-  python3 scripts/validate.py --review        # list the unreviewed sections
-  python3 scripts/validate.py --review memory # ... in one section
+  python3 scripts/validate.py --review        # list the unreviewed tags
+  python3 scripts/validate.py --review memory # ... for one tag
 """
 import argparse
 import json
@@ -17,7 +18,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-REQUIRED = ("id", "title", "section", "links")
+REQUIRED = ("id", "title", "tags", "links")
 ARXIV_ID_RE = re.compile(r"^\d{4}\.\d{4,5}$")
 DATE_RE = re.compile(r"^\d{4}(-\d{2}-\d{2})?$")
 URL_RE = re.compile(r"^https?://\S+$")
@@ -36,7 +37,7 @@ def load(path):
     return records
 
 
-def check(records, sections):
+def check(records, known_tags):
     errors, warnings, seen = [], [], {}
     for lineno, rec in records:
         where = f"line {lineno}"
@@ -50,8 +51,27 @@ def check(records, sections):
             errors.append(f"{where}: duplicate of line {seen[pid]}")
         seen[pid] = lineno
 
-        if rec["section"] not in sections:
-            errors.append(f"{where}: unknown section {rec['section']!r}")
+        tags = rec.get("tags")
+        if not isinstance(tags, list):
+            errors.append(f"{where}: tags must be a list")
+        else:
+            if len(set(tags)) != len(tags):
+                errors.append(f"{where}: duplicate tag in {tags!r}")
+            for tag in tags:
+                if tag not in known_tags:
+                    errors.append(f"{where}: unknown tag {tag!r}")
+            source = rec.get("tags_source") or {}
+            if not isinstance(source, dict):
+                errors.append(f"{where}: tags_source must be an object keyed by tag")
+            else:
+                # A tag with no recorded provenance reads as confirmed, so an
+                # unconfirmed one would quietly leave the review queue.
+                for tag in tags:
+                    if tag not in source:
+                        errors.append(f"{where}: tag {tag!r} has no tags_source")
+                for tag in source:
+                    if tag not in tags:
+                        errors.append(f"{where}: tags_source has {tag!r}, which is not a tag")
 
         date = rec.get("date") or ""
         if date and not DATE_RE.match(date):
@@ -84,26 +104,27 @@ def check(records, sections):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--papers", type=Path, default=ROOT / "data" / "papers.jsonl")
-    ap.add_argument("--sections", type=Path, default=ROOT / "data" / "sections.json")
-    ap.add_argument("--review", nargs="?", const="*", metavar="SECTION",
-                    help="list entries whose section was not settled by a human")
+    ap.add_argument("--tags", type=Path, default=ROOT / "data" / "tags.json")
+    ap.add_argument("--review", nargs="?", const="*", metavar="TAG",
+                    help="list tags that were not settled by a human")
     args = ap.parse_args()
 
     unconfirmed = {"rule", "agent"}
 
-    sections = {s["key"] for s in json.loads(args.sections.read_text(encoding="utf-8"))}
+    known_tags = {t["key"] for t in json.loads(args.tags.read_text(encoding="utf-8"))}
     records = load(args.papers)
-    errors, warnings = check(records, sections)
+    errors, warnings = check(records, known_tags)
 
     if args.review:
-        pending = [r for _, r in records
-                   if r.get("section_source") in unconfirmed
-                   and (args.review == "*" or r.get("section") == args.review)]
-        pending.sort(key=lambda r: (r["section"], r.get("date") or ""), reverse=True)
-        for rec in pending:
-            print(f"{rec.get('section_source', '?'):<6} {rec['section']:<11} "
+        pending = [(rec, tag) for _, rec in records
+                   for tag, src in (rec.get("tags_source") or {}).items()
+                   if src in unconfirmed
+                   and (args.review == "*" or tag == args.review)]
+        pending.sort(key=lambda p: (p[1], p[0].get("date") or ""), reverse=True)
+        for rec, tag in pending:
+            print(f"{rec['tags_source'][tag]:<6} {tag:<11} "
                   f"{rec['id']:<11} {rec['title'][:80]}")
-        print(f"\n{len(pending)} entr{'y' if len(pending) == 1 else 'ies'} "
+        print(f"\n{len(pending)} tag{'' if len(pending) == 1 else 's'} "
               f"placed by a keyword rule or a review agent, not by a human.")
         return
 
@@ -114,10 +135,14 @@ def main():
     if errors:
         sys.exit(f"\n{len(errors)} error(s) in data/papers.jsonl")
 
-    pending = sum(1 for _, r in records if r.get("section_source") in unconfirmed)
-    print(f"[validate] {len(records)} records, {len(sections)} sections, no errors")
+    pending = sum(1 for _, r in records
+                  for src in (r.get("tags_source") or {}).values()
+                  if src in unconfirmed)
+    assigned = sum(len(r.get("tags") or []) for _, r in records)
+    print(f"[validate] {len(records)} records, {assigned} tag assignments across "
+          f"{len(known_tags)} tags, no errors")
     if pending:
-        print(f"[validate] {pending} not yet confirmed by a human "
+        print(f"[validate] {pending} tag(s) not yet confirmed by a human "
               f"(scripts/validate.py --review)")
 
 

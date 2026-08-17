@@ -1178,7 +1178,7 @@ _Towards Memory-Efficient Autoregressive Video Generation via Instance-Specific 
 
 ### TempAct ([paper](https://arxiv.org/abs/2606.28016))
 
-_TempAct: Advancing Temporal Plausibility in Autoregressive Video Generation via Planner-Executor RL_ — 2026-06-26 · Real-Time & Streaming Generation
+_TempAct: Advancing Temporal Plausibility in Autoregressive Video Generation via Planner-Executor RL_ — 2026-06-26 · Action Control & Interfaces · Real-Time & Streaming Generation
 
 - **Backbone:** causal-diffusion
 - **Action space:** per-chunk text sub-event description (LLM-planner decomposition of one global caption); not embodied/camera control
@@ -1188,7 +1188,7 @@ _TempAct: Advancing Temporal Plausibility in Autoregressive Video Generation via
 
 ### LiveEdit ([paper](https://arxiv.org/abs/2606.26740))
 
-_LiveEdit: Towards Real-Time Diffusion-Based Streaming Video Editing_ — 2026-06-25 · Real-Time & Streaming Generation
+_LiveEdit: Towards Real-Time Diffusion-Based Streaming Video Editing_ — 2026-06-25 · Action Control & Interfaces · Real-Time & Streaming Generation
 
 - **Backbone:** causal-diffusion
 - **Action space:** single text edit instruction per stream (semantic attribute edit: color/texture/object); source video content is the preserved anchor, not a controllable axis
@@ -1244,7 +1244,7 @@ _TetherCache: Stabilizing Autoregressive Long-Form Video Generation with Gated R
 
 ### Next Forcing ([paper](https://arxiv.org/abs/2606.11187))
 
-_Next Forcing: Causal World Modeling with Multi-Chunk Prediction_ — 2026-06-09 · Real-Time & Streaming Generation
+_Next Forcing: Causal World Modeling with Multi-Chunk Prediction_ — 2026-06-09 · Action Control & Interfaces · Real-Time & Streaming Generation
 
 - **Backbone:** causal-diffusion
 - **Action space:** language instruction plus low-level bimanual manipulation actions decoded via inverse dynamics (RoboTwin dual-arm control)

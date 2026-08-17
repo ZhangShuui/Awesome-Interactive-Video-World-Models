@@ -10,7 +10,7 @@ import build_readme as br  # noqa: E402
 
 
 def rec(**kw):
-    base = {"id": "2508.13009", "title": "A Title", "section": "systems",
+    base = {"id": "2508.13009", "title": "A Title", "tags": ["systems"],
             "links": {"paper": "https://arxiv.org/abs/2508.13009"}, "attrs": {}}
     base.update(kw)
     return base
@@ -106,10 +106,23 @@ class TestAttributeNormalisation(unittest.TestCase):
 class TestTable(unittest.TestCase):
     def test_only_the_main_list_is_compared(self):
         records = [
-            rec(id="1", section="systems", attrs={"backbone": "causal-diffusion"}),
-            rec(id="2", section="realtime", attrs={"backbone": "causal-diffusion"}),
+            rec(id="1", tags=["systems"], attrs={"backbone": "causal-diffusion"}),
+            rec(id="2", tags=["realtime"], attrs={"backbone": "causal-diffusion"}),
         ]
         self.assertEqual([r["id"] for r in br.table_rows(records)], ["1"])
+
+    def test_a_system_that_is_also_a_component_is_still_a_system(self):
+        """Tags overlap, so "the supporting lists" has to be said by exclusion.
+        Listing the other tags would put every system in both halves of
+        comparison.md, once as a system and once as its own component."""
+        records = [
+            rec(id="1", tags=["systems", "realtime"],
+                attrs={"backbone": "causal-diffusion"}),
+            rec(id="2", tags=["realtime"], attrs={"backbone": "causal-diffusion"}),
+        ]
+        self.assertEqual([r["id"] for r in br.table_rows(records)], ["1"])
+        others = br.table_rows(records, ("realtime",), without=("systems",))
+        self.assertEqual([r["id"] for r in others], ["2"])
 
     def test_long_titles_are_truncated(self):
         label = br.short_label(rec(name=None, title="A " + "very " * 20 + "long title"))
@@ -122,18 +135,18 @@ class TestNoTallies(unittest.TestCase):
 
     A tally is noise that goes stale on every merge and tells a reader nothing
     they came for. These crept in one at a time -- a stats banner, a number
-    beside each table-of-contents line, an entry count under each section
-    heading, a "showing 40 of 107" footer -- so they are pinned out.
+    beside each table-of-contents line, an entry count under each heading, a
+    "showing 40 of 107" footer -- so they are pinned out.
     """
 
-    SECTIONS = json.loads((ROOT / "data" / "sections.json").read_text())
+    TAGS = json.loads((ROOT / "data" / "tags.json").read_text())
 
     def test_the_contents_list_is_names_only(self):
-        contents = br.render_contents(self.SECTIONS)
+        contents = br.render_contents(self.TAGS)
         self.assertNotRegex(contents, r"\(\d+\)")
 
-    def test_section_headings_carry_no_entry_count(self):
-        body = br.render_list(self.SECTIONS, {"systems": [rec(id="1")]})
+    def test_tag_headings_carry_no_entry_count(self):
+        body = br.render_list(self.TAGS, {"systems": [rec(id="1")]})
         self.assertNotIn("entries", body)
 
     def test_no_stats_banner_is_rendered(self):

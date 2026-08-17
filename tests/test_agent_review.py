@@ -191,15 +191,15 @@ class TestPrompts(unittest.TestCase):
                        "Persistent world state"):
             self.assertIn(phrase, scope)
 
-    def test_sections_list_covers_every_section(self):
-        keys = {s["key"] for s in json.loads(
-            (ROOT / "data" / "sections.json").read_text(encoding="utf-8"))}
-        text = ar.sections_text()
+    def test_tags_list_covers_every_tag(self):
+        keys = {t["key"] for t in json.loads(
+            (ROOT / "data" / "tags.json").read_text(encoding="utf-8"))}
+        text = ar.tags_text()
         for key in keys:
             self.assertIn(f"`{key}`", text)
 
     def test_render_fills_every_placeholder(self):
-        out = ar.render("screen.md", SCOPE="S", SECTIONS="X", CANDIDATES="C")
+        out = ar.render("screen.md", SCOPE="S", TAGS="X", CANDIDATES="C")
         self.assertNotIn("{{", out)
 
     def test_unfilled_placeholder_is_fatal(self):
@@ -212,7 +212,7 @@ class TestPrompts(unittest.TestCase):
         self.assertIn("Matrix-Game 2.0", out)
 
     def test_candidates_block_flags_a_missing_abstract(self):
-        block = ar.candidates_block([{"id": "1", "title": "T", "section": "systems"}])
+        block = ar.candidates_block([{"id": "1", "title": "T", "tags": ["systems"]}])
         self.assertIn("say unsure", block)
 
 

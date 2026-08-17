@@ -7,8 +7,8 @@ of them, so the query set covers the vocabulary of the field and the three
 scope criteria do the narrowing afterwards.
 
 Output is one markdown report meant to live in a single GitHub Issue. Each
-candidate carries its metadata base64-encoded in an HTML comment; the section
-in backticks on the visible line is editable and wins.
+candidate carries its metadata base64-encoded in an HTML comment; the tags in
+backticks on the visible line are editable and win.
 
 Usage:
   python3 scripts/arxiv_candidates.py --days 7
@@ -227,7 +227,7 @@ def ids_in_text(text):
 
 # --- report ------------------------------------------------------------------
 
-def render(candidates, days, sections, carried=0):
+def render(candidates, days, tags, carried=0):
     fresh = len(candidates) - carried
     summary = (
         f"{len(candidates)} unreviewed paper(s), newest first — {fresh} from the "
@@ -241,15 +241,17 @@ def render(candidates, days, sections, carried=0):
         "",
         "Two boxes each. Tick the **top** one to accept a paper; tick the nested "
         "**drop** box to say it should never be proposed again. Leaving both empty "
-        "means not looked at yet, and it comes back tomorrow. The section in "
-        "backticks is a keyword guess — edit it in place if it is wrong.",
+        "means not looked at yet, and it comes back tomorrow. The tags in "
+        "backticks are a keyword guess — edit them in place if they are wrong, "
+        "comma-separated, and add every one that applies: a paper is rarely "
+        "about one thing.",
         "",
         "Comment `/create-pr` when you are done: accepted papers go to "
         "`data/papers.jsonl` and the README is regenerated, dropped ones go to "
         "`data/maintainer-rejected.jsonl`. Nothing is recorded until you do — "
         "both marks are safe to change until then.",
         "",
-        f"Valid sections: {', '.join(f'`{s}`' for s in sections)}.",
+        f"Valid tags: {', '.join(f'`{t}`' for t in tags)}.",
         "",
         "`criteria` counts evidence for the three scope rules — per-step **action**, "
         "**causal** generation, persistent **state**. 3/3 suggests the main list; it is "
@@ -273,7 +275,7 @@ def parse_args():
     ap.add_argument("--output", default="ARXIV_CANDIDATES.md",
                     help="'-' writes the report to stdout")
     ap.add_argument("--papers", type=Path, default=ROOT / "data" / "papers.jsonl")
-    ap.add_argument("--sections", type=Path, default=ROOT / "data" / "sections.json")
+    ap.add_argument("--tags", type=Path, default=ROOT / "data" / "tags.json")
     ap.add_argument("--ignore", type=Path, default=ROOT / "data" / "arxiv-ignore.txt")
     ap.add_argument("--rejected", type=Path,
                     default=ROOT / "data" / "agent-rejected.jsonl",
@@ -282,7 +284,7 @@ def parse_args():
                     default=ROOT / "data" / "maintainer-rejected.jsonl",
                     help="papers crossed out by hand in the inbox")
     ap.add_argument("--existing-issue-body", type=Path,
-                    help="current inbox body; ticks and section edits are preserved")
+                    help="current inbox body; ticks and tag edits are preserved")
     ap.add_argument("--known-file", type=Path,
                     help="text whose arXiv links are already proposed (open PR bodies)")
     ap.add_argument("--feed-file", type=Path,
@@ -295,7 +297,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    sections = [s["key"] for s in json.loads(args.sections.read_text(encoding="utf-8"))]
+    tags = [t["key"] for t in json.loads(args.tags.read_text(encoding="utf-8"))]
 
     if args.feed_file:
         papers = parse_feed(args.feed_file.read_bytes())
@@ -314,7 +316,7 @@ def main():
     # Crossed but not yet committed: the entry stays, wearing its cross, so the
     # verdict is not lost between the click and the /create-pr that records it.
     crossed = sources.rejected_in_issue(issue_body)
-    overrides = sources.edited_sections(issue_body)
+    overrides = sources.edited_tags(issue_body)
 
     seen, candidates = set(), []
     for paper in papers:
@@ -326,7 +328,7 @@ def main():
         # shared with OpenReview, the proceedings backfill and the watchlist.
         if not set(paper["categories"]) & ALLOWED_CATEGORIES:
             continue
-        propose, section, met, evidence = sources.proposal(
+        propose, tags_, met, evidence = sources.proposal(
             paper["title"], paper["abstract"])
         if not propose:
             continue
@@ -335,7 +337,7 @@ def main():
             "name": triage.extract_name(paper["title"]),
             "title": paper["title"],
             "date": paper["date"],
-            "section": overrides.get(pid, section),
+            "tags": overrides.get(pid, tags_),
             "met": met,
             "evidence": evidence,
         })
@@ -354,7 +356,7 @@ def main():
 
     candidates.sort(key=lambda c: (c["met"], c["date"], c["id"]), reverse=True)
     report = sources.recross(
-        sources.retick(render(candidates, args.days, sections, carried), ticked),
+        sources.retick(render(candidates, args.days, tags, carried), ticked),
         crossed)
 
     if args.output == "-":

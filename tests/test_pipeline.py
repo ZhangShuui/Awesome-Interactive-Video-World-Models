@@ -19,7 +19,7 @@ import sources  # noqa: E402
 import triage  # noqa: E402
 
 FEED = Path(__file__).resolve().parent / "data" / "sample-feed.xml"
-SECTIONS = {s["key"] for s in json.loads((ROOT / "data" / "sections.json").read_text())}
+TAGS = {t["key"] for t in json.loads((ROOT / "data" / "tags.json").read_text())}
 
 
 def run_candidates(*extra, output):
@@ -56,9 +56,9 @@ class TestFilters(unittest.TestCase):
         title = "SPADE: An Input-Adaptive Sparse Attention Engine for Fast Video Diffusion Models"
         abstract = ("Video diffusion transformers pay quadratic self-attention cost, "
                     "making inference prohibitive at video-token scales.")
-        section, met, _ = triage.triage(title, abstract)
+        tags, met, _ = triage.triage(title, abstract)
         self.assertEqual(met, 0)
-        admitted = (met > 0 or section in ("surveys", "benchmarks")
+        admitted = (met > 0 or {"surveys", "benchmarks"} & set(tags)
                     or triage.is_efficiency_substrate(title, abstract))
         self.assertTrue(admitted)
 
@@ -188,46 +188,66 @@ class TestRoundTrip(unittest.TestCase):
         return {c["id"]
                 for c in sources.carried_candidates(path.read_text(encoding="utf-8"))}
 
-    def _tick_first(self, section=None):
+    def _tick_first(self, tags=None):
         lines = self.report.read_text(encoding="utf-8").splitlines(keepends=True)
         for i, line in enumerate(lines):
             if line.startswith("- [ ]"):
                 line = line.replace("- [ ]", "- [x]", 1)
-                if section:
+                if tags:
                     head, _, rest = line.partition("`")
                     _, _, tail = rest.partition("`")
-                    line = f"{head}`{section}`{tail}"
+                    line = f"{head}`{tags}`{tail}"
                 lines[i] = line
                 break
         self.report.write_text("".join(lines), encoding="utf-8")
+
+    def _select(self, body):
+        order = [t["key"] for t in json.loads(
+            (ROOT / "data" / "tags.json").read_text(encoding="utf-8"))]
+        return apply_mod.parse_selections(body, set(order), order)
 
     def test_ticked_candidate_becomes_a_record(self):
         run_candidates("--papers", str(self.papers), output=self.report)
         self._tick_first()
         body = self.report.read_text(encoding="utf-8")
-        records, warnings = apply_mod.parse_selections(body, SECTIONS)
+        records, warnings = self._select(body)
         self.assertEqual(len(records), 1)
         self.assertFalse(warnings)
         rec = records[0]
         self.assertIn(rec["id"], rec["links"]["paper"])
-        self.assertIn(rec["section"], SECTIONS)
-        self.assertEqual(rec["section_source"], "curated")
+        self.assertTrue(rec["tags"])
+        self.assertTrue(set(rec["tags"]) <= TAGS)
+        self.assertEqual(set(rec["tags_source"].values()), {"curated"})
 
-    def test_maintainer_section_edit_wins(self):
+    def test_maintainer_tag_edit_wins(self):
         run_candidates("--papers", str(self.papers), output=self.report)
-        self._tick_first(section="systems")
-        records, warnings = apply_mod.parse_selections(
-            self.report.read_text(encoding="utf-8"), SECTIONS)
-        self.assertEqual(records[0]["section"], "systems")
+        self._tick_first(tags="systems")
+        records, warnings = self._select(self.report.read_text(encoding="utf-8"))
+        self.assertEqual(records[0]["tags"], ["systems"])
         self.assertFalse(warnings)
 
-    def test_unknown_section_falls_back_and_warns(self):
+    def test_a_maintainer_can_type_a_second_tag(self):
+        """The reason any of this exists: one box, two answers."""
         run_candidates("--papers", str(self.papers), output=self.report)
-        self._tick_first(section="nonsense")
-        records, warnings = apply_mod.parse_selections(
-            self.report.read_text(encoding="utf-8"), SECTIONS)
+        self._tick_first(tags="systems, control")
+        records, warnings = self._select(self.report.read_text(encoding="utf-8"))
+        self.assertEqual(records[0]["tags"], ["systems", "control"])
+        self.assertFalse(warnings)
+
+    def test_an_unknown_tag_is_dropped_without_taking_the_paper_with_it(self):
+        run_candidates("--papers", str(self.papers), output=self.report)
+        self._tick_first(tags="systems,nonsense")
+        records, warnings = self._select(self.report.read_text(encoding="utf-8"))
         self.assertEqual(len(records), 1)
-        self.assertIn(records[0]["section"], SECTIONS)
+        self.assertEqual(records[0]["tags"], ["systems"])
+        self.assertTrue(any("nonsense" in w for w in warnings))
+
+    def test_all_tags_unknown_falls_back_and_warns(self):
+        run_candidates("--papers", str(self.papers), output=self.report)
+        self._tick_first(tags="nonsense")
+        records, warnings = self._select(self.report.read_text(encoding="utf-8"))
+        self.assertEqual(len(records), 1)
+        self.assertTrue(set(records[0]["tags"]) <= TAGS)
         self.assertTrue(warnings)
 
     def test_refresh_preserves_ticks(self):
@@ -243,7 +263,7 @@ class TestRoundTrip(unittest.TestCase):
         run_candidates("--papers", str(self.papers), output=self.report)
         first = ac.parse_feed(FEED.read_bytes())[0]
         self.papers.write_text(json.dumps({
-            "id": first["id"], "title": first["title"], "section": "systems",
+            "id": first["id"], "title": first["title"], "tags": ["systems"],
             "links": {"paper": f"https://arxiv.org/abs/{first['id']}"}, "attrs": {},
         }) + "\n", encoding="utf-8")
         again = self.tmp / "inbox3.md"
@@ -264,7 +284,7 @@ class TestRoundTrip(unittest.TestCase):
 
     def test_a_carried_candidate_keeps_its_tick_and_its_criteria(self):
         run_candidates("--papers", str(self.papers), output=self.report)
-        self._tick_first(section="systems")
+        self._tick_first(tags="systems")
         body = self.report.read_text(encoding="utf-8")
         ticked = sources.checked_ids(body)
         detail = {c["id"]: (c["met"], c["evidence"])
@@ -286,11 +306,11 @@ class TestRoundTrip(unittest.TestCase):
         merged, kept = "2608.06257", "2608.06332"
         self.report.write_text("\n".join(sources.render_candidates([
             {"id": pid, "title": f"Paper {pid}", "date": "2026-08-13",
-             "section": "systems", "met": 2,
+             "tags": ["systems"], "met": 2,
              "evidence": {"action": True, "causal": False, "state": True}}
             for pid in (merged, kept)])) + "\n", encoding="utf-8")
         self.papers.write_text(json.dumps({
-            "id": merged, "title": f"Paper {merged}", "section": "systems",
+            "id": merged, "title": f"Paper {merged}", "tags": ["systems"],
             "links": {"paper": f"https://arxiv.org/abs/{merged}"}, "attrs": {},
         }) + "\n", encoding="utf-8")
         refreshed = self.tmp / "inbox2.md"
@@ -304,7 +324,7 @@ class TestRoundTrip(unittest.TestCase):
         pid = "2608.06257"
         self.report.write_text("\n".join(sources.render_candidates([
             {"id": pid, "title": f"Paper {pid}", "date": "2026-08-13",
-             "section": "systems", "met": 2, "evidence": {}}])) + "\n", encoding="utf-8")
+             "tags": ["systems"], "met": 2, "evidence": {}}])) + "\n", encoding="utf-8")
         pr_bodies = self.tmp / "open-prs.md"
         pr_bodies.write_text(f"adds https://arxiv.org/abs/{pid}\n", encoding="utf-8")
         refreshed = self.tmp / "inbox2.md"
@@ -328,7 +348,7 @@ class TestRoundTrip(unittest.TestCase):
         scrolls off is never announced again. Polled with an empty watchlist,
         which is also the shape of every source being unreachable at once."""
         post = {"id": "blog:runway-gwm-1", "title": "GWM-1", "date": "2026-07-02",
-                "section": "reports", "met": 1, "evidence": {"state": True},
+                "tags": ["reports"], "met": 1, "evidence": {"state": True},
                 "url": "https://runwayml.com/research/introducing-runway-gwm-1",
                 "origin": "Runway research"}
         self.report.write_text(
