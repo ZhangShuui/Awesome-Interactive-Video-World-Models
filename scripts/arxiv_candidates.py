@@ -227,15 +227,27 @@ def ids_in_text(text):
 
 # --- report ------------------------------------------------------------------
 
-def render(candidates, days, sections):
+def render(candidates, days, sections, carried=0):
+    fresh = len(candidates) - carried
+    summary = (
+        f"{len(candidates)} unreviewed paper(s), newest first — {fresh} from the "
+        f"last {days} day(s), {carried} still open from an earlier window."
+        if carried else
+        f"{len(candidates)} unreviewed paper(s) from the last {days} day(s), newest first.")
     lines = [
         "## Review recent arXiv candidates",
         "",
-        f"{len(candidates)} unreviewed paper(s) from the last {days} day(s), newest first.",
+        summary,
         "",
-        "Tick the ones that belong. The section in backticks is a keyword guess — "
-        "edit it in place if it is wrong. Comment `/create-pr` when you are done and "
-        "a PR will add the ticked papers to `data/papers.jsonl` and regenerate the README.",
+        "Two boxes each. Tick the **top** one to accept a paper; tick the nested "
+        "**drop** box to say it should never be proposed again. Leaving both empty "
+        "means not looked at yet, and it comes back tomorrow. The section in "
+        "backticks is a keyword guess — edit it in place if it is wrong.",
+        "",
+        "Comment `/create-pr` when you are done: accepted papers go to "
+        "`data/papers.jsonl` and the README is regenerated, dropped ones go to "
+        "`data/maintainer-rejected.jsonl`. Nothing is recorded until you do — "
+        "both marks are safe to change until then.",
         "",
         f"Valid sections: {', '.join(f'`{s}`' for s in sections)}.",
         "",
@@ -266,6 +278,9 @@ def parse_args():
     ap.add_argument("--rejected", type=Path,
                     default=ROOT / "data" / "agent-rejected.jsonl",
                     help="papers a review agent already turned down")
+    ap.add_argument("--maintainer-rejected", type=Path,
+                    default=ROOT / "data" / "maintainer-rejected.jsonl",
+                    help="papers crossed out by hand in the inbox")
     ap.add_argument("--existing-issue-body", type=Path,
                     help="current inbox body; ticks and section edits are preserved")
     ap.add_argument("--known-file", type=Path,
@@ -291,10 +306,14 @@ def main():
     issue_body = (args.existing_issue_body.read_text(encoding="utf-8")
                   if args.existing_issue_body and args.existing_issue_body.exists() else "")
     known = (sources.known_ids(args.papers) | sources.ignored_ids(args.ignore)
-             | sources.rejected_ids(args.rejected))
+             | sources.rejected_ids(args.rejected)
+             | sources.rejected_ids(args.maintainer_rejected))
     if args.known_file and args.known_file.exists():
         known |= ids_in_text(args.known_file.read_text(encoding="utf-8"))
     ticked = sources.checked_ids(issue_body)
+    # Crossed but not yet committed: the entry stays, wearing its cross, so the
+    # verdict is not lost between the click and the /create-pr that records it.
+    crossed = sources.rejected_in_issue(issue_body)
     overrides = sources.edited_sections(issue_body)
 
     seen, candidates = set(), []
@@ -321,8 +340,22 @@ def main():
             "evidence": evidence,
         })
 
+    # Everything above came out of this run's date window. Anything still open
+    # from an earlier one has to be put back by hand, or the inbox forgets it
+    # the first time the window slides past -- see sources.carried_candidates.
+    carried = 0
+    for candidate in sources.carried_candidates(issue_body):
+        pid = candidate["id"]
+        if sources.source_of(pid) != "arxiv" or pid in known or pid in seen:
+            continue
+        seen.add(pid)
+        candidates.append(candidate)
+        carried += 1
+
     candidates.sort(key=lambda c: (c["met"], c["date"], c["id"]), reverse=True)
-    report = sources.retick(render(candidates, args.days, sections), ticked)
+    report = sources.recross(
+        sources.retick(render(candidates, args.days, sections, carried), ticked),
+        crossed)
 
     if args.output == "-":
         sys.stdout.write(report)

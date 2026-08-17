@@ -139,6 +139,8 @@ _Systems that would sit in the main list if they had a paper. Announced through 
 
 _The main list: systems that meet all three criteria. Newest first._
 
+* **`ForgeWM`**, Progressive Causal Training for Few-Step Action-Conditioned Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.14022)]
+* **`Context-Matched Distillation`**, Teacher Causality for Autoregressive Video Distillation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13391)]
 * **`MASS`**, Multiplayer World Models with Authoritative Shared State. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06257)]
 * **`HelloWorld`**, Enabling Socially Interactive Characters in Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05070)]
 * **`StatePlay`**, State-Aware Game World Models for Mechanics-Consistent Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26754)]
@@ -253,6 +255,8 @@ _The main list: systems that meet all three criteria. Newest first._
 
 _How an action reaches the generator: action spaces, injection mechanisms, latent actions learned without labels, and control-fidelity analysis._
 
+* **`DreamX-Phi 1.0`**, Action-Conditioned Video World Model for Robotic Manipulation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13489)]
+* Spatially-Grounded Text-to-Video Generation via Inference-Time Gradient-Free Optimization. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13037)]
 * **`GeniWorld`**, A Generalizable Interactive World Model for Robotic Manipulation via Visual Actions. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06332)]
 * **`LAWM-3D`**, Learning 3D-Aware Latent Actions from Human Videos for Generalizable Robot World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05706)]
 * **`UniWorld-View`**, Large-Baseline View Synthesis via Video Diffusion Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.04701)]
@@ -290,6 +294,8 @@ _How an action reaches the generator: action spaces, injection mechanisms, laten
 
 _Meeting the per-frame latency budget: causal and autoregressive backbones, few-step distillation, KV caching, and inference systems._
 
+* **`HPSD`**, Hybrid-Policy Self-Distillation for Text-Image-to-Video Diffusion Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13205)]
+* From Local Mismatch to Global Impact: Optimizing Cache Reuse Policy for Efficient Diffusion. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13043)]
 * **`In-Context Forcing`**, Uncovering Context Effects in Autoregressive Video Diffusion. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05237)]
 * **`SPADE`**, An Input-Adaptive Sparse Attention Engine for Fast Video Diffusion Models Inference. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.03335)]
 * Token Radius Attention for Efficient Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.02504)]
@@ -403,6 +409,9 @@ _Meeting the per-frame latency budget: causal and autoregressive backbones, few-
 
 _Keeping the world stable when the camera comes back: long context, explicit spatial and 3D memory, retrieval, and state persistence._
 
+* **`Marionette`**, Predicting World States, Rendering Geometry, Painting Appearance. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.14530)]
+* **`Alaya-EVOKE`**, From Linear-Scaling Supervision to Endless World. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13546)]
+* **`AlayaWorld`**, Interactive Long-Horizon World Modeling - Full Technical Report (v1.1). **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13492)]
 * Addressable Memory for Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.07408)]
 * **`Diff-VF`**, Training-free High-quality Long Video Generation via Diffusion Model. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05976)]
 * **`Vorch-Director`**, Interactive World Story Model via Noise-Aware Error Rectification. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05776)]
@@ -506,6 +515,7 @@ _Keeping the world stable when the camera comes back: long context, explicit spa
 
 _Benchmarks and evaluation protocols aimed at interactive world models, including memory, control-following, and long-horizon stability._
 
+* **`PlayWorld`**, Benchmarking World Models with Agent Players over Long-Horizon Objectives. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13552)]
 * **`GAUGE`**, A Measurement-Grounded Benchmark for Physical Fidelity in Simulation Engines and Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05948)]
 * **`XEWorld`**, Can Action-Conditioned World Models Generalize to Unseen Robot Embodiments?. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.05799)]
 * **`WorldExam`**, Benchmarking World Models from Apparent Appearance to Inherent Reactivity. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.02603)]

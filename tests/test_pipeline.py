@@ -174,7 +174,19 @@ class TestRoundTrip(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.papers = self.tmp / "papers.jsonl"
         self.papers.write_text("", encoding="utf-8")
+        self.rejects = self.tmp / "maintainer-rejected.jsonl"
         self.report = self.tmp / "inbox.md"
+
+    def _empty_feed(self):
+        """A window that has moved past everything the inbox holds."""
+        path = self.tmp / "empty-feed.xml"
+        path.write_text('<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+                        encoding="utf-8")
+        return path
+
+    def _ids(self, path):
+        return {c["id"]
+                for c in sources.carried_candidates(path.read_text(encoding="utf-8"))}
 
     def _tick_first(self, section=None):
         lines = self.report.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -237,6 +249,179 @@ class TestRoundTrip(unittest.TestCase):
         again = self.tmp / "inbox3.md"
         run_candidates("--papers", str(self.papers), output=again)
         self.assertNotIn(first["id"], again.read_text(encoding="utf-8"))
+
+    def test_a_candidate_outlives_the_window_it_arrived_in(self):
+        """The bug this guards: on 08-17 a 3-day refresh silently dropped 18 of
+        the 23 papers a 4-day run had put in the inbox hours earlier. They were
+        not judged, they were just older than the new window."""
+        run_candidates("--papers", str(self.papers), output=self.report)
+        before = self._ids(self.report)
+        self.assertTrue(before)
+        refreshed = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers), "--feed-file", str(self._empty_feed()),
+                       "--existing-issue-body", str(self.report), output=refreshed)
+        self.assertEqual(self._ids(refreshed), before)
+
+    def test_a_carried_candidate_keeps_its_tick_and_its_criteria(self):
+        run_candidates("--papers", str(self.papers), output=self.report)
+        self._tick_first(section="systems")
+        body = self.report.read_text(encoding="utf-8")
+        ticked = sources.checked_ids(body)
+        detail = {c["id"]: (c["met"], c["evidence"])
+                  for c in sources.carried_candidates(body)}
+        refreshed = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers), "--feed-file", str(self._empty_feed()),
+                       "--existing-issue-body", str(self.report), output=refreshed)
+        after = refreshed.read_text(encoding="utf-8")
+        self.assertEqual(sources.checked_ids(after), ticked)
+        self.assertEqual({c["id"]: (c["met"], c["evidence"])
+                          for c in sources.carried_candidates(after)}, detail)
+        self.assertIn("`systems`", after)
+
+    def test_carrying_forward_is_not_never_forgetting(self):
+        """An entry retires the moment something else accounts for it --
+        otherwise the inbox only ever grows. Written against a hand-built body
+        rather than the fixture, which yields a single candidate and so cannot
+        tell 'retired the merged one' from 'dropped everything'."""
+        merged, kept = "2608.06257", "2608.06332"
+        self.report.write_text("\n".join(sources.render_candidates([
+            {"id": pid, "title": f"Paper {pid}", "date": "2026-08-13",
+             "section": "systems", "met": 2,
+             "evidence": {"action": True, "causal": False, "state": True}}
+            for pid in (merged, kept)])) + "\n", encoding="utf-8")
+        self.papers.write_text(json.dumps({
+            "id": merged, "title": f"Paper {merged}", "section": "systems",
+            "links": {"paper": f"https://arxiv.org/abs/{merged}"}, "attrs": {},
+        }) + "\n", encoding="utf-8")
+        refreshed = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers), "--feed-file", str(self._empty_feed()),
+                       "--existing-issue-body", str(self.report), output=refreshed)
+        self.assertEqual(self._ids(refreshed), {kept})
+
+    def test_an_open_pr_also_retires_a_carried_entry(self):
+        """Ticked papers sit in an open PR for as long as review takes, and the
+        inbox must not re-propose them the whole time."""
+        pid = "2608.06257"
+        self.report.write_text("\n".join(sources.render_candidates([
+            {"id": pid, "title": f"Paper {pid}", "date": "2026-08-13",
+             "section": "systems", "met": 2, "evidence": {}}])) + "\n", encoding="utf-8")
+        pr_bodies = self.tmp / "open-prs.md"
+        pr_bodies.write_text(f"adds https://arxiv.org/abs/{pid}\n", encoding="utf-8")
+        refreshed = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers), "--feed-file", str(self._empty_feed()),
+                       "--existing-issue-body", str(self.report),
+                       "--known-file", str(pr_bodies), output=refreshed)
+        self.assertEqual(self._ids(refreshed), set())
+
+    def test_a_paper_still_in_the_window_is_not_listed_twice(self):
+        run_candidates("--papers", str(self.papers), output=self.report)
+        before = self._ids(self.report)
+        refreshed = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers),
+                       "--existing-issue-body", str(self.report), output=refreshed)
+        body = refreshed.read_text(encoding="utf-8")
+        self.assertEqual(self._ids(refreshed), before)
+        self.assertEqual(len(sources.carried_candidates(body)), len(before))
+
+    def test_the_watchlist_carries_its_own_candidates_forward(self):
+        """Feeds are incremental and listing pages are short, so a post that
+        scrolls off is never announced again. Polled with an empty watchlist,
+        which is also the shape of every source being unreachable at once."""
+        post = {"id": "blog:runway-gwm-1", "title": "GWM-1", "date": "2026-07-02",
+                "section": "reports", "met": 1, "evidence": {"state": True},
+                "url": "https://runwayml.com/research/introducing-runway-gwm-1",
+                "origin": "Runway research"}
+        self.report.write_text(
+            "\n".join(sources.render_candidates([post])) + "\n", encoding="utf-8")
+        watchlist = self.tmp / "watchlist.json"
+        watchlist.write_text("[]", encoding="utf-8")
+        refreshed = self.tmp / "inbox2.md"
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "blog_candidates.py"),
+                        "--watchlist", str(watchlist), "--papers", str(self.papers),
+                        "--existing-issue-body", str(self.report),
+                        "--output", str(refreshed)],
+                       capture_output=True, text=True, check=True)
+        carried = sources.carried_candidates(refreshed.read_text(encoding="utf-8"))
+        self.assertEqual([c["id"] for c in carried], [post["id"]])
+        self.assertEqual(carried[0]["url"], post["url"])
+        self.assertEqual(carried[0]["origin"], post["origin"])
+
+    def _cross_first(self):
+        """Tick the nested drop box on the first candidate."""
+        lines = self.report.read_text(encoding="utf-8").splitlines(keepends=True)
+        for i, line in enumerate(lines):
+            if sources.REJECT_RE.match(line):
+                lines[i] = line.replace("- [ ]", "- [x]", 1)
+                break
+        self.report.write_text("".join(lines), encoding="utf-8")
+
+    def _apply(self, *extra):
+        return subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "apply_issue_selections.py"),
+             "--issue-body", str(self.report), "--papers", str(self.papers),
+             "--maintainer-rejected", str(self.rejects), *extra],
+            capture_output=True, text=True, check=True)
+
+    def test_every_candidate_offers_both_verdicts(self):
+        run_candidates("--papers", str(self.papers), output=self.report)
+        body = self.report.read_text(encoding="utf-8")
+        ids = self._ids(self.report)
+        self.assertTrue(ids)
+        offered = {m.group("id") for m in sources.REJECT_RE.finditer(body)}
+        self.assertEqual(offered, ids)
+        # Nothing is decided until someone clicks.
+        self.assertFalse(sources.checked_ids(body))
+        self.assertFalse(sources.rejected_in_issue(body))
+
+    def test_a_crossed_box_is_recorded_and_stops_the_candidate_coming_back(self):
+        run_candidates("--papers", str(self.papers), output=self.report)
+        self._cross_first()
+        dropped = sources.rejected_in_issue(self.report.read_text(encoding="utf-8"))
+        self.assertEqual(len(dropped), 1)
+        self.assertEqual(self._apply().stdout.strip(), "1")
+        recorded = [json.loads(l) for l in self.rejects.read_text(encoding="utf-8")
+                    .splitlines() if l.strip()]
+        self.assertEqual({r["id"] for r in recorded}, dropped)
+        self.assertTrue(recorded[0]["title"])
+        # Rejected, so not proposed again -- from the window or from the inbox.
+        again = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers),
+                       "--maintainer-rejected", str(self.rejects),
+                       "--existing-issue-body", str(self.report), output=again)
+        self.assertFalse(self._ids(again) & dropped)
+
+    def test_a_cross_survives_a_refresh_before_it_is_recorded(self):
+        """The click and the /create-pr that records it can be days apart, and
+        the refresh in between rewrites the body."""
+        run_candidates("--papers", str(self.papers), output=self.report)
+        self._cross_first()
+        dropped = sources.rejected_in_issue(self.report.read_text(encoding="utf-8"))
+        refreshed = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers), "--feed-file", str(self._empty_feed()),
+                       "--existing-issue-body", str(self.report), output=refreshed)
+        body = refreshed.read_text(encoding="utf-8")
+        self.assertEqual(sources.rejected_in_issue(body), dropped)
+        self.assertTrue(dropped <= self._ids(refreshed))
+
+    def test_ticked_and_crossed_at_once_keeps_the_tick_and_says_so(self):
+        run_candidates("--papers", str(self.papers), output=self.report)
+        self._tick_first()
+        self._cross_first()
+        result = self._apply()
+        self.assertEqual(result.stdout.strip(), "1")
+        self.assertIn("ticked and crossed", result.stderr)
+        # Nothing rejected, so the file is never even created.
+        self.assertFalse(self.rejects.exists())
+        self.assertEqual(len(self.papers.read_text(encoding="utf-8").splitlines()), 1)
+
+    def test_recording_a_rejection_twice_does_not_duplicate_it(self):
+        run_candidates("--papers", str(self.papers), output=self.report)
+        self._cross_first()
+        self.assertEqual(self._apply().stdout.strip(), "1")
+        self.assertEqual(self._apply().stdout.strip(), "0")
+        lines = [l for l in self.rejects.read_text(encoding="utf-8").splitlines()
+                 if l.strip()]
+        self.assertEqual(len(lines), 1)
 
     def test_apply_is_idempotent(self):
         run_candidates("--papers", str(self.papers), output=self.report)

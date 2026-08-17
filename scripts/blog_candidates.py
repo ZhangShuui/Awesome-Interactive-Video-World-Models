@@ -238,21 +238,23 @@ def fill_abstracts(candidates, watchlist=None, timeout=60.0, retries=2, retry_de
 
 # --- report ------------------------------------------------------------------
 
-def render(candidates, sections, polled, failed):
+def render(candidates, sections, polled, failed, carried=0):
     lines = [
         "## Review blog and technical-report candidates",
         "",
-        f"{len(candidates)} post(s) from {polled} watchlist source(s)"
-        + (f", {failed} unreachable" if failed else "") + ".",
+        f"{len(candidates) - carried} post(s) from {polled} watchlist source(s)"
+        + (f", {failed} unreachable" if failed else "")
+        + (f", plus {carried} still open from an earlier poll" if carried else "") + ".",
         "",
         "**Every one of these needs the link opened before it is merged.** The "
         "`reports` section promises hand-checked URLs, and a keyword match on a "
         "feed summary is not that. Titles from `page` sources are scraped from "
         "anchor text and are provisional — fix them in place if they are wrong.",
         "",
-        "Tick what belongs. The section in backticks defaults to `reports`; edit "
-        "it if the post is really a dataset or a survey. Comment `/create-pr` "
-        "when done.",
+        "Tick the top box for what belongs, the nested **drop** box for what "
+        "should stop coming back. The section in backticks defaults to `reports`; "
+        "edit it if the post is really a dataset or a survey. Comment "
+        "`/create-pr` when done.",
         "",
         f"Valid sections: {', '.join(f'`{s}`' for s in sections)}.",
         "",
@@ -278,6 +280,9 @@ def parse_args():
     ap.add_argument("--papers", type=Path, default=ROOT / "data" / "papers.jsonl")
     ap.add_argument("--sections", type=Path, default=ROOT / "data" / "sections.json")
     ap.add_argument("--ignore", type=Path, default=ROOT / "data" / "arxiv-ignore.txt")
+    ap.add_argument("--maintainer-rejected", type=Path,
+                    default=ROOT / "data" / "maintainer-rejected.jsonl",
+                    help="posts crossed out by hand in the inbox")
     ap.add_argument("--rejected", type=Path,
                     default=ROOT / "data" / "agent-rejected.jsonl")
     ap.add_argument("--existing-issue-body", type=Path,
@@ -294,12 +299,14 @@ def main():
     watchlist = json.loads(args.watchlist.read_text(encoding="utf-8"))
 
     known_ids = (sources.known_ids(args.papers) | sources.ignored_ids(args.ignore)
-                 | sources.rejected_ids(args.rejected))
+                 | sources.rejected_ids(args.rejected)
+                 | sources.rejected_ids(args.maintainer_rejected))
     known_titles = sources.known_titles(args.papers)
     known_urls = sources.known_urls(args.papers)
     issue_body = (args.existing_issue_body.read_text(encoding="utf-8")
                   if args.existing_issue_body and args.existing_issue_body.exists() else "")
     overrides = sources.edited_sections(issue_body)
+    crossed = sources.rejected_in_issue(issue_body)
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=args.days)).date().isoformat()
     candidates, seen, failed = [], set(), 0
@@ -345,9 +352,30 @@ def main():
             })
         time.sleep(MIN_DELAY_S)
 
+    # A feed is incremental and a scraped listing page is short, so a post
+    # falls off the end of both without ever being announced again. Carrying
+    # the unjudged ones forward matters more here than it does for arXiv: a
+    # single unreachable source already costs a poll, and this is what stops it
+    # costing everything that source had proposed before.
+    carried = 0
+    for candidate in sources.carried_candidates(issue_body):
+        pid = candidate["id"]
+        if sources.source_of(pid) != "blog" or pid in known_ids:
+            continue
+        key = sources.norm_url(candidate.get("url") or "")
+        if key in known_urls or key in seen:
+            continue
+        if sources.norm_title(candidate["title"]) in known_titles:
+            continue
+        seen.add(key)
+        candidates.append(candidate)
+        carried += 1
+
     candidates.sort(key=lambda c: (c["date"] or "", c["id"]), reverse=True)
-    report = sources.retick(render(candidates, sections, len(watchlist), failed),
-                            sources.checked_ids(issue_body))
+    report = sources.recross(
+        sources.retick(render(candidates, sections, len(watchlist), failed, carried),
+                       sources.checked_ids(issue_body)),
+        crossed)
     if args.output == "-":
         sys.stdout.write(report)
         print(len(candidates), file=sys.stderr)

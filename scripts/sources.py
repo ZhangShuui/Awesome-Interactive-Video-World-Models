@@ -242,6 +242,26 @@ CANDIDATE_RE = re.compile(
     r"<!-- candidate:(?P<payload>[A-Za-z0-9+/=]+) -->",
     re.M | re.S)
 
+# The same entry plus the indented detail line under it, which is where the
+# criteria marks live. They are not in the payload because they are derived,
+# not identity -- but re-deriving them needs the abstract, and the inbox does
+# not carry one, so a carried candidate reads them back off its own report.
+CARRIED_RE = re.compile(
+    r"^- \[(?P<checked>[ xX])\]\s+`(?P<section>[a-z-]+)`\s+.*?"
+    r"<!-- candidate:(?P<payload>[A-Za-z0-9+/=]+) -->\n"
+    r"[ ]+(?P<detail>\S.*)$",
+    re.M)
+
+CRITERIA_RE = re.compile(
+    r"criteria (?P<met>\d)/3 \(action (?P<action>yes|--) · "
+    r"causal (?P<causal>yes|--) · state (?P<state>yes|--)\)")
+
+# The second box, on the indented detail line. Its id is in the clear rather
+# than base64: the entry above already carries the payload, and this one only
+# has to say which entry it belongs to.
+REJECT_RE = re.compile(
+    r"^\s+- \[(?P<checked>[ xX])\].*?<!-- reject:(?P<id>[^\s>]+) -->", re.M)
+
 PAYLOAD_FIELDS = ("id", "name", "title", "date", "section", "url", "origin")
 
 
@@ -268,6 +288,20 @@ def checked_ids(issue_body):
     return out
 
 
+def rejected_in_issue(issue_body):
+    """Papers the maintainer crossed out in the inbox.
+
+    A cross is not durable on its own -- it lives in an Issue body that the
+    next refresh rewrites -- so it is honoured here and recorded for good in
+    data/maintainer-rejected.jsonl when /create-pr runs. Until that happens the
+    entry stays in the inbox wearing its cross, exactly as a ticked entry stays
+    until a PR carries it off. Neither mark is allowed to be the only copy of
+    itself.
+    """
+    return {m.group("id") for m in REJECT_RE.finditer(issue_body or "")
+            if m.group("checked").lower() == "x"}
+
+
 def edited_sections(issue_body):
     """Section corrections the maintainer typed survive an inbox refresh."""
     out = {}
@@ -278,11 +312,53 @@ def edited_sections(issue_body):
     return out
 
 
+def carried_candidates(issue_body):
+    """Every candidate already in the inbox, rebuilt well enough to re-render.
+
+    Each source regenerates its report from its own window, so without this an
+    entry that ages out of that window disappears before anyone has judged it
+    -- silently, and for good, because nothing else remembers a candidate. The
+    inbox is the only record between proposal and verdict, and the window has
+    to be allowed to move: it is three days, the daily run has lost three of
+    its last five, and a paper nobody had time to tick on Friday is not a
+    paper anybody decided against.
+
+    Carrying forward is not the same as never forgetting. The caller retires an
+    entry the moment it is accounted for elsewhere -- merged, ignored, rejected,
+    or sitting in an open PR -- which is what keeps the inbox from growing
+    without bound.
+    """
+    out = []
+    for m in CARRIED_RE.finditer(issue_body or ""):
+        payload = decode(m.group("payload"))
+        if not payload:
+            continue
+        criteria = CRITERIA_RE.search(m.group("detail"))
+        candidate = dict(payload)
+        # The visible section is the maintainer's if they edited it, and the
+        # payload's otherwise; either way the line is what to believe.
+        candidate["section"] = m.group("section")
+        candidate["met"] = int(criteria.group("met")) if criteria else 0
+        candidate["evidence"] = {
+            key: bool(criteria and criteria.group(key) == "yes")
+            for key in ("action", "causal", "state")}
+        out.append(candidate)
+    return out
+
+
 TICKS = {True: "yes", False: "--"}
 
 
 def render_candidates(candidates):
-    """The checkbox lines for one source's candidates."""
+    """The checkbox lines for one source's candidates.
+
+    Two boxes each, because a candidate has three fates and one box only spells
+    two. Ticking the first accepts it; ticking the second says never propose
+    this again; leaving both empty means nobody has looked yet, which is not
+    the same as no. The second box is the detail line rather than a line of its
+    own -- that line already existed and had nothing interactive on it, so the
+    inbox gains a verdict without gaining any length.
+    """
     lines = []
     for cand in candidates:
         ev = cand.get("evidence") or {}
@@ -296,7 +372,8 @@ def render_candidates(candidates):
         if cand.get("origin"):
             detail.append(cand["origin"])
         detail.append(f"criteria {cand['met']}/3 ({marks})")
-        lines.append("      " + " · ".join(d for d in detail if d))
+        lines.append("  - [ ] **drop** · " + " · ".join(d for d in detail if d)
+                     + f" <!-- reject:{cand['id']} -->")
     return lines
 
 
@@ -345,4 +422,16 @@ def retick(report, ticked):
             payload = decode(m.group("payload"))
             if payload and payload["id"] in ticked:
                 lines[i] = line.replace("- [ ]", "- [x]", 1)
+    return "".join(lines)
+
+
+def recross(report, rejected):
+    """The same, for the drop box. A verdict survives a refresh either way."""
+    if not rejected:
+        return report
+    lines = report.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        m = REJECT_RE.match(line)
+        if m and m.group("id") in rejected:
+            lines[i] = line.replace("- [ ]", "- [x]", 1)
     return "".join(lines)
