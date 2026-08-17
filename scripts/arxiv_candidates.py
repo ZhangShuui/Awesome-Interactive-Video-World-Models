@@ -227,11 +227,17 @@ def ids_in_text(text):
 
 # --- report ------------------------------------------------------------------
 
-def render(candidates, days, sections):
+def render(candidates, days, sections, carried=0):
+    fresh = len(candidates) - carried
+    summary = (
+        f"{len(candidates)} unreviewed paper(s), newest first — {fresh} from the "
+        f"last {days} day(s), {carried} still open from an earlier window."
+        if carried else
+        f"{len(candidates)} unreviewed paper(s) from the last {days} day(s), newest first.")
     lines = [
         "## Review recent arXiv candidates",
         "",
-        f"{len(candidates)} unreviewed paper(s) from the last {days} day(s), newest first.",
+        summary,
         "",
         "Tick the ones that belong. The section in backticks is a keyword guess — "
         "edit it in place if it is wrong. Comment `/create-pr` when you are done and "
@@ -321,8 +327,20 @@ def main():
             "evidence": evidence,
         })
 
+    # Everything above came out of this run's date window. Anything still open
+    # from an earlier one has to be put back by hand, or the inbox forgets it
+    # the first time the window slides past -- see sources.carried_candidates.
+    carried = 0
+    for candidate in sources.carried_candidates(issue_body):
+        pid = candidate["id"]
+        if sources.source_of(pid) != "arxiv" or pid in known or pid in seen:
+            continue
+        seen.add(pid)
+        candidates.append(candidate)
+        carried += 1
+
     candidates.sort(key=lambda c: (c["met"], c["date"], c["id"]), reverse=True)
-    report = sources.retick(render(candidates, args.days, sections), ticked)
+    report = sources.retick(render(candidates, args.days, sections, carried), ticked)
 
     if args.output == "-":
         sys.stdout.write(report)

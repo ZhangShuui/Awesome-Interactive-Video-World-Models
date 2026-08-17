@@ -176,6 +176,17 @@ class TestRoundTrip(unittest.TestCase):
         self.papers.write_text("", encoding="utf-8")
         self.report = self.tmp / "inbox.md"
 
+    def _empty_feed(self):
+        """A window that has moved past everything the inbox holds."""
+        path = self.tmp / "empty-feed.xml"
+        path.write_text('<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+                        encoding="utf-8")
+        return path
+
+    def _ids(self, path):
+        return {c["id"]
+                for c in sources.carried_candidates(path.read_text(encoding="utf-8"))}
+
     def _tick_first(self, section=None):
         lines = self.report.read_text(encoding="utf-8").splitlines(keepends=True)
         for i, line in enumerate(lines):
@@ -237,6 +248,102 @@ class TestRoundTrip(unittest.TestCase):
         again = self.tmp / "inbox3.md"
         run_candidates("--papers", str(self.papers), output=again)
         self.assertNotIn(first["id"], again.read_text(encoding="utf-8"))
+
+    def test_a_candidate_outlives_the_window_it_arrived_in(self):
+        """The bug this guards: on 08-17 a 3-day refresh silently dropped 18 of
+        the 23 papers a 4-day run had put in the inbox hours earlier. They were
+        not judged, they were just older than the new window."""
+        run_candidates("--papers", str(self.papers), output=self.report)
+        before = self._ids(self.report)
+        self.assertTrue(before)
+        refreshed = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers), "--feed-file", str(self._empty_feed()),
+                       "--existing-issue-body", str(self.report), output=refreshed)
+        self.assertEqual(self._ids(refreshed), before)
+
+    def test_a_carried_candidate_keeps_its_tick_and_its_criteria(self):
+        run_candidates("--papers", str(self.papers), output=self.report)
+        self._tick_first(section="systems")
+        body = self.report.read_text(encoding="utf-8")
+        ticked = sources.checked_ids(body)
+        detail = {c["id"]: (c["met"], c["evidence"])
+                  for c in sources.carried_candidates(body)}
+        refreshed = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers), "--feed-file", str(self._empty_feed()),
+                       "--existing-issue-body", str(self.report), output=refreshed)
+        after = refreshed.read_text(encoding="utf-8")
+        self.assertEqual(sources.checked_ids(after), ticked)
+        self.assertEqual({c["id"]: (c["met"], c["evidence"])
+                          for c in sources.carried_candidates(after)}, detail)
+        self.assertIn("`systems`", after)
+
+    def test_carrying_forward_is_not_never_forgetting(self):
+        """An entry retires the moment something else accounts for it --
+        otherwise the inbox only ever grows. Written against a hand-built body
+        rather than the fixture, which yields a single candidate and so cannot
+        tell 'retired the merged one' from 'dropped everything'."""
+        merged, kept = "2608.06257", "2608.06332"
+        self.report.write_text("\n".join(sources.render_candidates([
+            {"id": pid, "title": f"Paper {pid}", "date": "2026-08-13",
+             "section": "systems", "met": 2,
+             "evidence": {"action": True, "causal": False, "state": True}}
+            for pid in (merged, kept)])) + "\n", encoding="utf-8")
+        self.papers.write_text(json.dumps({
+            "id": merged, "title": f"Paper {merged}", "section": "systems",
+            "links": {"paper": f"https://arxiv.org/abs/{merged}"}, "attrs": {},
+        }) + "\n", encoding="utf-8")
+        refreshed = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers), "--feed-file", str(self._empty_feed()),
+                       "--existing-issue-body", str(self.report), output=refreshed)
+        self.assertEqual(self._ids(refreshed), {kept})
+
+    def test_an_open_pr_also_retires_a_carried_entry(self):
+        """Ticked papers sit in an open PR for as long as review takes, and the
+        inbox must not re-propose them the whole time."""
+        pid = "2608.06257"
+        self.report.write_text("\n".join(sources.render_candidates([
+            {"id": pid, "title": f"Paper {pid}", "date": "2026-08-13",
+             "section": "systems", "met": 2, "evidence": {}}])) + "\n", encoding="utf-8")
+        pr_bodies = self.tmp / "open-prs.md"
+        pr_bodies.write_text(f"adds https://arxiv.org/abs/{pid}\n", encoding="utf-8")
+        refreshed = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers), "--feed-file", str(self._empty_feed()),
+                       "--existing-issue-body", str(self.report),
+                       "--known-file", str(pr_bodies), output=refreshed)
+        self.assertEqual(self._ids(refreshed), set())
+
+    def test_a_paper_still_in_the_window_is_not_listed_twice(self):
+        run_candidates("--papers", str(self.papers), output=self.report)
+        before = self._ids(self.report)
+        refreshed = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers),
+                       "--existing-issue-body", str(self.report), output=refreshed)
+        body = refreshed.read_text(encoding="utf-8")
+        self.assertEqual(self._ids(refreshed), before)
+        self.assertEqual(len(sources.carried_candidates(body)), len(before))
+
+    def test_the_watchlist_carries_its_own_candidates_forward(self):
+        """Feeds are incremental and listing pages are short, so a post that
+        scrolls off is never announced again. Polled with an empty watchlist,
+        which is also the shape of every source being unreachable at once."""
+        post = {"id": "blog:runway-gwm-1", "title": "GWM-1", "date": "2026-07-02",
+                "section": "reports", "met": 1, "evidence": {"state": True},
+                "url": "https://runwayml.com/research/introducing-runway-gwm-1",
+                "origin": "Runway research"}
+        self.report.write_text(
+            "\n".join(sources.render_candidates([post])) + "\n", encoding="utf-8")
+        watchlist = self.tmp / "watchlist.json"
+        watchlist.write_text("[]", encoding="utf-8")
+        refreshed = self.tmp / "inbox2.md"
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "blog_candidates.py"),
+                        "--watchlist", str(watchlist), "--papers", str(self.papers),
+                        "--existing-issue-body", str(self.report),
+                        "--output", str(refreshed)],
+                       capture_output=True, text=True, check=True)
+        carried = sources.carried_candidates(refreshed.read_text(encoding="utf-8"))
+        self.assertEqual([c["id"] for c in carried], [post["id"]])
+        self.assertEqual(carried[0]["url"], post["url"])
+        self.assertEqual(carried[0]["origin"], post["origin"])
 
     def test_apply_is_idempotent(self):
         run_candidates("--papers", str(self.papers), output=self.report)

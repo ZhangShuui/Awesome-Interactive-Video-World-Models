@@ -238,12 +238,13 @@ def fill_abstracts(candidates, watchlist=None, timeout=60.0, retries=2, retry_de
 
 # --- report ------------------------------------------------------------------
 
-def render(candidates, sections, polled, failed):
+def render(candidates, sections, polled, failed, carried=0):
     lines = [
         "## Review blog and technical-report candidates",
         "",
-        f"{len(candidates)} post(s) from {polled} watchlist source(s)"
-        + (f", {failed} unreachable" if failed else "") + ".",
+        f"{len(candidates) - carried} post(s) from {polled} watchlist source(s)"
+        + (f", {failed} unreachable" if failed else "")
+        + (f", plus {carried} still open from an earlier poll" if carried else "") + ".",
         "",
         "**Every one of these needs the link opened before it is merged.** The "
         "`reports` section promises hand-checked URLs, and a keyword match on a "
@@ -345,9 +346,29 @@ def main():
             })
         time.sleep(MIN_DELAY_S)
 
+    # A feed is incremental and a scraped listing page is short, so a post
+    # falls off the end of both without ever being announced again. Carrying
+    # the unjudged ones forward matters more here than it does for arXiv: a
+    # single unreachable source already costs a poll, and this is what stops it
+    # costing everything that source had proposed before.
+    carried = 0
+    for candidate in sources.carried_candidates(issue_body):
+        pid = candidate["id"]
+        if sources.source_of(pid) != "blog" or pid in known_ids:
+            continue
+        key = sources.norm_url(candidate.get("url") or "")
+        if key in known_urls or key in seen:
+            continue
+        if sources.norm_title(candidate["title"]) in known_titles:
+            continue
+        seen.add(key)
+        candidates.append(candidate)
+        carried += 1
+
     candidates.sort(key=lambda c: (c["date"] or "", c["id"]), reverse=True)
-    report = sources.retick(render(candidates, sections, len(watchlist), failed),
-                            sources.checked_ids(issue_body))
+    report = sources.retick(
+        render(candidates, sections, len(watchlist), failed, carried),
+        sources.checked_ids(issue_body))
     if args.output == "-":
         sys.stdout.write(report)
         print(len(candidates), file=sys.stderr)

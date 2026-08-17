@@ -242,6 +242,20 @@ CANDIDATE_RE = re.compile(
     r"<!-- candidate:(?P<payload>[A-Za-z0-9+/=]+) -->",
     re.M | re.S)
 
+# The same entry plus the indented detail line under it, which is where the
+# criteria marks live. They are not in the payload because they are derived,
+# not identity -- but re-deriving them needs the abstract, and the inbox does
+# not carry one, so a carried candidate reads them back off its own report.
+CARRIED_RE = re.compile(
+    r"^- \[(?P<checked>[ xX])\]\s+`(?P<section>[a-z-]+)`\s+.*?"
+    r"<!-- candidate:(?P<payload>[A-Za-z0-9+/=]+) -->\n"
+    r"[ ]+(?P<detail>\S.*)$",
+    re.M)
+
+CRITERIA_RE = re.compile(
+    r"criteria (?P<met>\d)/3 \(action (?P<action>yes|--) · "
+    r"causal (?P<causal>yes|--) · state (?P<state>yes|--)\)")
+
 PAYLOAD_FIELDS = ("id", "name", "title", "date", "section", "url", "origin")
 
 
@@ -275,6 +289,40 @@ def edited_sections(issue_body):
         payload = decode(m.group("payload"))
         if payload and m.group("section") != payload.get("section"):
             out[payload["id"]] = m.group("section")
+    return out
+
+
+def carried_candidates(issue_body):
+    """Every candidate already in the inbox, rebuilt well enough to re-render.
+
+    Each source regenerates its report from its own window, so without this an
+    entry that ages out of that window disappears before anyone has judged it
+    -- silently, and for good, because nothing else remembers a candidate. The
+    inbox is the only record between proposal and verdict, and the window has
+    to be allowed to move: it is three days, the daily run has lost three of
+    its last five, and a paper nobody had time to tick on Friday is not a
+    paper anybody decided against.
+
+    Carrying forward is not the same as never forgetting. The caller retires an
+    entry the moment it is accounted for elsewhere -- merged, ignored, rejected,
+    or sitting in an open PR -- which is what keeps the inbox from growing
+    without bound.
+    """
+    out = []
+    for m in CARRIED_RE.finditer(issue_body or ""):
+        payload = decode(m.group("payload"))
+        if not payload:
+            continue
+        criteria = CRITERIA_RE.search(m.group("detail"))
+        candidate = dict(payload)
+        # The visible section is the maintainer's if they edited it, and the
+        # payload's otherwise; either way the line is what to believe.
+        candidate["section"] = m.group("section")
+        candidate["met"] = int(criteria.group("met")) if criteria else 0
+        candidate["evidence"] = {
+            key: bool(criteria and criteria.group(key) == "yes")
+            for key in ("action", "causal", "state")}
+        out.append(candidate)
     return out
 
 
