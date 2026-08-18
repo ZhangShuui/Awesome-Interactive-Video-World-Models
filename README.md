@@ -86,6 +86,10 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`HarnessEval-W`**, Agentifying the Evaluation of Visual Worlds. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.16859)] · 📊`benchmarks`
+* **`CaliBench`**, Are the Stochastic Dynamics of Video World Models Physically Calibrated?. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.16829)] · 🧠`memory`
+* **`SQuad`**, Sub-Quadratic Attention Distillation for Efficient Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.16585)] · ⚡`realtime`
+* MLLM-Guided Semantic Correction for Text-to-Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.16513)] · 🕹️`control`
 * **`Marionette`**, Predicting World States, Rendering Geometry, Painting Appearance. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.14530)] · 🧠`memory`
 * **`ForgeWM`**, Progressive Causal Training for Few-Step Action-Conditioned Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.14022)] · 🌍`systems` 🕹️`control` ⚡`realtime`
 * **`PlayWorld`**, Benchmarking World Models with Agent Players over Long-Horizon Objectives. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13552)] · 🧠`memory` 📊`benchmarks`
@@ -96,6 +100,8 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * **`HPSD`**, Hybrid-Policy Self-Distillation for Text-Image-to-Video Diffusion Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13205)] · ⚡`realtime`
 * From Local Mismatch to Global Impact: Optimizing Cache Reuse Policy for Efficient Diffusion. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13043)] · ⚡`realtime`
 * Spatially-Grounded Text-to-Video Generation via Inference-Time Gradient-Free Optimization. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13037)] · 🕹️`control`
+* **`LoSA`**, Near-Lossless Sparse Attention for Training-Free Video Diffusion Acceleration. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.12032)] · ⚡`realtime`
+* Bridging Event Streams and DiT: Event-Guided Video Frame Interpolation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.10479)] · 🧠`memory`
 * Addressable Memory for Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.07408)] · 🧠`memory`
 * **`GeniWorld`**, A Generalizable Interactive World Model for Robotic Manipulation via Visual Actions. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06332)] · 🕹️`control`
 * **`MASS`**, Multiplayer World Models with Authoritative Shared State. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06257)] · 🌍`systems`
