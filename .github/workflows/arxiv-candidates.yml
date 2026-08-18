@@ -20,7 +20,7 @@ on:
       days:
         description: Number of days to search
         required: false
-        default: "3"
+        default: "7"
       blog_days:
         description: How far back to look on the blog watchlist
         required: false
@@ -30,6 +30,9 @@ permissions:
   contents: read
   issues: write
   pull-requests: read
+  # Only to ask when this workflow last succeeded, which is what the search
+  # window is anchored to.
+  actions: read
 
 jobs:
   refresh-candidates:
@@ -58,8 +61,8 @@ jobs:
           # nobody ticked went down with it, still unjudged. The scripts carry
           # unjudged candidates across a moving window, but only if they are
           # handed the previous body, so read the closed one rather than
-          # starting empty: a 3-day window means "starting empty" loses every
-          # candidate older than yesterday, the day after any PR is opened.
+          # starting empty: any finite window means "starting empty" loses every
+          # candidate older than it, the day after any PR is opened.
           if [ -n "$issue_number" ]; then
             gh issue view "$issue_number" --json body --jq '.body' > "$RUNNER_TEMP/existing-inbox.md"
           else
@@ -72,15 +75,35 @@ jobs:
           gh pr list \
             --label arxiv-candidates --state open --limit 100 \
             --json body --jq '.[].body' > "$RUNNER_TEMP/open-arxiv-prs.md"
+          # How far back this run has to reach. A window of `now - days` only
+          # covers the gap between runs while the runs actually happen: a run
+          # that died searched nothing, and the next one opens its window after
+          # the gap it was supposed to close. 08-11, 08-12 and 08-13 all died on
+          # a 429, and the 08-14 run opened at 08-11 02:17 -- 2h15m after
+          # 2608.14706 was submitted, which no later window can ever reach back
+          # for, because every later window opens later still. So anchor to the
+          # last run that finished instead. This one is still in_progress, so it
+          # cannot match itself; an empty answer means nothing has ever
+          # succeeded, and the script falls back to the plain window.
+          since="$(gh run list \
+            --workflow "$GITHUB_WORKFLOW" --status success --limit 1 \
+            --json createdAt --jq '.[0].createdAt // ""')"
+          echo "since=$since" >> "$GITHUB_OUTPUT"
 
       - name: Generate candidate report
         id: candidates
         env:
-          SEARCH_DAYS: ${{ github.event.inputs.days || '3' }}
+          # Seven days, not three. Covering the gap between runs is `--since`'s
+          # job now; what the window is for is arXiv's announcement lag, which
+          # routinely runs to two or three days -- 2608.14706 carries
+          # submittedDate 08-11 and an id from the 08-13 announcement batch.
+          SEARCH_DAYS: ${{ github.event.inputs.days || '7' }}
           BLOG_DAYS: ${{ github.event.inputs.blog_days || '30' }}
+          SINCE: ${{ steps.inbox.outputs.since }}
         run: |
           arxiv="$(python3 scripts/arxiv_candidates.py \
             --days "$SEARCH_DAYS" \
+            --since "$SINCE" \
             --existing-issue-body "$RUNNER_TEMP/existing-inbox.md" \
             --known-file "$RUNNER_TEMP/open-arxiv-prs.md" \
             --output "$RUNNER_TEMP/arxiv-candidates.md")"

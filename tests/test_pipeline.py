@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 import urllib.error
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -167,6 +168,58 @@ class TestRateLimit(unittest.TestCase):
         """08-16 was still being refused six minutes in and the run was lost.
         Worst-case jitter, so this is the floor the schedule can count on."""
         self.assertGreaterEqual(sum(self._backoffs(1.0)), 15 * 60)
+
+
+class TestSearchWindow(unittest.TestCase):
+    """Where the window opens, which is the difference between a run that
+    recovers from a failed one and a run that quietly writes off its papers."""
+
+    NOW = datetime(2026, 8, 17, 4, 31, tzinfo=timezone.utc)
+
+    def test_a_routine_run_reaches_back_the_usual_number_of_days(self):
+        self.assertEqual(ac.window_start(self.NOW, 7, None),
+                         self.NOW - timedelta(days=7))
+
+    def test_a_recent_success_does_not_shorten_the_window(self):
+        """Yesterday's run succeeding is no reason to stop covering the
+        announcement lag -- arXiv posts a submission days after it arrives."""
+        yesterday = self.NOW - timedelta(days=1)
+        self.assertEqual(ac.window_start(self.NOW, 7, yesterday),
+                         self.NOW - timedelta(days=7))
+
+    def test_an_outage_widens_the_window_to_cover_it(self):
+        last = self.NOW - timedelta(days=12)
+        self.assertEqual(ac.window_start(self.NOW, 7, last), last)
+
+    def test_the_august_gap_is_closed(self):
+        """2608.14706 was submitted 08-11 00:02Z. Three runs died on a 429 and
+        the next one opened its window at 08-11 02:17 -- 2h15m too late, and
+        every later window opens later still. Anchored to the last success
+        (08-10 05:57Z) the paper is inside the window again."""
+        run = datetime(2026, 8, 14, 2, 17, tzinfo=timezone.utc)
+        last_success = datetime(2026, 8, 10, 5, 57, tzinfo=timezone.utc)
+        submitted = datetime(2026, 8, 11, 0, 2, 32, tzinfo=timezone.utc)
+        self.assertGreater(ac.window_start(run, 3, None), submitted)
+        self.assertLess(ac.window_start(run, 3, last_success), submitted)
+
+    def test_a_naive_timestamp_is_read_as_utc(self):
+        self.assertEqual(ac.parse_since("2026-08-14T04:31:00"),
+                         datetime(2026, 8, 14, 4, 31, tzinfo=timezone.utc))
+
+    def test_a_zulu_timestamp_is_understood(self):
+        """gh run list hands back exactly this shape."""
+        self.assertEqual(ac.parse_since("2026-08-14T04:31:00Z"),
+                         datetime(2026, 8, 14, 4, 31, tzinfo=timezone.utc))
+
+    def test_no_previous_run_is_not_an_error(self):
+        """The first run ever, and every run whose lookup came back empty."""
+        self.assertIsNone(ac.parse_since(""))
+        self.assertIsNone(ac.parse_since(None))
+
+    def test_a_malformed_timestamp_fails_loudly(self):
+        """Silently falling back would look exactly like a healthy run."""
+        with self.assertRaises(SystemExit):
+            ac.parse_since("last tuesday")
 
 
 class TestRoundTrip(unittest.TestCase):

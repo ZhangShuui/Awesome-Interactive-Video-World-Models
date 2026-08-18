@@ -12,6 +12,7 @@ backticks on the visible line are editable and win.
 
 Usage:
   python3 scripts/arxiv_candidates.py --days 7
+  python3 scripts/arxiv_candidates.py --since 2026-08-14T04:31:00Z
   python3 scripts/arxiv_candidates.py --feed-file tests/data/feed.xml --output -
 """
 import argparse
@@ -89,8 +90,11 @@ def parse_feed(payload):
 # share its budget. arXiv limits by IP, and a GitHub Actions runner shares its
 # address with everything else on that subnet, so the scheduled run collects
 # 429s a laptop never sees. The 5s/10s backoff that covers a dropped connection
-# gave up fifteen seconds into a limit measured in minutes -- and a lost run is
-# a lost day of recall, silently, because the 3-day window only tolerates two.
+# gave up fifteen seconds into a limit measured in minutes -- and a lost run used
+# to be a lost day of recall, silently, because the window opened at `now - days`
+# no matter how long it had been since anything ran. `--since` makes the next run
+# reach back over the outage, so a 429 now costs latency rather than papers; the
+# backoff still matters, because reaching back only helps if something reaches.
 #
 # The first version of this budget waited 30/60/90/120s and still lost 08-13,
 # 08-15 and 08-16: growing linearly spends most of the patience on the early
@@ -175,9 +179,45 @@ def total_results(payload):
     return int(match.group(1)) if match else None
 
 
-def fetch_papers(days, max_results, timeout, retries, retry_delay):
-    end = datetime.now(timezone.utc)
-    query = build_query(end - timedelta(days=days), end)
+def parse_since(raw):
+    """An ISO-8601 instant, or None. Naive input is read as UTC."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        when = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        raise SystemExit(f"--since is not an ISO-8601 timestamp: {raw!r}")
+    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
+def window_start(end, days, since):
+    """Where the search window opens.
+
+    Two things set it, and taking whichever reaches further back is the whole
+    point. `days` is the routine reach, and it has to be wider than the gap
+    between runs because arXiv announces a submission days after it is
+    submitted: 2608.14706 carries submittedDate 08-11 and an id from the 08-13
+    batch, so a window that only reaches back to yesterday never sees it.
+
+    `since` is when the last successful run started, and it covers the case
+    `days` cannot: a run that never happened searched nothing, and the next
+    run's `end - days` opens *after* the gap it was supposed to close. Three
+    scheduled runs died on a 429 in August 2026; the run that followed opened
+    its window 2h15m after 2608.14706 was submitted, and no later window can
+    reach back for it, because every later window opens later still.
+    """
+    routine = end - timedelta(days=days)
+    if since is None or since >= routine:
+        return routine
+    print(f"the last successful run was {since:%Y-%m-%d %H:%M}Z, further back "
+          f"than the {days}-day window; searching from there instead",
+          file=sys.stderr)
+    return since
+
+
+def fetch_papers(start_at, end, max_results, timeout, retries, retry_delay):
+    query = build_query(start_at, end)
     papers, start, total = [], 0, None
     while start < max_results:
         page = fetch_page(query, start, min(PAGE_SIZE, max_results - start),
@@ -190,14 +230,15 @@ def fetch_papers(days, max_results, timeout, retries, retry_delay):
             break
         start += PAGE_SIZE
         time.sleep(MIN_DELAY_S)
-    # A daily 3-day window returns a couple of dozen papers and never comes near
-    # the cap. A hand-run backfill over a month does: the window silently lost
-    # its oldest papers and the report looked complete. Say so.
+    # A routine window returns a couple of hundred papers and never comes near
+    # the cap. A hand-run backfill over a month does, and so does a window that
+    # `--since` has stretched across a long outage: the window silently lost its
+    # oldest papers and the report looked complete. Say so.
     if total is not None and total > max_results:
-        print(f"warning: the {days}-day window holds {total} papers but "
-              f"--max-results is {max_results}; {total - max_results} were not "
-              f"fetched. Re-run with --max-results {total} or a shorter window.",
-              file=sys.stderr)
+        print(f"warning: the window from {start_at:%Y-%m-%d %H:%M}Z holds "
+              f"{total} papers but --max-results is {max_results}; "
+              f"{total - max_results} were not fetched. Re-run with "
+              f"--max-results {total} or a shorter window.", file=sys.stderr)
     return papers
 
 
@@ -270,7 +311,14 @@ def render(candidates, days, tags, carried=0):
 def parse_args():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--days", type=int, default=3)
+    # Seven, not three. The window's job is no longer to cover the gap between
+    # runs -- `--since` does that -- but to outlast arXiv's announcement lag,
+    # which routinely runs to two or three days and is the reason a paper can
+    # be submitted inside a window nobody was searching yet.
+    ap.add_argument("--days", type=int, default=7)
+    ap.add_argument("--since", default="",
+                    help="when the last successful run started (ISO-8601); the "
+                         "window is widened to reach back at least this far")
     ap.add_argument("--max-results", type=int, default=400)
     ap.add_argument("--output", default="ARXIV_CANDIDATES.md",
                     help="'-' writes the report to stdout")
@@ -299,11 +347,17 @@ def main():
     args = parse_args()
     tags = [t["key"] for t in json.loads(args.tags.read_text(encoding="utf-8"))]
 
+    days = args.days
     if args.feed_file:
         papers = parse_feed(args.feed_file.read_bytes())
     else:
-        papers = fetch_papers(args.days, args.max_results, args.timeout,
+        end = datetime.now(timezone.utc)
+        start_at = window_start(end, args.days, parse_since(args.since))
+        papers = fetch_papers(start_at, end, args.max_results, args.timeout,
                               args.retries, args.retry_delay)
+        # What the report claims to cover has to be what it covered, or a
+        # stretched window reads as a routine one.
+        days = max(1, round((end - start_at).total_seconds() / 86400))
 
     issue_body = (args.existing_issue_body.read_text(encoding="utf-8")
                   if args.existing_issue_body and args.existing_issue_body.exists() else "")
@@ -356,7 +410,7 @@ def main():
 
     candidates.sort(key=lambda c: (c["met"], c["date"], c["id"]), reverse=True)
     report = sources.recross(
-        sources.retick(render(candidates, args.days, tags, carried), ticked),
+        sources.retick(render(candidates, days, tags, carried), ticked),
         crossed)
 
     if args.output == "-":

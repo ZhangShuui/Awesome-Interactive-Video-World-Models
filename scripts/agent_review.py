@@ -219,7 +219,9 @@ def candidates_from_issue():
 
 def candidates_locally(days, max_results):
     import arxiv_candidates as ac
-    papers = ac.fetch_papers(days, max_results, 60.0, 2, 5.0)
+    end = datetime.now(timezone.utc)
+    papers = ac.fetch_papers(ac.window_start(end, days, None), end,
+                             max_results, 60.0, 2, 5.0)
     known = sources.known_ids(ROOT / "data" / "papers.jsonl")
     known |= sources.ignored_ids(ROOT / "data" / "arxiv-ignore.txt")
     known |= rejected_ids()
