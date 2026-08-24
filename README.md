@@ -86,6 +86,15 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* 4DAnyone: Create Anyone in 4D from a Casual Monocular Video. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.20335)] · 🧠`memory`
+* **`BeyondMasks`**, Evaluating Causal and Physical Consistency in Video Object Removal. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.20107)] · 🧠`memory` 📊`benchmarks`
+* **`Stream4D`**, 4D-Consistency for Streaming Autoregressive Diffusion Video Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.19556)] · ⚡`realtime` 🧠`memory`
+* **`CamWorldQA`**, Perceptual Quality Assessment of Camera-Controlled World Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.18710)] · 🧠`memory`
+* Partition the Support, Reconstruct the Residual: Training-Free Sparse Attention for Video Generation and World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.18484)] · ⚡`realtime`
+* **`LinCa`**, Accelerating Diffusion Models via Learnable Decomposed Feature Caching. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.17973)] · ⚡`realtime`
+* **`DynaForcing`**, Overcoming Dynamic Collapse in Self-Forcing Distillation for Streaming Avatar Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.17707)] · ⚡`realtime`
+* Magnitude-Direction Decoupling for Fast Video Generation with Flow Matching Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.17695)] · ⚡`realtime`
+* **`SemComp-Bench`**, Benchmarking Semantic Task Completion in Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.17426)] · 📊`benchmarks`
 * **`HarnessEval-W`**, Agentifying the Evaluation of Visual Worlds. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.16859)] · 📊`benchmarks`
 * **`CaliBench`**, Are the Stochastic Dynamics of Video World Models Physically Calibrated?. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.16829)] · 🧠`memory`
 * **`SQuad`**, Sub-Quadratic Attention Distillation for Efficient Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.16585)] · ⚡`realtime`
@@ -100,8 +109,17 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * **`HPSD`**, Hybrid-Policy Self-Distillation for Text-Image-to-Video Diffusion Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13205)] · ⚡`realtime`
 * From Local Mismatch to Global Impact: Optimizing Cache Reuse Policy for Efficient Diffusion. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13043)] · ⚡`realtime`
 * Spatially-Grounded Text-to-Video Generation via Inference-Time Gradient-Free Optimization. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.13037)] · 🕹️`control`
+* **`Avatar-Forever`**, Decoupled Parallel Training for High-Quality Real-Time Infinite Avatars. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.12107)] · ⚡`realtime`
 * **`LoSA`**, Near-Lossless Sparse Attention for Training-Free Video Diffusion Acceleration. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.12032)] · ⚡`realtime`
+* **`LiveAnimate`**, Stable Long-Form Streaming Human Animation in Real-Time. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.11745)] · ⚡`realtime`
+* From Synthesis to Removal: Physics-Grounded Reflection Simulation and Diffusion-Based Video Dereflection. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.11562)] · ⚡`realtime`
+* Equilibrium Forcing: Adaptive Video Generation Without Noise Conditioning. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.14706)] · 🧠`memory`
+* **`SparSTAR`**, Sparse Attention for SpaceTime AutoRegressive Video Synthesis. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.10519)] · 🧠`memory`
 * Bridging Event Streams and DiT: Event-Guided Video Frame Interpolation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.10479)] · 🧠`memory`
+* Stream Forcing: Constructing Unified Training Trajectory for Robust Streaming Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.10439)] · ⚡`realtime`
+* **`DUET`**, A Diversity-Quality Duet of Distillation Experts for Two-Step Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.09637)] · ⚡`realtime`
+* **`Sekai2`**, From World Exploration to Interactive World Modeling. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.09449)] · 🧠`memory`
+* Alpha as an Efficiency Signal: Visibility-Routed RGBA Image-to-Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.09355)] · ⚡`realtime`
 * Addressable Memory for Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.07408)] · 🧠`memory`
 * **`GeniWorld`**, A Generalizable Interactive World Model for Robotic Manipulation via Visual Actions. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06332)] · 🕹️`control`
 * **`MASS`**, Multiplayer World Models with Authoritative Shared State. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.06257)] · 🌍`systems`
