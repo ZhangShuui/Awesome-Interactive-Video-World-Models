@@ -91,6 +91,51 @@ class TestSharedScope(unittest.TestCase):
         self.assertEqual(met, 3)
         self.assertIn("systems", tags)
 
+    def test_a_latent_only_world_model_is_dropped(self):
+        """The world-action genre: predicts a feature, hands it to a planner,
+        never decodes it. It says so itself, which is what makes it separable
+        from the video world models it is named after."""
+        propose, _, _, _ = sources.proposal(
+            "Foresight Without Seeing: decoder-free latent futures for WAMs",
+            "Our world-action model forecasts features for downstream planning "
+            "and policy evaluation on manipulation benchmarks, beyond RGB.")
+        self.assertFalse(propose)
+
+    def test_an_llm_paper_is_dropped_however_it_reached_the_query(self):
+        """"world model" is a figure of speech outside vision, and "diffusion"
+        used to be enough to clear the visual gate on its own."""
+        propose, _, _, _ = sources.proposal(
+            "Serving masked diffusion LLMs: design principles from real hardware",
+            "We characterise speculative decoding throughput for diffusion LLMs "
+            "and build an internal world model of the serving stack.")
+        self.assertFalse(propose)
+
+    def test_render_as_a_figure_of_speech_is_not_visual_output(self):
+        """"render X infeasible" is ordinary English, and it was walking LLM
+        papers through a gate named after graphics."""
+        self.assertFalse(sources.generates_video(
+            "ResiSpec: multi-candidate speculative sampling",
+            "The distribution shift renders subsequent candidates ineffective, "
+            "which renders exhaustive search infeasible for large language models."))
+
+    def test_a_robot_world_model_that_generates_video_survives(self):
+        """The wanted half of the field says both things at once: this is an
+        action-conditioned world model for manipulation *and* it makes pixels.
+        The policy vocabulary must not be a rejection on its own."""
+        propose, _, _, _ = sources.proposal(
+            "DreamX-Phi: action-conditioned video world model for robotic manipulation",
+            "A convincing rollout can still move the wrong arm. We train a video "
+            "world model for policy learning and evaluate generated video.")
+        self.assertTrue(propose)
+
+    def test_a_survey_is_judged_by_its_subject_not_its_output(self):
+        propose, tags, _, _ = sources.proposal(
+            "A comprehensive survey on world models for embodied AI",
+            "We review visual dynamics models and their use as internal "
+            "simulators for policy learning.")
+        self.assertTrue(propose)
+        self.assertIn("surveys", tags)
+
     def test_a_dropped_candidate_comes_back_with_no_tags(self):
         """`proposal` used to return None for the section on a rejection, which
         a caller could still index into. An empty list cannot be mistaken for a
