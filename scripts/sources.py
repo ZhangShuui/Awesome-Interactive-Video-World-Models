@@ -150,6 +150,84 @@ VISUAL_GATE_RE = re.compile(
     r"\bvideo\b|\bframes?\b|\bvisual\b|\bpixel|\brender|\bimages?\b|"
     r"\bscene\b|\bview(?:point|s)?\b|\bdiffusion\b", re.I)
 
+# The gate above states that intent and does not enforce it. It asks whether a
+# visual word appears anywhere, which every paper in the field satisfies by
+# accident: "diffusion" admits every diffusion-LLM serving paper, "visual"
+# admits every VLA policy, "scene" admits every navigation stack. Measured over
+# the 134 papers rejected by hand or by the review agent, 133 cleared it -- the
+# gate was doing no work at all, and the maintainer was doing it instead, daily.
+#
+# So the decision is split in two. Below is the evidence that a paper actually
+# *produces* pixels rather than merely consuming them; further down is the
+# vocabulary of the two genres that keep arriving without any.
+#
+# "render" earns its own clause. On its own it matches "render exhaustive
+# search infeasible" and "renders subsequent candidates ineffective" -- an
+# ordinary English idiom that was letting LLM-serving papers in through a gate
+# named after graphics. It counts only next to something visual.
+VISUAL_OUTPUT_RE = re.compile(
+    r"video (?:generation|generat\w+|synthesi[sz]\w*|diffusion|model|world model|rollout|frames?)|"
+    r"generat\w+ (?:video|frames?|pixels?|images?)|synthesi[sz]\w* (?:video|frames?)|"
+    r"diffusion world model|world model.{0,40}\bvideo\b|\bvideo\b.{0,40}world model|"
+    r"visual (?:realism|fidelity|experience|generation|quality|content|world)|"
+    r"world simulator|game engine|generative game|game generation|"
+    r"\bplayable\b|interactive video|explorable|enterable|"
+    r"text[- ]to[- ]video|image[- ]to[- ]video|\bt2v\b|\bi2v\b|pixel[- ]space|"
+    r"\bfps\b|\b\d{3,4}p\b|"
+    r"\brender\w*\b[^.]{0,60}?\b(?:videos?|frames?|images?|views?|scenes?|geometry|"
+    r"appearance|artifacts?|pixels?|visual)\b|"
+    r"\b(?:videos?|frames?|images?|views?|scenes?|neural|3d|gaussian|visual)\b"
+    r"[^.]{0,40}?\brender\w*", re.I)
+
+# The two genres that arrive every day and are turned down every day.
+#
+# The first stops at the latent: JEPA and the world-action models predict a
+# feature, hand it to a planner and never decode it. They advertise the fact --
+# "decoder-free", "beyond RGB", "latent futures" -- which is what makes them
+# separable from the video world models they are named after. The second is the
+# LLM stack: serving, speculative decoding, GUI and coding agents, which reach
+# the query through "world model" as a figure of speech.
+#
+# Neither list is a rejection on its own. A paper matching them is dropped only
+# when it cannot show visual output above, because the wanted half of this field
+# says both things at once: DreamX-Phi is an action-conditioned world model for
+# robotic manipulation, GeniWorld is a robot world model, and both generate
+# video. Measured over the 429 already-listed papers that clear the current
+# gate, this pair drops none of them and removes 44 of the 133 surviving
+# rejections -- 34 world-action, 10 LLM, and nothing from any other genre.
+#
+# Surveys are exempt for the same reason they are admitted at 0/3: a survey of
+# embodied world models is a survey first, and is wanted whatever it surveys.
+NON_VISUAL_PURPOSE_RE = re.compile(
+    # latent-only world models
+    r"\bjepa\b|joint[- ]embedding predictive|latent world model|world[- ]action model|"
+    r"\bwams?\b|decoder[- ]free|beyond rgb|feature forecasting|latent futures?\b|"
+    r"without (?:generating|decoding|rendering) pixels|"
+    # the LLM stack
+    r"\bllms?\b|large language model|language model|\bmllms?\b|\bgui agent|coding agent|"
+    r"mobile agent|tool[- ]augmented|speculative (?:sampling|decoding)|\bdllms?\b|"
+    r"diffusion llm|"
+    # a world model used only as a policy's simulator
+    r"polic(?:y|ies)[- ](?:learning|evaluation|improvement|optimization)|"
+    r"continuous[- ]control|visual control|model[- ]based rl\b|"
+    r"downstream (?:planning|control)|(?:internal|learned) simulators?|"
+    r"action[- ]chunks?|vision[- ]language[- ]action|\bvla\b|soft actor|\bmasac\b|"
+    r"generalist polic", re.I)
+
+
+def generates_video(title, abstract):
+    """Does this paper produce pixels, or only consume them?
+
+    True whenever there is evidence of visual output, and for surveys, which
+    are judged by their subject rather than by their output.
+    """
+    blob = f"{title} {abstract or ''}"
+    if triage.SURVEY_RE.search(title or ""):
+        return True
+    if VISUAL_OUTPUT_RE.search(blob):
+        return True
+    return not NON_VISUAL_PURPOSE_RE.search(blob)
+
 
 def proposal(title, abstract):
     """-> (propose, tags, met, evidence). The one admission decision.
@@ -159,9 +237,15 @@ def proposal(title, abstract):
     benchmarks and the efficiency substrate are admitted at 0/3 because they
     have no reason to say "causal" or "streaming" anywhere and were being
     dropped while the realtime list already held a dozen of their genre.
+
+    Three gates, cheapest first: the topic is not somebody else's field, a
+    visual word appears at all, and -- see generates_video -- the paper makes
+    pixels rather than only reading them.
     """
     blob = f"{title} {abstract or ''}"
     if OFF_TOPIC_RE.search(blob) or not VISUAL_GATE_RE.search(blob):
+        return False, [], 0, {}
+    if not generates_video(title, abstract):
         return False, [], 0, {}
     tags, met, evidence = triage.triage(title, abstract)
     if (met == 0 and not {"surveys", "benchmarks"} & set(tags)

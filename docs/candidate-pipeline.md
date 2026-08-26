@@ -37,10 +37,25 @@ So recall is phrase-based over title and abstract (`QUERY_PHRASES` in
 2. Off-topic stems (protein, econom, climate, …) are dropped outright.
 3. A **visual gate** requires the paper to be about pixels at all — an LLM's
    internal world model is out no matter how well it scores.
-4. Each survivor is scored for evidence of the three scope criteria. A paper
+4. A **visual-output gate** (`generates_video`) requires the paper to *make*
+   pixels rather than only read them. Gate 3 asks whether a visual word appears
+   anywhere, which the whole field satisfies by accident: "diffusion" admits
+   diffusion-LLM serving papers, "visual" admits VLA policies, "scene" admits
+   navigation stacks. Of 134 papers turned down by hand or by the review agent,
+   133 cleared gate 3. So a paper matching either of the two genres that keep
+   arriving — the latent-only world models (JEPA, world-action models,
+   decoder-free, "beyond RGB") and the LLM stack (serving, speculative
+   decoding, GUI and coding agents) — is dropped unless it can also show
+   evidence of visual output. Neither list rejects on its own, because the
+   wanted half of the field says both things at once: an action-conditioned
+   world model for robotic manipulation that generates video stays in. Surveys
+   are exempt, being judged by their subject. Measured against the list as it
+   stood: no already-listed paper lost, 44 of the 133 surviving rejections
+   removed — 34 world-action, 10 LLM, nothing from any other genre.
+5. Each survivor is scored for evidence of the three scope criteria. A paper
    showing evidence for all three is proposed for `systems`; otherwise it is
    proposed with whatever tags its keywords earn. Scoring zero drops it.
-5. **Except** for surveys, benchmarks, and the *efficiency substrate*: video
+6. **Except** for surveys, benchmarks, and the *efficiency substrate*: video
    diffusion work on sparse attention, KV caching, distillation, early exit and
    the like. Those papers have no reason to say "causal" or "streaming"
    anywhere, so they score 0/3 and were being dropped — while the `realtime`
