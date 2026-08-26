@@ -86,6 +86,11 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* Scaling Reinforcement Learning for Diffusion Models via Velocity Matching. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.23664)] · ⚡`realtime`
+* **`ReWorld`**, An Interactive World Model with Long-Horizon Memory. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.23565)] · 🧠`memory`
+* **`EchoWM`**, Open and Enterable Omnimodal World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.23189)] · 🧠`memory`
+* From Generation to Simulation: How Far Are World Models from Being True Simulators?. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.23070)] · 🕹️`control`
+* **`StocBench`**, A Benchmark for Generative Modeling of Stochastic Dynamics. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.22309)] · 📊`benchmarks`
 * 4DAnyone: Create Anyone in 4D from a Casual Monocular Video. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.20335)] · 🧠`memory`
 * **`BeyondMasks`**, Evaluating Causal and Physical Consistency in Video Object Removal. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.20107)] · 🧠`memory` 📊`benchmarks`
 * **`Stream4D`**, 4D-Consistency for Streaming Autoregressive Diffusion Video Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.19556)] · ⚡`realtime` 🧠`memory`
