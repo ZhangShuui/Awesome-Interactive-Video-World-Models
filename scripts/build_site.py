@@ -172,8 +172,9 @@ def render_years(by_year):
     for i, year in enumerate(years):
         n = by_year.get(year, 0)
         h = round(100 * math.sqrt(n) / top, 2) if top else 0
+        empty = "" if n else " year--empty"
         out.append(
-            f'        <div class="year{"" if n else " year--empty"}" title="{n} paper(s) in {year}">'
+            f'        <div class="year{empty}" title="{n} paper(s) in {year}">'
             f'<span class="year__n">{n or ""}</span>'
             f'<span class="year__col" style="--h:{h}%;--i:{i}"></span>'
             f'<span class="year__k">{esc(str(year)[2:])}</span></div>')
@@ -281,13 +282,20 @@ def render_row(rec, i, by_key, demo_ids):
     if has_demo:
         meta.append(f'<a class="demo-badge" href="demos/{ident}/">&#9654; DEMO</a>')
 
+    # Built outside the f-string: an escaped quote inside an f-string
+    # expression is a syntax error before Python 3.12, and CI runs 3.11.
+    flags = "".join(
+        f' data-{name}="1"' for name, on in (
+            ("demo", has_demo),
+            ("code", bool(links.get("code"))),
+            ("profiled", bool(rec.get("attrs"))),
+        ) if on)
+
     return (
         f'    <li class="row" id="p-{ident}" style="--i:{i}"'
         f' data-search="{esc(search_blob(rec, by_key))}"'
         f' data-tags="{esc(" ".join(rec.get("tags", [])))}"'
-        f'{" data-demo=\"1\"" if has_demo else ""}'
-        f'{" data-code=\"1\"" if links.get("code") else ""}'
-        f'{" data-profiled=\"1\"" if rec.get("attrs") else ""}>'
+        f'{flags}>'
         f'\n      <div class="row__id">{id_cell}</div>'
         f'\n      <div class="row__main">'
         f'\n        <h2 class="row__title">{title_html}</h2>'
