@@ -2,6 +2,9 @@
 
 A curated list of **interactive video world models** — generative models you can act inside, one step at a time.
 
+**[Browse it as a filterable index →](https://zhangshuui.github.io/Awesome-Interactive-Video-World-Models/)**
+The same list, filterable by tag, with each paper's comparison record folded into its row.
+
 Video generation stopped being a movie and became a place. This list tracks that shift: systems where a user or a policy issues an action, the model produces the next frames causally, and the world is still there when you look back — together with the work those systems are built out of, on action control, real-time generation, and long-horizon memory. General world-model lists cover robotics, driving, and 3D generation alongside this; here the narrow focus is the point.
 
 > A personal reading record, not an authoritative or community-curated list: every inclusion,

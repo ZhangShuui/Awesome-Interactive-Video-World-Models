@@ -87,6 +87,27 @@ that cannot be automated. Only add a field you have read out of the paper:
 - Leave a field out when the paper does not report it. A blank means "not
   reported", and that is useful information. Do not guess.
 
+## The site
+
+The same data renders a second way, at
+[zhangshuui.github.io/Awesome-Interactive-Video-World-Models](https://zhangshuui.github.io/Awesome-Interactive-Video-World-Models/):
+the whole list, filterable by tag, with the comparison record folded into each
+row. Nothing there is a separate source of truth — it is built from
+`data/papers.jsonl` by `scripts/build_site.py`.
+
+```bash
+python3 scripts/build_site.py           # -> site/
+python3 -m http.server -d site 8000
+```
+
+`site/` is not committed. The Pages workflow rebuilds it on every push to main,
+which is the reason it cannot fall behind the data the way `README.md` could.
+Edit `data/papers.jsonl` for content and `web/` for how it looks.
+
+A paper can also carry an interactive demo as a sub-page — see
+[`demos/README.md`](demos/README.md). Copy `demos/_template` to
+`demos/<paper-id>/` and the next build picks it up.
+
 ## Maintainers
 
 The [candidate pipeline](docs/candidate-pipeline.md) opens a review inbox every day.
