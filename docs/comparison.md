@@ -271,15 +271,6 @@ _Streaming Video Generation with Streaming Force Control_ — 2026-06-05
 - **Horizon / context:** 5s / 80 frames at 16fps standard evaluation (Physics-IQ benchmark); long-video extension via 'Rolling-Forcing' mentioned in Appendix E but maximum horizon not quantified
 - **Memory mechanism:** implicit-context
 
-### AnchorWorld ([paper](https://arxiv.org/abs/2606.07326))
-
-_AnchorWorld: Embodied Egocentric World Simulation with View-based Evolution Customization_ — 2026-06-05
-
-- **Backbone:** bidirectional-diffusion+adapt
-- **Action space:** 3D human motion (SMPL-X, 22 joints, pos+axis-angle), egocentric video
-- **Horizon / context:** 77 frames at 480p per generation call; no chaining/rollout demonstrated -- 'long-term exploration' explicitly named as an unaddressed limitation.
-- **Memory mechanism:** explicit-spatial-storage
-
 ### MetaWorld ([paper](https://arxiv.org/abs/2606.02753))
 
 _MetaWorld: Scaling Multi-Agent Video World Model from Single-view Video Data_ — 2026-06-01
@@ -418,16 +409,6 @@ _ActionParty: Multi-Subject Action Binding in Generative Video Games_ — 2026-0
 - **Action space:** 25 discrete 'button' actions (7 shared base + per-game) controlling up to 7 subjects, 46 2D games
 - **Horizon / context:** 20 rollout steps (appendix long-horizon demo); coordinate drift observed near the end from error accumulation
 - **Memory mechanism:** hybrid:implicit-context+explicit-spatial-storage
-
-### EgoSim ([paper](https://arxiv.org/abs/2604.01001))
-
-_EgoSim: Egocentric World Simulator for Embodied Interaction Generation_ — 2026-04-01
-
-- **Backbone:** bidirectional-diffusion+adapt
-- **Action space:** hand/robot keypoints (21-pt MANO skeleton), egocentric interaction
-- **Reported FPS:** 16
-- **Horizon / context:** 121 frames / 7.6s @16fps; 2 chained 61-frame clips w/ intermediate state update (Continuous Generation setting)
-- **Memory mechanism:** explicit-spatial-reconstruction
 
 ### MemCam ([paper](https://arxiv.org/abs/2603.26193))
 
@@ -918,16 +899,6 @@ _Vid2World: Crafting Video Diffusion Models to Interactive World Models_ — 202
 - **Memory mechanism:** implicit-context
 - **Open source:** yes
 
-### Learning 3D Persistent Embodied World Models ([paper](https://arxiv.org/abs/2505.05495))
-
-_Learning 3D Persistent Embodied World Models_ — 2025-05-05
-
-- **Backbone:** causal-diffusion
-- **Action space:** navigation/interaction commands mapped to relative 6D camera pose (Plucker)
-- **Horizon / context:** 112 frames generated autoregressively (Habitat sim, 1000 multi-room scenes); frame rate unspecified
-- **Memory mechanism:** explicit-spatial-reconstruction
-- **Open source:** no
-
 ### WorldMem ([paper](https://arxiv.org/abs/2504.12369))
 
 _WorldMem: Long-term Consistent World Simulation with Memory_ — 2025-04-16
@@ -1131,16 +1102,6 @@ _Cycle-World: Mitigating Error Accumulation in Long-term Video World Models via 
 - **Horizon / context:** 60 seconds, VBench eval (SOTA Total 82.88 vs LongLive 82.62, Context Forcing 82.45 at 60s)
 - **Memory mechanism:** implicit-context
 - **Open source:** no
-
-### Causally Debiased Latent Action Model for Embodied Action Conditioned World Models ([paper](https://arxiv.org/abs/2607.09185))
-
-_Causally Debiased Latent Action Model for Embodied Action Conditioned World Models_ — 2026-07-10 · Action Control & Interfaces
-
-- **Backbone:** other:action-conditioned video diffusion (DreamDojo ACWM, 2B/14B; architecture unmodified, inherited from prior work)
-- **Action space:** continuous latent action vectors; adapted to 6-DoF robot end-effector control
-- **Horizon / context:** multi-step qualitative rollouts on 300 EgoDex/AgiBot clips (Figs. 3, 5); no explicit frame/second horizon stated
-- **Memory mechanism:** implicit-context
-- **Open source:** yes
 
 ### OPSD-V ([paper](https://arxiv.org/abs/2607.08766))
 
