@@ -221,6 +221,17 @@ class TestRealData(unittest.TestCase):
             self.assertTrue((Path(tmp) / "site" / "assets" / "style.css").is_file())
             self.assertTrue((Path(tmp) / "site" / ".nojekyll").is_file())
 
+    def test_no_outbound_link_anywhere_opens_in_the_same_tab(self):
+        """Covers the template's own links too, not just the generated rows --
+        the footer is where an inconsistency survives longest, because nothing
+        regenerates it when a paper is added."""
+        with tempfile.TemporaryDirectory() as tmp:
+            bs.build(Path(tmp) / "site")
+            page = (Path(tmp) / "site" / "index.html").read_text(encoding="utf-8")
+        offenders = [a for a in re.findall(r'<a [^>]*href="https?://[^"]*"[^>]*>', page)
+                     if 'target="_blank"' not in a or "noopener" not in a]
+        self.assertEqual(offenders, [])
+
     def test_every_tag_has_a_unique_site_code(self):
         tags = json.loads((ROOT / "data" / "tags.json").read_text(encoding="utf-8"))
         codes = [t["code"] for t in tags]
