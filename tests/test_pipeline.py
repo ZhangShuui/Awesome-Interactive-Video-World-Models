@@ -23,9 +23,24 @@ FEED = Path(__file__).resolve().parent / "data" / "sample-feed.xml"
 TAGS = {t["key"] for t in json.loads((ROOT / "data" / "tags.json").read_text())}
 
 
+# The curated lists are inputs to the pipeline, so a test that leaves them at
+# their defaults is really asserting against today's contents of data/. Ids the
+# fixtures use are real ones, and adding one to the ignore list -- an ordinary
+# act of curation -- would fail a test about carrying entries forward. Point
+# every "already accounted for" source at an empty file and let each test
+# supply the one it is actually about.
+EMPTY = Path(tempfile.mkdtemp(prefix="pipeline-empty-")) / "empty"
+EMPTY.write_text("", encoding="utf-8")
+
+ISOLATED = ("--ignore", "--rejected", "--maintainer-rejected")
+
+
 def run_candidates(*extra, output):
     cmd = [sys.executable, str(ROOT / "scripts" / "arxiv_candidates.py"),
            "--feed-file", str(FEED), "--output", str(output), *extra]
+    for flag in ISOLATED:
+        if flag not in extra:
+            cmd += [flag, str(EMPTY)]
     return subprocess.run(cmd, capture_output=True, text=True, check=True)
 
 
