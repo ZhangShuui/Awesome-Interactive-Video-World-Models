@@ -86,11 +86,20 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`PAWBench`**, How Far Are We from Probabilistically Aligned World Modeling?. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.27345)] · 🧠`memory`
+* **`R2M-Bench`**, Evaluating Revisit Memory via Relative Consistency in Interactive Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.27328)] · 🧠`memory` 📊`benchmarks`
+* **`Magpie`**, Real-Time World Renderer for Interactive Games. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.27168)] · ⚡`realtime`
+* Tether the Subject, Release the Scene: Query-Aware Memory Routing for Long-Horizon Autoregressive Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.26902)] · 🧠`memory`
+* Ring Forcing: Towards Precise Long-Term Memory for Autoregressive Video Diffusion. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.26794)] · 🧠`memory`
+* **`RECAP-Forcing`**, Retaining Content Appearances for Long Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.26671)] · 🧠`memory`
+* **`StreamAV-Bench`**, A Comprehensive Benchmark for Streaming Audio-Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.26336)] · ⚡`realtime` 📊`benchmarks`
+* Code World Model: Coding Agent as World Brain. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.25927)] · 🧠`memory`
 * Scaling Reinforcement Learning for Diffusion Models via Velocity Matching. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.23664)] · ⚡`realtime`
 * **`ReWorld`**, An Interactive World Model with Long-Horizon Memory. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.23565)] · 🧠`memory`
 * **`EchoWM`**, Open and Enterable Omnimodal World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.23189)] · 🧠`memory`
 * From Generation to Simulation: How Far Are World Models from Being True Simulators?. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.23070)] · 🕹️`control`
 * **`StocBench`**, A Benchmark for Generative Modeling of Stochastic Dynamics. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.22309)] · 📊`benchmarks`
+* **`FIRM-Video`**, Check Before You Score for Reliable Text-to-Video Reward Modeling. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.21839)] · 🕹️`control`
 * 4DAnyone: Create Anyone in 4D from a Casual Monocular Video. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.20335)] · 🧠`memory`
 * **`BeyondMasks`**, Evaluating Causal and Physical Consistency in Video Object Removal. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.20107)] · 🧠`memory` 📊`benchmarks`
 * **`Stream4D`**, 4D-Consistency for Streaming Autoregressive Diffusion Video Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.19556)] · ⚡`realtime` 🧠`memory`
