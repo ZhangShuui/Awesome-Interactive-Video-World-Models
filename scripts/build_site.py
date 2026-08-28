@@ -48,6 +48,14 @@ LINK_ORDER = [("paper", "PAPER"), ("website", "SITE"),
               ("code", "CODE"), ("blog", "BLOG")]
 ID_LINK_ORDER = ("paper", "website", "blog")
 
+# Everything that leaves the site opens beside it. The index is scanned, not
+# read start to finish, and following a paper should not cost the reader the
+# filter they built and the place they had scrolled to. noreferrer rides along
+# with noopener because a target="_blank" without it hands the new page a
+# handle on this one.
+NEW_TAB = ' target="_blank" rel="noopener noreferrer"'
+
+
 # The comparison fields, in the order a reader wants them: what it is, how you
 # drive it, how long it holds, what it remembers, how fast.
 PROFILE_FIELDS = [
@@ -224,7 +232,7 @@ def id_link_key(rec):
 def render_links(rec, skip=None):
     links = rec.get("links") or {}
     return "".join(
-        f'<a href="{esc(links[key])}" rel="noopener">{label}</a>'
+        f'<a href="{esc(links[key])}"{NEW_TAB}>{label}</a>'
         for key, label in LINK_ORDER if links.get(key) and key != skip)
 
 
@@ -262,12 +270,18 @@ def render_row(rec, i, by_key, demo_ids):
     has_demo = rec["id"] in demo_ids
 
     ident = esc(rec["id"])
-    id_cell = f'<a href="{esc(paper_url)}" rel="noopener">{ident}</a>' if paper_url else ident
+    id_cell = f'<a href="{esc(paper_url)}"{NEW_TAB}>{ident}</a>' if paper_url else ident
 
-    title_html = ""
+    # The title is the thing a reader points at, so the title is the link --
+    # not just the id, which is a 10px string in the margin. The tags, the
+    # other links and the profile toggle stay siblings of it: nesting them
+    # inside the anchor would make every one of them un-clickable.
+    label = ""
     if name:
-        title_html += f'<span class="row__name">{esc(name)}</span>'
-    title_html += esc(display_title(rec))
+        label += f'<span class="row__name">{esc(name)}</span>'
+    label += esc(display_title(rec))
+    title_html = (f'<a class="row__link" href="{esc(paper_url)}"{NEW_TAB}>{label}</a>'
+                  if paper_url else label)
 
     meta = []
     venue = venue_of(rec)

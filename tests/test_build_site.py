@@ -1,5 +1,6 @@
 """The site build: data in, static pages out."""
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -93,6 +94,46 @@ class TestIndex(SiteCase):
             "code": "https://github.com/x/y"})])
         self.build()
         self.assertIn(">CODE<", self.index())
+
+    def test_the_title_is_the_link_and_it_opens_beside_the_index(self):
+        """The id is a 10px string in the margin; the title is what a reader
+        points at. Leaving the index to read a paper must not cost the filter
+        they built and the place they had scrolled to."""
+        self.write([record("2608.00001")])
+        self.build()
+        page = self.index()
+        self.assertIn('class="row__link" href="https://arxiv.org/abs/2608.00001"'
+                      ' target="_blank" rel="noopener noreferrer"', page)
+
+    def test_every_outbound_link_opens_in_a_new_tab(self):
+        self.write([record("2608.00001", links={
+            "paper": "https://arxiv.org/abs/2608.00001",
+            "code": "https://github.com/x/y"})])
+        self.build()
+        page = self.index()
+        for href in ("https://arxiv.org/abs/2608.00001", "https://github.com/x/y"):
+            for match in re.finditer(rf'<a [^>]*href="{re.escape(href)}"[^>]*>', page):
+                self.assertIn('target="_blank"', match.group(0))
+                self.assertIn("noopener", match.group(0))
+
+    def test_nothing_clickable_is_nested_inside_the_title_link(self):
+        """A tag button or a disclosure inside the anchor is un-clickable --
+        the anchor swallows the activation before the control sees it."""
+        self.write([record("2608.00001", attrs={"backbone": "causal-diffusion"},
+                           links={"paper": "https://arxiv.org/abs/2608.00001",
+                                  "code": "https://github.com/x/y"})])
+        self.build()
+        inner = re.search(r'<a class="row__link"[^>]*>(.*?)</a>', self.index(), re.S)
+        self.assertIsNotNone(inner)
+        for forbidden in ("<button", "<details", "<summary", "<a ", "demo-badge"):
+            self.assertNotIn(forbidden, inner.group(1))
+
+    def test_a_record_with_no_link_still_renders_its_title(self):
+        self.write([record("2608.00001", links={})])
+        self.build()
+        page = self.index()
+        self.assertIn("Paper 2608.00001", page)
+        self.assertNotIn('class="row__link"', page)
 
     def test_titles_are_escaped(self):
         self.write([record("2608.00001", title="Attention <script>alert(1)</script>")])
