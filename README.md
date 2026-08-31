@@ -89,6 +89,9 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`LayerRecall`**, A State-Conditioned Memory Router for Long-Horizon Consistency in Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.28460)] · 🧠`memory`
+* How Far Can 5,500 Hours of Driving Take You? A Scaling Law Analysis of Video Diffusion Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.28404)] · 🧠`memory`
+* **`DensityKV`**, Density-Guided KV Cache Compression for Long Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.27922)] · ⚡`realtime`
 * **`PAWBench`**, How Far Are We from Probabilistically Aligned World Modeling?. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.27345)] · 🧠`memory`
 * **`R2M-Bench`**, Evaluating Revisit Memory via Relative Consistency in Interactive Video World Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.27328)] · 🧠`memory` 📊`benchmarks`
 * **`Magpie`**, Real-Time World Renderer for Interactive Games. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.27168)] · ⚡`realtime`
