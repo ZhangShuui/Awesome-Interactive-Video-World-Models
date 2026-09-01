@@ -108,6 +108,11 @@ A paper can also carry an interactive demo as a sub-page — see
 [`demos/README.md`](demos/README.md). Copy `demos/_template` to
 `demos/<paper-id>/` and the next build picks it up.
 
+It can carry a written explainer the same way — see
+[`explainers/README.md`](explainers/README.md). Drop a self-contained page at
+`explainers/<paper-id>.html` and the next build publishes it and badges the
+row. Neither needs registering anywhere; the filename is the whole of it.
+
 ## Maintainers
 
 The [candidate pipeline](docs/candidate-pipeline.md) opens a review inbox every day.

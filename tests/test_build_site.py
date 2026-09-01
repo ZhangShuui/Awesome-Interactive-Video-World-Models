@@ -35,6 +35,8 @@ class SiteCase(unittest.TestCase):
         self.papers = self.tmp / "papers.jsonl"
         self.demos = self.tmp / "demos"
         self.demos.mkdir()
+        self.explainers = self.tmp / "explainers"
+        self.explainers.mkdir()
         self.out = self.tmp / "site"
 
     def write(self, records):
@@ -44,7 +46,8 @@ class SiteCase(unittest.TestCase):
     def build(self):
         return bs.build(self.out, papers_path=self.papers,
                         tags_path=ROOT / "data" / "tags.json",
-                        demos_dir=self.demos)
+                        demos_dir=self.demos,
+                        explainers_dir=self.explainers)
 
     def index(self):
         return (self.out / "index.html").read_text(encoding="utf-8")
@@ -54,6 +57,13 @@ class SiteCase(unittest.TestCase):
         d.mkdir(parents=True)
         (d / entry).write_text(body, encoding="utf-8")
         return d
+
+    def add_explainer(self, name, body=None):
+        f = self.explainers / f"{name}.html"
+        f.write_text(body if body is not None
+                     else "<!DOCTYPE html>\n<html><body>\n<h1>read</h1>\n</body></html>",
+                     encoding="utf-8")
+        return f
 
 
 class TestIndex(SiteCase):
@@ -125,7 +135,8 @@ class TestIndex(SiteCase):
         self.build()
         inner = re.search(r'<a class="row__link"[^>]*>(.*?)</a>', self.index(), re.S)
         self.assertIsNotNone(inner)
-        for forbidden in ("<button", "<details", "<summary", "<a ", "demo-badge"):
+        for forbidden in ("<button", "<details", "<summary", "<a ",
+                          "demo-badge", "explainer-badge"):
             self.assertNotIn(forbidden, inner.group(1))
 
     def test_a_record_with_no_link_still_renders_its_title(self):
@@ -211,6 +222,109 @@ class TestDemos(SiteCase):
         stats = self.build()
         self.assertEqual(stats["demos"], 0)
         self.assertNotIn("data-flag=\"demo\"", self.index())
+
+
+class TestExplainers(SiteCase):
+    def test_an_explainer_file_becomes_a_page_and_a_badge(self):
+        self.write([record("2608.00001")])
+        self.add_explainer("2608.00001")
+        stats = self.build()
+        self.assertEqual(stats["explainers"], 1)
+        self.assertTrue((self.out / "explainers" / "2608.00001.html").is_file())
+        self.assertIn('href="explainers/2608.00001.html"', self.index())
+
+    def test_the_explainer_is_published_as_itself(self):
+        """A demo is wrapped in site chrome because it runs in an iframe. An
+        explainer is a long document carrying its own header, theme toggle and
+        progress bar, and every one of those measures a viewport an iframe
+        would take away from it. Nothing but the link home is added."""
+        page = ("<!DOCTYPE html>\n<html lang=\"zh-CN\"><head><title>t</title></head>"
+                "<body class=\"x\">\n<h1>\u7cbe\u8bfb</h1>\n</body></html>")
+        self.write([record("2608.00001")])
+        self.add_explainer("2608.00001", body=page)
+        self.build()
+        built = (self.out / "explainers" / "2608.00001.html").read_text(encoding="utf-8")
+        self.assertNotIn("<iframe", built)
+        self.assertIn('<body class="x">', built)
+        self.assertIn("\u7cbe\u8bfb", built)
+        # Everything the source said, still said, in order.
+        self.assertEqual([line for line in page.splitlines() if line.strip()],
+                         [line for line in built.splitlines()
+                          if line.strip() and line in page])
+
+    def test_the_link_home_lands_on_the_paper_row(self):
+        """An explainer is reached by a shared link as often as from the index,
+        and a page with no way back is a dead end."""
+        self.write([record("2608.00001")])
+        self.add_explainer("2608.00001")
+        self.build()
+        built = (self.out / "explainers" / "2608.00001.html").read_text(encoding="utf-8")
+        self.assertIn('href="../index.html#p-2608.00001"', built)
+
+    def test_the_link_home_goes_after_body_not_into_head(self):
+        """Inserted at the top of the file it would sit inside <head>, where
+        browsers move it anyway -- but only after the CSS beside it has been
+        dropped on the floor."""
+        self.write([record("2608.00001")])
+        self.add_explainer("2608.00001")
+        self.build()
+        built = (self.out / "explainers" / "2608.00001.html").read_text(encoding="utf-8")
+        self.assertLess(built.index("<body>"), built.index('id="site-back"'))
+
+    def test_the_link_home_is_added_once(self):
+        """`<body>` appears in the prose of a page about HTML too."""
+        self.write([record("2608.00001")])
+        self.add_explainer(
+            "2608.00001",
+            body="<html><body>\n<code>&lt;body&gt;</code>\n<body>\n</html>")
+        self.build()
+        built = (self.out / "explainers" / "2608.00001.html").read_text(encoding="utf-8")
+        self.assertEqual(built.count('id="site-back"'), 1)
+
+    def test_an_explainer_for_an_unknown_id_is_reported_not_ignored(self):
+        self.add_explainer("9999.99999")
+        found, orphans = bs.find_explainers(self.explainers, {"2608.00001"})
+        self.assertEqual(found, {})
+        self.assertTrue(any("9999.99999" in o for o in orphans))
+
+    def test_underscore_files_are_not_explainers(self):
+        """Even where a paper is somehow called `_template`, the leading
+        underscore means "not published", the same as it does under demos/."""
+        self.add_explainer("_template")
+        found, orphans = bs.find_explainers(self.explainers, {"_template"})
+        self.assertEqual(found, {})
+        self.assertEqual(orphans, [])
+
+    def test_the_row_is_filterable_and_findable(self):
+        """The chip is the obvious way in; 解读 is what the reader of a
+        Chinese-language explainer would actually type."""
+        self.write([record("2608.00001"), record("2608.00002")])
+        self.add_explainer("2608.00001")
+        self.build()
+        page = self.index()
+        self.assertIn('data-flag="explainer"', page)
+        self.assertEqual(page.count(' data-explainer="1"'), 1)
+        row = re.search(r'<li class="row" id="p-2608\.00001".*?data-search="([^"]*)"',
+                        page).group(1)
+        self.assertIn("explainer", row)
+        self.assertIn("\u89e3\u8bfb", row)
+
+    def test_no_explainers_is_not_an_error(self):
+        self.write([record("2608.00001")])
+        stats = self.build()
+        self.assertEqual(stats["explainers"], 0)
+        self.assertNotIn('data-flag="explainer"', self.index())
+        self.assertFalse((self.out / "explainers").exists())
+
+    def test_a_paper_can_carry_both(self):
+        self.write([record("2608.00001")])
+        self.add_demo("2608.00001")
+        self.add_explainer("2608.00001")
+        stats = self.build()
+        self.assertEqual((stats["demos"], stats["explainers"]), (1, 1))
+        page = self.index()
+        self.assertIn("demo-badge", page)
+        self.assertIn("explainer-badge", page)
 
 
 class TestRealData(unittest.TestCase):

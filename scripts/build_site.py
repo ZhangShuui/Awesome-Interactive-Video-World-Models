@@ -19,6 +19,11 @@ page carrying the site chrome; the paper's row in the index grows a DEMO badge.
 Directories starting with `_` are skipped, which is how demos/_template stays a
 template instead of becoming a demo for a paper called `_template`.
 
+Long-form explainers are single self-contained pages under explainers/, named
+explainers/<paper-id>.html. They are published as themselves rather than
+wrapped, and the row grows an EXPLAINER badge. Same registration rule: the
+filename is the whole of it.
+
 Usage:
   python3 scripts/build_site.py                # build into site/
   python3 scripts/build_site.py --out /tmp/x   # build somewhere else
@@ -39,6 +44,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 WEB = ROOT / "web"
 DEMOS = ROOT / "demos"
+EXPLAINERS = ROOT / "explainers"
 
 # The row's id is already a link to the paper, so listing PAPER again on all
 # 451 rows labels nothing -- 381 of them have no other link at all. Only the
@@ -69,6 +75,28 @@ PROFILE_FIELDS = [
 
 # Entry points a hand-written demo may use, most conventional first.
 DEMO_ENTRIES = ("index.html", "demo.html", "main.html")
+
+# An explainer is a long document that already carries its own sticky header,
+# its own theme toggle and its own scroll-progress bar. Wrapping it in an
+# iframe the way a demo is wrapped would break all three -- a progress bar
+# measures a viewport it no longer owns -- so it is served as itself and given
+# the one thing a page reached by a shared link cannot supply for itself: the
+# way back. Bottom left, because every explainer written so far already keeps a
+# back-to-top control at bottom right.
+BACK_LINK = """<a id="site-back" href="../index.html#p-{pid}">&larr; INDEX</a>
+<style>
+#site-back{{position:fixed;left:14px;bottom:14px;z-index:190;padding:7px 12px;
+  border-radius:999px;text-decoration:none;letter-spacing:.14em;
+  font:600 11px/1 "IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  color:#f4f6f8;background:#15171b;border:1px solid rgba(255,255,255,.24);
+  box-shadow:0 2px 10px rgba(0,0,0,.35);opacity:.7;
+  transition:opacity .15s var(--ease,ease),transform .15s var(--ease,ease)}}
+#site-back:hover{{opacity:1;transform:translateY(-1px)}}
+@media print{{#site-back{{display:none}}}}
+</style>
+"""
+
+BODY_TAG = re.compile(r"<body\b[^>]*>", re.I)
 
 
 def esc(value):
@@ -138,9 +166,30 @@ def find_demos(demos_dir, known_ids):
     return found, orphans
 
 
+def find_explainers(explainers_dir, known_ids):
+    """Map paper id -> source file, for every explainer present.
+
+    The same registration rule as demos, one directory level shallower: an
+    explainer is a single self-contained page, so `explainers/<id>.html` is
+    the whole artefact and a directory to hold one file would be ceremony.
+    An id nobody publishes is named for the same reason a stray demo is.
+    """
+    found, orphans = {}, []
+    if not explainers_dir.is_dir():
+        return found, orphans
+    for child in sorted(explainers_dir.glob("*.html")):
+        if child.name.startswith("_") or child.name.startswith("."):
+            continue
+        if child.stem not in known_ids:
+            orphans.append(f"explainers/{child.name}: no paper with that id")
+            continue
+        found[child.stem] = child
+    return found, orphans
+
+
 # ----------------------------------------------------------------- rendering --
 
-def render_readout(records, profiled, demos, years):
+def render_readout(records, profiled, demos, explainers, years):
     cells = [
         (f"{len(records)}", "papers"),
         (f"{profiled}", "profiled"),
@@ -148,6 +197,8 @@ def render_readout(records, profiled, demos, years):
     ]
     if demos:
         cells.append((f"{len(demos)}", "demos"))
+    if explainers:
+        cells.append((f"{len(explainers)}", "explainers"))
     return "\n".join(
         f'      <li><span class="n">{esc(n)}</span><span class="k">{esc(k)}</span></li>'
         for n, k in cells)
@@ -198,10 +249,12 @@ def render_chips(tags, counts):
         for t in tags)
 
 
-def render_flags(has_demo, n_code, n_profiled):
+def render_flags(has_demo, has_explainer, n_code, n_profiled):
     flags = []
     if has_demo:
         flags.append(("demo", "DEMO"))
+    if has_explainer:
+        flags.append(("explainer", "EXPLAINER"))
     flags.append(("code", f"CODE {n_code}"))
     flags.append(("profiled", f"PROFILED {n_profiled}"))
     return "\n".join(
@@ -250,24 +303,31 @@ def render_profile(rec):
         "\n        </details>")
 
 
-def search_blob(rec, by_key):
+def search_blob(rec, by_key, has_demo=False, has_explainer=False):
     """One lowercased haystack per row. Tag codes go in too, so typing SYS
-    finds the systems papers without reaching for the chip."""
+    finds the systems papers without reaching for the chip -- and so do the
+    words for the sub-pages, including the Chinese one, because the explainers
+    are written in Chinese and 解读 is what their reader would type."""
     parts = [rec["id"], rec.get("name") or "", rec["title"], venue_of(rec)]
     for key in rec.get("tags", []):
         parts.append(key)
         tag = by_key.get(key)
         if tag:
             parts.append(tag["code"])
+    if has_demo:
+        parts.append("demo")
+    if has_explainer:
+        parts.append("explainer 解读")
     return " ".join(parts).lower()
 
 
-def render_row(rec, i, by_key, demo_ids):
+def render_row(rec, i, by_key, demo_ids, explainer_ids):
     links = rec.get("links") or {}
     id_key = id_link_key(rec)
     paper_url = links.get(id_key, "") if id_key else ""
     name = rec.get("name")
     has_demo = rec["id"] in demo_ids
+    has_explainer = rec["id"] in explainer_ids
 
     ident = esc(rec["id"])
     id_cell = f'<a href="{esc(paper_url)}"{NEW_TAB}>{ident}</a>' if paper_url else ident
@@ -295,19 +355,24 @@ def render_row(rec, i, by_key, demo_ids):
         meta.append(f'<span class="links">{links_html}</span>')
     if has_demo:
         meta.append(f'<a class="demo-badge" href="demos/{ident}/">&#9654; DEMO</a>')
+    if has_explainer:
+        meta.append(f'<a class="explainer-badge" href="explainers/{ident}.html"'
+                    f' title="Long-form read-through of this paper, written for'
+                    f' this index (Chinese)">&#9776; EXPLAINER</a>')
 
     # Built outside the f-string: an escaped quote inside an f-string
     # expression is a syntax error before Python 3.12, and CI runs 3.11.
     flags = "".join(
         f' data-{name}="1"' for name, on in (
             ("demo", has_demo),
+            ("explainer", has_explainer),
             ("code", bool(links.get("code"))),
             ("profiled", bool(rec.get("attrs"))),
         ) if on)
 
     return (
         f'    <li class="row" id="p-{ident}" style="--i:{i}"'
-        f' data-search="{esc(search_blob(rec, by_key))}"'
+        f' data-search="{esc(search_blob(rec, by_key, has_demo, has_explainer))}"'
         f' data-tags="{esc(" ".join(rec.get("tags", [])))}"'
         f'{flags}>'
         f'\n      <div class="row__id">{id_cell}</div>'
@@ -334,14 +399,16 @@ def fill_slot(text, name, value):
 
 # -------------------------------------------------------------------- build --
 
-def build(out_dir, papers_path=None, tags_path=None, demos_dir=None):
+def build(out_dir, papers_path=None, tags_path=None, demos_dir=None,
+          explainers_dir=None):
     papers = load_papers(papers_path or DATA / "papers.jsonl")
     tags = load_tags(tags_path or DATA / "tags.json")
     by_key = {t["key"]: t for t in tags}
     known_ids = {r["id"] for r in papers}
 
     demos, orphans = find_demos(demos_dir or DEMOS, known_ids)
-    for problem in orphans:
+    explainers, more = find_explainers(explainers_dir or EXPLAINERS, known_ids)
+    for problem in orphans + more:
         print(f"[site] warning: {problem}", file=sys.stderr)
 
     records = sorted(papers, key=lambda r: (r.get("date") or "", r["id"]), reverse=True)
@@ -361,13 +428,15 @@ def build(out_dir, papers_path=None, tags_path=None, demos_dir=None):
     n_code = sum(1 for r in records if (r.get("links") or {}).get("code"))
 
     page = (WEB / "index.template.html").read_text(encoding="utf-8")
-    page = fill_block(page, "READOUT", render_readout(records, profiled, demos, by_year))
+    page = fill_block(page, "READOUT",
+                      render_readout(records, profiled, demos, explainers, by_year))
     page = fill_block(page, "BARS", render_bars(tags, counts))
     page = fill_block(page, "YEARS", render_years(by_year))
     page = fill_block(page, "CHIPS", render_chips(tags, counts))
-    page = fill_block(page, "FLAGS", render_flags(bool(demos), n_code, profiled))
+    page = fill_block(page, "FLAGS",
+                      render_flags(bool(demos), bool(explainers), n_code, profiled))
     page = fill_block(page, "ROWS", "\n".join(
-        render_row(rec, i, by_key, demos) for i, rec in enumerate(records)))
+        render_row(rec, i, by_key, demos, explainers) for i, rec in enumerate(records)))
     page = fill_slot(page, "COUNT", len(records))
     page = fill_slot(page, "PROFILED", profiled)
     page = fill_slot(page, "BUILT", dt.date.today().isoformat())
@@ -388,8 +457,13 @@ def build(out_dir, papers_path=None, tags_path=None, demos_dir=None):
         rec = next(r for r in records if r["id"] == pid)
         build_demo_page(out_dir, rec, entry, by_key, demos_dir or DEMOS)
 
+    if explainers:
+        (out_dir / "explainers").mkdir(parents=True, exist_ok=True)
+    for pid, source in explainers.items():
+        build_explainer_page(out_dir, pid, source)
+
     return {"papers": len(records), "profiled": profiled, "demos": len(demos),
-            "out": out_dir}
+            "explainers": len(explainers), "out": out_dir}
 
 
 def build_demo_page(out_dir, rec, entry, by_key, demos_dir):
@@ -411,6 +485,24 @@ def build_demo_page(out_dir, rec, entry, by_key, demos_dir):
     (dest / "index.html").write_text(page, encoding="utf-8")
 
 
+def build_explainer_page(out_dir, pid, source):
+    """Copy the explainer verbatim but for one addition: the link home.
+
+    Verbatim matters more here than anywhere else in the build. These pages
+    are hand-written, self-contained and already themed; anything this script
+    rewrote it would then have to keep rewriting correctly for every page
+    written after it. So the only edit is one anchor and the rules that
+    position it, inserted after <body> where it cannot land inside <head>.
+    """
+    text = source.read_text(encoding="utf-8")
+    back = BACK_LINK.format(pid=esc(pid))
+    page, n = BODY_TAG.subn(lambda m: f"{m.group(0)}\n{back}", text, count=1)
+    if not n:
+        print(f"[site] warning: explainers/{source.name} has no <body>; "
+              "published with no way back to the index", file=sys.stderr)
+    (out_dir / "explainers" / f"{pid}.html").write_text(page, encoding="utf-8")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -423,12 +515,14 @@ def main():
         with tempfile.TemporaryDirectory() as tmp:
             stats = build(Path(tmp) / "site")
             print(f"[site] builds clean: {stats['papers']} papers, "
-                  f"{stats['profiled']} profiled, {stats['demos']} demo(s)")
+                  f"{stats['profiled']} profiled, {stats['demos']} demo(s), "
+                  f"{stats['explainers']} explainer(s)")
         return
 
     stats = build(args.out)
     print(f"[site] {stats['papers']} papers, {stats['profiled']} profiled, "
-          f"{stats['demos']} demo(s) -> {stats['out']}")
+          f"{stats['demos']} demo(s), {stats['explainers']} explainer(s) "
+          f"-> {stats['out']}")
 
 
 if __name__ == "__main__":

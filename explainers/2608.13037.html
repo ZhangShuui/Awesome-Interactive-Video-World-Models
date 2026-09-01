@@ -1,0 +1,2021 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GATO-Vid 无梯度空间定位视频生成</title>
+<meta name="description" content="arXiv 2608.13037 · Spatially-Grounded Text-to-Video Generation via Inference-Time Gradient-Free Optimization 方法精读与交互图解">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   GATO-Vid 精读 — tokens.
+   语义色： pos = 正向偏置/目标区   neg = 负向偏置/抑制区
+            key = 文本键/条件       acc = GATO-Vid 方法主色
+            grad = 梯度法（旧路）
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0e1013; --surf:#14161a; --surf2:#1a1d23; --surf3:#232830;
+  --rule:#272b33; --rule2:#39404b;
+  --ink:#eef1f5; --ink2:#aeb6c2; --ink3:#7e8794;
+  --pos:#1f9c6d;  --pos-ink:#45c194;  --pos-soft:rgba(31,156,109,.17);
+  --neg:#d05a52;  --neg-ink:#ef8a83;  --neg-soft:rgba(208,90,82,.16);
+  --key:#2f7fd6;  --key-ink:#63aef0;  --key-soft:rgba(47,127,214,.17);
+  --acc:#7f63d6;  --acc-ink:#a894f2;  --acc-soft:rgba(127,99,214,.20);
+  --grad:#bf8615; --grad-ink:#e0a53a; --grad-soft:rgba(191,134,21,.18);
+  --ok:#3fb27a;   --ok-ink:#5fc994;   --ok-soft:rgba(63,178,122,.15);
+  --bad:#e06a63;  --bad-ink:#ef8a83;  --bad-soft:rgba(224,106,99,.15);
+  --m1:#199e70; --m2:#e66767; --m3:#3987e5; --m4:#c98500; --m5:#9085e9;
+  --grid:#232830; --axis:#39404b;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.35);
+  --tint:rgba(255,255,255,.045);
+  --font-display:"Archivo","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f1f2f5; --surf:#fbfbfc; --surf2:#ebedf1; --surf3:#e1e4ea;
+    --rule:#dde0e6; --rule2:#c3c9d3;
+    --ink:#12151a; --ink2:#4d545f; --ink3:#767e8b;
+    --pos:#0f8a52;  --pos-ink:#0b6f43;  --pos-soft:rgba(15,138,82,.13);
+    --neg:#c8362f;  --neg-ink:#a92a24;  --neg-soft:rgba(200,54,47,.11);
+    --key:#1a68c4;  --key-ink:#12539f;  --key-soft:rgba(26,104,196,.12);
+    --acc:#6d3fd1;  --acc-ink:#5a2fb8;  --acc-soft:rgba(109,63,209,.13);
+    --grad:#b0740a; --grad-ink:#8a5a04; --grad-soft:rgba(176,116,10,.14);
+    --ok:#0f8a52;   --ok-ink:#0b7043;   --ok-soft:rgba(15,138,82,.12);
+    --bad:#c8362f;  --bad-ink:#a92a24;  --bad-soft:rgba(200,54,47,.11);
+    --m1:#1baf7a; --m2:#e34948; --m3:#2a78d6; --m4:#eda100; --m5:#4a3aa7;
+    --grid:#e3e6eb; --axis:#c3c9d3;
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+    --tint:rgba(16,20,28,.035);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f1f2f5; --surf:#fbfbfc; --surf2:#ebedf1; --surf3:#e1e4ea;
+  --rule:#dde0e6; --rule2:#c3c9d3;
+  --ink:#12151a; --ink2:#4d545f; --ink3:#767e8b;
+  --pos:#0f8a52;  --pos-ink:#0b6f43;  --pos-soft:rgba(15,138,82,.13);
+  --neg:#c8362f;  --neg-ink:#a92a24;  --neg-soft:rgba(200,54,47,.11);
+  --key:#1a68c4;  --key-ink:#12539f;  --key-soft:rgba(26,104,196,.12);
+  --acc:#6d3fd1;  --acc-ink:#5a2fb8;  --acc-soft:rgba(109,63,209,.13);
+  --grad:#b0740a; --grad-ink:#8a5a04; --grad-soft:rgba(176,116,10,.14);
+  --ok:#0f8a52;   --ok-ink:#0b7043;   --ok-soft:rgba(15,138,82,.12);
+  --bad:#c8362f;  --bad-ink:#a92a24;  --bad-soft:rgba(200,54,47,.11);
+  --m1:#1baf7a; --m2:#e34948; --m3:#2a78d6; --m4:#eda100; --m5:#4a3aa7;
+  --grid:#e3e6eb; --axis:#c3c9d3;
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  --tint:rgba(16,20,28,.035);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility}
+h1,h2,h3,h4,h5{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--key-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--acc-ink); outline-offset:3px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); border:1px solid var(--rule);
+  padding:.08em .36em; border-radius:5px; white-space:nowrap}
+strong{font-weight:600; color:var(--ink)}
+hr{border:0; border-top:1px solid var(--rule); margin:40px 0}
+button{font-family:inherit}
+
+/* ============================================================ chrome */
+#prog{position:fixed; inset:0 auto auto 0; height:2px; width:0; z-index:200;
+  background:linear-gradient(90deg,var(--key),var(--acc)); transition:width .08s linear}
+.top{position:fixed; inset:0 0 auto 0; height:60px; z-index:150; display:flex; align-items:center; gap:18px;
+  padding:0 22px; background:color-mix(in srgb, var(--surf) 86%, transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2); background:var(--surf3)}
+
+/* ============================================================ shell */
+.shell{max-width:1340px; margin:0 auto; padding:60px 26px 120px;
+  display:grid; grid-template-columns:minmax(0,1fr); gap:0}
+@media(min-width:1080px){
+  .shell{grid-template-columns:244px minmax(0,1fr); gap:56px; padding-left:32px; padding-right:32px}
+}
+.rail{display:none}
+@media(min-width:1080px){
+  .rail{display:block; position:sticky; top:88px; align-self:start; max-height:calc(100vh - 120px); overflow-y:auto;
+    padding-right:6px; scrollbar-width:thin}
+  .rail .rl{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink3); margin:0 0 14px 12px}
+  .rail ol{list-style:none; margin:0; padding:0; position:relative}
+  .rail ol::before{content:""; position:absolute; left:4px; top:6px; bottom:6px; width:1px; background:var(--rule)}
+  .rail li{position:relative}
+  .rail a{display:block; padding:5px 0 5px 22px; font-size:13px; line-height:1.45; color:var(--ink3);
+    border:0; transition:.16s}
+  .rail a::before{content:""; position:absolute; left:1px; top:14px; width:7px; height:7px; border-radius:50%;
+    background:var(--rule2); transition:.16s}
+  .rail a:hover{color:var(--ink2)}
+  .rail a.on{color:var(--ink); font-weight:500}
+  .rail a.on::before{background:var(--acc); box-shadow:0 0 0 3px var(--acc-soft)}
+}
+main{min-width:0}
+
+/* ============================================================ hero */
+.hero{margin-bottom:64px}
+.kicker{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:22px}
+.tag{font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; padding:4px 9px; border-radius:6px;
+  border:1px solid var(--rule); color:var(--ink2); background:var(--surf2)}
+.tag.hl{color:var(--acc-ink); border-color:var(--acc); background:var(--acc-soft)}
+.hero h1{font-size:clamp(2.1rem,4.6vw,3.4rem); font-weight:700; letter-spacing:-.025em; margin-bottom:6px}
+.hero .zh{font-size:clamp(1.05rem,2vw,1.35rem); color:var(--ink2); font-family:var(--font-display); font-weight:500;
+  letter-spacing:.01em; margin-bottom:22px}
+.hero .thesis{font-size:1.06rem; line-height:1.9; color:var(--ink2); max-width:68ch; margin-bottom:24px}
+.hero .thesis b{color:var(--ink)}
+.authors{font-size:13.5px; color:var(--ink3); line-height:1.75; max-width:72ch; margin-bottom:8px}
+.authors b{color:var(--ink2); font-weight:500}
+.links{display:flex; flex-wrap:wrap; gap:10px; margin-top:18px}
+.links a{font-family:var(--font-mono); font-size:12.5px; padding:7px 13px; border-radius:8px;
+  border:1px solid var(--rule); background:var(--surf2); color:var(--ink2)}
+.links a:hover{border-color:var(--rule2); color:var(--ink); background:var(--surf3)}
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(166px,1fr)); gap:1px; margin-top:34px;
+  background:var(--rule); border:1px solid var(--rule); border-radius:14px; overflow:hidden}
+.stat{background:var(--surf); padding:18px 18px 16px}
+.stat .lb{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.11em; text-transform:uppercase; color:var(--ink3)}
+.stat .vl{font-family:var(--font-display); font-size:1.8rem; font-weight:700; letter-spacing:-.02em; margin:6px 0 2px;
+  font-variant-numeric:tabular-nums}
+.stat .dl{font-size:12px; color:var(--ink3); line-height:1.5}
+.stat .dl b{color:var(--ok-ink); font-weight:600}
+
+/* ============================================================ sections */
+.sec{margin:0 0 76px; scroll-margin-top:88px}
+.eyebrow{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.eyebrow .n{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; color:var(--acc-ink);
+  border:1px solid var(--acc); background:var(--acc-soft); padding:2px 8px; border-radius:5px}
+.eyebrow .t{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.19em; text-transform:uppercase; color:var(--ink3)}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec > h2{font-size:clamp(1.5rem,2.6vw,2rem); letter-spacing:-.02em; margin-bottom:18px}
+.sec h3{font-size:1.16rem; margin:44px 0 12px; letter-spacing:-.01em; display:flex; align-items:baseline; gap:10px}
+.sec h3 .ix{font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-weight:400}
+.sec h4{font-size:.98rem; margin:26px 0 8px; color:var(--ink2); font-weight:600}
+.prose p{max-width:74ch; margin:0 0 15px}
+.prose ul,.prose ol{max-width:74ch; margin:0 0 15px; padding-left:1.35em}
+.prose li{margin:0 0 7px}
+.prose li::marker{color:var(--ink3)}
+.lead{font-size:1.04rem; color:var(--ink2); max-width:70ch; margin-bottom:24px; line-height:1.9}
+
+/* ============================================================ roles */
+.rP{color:var(--pos-ink); font-weight:600}
+.rN{color:var(--neg-ink); font-weight:600}
+.rK{color:var(--key-ink); font-weight:600}
+.rA{color:var(--acc-ink); font-weight:600}
+.rG{color:var(--grad-ink); font-weight:600}
+
+/* ============================================================ math */
+.eqwrap{margin:24px 0; border:1px solid var(--rule); border-radius:14px; background:var(--surf); overflow:hidden}
+.eqwrap.acc-P{border-left:3px solid var(--pos)}
+.eqwrap.acc-N{border-left:3px solid var(--neg)}
+.eqwrap.acc-K{border-left:3px solid var(--key)}
+.eqwrap.acc-A{border-left:3px solid var(--acc)}
+.eqwrap.acc-G{border-left:3px solid var(--grad)}
+.eqrow{display:flex; align-items:flex-start; gap:16px; padding:20px 22px; overflow-x:auto}
+.eqrow .body{flex:1; min-width:0}
+.eqn{font-family:var(--font-math); font-size:1.08rem; line-height:2.15; white-space:nowrap}
+.eqn i{font-style:italic}
+.eqn .op{font-style:normal; padding:0 .2em}
+.eqn .fn{font-style:normal}
+.eqn .vv{font-weight:700; font-style:normal}
+.eqno{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); flex:none; align-self:flex-start; padding-top:8px}
+.eqcap{border-top:1px dashed var(--rule); padding:13px 22px 15px; font-size:14px; color:var(--ink2); background:var(--tint)}
+.eqcap b{color:var(--ink)}
+.frac{display:inline-flex; flex-direction:column; vertical-align:middle; text-align:center; font-size:.82em; line-height:1.35; margin:0 .18em}
+.frac > span:first-child{border-bottom:1px solid currentColor; padding:0 .3em}
+.frac > span:last-child{padding:0 .3em}
+.eqn sub{font-size:.66em; vertical-align:-.28em; font-style:normal; font-family:var(--font-body)}
+.eqn sup{font-size:.62em; vertical-align:.5em; font-style:normal; font-family:var(--font-body)}
+.sumop{display:inline-flex; flex-direction:column; align-items:center; vertical-align:middle; margin:0 .12em; line-height:1}
+.sumop .sg{font-size:1.35em}
+.sumop .sb{font-size:.5em; font-family:var(--font-body); font-style:normal; margin-top:1px}
+.hl-i{background:var(--pos-soft); border-radius:5px; padding:.12em .18em; box-shadow:inset 0 0 0 1px var(--pos)}
+.hl-ii{background:var(--neg-soft); border-radius:5px; padding:.12em .18em; box-shadow:inset 0 0 0 1px var(--neg)}
+.hl-iii{background:var(--grad-soft); border-radius:5px; padding:.12em .18em; box-shadow:inset 0 0 0 1px var(--grad)}
+.eqn .zone{transition:.18s; border-radius:5px; padding:.12em .18em}
+.eqn .zone.off{opacity:.26}
+
+/* ============================================================ callouts */
+.call{margin:22px 0; padding:16px 18px; border-radius:12px; border:1px solid var(--rule);
+  background:var(--surf); font-size:14.6px; line-height:1.82; color:var(--ink2)}
+.call .hd{display:flex; align-items:center; gap:9px; font-family:var(--font-mono); font-size:11px;
+  letter-spacing:.13em; text-transform:uppercase; margin-bottom:8px}
+.call p{max-width:none; margin:0 0 10px}
+.call p:last-child{margin-bottom:0}
+.call b{color:var(--ink)}
+.call.key{border-color:var(--acc); background:var(--acc-soft)}
+.call.key .hd{color:var(--acc-ink)}
+.call.warn{border-color:var(--bad); background:var(--bad-soft)}
+.call.warn .hd{color:var(--bad-ink)}
+.call.note .hd{color:var(--ink3)}
+.call.mine{border-color:var(--rule2); background:var(--surf2); border-left:3px solid var(--ink3)}
+.call.mine .hd{color:var(--ink3)}
+.call ul{margin:6px 0 0; padding-left:1.3em}
+.call li{margin:0 0 6px}
+.call li::marker{color:var(--ink3)}
+
+/* ============================================================ figures */
+figure{margin:30px 0; padding:0}
+.fig{background:var(--surf); border:1px solid var(--rule); border-radius:16px; padding:20px 20px 4px; box-shadow:var(--shadow)}
+.fig .fh{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:4px}
+.fig .fh .no{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3)}
+.fig .fh .ti{font-family:var(--font-display); font-weight:600; font-size:15px}
+.figbody{overflow-x:auto; padding:10px 0 4px}
+.fig svg{display:block; max-width:100%; height:auto; margin:0 auto}
+.figbody svg{min-width:600px}
+figcaption{font-size:13px; color:var(--ink3); line-height:1.72; padding:12px 2px 16px; border-top:1px dashed var(--rule); margin-top:8px}
+figcaption b{color:var(--ink2); font-weight:500}
+/* svg semantic classes */
+.s-ink{stroke:var(--ink2)} .s-ink3{stroke:var(--ink3)} .s-rule{stroke:var(--rule2)}
+.f-ink{fill:var(--ink)} .f-ink2{fill:var(--ink2)} .f-ink3{fill:var(--ink3)}
+.s-P{stroke:var(--pos)} .f-P{fill:var(--pos)} .f-Pi{fill:var(--pos-ink)} .fs-P{fill:var(--pos-soft)}
+.s-N{stroke:var(--neg)} .f-N{fill:var(--neg)} .f-Ni{fill:var(--neg-ink)} .fs-N{fill:var(--neg-soft)}
+.s-K{stroke:var(--key)} .f-K{fill:var(--key)} .f-Ki{fill:var(--key-ink)} .fs-K{fill:var(--key-soft)}
+.s-A{stroke:var(--acc)} .f-A{fill:var(--acc)} .f-Ai{fill:var(--acc-ink)} .fs-A{fill:var(--acc-soft)}
+.s-G{stroke:var(--grad)} .f-G{fill:var(--grad)} .f-Gi{fill:var(--grad-ink)} .fs-G{fill:var(--grad-soft)}
+.f-surf{fill:var(--surf)} .f-surf2{fill:var(--surf2)} .f-surf3{fill:var(--surf3)}
+svg text{font-family:var(--font-body); font-size:12px}
+svg .mono{font-family:var(--font-mono)}
+svg .lbl{font-size:11.5px}
+svg .sml{font-size:10px; letter-spacing:.06em}
+svg .big{font-size:13px; font-weight:600}
+svg .math{font-family:var(--font-math); font-style:italic}
+.nofill{fill:none}
+#f7svg,#f8svg{touch-action:none}
+
+/* ============================================================ tabs / steppers */
+.tabs{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px}
+.tab{font-family:var(--font-body); font-size:13px; padding:7px 13px; border-radius:9px; cursor:pointer;
+  border:1px solid var(--rule); background:var(--surf2); color:var(--ink2); transition:.16s; font-weight:500}
+.tab:hover{color:var(--ink); border-color:var(--rule2)}
+.tab[aria-selected="true"]{background:var(--acc-soft); border-color:var(--acc); color:var(--acc-ink)}
+.tabpanel[hidden]{display:none}
+.stepbar{display:flex; gap:4px; flex-wrap:wrap; margin-bottom:14px}
+.stepbtn{font-family:var(--font-mono); font-size:11.5px; padding:6px 10px; border-radius:8px; cursor:pointer;
+  border:1px solid var(--rule); background:var(--surf2); color:var(--ink3); transition:.16s}
+.stepbtn:hover{color:var(--ink2)}
+.stepbtn.on{background:var(--acc); border-color:var(--acc); color:#fff}
+.stepinfo{border:1px solid var(--rule); border-radius:12px; background:var(--surf2); padding:15px 17px; margin-top:6px;
+  font-size:14.4px; line-height:1.8; color:var(--ink2); min-height:104px}
+.stepinfo h5{margin:0 0 6px; font-family:var(--font-display); font-size:14.5px; color:var(--ink); font-weight:600}
+.stepinfo .eqmini{font-family:var(--font-math); font-size:1rem; color:var(--ink); margin-top:9px; display:block; overflow-x:auto}
+.dim{opacity:.16; transition:opacity .3s}
+.lit{opacity:1; transition:opacity .3s}
+
+/* ============================================================ controls */
+.ctl{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:10px 0 4px;
+  padding:12px 14px; border:1px solid var(--rule); border-radius:11px; background:var(--surf2)}
+.ctl label{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.06em; color:var(--ink3)}
+input[type=range]{-webkit-appearance:none; appearance:none; height:4px; border-radius:3px; background:var(--rule2);
+  flex:1; min-width:120px; outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:17px; height:17px; border-radius:50%;
+  background:var(--acc); border:2px solid var(--surf); cursor:pointer; box-shadow:0 0 0 1px var(--acc)}
+input[type=range]::-moz-range-thumb{width:15px; height:15px; border-radius:50%; background:var(--acc);
+  border:2px solid var(--surf); cursor:pointer}
+.readout{font-family:var(--font-mono); font-size:13px; color:var(--ink); font-variant-numeric:tabular-nums;
+  background:var(--surf3); border:1px solid var(--rule); padding:4px 10px; border-radius:7px; white-space:nowrap}
+.tog{display:inline-flex; border:1px solid var(--rule); border-radius:9px; overflow:hidden; background:var(--surf)}
+.tog button{background:transparent; border:0; color:var(--ink3); font-size:12.5px; padding:6px 12px; cursor:pointer;
+  transition:.15s; font-weight:500}
+.tog button+button{border-left:1px solid var(--rule)}
+.tog button[aria-pressed="true"]{background:var(--acc-soft); color:var(--acc-ink)}
+.tog button:hover{color:var(--ink2)}
+.tog.pn button[aria-pressed="true"][data-v="fg"]{background:var(--pos-soft); color:var(--pos-ink)}
+.tog.pn button[aria-pressed="true"][data-v="bg"]{background:var(--neg-soft); color:var(--neg-ink)}
+.chk{display:inline-flex; align-items:center; gap:7px; font-size:12.5px; color:var(--ink2); cursor:pointer; user-select:none}
+.chk input{accent-color:var(--acc); width:15px; height:15px; cursor:pointer}
+.hint{font-size:12px; color:var(--ink3); margin-top:8px; font-style:italic}
+
+/* ============================================================ tables */
+.tblwrap{overflow-x:auto; border:1px solid var(--rule); border-radius:14px; background:var(--surf); margin:20px 0}
+table{border-collapse:collapse; width:100%; font-size:13.2px; font-variant-numeric:tabular-nums}
+caption{text-align:left; padding:14px 18px 0; font-size:13px; color:var(--ink3); caption-side:top}
+th,td{padding:9px 13px; text-align:right; border-bottom:1px solid var(--rule); white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--ink3); font-weight:500; background:var(--surf2)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--tint)}
+td.best{font-weight:700; color:var(--ink)}
+td.second{text-decoration:underline; text-underline-offset:3px; color:var(--ink)}
+tr.ours td{background:var(--acc-soft)}
+tr.ours:hover td{background:var(--acc-soft)}
+tr.ours td:first-child{font-weight:600; color:var(--acc-ink)}
+tr.base td:first-child{color:var(--ink3)}
+.tnote{font-size:12.4px; color:var(--ink3); padding:10px 18px 14px; line-height:1.7}
+
+/* ============================================================ cards */
+.cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; margin:22px 0}
+.card{border:1px solid var(--rule); border-radius:13px; background:var(--surf); padding:16px 17px;
+  font-size:13.6px; line-height:1.75; color:var(--ink2)}
+.card h5{font-family:var(--font-display); font-size:14px; color:var(--ink); margin:0 0 7px; font-weight:600}
+.card .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--ink3); display:block; margin-bottom:5px}
+.card.pp{border-top:3px solid var(--pos)}
+.card.nn{border-top:3px solid var(--neg)}
+.card.kk{border-top:3px solid var(--key)}
+.card.aa{border-top:3px solid var(--acc)}
+.card.gg{border-top:3px solid var(--grad)}
+
+/* ============================================================ algorithm */
+.algo{border:1px solid var(--rule); border-radius:14px; background:var(--surf); overflow:hidden; margin:22px 0}
+.algo .ah{padding:12px 18px; border-bottom:1px solid var(--rule); background:var(--surf2);
+  font-family:var(--font-mono); font-size:11.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3);
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+.algo ol{list-style:none; margin:0; padding:8px 0; counter-reset:ln}
+.algo li{counter-increment:ln; position:relative; padding:4px 18px 4px 62px;
+  font-family:var(--font-mono); font-size:12.8px; line-height:1.72; color:var(--ink2); transition:.18s;
+  border-left:2px solid transparent}
+.algo li::before{content:counter(ln); position:absolute; left:14px; top:4px; width:34px;
+  color:var(--ink3); text-align:right; font-size:11px}
+.algo li.cmt{color:var(--ink3); font-style:italic}
+.algo li b{color:var(--ink); font-weight:600}
+.algo li .cm{color:var(--ink3)}
+.algo li:hover{background:var(--tint)}
+.algo li.act{background:var(--acc-soft); border-left-color:var(--acc)}
+.algo li.faded{opacity:.32}
+.algo .an{padding:12px 18px; border-top:1px dashed var(--rule); font-size:13px; color:var(--ink3); font-family:var(--font-body)}
+.ind1{padding-left:1.6em; display:inline-block}
+.ind2{padding-left:3.2em; display:inline-block}
+.ind3{padding-left:4.8em; display:inline-block}
+
+/* ============================================================ notation */
+.nota{display:grid; grid-template-columns:repeat(auto-fit,minmax(258px,1fr)); gap:1px; background:var(--rule);
+  border:1px solid var(--rule); border-radius:13px; overflow:hidden; margin:20px 0}
+.nota div{background:var(--surf); padding:11px 14px; display:flex; gap:12px; align-items:baseline}
+.nota .sym{font-family:var(--font-math); font-size:1rem; color:var(--ink); flex:none; min-width:66px}
+.nota .dsc{font-size:13px; color:var(--ink2); line-height:1.6}
+
+/* ============================================================ details */
+details{border:1px solid var(--rule); border-radius:12px; background:var(--surf); margin:14px 0; overflow:hidden}
+summary{cursor:pointer; padding:13px 17px; font-size:14px; font-weight:500; color:var(--ink2); list-style:none;
+  display:flex; align-items:center; gap:10px; user-select:none}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"＋"; font-family:var(--font-mono); color:var(--ink3); font-size:13px}
+details[open] summary::before{content:"−"}
+summary:hover{color:var(--ink); background:var(--tint)}
+details .dc{padding:6px 17px 16px; font-size:14px; color:var(--ink2); line-height:1.82; border-top:1px solid var(--rule)}
+details .dc pre{font-family:var(--font-mono); font-size:11.8px; line-height:1.68; white-space:pre-wrap;
+  background:var(--surf2); border:1px solid var(--rule); border-radius:9px; padding:13px 14px; color:var(--ink2);
+  overflow-x:auto; margin:10px 0}
+details .dc p{margin:0 0 10px}
+
+/* ============================================================ footer */
+footer{border-top:1px solid var(--rule); margin-top:80px; padding-top:26px; font-size:13px; color:var(--ink3); line-height:1.8}
+footer a{color:var(--ink2)}
+.toTop{position:fixed; right:22px; bottom:22px; z-index:140; opacity:0; pointer-events:none; transition:.2s}
+.toTop.show{opacity:1; pointer-events:auto}
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms !important; transition-duration:.001ms !important}
+  html{scroll-behavior:auto}
+}
+@media print{ .top,.rail,.toTop,#prog{display:none} body{background:#fff; color:#000} }
+</style>
+</head>
+<body>
+<div id="prog"></div>
+<div class="top">
+  <div class="brand">GATO-Vid<em>arXiv 2608.13037 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" title="切换主题">◐ 主题</button>
+</div>
+<div class="shell">
+<nav class="rail" aria-label="目录">
+  <p class="rl">目录</p>
+  <ol id="toc"></ol>
+</nav>
+<main>
+<header class="hero">
+  <div class="kicker">
+    <span class="tag hl">arXiv 2608.13037v1</span>
+    <span class="tag">cs.CV · 2026-08-13</span>
+    <span class="tag">Training-free</span>
+    <span class="tag">Gradient-free</span>
+    <span class="tag">Wan2.2 · DiT</span>
+  </div>
+  <h1>GATO-Vid</h1>
+  <p class="zh">用闭式解替代反向传播的空间定位文生视频<br><span style="font-size:.86em;color:var(--ink3)">Spatially-Grounded Text-to-Video Generation via Inference-Time Gradient-Free Optimization</span></p>
+  <p class="thesis">
+    要让 14B 的视频 DiT 把「一只猫」生成在你指定的框里，主流 training-free 做法是<span class="rG">对交叉注意力图做梯度引导</span>——前向一遍、显式物化注意力图、算定位损失、再<b>反向穿过整个网络</b>。在 Wan2.2 这种量级上，这一步要多花 <b>300%</b> 的时间和 <b>26 GB</b> 显存。
+    GATO-Vid 的主张是：<b>这个梯度其实不必算</b>。把交叉注意力的目标函数换成一个<span class="rA">可解析求解的代理分数</span>，它的最优方向有<b>闭式解</b>，而且只依赖<span class="rK">文本键</span>——于是整个引导退化成「在 block 内部把 query 往一个算好的方向掰一下，再拉回 RMSNorm 的椭球面」。代价：<b>+0.4%</b> 推理时间；每层只多两个 d 维向量，显存开销可忽略。
+  </p>
+  <p class="authors">
+    <b>Guillaume Jeanneret</b>¹, <b>Mathis Koroglu</b>¹˒², <b>Hugo Caselles-Dupré</b>², <b>Arnaud Dapogny</b>¹, <b>Matthieu Cord</b>¹˒³ ·
+    ¹ ISIR, Sorbonne Université · ² Obvious Research · ³ Valeo.ai
+  </p>
+  <div class="links">
+    <a href="https://arxiv.org/abs/2608.13037" target="_blank" rel="noopener">arXiv 摘要页 ↗</a>
+    <a href="https://arxiv.org/pdf/2608.13037" target="_blank" rel="noopener">PDF ↗</a>
+    <a href="https://gato-vid.github.io/" target="_blank" rel="noopener">项目主页 ↗</a>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="lb">推理开销</div><div class="vl" style="color:var(--pos-ink)">+0.4%</div><div class="dl">梯度法单步反向为 <b style="color:var(--bad-ink)">+300.3%</b></div></div>
+    <div class="stat"><div class="lb">IoU · Set 1</div><div class="vl">0.154 → <span style="color:var(--acc-ink)">0.363</span></div><div class="dl">次优基线 Peekaboo 仅 0.249</div></div>
+    <div class="stat"><div class="lb">中心距 CD ↓</div><div class="vl">0.138 → <span style="color:var(--acc-ink)">0.059</span></div><div class="dl">Set 2：0.198 → <b>0.121</b></div></div>
+    <div class="stat"><div class="lb">注入范围</div><div class="vl">20 / 40 层</div><div class="dl">仅前 <b>15%</b> 采样步，λ<sub>±</sub>=1.5 带线性衰减</div></div>
+    <div class="stat"><div class="lb">代价</div><div class="vl" style="color:var(--bad-ink)">AQ −0.08</div><div class="dl">动态度 DD 0.248 → 0.113</div></div>
+  </div>
+</header>
+
+<section class="sec" id="s1" data-t="一图看懂">
+  <div class="eyebrow"><span class="n">01</span><span class="t">The whole idea</span><span class="line"></span></div>
+  <h2>一图看懂：把「反向传播」换成「block 内部的一次掰正」</h2>
+  <p class="lead">两条路线的输入输出完全一样：一段 prompt、一串逐帧包围框、一个冻结的 T2V 生成器。差别只在于<b>拿到引导方向的方式</b>——一边靠反向传播把误差信号送回 latent，一边直接用文本键算出方向、就地改写 query。</p>
+
+  <figure>
+  <div class="fig">
+    <div class="fh"><span class="no">Figure 1</span><span class="ti">梯度引导 vs. GATO-Vid：消失的那根反向箭头</span></div>
+    <div class="figbody">
+<svg viewBox="0 0 960 462" role="img" aria-label="上半部分展示梯度引导流程：前向一遍网络、收集所有层的注意力图求均值、计算定位损失、再反向传播穿过全部 40 层更新 latent；下半部分展示 GATO-Vid：同样的前向流程中，在前 20 层内部读取文本键、闭式计算正负偏置、改写 query 后重投影回椭球，没有任何反向箭头。">
+  <defs>
+    <marker id="f1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    <marker id="f1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--bad)"/></marker>
+    <marker id="f1p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--acc)"/></marker>
+  </defs>
+
+  <!-- ============ PANEL A ============ -->
+  <rect x="1" y="1" width="958" height="214" rx="13" class="nofill s-rule" stroke-width="1"/>
+  <rect x="1" y="1" width="958" height="214" rx="13" class="fs-G" opacity=".35"/>
+  <text x="16" y="25" class="big f-Gi">① 梯度引导 — 现有 training-free SOTA（Lian et al. 等）</text>
+
+  <g class="f-ink2" color="var(--ink3)">
+    <rect x="24" y="78" width="52" height="32" rx="7" class="f-surf2 s-rule" stroke-width="1"/>
+    <text x="50" y="98" text-anchor="middle" class="math f-ink">x<tspan font-size="9" dy="3">t</tspan></text>
+    <line x1="78" y1="94" x2="92" y2="94" stroke="currentColor" stroke-width="1.4" marker-end="url(#f1a)"/>
+    <g class="f-surf2 s-rule" stroke-width="1">
+      <rect x="96" y="78" width="34" height="32" rx="6"/><rect x="140" y="78" width="34" height="32" rx="6"/>
+      <rect x="184" y="78" width="34" height="32" rx="6"/><rect x="228" y="78" width="34" height="32" rx="6"/>
+      <rect x="296" y="78" width="34" height="32" rx="6"/><rect x="340" y="78" width="34" height="32" rx="6"/>
+    </g>
+    <text x="277" y="99" text-anchor="middle" class="f-ink3">⋯</text>
+    <text x="113" y="99" text-anchor="middle" class="sml f-ink3">B1</text><text x="157" y="99" text-anchor="middle" class="sml f-ink3">B2</text>
+    <text x="201" y="99" text-anchor="middle" class="sml f-ink3">B3</text><text x="245" y="99" text-anchor="middle" class="sml f-ink3">B4</text>
+    <text x="313" y="99" text-anchor="middle" class="sml f-ink3">B39</text><text x="357" y="99" text-anchor="middle" class="sml f-ink3">B40</text>
+    <line x1="376" y1="94" x2="388" y2="94" stroke="currentColor" stroke-width="1.4" marker-end="url(#f1a)"/>
+    <rect x="392" y="78" width="50" height="32" rx="7" class="f-surf2 s-rule" stroke-width="1"/>
+    <text x="417" y="98" text-anchor="middle" class="math f-ink">v<tspan font-size="9" dy="3">t</tspan></text>
+    <text x="233" y="65" text-anchor="middle" class="sml f-ink3">冻结的 T2V 生成器 · 40 个 DiT block（Wan2.2-A14B 公开配置）</text>
+  </g>
+
+  <!-- collectors -->
+  <g stroke="var(--grad)" stroke-width="1.1" stroke-dasharray="3 3" opacity=".9" class="nofill">
+    <path d="M113,112 L113,142"/><path d="M157,112 L157,142"/><path d="M201,112 L201,142"/>
+    <path d="M245,112 L245,142"/><path d="M313,112 L313,142"/><path d="M357,112 L357,142"/>
+    <path d="M113,142 L455,142"/>
+  </g>
+  <g color="var(--grad)"><line x1="440" y1="142" x2="466" y2="142" stroke="currentColor" stroke-width="1.4" marker-end="url(#f1a)"/></g>
+  <text x="228" y="136" text-anchor="middle" class="sml f-Gi">收集每层 Q<tspan font-size="8" dy="2">i</tspan><tspan dy="-2">, K</tspan><tspan font-size="8" dy="2">i</tspan></text>
+
+  <rect x="470" y="56" width="172" height="78" rx="10" class="f-surf s-G" stroke-width="1.3"/>
+  <text x="556" y="78" text-anchor="middle" class="math f-ink" font-size="13">Ā = (1/B) Σ A(Q<tspan font-size="9" dy="3">i</tspan><tspan dy="-3">,K</tspan><tspan font-size="9" dy="3">i</tspan><tspan dy="-3">)</tspan></text>
+  <text x="556" y="97" text-anchor="middle" class="sml f-ink3">显式物化注意力图</text>
+  <text x="556" y="112" text-anchor="middle" class="sml f-ink3">THW × |τ| × heads × B</text>
+  <text x="556" y="126" text-anchor="middle" class="sml f-Ni">≈ 50 GiB（本文估算）</text>
+  <line x1="646" y1="95" x2="658" y2="95" stroke="var(--grad)" stroke-width="1.4" marker-end="url(#f1a)" color="var(--grad)"/>
+
+  <rect x="662" y="56" width="130" height="78" rx="10" class="f-surf s-G" stroke-width="1.3"/>
+  <text x="727" y="83" text-anchor="middle" class="math f-ink" font-size="14">ℓ( Ā, M, T )</text>
+  <text x="727" y="103" text-anchor="middle" class="sml f-ink3">Dice / ℓ₂ 定位损失</text>
+  <text x="727" y="119" text-anchor="middle" class="sml f-ink3">目标框 M · 目标词 T</text>
+
+  <g>
+    <rect x="806" y="56" width="144" height="23" rx="6" class="fs-N s-N" stroke-width="1"/>
+    <text x="878" y="72" text-anchor="middle" class="sml f-Ni">+300.3% 推理时延</text>
+    <rect x="806" y="84" width="144" height="23" rx="6" class="fs-N s-N" stroke-width="1"/>
+    <text x="878" y="100" text-anchor="middle" class="sml f-Ni">+26 GB 显存 → 59 GB</text>
+    <rect x="806" y="112" width="144" height="23" rx="6" class="fs-N s-N" stroke-width="1"/>
+    <text x="878" y="128" text-anchor="middle" class="sml f-Ni">显式 Ā 在 80GB 卡 OOM</text>
+  </g>
+
+  <!-- backward -->
+  <g color="var(--bad)">
+    <path d="M727,140 L727,172 L49,172 L49,118" fill="none" stroke="var(--bad)" stroke-width="2.6" marker-end="url(#f1g)"/>
+  </g>
+  <text x="392" y="166" text-anchor="middle" class="big f-Ni">∇<tspan font-size="9" dy="3">x</tspan><tspan dy="-3">ℓ</tspan> ：反向传播穿过全部 40 层的计算图</text>
+  <text x="392" y="192" text-anchor="middle" class="lbl f-ink2">x′<tspan font-size="9" dy="3">t</tspan><tspan dy="-3"> = x</tspan><tspan font-size="9" dy="3">t</tspan><tspan dy="-3"> − μ ∇</tspan><tspan font-size="9" dy="3">x</tspan><tspan dy="-3">ℓ</tspan>　→　用 x′<tspan font-size="9" dy="3">t</tspan><tspan dy="-3"> 重跑这一步去噪（Eq. 6）</tspan></text>
+
+  <!-- ============ PANEL B ============ -->
+  <rect x="1" y="240" width="958" height="220" rx="13" class="nofill s-rule" stroke-width="1"/>
+  <rect x="1" y="240" width="958" height="220" rx="13" class="fs-A" opacity=".4"/>
+  <text x="16" y="264" class="big f-Ai">② GATO-Vid — 闭式解 + 就地注入，没有反向箭头</text>
+
+  <g>
+    <rect x="470" y="272" width="148" height="23" rx="6" class="fs-P s-P" stroke-width="1"/>
+    <text x="544" y="288" text-anchor="middle" class="sml f-Pi">+0.4% 推理时延</text>
+    <rect x="628" y="272" width="148" height="23" rx="6" class="fs-P s-P" stroke-width="1"/>
+    <text x="702" y="288" text-anchor="middle" class="sml f-Pi">不物化 Ā · 显存几乎不增</text>
+    <rect x="786" y="272" width="164" height="23" rx="6" class="fs-P s-P" stroke-width="1"/>
+    <text x="868" y="288" text-anchor="middle" class="sml f-Pi">全部代价 = 3 次向量点积</text>
+  </g>
+
+  <g class="f-ink2" color="var(--ink3)">
+    <rect x="24" y="322" width="52" height="32" rx="7" class="f-surf2 s-rule" stroke-width="1"/>
+    <text x="50" y="342" text-anchor="middle" class="math f-ink">x<tspan font-size="9" dy="3">t</tspan></text>
+    <line x1="78" y1="338" x2="92" y2="338" stroke="currentColor" stroke-width="1.4" marker-end="url(#f1a)"/>
+    <g class="fs-A s-A" stroke-width="1.4">
+      <rect x="96" y="322" width="34" height="32" rx="6"/><rect x="140" y="322" width="34" height="32" rx="6"/>
+      <rect x="184" y="322" width="34" height="32" rx="6"/><rect x="228" y="322" width="34" height="32" rx="6"/>
+    </g>
+    <g class="f-surf2 s-rule" stroke-width="1">
+      <rect x="296" y="322" width="34" height="32" rx="6"/><rect x="340" y="322" width="34" height="32" rx="6"/>
+    </g>
+    <text x="277" y="343" text-anchor="middle" class="f-ink3">⋯</text>
+    <text x="113" y="343" text-anchor="middle" class="sml f-Ai">B1</text><text x="157" y="343" text-anchor="middle" class="sml f-Ai">B2</text>
+    <text x="201" y="343" text-anchor="middle" class="sml f-Ai">⋯</text><text x="245" y="343" text-anchor="middle" class="sml f-Ai">B20</text>
+    <text x="313" y="343" text-anchor="middle" class="sml f-ink3">B21+</text><text x="357" y="343" text-anchor="middle" class="sml f-ink3">B40</text>
+    <line x1="376" y1="338" x2="388" y2="338" stroke="currentColor" stroke-width="1.4" marker-end="url(#f1a)"/>
+    <rect x="392" y="322" width="50" height="32" rx="7" class="f-surf2 s-rule" stroke-width="1"/>
+    <text x="417" y="342" text-anchor="middle" class="math f-ink">v<tspan font-size="9" dy="3">t</tspan></text>
+    <text x="180" y="309" text-anchor="middle" class="sml f-Ai">注入层：前 20 / 40 层 · 仅前 15% 采样步</text>
+  </g>
+  <path d="M157,356 L157,376 L462,376" fill="none" stroke="var(--acc)" stroke-width="1.3" stroke-dasharray="3 3"/>
+  <g color="var(--acc)"><line x1="450" y1="376" x2="466" y2="376" stroke="currentColor" stroke-width="1.4" marker-end="url(#f1a)"/></g>
+
+  <g>
+    <rect x="470" y="352" width="100" height="48" rx="9" class="f-surf s-K" stroke-width="1.3"/>
+    <text x="520" y="372" text-anchor="middle" class="math f-Ki" font-size="13">K<tspan font-size="9" dy="3">i</tspan></text>
+    <text x="520" y="390" text-anchor="middle" class="sml f-ink3">该层文本键</text>
+    <line x1="574" y1="376" x2="588" y2="376" stroke="var(--acc)" stroke-width="1.4" marker-end="url(#f1p)" color="var(--acc)"/>
+    <rect x="592" y="352" width="100" height="48" rx="9" class="f-surf s-K" stroke-width="1.3"/>
+    <text x="642" y="371" text-anchor="middle" class="math f-Ki" font-size="12.5">K(T), K(T ᶜ)</text>
+    <text x="642" y="389" text-anchor="middle" class="sml f-ink3">两个均值向量</text>
+    <line x1="696" y1="376" x2="710" y2="376" stroke="var(--acc)" stroke-width="1.4" marker-end="url(#f1p)" color="var(--acc)"/>
+    <rect x="714" y="352" width="100" height="48" rx="9" class="f-surf s-A" stroke-width="1.5"/>
+    <text x="764" y="371" text-anchor="middle" class="math f-Ai" font-size="13">b₊ , b₋</text>
+    <text x="764" y="389" text-anchor="middle" class="sml f-ink3">闭式最优方向</text>
+    <line x1="818" y1="376" x2="832" y2="376" stroke="var(--acc)" stroke-width="1.4" marker-end="url(#f1p)" color="var(--acc)"/>
+    <rect x="836" y="352" width="114" height="48" rx="9" class="f-surf s-P" stroke-width="1.5"/>
+    <text x="893" y="371" text-anchor="middle" class="math f-Pi" font-size="12.5">q ← Π(q + λ‖q‖b±)</text>
+    <text x="893" y="389" text-anchor="middle" class="sml f-ink3">掰方向 + 重投影</text>
+  </g>
+  <path d="M893,404 L893,428 L157,428 L157,358" fill="none" stroke="var(--pos)" stroke-width="2.2" marker-end="url(#f1p)" color="var(--pos)"/>
+  <text x="525" y="422" text-anchor="middle" class="lbl f-Pi">改写后的 q 直接进入本层 cross-attention —— 前向流程一次都没中断</text>
+  <text x="200" y="450" text-anchor="middle" class="sml f-ink3">M（目标框）只用来决定「哪些 query 收正偏置、哪些收负偏置」</text>
+</svg>
+    </div>
+    <figcaption><b>关键差异是那根红色的长箭头。</b>梯度法必须先把 40 层的注意力图全部显式算出来、拼成 Ā、算损失，再把梯度一路送回 x<sub>t</sub>；GATO-Vid 把干预点从「latent」搬到了「block 内部的 query」，方向由该层的文本键当场解出来，前向一次到底。图中 50 GiB 与 token 数为本文按 Wan2.2-A14B 公开配置的估算（见 §3），非原文数据；+300.3% / +26 GB / OOM 均为原文实测。</figcaption>
+  </div>
+  </figure>
+
+  <div class="cards">
+    <div class="card gg"><span class="k">旧路的瓶颈 1</span><h5>注意力图必须显式物化</h5>现代引擎用 FlashAttention 就是为了<b>不</b>把 A 写进显存。梯度法为了算 Ā 又把它逼出来，等于主动放弃了这项优化。</div>
+    <div class="card gg"><span class="k">旧路的瓶颈 2</span><h5>反向要穿过全部参数</h5>对输入 x<sub>t</sub> 求梯度 ⇒ 计算图覆盖整个网络。原文实测：只在 Wan2.2 <b>两个 transformer 之一</b>上做一次反向，就要额外 26 GB。</div>
+    <div class="card aa"><span class="k">新路的支点 1</span><h5>目标函数换成 logits</h5>丢掉 softmax 的非线性，直接在 <span class="math">QK</span><sup>⊤</sup> 上定义分数——于是它对 q 是<b>线性</b>的，可以解析求极值。</div>
+    <div class="card aa"><span class="k">新路的支点 2</span><h5>最优方向只依赖文本键</h5>解出来的 b<sub>±</sub> 是 K(T) 与 K(T<sup>c</sup>) 的函数，<b>与视频 query 无关</b>，所以每层算一次就能广播给全部 3 万多个 token。</div>
+  </div>
+</section>
+<section class="sec" id="s2" data-t="任务与符号">
+  <div class="eyebrow"><span class="n">02</span><span class="t">Problem setup</span><span class="line"></span></div>
+  <h2>任务与符号：两个索引集合 M 和 T</h2>
+  <p class="lead">整篇论文的所有机制都建立在两个索引集合上：<span class="rP">M</span> 是目标物体轨迹在视频 token 序列里占据的时空位置，<span class="rK">T</span> 是 prompt 里指向这个物体的那几个词。剩下的一切都是「怎么让 M 里的 query 更喜欢 T 里的 key」。</p>
+
+  <figure>
+  <div class="fig">
+    <div class="fh"><span class="no">Figure 2</span><span class="ti">输入长什么样：prompt 中的 T，视频体积中的 M</span></div>
+    <div class="figbody">
+<svg viewBox="0 0 960 342" role="img" aria-label="左侧是 prompt，其中目标词 cat 被标记为集合 T，其余文本 token 为补集 T 上标 c；中间是 81 帧视频的四个采样帧，每帧带一个绿色包围框，框随时间移动；右侧把一帧的 latent patch 网格展平，框覆盖的格子属于集合 M，其余属于 M 的补集。">
+  <defs>
+    <marker id="f2a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+  </defs>
+
+  <text x="20" y="22" class="big f-Ki">文本侧</text>
+  <rect x="20" y="34" width="278" height="76" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+  <text x="34" y="58" class="lbl f-ink2">“A </text>
+  <rect x="52" y="44" width="30" height="20" rx="5" class="fs-P s-P" stroke-width="1.2"/>
+  <text x="67" y="59" text-anchor="middle" class="lbl f-Pi" font-weight="600">cat</text>
+  <text x="86" y="58" class="lbl f-ink2">jumps across a narrow</text>
+  <text x="34" y="82" class="lbl f-ink2">alleyway between two weathered</text>
+  <text x="34" y="102" class="lbl f-ink2">brick walls.”</text>
+
+  <text x="20" y="140" class="sml f-ink3">文本编码器输出的 |τ| 个 key 向量</text>
+  <g>
+    <rect x="20" y="150" width="16" height="22" rx="4" class="f-surf3 s-rule" stroke-width="1"/>
+    <rect x="40" y="150" width="16" height="22" rx="4" class="fs-P s-P" stroke-width="1.4"/>
+    <rect x="60" y="150" width="16" height="22" rx="4" class="f-surf3 s-rule" stroke-width="1"/>
+    <rect x="80" y="150" width="16" height="22" rx="4" class="f-surf3 s-rule" stroke-width="1"/>
+    <rect x="100" y="150" width="16" height="22" rx="4" class="f-surf3 s-rule" stroke-width="1"/>
+    <rect x="120" y="150" width="16" height="22" rx="4" class="f-surf3 s-rule" stroke-width="1"/>
+    <rect x="140" y="150" width="16" height="22" rx="4" class="f-surf3 s-rule" stroke-width="1"/>
+    <rect x="160" y="150" width="16" height="22" rx="4" class="f-surf3 s-rule" stroke-width="1"/>
+    <text x="188" y="166" class="f-ink3">⋯</text>
+    <rect x="204" y="150" width="16" height="22" rx="4" class="f-surf3 s-rule" stroke-width="1"/>
+    <rect x="224" y="150" width="16" height="22" rx="4" class="f-surf3 s-rule" stroke-width="1"/>
+  </g>
+  <path d="M40,178 L40,184 L56,184 L56,178" class="nofill s-P" stroke-width="1.2"/>
+  <text x="48" y="200" text-anchor="middle" class="lbl f-Pi" font-weight="600">T</text>
+  <text x="48" y="216" text-anchor="middle" class="sml f-ink3">目标词</text>
+  <path d="M20,190 L20,196 L36,196" class="nofill s-rule" stroke-width="1"/>
+  <path d="M60,196 L240,196 L240,190" class="nofill s-rule" stroke-width="1"/>
+  <text x="152" y="212" text-anchor="middle" class="lbl f-ink3" font-weight="600">T ᶜ　其余全部文本 token</text>
+  <text x="20" y="248" class="sml f-Ki">K(T) = T 内 key 的均值　·　K(T ᶜ) = 其余 key 的均值</text>
+  <text x="20" y="266" class="sml f-ink3">→ 这两个向量就是 GATO-Vid 唯一需要的原料</text>
+
+  <line x1="310" y1="150" x2="326" y2="150" stroke="var(--ink3)" stroke-width="1.4" marker-end="url(#f2a)" color="var(--ink3)"/>
+
+  <text x="340" y="22" class="big f-Pi">视频侧 — 81 帧 × 480×832</text>
+  <g class="f-surf s-rule" stroke-width="1.2">
+    <rect x="338" y="160" width="82" height="52" rx="5"/>
+    <rect x="404" y="132" width="82" height="52" rx="5"/>
+    <rect x="470" y="104" width="82" height="52" rx="5"/>
+    <rect x="536" y="76" width="82" height="52" rx="5"/>
+  </g>
+  <g class="s-rule" stroke-width=".7" opacity=".55">
+    <line x1="420" y1="160" x2="486" y2="132"/><line x1="420" y1="212" x2="486" y2="184"/>
+    <line x1="486" y1="132" x2="552" y2="104"/><line x1="486" y1="184" x2="552" y2="156"/>
+    <line x1="552" y1="104" x2="618" y2="76"/><line x1="552" y1="156" x2="618" y2="128"/>
+  </g>
+  <g class="fs-P s-P" stroke-width="1.8">
+    <rect x="350" y="186" width="26" height="18" rx="3"/>
+    <rect x="428" y="152" width="26" height="18" rx="3"/>
+    <rect x="506" y="118" width="26" height="18" rx="3"/>
+    <rect x="580" y="86" width="26" height="18" rx="3"/>
+  </g>
+  <text x="379" y="228" text-anchor="middle" class="sml f-ink3">帧 1</text>
+  <text x="445" y="200" text-anchor="middle" class="sml f-ink3">帧 28</text>
+  <text x="511" y="172" text-anchor="middle" class="sml f-ink3">帧 55</text>
+  <text x="577" y="144" text-anchor="middle" class="sml f-ink3">帧 81</text>
+  <text x="478" y="256" text-anchor="middle" class="lbl f-ink2">用户给的时空条件：一串逐帧包围框</text>
+  <text x="478" y="274" text-anchor="middle" class="sml f-ink3">论文 Set 2 里包含直线 / 螺旋 / 圆周 / Z 形 / N 形轨迹</text>
+
+  <line x1="632" y1="150" x2="648" y2="150" stroke="var(--ink3)" stroke-width="1.4" marker-end="url(#f2a)" color="var(--ink3)"/>
+
+  <text x="662" y="22" class="big f-Ai">展平成 token 序列</text>
+  <text x="662" y="42" class="sml f-ink3">VAE 4×8×8 下采样 + 1×2×2 patch</text>
+  <text x="662" y="58" class="sml f-ink3">→ 21 × 30 × 52 = 32 760 个视频 token</text>
+  <g id="f2grid"></g>
+  <text x="662" y="272" class="lbl f-Pi" font-weight="600">■ M</text>
+  <text x="706" y="272" class="sml f-ink3">框覆盖的 token（前景）</text>
+  <text x="662" y="292" class="lbl f-ink3" font-weight="600">■ M ᶜ</text>
+  <text x="712" y="292" class="sml f-ink3">其余全部 token（背景）</text>
+  <text x="662" y="318" class="sml f-ink3">注：图示为单帧的 patch 网格示意，实际 M 是横跨</text>
+  <text x="662" y="334" class="sml f-ink3">21 个 latent 帧的三维索引集合。</text>
+</svg>
+    </div>
+    <figcaption><b>整个方法的输入只有这两个集合。</b>左边把 prompt 切成 T 与 T<sup>c</sup>，右边把视频 token 切成 M 与 M<sup>c</sup>。token 数与 latent 尺寸按 Wan2.2-A14B 公开配置（VAE stride 4×8×8、patch 1×2×2）与论文的 81 帧 / 480×832 设置推算，供理解量级用。</figcaption>
+  </div>
+  </figure>
+
+  <h3><span class="ix">2.1</span> 采样循环与交叉注意力</h3>
+  <p class="prose">生成器是 latent flow matching：从高斯噪声 x<sub>0</sub> 出发，每步预测速度场再交给调度器推进，t=1 时用 VAE 解码回像素。</p>
+
+  <div class="eqwrap acc-K">
+    <div class="eqrow"><div class="body">
+      <div class="eqn"><i>v</i><sub>t</sub> <span class="op">=</span> <i>f</i><sub>θ</sub>(<i>x</i><sub>t</sub>, τ, <i>t</i>)<span class="op" style="padding:0 1.4em">,</span> <i>x</i><sub>t+Δt</sub> <span class="op">=</span> <span class="fn">FlowSch</span>(<i>x</i><sub>t</sub>, <i>v</i><sub>t</sub>, <i>t</i>)</div>
+    </div><div class="eqno">Eq. 1</div></div>
+    <div class="eqcap">冻结的采样主干。GATO-Vid <b>不改这一行的任何东西</b>——它不改 x<sub>t</sub>，只在 f<sub>θ</sub> 内部动手；这正是它与梯度法（Eq. 6 直接改 x<sub>t</sub>）的结构性区别。</div>
+  </div>
+
+  <div class="eqwrap acc-K">
+    <div class="eqrow"><div class="body">
+      <div class="eqn"><i>A</i>(<i>Q</i><sub>i</sub>, <i>K</i><sub>i</sub>) <span class="op">=</span> <span class="fn">softmax</span><span style="font-size:1.3em">(</span><span class="frac"><span><i>Q</i><sub>i</sub><i>K</i><sub>i</sub><sup>⊤</sup></span><span>√<i>d</i></span></span><span style="font-size:1.3em">)</span><span class="op" style="padding:0 1.2em">,</span> <span class="fn">cross-attn</span> <span class="op">=</span> <i>A</i>(<i>Q</i><sub>i</sub>,<i>K</i><sub>i</sub>)<i>V</i><sub>i</sub></div>
+    </div><div class="eqno">Eq. 2</div></div>
+    <div class="eqcap"><i>Q</i><sub>i</sub> ∈ ℝ<sup>THW×d</sup> 是视频 query，<i>K</i><sub>i</sub>, <i>V</i><sub>i</sub> ∈ ℝ<sup>|τ|×d</sup> 是文本 key/value。论文引用 Shen et al. 的观察：<b>不管架构是 UNet 还是 DiT，把文本信息「贴」到空间位置上的就是这一层</b>——所以所有 grounding 方法都在打它的主意。</div>
+  </div>
+
+  <div class="call note">
+    <div class="hd">◆ 一个容易绕晕的措辞</div>
+    <p>正文说「DiT 把文本和视频 token 拼接后过 self-attention，cross-attention 是其中的子运算」——这是为了同时覆盖 MMDiT 式的拼接架构。但 Alg. 1 里写的是 Wan2.2 的<b>显式 cross-attention 分支</b>（<code>b.to_k(τ)</code>、<code>b.to_v(τ)</code> 与视频流分开）。两种写法下 GATO-Vid 的落点是一样的：<b>norm_q 之后、attention 之前的那个 q</b>。</p>
+  </div>
+
+  <h3><span class="ix">2.2</span> RMSNorm：query 被钉在一张椭球面上</h3>
+  <p class="prose">这是后面所有几何操作的前提。现代 DiT 在 q/k 投影之后都会插一层 RMS Normalization：</p>
+
+  <div class="eqwrap acc-A">
+    <div class="eqrow"><div class="body">
+      <div class="eqn"><i>q</i> <span class="op">←</span> √<i>d</i> <span class="frac"><span><i>q</i> ⊙ γ</span><span>‖<i>q</i>‖</span></span></div>
+    </div><div class="eqno">Eq. 3</div></div>
+    <div class="eqcap">γ ∈ ℝ<sup>d</sup> 是可学习缩放，⊙ 是逐元素乘。<b>这个映射的像不是球面，而是一张超椭球面</b>：把上式记作 <i>v</i>，则 <i>v</i> ⊘ γ = √d · q/‖q‖，于是恒有 <b>‖<i>v</i> ⊘ γ‖ = √d</b>。所有进入 attention 的 query 都躺在这张曲面上——GATO-Vid 的注入必须把结果送回这张面。</div>
+  </div>
+
+  <h3><span class="ix">2.3</span> 符号速查</h3>
+  <div class="nota">
+    <div><span class="sym">x<sub>t</sub></span><span class="dsc">第 t 步的时空视频 latent，ℝ<sup>C×T×H×W</sup></span></div>
+    <div><span class="sym">τ</span><span class="dsc">tokenize + 文本编码后的 prompt，|τ| 个 d 维向量</span></div>
+    <div><span class="sym">f<sub>θ</sub></span><span class="dsc">冻结的 T2V flow-matching 生成器（本文 = Wan2.2）</span></div>
+    <div><span class="sym">M / M<sup>c</sup></span><span class="dsc">目标框覆盖的视频 token 索引 / 其补集</span></div>
+    <div><span class="sym">T / T<sup>c</sup></span><span class="dsc">指向目标物体的文本 token 索引 / 其补集</span></div>
+    <div><span class="sym">Q<sub>i</sub>, K<sub>i</sub>, V<sub>i</sub></span><span class="dsc">第 i 个 block 的 query（视频）/ key, value（文本）</span></div>
+    <div><span class="sym">B</span><span class="dsc">block 总数；Wan2.2-A14B 为 40</span></div>
+    <div><span class="sym">γ</span><span class="dsc">RMSNorm 的可学习逐通道缩放，决定椭球形状</span></div>
+    <div><span class="sym">b<sub>+</sub> , b<sub>−</sub></span><span class="dsc">解析求出的正 / 负单位方向向量</span></div>
+    <div><span class="sym">λ<sub>±</sub></span><span class="dsc">注入强度，扮演梯度法里学习率 μ 的角色（=1.5）</span></div>
+    <div><span class="sym">S<sub>B</sub></span><span class="dsc">施加注入的 block 集合（前 20 层）</span></div>
+    <div><span class="sym">P(a, b)</span><span class="dsc">把 a 投影到 b 的正交补上（Eq. 15）</span></div>
+  </div>
+</section>
+
+<section class="sec" id="s3" data-t="旧路的代价">
+  <div class="eyebrow"><span class="n">03</span><span class="t">Why gradients break</span><span class="line"></span></div>
+  <h2>旧路：梯度引导为什么在 DiT 上走不通</h2>
+  <p class="lead">先把要打倒的对象写清楚。梯度引导分三步，每一步都在现代视频 DiT 上撞墙。</p>
+
+  <div class="eqwrap acc-G">
+    <div class="eqrow"><div class="body">
+      <div class="eqn">(<i>v</i><sub>t</sub>, {<i>Q</i><sub>i</sub>, <i>K</i><sub>i</sub>}<sup>B</sup><sub style="margin-left:-.6em">i=1</sub>) <span class="op">=</span> <i>f</i><sub>θ</sub>(<i>x</i><sub>t</sub>, τ, <i>t</i>)</div>
+    </div><div class="eqno">Eq. 4</div></div>
+    <div class="eqcap"><b>① 前向并把每层的 Q、K 全部留下。</b>光是留住它们就已经不便宜。</div>
+  </div>
+  <div class="eqwrap acc-G">
+    <div class="eqrow"><div class="body">
+      <div class="eqn">Ā <span class="op">=</span> <span class="frac"><span>1</span><span><i>B</i></span></span> <span class="sumop"><span class="sb">B</span><span class="sg">Σ</span><span class="sb">i=1</span></span> <i>A</i>(<i>Q</i><sub>i</sub>, <i>K</i><sub>i</sub>)</div>
+    </div><div class="eqno">Eq. 5</div></div>
+    <div class="eqcap"><b>② 求 B 层注意力图的均值。</b>这一步是灾难的源头——它逼你把 A 显式写进显存。</div>
+  </div>
+  <div class="eqwrap acc-G">
+    <div class="eqrow"><div class="body">
+      <div class="eqn"><i>x</i>′<sub>t</sub> <span class="op">=</span> <i>x</i><sub>t</sub> <span class="op">−</span> μ ∇<sub>x<sub>t</sub></sub> ℓ(Ā, <i>M</i>, <i>T</i>)</div>
+    </div><div class="eqno">Eq. 6</div></div>
+    <div class="eqcap"><b>③ 对 latent 求梯度并更新。</b>ℓ 通常是 Ā（在目标词上平均后）与 M 之间的 Dice 或 ℓ₂ 损失。对 <i>输入</i> 求梯度意味着计算图要覆盖<b>整个网络</b>。</div>
+  </div>
+
+  <h3><span class="ix">3.1</span> 把「贵」换算成具体数字</h3>
+  <p class="prose">论文给出的实测是：单次反向 <b>+300.31%</b> 推理时间、<b>+26 GB</b> 显存（合计 59 GB，且只加载了双专家中的一个），而如果还要显式算注意力图和注意力损失，<b>80 GB 的 H100 直接 OOM</b>。下面这个滑块是我按 Wan2.2-A14B 的公开配置做的量级换算，帮助理解为什么会 OOM。</p>
+
+  <figure>
+  <div class="fig">
+    <div class="fh"><span class="no">Figure 3 · 交互</span><span class="ti">显式注意力图的显存账（本文估算）</span></div>
+    <div class="ctl">
+      <label for="c3f">帧数</label><input type="range" id="c3f" min="17" max="121" step="4" value="81">
+      <span class="readout" id="r3f">81 帧</span>
+      <label for="c3r">分辨率</label><input type="range" id="c3r" min="0" max="3" step="1" value="1">
+      <span class="readout" id="r3r">480×832</span>
+    </div>
+    <div class="ctl">
+      <label for="c3b">参与均值的层数 B</label><input type="range" id="c3b" min="1" max="40" step="1" value="40">
+      <span class="readout" id="r3b">40 层</span>
+      <label class="chk"><input type="checkbox" id="c3h" checked> 按 40 个 head 分别存</label>
+    </div>
+    <div class="figbody" style="padding-top:14px">
+      <svg viewBox="0 0 960 232" id="f3svg" role="img" aria-label="条形图，比较视频 token 数、单层单头注意力图元素数、以及显式物化全部注意力图所需的显存，与 80GB 显卡容量的对比。"></svg>
+    </div>
+    <figcaption><b>这不是原文数字，是按 bf16、Wan2.2-A14B 配置（d=5120、40 head、40 层、文本长度 512、VAE stride 4×8×8、patch 1×2×2）做的量级估算。</b>结论与原文一致：在默认设置下，仅注意力图一项就足以吃满一张 80 GB 卡，这还没算反向传播需要的激活缓存。FlashAttention 之所以快，正是因为它<b>从不</b>把这张图写出来；梯度法把它逼出来，等于主动退回优化之前。</figcaption>
+  </div>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">◆ 我的一点保留</div>
+    <p>Eq. 5 的均值对<b>全部 B 层</b>取平均，所以梯度必须同时流经 40 层注意力分支——这确实很贵。但反过来看：GATO-Vid 自己的消融（§8）显示<b>只用前 20 层甚至更少就够了</b>。如果把同样的「只用前若干层」约束加到梯度法上，它的反向深度也会相应变浅，成本远没有 +300% 那么夸张。</p>
+    <p>论文比较的是「全层梯度法」与「前 20 层无梯度法」，<b>没有给出「前 20 层梯度法」这个更公平的对手</b>。真正不可约的成本是显式 Ā 的显存（下图），而不是反向传播本身的深度。这不影响 GATO-Vid 的结论方向，但会影响你对「300%」这个数字的解读。</p>
+  </div>
+</section>
+<section class="sec" id="s4" data-t="第一步：换分数">
+  <div class="eyebrow"><span class="n">04</span><span class="t">Step 1 · A solvable surrogate</span><span class="line"></span></div>
+  <h2>第一步：把目标函数换成一个能解析求解的分数</h2>
+  <p class="lead">梯度法之所以要梯度，是因为它的损失函数<b>不可解析求极值</b>——softmax 把一切都非线性化了。GATO-Vid 的第一刀砍在这里：如果我根本不做 softmax，只在 <span class="rK">logits</span> 上定义目标，那么目标对 query 是<b>线性</b>的，最优解可以直接写出来。</p>
+
+  <h3><span class="ix">4.1</span> 为什么可以丢掉 softmax</h3>
+  <p class="prose">看单个 query <i>q</i><sub>j</sub> 对第 <i>l</i> 个文本 key 的注意力：</p>
+  <div class="eqwrap acc-K">
+    <div class="eqrow"><div class="body">
+      <div class="eqn"><i>A</i>(<i>q</i><sub>j</sub>, <i>K</i><sub>i</sub>) <span class="op">=</span> <span style="font-size:1.5em">[</span> … , <span class="frac"><span>exp(<i>q</i><sub>j</sub>·<i>k</i><sub>l</sub> / √<i>d</i>)</span><span><span class="sumop"><span class="sb"></span><span class="sg">Σ</span><span class="sb">k∈K<sub>i</sub></span></span> exp(<i>q</i><sub>j</sub>·<i>k</i> / √<i>d</i>)</span></span> , … <span style="font-size:1.5em">]</span></div>
+    </div><div class="eqno">Eq. 7</div></div>
+    <div class="eqcap">要抬高这一项，只有两条路：<span class="rP">抬高分子 <i>q</i><sub>j</sub>·<i>k</i><sub>l</sub></span>，或者 <span class="rN">压低分母里其他 key 的贡献</span>。而 exp(·) 对 <i>q</i><sub>j</sub>·<i>k</i> <b>严格单调递增</b>——所以「压低 exp 项」等价于「压低对应的内积」。两条路都可以只在内积上表达。</div>
+  </div>
+  <div class="eqwrap acc-A">
+    <div class="eqrow"><div class="body"><div class="eqn"><i>A</i>′(<i>Q</i>, <i>K</i>) <span class="op">=</span> <i>Q</i><i>K</i><sup>⊤</sup></div></div><div class="eqno">Eq. 8</div></div>
+    <div class="eqcap">于是直接拿 <b>pre-softmax logits</b> 当代理。注意这一步的性质：它保序但不保值——最优<b>方向</b>被保留了，最优<b>步长</b>没有任何保证。后面 λ<sub>±</sub> 要靠人手调，根源就在这里。</div>
+  </div>
+
+  <figure>
+  <div class="fig">
+    <div class="fh"><span class="no">Figure 4 · 交互</span><span class="ti">拖一拖：logit 怎么推动 softmax 注意力</span></div>
+    <div class="ctl">
+      <label for="c4a">目标词 logit（项 i）</label><input type="range" id="c4a" min="-2" max="7" step="0.1" value="2.2"><span class="readout" id="r4a">2.2</span>
+    </div>
+    <div class="ctl">
+      <label for="c4b">其他词 logit（项 ii）</label><input type="range" id="c4b" min="-2" max="7" step="0.1" value="1.0"><span class="readout" id="r4b">1.0</span>
+    </div>
+    <div class="figbody"><svg viewBox="0 0 960 258" id="f4svg" role="img" aria-label="条形图展示一个 query 对 10 个文本 key 的 softmax 注意力分布；提高目标 key 的 logit 或降低其他 key 的 logit，都会让目标 key 的注意力份额上升。"></svg></div>
+    <figcaption><b>项 (i) 和项 (ii) 是同一件事的两半。</b>把目标词的 logit 拉高、把其他词的 logit 压低，落到 softmax 之后都是「目标词的注意力份额变大」。这就是 GATO-Vid 敢丢掉 softmax 的全部理由——它只需要保证<b>方向</b>正确。项 (iii) 不在这张图里：它作用在 <i>别的 query 行</i> 上（框外的 token），一行 softmax 看不到它。</figcaption>
+  </div>
+  </figure>
+
+  <h3><span class="ix">4.2</span> 三项分数：一个「抬」、两个「压」</h3>
+  <p class="prose">把 logits 矩阵按「query 在不在框里 × key 是不是目标词」切成四类，GATO-Vid 只对其中三类下手：</p>
+
+  <figure>
+  <div class="fig">
+    <div class="fh"><span class="no">Figure 5 · 交互</span><span class="ti">Eq. 9 的三个区域（对应原文 Fig. 1a）</span></div>
+    <div class="tabs" role="tablist" style="margin:10px 0 4px">
+      <button class="tab" role="tab" aria-selected="true" data-z="all">全部</button>
+      <button class="tab" role="tab" aria-selected="false" data-z="1">项 (i) 抬</button>
+      <button class="tab" role="tab" aria-selected="false" data-z="2">项 (ii) 压</button>
+      <button class="tab" role="tab" aria-selected="false" data-z="3">项 (iii) 压</button>
+      <button class="tab" role="tab" aria-selected="false" data-z="0">无人管的角落</button>
+    </div>
+    <div class="figbody">
+<svg viewBox="0 0 700 396" id="f5svg" role="img" aria-label="三乘三的 logits 矩阵分区图。中间一行是目标框内的 query，中间一列是目标词 key。交点区域为项 i 要最大化；中间行两侧为项 ii 要最小化；中间列上下为项 iii 要最小化；四个角落无人干预。">
+<g transform="translate(22,0)">
+  <text x="350" y="22" text-anchor="middle" class="big f-ink2">Pre-softmax logits　<tspan class="math">Q K</tspan>ᵀ</text>
+  <text x="350" y="44" text-anchor="middle" class="sml f-ink3">Keys（文本 token）→</text>
+  <text x="-14" y="230" text-anchor="middle" class="sml f-ink3" transform="rotate(-90 -14 230)">Queries（视频 token）→</text>
+
+  <text x="120" y="62" text-anchor="middle" class="sml f-ink3">其他 key　T ᶜ</text>
+  <text x="290" y="62" text-anchor="middle" class="sml f-Ki" font-weight="600">目标 key　T</text>
+  <text x="470" y="62" text-anchor="middle" class="sml f-ink3">其他 key　T ᶜ</text>
+
+  <g id="f5cells">
+    <g data-z="0"><rect x="60" y="72" width="120" height="86" rx="5" class="f-surf3 s-rule" stroke-width="1"/>
+      <text x="120" y="120" text-anchor="middle" class="sml f-ink3">不干预</text></g>
+    <g data-z="3"><rect x="184" y="72" width="212" height="86" rx="5" class="fs-G s-G" stroke-width="1.4"/>
+      <text x="290" y="112" text-anchor="middle" class="big f-Gi">项 (iii)　↓ 压低</text>
+      <text x="290" y="132" text-anchor="middle" class="sml f-Gi">框外的 query 别去看目标词</text></g>
+    <g data-z="0"><rect x="400" y="72" width="240" height="86" rx="5" class="f-surf3 s-rule" stroke-width="1"/>
+      <text x="520" y="120" text-anchor="middle" class="sml f-ink3">不干预</text></g>
+
+    <g data-z="2"><rect x="60" y="162" width="120" height="86" rx="5" class="fs-N s-N" stroke-width="1.4"/>
+      <text x="120" y="200" text-anchor="middle" class="lbl f-Ni" font-weight="600">项 (ii) ↓</text>
+      <text x="120" y="220" text-anchor="middle" class="sml f-Ni">压低</text></g>
+    <g data-z="1"><rect x="184" y="162" width="212" height="86" rx="5" class="fs-P s-P" stroke-width="2"/>
+      <text x="290" y="200" text-anchor="middle" class="big f-Pi">项 (i)　↑ 抬高</text>
+      <text x="290" y="220" text-anchor="middle" class="sml f-Pi">框内的 query 要看目标词</text></g>
+    <g data-z="2"><rect x="400" y="162" width="240" height="86" rx="5" class="fs-N s-N" stroke-width="1.4"/>
+      <text x="520" y="200" text-anchor="middle" class="big f-Ni">项 (ii)　↓ 压低</text>
+      <text x="520" y="220" text-anchor="middle" class="sml f-Ni">框内的 query 别去看其他词</text></g>
+
+    <g data-z="0"><rect x="60" y="252" width="120" height="86" rx="5" class="f-surf3 s-rule" stroke-width="1"/>
+      <text x="120" y="300" text-anchor="middle" class="sml f-ink3">不干预</text></g>
+    <g data-z="3"><rect x="184" y="252" width="212" height="86" rx="5" class="fs-G s-G" stroke-width="1.4"/>
+      <text x="290" y="292" text-anchor="middle" class="big f-Gi">项 (iii)　↓ 压低</text>
+      <text x="290" y="312" text-anchor="middle" class="sml f-Gi">框外的 query 别去看目标词</text></g>
+    <g data-z="0"><rect x="400" y="252" width="240" height="86" rx="5" class="f-surf3 s-rule" stroke-width="1"/>
+      <text x="520" y="300" text-anchor="middle" class="sml f-ink3">不干预</text></g>
+  </g>
+
+  <text x="52" y="120" text-anchor="end" class="sml f-ink3">其他 query</text>
+  <text x="52" y="134" text-anchor="end" class="sml f-ink3">M ᶜ</text>
+  <text x="52" y="205" text-anchor="end" class="sml f-Pi" font-weight="600">目标 query</text>
+  <text x="52" y="219" text-anchor="end" class="sml f-Pi" font-weight="600">M</text>
+  <text x="52" y="300" text-anchor="end" class="sml f-ink3">其他 query</text>
+  <text x="52" y="314" text-anchor="end" class="sml f-ink3">M ᶜ</text>
+  <text x="350" y="366" text-anchor="middle" class="sml f-ink3">左右两块 T ᶜ / 上下两块 M ᶜ 只是把「目标词、目标区」画在中间的排版方式，实际是各自一个集合</text>
+  <text x="350" y="386" text-anchor="middle" class="sml f-ink3">四个角落（框外 query × 非目标词）完全不受干预 —— 这是本方法「温和」的部分，也是它保住画质的原因之一</text>
+</g>
+</svg>
+    </div>
+    <div class="eqwrap acc-A" style="margin:6px 0 0">
+      <div class="eqrow"><div class="body">
+        <div class="eqn"><i>s</i> <span class="op">=</span>
+          <span class="zone" id="z1"><span class="frac"><span><span class="sumop"><span class="sb"></span><span class="sg">Σ</span><span class="sb">j∈M</span></span><span class="sumop"><span class="sb"></span><span class="sg">Σ</span><span class="sb">l∈T</span></span> <i>q</i><sub>j</sub>·<i>k</i><sub>l</sub></span><span>|<i>M</i>||<i>T</i>|</span></span></span>
+          <span class="op">−</span>
+          <span class="zone" id="z2"><span class="frac"><span><span class="sumop"><span class="sb"></span><span class="sg">Σ</span><span class="sb">j∈M</span></span><span class="sumop"><span class="sb"></span><span class="sg">Σ</span><span class="sb">l∈T ᶜ</span></span> <i>q</i><sub>j</sub>·<i>k</i><sub>l</sub></span><span>|<i>M</i>||<i>T</i><sup>c</sup>|</span></span></span>
+          <span class="op">−</span>
+          <span class="zone" id="z3"><span class="frac"><span><span class="sumop"><span class="sb"></span><span class="sg">Σ</span><span class="sb">j∈M ᶜ</span></span><span class="sumop"><span class="sb"></span><span class="sg">Σ</span><span class="sb">l∈T</span></span> <i>q</i><sub>j</sub>·<i>k</i><sub>l</sub></span><span>|<i>M</i><sup>c</sup>||<i>T</i>|</span></span></span>
+        </div>
+      </div><div class="eqno">Eq. 9</div></div>
+      <div class="eqcap" id="f5cap">三项分别对应上图的三种颜色。最大化 <i>s</i> = 抬高绿区 + 压低红区 + 压低黄区，全部在 logit 空间完成。</div>
+    </div>
+    <figcaption><b>注意每一项都做了归一化。</b>除以 |M||T| 这类基数，是为了让三项在框大小、目标词个数变化时保持可比——否则一个占半屏的大框会天然压过一个小框。原文 Fig. 1a 用 3×3 排版把「目标行/列」放在中间，本图沿用了这个布局。</figcaption>
+  </div>
+  </figure>
+
+  <h3><span class="ix">4.3</span> 因式分解：双和坍缩成三次点积</h3>
+  <p class="prose">这是全文最漂亮的一步。Eq. 9 的每一项都是「两个集合上的双重求和的平均」，而内积对求和是双线性的——所以求和可以先做完再点积：</p>
+
+  <div class="eqwrap acc-A">
+    <div class="eqrow"><div class="body">
+      <div class="eqn"><i>s</i> <span class="op">=</span> <i>Q</i>(<i>M</i>) · <span style="font-size:1.2em">(</span><i>K</i>(<i>T</i>) <span class="op">−</span> <i>K</i>(<i>T</i><sup>c</sup>)<span style="font-size:1.2em">)</span> <span class="op">−</span> <i>Q</i>(<i>M</i><sup>c</sup>) · <i>K</i>(<i>T</i>)</div>
+      <div class="eqn" style="margin-top:14px; font-size:.98rem"><i>Q</i>(<i>M</i>) <span class="op">=</span> <span class="frac"><span><span class="sumop"><span class="sb"></span><span class="sg">Σ</span><span class="sb">j∈M</span></span> <i>q</i><sub>j</sub></span><span>|<i>M</i>|</span></span><span class="op" style="padding:0 1.2em">,</span> <i>K</i>(<i>T</i>) <span class="op">=</span> <span class="frac"><span><span class="sumop"><span class="sb"></span><span class="sg">Σ</span><span class="sb">l∈T</span></span> <i>k</i><sub>l</sub></span><span>|<i>T</i>|</span></span></div>
+    </div><div class="eqno">Eq. 10<br>Eq. 11</div></div>
+    <div class="eqcap"><b>三万多个 query 和五百多个 key 之间的 1600 万次内积，坍缩成 4 个 d 维均值向量之间的 3 次点积。</b>更关键的是：这个式子里再也没有「注意力图」这个对象了——不需要物化，自然也就不需要 FlashAttention 让路。</div>
+  </div>
+
+  <figure>
+  <div class="fig">
+    <div class="fh"><span class="no">Figure 6</span><span class="ti">双和可分离 ⇒ 先平均、再点积</span></div>
+    <div class="figbody">
+<svg viewBox="0 0 960 260" role="img" aria-label="左图把框内每个 query 与每个目标 key 之间画一条边，形成密集的二分图；右图先把 query 平均成一个向量、key 平均成一个向量，只剩一条边，说明复杂度从乘积降为常数。">
+  <defs><marker id="f6a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="var(--acc)"/></marker></defs>
+  <text x="16" y="24" class="big f-ink2">朴素写法：|M| × |T| 次内积</text>
+  <g stroke="var(--ink3)" stroke-width=".55" opacity=".5">
+    <path d="M96,60 L246,96 M96,60 L246,130 M96,60 L246,164"/>
+    <path d="M96,96 L246,96 M96,96 L246,130 M96,96 L246,164"/>
+    <path d="M96,132 L246,96 M96,132 L246,130 M96,132 L246,164"/>
+    <path d="M96,168 L246,96 M96,168 L246,130 M96,168 L246,164"/>
+    <path d="M96,204 L246,96 M96,204 L246,130 M96,204 L246,164"/>
+  </g>
+  <g class="f-P"><circle cx="96" cy="60" r="7"/><circle cx="96" cy="96" r="7"/><circle cx="96" cy="132" r="7"/><circle cx="96" cy="168" r="7"/><circle cx="96" cy="204" r="7"/></g>
+  <g class="f-K"><circle cx="246" cy="96" r="7"/><circle cx="246" cy="130" r="7"/><circle cx="246" cy="164" r="7"/></g>
+  <text x="96" y="232" text-anchor="middle" class="sml f-Pi">q<tspan font-size="8" dy="2">j</tspan><tspan dy="-2">, j∈M</tspan></text>
+  <text x="96" y="248" text-anchor="middle" class="sml f-ink3">≈ 数千个</text>
+  <text x="246" y="232" text-anchor="middle" class="sml f-Ki">k<tspan font-size="8" dy="2">l</tspan><tspan dy="-2">, l∈T</tspan></text>
+  <text x="246" y="248" text-anchor="middle" class="sml f-ink3">1–3 个</text>
+
+  <line x1="330" y1="132" x2="420" y2="132" stroke="var(--acc)" stroke-width="1.8" marker-end="url(#f6a)"/>
+  <text x="375" y="120" text-anchor="middle" class="sml f-Ai">双和可分离</text>
+  <text x="375" y="154" text-anchor="middle" class="sml f-ink3">Σ<tspan font-size="8" dy="2">j</tspan><tspan dy="-2">Σ</tspan><tspan font-size="8" dy="2">l</tspan><tspan dy="-2"> q</tspan><tspan font-size="8" dy="2">j</tspan><tspan dy="-2">·k</tspan><tspan font-size="8" dy="2">l</tspan><tspan dy="-2"> = (Σq)·(Σk)</tspan></text>
+
+  <text x="470" y="24" class="big f-Ai">GATO-Vid：先求均值向量</text>
+  <g class="f-P" opacity=".28"><circle cx="510" cy="60" r="5"/><circle cx="510" cy="92" r="5"/><circle cx="510" cy="124" r="5"/><circle cx="510" cy="156" r="5"/><circle cx="510" cy="188" r="5"/></g>
+  <g stroke="var(--pos)" stroke-width=".8" opacity=".55" class="nofill">
+    <path d="M516,60 L568,124 M516,92 L568,124 M516,124 L568,124 M516,156 L568,124 M516,188 L568,124"/></g>
+  <circle cx="576" cy="124" r="10" class="f-P"/>
+  <text x="576" y="152" text-anchor="middle" class="sml f-Pi" font-weight="600">Q(M)</text>
+  <g class="f-K" opacity=".28"><circle cx="768" cy="92" r="5"/><circle cx="768" cy="124" r="5"/><circle cx="768" cy="156" r="5"/></g>
+  <g stroke="var(--key)" stroke-width=".8" opacity=".55" class="nofill">
+    <path d="M762,92 L710,124 M762,124 L710,124 M762,156 L710,124"/></g>
+  <circle cx="702" cy="124" r="10" class="f-K"/>
+  <text x="702" y="152" text-anchor="middle" class="sml f-Ki" font-weight="600">K(T)</text>
+  <line x1="588" y1="124" x2="690" y2="124" stroke="var(--acc)" stroke-width="2.4"/>
+  <text x="639" y="114" text-anchor="middle" class="sml f-Ai" font-weight="600">1 次点积</text>
+
+  <rect x="800" y="72" width="146" height="106" rx="10" class="fs-A s-A" stroke-width="1.3"/>
+  <text x="873" y="96" text-anchor="middle" class="sml f-Ai" font-weight="600">复杂度</text>
+  <text x="873" y="120" text-anchor="middle" class="sml f-ink3">O(|Q|·|K|)</text>
+  <text x="873" y="140" text-anchor="middle" class="f-Ai">↓</text>
+  <text x="873" y="162" text-anchor="middle" class="sml f-Ai" font-weight="600">3 次向量点积</text>
+</svg>
+    </div>
+    <figcaption><b>而且真到了算法里，连 Q(M) 都不用求。</b>下一节会看到：Q(M) 和 Q(M<sup>c</sup>) 在推导中被<b>整体替换</b>成待求的单位向量，所以最终实现只需要文本侧的 K(T) 与 K(T<sup>c</sup>) 两个均值——它们只在几百个文本 key 上求平均（Wan 公开配置的 text_len = 512），代价可以忽略。</figcaption>
+  </div>
+  </figure>
+</section>
+<section class="sec" id="s5" data-t="第二步：闭式解">
+  <div class="eyebrow"><span class="n">05</span><span class="t">Step 2 · The closed form</span><span class="line"></span></div>
+  <h2>第二步：最优方向长什么样——两行就解完了</h2>
+  <p class="lead">Eq. 10 里 <i>s</i> 对 <i>Q</i>(<i>M</i>) 和 <i>Q</i>(<i>M</i><sup>c</sup>) 都是<b>线性</b>的。线性函数在单位球上的最大值点是初中知识：<b>与系数向量同向</b>。整个「优化」到此为止。</p>
+
+  <h3><span class="ix">5.1</span> 为什么必须加单位范数约束</h3>
+  <p class="prose">如果不约束长度，<i>s</i> 是<b>无界</b>的——把 <i>Q</i>(<i>M</i>) 沿着正确方向拉到无穷，分数就到无穷。所以论文令 <i>b</i><sup>+</sup>、<i>b</i><sup>−</sup> 为<b>单位向量</b>去替换 <i>Q</i>(<i>M</i>)、<i>Q</i>(<i>M</i><sup>c</sup>)：</p>
+
+  <div class="eqwrap acc-A">
+    <div class="eqrow"><div class="body">
+      <div class="eqn"><i>s</i>(<i>b</i><sup>+</sup>, <i>b</i><sup>−</sup>) <span class="op">=</span> <i>b</i><sup>+</sup> · <span style="font-size:1.2em">(</span><i>K</i>(<i>T</i>) <span class="op">−</span> <i>K</i>(<i>T</i><sup>c</sup>)<span style="font-size:1.2em">)</span> <span class="op">−</span> <i>b</i><sup>−</sup> · <i>K</i>(<i>T</i>)</div>
+    </div><div class="eqno">Eq. 12</div></div>
+    <div class="eqcap">两个变量互不耦合，可以分别求。<b>项 (i) 和项 (ii) 合并成了一个方向 <i>K</i>(<i>T</i>)−<i>K</i>(<i>T</i><sup>c</sup>)</b>——「靠近目标词、同时远离其他词」在向量空间里就是一个减法。</div>
+  </div>
+  <div class="eqwrap acc-A">
+    <div class="eqrow"><div class="body">
+      <div class="eqn"><i>b</i><sup>+</sup> <span class="op">=</span> <span class="frac"><span><i>K</i>(<i>T</i>) − <i>K</i>(<i>T</i><sup>c</sup>)</span><span>‖<i>K</i>(<i>T</i>) − <i>K</i>(<i>T</i><sup>c</sup>)‖</span></span><span class="op" style="padding:0 1.4em">,</span> <i>b</i><sup>−</sup> <span class="op">=</span> <span class="op">−</span><span class="frac"><span><i>K</i>(<i>T</i>)</span><span>‖<i>K</i>(<i>T</i>)‖</span></span></div>
+    </div><div class="eqno">Eq. 13</div></div>
+    <div class="eqcap">全文的核心结论。<b>注意 b<sub>±</sub> 完全不含视频 query</b>——它们只由该层的文本 key 决定。所以每层只需要算一次，就能广播给三万多个 token；这才是 +0.4% 的真正来源。</div>
+  </div>
+
+  <div class="call key">
+    <div class="hd">◆ 顺手能推出来的一个量（原文未列）</div>
+    <p>把 Eq. 13 代回 Eq. 12，最优分数有干净的闭式：<span class="eqn" style="font-size:1rem"><i>s</i>* = ‖<i>K</i>(<i>T</i>) − <i>K</i>(<i>T</i><sup>c</sup>)‖ + ‖<i>K</i>(<i>T</i>)‖</span></p>
+    <p>它只依赖文本键的几何：<b>目标词与其余词分得越开（第一项大）、目标词本身范数越大（第二项大），这一层能提供的引导就越强</b>。这解释了 Fig. 4c 的现象——早期 block 的注意力分数高，正是因为那里的 K 分离度更好。也提示了一个论文没做的事：可以用 <i>s</i>* 作为廉价指标<b>自动挑选</b>该注入哪些层，而不是手工定「前 20 层」。</p>
+  </div>
+
+  <figure>
+  <div class="fig">
+    <div class="fh"><span class="no">Figure 7 · 可拖拽</span><span class="ti">闭式解的几何：拖动 K(T) 与 K(Tᶜ)，看 b₊ / b₋ 怎么跟着转</span></div>
+    <div class="figbody"><svg viewBox="0 0 960 420" id="f7svg" role="img" aria-label="二维向量图。蓝色箭头是目标词均值 K(T)，灰色箭头是其余词均值 K(T 上标 c)，两者相减得到的方向归一化后就是绿色单位向量 b 加；K(T) 取反归一化得到红色单位向量 b 减。橙色箭头是可拖动的试探方向，其分数始终不超过 b 加。"></svg></div>
+    <div class="ctl">
+      <span class="readout" id="r7max">s* = —</span>
+      <span class="readout" id="r7try">试探方向得分 = —</span>
+      <label class="chk"><input type="checkbox" id="c7p" checked> 显示平行四边形构造</label>
+      <button class="tbtn" id="b7reset">重置</button>
+    </div>
+    <figcaption><b>拖动两个粗箭头的端点。</b>绿色 b₊ 永远指向「K(T) 减去 K(Tᶜ)」的方向；红色 b₋ 永远与 K(T) 反向。橙色是可拖动的试探单位向量——它的得分 b·(K(T)−K(Tᶜ)) 只有在与绿色完全重合时才达到上限 ‖K(T)−K(Tᶜ)‖。这就是「解析最优」的全部含义：一个线性泛函在单位球上的极值。</figcaption>
+  </div>
+  </figure>
+
+  <div class="call warn">
+    <div class="hd">▲ 这个「最优解」不能字面使用</div>
+    <p>Eq. 13 的字面含义是：<b>把框内所有 query 全部替换成同一个向量 b₊</b>。真这么干，前景区的几万个 token 会瞬间同质化——它们的 query 完全相同，cross-attention 输出也完全相同，画面必然塌成一片。</p>
+    <p>论文在 Eq. 14 前面用一句话带过（「直接替换或朴素相加会因为幅度不匹配破坏网络内部表示」），但真正的问题不只是幅度：<b>是「最优」这个目标本身与「保留内容」是对立的</b>。所以 b<sub>±</sub> 在实现中只能当作<span class="rA">方向神谕</span>，用 λ<sub>±</sub> 做一次有限插值。换句话说——这套推导给出的是<b>方向的严格解</b>，步长仍然是超参数，和梯度法的学习率 μ 处境完全一样。论文自己也承认这一点（「λ<sub>±</sub> 扮演学习率的角色」）。</p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">◆ 单位范数与椭球约束之间的缝隙</div>
+    <p>推导时把 <i>Q</i>(<i>M</i>) 约束成<b>单位球</b>上的向量，但真实的 query 被 RMSNorm 钉在<b>椭球</b> ‖q ⊘ γ‖ = √d 上（Eq. 3）。两者只有在 γ 各向同性时才一致。严格做法应当在椭球约束下解 max <i>b</i>·<i>c</i>，其最优解是 <i>b</i> ∝ γ² ⊙ <i>c</i>（按 γ 的平方逐通道加权），而不是简单归一化的 <i>c</i>。</p>
+    <p>论文选择了「先在球上解、再投影回椭球」的两段式做法（Eq. 13 → Eq. 14）。这在工程上更简单，但<b>并不是那个约束优化问题的解</b>。消融 (i) 显示去掉投影后 IoU 只从 0.363 掉到 0.355、但 AQ / IQ 明显变差，说明椭球这件事影响的主要是画质而非定位——从这个角度看，用更严格的 γ² 加权解也许还能再挤出一点画质。</p>
+  </div>
+</section>
+
+<section class="sec" id="s6" data-t="第三步：注入">
+  <div class="eyebrow"><span class="n">06</span><span class="t">Step 3 · Geometry-aware injection</span><span class="line"></span></div>
+  <h2>第三步：把方向注入回 RMSNorm 的椭球面</h2>
+  <p class="lead">现在有了方向，要把它塞进 query 里。论文的注入式由三个部件拼成，每个都在解决一个具体的失败模式。</p>
+
+  <div class="eqwrap acc-P">
+    <div class="eqrow"><div class="body">
+      <div class="eqn"><i>q</i><sub>j</sub> <span class="op">←</span>
+        <span style="font-size:1.9em;line-height:.9;vertical-align:-.32em">{</span>
+        <span style="display:inline-block;vertical-align:middle;text-align:left;line-height:2.6;font-size:.94em">
+          <span style="display:block"><span class="frac"><span>√<i>d</i></span><span>‖(λ<sub>+</sub><i>b</i><sup>+</sup>‖<i>q</i><sub>j</sub>‖ + <i>q</i><sub>j</sub>) ⊘ γ‖</span></span> (λ<sub>+</sub><i>b</i><sup>+</sup>‖<i>q</i><sub>j</sub>‖ + <i>q</i><sub>j</sub>)<span style="padding-left:1.4em;font-style:normal;font-size:.92em">若 <i>j</i> ∈ <i>M</i></span></span>
+          <span style="display:block"><span class="frac"><span>√<i>d</i></span><span>‖(λ<sub>−</sub><i>b</i><sup>−</sup>‖<i>q</i><sub>j</sub>‖ + <i>q</i><sub>j</sub>) ⊘ γ‖</span></span> (λ<sub>−</sub><i>b</i><sup>−</sup>‖<i>q</i><sub>j</sub>‖ + <i>q</i><sub>j</sub>)<span style="padding-left:1.4em;font-style:normal;font-size:.92em">若 <i>j</i> ∈ <i>M</i><sup>c</sup></span></span>
+        </span>
+      </div>
+    </div><div class="eqno">Eq. 14</div></div>
+    <div class="eqcap">三个部件：<b>①</b> 乘 ‖<i>q</i><sub>j</sub>‖ —— 让扰动幅度<b>相对于</b>该 token 自身的尺度，而不是绝对量；<b>②</b> 乘 λ<sub>±</sub> —— 控制强度，等价于学习率；<b>③</b> 前面那个系数 —— 把结果<b>径向拉回</b> RMSNorm 椭球面。</div>
+  </div>
+
+  <div class="call key">
+    <div class="hd">◆ 一个必须看清的细节：重投影不改方向</div>
+    <p>部件 ③ 只是一个<b>正标量缩放</b>：<i>q</i><sub>new</sub> = c · (<i>q</i> + λ‖<i>q</i>‖<i>b</i>)，c &gt; 0。所以它<b>完全不改变</b>加法之后的方向，只把长度调回椭球面上。</p>
+    <p>推论：query 转了多少度，<b>全部由那一次加法决定，和重投影开关无关</b>。设 θ 是 <i>b</i> 与 <i>q</i> 的夹角，把 <i>b</i> 分解到 <i>q</i> 方向与其正交方向上，立刻得到旋转角 φ：</p>
+    <p style="text-align:center;margin:14px 0"><span class="eqn" style="font-size:1.02rem">tan φ <span class="op">=</span> <span class="frac"><span>λ sin θ</span><span>1 <span class="op">+</span> λ cos θ</span></span></span></p>
+    <ul>
+      <li><b><i>b</i> ⊥ <i>q</i></b>（θ = 90°）：φ = arctan(λ)。论文取 λ<sub>±</sub>=1.5 ⇒ <b>56.3°</b>。这不是「轻微扰动」——它把 query 的方向掰过去了大半。</li>
+      <li><b><i>b</i> 与 <i>q</i> 接近反向</b>（θ → 180°）且 λ &gt; 1：分母 1+λcos θ 变号，φ 一路逼近 <b>180°</b>，query 被整个翻面。这正是 §6.1 要用正交投影拦住的事故。</li>
+    </ul>
+    <p>所以 λ=1.5 给出的<b>典型</b>扭转在 56° 量级，<b>最坏</b>情况是彻底反向。这解释了为什么 GATO-Vid 只能在前 15% 的采样步里用——多用画质就垮。</p>
+  </div>
+
+  <figure>
+  <div class="fig">
+    <div class="fh"><span class="no">Figure 8 · 交互</span><span class="ti">注入的几何：椭球面上的一次掰正</span></div>
+    <div class="ctl">
+      <div class="tog pn" role="group" aria-label="前景背景切换">
+        <button data-v="fg" aria-pressed="true">前景 q ∈ M（用 b₊）</button>
+        <button data-v="bg" aria-pressed="false">背景 q ∈ Mᶜ（用 b₋）</button>
+      </div>
+      <label class="chk"><input type="checkbox" id="c8proj" checked> 重投影回椭球（部件 ③）</label>
+      <label class="chk"><input type="checkbox" id="c8orth" checked> 正交投影 P（仅背景 · Eq. 16）</label>
+    </div>
+    <div class="ctl">
+      <label for="c8lam">λ<sub>±</sub></label><input type="range" id="c8lam" min="0" max="3" step="0.05" value="1.5"><span class="readout" id="r8lam">1.50</span>
+      <label for="c8gam">γ 各向异性</label><input type="range" id="c8gam" min="1" max="3" step="0.05" value="1.55"><span class="readout" id="r8gam">1.55</span>
+    </div>
+    <div class="figbody"><svg viewBox="0 0 960 430" id="f8svg" role="img" aria-label="二维几何图。紫色椭圆是 RMSNorm 的约束面。原始 query 位于椭圆上；加上偏置向量后落到椭圆外；再乘一个正标量沿射线拉回椭圆。旋转角只由 lambda 决定。背景模式下可以看到正交投影如何避免 query 被反向抵消。"></svg></div>
+    <div class="ctl">
+      <span class="readout" id="r8ang">旋转角 = —</span>
+      <span class="readout" id="r8norm">‖q_new ⊘ γ‖ = —</span>
+      <span class="readout" id="r8warn" style="border-color:var(--bad);color:var(--bad-ink)">—</span>
+    </div>
+    <figcaption><b>拖动椭圆上的空心圆点改变 q 的位置，拖动细箭头改变偏置方向。</b>三件事值得亲手确认：<b>①</b> 关掉「重投影」，红点会留在椭圆外——这就是消融 (i)，进入 attention 的 query 不再服从 RMSNorm 的分布；<b>②</b> 旋转角与「重投影」开关<b>完全无关</b>——重投影只改长度，方向早在加法那一步就定了；<b>③</b> 切到「背景」并把 q 拖到与 b₋ 接近同向，关掉正交投影 P，你会看到 λ&gt;1 时 q 直接<b>被翻到反面</b>——这正是 Eq. 15/16 要拦住的事故。</figcaption>
+  </div>
+  </figure>
+
+  <h3><span class="ix">6.1</span> 背景为什么要多一层正交投影</h3>
+  <p class="prose">论文的说法是「若 b<sup>−</sup> 与原 query 过于接近，加负偏置会扭曲已有的背景特征」，于是只保留 b<sup>−</sup> 中<b>与 q 正交</b>的那一份：</p>
+  <div class="eqwrap acc-N">
+    <div class="eqrow"><div class="body">
+      <div class="eqn"><i>P</i>(<i>a</i>, <i>b</i>) <span class="op">=</span> <i>a</i> <span class="op">−</span> <span style="font-size:1.2em">(</span><i>a</i> · <span class="frac"><span><i>b</i></span><span>‖<i>b</i>‖</span></span><span style="font-size:1.2em">)</span> <span class="frac"><span><i>b</i></span><span>‖<i>b</i>‖</span></span></div>
+    </div><div class="eqno">Eq. 15</div></div>
+    <div class="eqcap">把 <i>a</i> 投到 <i>b</i> 的正交补上。代入 Eq. 14 的背景分支，就得到最终形式 Eq. 16：<span class="eqn" style="font-size:.98rem">λ<sub>−</sub><i>P</i>(<i>b</i><sup>−</sup>‖<i>q</i><sub>j</sub>‖, <i>q</i><sub>j</sub>) + <i>q</i><sub>j</sub></span>，再照旧重投影。</div>
+  </div>
+  <div class="call key">
+    <div class="hd">◆ 把这句话翻译成具体的事故</div>
+    <p>假设某个背景 query 恰好 <i>q</i> ≈ −‖<i>q</i>‖·<i>b</i><sup>−</sup>（即 q 本来就指向 K(T)，这在「画面里本来就有一只猫、但位置不对」时非常常见）。朴素更新给出</p>
+    <p style="text-align:center"><span class="eqn"><i>q</i> + λ‖<i>q</i>‖<i>b</i><sup>−</sup> ≈ (1 − λ) <i>q</i></span></p>
+    <p>λ = 1.5 时结果是 <b>−0.5 q</b>：这个 token 的 query <b>被整个翻到反面</b>，它的语义内容不是被「削弱」，而是被<b>取反</b>。加上 <i>P</i> 之后，同样的情形给出 <i>P</i> = 0，更新退化成<b>不动</b>——正确的兜底行为。这就是为什么消融 (i)「去掉椭球投影」只掉一点点，而正交投影这一层在原文里被单独拎出来讲。</p>
+  </div>
+
+  <h3><span class="ix">6.2</span> 最后一块补丁：把 λ₊ 做成高斯</h3>
+  <p class="prose">真实的交叉注意力图在物体<b>语义中心</b>最强、向边缘衰减。如果对框内所有 query 施加同样的 λ₊，得到的注意力会均匀得很不自然。论文的处理是：给每一帧的包围框拟合一个归一化的二维高斯，用它去乘 λ₊——于是框内每个位置的注入强度不同。</p>
+
+  <figure>
+  <div class="fig">
+    <div class="fh"><span class="no">Figure 9 · 交互</span><span class="ti">均匀 λ₊ vs. 高斯调制的 λ₊</span></div>
+    <div class="ctl">
+      <div class="tog" role="group" aria-label="调制方式">
+        <button id="b9u" aria-pressed="false">均匀（消融 ii）</button>
+        <button id="b9g" aria-pressed="true">高斯调制（本文）</button>
+      </div>
+      <label for="c9w">框宽</label><input type="range" id="c9w" min="4" max="16" step="1" value="9"><span class="readout" id="r9w">9</span>
+      <label for="c9h">框高</label><input type="range" id="c9h" min="3" max="12" step="1" value="6"><span class="readout" id="r9h">6</span>
+    </div>
+    <div class="figbody"><svg viewBox="0 0 960 300" id="f9svg" role="img" aria-label="左侧网格显示框内每个 patch 上的注入强度，均匀模式下框内全部相同、边缘突变；高斯模式下从框心向外平滑衰减。右侧折线是沿框中心横切的强度剖面。"></svg></div>
+    <figcaption><b>消融 (ii) 的数字很值得玩味：</b>去掉高斯之后 IoU 反而<b>更高</b>（0.375 vs 0.363），但成功率 SR 从 89.7% 崩到 <b>72.0%</b>。而 IoU / CD 只在「SAM 3 成功检出物体」的视频上统计——所以那个更高的 IoU 是<b>幸存者偏差</b>：硬边界的强注入把物体压得更死，但有近三成的视频里物体压根没生成出来。高斯调制买的是「物体真的存在」，不是「框对得更准」。</figcaption>
+  </div>
+  </figure>
+
+  <div class="call note">
+    <div class="hd">◆ 完整配方（论文 §3.3 末段）</div>
+    <p>① 用高斯噪声采样 x<sub>0</sub>；② 在<b>前 15% 的采样步</b>、<b>前 20 个 block</b> 内，用该层文本 key 算出 b<sub>+</sub>、b<sub>−</sub>，按 Eq. 14 / 16 改写 query（λ<sub>±</sub>=1.5 并带<b>线性衰减</b>，框内再乘高斯）；③ 其余步骤完全按 Eq. 1 原样走。<b>没有任何一步需要额外的前向或反向。</b></p>
+  </div>
+</section>
+<section class="sec" id="s7" data-t="算法走读">
+  <div class="eyebrow"><span class="n">07</span><span class="t">Algorithm 1, line by line</span><span class="line"></span></div>
+  <h2>算法逐行走读（含原文的三处对不上）</h2>
+  <p class="lead">下面是 Alg. 1 的逐行中译。点上面的按钮会高亮对应的行——请特别留意第 11、13 行，它们和正文 Eq. 13 / 16 <b>不一致</b>。</p>
+
+  <div class="stepbar" id="a1steps">
+    <button class="stepbtn on" data-l="1,2,3,4">① 照常前向</button>
+    <button class="stepbtn" data-l="5">② 判断注入层</button>
+    <button class="stepbtn" data-l="6">③ 解正方向 b₊</button>
+    <button class="stepbtn" data-l="7,8,9,10">④ 改写框内 query</button>
+    <button class="stepbtn" data-l="11,12,13,14,15">⑤ 改写框外 query</button>
+    <button class="stepbtn" data-l="16,17,18">⑥ 正常收尾</button>
+    <button class="stepbtn" data-l="">全部</button>
+  </div>
+
+  <div class="algo">
+    <div class="ah"><span>Algorithm 1 · Bias Injection</span><span style="color:var(--ink3)">Require: f<sub>θ</sub>, x, t, τ ∈ ℝ<sup>|τ|×n</sup>, 目标图 M, 目标词 T, 注入层集合 S<sub>B</sub></span></div>
+    <ol id="a1code">
+      <li><b>x</b> ← f.tokenize(x)　<span class="cm">▷ 展平成 THW×n 的 token 序列</span></li>
+      <li><b>for</b> blk <b>in</b> f<sub>θ</sub>.blocks <b>do</b></li>
+      <li><span class="ind1">x ← x + blk.SelfAttention(x)</span>　<span class="cm">▷ 视频自注意力，不动</span></li>
+      <li><span class="ind1">q,k,v ← blk.norm_q(blk.to_q(x)), blk.norm_k(blk.to_k(τ)), blk.to_v(τ)</span></li>
+      <li><span class="ind1"><b>if</b> blk ∈ S<sub>B</sub> <b>then</b></span>　<span class="cm">▷ 只在前 20 层 × 前 15% 步</span></li>
+      <li><span class="ind2">b₊ = Normalize( mean(k[T]) − mean(k[T ᶜ]) )</span>　<span class="cm">▷ = Eq. 13 的 b⁺ ✓</span></li>
+      <li><span class="ind2">q′ ← q[M]</span>　<span class="cm">▷ 取出框内 query</span></li>
+      <li><span class="ind2">q′ ← q′ + λ₊‖q′‖ b₊</span>　<span class="cm">▷ 加正偏置</span></li>
+      <li><span class="ind2">q′ ← √n / ‖q′ ⊘ blk.norm_q.γ‖ · q′</span>　<span class="cm">▷ 重投影回超椭球</span></li>
+      <li><span class="ind2">q[M] ← q′</span></li>
+      <li><span class="ind2">b₋ = Normalize( mean(k[T ᶜ]) )</span>　<span class="cm" style="color:var(--bad-ink)">▷ ✗ 与 Eq. 13 冲突（见下）</span></li>
+      <li><span class="ind2">q′ ← q[M ᶜ]</span>　<span class="cm">▷ 取出框外 query</span></li>
+      <li><span class="ind2">q′ ← q′ − λ₊‖q′‖ b₋</span>　<span class="cm" style="color:var(--bad-ink)">▷ ✗ 缺正交投影 P，且用了 λ₊</span></li>
+      <li><span class="ind2">q′ ← √n / ‖q′ ⊘ blk.norm_q.γ‖ · q′</span></li>
+      <li><span class="ind2">q[M ᶜ] ← q′</span></li>
+      <li><span class="ind1">x ← x + blk.CrossAttention(q, k, v)</span>　<span class="cm">▷ 用改写后的 q 走原本的注意力</span></li>
+      <li><span class="ind1">x ← x + blk.FFN(x)</span></li>
+      <li><b>return</b> f.detokenize(x)</li>
+    </ol>
+    <div class="an" id="a1note">① 前 4 行完全是原生 Wan2.2 的 block 流程。关键是<b>第 4 行</b>：q 是 <code>norm_q</code> <b>之后</b>的量——也就是说，注入的落点在 RMSNorm 的<b>像</b>上，这正是后面必须手动重投影回椭球的原因。</div>
+  </div>
+
+  <div class="call warn">
+    <div class="hd">▲ 伪代码与正文的三处不一致</div>
+    <ul>
+      <li><b>第 11 行的 b₋ 方向错了。</b>正文 Eq. 13 是 <span class="eqn" style="font-size:.95rem">b⁻ = −K(T)/‖K(T)‖</span>，配合 Eq. 14 的加法，效果是「背景 query <b>远离目标词</b>」。而 Alg. 1 写的是 <code>b₋ = Normalize(mean(k[T ᶜ]))</code> 再做减法，效果变成「背景 query <b>远离其他词</b>」——方向完全不同，甚至可能把背景 token 推<b>向</b>目标词。结合 Eq. 10 中负项写的是 −Q(M ᶜ)·K(T)，以及消融 (iv) 的描述（「移除 Eq. 10 的负向影响」），<b>正文版本才是真实实现</b>，第 11 行的 <code>T ᶜ</code> 应为 <code>T</code>。</li>
+      <li><b>第 13 行丢了正交投影。</b>Eq. 16 明确要求背景分支用 <i>P</i>(b⁻‖q‖, q)，伪代码里没有。考虑到 §6.1 那个「λ&gt;1 时 query 被翻面」的事故，这一步不可能真的省掉。</li>
+      <li><b>第 13 行用了 λ₊ 而非 λ₋。</b>这条大概率无害——实现里两者都取 1.5。</li>
+    </ul>
+    <p style="margin-top:10px">另外伪代码里的高斯调制也没有出现，维度字母从正文的 <i>d</i> 变成了 <i>n</i>。<b>结论：把 Eq. 13/14/15/16 当作权威，把 Alg. 1 当作骨架。</b></p>
+  </div>
+
+  <div class="call note">
+    <div class="hd">◆ 注入是极其外科式的</div>
+    <p>看第 16 行的残差结构：改写后的 q <b>只影响 cross-attention 这一支的输出</b>，自注意力（第 3 行）已经跑完，FFN（第 17 行）拿到的是加过残差的 x。也就是说，每层的干预量被残差流稀释了一次；这解释了为什么需要 λ=1.5 这么大的值才有效果，也解释了为什么必须连做 20 层。</p>
+  </div>
+</section>
+
+<section class="sec" id="s8" data-t="实验与结果">
+  <div class="eyebrow"><span class="n">08</span><span class="t">Experiments</span><span class="line"></span></div>
+  <h2>实验设置与主结果</h2>
+
+  <div class="cards">
+    <div class="card aa"><span class="k">Backbone</span><h5>Wan2.2</h5>81 帧 · 480×832 · 30 步 flow matching · 单张 H100 80GB。所有基线都被<b>重新适配到 Wan2.2</b> 并做了超参搜索。</div>
+    <div class="card kk"><span class="k">Set 1 · 400 videos</span><h5>真实轨迹</h5>Gemini 生成 25 条 prompt → Wan2.2 生成参考视频 → SAM 3 抽出<b>真实包围框</b>。框来自模型自己的分布，相对温和。</div>
+    <div class="card nn"><span class="k">Set 2 · 400 videos</span><h5>合成轨迹</h5>ChatGPT 生成 100 条 prompt + <b>人造轨迹</b>（直线 / 螺旋 / 圆周 / Z 形 / N 形）。故意与模型的运动先验冲突，明显更难。</div>
+    <div class="card pp"><span class="k">Metrics</span><h5>定位 3 项 + 画质 5 项</h5>IoU↑ / 中心距 CD↓ / 成功率 SR↑（均由 SAM 3 判定），VBench 的 SC·BC·DD·AQ·IQ。</div>
+  </div>
+
+  <div class="call warn">
+    <div class="hd">▲ 读表之前必须知道的两件事</div>
+    <ul>
+      <li><b>IoU 与 CD 只在 SAM 3 成功检出物体的视频上统计。</b>所以 SR 低的方法，其 IoU 是在一个「更容易的子集」上算的——Peekaboo 在 Set 2 的 SR 只有 49.2%，它那个 0.171 的 IoU 相当于只在一半样本上及格。</li>
+      <li><b>VBench 五项不是「越高越好」，而是「越接近 vanilla 越好」。</b>原文明确说：理想情况是与基座模型持平，显著变化意味着行为偏移。所以下表默认按<b>相对 Wan2.2 的偏移</b>着色，可以切换回绝对值。</li>
+    </ul>
+  </div>
+
+  <div class="tabs" role="tablist" id="t1tabs" style="margin-bottom:0">
+    <button class="tab" role="tab" aria-selected="true" data-set="1">Set 1 · 真实轨迹</button>
+    <button class="tab" role="tab" aria-selected="false" data-set="2">Set 2 · 合成轨迹</button>
+    <button class="tab" role="tab" aria-selected="false" data-set="d">两组之差</button>
+  </div>
+  <div class="ctl" style="border-radius:0 0 11px 11px;margin-top:6px">
+    <label class="chk"><input type="checkbox" id="t1delta" checked> VBench 列显示相对 Wan2.2 的偏移</label>
+    <span class="readout" style="border:0;background:transparent;color:var(--ink3)">CD ↓ · IoU ↑ · SR ↑</span>
+  </div>
+  <div class="tblwrap">
+    <table id="t1"></table>
+    <div class="tnote" id="t1note"></div>
+  </div>
+
+  <p class="prose"><b>怎么读这张表：</b>三个基线里，VideoTetris 和 SwitchCraft 的 IoU 与 vanilla Wan2.2 几乎没差别——它们<b>根本没把物体挪动</b>。原文对 SwitchCraft 的诊断很到位：它只做「把源 query 投影到目标子空间以提升相似度」，<b>没有压制目标词在框外的影响</b>，而消融 (iv) 恰好证明负向分量才是拉开差距的关键。Peekaboo 靠硬掩码确实拿到了基线里最好的 IoU，代价是 DD 飙到 0.310 / 0.750（画面乱动）和 AQ 掉到 0.597 / 0.510（硬边界产生伪影）。</p>
+
+  <h3><span class="ix">8.1</span> 效率：这才是这篇论文的卖点</h3>
+  <figure>
+  <div class="fig">
+    <div class="fh"><span class="no">Figure 10</span><span class="ti">相对 vanilla Wan2.2 的推理时间增量（原文实测，50 次平均）</span></div>
+    <div class="figbody"><svg viewBox="0 0 960 260" id="f10svg" role="img" aria-label="横向条形图，展示各方法相对基座模型的推理时间增量：GATO-Vid 加 0.4%，VideoTetris 加 6.2%，SwitchCraft 加 32.8%，Peekaboo 加 92.13%，单步反向传播加 300.31%。"></svg></div>
+    <figcaption><b>+0.4% 与 +300.31% 之间差了近三个数量级。</b>另外注意原文的诚实之处：由于所有方法（包括 GATO-Vid）都只在采样前期启用，这些增量摊到<b>整段生成</b>上后差距会显著缩小——真正致命的不是时间，是<b>显存</b>：反向需要额外 26 GB（合计 59 GB，且只加载了双专家中的一个），而显式算注意力图与注意力损失时，80 GB 的 H100 直接 OOM。</figcaption>
+  </div>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">◆ 定性结果一节的信息量</div>
+    <p>原文 Fig. 2 的四组对比里，作者自己写道：GATO-Vid「成功生成并定位了目标物体，<b>代价是背景质量</b>」。配合 Tab. 1 里 Set 1 的 DD 从 0.248 掉到 0.113（−55%）、AQ 从 0.631 掉到 0.551，可以给出一个更直白的描述：<b>它是靠把场景「按住」来把物体钉进框里的</b>。对一段本该动起来的视频来说，这个代价并不小。</p>
+  </div>
+</section>
+<section class="sec" id="s9" data-t="消融分析">
+  <div class="eyebrow"><span class="n">09</span><span class="t">Ablations</span><span class="line"></span></div>
+  <h2>消融：哪一块在出力，哪一块在保命</h2>
+  <p class="lead">四个消融（Set 1）。表面结论是「每一块都有用」，但把数字摆开看，四块零件的<b>分工完全不同</b>：两块负责定位，两块负责别把画面搞坏。</p>
+
+  <div class="tblwrap">
+    <table id="t2"></table>
+    <div class="tnote">(i) 去掉椭球重投影，改成朴素相加 q ← q + λ‖q‖b；(ii) 去掉高斯调制，框内 λ₊ 恒定；(iii) 去掉正偏置 b₊；(iv) 去掉负偏置 b₋。</div>
+  </div>
+
+  <h3><span class="ix">9.1</span> 正负偏置的「超加性」</h3>
+  <figure>
+  <div class="fig">
+    <div class="fh"><span class="no">Figure 11</span><span class="ti">两个偏置单独用 vs. 合起来用</span></div>
+    <div class="figbody"><svg viewBox="0 0 960 300" id="f11svg" role="img" aria-label="柱状图对比四种配置的 IoU，并叠加画质 AQ 的折线：只用正偏置时 IoU 从 0.154 升到 0.241 而画质几乎不变；只用负偏置时 IoU 升到 0.252 但画质明显下降；两者合用 IoU 达到 0.363，高于两者单独增益之和 0.339。"></svg></div>
+    <figcaption><b>两个关键读数。</b>其一，<span class="rP">只用正偏置 b₊ 是一顿近乎免费的午餐</span>：IoU +0.087，而 AQ 0.628、DD 0.258、SC/BC 全部与 vanilla 持平——画质<b>一点没掉</b>。其二，<span class="rN">画质的代价几乎全部来自负偏置 b₋</span>：单用它 IoU 拿到 0.252（相对 vanilla <b>+0.098</b>，和 b₊ 那半几乎一样多），却把 AQ 砸到 0.558、DD 砸到 0.158——<b>同样的定位收益，一半免费、一半昂贵</b>。而合用时 IoU 达到 0.363，比两份单独增益之和（0.154 + 0.087 + 0.098 = 0.339）还高 0.024，说明两个方向互补而非冗余。原文对 SwitchCraft 的诊断（「无法压制目标词在框外的影响」）正指向缺失的这一半；但要注意 SwitchCraft 实测只有 0.152，连正向那一半都没做出效果，不能拿 0.241 当它的天花板。</figcaption>
+  </div>
+  </figure>
+
+  <div class="call key">
+    <div class="hd">◆ 一个论文没给但很实用的推论</div>
+    <p>如果你的场景更在意画质而非极限定位精度，<b>「只开 b₊」是一个论文里没有单独推荐、但数据完全支持的配置</b>：IoU 0.154→0.241（+56%），AQ 0.631→0.628（几乎无损），DD 0.248→0.258（甚至略升）。相比之下完整版把 IoU 再推到 0.363，但要付出 AQ −0.077、DD −0.145。这是一个非常清晰的<b>两档旋钮</b>，值得在实现里直接暴露出来。</p>
+  </div>
+
+  <h3><span class="ix">9.2</span> 注入范围：为什么是「前 20 层 × 前 15% 步」</h3>
+  <figure>
+  <div class="fig">
+    <div class="fh"><span class="no">Figure 12</span><span class="ti">层深消融（原文 Fig. 4b，精确读数）</span></div>
+    <div class="figbody"><svg viewBox="0 0 960 300" id="f12svg" role="img" aria-label="柱状图对比四种注入层范围的 IoU 与画质 AQ：不注入时 IoU 0.154；注入前 20 层 IoU 0.328；注入全部 40 层 IoU 0.357 但画质更低；只注入后 20 层 IoU 0.159 与不注入几乎相同。"></svg></div>
+    <figcaption><b>后 20 层完全无效（0.159 ≈ vanilla 的 0.154）。</b>原文用 Fig. 4c 的注意力分数分布解释：早期 block 的交叉注意力分数显著更高，晚期趋于均匀——也就是说<b>版面布局是在前半段的层里定下来的</b>。前 20 层拿到 0.328、全 40 层拿到 0.357，多出来的 0.029 要用 AQ 0.558→0.549 去换，不划算。<b>注意：本图的「Ours」是 0.328 / 0.558，与 Tab. 1 的 0.363 / 0.551 对不上</b>，推测消融扫描跑在一个更小的子集上；相对趋势可信，绝对值不要跨表比较。</figcaption>
+  </div>
+  </figure>
+
+  <figure>
+  <div class="fig">
+    <div class="fh"><span class="no">Figure 13 · 示意</span><span class="ti">为什么早期层有效：交叉注意力分数的分布（原文 Fig. 4c 的定性重绘）</span></div>
+    <div class="figbody"><svg viewBox="0 0 960 280" id="f13svg" role="img" aria-label="示意热力图：横轴为 1 到 40 号 transformer block，纵轴为 0 到 1 的采样时间步，颜色越亮表示交叉注意力分数越高。亮区集中在左下角，即早期 block 与早期时间步。"></svg></div>
+    <figcaption><b>此图为按原文文字描述重绘的定性示意，非原文数值。</b>原文的结论是：早期 block 产生的注意力分数显著高于后期 block 与后期时间步，说明<b>初始层专门负责整体版面</b>。这同时解释了两个超参——为什么注入范围是「前 20 层」，以及为什么只在「前 15% 采样步」里做。<br>顺带一提，§5 里推出的 <i>s</i>* = ‖K(T)−K(Tᶜ)‖+‖K(T)‖ 给了一个不用跑消融就能预估某层引导强度的量，可以用来把这两个超参变成自适应的。</figcaption>
+  </div>
+  </figure>
+
+  <p class="prose">迭代范围的消融（原文 Fig. 4a）结论是单调的：<b>注入的采样步比例越大，IoU 越高、AQ 越低</b>，作者取 15% 作为折中。原文只在散点旁标出 0.0 / 0.10 / 0.12 / 0.15 / 0.20 / 0.30 六个<b>比例</b>，<b>不印任何 IoU / AQ 数值</b>；加上 Fig. 4b 的读数已经与 Tab. 1 对不上（见上图注），这条曲线的绝对位置无法核实。因此本文不做复刻，只保留「比例越大 → IoU 越高、AQ 越低」这个单调趋势。</p>
+</section>
+
+<section class="sec" id="s10" data-t="局限与保留">
+  <div class="eyebrow"><span class="n">10</span><span class="t">Limitations</span><span class="line"></span></div>
+  <h2>局限，以及我读下来的保留意见</h2>
+  <p class="lead">先说清楚：这篇论文的<b>诚实度很高</b>——画质代价、任务难度、基线普遍失效，作者都写在正文里而不是藏在附录。下面几条里，前三条是原文承认的，后面几条是我读的时候记下来的。</p>
+
+  <h3><span class="ix">10.1</span> 原文自己承认的</h3>
+  <div class="cards">
+    <div class="card nn"><span class="k">Trade-off</span><h5>定位换画质</h5>Set 1 上 DD 0.248→0.113（−55%）、AQ 0.631→0.551。原文措辞是「空间约束会导致更静态的构图」与「背景退化」。对<b>视频</b>而言这不是小代价。</div>
+    <div class="card nn"><span class="k">Task difficulty</span><h5>任务本身极难</h5>三个 SOTA 无梯度基线里有两个（VideoTetris / SwitchCraft）在 DiT 上<b>几乎等同于什么都没做</b>。原文把这一点当作贡献之一来陈述，是对的。</div>
+    <div class="card nn"><span class="k">Generality</span><h5>只验证了一个 backbone</h5>全部实验在 Wan2.2 上完成，超参（20 层 / 15% / λ=1.5）都是在它上面调出来的。</div>
+  </div>
+
+  <h3><span class="ix">10.2</span> 我的保留意见</h3>
+  <div class="call mine">
+    <div class="hd">◆ 1 · 评测链路存在闭环风险</div>
+    <p>Set 1 的「真实包围框」是这样来的：用 <b>Wan2.2 自己</b>生成参考视频 → 用 <b>SAM 3</b> 抽框 → 再用 <b>SAM 3</b> 评测生成结果。真值和裁判是同一个分割模型，而目标分布来自被测生成器自己。这会系统性地偏向「不太偏离 Wan2.2 原生行为」的方法——所以 Set 2（人造轨迹）才是更有说服力的那一组，而 GATO-Vid 在 Set 2 上的优势（IoU 0.324 vs 0.171）确实依然成立。</p>
+  </div>
+  <div class="call mine">
+    <div class="hd">◆ 2 · IoU / CD 的幸存者偏差没有被消化</div>
+    <p>原文明确说 CD 与 IoU「只在 SAM 3 成功检出的视频上计算」，也确实引入了 SR 来兜底，但表格里三个指标是<b>并列呈现</b>的。Peekaboo 在 Set 2 的 SR=49.2%，它的 0.171 IoU 与 GATO-Vid 的 0.324（SR=74.7%）不在同一个样本集上。更干净的做法是给一个「未检出记为 IoU=0」的悲观版指标；那样 Peekaboo 的 Set 2 成绩会进一步劣化，而 GATO-Vid 的领先幅度会更大——也就是说这个偏差<b>不利于</b>本文，作者没有利用它。</p>
+  </div>
+  <div class="call mine">
+    <div class="hd">◆ 3 · 多物体场景是完全的空白</div>
+    <p>整套推导从头到尾只有<b>一个</b> M 和<b>一个</b> T。可 b₊ 是对全体框内 query 广播的同一个向量——如果场景里有两个物体、两个框，就需要两个 b₊，而 M₁ 与 M₂ 之外的背景要同时远离 K(T₁) 和 K(T₂)，两个负偏置会在同一批 query 上互相干扰。<b>论文没有讨论、没有实验、连一句 future work 都没提。</b>而它比较的 Peekaboo 与 VideoTetris 都是明确支持多物体的方法。</p>
+  </div>
+  <div class="call mine">
+    <div class="hd">◆ 4 · 「无梯度」不等于「无搜索」</div>
+    <p>λ<sub>±</sub> 扮演的是学习率的角色，取值 1.5 是调出来的；注入层数、步数比例同理。这些都是<b>外层超参搜索</b>，成本没有出现在那个 +0.4% 里。公平地说，梯度法的 μ 也一样要调——但「gradient-free」这个卖点容易让人以为省掉了调参，实际上省掉的只是<b>单次推理内</b>的反向传播。</p>
+  </div>
+  <div class="call mine">
+    <div class="hd">◆ 5 · 一个缺席的对照组</div>
+    <p>既然消融证明「前 20 层就够」，那么一个只在前 20 层建注意力损失的<b>浅层梯度法</b>，反向深度只有全网的一半、显存也大幅下降。这个对手没有出现在表里。它未必能赢，但它是「梯度法真的贵到不可用吗」这个问题的直接答案。</p>
+  </div>
+  <div class="call mine">
+    <div class="hd">◆ 6 · 代理与原目标的联系只有一个玩具实验支撑</div>
+    <p>「最大化 s 等价于最小化 ℓ₂ 定位损失」这一步，全部证据是 Fig. 1b：一个<b>三层随机初始化</b>的交叉注意力模型，跑 100 次，看到 λ 增大时 ℓ₂ 单调下降。这说明在随机权重下方向是对的，但没有说明在<b>训练好的</b> Wan2.2 上、在 softmax 的强非线性下，logit 空间的最优方向与真实注意力图的最优方向偏差有多大。最终结果好，但机制上的这一环是经验性的。</p>
+  </div>
+</section>
+
+<section class="sec" id="s11" data-t="与世界模型的关系">
+  <div class="eyebrow"><span class="n">11</span><span class="t">Relation to interactive world models</span><span class="line"></span></div>
+  <h2>放回「交互式视频世界模型」的坐标系里看</h2>
+  <p class="lead">这个仓库关心的是「用户给一个控制信号，视频要有响应」。包围框轨迹是这条线上最直观的一种空间控制，所以值得问一句：GATO-Vid 能不能直接拿来当世界模型的空间控制插件？</p>
+
+  <h3><span class="ix">11.1</span> 它带来的三件好东西</h3>
+  <div class="cards">
+    <div class="card pp"><span class="k">可叠加性</span><h5>零训练 · 零权重改动</h5>只要目标模型有 cross-attention 和 RMSNorm 的 query，就能挂上去。任何现成的 DiT 世界模型都是候选宿主。</div>
+    <div class="card pp"><span class="k">实时可行</span><h5>+0.4% · 显存几乎不增</h5>这是它对交互场景最关键的性质。梯度引导的 +26 GB 直接把消费级显卡排除在外，而交互式世界模型恰恰要跑在用户设备上。</div>
+    <div class="card pp"><span class="k">范式可迁移</span><h5>「推理时优化 → 闭式注入」</h5>这套推导的适用条件是：<b>控制目标能写成 attention logits 的线性泛函</b>。相机位姿、动作标签、深度提示，只要能表达成「某组 token 该和某组 key 更亲近」，都能照抄。</div>
+  </div>
+
+  <h3><span class="ix">11.2</span> 但对世界模型来说，三个硬伤更疼</h3>
+  <div class="call warn">
+    <div class="hd">▲ 动态度掉一半，对世界模型是要害</div>
+    <p>DD 0.248 → 0.113。对一个「生成漂亮视频」的任务，这是画质折损；对一个<b>世界模型</b>，动力学就是它要建模的东西本身。把场景按住来换定位精度，等于把要测的量给消掉了。</p>
+  </div>
+  <div class="call warn">
+    <div class="hd">▲ 只在前 15% 步生效 ⇒ 无法做闭环控制</div>
+    <p>交互的本质是「用户随时改主意，画面随时响应」。GATO-Vid 的注入窗口在采样早期，一旦布局定下来，后 85% 的步骤里控制信号已经无处施加。它是一个<b>开局条件</b>，不是一个<b>控制回路</b>。要用在自回归 rollout 的世界模型上，只能在每个新片段的开头重新注入——片段内部依然不可控。</p>
+  </div>
+  <div class="call warn">
+    <div class="hd">▲ 单目标假设与交互场景不匹配</div>
+    <p>交互式世界模型的典型画面里通常有多个可操纵实体。§10.2 第 3 条提到的多物体空白，在这个语境下不是「未来工作」，而是<b>准入门槛</b>。</p>
+  </div>
+
+  <h3><span class="ix">11.3</span> 在方法谱系里的位置</h3>
+  <div class="tblwrap">
+    <table>
+      <thead><tr><th>方法</th><th>需要训练</th><th>需要梯度</th><th>干预对象</th><th>多物体</th><th>Set 1 IoU</th></tr></thead>
+      <tbody>
+        <tr class="base"><td>GLIGEN / IFAdapter / BlobGEN（T2I）</td><td>是</td><td>—</td><td>新增 cross-attn 层</td><td>是</td><td>—</td></tr>
+        <tr class="base"><td>Lian et al.（T2V, ModelScope）</td><td>否</td><td><b style="color:var(--bad-ink)">是</b></td><td>latent x<sub>t</sub></td><td>是</td><td>—</td></tr>
+        <tr class="base"><td>Peekaboo</td><td>否</td><td>否</td><td>自 / 交叉注意力<b>硬掩码</b></td><td>是</td><td>0.249</td></tr>
+        <tr class="base"><td>VideoTetris</td><td>否</td><td>否</td><td>分区域注入不同 prompt</td><td>是</td><td>0.160</td></tr>
+        <tr class="base"><td>SwitchCraft</td><td>否</td><td>否</td><td>query 投影到目标子空间</td><td>—</td><td>0.152</td></tr>
+        <tr class="ours"><td>GATO-Vid</td><td>否</td><td>否</td><td>query <b>解析偏置 + 椭球重投影</b></td><td><b style="color:var(--bad-ink)">未讨论</b></td><td><b>0.363</b></td></tr>
+      </tbody>
+    </table>
+    <div class="tnote">IoU 列为原文 Tab. 1 中 Set 1 的数值（基线均由作者适配到 Wan2.2）。「多物体」一列反映各方法论文中的公开描述，不代表在 Wan2.2 上的实测能力。</div>
+  </div>
+  <p class="prose">SwitchCraft 是最接近的邻居——同样在 query 空间做手脚，同样无梯度。差别在于 SwitchCraft <b>只做正向靠拢</b>（把源 query 投到目标子空间），而 GATO-Vid 多了一个作用在框外 token 上的负向分量。消融 (iv) 证明这一半恰恰是关键：去掉负向分量，IoU 掉回 0.241——落到 Peekaboo（0.249）那一档；而 SwitchCraft 实测只有 0.152，连这一档都没够着。<b>把「压制框外」这件事做出来，是这篇论文实际拉开差距的地方</b>；而漂亮的闭式解推导，是让这件事能以 +0.4% 的代价做出来的手段。</p>
+</section>
+
+<section class="sec" id="s12" data-t="附录速查">
+  <div class="eyebrow"><span class="n">12</span><span class="t">Appendix</span><span class="line"></span></div>
+  <h2>附录速查</h2>
+
+  <h3><span class="ix">A</span> 超参与实现清单</h3>
+  <div class="nota">
+    <div><span class="sym">λ<sub>±</sub></span><span class="dsc">1.5，带<b>线性衰减</b>（原文未说明沿哪一维衰减，按上下文应为采样步）</span></div>
+    <div><span class="sym">S<sub>B</sub></span><span class="dsc">前 20 个 block（共 40）</span></div>
+    <div><span class="sym">步数窗口</span><span class="dsc">前 15% 的采样迭代</span></div>
+    <div><span class="sym">λ₊ 空间调制</span><span class="dsc">按每帧包围框拟合的归一化 2D 高斯</span></div>
+    <div><span class="sym">Backbone</span><span class="dsc">Wan2.2（双专家 DiT）</span></div>
+    <div><span class="sym">采样</span><span class="dsc">30 步 flow matching</span></div>
+    <div><span class="sym">分辨率</span><span class="dsc">81 帧 · 480×832</span></div>
+    <div><span class="sym">硬件</span><span class="dsc">单张 NVIDIA H100 80GB</span></div>
+    <div><span class="sym">评测分割器</span><span class="dsc">SAM 3（同时用于造 GT 与评测）</span></div>
+    <div><span class="sym">画质指标</span><span class="dsc">VBench 的 SC / BC / DD / AQ / IQ</span></div>
+  </div>
+
+  <h3><span class="ix">B</span> 想复现的话，我会按这个顺序做</h3>
+  <div class="prose">
+    <ol>
+      <li>先只实现 <b>b₊ 分支</b>（Alg. 1 第 6–10 行）。这一支最简单，且据消融 (iv) 应当能把 Set 1 的 IoU 推到 0.24 左右而画质几乎不掉——是一个干净的正确性检查点。</li>
+      <li>确认重投影公式：目标是让 <code>‖q_new ⊘ γ‖ == sqrt(d)</code>。写个断言，比对注入前后这个量是否守恒。守恒说明你的 γ 取对了（要取 <code>norm_q</code> 层的 weight，不是 <code>norm_k</code>）。</li>
+      <li>再加 <b>b₋ 分支</b>，并且<b>一定要按正文 Eq. 13/16 实现</b>：<code>b₋ = −mean(k[T])/‖·‖</code>，且加上正交投影 <code>P</code>。不要照抄 Alg. 1 第 11、13 行（见 §7）。</li>
+      <li>最后加高斯调制。它对 IoU 是<b>负贡献</b>、对 SR 是强正贡献，所以只看 IoU 会误判它没用。</li>
+      <li>调参顺序：先固定 λ=1.5 扫层数，再扫步数比例，最后微调 λ。三者高度耦合，同时扫会很痛苦。</li>
+    </ol>
+  </div>
+
+  <h3><span class="ix">C</span> 术语对照</h3>
+  <div class="nota">
+    <div><span class="sym">Spatially grounded</span><span class="dsc">空间定位生成：把指定物体放到指定位置</span></div>
+    <div><span class="sym">Training-free</span><span class="dsc">不改模型权重，只在推理时干预</span></div>
+    <div><span class="sym">Gradient-free</span><span class="dsc">推理时也不做反向传播</span></div>
+    <div><span class="sym">Surrogate score</span><span class="dsc">代理分数：替换掉原目标以换取可解析性</span></div>
+    <div><span class="sym">Pre-softmax logits</span><span class="dsc">softmax 之前的 QKᵀ 原始分数</span></div>
+    <div><span class="sym">RMSNorm 流形</span><span class="dsc">‖q ⊘ γ‖ = √d 定义的超椭球面</span></div>
+    <div><span class="sym">CD</span><span class="dsc">Center Distance，质心到框心的归一化欧氏距离，↓</span></div>
+    <div><span class="sym">SR</span><span class="dsc">Success Rate，SAM 3 能检出目标物的视频比例，↑</span></div>
+    <div><span class="sym">DD</span><span class="dsc">Dynamic Degree，画面运动量；本文中<b>越接近基座越好</b></span></div>
+    <div><span class="sym">AQ / IQ</span><span class="dsc">Aesthetic / Imaging Quality，构图美感 / 伪影程度</span></div>
+  </div>
+
+  <details>
+    <summary>D · 一句话摘要（可直接引用）</summary>
+    <div class="dc">
+      <p>GATO-Vid 把「用梯度优化交叉注意力图以实现空间定位」重写成「在 pre-softmax logit 空间定义一个三项代理分数」，该分数关于 query 是线性的，因而其在单位球上的最优方向有闭式解 <span class="eqn" style="font-size:.95rem">b⁺ = (K(T)−K(Tᶜ))/‖·‖</span>、<span class="eqn" style="font-size:.95rem">b⁻ = −K(T)/‖K(T)‖</span>；该方向仅依赖文本键，于是可以在 DiT 的每个 block 内部以 λ‖q‖ 的幅度加到 query 上、再径向重投影回 RMSNorm 椭球面完成注入。在 Wan2.2 上，以 +0.4% 推理开销把 Set 1 的 IoU 从 0.154 提到 0.363，代价是动态度 −55%、美学分 −0.08。</p>
+    </div>
+  </details>
+  <details>
+    <summary>E · 如果只记三件事</summary>
+    <div class="dc">
+      <p><b>① 丢掉 softmax 换来的是线性，线性换来的是闭式解。</b>整条推理链的起点就是「保序即可，不必保值」。</p>
+      <p><b>② 最优方向不含 query，所以能广播。</b>这是 +0.4% 的全部秘密——每层只算两个均值向量，然后三万多个 token 共用。</p>
+      <p><b>③ 重投影只改长度不改方向，所以扭转量完全由那一次加法决定。</b>tan φ = λ sin θ / (1 + λ cos θ)：b ⊥ q 时 φ = arctan(1.5) ≈ 56°；b 与 q 接近反向时 φ 可逼近 180°。这是画质代价的直接来源，也是它只能用在前 15% 步的原因。</p>
+    </div>
+  </details>
+</section>
+
+<footer>
+  <p><b>论文</b>：Jeanneret G., Koroglu M., Caselles-Dupré H., Dapogny A., Cord M. <i>Spatially-Grounded Text-to-Video Generation via Inference-Time Gradient-Free Optimization</i>. arXiv:2608.13037v1 [cs.CV], 2026-08-13. · <a href="https://gato-vid.github.io/" target="_blank" rel="noopener">gato-vid.github.io</a></p>
+  <p style="margin-top:10px"><b>关于本页</b>：方法与数字来自原文；所有<span style="color:var(--ink2)">标注为「估算」「示意」「我的保留」</span>的内容是本页作者的推算或评论，不是论文原文。Figure 3 的显存账、Figure 2 的 token 数按 Wan2.2-A14B 公开配置推得；Figure 13 为按文字描述重绘的定性示意图。</p>
+  <p style="margin-top:10px">收录于 <b>Awesome-Interactive-Video-World-Models</b> · docs/</p>
+</footer>
+</main>
+</div>
+<button class="tbtn toTop" id="toTop" title="回到顶部">↑</button>
+<script>
+(function(){
+"use strict";
+const NS="http://www.w3.org/2000/svg";
+const $=(s,r)=>(r||document).querySelector(s), $$=(s,r)=>[...(r||document).querySelectorAll(s)];
+function S(t,a,x){const e=document.createElementNS(NS,t);if(a)for(const k in a)e.setAttribute(k,a[k]);
+  if(x!=null)e.textContent=x;return e;}
+function clr(n){while(n.firstChild)n.removeChild(n.firstChild);}
+function add(p,t,a,x){const e=S(t,a,x);p.appendChild(e);return e;}
+function addH(p,t,a,x){const e=document.createElement(t);if(a)for(const k in a)e.setAttribute(k,a[k]);
+  if(x!=null)e.textContent=x;p.appendChild(e);return e;}
+const fmt=(v,n)=>v.toFixed(n===undefined?3:n);
+
+/* ---------------------------------------------------------- chrome */
+const root=document.documentElement;
+$("#themeBtn").addEventListener("click",()=>{
+  const cur=root.getAttribute("data-theme");
+  const dark=cur?cur==="dark":!window.matchMedia("(prefers-color-scheme: light)").matches;
+  root.setAttribute("data-theme",dark?"light":"dark");
+  redrawAll();
+});
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change",redrawAll);
+
+const secs=$$("section.sec");
+const toc=$("#toc");
+secs.forEach((s,i)=>{
+  const li=document.createElement("li");
+  const a=document.createElement("a");
+  a.href="#"+s.id; a.textContent=String(i+1).padStart(2,"0")+"　"+s.dataset.t;
+  li.appendChild(a); toc.appendChild(li);
+});
+const tocLinks=$$("#toc a"), toTop=$("#toTop"), prog=$("#prog");
+toTop.addEventListener("click",()=>window.scrollTo({top:0,behavior:"smooth"}));
+let ticking=false;
+function onScroll(){
+  const h=document.body.scrollHeight-window.innerHeight;
+  prog.style.width=(h>0?Math.min(100,window.scrollY/h*100):0)+"%";
+  toTop.classList.toggle("show",window.scrollY>700);
+  let act=0;
+  secs.forEach((s,i)=>{ if(s.getBoundingClientRect().top<160) act=i; });
+  tocLinks.forEach((a,i)=>a.classList.toggle("on",i===act));
+  ticking=false;
+}
+window.addEventListener("scroll",()=>{if(!ticking){ticking=true;requestAnimationFrame(onScroll);}},{passive:true});
+onScroll();
+
+/* ---------------------------------------------------------- fig 3 : memory */
+const RES=[[320,576],[480,832],[720,1280],[1080,1920]];
+function fig3(){
+  const sv=$("#f3svg"); if(!sv)return; clr(sv);
+  const F=+$("#c3f").value, ri=+$("#c3r").value, B=+$("#c3b").value, ph=$("#c3h").checked;
+  const [H,W]=RES[ri];
+  $("#r3f").textContent=F+" 帧"; $("#r3r").textContent=H+"×"+W; $("#r3b").textContent=B+" 层";
+  const lt=Math.floor((F-1)/4)+1, lh=Math.floor(H/8/2), lw=Math.floor(W/8/2);
+  const tok=lt*lh*lw, KL=512, heads=ph?40:1;
+  const one=tok*KL*2, all=tok*KL*heads*B*2;
+  const X0=178,X1=838,Y=[70,120];
+  const lo=Math.log10(1e6), hi=Math.log10(5e11);
+  const px=b=>X0+Math.max(0,Math.min(1,(Math.log10(Math.max(b,1e6))-lo)/(hi-lo)))*(X1-X0);
+  add(sv,"text",{x:16,y:26,class:"big f-ink2"},"视频 token 数 "+tok.toLocaleString()+"　·　文本 token 512　·　bf16");
+  add(sv,"text",{x:16,y:44,class:"sml f-ink3"},"latent "+lt+" × "+lh+" × "+lw+"（VAE 4×8×8 + patch 1×2×2）");
+  // axis
+  const ticks=[[1e6,"1 MB"],[1e7,"10 MB"],[1e8,"100 MB"],[1e9,"1 GB"],[1e10,"10 GB"],[1e11,"100 GB"],[5e11,"500 GB"]];
+  ticks.forEach(([v,l])=>{ const x=px(v);
+    add(sv,"line",{x1:x,y1:58,x2:x,y2:176,stroke:"var(--grid)","stroke-width":1});
+    add(sv,"text",{x:x,y:194,"text-anchor":"middle",class:"sml f-ink3"},l);
+  });
+  const gpu=px(80*1024*1024*1024);
+  add(sv,"line",{x1:gpu,y1:52,x2:gpu,y2:180,stroke:"var(--bad)","stroke-width":1.6,"stroke-dasharray":"5 4"});
+  add(sv,"text",{x:gpu+7,y:50,class:"sml f-Ni","font-weight":600},"80 GB 显卡");
+  const rows=[["单层单头的 A",one,"var(--key)"],["Eq. 5 需同时持有的全部 A",all,"var(--bad)"]];
+  rows.forEach(([lb,v,c],i)=>{
+    const y=Y[i];
+    add(sv,"text",{x:168,y:y+16,"text-anchor":"end",class:"lbl f-ink2"},lb);
+    add(sv,"rect",{x:X0,y:y,width:Math.max(2,px(v)-X0),height:26,rx:5,fill:c,"fill-opacity":.72,stroke:c,"stroke-width":1});
+    const g=v/(1024**3), vtxt=g>=1?fmt(g,1)+" GiB":fmt(v/(1024**2),1)+" MiB", bx=px(v), inside=(bx-X0)>0.55*(X1-X0);
+    add(sv,"text",{x:inside?bx-10:bx+9,y:y+18,"text-anchor":inside?"end":"start",
+      class:"lbl",fill:inside?"#fff":"var(--ink)","font-weight":600},vtxt);
+  });
+  add(sv,"text",{x:X0,y:212,class:"sml f-ink3"},"注：仅注意力图本身，不含反向传播所需的激活缓存与优化器状态。");
+}
+["c3f","c3r","c3b","c3h"].forEach(id=>$("#"+id).addEventListener("input",fig3));
+
+/* ---------------------------------------------------------- fig 4 : softmax */
+const JIT=[-0.13,0.07,-0.05,0.00,0.11,-0.09,0.04,-0.03,0.08];
+function fig4(){
+  const sv=$("#f4svg"); if(!sv)return; clr(sv);
+  const a=+$("#c4a").value,b=+$("#c4b").value;
+  $("#r4a").textContent=fmt(a,1); $("#r4b").textContent=fmt(b,1);
+  const T=1, n=10, lg=[];
+  for(let i=0;i<n;i++) lg.push(i===T?a:b+JIT[i>T?i-1:i]);
+  const mx=Math.max(...lg), ex=lg.map(v=>Math.exp(v-mx)), sm=ex.reduce((p,c)=>p+c,0);
+  const pr=ex.map(v=>v/sm);
+  const bw=62,gap=22,X0=96,base=196,hmax=132, top=Math.max(...pr)*1.18;
+  const words=["A","cat","jumps","across","a","narrow","alley","brick","walls","pad"];
+  add(sv,"text",{x:16,y:24,class:"big f-ink2"},"一个框内 query 对 10 个文本 key 的注意力分布");
+  add(sv,"line",{x1:X0-14,y1:base,x2:X0+n*(bw+gap),y2:base,stroke:"var(--axis)","stroke-width":1.2});
+  for(let i=0;i<n;i++){
+    const x=X0+i*(bw+gap), isT=(i===T), h=Math.max(1.5,pr[i]/top*hmax);
+    add(sv,"rect",{x:x,y:base-h,width:bw,height:h,rx:4,
+      fill:isT?"var(--pos)":"var(--rule2)","fill-opacity":isT?.85:.75,
+      stroke:isT?"var(--pos)":"var(--rule2)","stroke-width":isT?1.6:1});
+    add(sv,"text",{x:x+bw/2,y:base-h-9,"text-anchor":"middle",class:"lbl "+(isT?"f-Pi":"f-ink3"),
+      "font-weight":isT?600:400},(pr[i]*100).toFixed(1)+"%");
+    add(sv,"text",{x:x+bw/2,y:base+17,"text-anchor":"middle",class:"sml "+(isT?"f-Pi":"f-ink3")},words[i]);
+    add(sv,"text",{x:x+bw/2,y:base+32,"text-anchor":"middle",class:"sml f-ink3"},"logit "+fmt(lg[i],1));
+  }
+  add(sv,"text",{x:X0+T*(bw+gap)+bw/2,y:base+48,"text-anchor":"middle",class:"sml f-Pi","font-weight":600},"↑ 目标词 l ∈ T");
+  add(sv,"text",{x:16,y:base+17,"text-anchor":"start",class:"sml f-ink3"},"softmax");
+  add(sv,"text",{x:16,y:base+32,"text-anchor":"start",class:"sml f-ink3"},"份额");
+  const share=pr[T]*100;
+  add(sv,"rect",{x:760,y:26,width:186,height:36,rx:8,fill:"var(--pos-soft)",stroke:"var(--pos)","stroke-width":1.2});
+  add(sv,"text",{x:853,y:50,"text-anchor":"middle",class:"big f-Pi"},"目标词注意力 "+share.toFixed(1)+"%");
+}
+["c4a","c4b"].forEach(id=>$("#"+id).addEventListener("input",fig4));
+
+/* ---------------------------------------------------------- fig 5 : zones */
+const Z_CAP={
+  all:'三项分别对应上图的三种颜色。最大化 <i>s</i> = 抬高绿区 + 压低红区 + 压低黄区，全部在 logit 空间完成。',
+  "1":'<b>项 (i) — 唯一被抬高的区域。</b>框内 query 要更喜欢目标词。它与项 (ii) 在闭式解里被合并进同一个方向 b₊；只保留 b₊ 就是消融 (iv)：IoU 0.154→0.241，而画质<b>几乎不掉</b>。',
+  "2":'<b>项 (ii) — 给目标词让路。</b>压低框内 query 对其他词的 logit，等价于缩小 softmax 分母里的竞争项。它在闭式解里被吸收进 b₊ = normalize(K(T) − K(Tᶜ)) 的那个减号里。',
+  "3":'<b>项 (iii) — 防止物体在框外也长出来。</b>压低框外 query 对目标词的 logit。这一项对应负偏置 b₋，消融 (iii) 显示单独用它 IoU 能到 0.252，但 AQ 从 0.631 掉到 0.558 —— <b>画质代价几乎全在这里</b>。',
+  "0":'<b>四个角落完全不受干预。</b>|Mᶜ|×|Tᶜ| 占了整个矩阵的绝大部分，它们一动不动。这是 GATO-Vid 相比 Peekaboo 的硬掩码「温和」的结构性原因，也是它能保住 SC / BC 两项时序一致性指标的原因。'
+};
+function fig5(z){
+  $$("#f5svg #f5cells > g").forEach(g=>{
+    g.classList.toggle("dim", z!=="all" && g.dataset.z!==z);
+    g.classList.toggle("lit", z==="all" || g.dataset.z===z);
+  });
+  ["z1","z2","z3"].forEach((id,i)=>{
+    const on = z==="all" || z===String(i+1);
+    $("#"+id).classList.toggle("off",!on);
+  });
+  $("#f5cap").innerHTML=Z_CAP[z];
+}
+$$("#f5svg").length && $$('.fig .tabs [data-z]').forEach(b=>b.addEventListener("click",()=>{
+  $$('.fig .tabs [data-z]').forEach(o=>o.setAttribute("aria-selected",String(o===b)));
+  fig5(b.dataset.z);
+}));
+
+/* ---------------------------------------------------------- drag helper */
+function dragify(sv,handle,onMove){
+  const toPt=ev=>{const m=sv.getScreenCTM().inverse();
+    return new DOMPoint(ev.clientX,ev.clientY).matrixTransform(m);};
+  handle.style.cursor="grab";
+  handle.addEventListener("pointerdown",ev=>{
+    ev.preventDefault();
+    const mv=e=>{e.preventDefault();onMove(toPt(e));};
+    const up=()=>{window.removeEventListener("pointermove",mv);
+      window.removeEventListener("pointerup",up);window.removeEventListener("pointercancel",up);
+      document.body.style.userSelect="";};
+    document.body.style.userSelect="none";
+    window.addEventListener("pointermove",mv,{passive:false});
+    window.addEventListener("pointerup",up);window.addEventListener("pointercancel",up);
+  });
+}
+function arrow(p,x1,y1,x2,y2,col,w,mid){
+  const dx=x2-x1,dy=y2-y1,L=Math.hypot(dx,dy)||1,ux=dx/L,uy=dy/L,hl=Math.min(11,L*.4),hw=hl*.55;
+  const bx=x2-ux*hl,by=y2-uy*hl;
+  add(p,"line",{x1:x1,y1:y1,x2:bx,y2:by,stroke:col,"stroke-width":w,"stroke-linecap":"round",
+    "stroke-dasharray":mid||"none"});
+  add(p,"polygon",{points:[x2+","+y2,(bx-uy*hw)+","+(by+ux*hw),(bx+uy*hw)+","+(by-ux*hw)].join(" "),fill:col});
+}
+
+/* ---------------------------------------------------------- fig 7 : closed form */
+const F7={KT:{x:1.15,y:-0.62},KC:{x:-0.42,y:-0.95},th:0.95,par:true};
+function fig7(){
+  const sv=$("#f7svg"); if(!sv)return; clr(sv);
+  const cx=286,cy=208;
+  const KT=F7.KT,KC=F7.KC;
+  const D={x:KT.x-KC.x,y:KT.y-KC.y};
+  const nD=Math.hypot(D.x,D.y)||1e-6, nT=Math.hypot(KT.x,KT.y)||1e-6;
+  const SC=Math.min(92,176/Math.max(Math.hypot(KT.x,KT.y),Math.hypot(KC.x,KC.y),nD,1.15));
+  const P=v=>[cx+v.x*SC,cy-v.y*SC];
+  add(sv,"line",{x1:cx-200,y1:cy,x2:cx+200,y2:cy,stroke:"var(--grid)","stroke-width":1});
+  add(sv,"line",{x1:cx,y1:cy-180,x2:cx,y2:cy+180,stroke:"var(--grid)","stroke-width":1});
+  add(sv,"circle",{cx:cx,cy:cy,r:SC,class:"nofill",stroke:"var(--rule2)","stroke-width":1.2,"stroke-dasharray":"4 4"});
+  add(sv,"text",{x:cx+SC*0.75+6,y:cy+SC*0.75+12,class:"sml f-ink3"},"单位球 ‖b‖=1");
+  const bp={x:D.x/nD,y:D.y/nD}, bm={x:-KT.x/nT,y:-KT.y/nT};
+  if(F7.par){
+    const nKC={x:-KC.x,y:-KC.y};
+    add(sv,"line",{x1:P(KT)[0],y1:P(KT)[1],x2:P(D)[0],y2:P(D)[1],stroke:"var(--ink3)","stroke-width":1,"stroke-dasharray":"3 3"});
+    add(sv,"line",{x1:cx,y1:cy,x2:P(nKC)[0],y2:P(nKC)[1],stroke:"var(--ink3)","stroke-width":1,"stroke-dasharray":"3 3"});
+    add(sv,"line",{x1:P(nKC)[0],y1:P(nKC)[1],x2:P(D)[0],y2:P(D)[1],stroke:"var(--ink3)","stroke-width":1,"stroke-dasharray":"3 3"});
+    add(sv,"text",{x:P(nKC)[0]-6,y:P(nKC)[1]+15,"text-anchor":"end",class:"sml f-ink3"},"−K(Tᶜ)");
+  }
+  arrow(sv,cx,cy,P(D)[0],P(D)[1],"var(--acc)",1.6,"5 4");
+  add(sv,"text",{x:P(D)[0]+8,y:P(D)[1]-7,class:"sml f-Ai"},"K(T)−K(Tᶜ)");
+  arrow(sv,cx,cy,P(KT)[0],P(KT)[1],"var(--key)",3.4);
+  arrow(sv,cx,cy,P(KC)[0],P(KC)[1],"var(--ink3)",2.6);
+  arrow(sv,cx,cy,cx+bp.x*SC,cy-bp.y*SC,"var(--pos)",4);
+  arrow(sv,cx,cy,cx+bm.x*SC,cy-bm.y*SC,"var(--neg)",4);
+  const bt={x:Math.cos(F7.th),y:Math.sin(F7.th)};
+  arrow(sv,cx,cy,cx+bt.x*SC,cy-bt.y*SC,"var(--grad)",2.4,"4 3");
+  add(sv,"text",{x:P(KT)[0]+10,y:P(KT)[1]-5,class:"lbl f-Ki","font-weight":600},"K(T)");
+  add(sv,"text",{x:P(KC)[0]-10,y:P(KC)[1]+15,"text-anchor":"end",class:"lbl f-ink3","font-weight":600},"K(Tᶜ)");
+  add(sv,"text",{x:cx+bp.x*SC*1.32,y:cy-bp.y*SC*1.32,"text-anchor":"middle",class:"lbl f-Pi","font-weight":600},"b₊");
+  add(sv,"text",{x:cx+bm.x*SC*1.32,y:cy-bm.y*SC*1.32,"text-anchor":"middle",class:"lbl f-Ni","font-weight":600},"b₋");
+  add(sv,"text",{x:cx+bt.x*SC*1.56,y:cy-bt.y*SC*1.56,"text-anchor":"middle",class:"sml f-Gi"},"试探 b");
+  [[KT,"var(--key)"],[KC,"var(--ink3)"]].forEach(([v,c])=>{
+    const [x,y]=P(v);
+    const h=add(sv,"circle",{cx:x,cy:y,r:10,fill:c,"fill-opacity":.25,stroke:c,"stroke-width":2});
+    dragify(sv,h,pt=>{ let nx=(pt.x-cx)/SC, ny=(cy-pt.y)/SC;
+      const r=Math.hypot(nx,ny); if(r>1.7){nx*=1.7/r;ny*=1.7/r;} if(r<0.18){nx=0.18;ny=0;}
+      v.x=nx; v.y=ny; fig7(); });
+  });
+  const hb=add(sv,"circle",{cx:cx+bt.x*SC,cy:cy-bt.y*SC,r:9,fill:"var(--grad)","fill-opacity":.3,
+    stroke:"var(--grad)","stroke-width":2});
+  dragify(sv,hb,pt=>{ F7.th=Math.atan2(cy-pt.y,pt.x-cx); fig7(); });
+
+  const X=560,gw=372;
+  add(sv,"text",{x:X,y:44,class:"big f-ink2"},"分数的两半（Eq. 12）");
+  const t1=bp.x*D.x+bp.y*D.y, t2=-(bm.x*KT.x+bm.y*KT.y), tt=bt.x*D.x+bt.y*D.y;
+  const rows=[["b₊ · (K(T)−K(Tᶜ))",t1,"= ‖K(T)−K(Tᶜ)‖","var(--pos)"],
+    ["− b₋ · K(T)",t2,"= ‖K(T)‖","var(--neg)"],
+    ["s* 合计",t1+t2,"闭式最优值","var(--acc)"]];
+  rows.forEach(([l,v,note,c],i)=>{
+    const y=74+i*40;
+    add(sv,"text",{x:X,y:y+16,class:"lbl f-ink2"},l);
+    add(sv,"text",{x:X+gw,y:y+16,"text-anchor":"end",class:"lbl",fill:c,"font-weight":600},fmt(v,3));
+    add(sv,"text",{x:X+gw,y:y+31,"text-anchor":"end",class:"sml f-ink3"},note);
+    if(i<2)add(sv,"line",{x1:X,y1:y+38,x2:X+gw,y2:y+38,stroke:"var(--rule)","stroke-width":1});
+  });
+  add(sv,"text",{x:X,y:222,class:"big f-Gi"},"试探方向的得分");
+  add(sv,"text",{x:X,y:243,class:"sml f-ink3"},"b · (K(T)−K(Tᶜ))　最大可能 = "+fmt(t1,3));
+  const r=t1>1e-9?Math.max(0,tt/t1):0;
+  add(sv,"rect",{x:X,y:256,width:gw,height:20,rx:5,fill:"var(--surf3)",stroke:"var(--rule)","stroke-width":1});
+  add(sv,"rect",{x:X,y:256,width:Math.max(0,Math.min(1,r))*gw,height:20,rx:5,fill:"var(--grad)","fill-opacity":.8});
+  add(sv,"text",{x:X+gw,y:292,"text-anchor":"end",class:"lbl f-Gi"},fmt(tt,3)+"　（最优的 "+(r*100).toFixed(0)+"%）");
+  add(sv,"text",{x:X,y:326,class:"sml f-ink3"},"把橙色箭头拖到与绿色重合，比值才会到 100%。");
+  add(sv,"text",{x:X,y:346,class:"sml f-ink3"},"线性泛函在单位球上的极值点唯一——这就是「解析");
+  add(sv,"text",{x:X,y:366,class:"sml f-ink3"},"最优」的全部内容：没有迭代，也没有梯度。");
+  $("#r7max").textContent="s* = "+fmt(t1+t2,3);
+  $("#r7try").textContent="试探方向得分 = "+fmt(tt,3);
+}
+$("#c7p")&&$("#c7p").addEventListener("change",e=>{F7.par=e.target.checked;fig7();});
+$("#b7reset")&&$("#b7reset").addEventListener("click",()=>{
+  F7.KT={x:1.15,y:-0.62};F7.KC={x:-0.42,y:-0.95};F7.th=0.95;fig7();});
+
+/* ---------------------------------------------------------- fig 8 : ellipsoid */
+const F8={mode:"fg",th:0.62,phi:2.00,lam:1.5,gam:1.55,proj:true,orth:true};
+function fig8(){
+  const sv=$("#f8svg"); if(!sv)return; clr(sv);
+  F8.lam=+$("#c8lam").value; F8.gam=+$("#c8gam").value;
+  F8.proj=$("#c8proj").checked; F8.orth=$("#c8orth").checked;
+  $("#r8lam").textContent=fmt(F8.lam,2); $("#r8gam").textContent=fmt(F8.gam,2);
+  const cx=272,cy=214,R2=Math.SQRT2,g1=F8.gam,g2=1;
+  const col=F8.mode==="fg"?"var(--pos)":"var(--neg)";
+  const colI=F8.mode==="fg"?"var(--pos-ink)":"var(--neg-ink)";
+  const q={x:R2*g1*Math.cos(F8.th),y:R2*g2*Math.sin(F8.th)};
+  const nq=Math.hypot(q.x,q.y), b={x:Math.cos(F8.phi),y:Math.sin(F8.phi)};
+  let off;
+  if(F8.mode==="bg"&&F8.orth){
+    const qh={x:q.x/nq,y:q.y/nq}, a={x:b.x*nq,y:b.y*nq}, dp=a.x*qh.x+a.y*qh.y;
+    off={x:F8.lam*(a.x-dp*qh.x),y:F8.lam*(a.y-dp*qh.y)};
+  }else off={x:F8.lam*nq*b.x,y:F8.lam*nq*b.y};
+  const u={x:q.x+off.x,y:q.y+off.y};
+  const nue=Math.hypot(u.x/g1,u.y/g2)||1e-9, k=R2/nue;
+  const qn=F8.proj?{x:u.x*k,y:u.y*k}:{x:u.x,y:u.y};
+  const SC=Math.min(46,176/Math.max(R2*g1,Math.hypot(u.x,u.y),Math.hypot(qn.x,qn.y),1.6));
+  const P=v=>[cx+v.x*SC,cy-v.y*SC];
+  add(sv,"line",{x1:cx-200,y1:cy,x2:cx+220,y2:cy,stroke:"var(--grid)","stroke-width":1});
+  add(sv,"line",{x1:cx,y1:cy-186,x2:cx,y2:cy+186,stroke:"var(--grid)","stroke-width":1});
+  add(sv,"circle",{cx:cx,cy:cy,r:R2*SC,class:"nofill",stroke:"var(--rule2)","stroke-width":1,"stroke-dasharray":"3 4"});
+  add(sv,"ellipse",{cx:cx,cy:cy,rx:R2*g1*SC,ry:R2*g2*SC,class:"nofill",stroke:"var(--acc)","stroke-width":2.2});
+  add(sv,"line",{x1:30,y1:24,x2:56,y2:24,stroke:"var(--acc)","stroke-width":2.2});
+  add(sv,"text",{x:64,y:28,class:"sml f-Ai","font-weight":600},"RMSNorm 约束面　‖v ⊘ γ‖ = √d");
+  add(sv,"line",{x1:30,y1:44,x2:56,y2:44,stroke:"var(--rule2)","stroke-width":1,"stroke-dasharray":"3 4"});
+  add(sv,"text",{x:64,y:48,class:"sml f-ink3"},"‖v‖ = √d 的球（各向同性对照）");
+  arrow(sv,cx,cy,cx+b.x*SC*1.2,cy-b.y*SC*1.2,col,1.6,"5 4");
+  add(sv,"text",{x:cx+b.x*SC*1.2-b.y*20,y:cy-b.y*SC*1.2-b.x*20+4,"text-anchor":"middle",class:"lbl",fill:colI,"font-weight":600},
+      F8.mode==="fg"?"b₊":"b₋");
+  add(sv,"line",{x1:cx,y1:cy,x2:P(q)[0],y2:P(q)[1],stroke:"var(--ink3)","stroke-width":1.4});
+  const nu=Math.hypot(u.x,u.y)||1;
+  add(sv,"line",{x1:cx,y1:cy,x2:cx+u.x/nu*182,y2:cy-u.y/nu*182,stroke:"var(--ink3)","stroke-width":1,
+    "stroke-dasharray":"2 5",opacity:.65});
+  arrow(sv,P(q)[0],P(q)[1],P(u)[0],P(u)[1],col,2.4);
+  add(sv,"text",{x:(P(q)[0]+P(u)[0])/2+12,y:(P(q)[1]+P(u)[1])/2-8,class:"sml",fill:colI},
+      (F8.mode==="bg"&&F8.orth?"λ·P(b‖q‖, q)":"λ‖q‖·b"));
+  add(sv,"circle",{cx:P(u)[0],cy:P(u)[1],r:7,class:"nofill",stroke:"var(--bad)","stroke-width":1.8,"stroke-dasharray":"3 3"});
+  if(F8.proj){
+    add(sv,"circle",{cx:P(qn)[0],cy:P(qn)[1],r:8,fill:col,"fill-opacity":.9});
+    const rt=qn.x>=0;
+    add(sv,"text",{x:P(qn)[0]+(rt?14:-14),y:P(qn)[1]+16,"text-anchor":rt?"start":"end",class:"sml",fill:colI,"font-weight":600},"q_new（面上）");
+    add(sv,"text",{x:P(u)[0]+13,y:P(u)[1]-8,class:"sml f-Ni"},"相加后（面外）");
+  }else{
+    add(sv,"circle",{cx:P(qn)[0],cy:P(qn)[1],r:8,fill:"var(--bad)","fill-opacity":.9});
+    add(sv,"text",{x:P(qn)[0]+13,y:P(qn)[1]-8,class:"sml f-Ni","font-weight":600},"q_new 留在面外 ✗");
+  }
+  const hq=add(sv,"circle",{cx:P(q)[0],cy:P(q)[1],r:10,fill:"var(--surf)","fill-opacity":.9,
+    stroke:"var(--ink2)","stroke-width":2.4});
+  add(sv,"text",{x:P(q)[0]+15,y:P(q)[1]+5,class:"lbl f-ink","font-weight":600},"q");
+  dragify(sv,hq,pt=>{ F8.th=Math.atan2((cy-pt.y)/(SC*g2),(pt.x-cx)/(SC*g1)); fig8(); });
+  const hb=add(sv,"circle",{cx:cx+b.x*SC*1.2,cy:cy-b.y*SC*1.2,r:9,fill:col,"fill-opacity":.28,
+    stroke:col,"stroke-width":2});
+  dragify(sv,hb,pt=>{ F8.phi=Math.atan2(cy-pt.y,pt.x-cx); fig8(); });
+
+  const cosA=(q.x*qn.x+q.y*qn.y)/((Math.hypot(q.x,q.y)*Math.hypot(qn.x,qn.y))||1e-9);
+  const ang=Math.acos(Math.max(-1,Math.min(1,cosA)))*180/Math.PI;
+  const nrm=Math.hypot(qn.x/g1,qn.y/g2), flip=(q.x*u.x+q.y*u.y)<0;
+  const X=556;
+  add(sv,"text",{x:X,y:42,class:"big f-ink2"},F8.mode==="fg"?"前景分支（Eq. 14 上行）":"背景分支（Eq. 16 下行）");
+  const lines=[["① 相对幅度","偏置乘 ‖q‖，扰动与该 token 自身尺度成比例"],
+    ["② 强度 λ","λ = "+fmt(F8.lam,2)+"，扮演梯度法学习率 μ 的角色"],
+    ["③ 重投影",F8.proj?"乘正标量 √d / ‖u ⊘ γ‖ 拉回椭球　✓":"已关闭 ⇒ 复现消融 (i)「朴素相加」"]];
+  if(F8.mode==="bg")lines.push(["④ 正交投影 P",F8.orth?"只保留 b₋ 中与 q 正交的分量　✓":"已关闭 ⇒ q 可能被反向抵消"]);
+  lines.forEach((ln,i)=>{ const y=74+i*44;
+    add(sv,"text",{x:X,y:y,class:"lbl f-ink","font-weight":600},ln[0]);
+    add(sv,"text",{x:X,y:y+19,class:"sml f-ink3"},ln[1]); });
+  const yb=F8.mode==="bg"?264:222;
+  add(sv,"rect",{x:X,y:yb,width:376,height:54,rx:9,fill:"var(--acc-soft)",stroke:"var(--acc)","stroke-width":1.2});
+  add(sv,"text",{x:X+14,y:yb+23,class:"lbl f-Ai","font-weight":600},"旋转角 = "+ang.toFixed(1)+"°");
+  add(sv,"text",{x:X+14,y:yb+42,class:"sml f-ink3"},"b ⊥ q 时理论值 arctan(λ) = "+(Math.atan(F8.lam)*180/Math.PI).toFixed(1)+"°");
+  add(sv,"text",{x:X,y:yb+80,class:"sml f-ink3"},"‖q_new ⊘ γ‖ = "+fmt(nrm,3)+"　（应为 √d ≈ 1.414）");
+  if(flip)add(sv,"text",{x:X,y:yb+102,class:"lbl f-Ni","font-weight":600},"⚠ q 已被翻到反面：语义内容被取反");
+  $("#r8ang").textContent="旋转角 = "+ang.toFixed(1)+"°";
+  $("#r8norm").textContent="‖q_new ⊘ γ‖ = "+fmt(nrm,3);
+  const w=$("#r8warn");
+  w.textContent=flip?"⚠ q 被翻到反面":(F8.proj?"✓ 仍在椭球面上":"✗ 已离开 RMSNorm 流形");
+  w.style.color=(flip||!F8.proj)?"var(--bad-ink)":"var(--pos-ink)";
+  w.style.borderColor=(flip||!F8.proj)?"var(--bad)":"var(--pos)";
+}
+$$('.tog.pn button').forEach(b=>b.addEventListener("click",()=>{
+  $$('.tog.pn button').forEach(o=>o.setAttribute("aria-pressed",String(o===b)));
+  F8.mode=b.dataset.v; fig8();
+}));
+["c8lam","c8gam","c8proj","c8orth"].forEach(id=>{const e=$("#"+id); e&&e.addEventListener("input",fig8);
+  e&&e.addEventListener("change",fig8);});
+
+/* ---------------------------------------------------------- fig 9 : gaussian */
+const F9={g:true};
+function fig9(){
+  const sv=$("#f9svg"); if(!sv)return; clr(sv);
+  const W=+$("#c9w").value,H=+$("#c9h").value;
+  $("#r9w").textContent=W; $("#r9h").textContent=H;
+  const cols=26,rows=12,cell=17,X0=34,Y0=40;
+  const c0=(cols-W)/2, r0=(rows-H)/2;
+  const cxg=cols/2, cyg=rows/2, sx=W/4, sy=H/4;
+  const val=(i,j)=>{
+    if(i<c0||i>=c0+W||j<r0||j>=r0+H) return 0;
+    if(!F9.g) return 1;
+    const dx=(i+0.5-cxg)/sx, dy=(j+0.5-cyg)/sy;
+    return Math.exp(-0.5*(dx*dx+dy*dy));
+  };
+  add(sv,"text",{x:X0,y:26,class:"big f-ink2"},"单帧 patch 网格上的注入强度 λ₊");
+  for(let j=0;j<rows;j++)for(let i=0;i<cols;i++){
+    const v=val(i,j);
+    add(sv,"rect",{x:X0+i*cell,y:Y0+j*cell,width:cell-1.5,height:cell-1.5,rx:2.5,
+      fill:v>0?"var(--pos)":"var(--surf3)","fill-opacity":v>0?(0.10+0.85*v):1});
+  }
+  add(sv,"rect",{x:X0+c0*cell-2,y:Y0+r0*cell-2,width:W*cell+2,height:H*cell+2,rx:4,
+    class:"nofill",stroke:"var(--pos-ink)","stroke-width":2,"stroke-dasharray":"5 3"});
+  add(sv,"text",{x:X0,y:Y0+rows*cell+22,class:"sml f-ink3"},"虚线 = 用户给的包围框　·　色深 = λ₊ 的相对大小");
+  add(sv,"text",{x:X0,y:Y0+rows*cell+40,class:"sml "+(F9.g?"f-Pi":"f-Ni")},
+    F9.g?"高斯调制：中心强、边缘弱，模仿真实交叉注意力的形状":"均匀：框内恒定、边界突变（消融 ii）");
+  const PX=596,PW=336,PY=62,PH=170;
+  add(sv,"text",{x:PX,y:36,class:"big f-ink2"},"沿框中心横切的强度剖面");
+  add(sv,"line",{x1:PX,y1:PY+PH,x2:PX+PW,y2:PY+PH,stroke:"var(--axis)","stroke-width":1.2});
+  add(sv,"line",{x1:PX,y1:PY,x2:PX,y2:PY+PH,stroke:"var(--axis)","stroke-width":1.2});
+  add(sv,"text",{x:PX-8,y:PY+6,"text-anchor":"end",class:"sml f-ink3"},"λ₊");
+  add(sv,"text",{x:PX+PW,y:PY+PH+18,"text-anchor":"end",class:"sml f-ink3"},"→ 横向 patch 索引");
+  const jm=Math.floor(rows/2), pts=[];
+  for(let i=0;i<cols;i++){ const v=val(i,jm);
+    pts.push([PX+(i+0.5)/cols*PW, PY+PH-v*PH*0.92]); }
+  let dstr="M "+PX+","+(PY+PH);
+  pts.forEach((p,i)=>{ if(i>0)dstr+=" L "+p[0]+","+pts[i-1][1]; dstr+=" L "+p[0]+","+p[1]; });
+  dstr+=" L "+(PX+PW)+","+pts[pts.length-1][1]+" L "+(PX+PW)+","+(PY+PH)+" Z";
+  add(sv,"path",{d:dstr,fill:"var(--pos)","fill-opacity":.22,stroke:"var(--pos)","stroke-width":2});
+  add(sv,"line",{x1:PX,y1:PY+PH*0.08,x2:PX+PW,y2:PY+PH*0.08,stroke:"var(--rule2)","stroke-width":1,"stroke-dasharray":"3 3"});
+  add(sv,"text",{x:PX+PW,y:PY+PH*0.08-6,"text-anchor":"end",class:"sml f-ink3"},"均匀模式的 λ₊ = 1.5");
+  add(sv,"text",{x:PX,y:PY+PH+42,class:"sml f-ink3"},F9.g
+    ?"注意边缘不是零而是 exp(−2)≈0.135：框边仍有引导，只是弱。"
+    :"硬边界会在框沿产生突变，正是消融 (ii) 中 SR 掉到 72% 的来源。");
+}
+$("#b9u")&&$("#b9u").addEventListener("click",()=>{F9.g=false;
+  $("#b9u").setAttribute("aria-pressed","true");$("#b9g").setAttribute("aria-pressed","false");fig9();});
+$("#b9g")&&$("#b9g").addEventListener("click",()=>{F9.g=true;
+  $("#b9g").setAttribute("aria-pressed","true");$("#b9u").setAttribute("aria-pressed","false");fig9();});
+["c9w","c9h"].forEach(id=>$("#"+id).addEventListener("input",fig9));
+
+/* ---------------------------------------------------------- fig 10 : efficiency */
+function fig10(){
+  const sv=$("#f10svg"); if(!sv)return; clr(sv);
+  const D=[["GATO-Vid（本文）",0.40,"var(--acc)","+0.4%"],["VideoTetris",6.20,"var(--rule2)"],
+    ["SwitchCraft",32.80,"var(--rule2)"],["Peekaboo",92.13,"var(--rule2)"],
+    ["梯度法：单步反向传播",300.31,"var(--bad)"]];
+  const X0=228,X1=884,MX=320;
+  const px=v=>X0+v/MX*(X1-X0);
+  for(let v=0;v<=300;v+=50){ const x=px(v);
+    add(sv,"line",{x1:x,y1:32,x2:x,y2:224,stroke:"var(--grid)","stroke-width":1});
+    add(sv,"text",{x:x,y:244,"text-anchor":"middle",class:"sml f-ink3"},"+"+v+"%"); }
+  D.forEach(([l,v,c,ov],i)=>{
+    const y=42+i*38;
+    add(sv,"text",{x:X0-14,y:y+18,"text-anchor":"end",class:"lbl f-ink2"},l);
+    add(sv,"rect",{x:X0,y:y,width:Math.max(2.5,px(v)-X0),height:25,rx:5,fill:c,
+      "fill-opacity":c==="var(--rule2)"?.62:.82,stroke:c,"stroke-width":1});
+    add(sv,"text",{x:px(v)+10,y:y+18,class:"lbl "+(c==="var(--bad)"?"f-Ni":(c==="var(--acc)"?"f-Ai":"f-ink2")),
+      "font-weight":600},ov||("+"+v.toFixed(2)+"%"));
+  });
+  add(sv,"text",{x:X0,y:20,class:"sml f-ink3"},"相对 vanilla Wan2.2 的单次推理时间增量（50 次平均）");
+}
+
+/* ---------------------------------------------------------- fig 11/12 : bars + AQ */
+function barAQ(id,title,D,extra){
+  const sv=$("#"+id); if(!sv)return; clr(sv);
+  const X0=110,X1=716,Y0=52,Y1=222, n=D.length, bw=Math.min(92,(X1-X0)/n-32);
+  const iMax=0.40, aMin=0.52, aMax=0.66;
+  const yI=v=>Y1-v/iMax*(Y1-Y0);
+  const yA=v=>Y1-(v-aMin)/(aMax-aMin)*(Y1-Y0);
+  add(sv,"text",{x:16,y:26,class:"big f-ink2"},title);
+  for(let v=0;v<=0.4;v+=0.1){ const y=yI(v);
+    add(sv,"line",{x1:X0-30,y1:y,x2:X1,y2:y,stroke:"var(--grid)","stroke-width":1});
+    add(sv,"text",{x:X0-38,y:y+4,"text-anchor":"end",class:"sml f-ink3"},v.toFixed(1)); }
+  add(sv,"text",{x:X0-38,y:Y0-14,"text-anchor":"end",class:"sml f-Ai","font-weight":600},"IoU ↑");
+  [0.55,0.60,0.65].forEach(v=>{
+    add(sv,"line",{x1:X1+6,y1:yA(v),x2:X1+14,y2:yA(v),stroke:"var(--grad)","stroke-width":1,opacity:.6});
+    add(sv,"text",{x:X1+20,y:yA(v)+4,class:"sml f-Gi"},v.toFixed(2)); });
+  add(sv,"text",{x:X1+6,y:Y0-14,class:"sml f-Gi","font-weight":600},"AQ 画质 ↑");
+  const cx=[];
+  D.forEach((d,i)=>{
+    const x=X0+i*((X1-X0)/n)+((X1-X0)/n-bw)/2, y=yI(d.iou);
+    cx.push(x+bw/2);
+    add(sv,"rect",{x:x,y:y,width:bw,height:Y1-y,rx:5,fill:d.c,"fill-opacity":d.hi?.85:.55,
+      stroke:d.c,"stroke-width":d.hi?1.6:1});
+    add(sv,"text",{x:x+bw/2,y:y-9,"text-anchor":"middle",class:"lbl f-ink","font-weight":600},d.iou.toFixed(3));
+    d.lb.split("\n").forEach((t,k)=>add(sv,"text",{x:x+bw/2,y:Y1+20+k*15,"text-anchor":"middle",
+      class:"sml "+(d.hi?"f-Ai":"f-ink3"),"font-weight":d.hi?600:400},t));
+  });
+  let dstr="";
+  D.forEach((d,i)=>{ dstr+=(i?" L ":"M ")+cx[i]+","+yA(d.aq); });
+  add(sv,"path",{d:dstr,class:"nofill",stroke:"var(--grad)","stroke-width":2,"stroke-dasharray":"5 4"});
+  D.forEach((d,i)=>{ add(sv,"circle",{cx:cx[i],cy:yA(d.aq),r:5.5,fill:"var(--grad)"});
+    add(sv,"text",{x:cx[i],y:yA(d.aq)-11,"text-anchor":"middle",class:"sml f-Gi"},d.aq.toFixed(3)); });
+  add(sv,"line",{x1:X0-30,y1:Y1,x2:X1,y2:Y1,stroke:"var(--axis)","stroke-width":1.2});
+  if(extra)extra(sv,{yI,X0,X1,Y0,Y1,cx});
+}
+function fig11(){
+  barAQ("f11svg","正 / 负偏置的分工（Set 1）",[
+    {lb:"不注入\nWan2.2",iou:.154,aq:.631,c:"var(--rule2)"},
+    {lb:"只用 b₊\n= 消融 (iv)",iou:.241,aq:.628,c:"var(--pos)"},
+    {lb:"只用 b₋\n= 消融 (iii)",iou:.252,aq:.558,c:"var(--neg)"},
+    {lb:"两者都用\nGATO-Vid",iou:.363,aq:.551,c:"var(--acc)",hi:true}
+  ],(sv,g)=>{
+    const y=g.yI(0.339);
+    add(sv,"line",{x1:g.X0-10,y1:y,x2:g.X1,y2:y,stroke:"var(--ink3)","stroke-width":1.4,"stroke-dasharray":"6 4"});
+    add(sv,"text",{x:g.X0+6,y:y+17,class:"sml f-ink3"},"— 线性叠加的预期值 0.339");
+    add(sv,"rect",{x:800,y:70,width:150,height:104,rx:9,fill:"var(--acc-soft)",stroke:"var(--acc)","stroke-width":1.2});
+    add(sv,"text",{x:814,y:94,class:"lbl f-Ai","font-weight":600},"超加性 +0.024");
+    add(sv,"text",{x:814,y:118,class:"sml f-ink3"},"0.363 > 0.087 + 0.098");
+    add(sv,"text",{x:814,y:138,class:"sml f-ink3"},"　　　+ 0.154 = 0.339");
+    add(sv,"text",{x:814,y:162,class:"sml f-ink3"},"两个方向互补，非冗余");
+  });
+}
+function fig12(){
+  barAQ("f12svg","注入层范围的影响（原文 Fig. 4b）",[
+    {lb:"不注入\nT2V",iou:.154,aq:.631,c:"var(--rule2)"},
+    {lb:"前 20 层\nGATO-Vid",iou:.328,aq:.558,c:"var(--acc)",hi:true},
+    {lb:"全部 40 层",iou:.357,aq:.549,c:"var(--key)"},
+    {lb:"后 20 层",iou:.159,aq:.628,c:"var(--neg)"}
+  ],(sv)=>{
+    add(sv,"rect",{x:800,y:70,width:150,height:112,rx:9,fill:"var(--surf2)",stroke:"var(--rule)","stroke-width":1});
+    add(sv,"text",{x:814,y:94,class:"lbl f-ink2","font-weight":600},"结论");
+    ["后 20 层 ≈ 什么都没做","全 40 层多 +0.029 IoU","但 AQ 再掉 0.009","前 20 层是性价比点"].forEach((t,i)=>
+      add(sv,"text",{x:814,y:116+i*19,class:"sml f-ink3"},t));
+  });
+}
+/* ---------------------------------------------------------- fig 13 : schematic heat */
+function fig13(){
+  const sv=$("#f13svg"); if(!sv)return; clr(sv);
+  const X0=74,Y0=42,cw=18,ch=17,nc=40,nr=12;
+  for(let j=0;j<nr;j++)for(let i=0;i<nc;i++){
+    const bkt=i/(nc-1), st=1-j/(nr-1);
+    const v=Math.exp(-bkt*3.1)*Math.exp(-st*1.5)*0.92+0.05;
+    add(sv,"rect",{x:X0+i*cw,y:Y0+j*ch,width:cw-1.5,height:ch-1.5,rx:2,
+      fill:"var(--acc)","fill-opacity":Math.min(1,v)});
+  }
+  add(sv,"line",{x1:X0,y1:Y0+nr*ch+2,x2:X0+nc*cw,y2:Y0+nr*ch+2,stroke:"var(--axis)","stroke-width":1.2});
+  add(sv,"text",{x:X0,y:Y0+nr*ch+22,class:"sml f-ink3"},"block 1");
+  add(sv,"text",{x:X0+nc*cw,y:Y0+nr*ch+22,"text-anchor":"end",class:"sml f-ink3"},"block 40");
+  add(sv,"text",{x:X0+nc*cw/2,y:Y0+nr*ch+22,"text-anchor":"middle",class:"sml f-ink3"},"Transformer Block →");
+  add(sv,"text",{x:X0-10,y:Y0+8,"text-anchor":"end",class:"sml f-ink3"},"t = 1");
+  add(sv,"text",{x:X0-10,y:Y0+nr*ch-2,"text-anchor":"end",class:"sml f-ink3"},"t = 0");
+  add(sv,"text",{x:22,y:Y0+nr*ch/2,"text-anchor":"middle",class:"sml f-ink3",
+    transform:"rotate(-90 22 "+(Y0+nr*ch/2)+")"},"采样时间步");
+  add(sv,"rect",{x:X0+2,y:Y0+2,width:20*cw-4,height:nr*ch-6,rx:4,class:"nofill",
+    stroke:"var(--pos-ink)","stroke-width":2,"stroke-dasharray":"5 3"});
+  add(sv,"text",{x:X0+20*cw/2,y:Y0-10,"text-anchor":"middle",class:"lbl f-Pi","font-weight":600},"GATO-Vid 的注入区（前 20 层）");
+  add(sv,"rect",{x:X0+nc*cw+26,y:Y0+8,width:118,height:26,rx:6,fill:"var(--bad-soft)",stroke:"var(--bad)","stroke-width":1});
+  add(sv,"text",{x:X0+nc*cw+85,y:Y0+26,"text-anchor":"middle",class:"sml f-Ni","font-weight":600},"示意 · 非原文数值");
+  add(sv,"text",{x:X0+nc*cw+26,y:Y0+68,class:"sml f-ink3"},"颜色越深 =");
+  add(sv,"text",{x:X0+nc*cw+26,y:Y0+86,class:"sml f-ink3"},"交叉注意力分数越高");
+  add(sv,"text",{x:X0+nc*cw+26,y:Y0+118,class:"sml f-ink3"},"原文观察：早期 block");
+  add(sv,"text",{x:X0+nc*cw+26,y:Y0+136,class:"sml f-ink3"},"分数显著更高，晚期");
+  add(sv,"text",{x:X0+nc*cw+26,y:Y0+154,class:"sml f-ink3"},"层趋于均匀 ⇒ 不负责");
+  add(sv,"text",{x:X0+nc*cw+26,y:Y0+172,class:"sml f-ink3"},"版面结构。");
+}
+
+/* ---------------------------------------------------------- tables */
+const COLS=["CD ↓","IoU ↑","SR ↑","SC","BC","DD","AQ","IQ"];
+const T1={
+ "1":[
+  {m:"Wan2.2 T2V（基座）",v:[0.138,0.154,89.3,0.974,0.971,0.248,0.631,0.666],base:true},
+  {m:"VideoTetris *",v:[0.132,0.160,85.7,0.973,0.972,0.260,0.630,0.673]},
+  {m:"SwitchCraft",v:[0.138,0.152,88.7,0.973,0.972,0.248,0.629,0.664]},
+  {m:"Peekaboo *",v:[0.103,0.249,85.5,0.970,0.966,0.310,0.597,0.677]},
+  {m:"GATO-Vid（本文）",v:[0.059,0.363,89.7,0.975,0.964,0.113,0.551,0.670],ours:true}],
+ "2":[
+  {m:"Wan2.2 T2V（基座）",v:[0.198,0.124,74.2,0.957,0.960,0.395,0.613,0.682],base:true},
+  {m:"VideoTetris *",v:[0.195,0.136,69.7,0.960,0.962,0.402,0.612,0.698]},
+  {m:"SwitchCraft",v:[0.196,0.128,75.5,0.956,0.960,0.393,0.611,0.678]},
+  {m:"Peekaboo *",v:[0.193,0.171,49.2,0.929,0.937,0.750,0.510,0.679]},
+  {m:"GATO-Vid（本文）",v:[0.121,0.324,74.7,0.952,0.951,0.360,0.557,0.690],ours:true}]
+};
+const T2D=[
+  {m:"Wan2.2 T2V（无注入）",v:[0.138,0.154,89.3,0.974,0.971,0.248,0.631,0.666],base:true},
+  {m:"(i) 去掉椭球重投影",v:[0.059,0.355,87.5,0.965,0.957,0.090,0.541,0.646]},
+  {m:"(ii) 去掉高斯调制",v:[0.059,0.375,72.0,0.969,0.960,0.093,0.535,0.662]},
+  {m:"(iii) 去掉正偏置 b₊",v:[0.104,0.252,89.7,0.977,0.968,0.158,0.558,0.660]},
+  {m:"(iv) 去掉负偏置 b₋",v:[0.105,0.241,89.7,0.972,0.970,0.258,0.628,0.679]},
+  {m:"GATO-Vid（完整）",v:[0.059,0.363,89.7,0.975,0.964,0.113,0.551,0.670],ours:true}
+];
+function devColor(d,base){
+  const r=Math.abs(d)/Math.abs(base||1);
+  return r>0.10?"var(--bad-ink)":(r>0.03?"var(--grad-ink)":"var(--ink3)");
+}
+function fmtV(i,v){ return i===2?v.toFixed(1)+"%":v.toFixed(3); }
+function renderT1(){
+  const set=$('#t1tabs [aria-selected="true"]').dataset.set;
+  const dl=$("#t1delta").checked, tb=$("#t1"); clr(tb);
+  const cap=addH(tb,"caption",{id:"t1cap"}), note=$("#t1note");
+  if(set==="d"){
+    cap.textContent="Table 1 · 两组数据集的定位指标对照（原文 Tab. 1）";
+    const tr=addH(addH(tb,"thead"),"tr");
+    ["方法","CD ↓ S1","CD ↓ S2","IoU ↑ S1","IoU ↑ S2","SR ↑ S1","SR ↑ S2"].forEach(h=>addH(tr,"th",null,h));
+    const tbo=addH(tb,"tbody");
+    T1["1"].forEach((r,i)=>{
+      const r2=T1["2"][i], row=addH(tbo,"tr",{class:r.ours?"ours":(r.base?"base":"")});
+      addH(row,"td",null,r.m);
+      [[0,r],[0,r2],[1,r],[1,r2],[2,r],[2,r2]].forEach(pair=>
+        addH(row,"td",null,fmtV(pair[0],pair[1].v[pair[0]])));
+    });
+    note.innerHTML="Set 2 的轨迹是人造的、与模型运动先验冲突，所以所有方法的绝对分都更差。<b>GATO-Vid 在两组上的相对优势一致</b>：Set 1 的 IoU 是次优基线的 1.46×，Set 2 是 1.89×。注意 Peekaboo 在 Set 2 的 SR 只有 49.2%，它的 IoU 是在不到一半的样本上算出来的。";
+    return;
+  }
+  const D=T1[set], base=D[0].v;
+  cap.textContent="Table 1 · "+(set==="1"?"Set 1（真实轨迹）":"Set 2（合成轨迹）")+"　定位与画质（原文 Tab. 1）";
+  const tr=addH(addH(tb,"thead"),"tr");
+  addH(tr,"th",null,"方法"); COLS.forEach((h,i)=>addH(tr,"th",null,(i>=3&&dl)?"Δ "+h:h));
+  const tbo=addH(tb,"tbody");
+  const best=[Math.min.apply(null,D.map(r=>r.v[0])),Math.max.apply(null,D.map(r=>r.v[1])),
+              Math.max.apply(null,D.map(r=>r.v[2]))];
+  D.forEach(r=>{
+    const row=addH(tbo,"tr",{class:r.ours?"ours":(r.base?"base":"")});
+    addH(row,"td",null,r.m);
+    r.v.forEach((v,i)=>{
+      if(i<3){ addH(row,"td",{class:Math.abs(v-best[i])<1e-9?"best":""},fmtV(i,v)); }
+      else if(dl){
+        const d=v-base[i];
+        const td=addH(row,"td",null,r.base?"—":((d>=0?"+":"")+d.toFixed(3)));
+        if(!r.base)td.style.color=devColor(d,base[i]);
+      }else addH(row,"td",null,v.toFixed(3));
+    });
+  });
+  note.innerHTML=dl
+    ?"VBench 五列显示<b>相对基座 Wan2.2 的偏移</b>：<span style='color:var(--ink3)'>灰</span> = 相对变化 &lt;3%，<span style='color:var(--grad-ink)'>黄</span> = 3–10%，<span style='color:var(--bad-ink)'>红</span> = &gt;10%。原文明确指出这五项<b>越接近基座越好</b>。可以看到 GATO-Vid 的 DD 与 AQ 是红的，而 Peekaboo 在 Set 2 上四项全红。"
+    :"* 标记的方法由原作者重新实现并适配到 Wan2.2。CD 与 IoU <b>仅在 SAM 3 成功检出目标物的视频上统计</b>，因此必须与 SR 一起读。";
+}
+$$("#t1tabs .tab").forEach(b=>b.addEventListener("click",()=>{
+  $$("#t1tabs .tab").forEach(o=>o.setAttribute("aria-selected",String(o===b)));
+  renderT1();
+}));
+$("#t1delta")&&$("#t1delta").addEventListener("change",renderT1);
+
+function renderT2(){
+  const tb=$("#t2"); if(!tb)return; clr(tb);
+  addH(tb,"caption",null,"Table 2 · 消融研究（原文 Tab. 2，Set 1）");
+  const tr=addH(addH(tb,"thead"),"tr");
+  addH(tr,"th",null,"配置"); COLS.forEach(h=>addH(tr,"th",null,h));
+  addH(tr,"th",null,"ΔIoU vs 完整");
+  const tbo=addH(tb,"tbody"), full=T2D[T2D.length-1].v[1];
+  T2D.forEach(r=>{
+    const row=addH(tbo,"tr",{class:r.ours?"ours":(r.base?"base":"")});
+    addH(row,"td",null,r.m);
+    r.v.forEach((v,i)=>addH(row,"td",{class:(i===1&&r.ours)?"best":""},fmtV(i,v)));
+    const d=r.v[1]-full;
+    const td=addH(row,"td",null,r.ours?"—":((d>=0?"+":"")+d.toFixed(3)));
+    if(!r.ours)td.style.color=d<0?"var(--bad-ink)":"var(--pos-ink)";
+  });
+}
+
+/* ---------------------------------------------------------- algorithm stepper */
+const A_NOTE=[
+ "① 前 4 行完全是原生 Wan2.2 的 block 流程。关键是<b>第 4 行</b>：q 是 <code>norm_q</code> <b>之后</b>的量——注入的落点在 RMSNorm 的<b>像</b>上，这正是后面必须手动重投影回椭球的原因。",
+ "② S<sub>B</sub> 的判断实际上含<b>两个</b>条件：block 索引 ∈ 前 20 层，<b>且</b>当前采样步 ∈ 前 15%。伪代码只写了前者，后者藏在实现细节里。",
+ "③ 全文唯一一次「求解」，一行搞定。<b>注意它只用 k、不用 q</b> —— 这就是为什么一层只算一次就能广播给三万多个 token，也就是 +0.4% 的全部来源。",
+ "④ 三步走：取 q[M] → 加 λ₊‖q′‖b₊ → 乘 √n/‖q′⊘γ‖ 拉回椭球。第 9 行的 γ 必须取 <code>norm_q.weight</code>（不是 norm_k）。论文实现里第 8 行的 λ₊ 还要再乘上按框拟合的 2D 高斯，伪代码省略了。",
+ "⑤ <b>这一段和正文冲突</b>：第 11 行的 b₋ 应为 −Normalize(mean(k[T]))（正文 Eq. 13），第 13 行应带正交投影 P（Eq. 16）且用 λ₋。按正文实现，不要照抄这里。",
+ "⑥ 改写后的 q <b>只影响 cross-attention 这一支</b>；self-attention（第 3 行）已经跑完，FFN 拿到的是加过残差的 x。每层干预都被残差流稀释一次——这解释了为什么 λ 需要取到 1.5，也解释了为什么要连做 20 层。",
+ "全部 18 行。整段代码没有任何 <code>.backward()</code>、没有 <code>torch.autograd</code>、没有显式的注意力矩阵，也没有第二次前向。"
+];
+const aSteps=$$("#a1steps .stepbtn"), aLines=$$("#a1code li");
+function setStep(k){
+  aSteps.forEach((b,i)=>b.classList.toggle("on",i===k));
+  const ls=aSteps[k].dataset.l;
+  const set=ls?new Set(ls.split(",").map(Number)):null;
+  aLines.forEach((li,i)=>{
+    const n=i+1, on=!set||set.has(n);
+    li.classList.toggle("act",!!set&&set.has(n));
+    li.classList.toggle("faded",!!set&&!set.has(n));
+  });
+  $("#a1note").innerHTML=A_NOTE[k];
+}
+aSteps.forEach((b,i)=>b.addEventListener("click",()=>setStep(i)));
+
+/* ---------------------------------------------------------- boot */
+function redrawAll(){ fig3();fig4();fig7();fig8();fig9();fig10();fig11();fig12();fig13(); }
+renderT1(); renderT2(); setStep(0); fig5("all"); redrawAll();
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(redrawAll);
+})();
+</script>
+</body>
+</html>

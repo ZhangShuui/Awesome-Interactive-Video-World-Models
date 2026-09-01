@@ -1,0 +1,2788 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReWorld 长时记忆交互世界模型</title>
+<meta name="description" content="arXiv 2608.23565 · ReWorld: An Interactive World Model with Long-Horizon Memory 方法精读与图解">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   ReWorld 精读 — tokens.  Dark is the default ground; light is a
+   fully designed second theme, reachable by OS setting or toggle.
+   角色色：ctrl = 控制 / 动作注入 / 局部头
+           mem  = 记忆 / MRoPE / 全局头
+           land = 记忆固化 / landmark bank / 检索
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0e1013; --surf:#14161a; --surf2:#1a1d23; --surf3:#232830;
+  --rule:#272b33; --rule2:#39404b;
+  --ink:#eef1f5; --ink2:#aeb6c2; --ink3:#7e8794;
+  --ctrl:#bf8615; --ctrl-ink:#e0a53a; --ctrl-soft:rgba(191,134,21,.18);
+  --mem:#2492ad;  --mem-ink:#56c2db;  --mem-soft:rgba(36,146,173,.18);
+  --land:#7f63d6; --land-ink:#a894f2; --land-soft:rgba(127,99,214,.20);
+  --bad:#e06a63;  --bad-ink:#ef8a83;  --bad-soft:rgba(224,106,99,.15);
+  --ok:#3fb27a;   --ok-ink:#5fc994;   --ok-soft:rgba(63,178,122,.15);
+  --m1:#199e70; --m2:#e66767; --m3:#3987e5; --m4:#c98500; --m5:#9085e9; --m6:#4aa3b8; --m7:#b06fb0;
+  --grid:#232830; --axis:#39404b;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.35);
+  --tint:rgba(255,255,255,.045);
+  --font-display:"Archivo","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f1f2f5; --surf:#fbfbfc; --surf2:#ebedf1; --surf3:#e1e4ea;
+    --rule:#dde0e6; --rule2:#c3c9d3;
+    --ink:#12151a; --ink2:#4d545f; --ink3:#767e8b;
+    --ctrl:#b0740a; --ctrl-ink:#8a5a04; --ctrl-soft:rgba(176,116,10,.14);
+    --mem:#00829c;  --mem-ink:#02697f;  --mem-soft:rgba(0,130,156,.14);
+    --land:#6d3fd1; --land-ink:#5a2fb8; --land-soft:rgba(109,63,209,.13);
+    --bad:#c8362f;  --bad-ink:#a92a24;  --bad-soft:rgba(200,54,47,.11);
+    --ok:#0f8a52;   --ok-ink:#0b7043;   --ok-soft:rgba(15,138,82,.12);
+    --m1:#1baf7a; --m2:#e34948; --m3:#2a78d6; --m4:#eda100; --m5:#4a3aa7; --m6:#0f7f96; --m7:#8e3f8e;
+    --grid:#e3e6eb; --axis:#c3c9d3;
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+    --tint:rgba(16,20,28,.035);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f1f2f5; --surf:#fbfbfc; --surf2:#ebedf1; --surf3:#e1e4ea;
+  --rule:#dde0e6; --rule2:#c3c9d3;
+  --ink:#12151a; --ink2:#4d545f; --ink3:#767e8b;
+  --ctrl:#b0740a; --ctrl-ink:#8a5a04; --ctrl-soft:rgba(176,116,10,.14);
+  --mem:#00829c;  --mem-ink:#02697f;  --mem-soft:rgba(0,130,156,.14);
+  --land:#6d3fd1; --land-ink:#5a2fb8; --land-soft:rgba(109,63,209,.13);
+  --bad:#c8362f;  --bad-ink:#a92a24;  --bad-soft:rgba(200,54,47,.11);
+  --ok:#0f8a52;   --ok-ink:#0b7043;   --ok-soft:rgba(15,138,82,.12);
+  --m1:#1baf7a; --m2:#e34948; --m3:#2a78d6; --m4:#eda100; --m5:#4a3aa7; --m6:#0f7f96; --m7:#8e3f8e;
+  --grid:#e3e6eb; --axis:#c3c9d3;
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  --tint:rgba(16,20,28,.035);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+h1,h2,h3,h4{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--mem-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--land-ink); outline-offset:3px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); border:1px solid var(--rule);
+  padding:.08em .36em; border-radius:5px; white-space:nowrap}
+strong{font-weight:600; color:var(--ink)}
+hr{border:0; border-top:1px solid var(--rule); margin:40px 0}
+
+/* ============================================================ chrome */
+#prog{position:fixed; inset:0 auto auto 0; height:2px; width:0; z-index:200;
+  background:linear-gradient(90deg,var(--ctrl),var(--mem),var(--land)); transition:width .08s linear}
+.top{position:fixed; inset:0 0 auto 0; height:60px; z-index:150; display:flex; align-items:center; gap:18px;
+  padding:0 22px; background:color-mix(in srgb, var(--surf) 86%, transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2); background:var(--surf3)}
+
+/* ============================================================ shell */
+.shell{max-width:1340px; margin:0 auto; padding:60px 26px 120px;
+  display:grid; grid-template-columns:minmax(0,1fr); gap:0}
+@media(min-width:1080px){
+  .shell{grid-template-columns:246px minmax(0,1fr); gap:56px; padding-left:32px; padding-right:32px}
+}
+.rail{display:none}
+@media(min-width:1080px){
+  .rail{display:block; position:sticky; top:88px; align-self:start; max-height:calc(100vh - 120px); overflow-y:auto;
+    padding-right:6px; scrollbar-width:thin}
+  .rail .rl{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink3); margin:0 0 14px 12px}
+  .rail ol{list-style:none; margin:0; padding:0; position:relative}
+  .rail ol::before{content:""; position:absolute; left:4px; top:6px; bottom:6px; width:1px; background:var(--rule)}
+  .rail li{position:relative}
+  .rail a{display:block; padding:5px 0 5px 22px; font-size:13px; line-height:1.45; color:var(--ink3);
+    border:0; transition:.16s}
+  .rail a::before{content:""; position:absolute; left:1px; top:14px; width:7px; height:7px; border-radius:50%;
+    background:var(--rule2); transition:.16s}
+  .rail a:hover{color:var(--ink2)}
+  .rail a.on{color:var(--ink); font-weight:500}
+  .rail a.on::before{background:var(--land); box-shadow:0 0 0 3px var(--land-soft)}
+}
+main{min-width:0}
+
+/* ============================================================ hero */
+.hero{margin-bottom:64px}
+.kicker{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:22px}
+.tag{font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; padding:4px 9px; border-radius:6px;
+  border:1px solid var(--rule); color:var(--ink2); background:var(--surf2)}
+.tag.hl{color:var(--land-ink); border-color:var(--land); background:var(--land-soft)}
+.hero h1{font-size:clamp(2.1rem,4.6vw,3.5rem); font-weight:700; letter-spacing:-.025em; margin-bottom:6px}
+.hero .zh{font-size:clamp(1.05rem,2vw,1.4rem); color:var(--ink2); font-family:var(--font-display); font-weight:500;
+  letter-spacing:.01em; margin-bottom:22px}
+.hero .thesis{font-size:1.06rem; line-height:1.9; color:var(--ink2); max-width:66ch; margin-bottom:24px}
+.hero .thesis b{color:var(--ink)}
+.authors{font-size:13.5px; color:var(--ink3); line-height:1.75; max-width:70ch; margin-bottom:8px}
+.authors b{color:var(--ink2); font-weight:500}
+.links{display:flex; flex-wrap:wrap; gap:10px; margin-top:18px}
+.links a{font-family:var(--font-mono); font-size:12.5px; padding:7px 13px; border-radius:8px;
+  border:1px solid var(--rule); background:var(--surf2); color:var(--ink2)}
+.links a:hover{border-color:var(--rule2); color:var(--ink); background:var(--surf3)}
+
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(158px,1fr)); gap:1px; margin-top:34px;
+  background:var(--rule); border:1px solid var(--rule); border-radius:14px; overflow:hidden}
+.stat{background:var(--surf); padding:18px 18px 16px}
+.stat .lb{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.11em; text-transform:uppercase; color:var(--ink3)}
+.stat .vl{font-family:var(--font-display); font-size:1.85rem; font-weight:700; letter-spacing:-.02em; margin:6px 0 2px;
+  font-variant-numeric:tabular-nums}
+.stat .dl{font-size:12px; color:var(--ink3); line-height:1.5}
+.stat .dl b{color:var(--ok-ink); font-weight:600}
+
+/* ============================================================ sections */
+.sec{margin:0 0 76px; scroll-margin-top:88px}
+.eyebrow{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.eyebrow .n{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; color:var(--land-ink);
+  border:1px solid var(--land); background:var(--land-soft); padding:2px 8px; border-radius:5px}
+.eyebrow .t{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.19em; text-transform:uppercase; color:var(--ink3)}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec > h2{font-size:clamp(1.5rem,2.6vw,2rem); letter-spacing:-.02em; margin-bottom:18px}
+.sec h3{font-size:1.16rem; margin:44px 0 12px; letter-spacing:-.01em; display:flex; align-items:baseline; gap:10px}
+.sec h3 .ix{font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-weight:400}
+.sec h4{font-size:.98rem; margin:26px 0 8px; color:var(--ink2); font-weight:600}
+.prose p{max-width:74ch; margin:0 0 15px}
+.prose ul,.prose ol{max-width:74ch; margin:0 0 15px; padding-left:1.35em}
+.prose li{margin:0 0 7px}
+.prose li::marker{color:var(--ink3)}
+.lead{font-size:1.04rem; color:var(--ink2); max-width:70ch; margin-bottom:24px; line-height:1.9}
+
+/* ============================================================ roles */
+.rC{color:var(--ctrl-ink); font-weight:600}
+.rM{color:var(--mem-ink); font-weight:600}
+.rL{color:var(--land-ink); font-weight:600}
+.rB{color:var(--bad-ink); font-weight:600}
+.rO{color:var(--ok-ink); font-weight:600}
+
+/* ============================================================ math */
+.eqwrap{margin:24px 0; border:1px solid var(--rule); border-radius:14px; background:var(--surf); overflow:hidden}
+.eqwrap.acc-C{border-left:3px solid var(--ctrl)}
+.eqwrap.acc-M{border-left:3px solid var(--mem)}
+.eqwrap.acc-L{border-left:3px solid var(--land)}
+.eqwrap.acc-B{border-left:3px solid var(--bad)}
+.eqrow{display:flex; align-items:center; gap:16px; padding:20px 22px; overflow-x:auto}
+.eqrow .body{flex:1; min-width:0}
+.eqn{font-family:var(--font-math); font-size:1.08rem; line-height:2.1; white-space:nowrap}
+.eqn i{font-style:italic}
+.eqn .op{font-style:normal; padding:0 .18em}
+.eqn .fn{font-style:normal}
+.eqno{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); flex:none; align-self:flex-start; padding-top:6px}
+.eqcap{border-top:1px dashed var(--rule); padding:13px 22px 15px; font-size:14px; color:var(--ink2); background:var(--tint)}
+.eqcap b{color:var(--ink)}
+.eqn sub{font-size:.66em; vertical-align:-.28em; font-style:normal; font-family:var(--font-body)}
+.eqn sup{font-size:.62em; vertical-align:.5em; font-style:normal; font-family:var(--font-body)}
+.nowrapfix{white-space:normal}
+
+/* ============================================================ callouts */
+.call{margin:22px 0; padding:16px 18px; border-radius:12px; border:1px solid var(--rule);
+  background:var(--surf); font-size:14.6px; line-height:1.82; color:var(--ink2)}
+.call .hd{display:flex; align-items:center; gap:9px; font-family:var(--font-mono); font-size:11px;
+  letter-spacing:.13em; text-transform:uppercase; margin-bottom:8px}
+.call p{max-width:none; margin:0 0 10px}
+.call p:last-child{margin-bottom:0}
+.call b{color:var(--ink)}
+.call.key{border-color:var(--land); background:var(--land-soft)}
+.call.key .hd{color:var(--land-ink)}
+.call.warn{border-color:var(--bad); background:var(--bad-soft)}
+.call.warn .hd{color:var(--bad-ink)}
+.call.note .hd{color:var(--ink3)}
+.call.mine{border-color:var(--rule2); background:var(--surf2); border-left:3px solid var(--ink3)}
+.call.mine .hd{color:var(--ink3)}
+
+/* ============================================================ figures */
+figure{margin:30px 0; padding:0}
+.fig{background:var(--surf); border:1px solid var(--rule); border-radius:16px; padding:20px 20px 4px; box-shadow:var(--shadow)}
+.fig .fh{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:4px}
+.fig .fh .no{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3)}
+.fig .fh .ti{font-family:var(--font-display); font-weight:600; font-size:15px}
+.figbody{overflow-x:auto; padding:10px 0 4px}
+.fig svg{display:block; max-width:100%; height:auto; margin:0 auto}
+.figbody svg, .chart svg{min-width:620px}
+.chart > div{overflow-x:auto}
+figcaption{font-size:13px; color:var(--ink3); line-height:1.72; padding:12px 2px 16px; border-top:1px dashed var(--rule); margin-top:8px}
+figcaption b{color:var(--ink2); font-weight:500}
+
+/* svg semantic classes */
+.s-ink{stroke:var(--ink2)} .s-ink3{stroke:var(--ink3)} .s-rule{stroke:var(--rule2)} .s-rule1{stroke:var(--rule)}
+.f-ink{fill:var(--ink)} .f-ink2{fill:var(--ink2)} .f-ink3{fill:var(--ink3)}
+.s-C{stroke:var(--ctrl)} .f-C{fill:var(--ctrl)} .f-Ci{fill:var(--ctrl-ink)} .fs-C{fill:var(--ctrl-soft)}
+.s-M{stroke:var(--mem)} .f-M{fill:var(--mem)} .f-Mi{fill:var(--mem-ink)} .fs-M{fill:var(--mem-soft)}
+.s-L{stroke:var(--land)} .f-L{fill:var(--land)} .f-Li{fill:var(--land-ink)} .fs-L{fill:var(--land-soft)}
+.s-B{stroke:var(--bad)} .f-B{fill:var(--bad)} .f-Bi{fill:var(--bad-ink)} .fs-B{fill:var(--bad-soft)}
+.s-O{stroke:var(--ok)} .f-O{fill:var(--ok)} .f-Oi{fill:var(--ok-ink)} .fs-O{fill:var(--ok-soft)}
+.f-surf{fill:var(--surf)} .f-surf2{fill:var(--surf2)} .f-surf3{fill:var(--surf3)} .f-grain{fill:var(--ink3)}
+.f-tint{fill:var(--tint)}
+.mk-C{fill:var(--ctrl)} .mk-M{fill:var(--mem)} .mk-L{fill:var(--land)}
+.mk-B{fill:var(--bad)} .mk-I{fill:var(--ink3)} .mk-O{fill:var(--ok)}
+svg text{font-family:var(--font-body); font-size:12px}
+svg .mono{font-family:var(--font-mono)}
+svg .lbl{font-size:11.5px}
+svg .sml{font-size:10px; letter-spacing:.08em}
+svg .big{font-size:13px; font-weight:600}
+.nofill{fill:none}
+
+/* ============================================================ tabs / steppers */
+.tabs{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px}
+.tab{font-family:var(--font-body); font-size:13px; padding:7px 13px; border-radius:9px; cursor:pointer;
+  border:1px solid var(--rule); background:var(--surf2); color:var(--ink2); transition:.16s; font-weight:500}
+.tab:hover{color:var(--ink); border-color:var(--rule2)}
+.tab[aria-selected="true"]{background:var(--land-soft); border-color:var(--land); color:var(--land-ink)}
+.tabpanel[hidden]{display:none}
+
+.stepbar{display:flex; gap:4px; flex-wrap:wrap; margin-bottom:14px}
+.stepbtn{font-family:var(--font-mono); font-size:11.5px; padding:6px 10px; border-radius:8px; cursor:pointer;
+  border:1px solid var(--rule); background:var(--surf2); color:var(--ink3); transition:.16s}
+.stepbtn:hover{color:var(--ink2)}
+.stepbtn.on{background:var(--land); border-color:var(--land); color:#fff}
+:root[data-theme="light"] .stepbtn.on{color:#fff}
+.stepinfo{border:1px solid var(--rule); border-radius:12px; background:var(--surf2); padding:15px 17px; margin-top:6px;
+  font-size:14.4px; line-height:1.8; color:var(--ink2); min-height:96px}
+.stepinfo h5{margin:0 0 6px; font-family:var(--font-display); font-size:14.5px; color:var(--ink); font-weight:600}
+.stepinfo .eqmini{font-family:var(--font-math); font-size:.98rem; color:var(--ink); margin-top:8px; display:block; overflow-x:auto}
+.dim{opacity:.16; transition:opacity .3s}
+.lit{opacity:1; transition:opacity .3s}
+
+/* ============================================================ controls */
+.ctl{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:8px 0 4px;
+  padding:12px 14px; border:1px solid var(--rule); border-radius:11px; background:var(--surf2)}
+.ctl label{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink3)}
+.ctl .grow{flex:1; min-width:120px; display:flex; align-items:center; gap:10px}
+input[type=range]{-webkit-appearance:none; appearance:none; height:4px; border-radius:3px; background:var(--rule2);
+  flex:1; min-width:110px; outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:17px; height:17px; border-radius:50%;
+  background:var(--land); border:2px solid var(--surf); cursor:pointer; box-shadow:0 0 0 1px var(--land)}
+input[type=range]::-moz-range-thumb{width:15px; height:15px; border-radius:50%; background:var(--land);
+  border:2px solid var(--surf); cursor:pointer}
+.readout{font-family:var(--font-mono); font-size:13px; color:var(--ink); font-variant-numeric:tabular-nums;
+  background:var(--surf3); border:1px solid var(--rule); padding:4px 10px; border-radius:7px; white-space:nowrap}
+.mini{font-family:var(--font-mono); font-size:11.5px; padding:6px 11px; border-radius:8px; cursor:pointer;
+  border:1px solid var(--rule); background:var(--surf3); color:var(--ink2); transition:.16s}
+.mini:hover{color:var(--ink); border-color:var(--rule2)}
+.mini.on{background:var(--land); border-color:var(--land); color:#fff}
+.seg{display:inline-flex; gap:0; border:1px solid var(--rule); border-radius:9px; overflow:hidden; background:var(--surf3)}
+.seg button{font-family:var(--font-mono); font-size:11.5px; padding:6px 11px; border:0; cursor:pointer;
+  background:transparent; color:var(--ink3); transition:.16s; border-right:1px solid var(--rule)}
+.seg button:last-child{border-right:0}
+.seg button:hover{color:var(--ink)}
+.seg button.on{background:var(--land); color:#fff}
+
+/* ============================================================ tables */
+.tblwrap{overflow-x:auto; border:1px solid var(--rule); border-radius:14px; background:var(--surf); margin:20px 0}
+table{border-collapse:collapse; width:100%; font-size:13.2px; font-variant-numeric:tabular-nums}
+caption{text-align:left; padding:14px 18px 0; font-size:13px; color:var(--ink3); caption-side:top}
+th,td{padding:9px 13px; text-align:right; border-bottom:1px solid var(--rule); white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--ink3); font-weight:500; background:var(--surf2); position:sticky; top:0}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--tint)}
+td.best{font-weight:700; color:var(--ink)}
+td.second{text-decoration:underline; text-underline-offset:3px; color:var(--ink)}
+tr.ours td{background:var(--land-soft)}
+tr.ours:hover td{background:var(--land-soft)}
+tr.ours td:first-child{font-weight:600; color:var(--land-ink)}
+tr.grp td{background:var(--surf2); font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--ink3); text-align:left}
+.mdot{display:inline-block; width:9px; height:9px; border-radius:3px; margin-right:8px; vertical-align:-1px}
+.tnote{font-size:12.4px; color:var(--ink3); padding:10px 18px 14px; line-height:1.7}
+
+/* ============================================================ chart */
+.chart{margin:6px 0}
+.chart .ctitle{font-family:var(--font-display); font-weight:600; font-size:14px; margin-bottom:2px}
+.chart .csub{font-size:12px; color:var(--ink3); margin-bottom:12px}
+.tip{position:fixed; z-index:300; pointer-events:none; background:var(--surf); border:1px solid var(--rule2);
+  border-radius:9px; padding:8px 11px; font-size:12.5px; box-shadow:var(--shadow); color:var(--ink);
+  font-variant-numeric:tabular-nums; opacity:0; transition:opacity .12s; max-width:280px}
+.tip b{display:block; font-size:11px; color:var(--ink3); font-weight:500; margin-bottom:3px;
+  font-family:var(--font-mono); letter-spacing:.06em; text-transform:uppercase}
+.legend{display:flex; gap:16px; flex-wrap:wrap; font-size:12.5px; color:var(--ink2); margin:12px 0 2px}
+.legend span{display:inline-flex; align-items:center; gap:7px}
+
+/* ============================================================ grids / cards */
+.grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; margin:20px 0}
+.grid3{display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:14px; margin:20px 0}
+.card{border:1px solid var(--rule); border-radius:13px; background:var(--surf); padding:16px 17px}
+.card h5{margin:0 0 7px; font-family:var(--font-display); font-size:14.5px; font-weight:600}
+.card p{font-size:14px; color:var(--ink2); line-height:1.78; margin:0}
+.card p + p{margin-top:9px}
+.card .mono{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); letter-spacing:.06em}
+.card.cc{border-top:3px solid var(--ctrl)}
+.card.mm{border-top:3px solid var(--mem)}
+.card.ll{border-top:3px solid var(--land)}
+.card.bb{border-top:3px solid var(--bad)}
+.card.oo{border-top:3px solid var(--ok)}
+
+/* ============================================================ algorithm */
+.algo{border:1px solid var(--rule); border-radius:14px; background:var(--surf); overflow:hidden; margin:22px 0}
+.algo .ah{padding:12px 18px; border-bottom:1px solid var(--rule); background:var(--surf2);
+  font-family:var(--font-mono); font-size:11.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3)}
+.algo ol{list-style:none; margin:0; padding:8px 0; counter-reset:ln}
+.algo li{counter-increment:ln; display:grid; grid-template-columns:38px 1fr; gap:12px; padding:5px 18px;
+  font-family:var(--font-mono); font-size:12.8px; line-height:1.72; color:var(--ink2)}
+.algo li::before{content:counter(ln); color:var(--ink3); text-align:right; font-size:11px; padding-top:2px}
+.algo li.cmt{color:var(--ink3); font-style:italic}
+.algo li.cmt::before{content:""}
+.algo li b{color:var(--ink); font-weight:600}
+.algo li .cm{color:var(--land-ink)}
+.algo li:hover{background:var(--tint)}
+.algo .an{padding:12px 18px; border-top:1px dashed var(--rule); font-size:13px; color:var(--ink3); font-family:var(--font-body)}
+
+/* ============================================================ notation */
+.nota{display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:1px; background:var(--rule);
+  border:1px solid var(--rule); border-radius:13px; overflow:hidden; margin:20px 0}
+.nota div{background:var(--surf); padding:11px 14px; display:flex; gap:12px; align-items:baseline}
+.nota .sym{font-family:var(--font-math); font-size:1rem; color:var(--ink); flex:none; min-width:74px}
+.nota .dsc{font-size:13px; color:var(--ink2); line-height:1.6}
+
+/* ============================================================ details */
+details{border:1px solid var(--rule); border-radius:12px; background:var(--surf); margin:14px 0; overflow:hidden}
+summary{cursor:pointer; padding:13px 17px; font-size:14px; font-weight:500; color:var(--ink2); list-style:none;
+  display:flex; align-items:center; gap:10px; user-select:none}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"＋"; font-family:var(--font-mono); color:var(--ink3); font-size:13px}
+details[open] summary::before{content:"−"}
+summary:hover{color:var(--ink); background:var(--tint)}
+details .dc{padding:4px 17px 16px; font-size:14px; color:var(--ink2); line-height:1.82; border-top:1px solid var(--rule)}
+details .dc p{margin:10px 0}
+details .dc pre{font-family:var(--font-mono); font-size:11.8px; line-height:1.68; white-space:pre-wrap;
+  background:var(--surf2); border:1px solid var(--rule); border-radius:9px; padding:13px 14px; color:var(--ink2);
+  overflow-x:auto; margin:10px 0}
+
+/* ============================================================ footer */
+footer{border-top:1px solid var(--rule); margin-top:80px; padding-top:26px; font-size:13px; color:var(--ink3); line-height:1.8}
+footer a{color:var(--ink2)}
+.toTop{position:fixed; right:22px; bottom:22px; z-index:140; opacity:0; pointer-events:none; transition:.2s}
+.toTop.show{opacity:1; pointer-events:auto}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms !important; transition-duration:.001ms !important}
+  html{scroll-behavior:auto}
+}
+@media print{
+  .top,.rail,.toTop,#prog{display:none}
+  body{background:#fff; color:#000}
+}
+</style>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">ReWorld<em>长时记忆交互世界模型 · 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<!-- shared SVG defs (same document, referenced by fragment id) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <marker id="ar-i" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-I"/></marker>
+  <marker id="ar-c" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-C"/></marker>
+  <marker id="ar-m" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-M"/></marker>
+  <marker id="ar-l" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-L"/></marker>
+  <marker id="ar-b" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-B"/></marker>
+  <marker id="ar-o" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-O"/></marker>
+  <pattern id="grain" width="7" height="7" patternUnits="userSpaceOnUse">
+    <circle cx="1.6" cy="1.6" r=".85" class="f-grain"/>
+    <circle cx="5.1" cy="3.4" r=".68" class="f-grain"/>
+    <circle cx="2.9" cy="5.6" r=".6" class="f-grain"/>
+    <circle cx="6.2" cy="6.4" r=".45" class="f-grain"/>
+  </pattern>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" class="s-rule" stroke-width="2.2"/>
+  </pattern>
+</defs></svg>
+
+<div class="shell">
+
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-tldr">00 · 一图看懂</a></li>
+    <li><a href="#s-problem">01 · 控制与记忆为何互相拆台</a></li>
+    <li><a href="#s-backbone">02 · 骨架：分块因果流匹配</a></li>
+    <li><a href="#s-mrope">03 · MRoPE：位姿即索引</a></li>
+    <li><a href="#s-action">04 · Plücker 动作注入</a></li>
+    <li><a href="#s-split">05 · 混合窗口 + 随机头路由</a></li>
+    <li><a href="#s-bank">06 · 定额 KV 下的记忆固化</a></li>
+    <li><a href="#s-drop">07 · Chunk-drop 训练</a></li>
+    <li><a href="#s-dmd">08 · 四步实时化 LoRA</a></li>
+    <li><a href="#s-data">09 · 八源语料与米制对齐</a></li>
+    <li><a href="#s-exp">10 · 三轴评测结果</a></li>
+    <li><a href="#s-abl">11 · 消融：谁贡献了什么</a></li>
+    <li><a href="#s-crit">12 · 局限与保留意见</a></li>
+    <li><a href="#s-repo">13 · 与本仓库的关联</a></li>
+    <li><a href="#s-appendix">14 · 附录速查</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <div class="kicker">
+    <span class="tag">arXiv 2608.23565v1</span>
+    <span class="tag">cs.AI · 2026-08-24</span>
+    <span class="tag">Preprint</span>
+    <span class="tag hl">交互式世界模型 / 长时记忆</span>
+  </div>
+  <h1>ReWorld</h1>
+  <p class="zh">带长时记忆的交互式世界模型：把「控制」和「记忆」按注意力窗口拆开训练，再在推理期用定额 KV 把整段历史压回常数成本</p>
+  <p class="thesis">一个可交互的世界模型要同时做到三件事：<b>响应</b>当前按键、<b>记住</b>已经生成过的地方、并且<b>实时</b>流式输出。
+  矛盾是结构性的——<span class="rC">控制</span>只需要一个短窗口，<span class="rM">记忆</span>却要一个无界窗口，而流式部署强迫你把窗口钉死成常数。
+  ReWorld 的两步解法是：训练期让<b>不同注意力头在不同窗口下学习</b>并每步随机换岗，推理期让老 chunk <span class="rL">固化进一个有界的 landmark bank</span>、按位姿就近召回。
+  全程<b>不加参数、不加损失、不加模块</b>。</p>
+
+  <p class="authors"><b>Zhifei Chen</b>*, <b>Luozhou Wang</b>*, Guibao Shen, Dongyu Yan, Shuai Yang, Tianshuo Xu, Yihua Du, Wei Wang, Tianyi Gui, Lianghua Huang, Yingcong Chen<sup>†</sup></p>
+  <p class="authors">香港科技大学（广州） · 阿里巴巴 ATH　　<span style="opacity:.75">*共同一作　†通讯作者　（工作于阿里巴巴实习期间完成）</span></p>
+
+  <div class="links">
+    <a href="https://arxiv.org/abs/2608.23565" target="_blank" rel="noopener">arXiv 摘要 ↗</a>
+    <a href="https://arxiv.org/pdf/2608.23565" target="_blank" rel="noopener">PDF ↗</a>
+    <a href="https://zhifeichen097.github.io/ReWorld/" target="_blank" rel="noopener">项目主页 ↗</a>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="lb">控制精度 · RotErr</div>
+      <div class="vl">11.95°</div>
+      <div class="dl">七个方法里<b>最低</b>；次低 12.59（LingBot）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">定额 KV 预算</div>
+      <div class="vl">B = 12</div>
+      <div class="dl">1 sink + 5 recent + 6 landmark；64 s / 384 latents 仍能回到起始视角</div>
+    </div>
+    <div class="stat">
+      <div class="lb">VBench 七维均值</div>
+      <div class="vl">0.850</div>
+      <div class="dl">七个方法里<b>最高</b>；无单项称王</div>
+    </div>
+    <div class="stat">
+      <div class="lb">训练语料</div>
+      <div class="vl">220,724</div>
+      <div class="dl">8 个来源 · 统一到同一把物理尺子</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 00 TL;DR -->
+<section class="sec" id="s-tldr">
+  <div class="eyebrow"><span class="n">00</span><span class="t">TL;DR</span><span class="line"></span></div>
+  <h2>一图看懂：一个装不下的窗口，两步拆解</h2>
+  <p class="lead">整篇论文的技术张力只在一件事上：<strong>注意力窗口该开多长？</strong>
+  控制要短（当前场景 + 当前指令就够了，且不能依赖窗口长度），记忆要长（看不见远处就无从检索），
+  而流式部署强行把窗口钉成一个常数。ReWorld 不去发明新模块，而是把这三个互斥的需求分配到<b>不同的位置</b>：
+  窗口的矛盾丢给<b>训练期的注意力头</b>去分工，容量的矛盾丢给<b>推理期的缓存策略</b>去消化。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 1</span><span class="ti">冲突在哪，以及两步解法各解决了什么</span></div>
+    <div class="tabs" role="tablist" aria-label="总览">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="p1a" id="t1a">(a) 结构性冲突</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p1b" id="t1b">(b) 第一步 · 训练期按窗口拆</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p1c" id="t1c">(c) 第二步 · 推理期定额固化</button>
+    </div>
+
+    <div class="figbody">
+    <!-- ---------------- panel a ---------------- -->
+    <div class="tabpanel" id="p1a" role="tabpanel" aria-labelledby="t1a">
+    <svg viewBox="0 0 720 292" role="img" aria-label="控制需要短窗口、记忆需要无界窗口、流式部署要求有界窗口，三者互斥">
+      <!-- axis -->
+      <line x1="96" y1="250" x2="676" y2="250" class="s-rule" stroke-width="1.2"/>
+      <text x="96" y="268" class="f-ink3 sml mono">rollout 起点（最早）</text>
+      <text x="676" y="268" class="f-ink3 sml mono" text-anchor="end">当前 chunk</text>
+      <text x="386" y="284" class="f-ink3 sml" text-anchor="middle">← 注意力可见的历史长度 →</text>
+
+      <!-- row 1 control -->
+      <text x="88" y="52" class="f-Ci big" text-anchor="end">① 响应</text>
+      <text x="88" y="68" class="f-ink3 sml" text-anchor="end">按键要在下一帧生效</text>
+      <rect x="556" y="34" width="120" height="40" rx="10" class="fs-C s-C" stroke-width="1.6"/>
+      <text x="616" y="58" class="f-Ci lbl" text-anchor="middle">最近 3 个 chunk</text>
+      <line x1="96" y1="54" x2="548" y2="54" class="s-ink3" stroke-width="1" stroke-dasharray="2 6"/>
+      <text x="320" y="50" class="f-ink3 sml" text-anchor="middle">再长也没有额外信息</text>
+      <text x="688" y="58" class="f-Ci sml mono" text-anchor="start" transform="translate(-4,0)">w=12</text>
+
+      <!-- row 2 memory -->
+      <text x="88" y="114" class="f-Mi big" text-anchor="end">② 记忆</text>
+      <text x="88" y="130" class="f-ink3 sml" text-anchor="end">回到旧地要长得一样</text>
+      <rect x="96" y="96" width="580" height="40" rx="10" class="fs-M s-M" stroke-width="1.6"/>
+      <text x="386" y="120" class="f-Mi lbl" text-anchor="middle">必须能看见任意远的过去，否则「无从检索」</text>
+
+      <!-- row 3 stream -->
+      <text x="88" y="176" class="f-Bi big" text-anchor="end">③ 流式</text>
+      <text x="88" y="192" class="f-ink3 sml" text-anchor="end">显存必须是常数</text>
+      <rect x="96" y="158" width="424" height="40" rx="10" fill="url(#hatch)" opacity=".5"/>
+      <rect x="96" y="158" width="424" height="40" rx="10" class="nofill s-rule" stroke-width="1" stroke-dasharray="4 4"/>
+      <text x="308" y="182" class="f-ink3 lbl" text-anchor="middle">显存装不下 · 720p 下远早于测试 horizon 就 OOM</text>
+      <rect x="524" y="158" width="152" height="40" rx="10" class="fs-B s-B" stroke-width="1.6"/>
+      <text x="600" y="182" class="f-Bi lbl" text-anchor="middle">只能留下 B 个 chunk</text>
+
+      <!-- conflict brace -->
+      <path d="M 96 214 L 96 222 L 676 222 L 676 214" class="nofill s-rule" stroke-width="1.2"/>
+      <text x="386" y="240" class="f-ink2 lbl" text-anchor="middle">② 与 ③ 直接冲突；① 又不允许依赖窗口长度 —— 三者不能同时满足</text>
+    </svg>
+    </div>
+
+    <!-- ---------------- panel b ---------------- -->
+    <div class="tabpanel" id="p1b" role="tabpanel" aria-labelledby="t1b" hidden>
+    <svg viewBox="0 0 720 292" role="img" aria-label="训练期把 24 个注意力头拆成 18 个局部头和 6 个全局头，并每个优化步切换一次分组">
+      <text x="24" y="28" class="f-ink big">每个 transformer block 的 H=24 个注意力头</text>
+      <text x="24" y="46" class="f-ink3 sml">同一次迭代里同时提供两种窗口长度</text>
+
+      <!-- local heads block -->
+      <rect x="24" y="60" width="300" height="128" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="40" y="82" class="f-Ci big">18 个局部头</text>
+      <text x="40" y="99" class="f-ink3 sml mono">context = 最近 w=12 latent frames（3 chunk）</text>
+      <g id="f1b-local"></g>
+      <text x="40" y="176" class="f-ink2 sml">→ 控制在这里被学会，且必须在短窗口内自洽</text>
+
+      <!-- global heads block -->
+      <rect x="344" y="60" width="180" height="128" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="360" y="82" class="f-Mi big">6 个全局头</text>
+      <text x="360" y="99" class="f-ink3 sml mono">context = 完整因果历史</text>
+      <g id="f1b-global"></g>
+      <text x="360" y="176" class="f-ink2 sml">→ 只有它们看得见远处，</text>
+      <text x="360" y="190" class="f-ink2 sml">　 检索只能长在这里</text>
+
+      <!-- routing -->
+      <rect x="544" y="60" width="152" height="128" rx="12" class="fs-L s-L" stroke-width="1.4"/>
+      <text x="560" y="82" class="f-Li big">随机头路由</text>
+      <text x="560" y="100" class="f-ink2 sml">固定池 |P| = 12 组</text>
+      <text x="560" y="115" class="f-ink2 sml">每个 optimizer step</text>
+      <text x="560" y="130" class="f-ink2 sml">换下一组</text>
+      <text x="560" y="152" class="f-Li sml mono">1 : 3 比例不变</text>
+      <text x="560" y="172" class="f-ink3 sml">没有哪个头是</text>
+      <text x="560" y="186" class="f-ink3 sml">「专职记忆头」</text>
+
+      <path d="M 528 124 L 540 124" class="nofill s-L" stroke-width="1.6" marker-end="url(#ar-l)"/>
+      <path d="M 328 124 L 340 124" class="nofill s-rule" stroke-width="1.4"/>
+
+      <!-- why -->
+      <rect x="24" y="204" width="672" height="66" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="40" y="226" class="f-ink big">为什么必须换岗？</text>
+      <text x="40" y="245" class="f-ink2 lbl">推理期这套按头分窗口的结构<tspan class="f-Bi" font-weight="600">根本无法实现</tspan>——完整历史已经不存在，所有头读的是同一个有界 cache。</text>
+      <text x="40" y="262" class="f-ink2 lbl">固定分组会把某些头训练成依赖部署给不了的窗口；换岗让每个头都在两种角色里待过，任何头都能读那个共享 cache。</text>
+    </svg>
+    </div>
+
+    <!-- ---------------- panel c ---------------- -->
+    <div class="tabpanel" id="p1c" role="tabpanel" aria-labelledby="t1c" hidden>
+    <svg viewBox="0 0 720 292" role="img" aria-label="推理期定额 KV cache 由 1 个 sink、6 个按位姿检索的 landmark 和 5 个最近 chunk 组成，老 chunk 固化进有界 landmark bank">
+      <text x="24" y="26" class="f-ink big">固定预算 B = 12 个 chunk，永远只有这 12 格</text>
+
+      <!-- cache slots -->
+      <g id="f1c-slots"></g>
+      <text x="24" y="52" class="f-ink3 sml mono">device 上的 KV cache C<tspan dy="3" font-size="8">k</tspan></text>
+
+      <!-- bank -->
+      <rect x="24" y="140" width="404" height="94" rx="12" class="fs-L s-L" stroke-width="1.4"/>
+      <text x="40" y="162" class="f-Li big">landmark bank ℳ（host memory，|ℳ| ≤ K = 30）</text>
+      <g id="f1c-bank"></g>
+      <text x="40" y="226" class="f-ink3 sml">全分辨率保存，不做 pooling / merge / token 剪枝</text>
+
+      <!-- flows -->
+      <path d="M 466 176 C 502 172, 514 138, 542 116" class="nofill s-L" stroke-width="1.8" marker-end="url(#ar-l)"/>
+      <text x="470" y="196" class="f-Li lbl">② 检索：位姿最近的 6 个回到 cache</text>
+
+      <path d="M 176 118 C 160 128, 140 132, 120 138" class="nofill s-O" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ar-o)"/>
+      <text x="196" y="126" class="f-Oi lbl">① 固化：滑出 recent 窗口的 chunk</text>
+      <text x="196" y="141" class="f-ink3 sml">里程计规则决定是否入库（走够 δ 才存）</text>
+
+      <rect x="452" y="212" width="244" height="58" rx="11" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="466" y="232" class="f-ink lbl" font-weight="600">③ 满了就淘汰</text>
+      <text x="466" y="249" class="f-ink2 sml">踢掉位姿空间上最冗余的成员</text>
+      <text x="466" y="263" class="f-ink2 sml">（最近邻距离最小者）；前两个永不淘汰</text>
+
+      <text x="24" y="252" class="f-ink3 sml">device 显存 = O(B)，与 rollout 长度无关；</text>
+      <text x="24" y="266" class="f-ink3 sml">landmark 传输走独立 stream 预取，与去噪重叠。</text>
+    </svg>
+    </div>
+    </div>
+
+    <figcaption><b>三个面板对应论文的三张结构图（Fig. 2–4）的核心信息，按我的理解重绘。</b>
+    (a) 说明为什么这不是一个可以靠「调大 context」解决的问题；(b) 是 Sec. 2.2 的训练侧设计；(c) 是 Sec. 2.3 的推理侧设计。
+    值得注意的是：(b) 里的按头分窗口<b>只存在于训练期</b>，评测时所有头一视同仁地读同一个有界 cache（Sec. 4.1 原文明确说明）。</figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card cc">
+      <p class="mono">CONTROL</p>
+      <h5>动作注入 + 局部头</h5>
+      <p>每个 latent frame 的指令位姿展开成 <b>Plücker 射线图</b>，经 MLP 加到 patch embedding 上。18 个局部头只看最近 12 帧，
+      逼迫「控制」在短窗口内闭环。</p>
+    </div>
+    <div class="card mm">
+      <p class="mono">MEMORY</p>
+      <h5>MRoPE + 全局头</h5>
+      <p>位姿被写进注意力的<b>索引</b>本身：相位差取代时间距离，相似视角天然靠拢。6 个全局头是唯一能看到远处的通道，检索只能在那里长出来。</p>
+    </div>
+    <div class="card ll">
+      <p class="mono">CONSOLIDATION</p>
+      <h5>landmark bank + chunk-drop</h5>
+      <p>老 chunk 按<b>里程</b>入库、按<b>冗余</b>淘汰、按<b>位姿</b>召回；训练期随机丢 chunk，让这种稀疏拼接的 cache 变成分布内输入。</p>
+    </div>
+  </div>
+
+  <div class="call key">
+    <div class="hd">◆ 如果只记三件事</div>
+    <p><b>1.</b> 控制和记忆放一起训会互相拆台：加了动作注入，所有控制指标都变好，但 revisit SSIM 从 0.3898 掉到 0.3376（Tab. 7）。这是全文的出发点。</p>
+    <p><b>2.</b> 解法不是加模块，而是<b>让不同的头在不同窗口下学习</b>，再用每步换岗把能力从具体的头上解绑——因为部署时给不了「按头分窗口」这种结构。</p>
+    <p><b>3.</b> 推理期的 12 格 cache 不靠压缩，靠<b>选择</b>：少存、但存完整的，并且按位姿召回。到 k=384 时它比滑动窗口高 8%（0.3752 vs 0.3476），而 full-KV 早就 OOM 了。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 01 PROBLEM -->
+<section class="sec" id="s-problem">
+  <div class="eyebrow"><span class="n">01</span><span class="t">The Tension</span><span class="line"></span></div>
+  <h2>控制与记忆为什么会互相拆台</h2>
+  <p class="lead">交互式世界模型这条线上的预期已经收敛成三条：<b>react</b>（按键要在紧接的几帧里反映出来）、
+  <b>remember</b>（回到旧地时它得长得和之前一样）、<b>stream</b>（在无界 rollout 上保持交互帧率）。
+  论文的观察是：把「控制」和「记忆」放在一起训练时，<span class="rC">控制学得很好，记忆学不起来</span>——而且这不是调参问题。</p>
+
+  <h3><span class="ix">1.1</span>现有系统的两条轴</h3>
+  <div class="prose">
+    <p>论文把已有工作沿两条轴归了类，这个归类对理解 ReWorld 的位置很关键：</p>
+    <ul>
+      <li><b>控制</b>有两条路线：一条把相机位姿<b>折进注意力</b>，让 attention logits 依赖相对位姿（E-PRoPE / PM-RoPE 一系）；另一条<b>直接注入显式动作信号</b>（HY-WorldPlay、Matrix-Game 3.0 一系）。</li>
+      <li><b>记忆</b>几乎都以相机位姿作检索键，有三种形态：<b>挑选哪些历史帧重新进入 context</b>（Context-as-Memory）、<b>索引一个外部记忆库</b>（WorldMem、Long-term Spatial Memory）、或者<b>让位姿进入注意力索引本身</b>（PM-RoPE）。</li>
+    </ul>
+    <p>ReWorld 的选择是<b>两个条件通道都要</b>：MRoPE 负责「按位姿找到缓存里的内容」，动作注入负责「说清楚这一步的指令」。
+    但两者编码的是同一条轨迹，当每个头都同时收到两者时，<b>动作信号会把位姿检索挤掉</b>。</p>
+  </div>
+
+  <h3><span class="ix">1.2</span>干扰是可测量的：论文自己的证据</h3>
+  <p class="lead">Table 7 是全文最重要的一张表——它不是结果表，而是<b>动机表</b>。三个变体在同一协议下训练，只改动作/位姿的融合方式。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 2</span><span class="ti">控制—记忆权衡平面（论文 Tab. 7 数值重绘）</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 296" role="img" aria-label="以 RotErr 为横轴、revisit SSIM 为纵轴的散点：MRoPE only 记忆好控制差，Action+MRoPE 控制好记忆差，Routing 同时占住两者">
+      <!-- frame -->
+      <rect x="90" y="34" width="550" height="186" class="nofill s-rule1" stroke-width="1"/>
+      <!-- gridlines -->
+      <line x1="90" y1="79" x2="640" y2="79" class="s-rule1" stroke-width=".8" stroke-dasharray="2 5"/>
+      <line x1="90" y1="124" x2="640" y2="124" class="s-rule1" stroke-width=".8" stroke-dasharray="2 5"/>
+      <line x1="90" y1="169" x2="640" y2="169" class="s-rule1" stroke-width=".8" stroke-dasharray="2 5"/>
+      <line x1="217" y1="34" x2="217" y2="220" class="s-rule1" stroke-width=".8" stroke-dasharray="2 5"/>
+      <line x1="344" y1="34" x2="344" y2="220" class="s-rule1" stroke-width=".8" stroke-dasharray="2 5"/>
+      <line x1="471" y1="34" x2="471" y2="220" class="s-rule1" stroke-width=".8" stroke-dasharray="2 5"/>
+      <line x1="598" y1="34" x2="598" y2="220" class="s-rule1" stroke-width=".8" stroke-dasharray="2 5"/>
+
+      <!-- y axis labels -->
+      <text x="82" y="224" class="f-ink3 sml mono" text-anchor="end">0.320</text>
+      <text x="82" y="173" class="f-ink3 sml mono" text-anchor="end">0.340</text>
+      <text x="82" y="128" class="f-ink3 sml mono" text-anchor="end">0.360</text>
+      <text x="82" y="83" class="f-ink3 sml mono" text-anchor="end">0.380</text>
+      <text x="82" y="38" class="f-ink3 sml mono" text-anchor="end">0.400</text>
+      <text x="26" y="130" class="f-Mi lbl" text-anchor="middle" transform="rotate(-90 26 130)">revisit SSIM ↑（记忆）</text>
+
+      <!-- x axis labels -->
+      <text x="90" y="238" class="f-ink3 sml mono" text-anchor="middle">12.0</text>
+      <text x="217" y="238" class="f-ink3 sml mono" text-anchor="middle">13.5</text>
+      <text x="344" y="238" class="f-ink3 sml mono" text-anchor="middle">15.0</text>
+      <text x="471" y="238" class="f-ink3 sml mono" text-anchor="middle">16.5</text>
+      <text x="598" y="238" class="f-ink3 sml mono" text-anchor="middle">18.0</text>
+      <text x="365" y="258" class="f-Ci lbl" text-anchor="middle">RotErr ° ↓（控制）　　← 越靠左越好</text>
+
+      <!-- ideal corner -->
+      <path d="M 96 40 L 150 40 M 96 40 L 96 78" class="nofill s-O" stroke-width="2"/>
+      <text x="158" y="46" class="f-Oi sml">理想角落：控制准 + 记得住</text>
+
+      <!-- arrows between points -->
+      <path d="M 556 68 C 430 62, 300 120, 208 174" class="nofill s-B" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#ar-b)"/>
+      <text x="392" y="104" class="f-Bi lbl" text-anchor="middle">＋动作注入</text>
+      <text x="392" y="119" class="f-ink3 sml" text-anchor="middle">控制全面变好，记忆掉了 13%</text>
+
+      <path d="M 190 172 C 172 150, 168 124, 170 106" class="nofill s-O" stroke-width="1.8" marker-end="url(#ar-o)"/>
+      <text x="112" y="150" class="f-Oi lbl">＋随机头路由</text>
+      <text x="112" y="165" class="f-ink3 sml">记忆回来 11%</text>
+      <text x="112" y="179" class="f-ink3 sml">控制还略好了一点</text>
+
+      <!-- points -->
+      <circle cx="569" cy="63" r="8" class="f-M"/>
+      <text x="569" y="46" class="f-Mi lbl" text-anchor="middle">MRoPE only</text>
+      <text x="569" y="86" class="f-ink3 sml mono" text-anchor="middle">17.66° / 0.3898</text>
+
+      <circle cx="192" cy="180" r="8" class="f-C"/>
+      <text x="212" y="200" class="f-Ci lbl" text-anchor="start">Action + MRoPE</text>
+      <text x="212" y="214" class="f-ink3 sml mono" text-anchor="start">13.21° / 0.3376</text>
+
+      <circle cx="170" cy="96" r="10" class="nofill s-L" stroke-width="2.6"/>
+      <circle cx="170" cy="96" r="4" class="f-L"/>
+      <text x="190" y="92" class="f-Li lbl" text-anchor="start">Routing（本文）</text>
+      <text x="190" y="106" class="f-ink3 sml mono" text-anchor="start">12.94° / 0.3752</text>
+    </svg>
+    </div>
+    <figcaption>三个变体在同一协议下训练，在长 rollout 记忆测试上评测。
+    <b>数值观察：</b>Routing 的 revisit SSIM(0.3752) 与 Tab. 6 里「+CD+RH（ours）」在 <b>k=384</b> 的数值完全一致，
+    据此可以推断 Tab. 7 的 revisit SSIM 报的是最长 rollout 长度——这是我的推断，论文没有明说。
+    另外注意 Routing 的控制指标（12.94° / 0.093 / 0.346）实际上<b>全面优于</b>不路由的 Action+MRoPE（13.21° / 0.107 / 0.371），
+    论文措辞是「matches」，读起来偏保守。</figcaption>
+  </figure>
+
+  <div class="tblwrap">
+    <table>
+      <caption>Table 7 · 控制—记忆解耦研究（原文数值，↓ 越低越好，↑ 越高越好）</caption>
+      <thead><tr><th>变体</th><th>RotErr° ↓</th><th>TransErr ↓</th><th>CamMC ↓</th><th>Revisit SSIM ↑</th></tr></thead>
+      <tbody>
+        <tr><td>MRoPE only<span style="color:var(--ink3);font-size:12px">　全 24 头 global，无动作嵌入</span></td><td>17.66</td><td>0.204</td><td>0.394</td><td class="best">0.3898</td></tr>
+        <tr><td>Action + MRoPE<span style="color:var(--ink3);font-size:12px">　全 24 头 global，融合但不路由</span></td><td>13.21</td><td>0.107</td><td>0.371</td><td>0.3376</td></tr>
+        <tr class="ours"><td>Routing（本文完整配置）</td><td class="best">12.94</td><td class="best">0.093</td><td class="best">0.346</td><td class="second">0.3752</td></tr>
+      </tbody>
+    </table>
+    <p class="tnote">读法：第一行是「只有记忆通道」——检索很好但相机跟不上指令；第二行加上动作注入，控制三项全面改善而记忆塌了；第三行加上混合窗口与随机路由，两边同时站住。
+    论文的原话是「结构约束不花费任何控制权限（costs no control authority），同时保住长间隔召回」。</p>
+  </div>
+
+  <h3><span class="ix">1.3</span>论文的核心论证：两种能力要的窗口不一样</h3>
+  <div class="prose">
+    <p>这一步的推理值得单独拎出来，因为整套设计都从它导出：</p>
+    <ul>
+      <li><b>控制不应该依赖窗口大小。</b>推理时无论给多长的窗口，模型都必须对当前动作作出正确反应；而「作出反应」所需要的东西——当前场景 + 当前指令——本来就落在一个短窗口里。</li>
+      <li><b>记忆恰好相反。</b>检索只能在长窗口下学会，因为一个看不见远处的模型<b>没有可检索的对象</b>。</li>
+    </ul>
+    <p>于是两种能力的学习可以<b>按窗口切分</b>：控制在短窗口下学，记忆在长窗口下学。这就是 Sec. 2.2 的全部内容。</p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">▸ 我的读解</div>
+    <p>这个论证有一个隐含前提值得留意：「控制所需的信息全部落在短窗口内」在<b>导航类相机控制</b>上成立，但在需要跨长程一致性的控制上未必——
+    比如「回到刚才那扇门前」这种指令，控制本身就依赖远处记忆。论文把动作定义成<b>逐帧 6-DoF 增量</b>（Sec. 3.3），
+    这个定义让前提自动成立，也同时把方法的适用面框在了「低层相机增量控制」上。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 02 BACKBONE -->
+<section class="sec" id="s-backbone">
+  <div class="eyebrow"><span class="n">02</span><span class="t">Backbone</span><span class="line"></span></div>
+  <h2>骨架：把双向视频扩散模型改造成分块因果流</h2>
+  <p class="lead">ReWorld 建在 <b>Wan2.2-TI2V-5B</b> 上——一个在因果 VAE 隐空间里工作的视频扩散 transformer（DiT）。
+  输入是一段文本提示、一张可选参考图，以及一串 6-DoF 相机动作；输出按 latent chunk 逐块生成，每个 chunk 由它自己的相机动作驱动。</p>
+
+  <h3><span class="ix">2.1</span>分块因果：chunk 内全注意力，chunk 间因果</h3>
+  <div class="prose">
+    <p>改造方式是施加<b>分块因果性</b>（chunkwise causality）：一个训练窗口是 <code>L = 12</code> 个 latent chunk、每个 chunk <code>4</code> 个 latent frame，
+    共 48 个 latent frame。chunk 内部用全注意力，chunk 之间用因果注意力。
+    推理时模型每跑一次去噪就吐出一个 chunk，并把它的 key/value 追加到缓存 <span class="rL">C</span> 里。</p>
+  </div>
+
+  <div class="nota">
+    <div><span class="sym">L = 12</span><span class="dsc">一个训练窗口的 latent chunk 数</span></div>
+    <div><span class="sym">4 frames</span><span class="dsc">每个 chunk 的 latent frame 数 → 窗口共 48 latent frames</span></div>
+    <div><span class="sym">189 frames</span><span class="dsc">原始采样窗口，重采样到 24 fps ≈ 7.88 s</span></div>
+    <div><span class="sym">0.164 s</span><span class="dsc">每个 latent step 对应的物理时长（≈4 个视频帧）</span></div>
+    <div><span class="sym">H = 24</span><span class="dsc">每个 block 的注意力头数（18 局部 + 6 全局）</span></div>
+    <div><span class="sym">w = 12</span><span class="dsc">局部头的窗口长度（latent frames，即 3 个 chunk）</span></div>
+    <div><span class="sym">a<sub>k</sub> ∈ ℝ<sup>6</sup></span><span class="dsc">第 k 个 chunk 的 6-DoF 相机增量动作</span></div>
+    <div><span class="sym">P<sub>k</sub> ∈ SE(3)</span><span class="dsc">MRoPE 消费的相对 camera-to-world 轨迹</span></div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 3</span><span class="ti">注意力掩码查看器：训练期真正长什么样</span></div>
+    <div class="ctl">
+      <label>掩码模式</label>
+      <div class="seg" id="maskSeg">
+        <button type="button" data-m="g" class="on">全局头</button>
+        <button type="button" data-m="l">局部头</button>
+        <button type="button" data-m="gd">全局头 + chunk-drop</button>
+        <button type="button" data-m="ld">局部头 + chunk-drop</button>
+      </div>
+      <button class="mini" id="maskResample" type="button">↻ 重新采样保留集</button>
+      <span class="readout" id="maskRead">—</span>
+    </div>
+    <div class="figbody">
+      <svg viewBox="0 0 720 404" id="maskSvg" role="img" aria-label="12x12 chunk 注意力掩码矩阵，可切换全局头、局部头与 chunk-drop 组合">
+        <g id="maskGrid"></g>
+      </svg>
+    </div>
+    <figcaption>行 = query 所在的 chunk，列 = 被注意的 key chunk。<b>全局头</b>是完整的因果下三角；
+    <b>局部头</b>只保留最近 <code>w=12</code> latent frames，也就是含自身在内的 3 个 chunk 的带状区域；
+    <b>chunk-drop</b> 在此之上再把历史随机打洞——sink chunk（第 1 个）永远保留，另外随机留 5 个，
+    每个 query chunk 仍然对<b>自己</b>做全注意力（论文明确「queries are never dropped」，所以每个 chunk 都还拿得到去噪损失）。
+    保留集每个优化步重新采样，并广播到所有数据/序列并行 rank，保证掩码一致。</figcaption>
+  </figure>
+
+  <div class="call note">
+    <div class="hd">▸ 一个容易读漏的细节</div>
+    <p>论文在 Sec. 4.1 明确写道：<b>per-head attention windows 是训练期构造，评测时不施加</b>——所有头都在那个有界 cache 上做注意力。
+    也就是说「18 局部 + 6 全局」这个结构<b>从来没有被部署过</b>，它纯粹是一个训练时的正则化/课程设计。这一点恰恰是随机头路由存在的理由。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 03 MROPE -->
+<section class="sec" id="s-mrope">
+  <div class="eyebrow"><span class="n">03</span><span class="t">Memory Channel</span><span class="line"></span></div>
+  <h2>MRoPE：把位姿写进注意力的索引本身</h2>
+  <p class="lead">标准 RoPE 用<b>时间和空间</b>给注意力编索引。这带来一个后果：一个被重访的位置，在位置编码看来只是「一个很久以前的时间戳」，
+  要把它找回来，只能靠内容去推断。ReWorld 的第一个部件因此把空间记忆<b>做进索引本身</b>。</p>
+
+  <h3><span class="ix">3.1</span>相位偏移：让注意力依赖位姿差而非时间距离</h3>
+  <div class="prose">
+    <p>论文采用 Memory-RoPE（MRoPE），沿用 PM-RoPE 的 camera-phase RoPE 设计。
+    每个 latent frame <i>f</i> 携带一个相对 camera-to-world 位姿 <i>P<sub>f</sub></i> ∈ SE(3)（锚定在第一帧），
+    其描述子 <i>c<sub>f</sub></i> = [vec(<i>R<sub>f</sub></i>); <i>t<sub>f</sub></i>] ∈ ℝ<sup>12</sup>
+    由一个<b>零初始化</b>的 MLP 映射成相位偏移 <i>δ<sub>f</sub></i>，叠加在 RoPE 之上、在<b>同一次注意力</b>里作用于 query 和 key：</p>
+  </div>
+
+  <div class="eqwrap acc-M">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn"><i>q̃</i> <span class="op">=</span> <span class="fn">RoPE</span>(<i>q</i>)·<i>e</i><sup>&thinsp;i&thinsp;δ<sub>f(q)</sub></sup>,
+        &emsp; <i>k̃</i> <span class="op">=</span> <span class="fn">RoPE</span>(<i>k</i>)·<i>e</i><sup>&thinsp;i&thinsp;δ<sub>f(k)</sub></sup>,
+        &emsp; ⟨<i>q̃</i>, <i>k̃</i>⟩ <span class="op">∝</span> <i>e</i><sup>&thinsp;i&thinsp;(δ<sub>f(q)</sub>−δ<sub>f(k)</sub>)</sup></div>
+      </div>
+      <div class="eqno">(1)</div>
+    </div>
+    <div class="eqcap">内积只依赖<b>相位差</b>。于是注意力依赖的是<b>位姿之差</b>而不是时间距离：<b>相似的视角会被拉到一起，不管它们在时间上隔多远</b>。
+    缓存因此变成一个隐式的空间记忆——每个 chunk 连同它被看到时的位姿一起存着，重访时按位姿就近取回。</div>
+  </div>
+
+  <div class="prose">
+    <p>条件化还有第二半：在 value 和 output 上各加一个<b>零初始化的 SE(3) 残差</b>，
+    <i>ṽ</i> = <i>v</i> + <i>W<sub>v</sub></i>(<i>P</i><sub>f</sub><sup>−1</sup> ∘ <i>v</i>)、
+    <span class="nowrapfix">out = <i>W<sub>o</sub>y</i> + <i>W<sub>p</sub></i>(<i>P<sub>f</sub></i> ∘ <i>y</i>)</span>。
+    「零初始化」意味着训练开始时这些通路输出为 0，模型从原始 Wan2.2 行为出发平滑接管。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 4</span><span class="ti">同一个 out-and-back rollout，两种索引下的检索难度</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 290" role="img" aria-label="左：时间索引下重访帧与被检索帧相隔95步；右：位姿索引下两者相位差接近零">
+      <!-- divider -->
+      <line x1="360" y1="24" x2="360" y2="266" class="s-rule1" stroke-width="1" stroke-dasharray="3 5"/>
+
+      <!-- ============ LEFT: temporal ============ -->
+      <text x="24" y="30" class="f-ink big">标准 RoPE · 按时间与空间索引</text>
+      <text x="24" y="48" class="f-ink3 sml">被重访的位置 = 一个很久以前的时间戳</text>
+
+      <line x1="30" y1="120" x2="332" y2="120" class="s-rule" stroke-width="1.2"/>
+      <g class="mono">
+        <text x="30" y="140" class="f-ink3 sml">t = 0</text>
+        <text x="332" y="140" class="f-ink3 sml" text-anchor="end">t = 95</text>
+      </g>
+      <circle cx="30" cy="120" r="7" class="f-M"/>
+      <text x="30" y="106" class="f-Mi sml" text-anchor="middle">needle</text>
+      <circle cx="332" cy="120" r="7" class="f-C"/>
+      <text x="332" y="106" class="f-Ci sml" text-anchor="middle">query</text>
+      <g class="f-ink3">
+        <circle cx="70" cy="120" r="2.6"/><circle cx="110" cy="120" r="2.6"/><circle cx="150" cy="120" r="2.6"/>
+        <circle cx="190" cy="120" r="2.6"/><circle cx="230" cy="120" r="2.6"/><circle cx="270" cy="120" r="2.6"/>
+        <circle cx="300" cy="120" r="2.6"/>
+      </g>
+      <path d="M 326 150 C 250 186, 110 186, 36 150" class="nofill s-B" stroke-width="1.8" marker-end="url(#ar-b)"/>
+      <text x="181" y="196" class="f-Bi lbl" text-anchor="middle">位置编码上相隔 95 步</text>
+      <text x="181" y="212" class="f-ink3 sml" text-anchor="middle">要找回它，只能靠内容推断</text>
+      <rect x="30" y="228" width="302" height="34" rx="10" class="fs-B s-B" stroke-width="1.2"/>
+      <text x="181" y="250" class="f-Bi lbl" text-anchor="middle">「远」与「不相关」在索引上无法区分</text>
+
+      <!-- ============ RIGHT: pose ============ -->
+      <text x="388" y="30" class="f-ink big">MRoPE · 时间、空间与位姿</text>
+      <text x="388" y="48" class="f-ink3 sml">重访 = 位姿重合 → 相位差 ≈ 0</text>
+
+      <!-- top-down map -->
+      <rect x="392" y="62" width="300" height="128" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="404" y="80" class="f-ink3 sml mono">俯视图 · 相机轨迹</text>
+      <path d="M 430 160 C 480 158, 520 120, 570 108 C 610 98, 640 110, 660 128" class="nofill s-M" stroke-width="2.2" stroke-linecap="round"/>
+      <path d="M 660 136 C 638 118, 610 106, 570 116 C 520 128, 480 166, 432 168" class="nofill s-C" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="6 4"/>
+      <text x="556" y="96" class="f-Mi sml" text-anchor="middle">去程 t = 0…47</text>
+      <text x="556" y="182" class="f-Ci sml" text-anchor="middle">回程 t = 48…95</text>
+      <circle cx="430" cy="160" r="7" class="f-M"/>
+      <circle cx="432" cy="168" r="7" class="f-C"/>
+      <circle cx="431" cy="164" r="14" class="nofill s-O" stroke-width="2"/>
+      <text x="446" y="142" class="f-Oi sml">同一个地方</text>
+
+      <path d="M 460 208 L 460 224" class="nofill s-O" stroke-width="1.6" marker-end="url(#ar-o)"/>
+      <text x="474" y="216" class="f-ink2 lbl">δ<tspan dy="3" font-size="9">f(q)</tspan><tspan dy="-3"> − δ</tspan><tspan dy="3" font-size="9">f(k)</tspan><tspan dy="-3"> ≈ 0 → 注意力天然被拉高</tspan></text>
+      <rect x="392" y="228" width="300" height="34" rx="10" class="fs-O s-O" stroke-width="1.2"/>
+      <text x="542" y="250" class="f-Oi lbl" text-anchor="middle">缓存 = 隐式空间记忆，按位姿寻址</text>
+    </svg>
+    </div>
+    <figcaption>这张图解释了为什么「位姿进索引」是后面 landmark 检索能生效的前提：
+    检索回来的 chunk 无论在时间上多远，<b>只要它带着位姿结构，就仍然是可寻址的</b>（论文 Sec. 2.3 原话）。
+    换句话说，Sec. 2.3 的召回机制是站在 Sec. 2.2 的位姿编码上的，两者不是独立部件。</figcaption>
+  </figure>
+
+  <h3><span class="ix">3.2</span>和两遍式设计比：省在哪</h3>
+  <div class="tblwrap">
+    <table>
+      <caption>Table 1 · 位姿如何进入注意力：四种设计对比（论文原表重排）</caption>
+      <thead><tr><th>设计</th><th style="text-align:left">注意力索引</th><th style="text-align:left">位姿进入的位置</th><th>注意力遍数</th><th style="text-align:left">额外开销</th></tr></thead>
+      <tbody>
+        <tr><td>Temporal RoPE</td><td style="text-align:left">时间 &amp; 空间</td><td style="text-align:left">—</td><td>1</td><td style="text-align:left">—</td></tr>
+        <tr><td>HY-World 1.5（两遍）</td><td style="text-align:left">时间 + 投影位姿</td><td style="text-align:left">独立的 camera-aware pass，输出融合</td><td>2</td><td style="text-align:left">≈2× 注意力 FLOPs</td></tr>
+        <tr><td>E-PRoPE</td><td style="text-align:left">时间 + 投影位姿</td><td style="text-align:left">独立的降 token camera pass，再加回</td><td>2</td><td style="text-align:left">一遍降采样 pass（token 少约 4.5×）</td></tr>
+        <tr class="ours"><td>MRoPE（本文）</td><td style="text-align:left">时间、空间 &amp; 位姿</td><td style="text-align:left">Q/K 相位 + 零初始化 V/O 残差</td><td class="best">1</td><td style="text-align:left">1 个小 MLP + 2 个线性层</td></tr>
+      </tbody>
+    </table>
+    <p class="tnote">MRoPE 的关键工程优势不只是省 FLOPs，而是<b>注意力 kernel、掩码布局、per-head 窗口全都不用动</b>——
+    这正好是 Sec. 2.2 要在 per-head 窗口上做文章的前提条件。两遍式设计要再叠一层按头分窗口会麻烦得多。</p>
+  </div>
+
+  <div class="call warn">
+    <div class="hd">▲ 单独用 MRoPE 的代价</div>
+    <p>论文明说：<b>MRoPE alone gives strong revisit memory but imprecise control</b>——Tab. 7 第一行，RotErr 17.66°、TransErr 0.204，
+    是三个变体里最差的。位姿作为<b>索引</b>能告诉注意力「去哪找」，但它不擅长告诉当前 chunk「该往哪走」。这就是下一节动作注入存在的理由。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 04 ACTION -->
+<section class="sec" id="s-action">
+  <div class="eyebrow"><span class="n">04</span><span class="t">Control Channel</span><span class="line"></span></div>
+  <h2>Plücker 射线图：把指令直接说清楚</h2>
+  <p class="lead">为了拿回控制权，ReWorld 把相机指令<b>直接注入</b>。
+  每个 latent frame 的指令位姿被展开成一张 <b>Plücker 射线图</b>：图上每一个空间位置都拿到自己那条观察射线在该位姿下的 6 维 Plücker 坐标
+  <i>[d, o × d]</i>（<i>d</i> 是方向、<i>o</i> 是相机中心），坐标系与 MRoPE 的位姿共用同一个第一帧坐标系。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 5</span><span class="ti">两个条件通道各自的分工</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 300" role="img" aria-label="Plücker 射线图注入 patch embedding，MRoPE 位姿进入注意力索引，两者分工不同">
+      <!-- camera + rays -->
+      <text x="24" y="28" class="f-Ci big">动作注入 · 指令通道</text>
+      <path d="M 46 148 L 118 108 L 118 188 Z" class="fs-C s-C" stroke-width="1.6" stroke-linejoin="round"/>
+      <circle cx="46" cy="148" r="5" class="f-C"/>
+      <text x="40" y="170" class="f-Ci sml mono" text-anchor="end">o</text>
+      <line x1="46" y1="148" x2="176" y2="96" class="s-C" stroke-width="1.2" marker-end="url(#ar-c)"/>
+      <line x1="46" y1="148" x2="176" y2="126" class="s-C" stroke-width="1.2" marker-end="url(#ar-c)"/>
+      <line x1="46" y1="148" x2="176" y2="170" class="s-C" stroke-width="1.2" marker-end="url(#ar-c)"/>
+      <line x1="46" y1="148" x2="176" y2="200" class="s-C" stroke-width="1.2" marker-end="url(#ar-c)"/>
+      <text x="182" y="130" class="f-Ci sml mono">d</text>
+      <text x="24" y="228" class="f-ink2 lbl">每个空间位置一条射线</text>
+      <text x="24" y="245" class="f-ink3 sml mono">[ d , o × d ] ∈ ℝ⁶</text>
+      <text x="24" y="262" class="f-ink3 sml">Plücker 坐标：方向 + 矩</text>
+
+      <!-- MLP -->
+      <path d="M 200 148 L 236 148" class="nofill s-C" stroke-width="1.6" marker-end="url(#ar-c)"/>
+      <rect x="240" y="126" width="76" height="44" rx="10" class="f-surf2 s-C" stroke-width="1.4"/>
+      <text x="278" y="146" class="f-Ci lbl" text-anchor="middle">MLP</text>
+      <text x="278" y="161" class="f-ink3 sml" text-anchor="middle">→ 模型宽度</text>
+      <path d="M 320 148 L 352 148" class="nofill s-C" stroke-width="1.6" marker-end="url(#ar-c)"/>
+
+      <!-- patch embeddings -->
+      <rect x="356" y="112" width="150" height="72" rx="11" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="431" y="132" class="f-ink lbl" text-anchor="middle" font-weight="600">patch embedding</text>
+      <text x="431" y="150" class="f-ink3 sml" text-anchor="middle">transformer 输入处</text>
+      <text x="431" y="168" class="f-Ci sml" text-anchor="middle" font-weight="600">按 token 逐位相加</text>
+
+      <path d="M 510 148 L 542 148" class="nofill s-rule" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="546" y="88" width="150" height="120" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="621" y="112" class="f-ink big" text-anchor="middle">DiT blocks</text>
+      <text x="621" y="136" class="f-Ci sml" text-anchor="middle">射线图告诉当前 chunk 的</text>
+      <text x="621" y="150" class="f-Ci sml" text-anchor="middle">每个 token：<tspan font-weight="600">该往哪看</tspan></text>
+      <text x="621" y="174" class="f-Mi sml" text-anchor="middle">MRoPE 告诉注意力：每个</text>
+      <text x="621" y="188" class="f-Mi sml" text-anchor="middle">缓存 token <tspan font-weight="600">是从哪看到的</tspan></text>
+
+      <!-- MRoPE channel below -->
+      <text x="24" y="292" class="f-Mi big">记忆检索 · 索引通道</text>
+      <path d="M 150 286 C 300 286, 420 250, 546 208" class="nofill s-M" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#ar-m)"/>
+      <text x="330" y="278" class="f-Mi sml">P<tspan dy="3" font-size="9">f</tspan><tspan dy="-3"> ∈ SE(3) → 相位偏移 δ</tspan><tspan dy="3" font-size="9">f</tspan><tspan dy="-3"> → Q/K</tspan></text>
+    </svg>
+    </div>
+    <figcaption>两个通道<b>编码的是同一条轨迹</b>，但作用位置完全不同：射线图进的是 <b>token 表示</b>，MRoPE 进的是 <b>注意力索引</b>。
+    论文的措辞很精确——「the ray map tells each token of the current chunk where its camera should look, while MRoPE poses tell attention where every cached token was seen」。
+    问题也正出在这里：当<b>每个头都同时收到两者</b>时，动作信号会挤掉位姿键控的检索。</figcaption>
+  </figure>
+
+  <div class="call key">
+    <div class="hd">◆ 到这一步为止的困境</div>
+    <p>MRoPE 单独用：记忆好（0.3898）、控制差（17.66°）。加上动作注入：控制好（13.21°）、记忆塌（0.3376）。
+    两个通道都保留、都作用在<b>全部 24 个头</b>上时，模型只能二选一。
+    ReWorld 不去改这两个通道，而是改<b>每个头训练时看到的窗口</b>——这是下一节。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 05 SPLIT -->
+<section class="sec" id="s-split">
+  <div class="eyebrow"><span class="n">05</span><span class="t">Step 1 · Training</span><span class="line"></span></div>
+  <h2>混合窗口 + 随机头路由：让两种能力各自在合适的窗口里长出来</h2>
+  <p class="lead">这是论文的第一个核心贡献，也是最「便宜」的一个——<b>不加参数、不加损失、不加模块</b>，
+  只改每个注意力头在训练时能看到多长的历史。</p>
+
+  <h3><span class="ix">5.1</span>混合 per-head 注意力窗口</h3>
+  <div class="prose">
+    <p>每个 block 的 <code>H = 24</code> 个头被切成两组：18 个<span class="rC">局部头</span>只看最近 <code>w = 12</code> 个 latent frame（3 个 chunk），
+    6 个<span class="rM">全局头</span>看完整因果历史。全局:局部固定为 <b>1 : 3</b>。</p>
+  </div>
+
+  <div class="eqwrap acc-C">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn nowrapfix"><span class="fn">context</span>(<i>h</i>) <span class="op">=</span>
+        &#123; <span class="rM">完整因果历史</span>，若 <i>h</i> ∈ <i>G</i>（6 个全局头）；&emsp;
+        <span class="rC">最近 w = 12 帧</span>，否则（18 个局部头）&#125;</div>
+      </div>
+      <div class="eqno">(2)</div>
+    </div>
+    <div class="eqcap">每一次迭代同时训练两种能力：<b>局部头在短窗口下学控制</b>，而<b>全局头是唯一看得见远处的通道，所以检索只能在那里学会</b>。
+    注意这不是「两个 loss」或「两阶段」，而是同一个 forward 里的两种可见范围。</div>
+  </div>
+
+  <h3><span class="ix">5.2</span>随机头路由：为什么固定分组会死在部署上</h3>
+  <div class="prose">
+    <p>这一步是整个设计能成立的关键，论文写得很直接：<b>固定分组活不到部署</b>。</p>
+    <p>推理时按头分窗口这件事<b>做不到</b>——完整历史已经不存在了，剩下的只有一个有界 cache，而且<b>所有头读的是同一个 cache</b>，
+    没有办法给某些头长窗口、给另一些头短窗口。如果训练时分组固定，那些头就被训练成依赖一个部署给不了的窗口。</p>
+    <p>解法是：抽一个包含 <code>|P| = 12</code> 组随机六头全局集的<b>固定池</b>，<b>每个 optimizer step 切换到池中下一组</b>。
+    1:3 的比例不变。于是每个头都在两种角色里待过，两种能力都不绑定到特定的头；推理时任何头都能读那个共享的有界 cache。</p>
+    <p>还有一个副产品论证：<b>因为一个头在大多数 step 上是局部的</b>（18/24 = 75%），它学到的控制<b>必须在短窗口内自洽</b>；
+    而检索则「活在当前恰好看得远的那些头里」。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 6</span><span class="ti">随机头路由推演器：拖动 optimizer step 看谁在当班</span></div>
+    <div class="ctl">
+      <label>Optimizer step</label>
+      <div class="grow"><input type="range" id="rhSlider" min="1" max="12" step="1" value="1" aria-label="optimizer step"></div>
+      <span class="readout" id="rhRead">step 1 / 池中第 1 组</span>
+      <button class="mini" id="rhPlay" type="button">▶ 自动播放</button>
+      <button class="mini" id="rhFixed" type="button">对照：固定分组</button>
+    </div>
+    <div class="figbody">
+      <svg viewBox="0 0 720 344" id="rhSvg" role="img" aria-label="24 个注意力头的角色随 optimizer step 切换，下方柱状图显示每个头担任全局头的累计次数">
+        <g id="rhGrid"></g>
+        <g id="rhBars"></g>
+      </svg>
+    </div>
+    <figcaption>上方 24 个色块是一个 block 的注意力头，<span class="rM">青色 = 本步全局头</span>、<span class="rC">琥珀 = 本步局部头</span>。
+    下方柱状图是<b>每个头在整个 12 组池里担任全局头的累计次数</b>。
+    点「对照：固定分组」可以看到论文要避免的那种情形：6 个头永远全局、18 个头永远局部。
+    <b>这里的 12 组分区是我按论文描述用固定随机种子生成的示意，不是论文发布的实际分区。</b></figcaption>
+  </figure>
+
+  <div class="call key">
+    <div class="hd">◆ 一个可证伪的预测</div>
+    <p>论文从这套设计里推出了一个明确的、<b>可以被实验证伪</b>的预测：既然控制在每个头里都被训练成「短窗口内完整」，
+    那么<b>在推理时更换 cache 压缩策略，控制误差应当保持不变</b>（Sec. 2.2 两次提到，并说 Sec. 4.5 会检验）。
+    这个预测非常漂亮——它把一个结构设计变成了一条可测的因果陈述。<b>但请留意 Sec. 12 里我对这条预测「是否真的被检验了」的保留意见。</b></p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">▸ 我的读解：固定池带来的不均匀</div>
+    <p>池是<b>固定的 12 组</b>、循环使用，而不是每步现抽。12 组 × 6 头 = 72 个「全局名额」摊到 24 个头上，平均每头 3 次；
+    但随机抽出来的 12 组不会正好均匀。上图那个用固定种子生成的示意池就很说明问题：
+    <b>head 16 一次全局头都没当过</b>，而 head 5 和 head 15 各当了 6 次——如果这就是实际的池，
+    「每个头都在两种角色里待过」对 head 16 并不成立。
+    论文没有讨论是否对池做过平衡约束，也没有做 |P| 的消融。</p>
+  </div>
+
+  <h3><span class="ix">5.3</span>这一步到底值多少</h3>
+  <div class="prose">
+    <p>Tab. 6 上半块给出了训练配方的拆分（全部从零开始、720p、20k steps、推理侧统一用 consolidation）：
+    单加 chunk-drop（+CD）在中长 rollout 上稳定小幅改善；单加随机头路由（+RH）在<b>短</b>rollout（k=96）上提升最大（0.4019 → 0.4319）；
+    两者合起来在<b>最长</b>的 k=384 上收益最明显（0.3387 → 0.3752，+10.8%）。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 06 BANK -->
+<section class="sec" id="s-bank">
+  <div class="eyebrow"><span class="n">06</span><span class="t">Step 2 · Inference</span><span class="line"></span></div>
+  <h2>定额 KV 预算下的记忆固化</h2>
+  <p class="lead">rollout 是无界的，cache 不是。720p 下一个不设限的 KV cache 会在「空间记忆真正被考验的长度」之前就把显存吃光。
+  ReWorld 的做法是<b>把记忆的写入侧和读取侧分开</b>：写入侧<b>少存、但存完整</b>，读取侧把固定预算花在一个<b>位姿索引的工作集</b>上。</p>
+
+  <h3><span class="ix">6.1</span>12 格里装什么</h3>
+  <div class="eqwrap acc-L">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn nowrapfix"><i>C<sub>k</sub></i> <span class="op">=</span>
+        <span class="rO">&#123; 1 &#125;</span><sub style="font-size:.6em">sink</sub>
+        <span class="op">∪</span> <span class="rC">&#123; k−5, …, k−1 &#125;</span><sub style="font-size:.6em">recent window</sub>
+        <span class="op">∪</span> <span class="rL"><i>T<sub>k</sub></i></span><sub style="font-size:.6em">retrieved landmarks</sub>,
+        &emsp;|<i>T<sub>k</sub></i>| = 6, &emsp;|<i>C<sub>k</sub></i>| = <i>B</i> = 12</div>
+      </div>
+      <div class="eqno">(3)</div>
+    </div>
+    <div class="eqcap"><b>1 个 sink + 5 个最近 chunk + 6 个按位姿召回的 landmark</b>。sink chunk 沿用 attention sink 的思路，锚住全局场景布局。
+    每一个被保留的 chunk 都是<b>全分辨率</b>的——不做 pooling、不做 merge、不做 token 级剪枝。这是这套方案与「KV 压缩」路线的根本分歧：
+    <b>宁可少存几个完整的，也不要存一堆降质的</b>。</div>
+  </div>
+
+  <div class="grid3">
+    <div class="card oo">
+      <p class="mono">WRITE · 准入</p>
+      <h5>里程计规则</h5>
+      <p>一个 chunk 滑出 recent 窗口时，<b>只有当相机自上一个 landmark 起已经走够 δ 的里程</b>（以中位步长为单位）才入库。
+      中间那些 chunk 是路径上最密、最冗余的采样，直接丢弃。</p>
+    </div>
+    <div class="card bb">
+      <p class="mono">WRITE · 淘汰</p>
+      <h5>冗余优先淘汰</h5>
+      <p>库满（K = 30）后每次准入都要踢掉一个：<b>在位姿空间里最冗余的那个</b>——即最近邻距离最小的成员。
+      <b>前两个成员永不淘汰</b>，因为最早那片区域是跨越最长间隔被重访的。</p>
+    </div>
+    <div class="card ll">
+      <p class="mono">READ · 召回</p>
+      <h5>位姿最近邻</h5>
+      <p>每生成一个 chunk，就把<b>距当前位姿最近的 6 个 landmark</b> 装回 cache 作为 <i>T<sub>k</sub></i>，
+      它们通过 MRoPE 的位姿索引被读取。device 显存恒为 O(B)，整个库放在 host memory。</p>
+    </div>
+  </div>
+
+  <div class="call key">
+    <div class="hd">◆ 最容易被读漏、但作者专门强调的一句</div>
+    <p>里程计规则衡量的是<b>走过的距离</b>——<span class="rB">而绝不是「这个地方是不是已经在库里了」</span>。
+    所以<b>重访那一趟会和第一次一样被存进去</b>。
+    论文给了反例的代价：如果拿整个 bank 去做去重门控，就会恰好丢掉后来重访时最需要的那个 chunk——仿真中远程重访覆盖率只有约 <b>64%</b>。</p>
+    <p>这个设计选择很反直觉（去重听起来更「聪明」），但它是对的：<b>bank 的目的是覆盖轨迹，不是覆盖场景</b>。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 7</span><span class="ti">landmark bank 推演器：走一趟 out-and-back，看 12 格 cache 里发生了什么</span></div>
+    <div class="ctl">
+      <label>缓存策略</label>
+      <div class="seg" id="lbPolicy">
+        <button type="button" data-p="bank" class="on">landmark bank（本文）</button>
+        <button type="button" data-p="win">sliding window（对照）</button>
+      </div>
+      <button class="mini" id="lbPlay" type="button">▶ 播放 rollout</button>
+    </div>
+    <div class="ctl">
+      <label>chunk k</label>
+      <div class="grow"><input type="range" id="lbStep" min="0" max="43" step="1" value="0" aria-label="rollout 中的 chunk 序号"></div>
+      <span class="readout" id="lbStepRead">k = 0</span>
+      <label>里程 δ</label>
+      <div class="grow" style="min-width:90px"><input type="range" id="lbDelta" min="1" max="6" step="1" value="3" aria-label="里程计步长"></div>
+      <span class="readout" id="lbDeltaRead">δ = 3</span>
+      <label>库容 K</label>
+      <div class="grow" style="min-width:90px"><input type="range" id="lbK" min="4" max="14" step="1" value="8" aria-label="landmark bank 容量"></div>
+      <span class="readout" id="lbKRead">K = 8</span>
+    </div>
+    <div class="figbody">
+      <svg viewBox="0 0 720 430" id="lbSvg" role="img" aria-label="俯视图上的相机轨迹、landmark bank 内容与 12 格 KV cache 的联动推演">
+        <g id="lbMap"></g>
+        <g id="lbBank"></g>
+        <g id="lbCache"></g>
+      </svg>
+    </div>
+    <figcaption>轨迹是一条 44 chunk 的 palindrome：去程 k = 0…21，回程 k = 22…43，<b>k 与 43−k 是一对镜像（同一位姿）</b>。
+    needle 定在 k = 5（论文的评分对落在最早五分之一、且间隔跨过一半 rollout 的镜像对），它的重访点是 k = 38。
+    回程为了看得清画成了略微偏移的虚线，<b>距离计算用的是未偏移的真实位姿</b>。
+    <b>库容 K 这里默认设成 8（论文是 30）</b>，否则 44 步的轨迹根本填不满库、看不到淘汰行为；δ 与 K 都可以拖动观察。
+    切到 sliding window 对照组可以看到：到 k = 38 时，起始区域的证据早已被挤出窗口——<b>只剩下 sink 这一个孤点</b>。</figcaption>
+  </figure>
+
+  <h3><span class="ix">6.2</span>分层存储与流水线</h3>
+  <div class="prose">
+    <p>bank <i>ℳ</i>（|<i>ℳ</i>| ≤ K = 30）放在一个<b>分层存储</b>里：所有 K 个成员的主副本常驻 <b>pinned host memory</b>，
+    只有被召回的工作集才 stage 到 device 上。每个 chunk 只带<b>一个</b>相机位姿 <i>P<sub>k</sub></i> ∈ SE(3)——
+    取该 chunk 第一帧的旋转，配上块内平均的平移。bank 完全按位姿管理，不看内容。</p>
+    <p>landmark 的传输走<b>独立 CUDA stream 预取</b>，与去噪计算重叠，因此不进入关键路径。
+    这样 device 显存就是 O(B) 个 chunk，<b>与 rollout 长度无关</b>。</p>
+  </div>
+
+  <div class="algo">
+    <div class="ah">每生成一个 chunk 时的固化 / 召回流程（按论文 Sec. 2.3 复述）</div>
+    <ol>
+      <li class="cmt"># 写入侧：处理刚滑出 recent 窗口的那个 chunk</li>
+      <li><b>aged</b> ← chunk k−6　<span class="cm"># recent 窗口是 k−5 … k−1</span></li>
+      <li>odo ← 相机自上一次入库以来走过的里程（以中位步长计）</li>
+      <li><b>if</b> odo ≥ δ <b>then</b></li>
+      <li>　　<b>if</b> |ℳ| = K <b>then</b> 淘汰 argmin<sub>m∉前两个</sub> dist(m, 最近邻)　<span class="cm"># 最冗余者</span></li>
+      <li>　　ℳ ← ℳ ∪ {aged}（全分辨率 KV + 位姿 P）；odo ← 0</li>
+      <li class="cmt"># 注意：这里从不检查「这个地方是否已在库中」</li>
+      <li class="cmt"># 读取侧：装满固定的 12 格</li>
+      <li>T<sub>k</sub> ← 距当前位姿最近的 6 个 ℳ 成员　<span class="cm"># prefetch，与去噪重叠</span></li>
+      <li>C<sub>k</sub> ← {sink} ∪ {k−5 … k−1} ∪ T<sub>k</sub>　　<span class="cm"># |C<sub>k</sub>| = 12</span></li>
+      <li>生成 chunk k，其 KV 追加进 recent 窗口</li>
+    </ol>
+    <div class="an">这套流程里没有任何可学习参数：它完全是一个推理期的缓存管理策略。模型侧唯一需要配合的，是下一节的 chunk-drop 训练。</div>
+  </div>
+</section>
+
+<!-- ============================================================ 07 CHUNK DROP -->
+<section class="sec" id="s-drop">
+  <div class="eyebrow"><span class="n">07</span><span class="t">Train–Test Gap</span><span class="line"></span></div>
+  <h2>Chunk-drop 训练：让「拼接出来的历史」变成分布内输入</h2>
+  <p class="lead">上一节那个 cache 交给模型的是一段<b>稀疏、不连续</b>的历史；而标准的 teacher forcing 让每一个去噪 query 都条件在
+  <b>连续、完整</b>的因果前缀上。这是一个典型的训练—测试错配，症状是：<b>一旦有 chunk 被逐出，画面就开始糊、开始漂</b>。</p>
+
+  <h3><span class="ix">7.1</span>做法</h3>
+  <div class="prose">
+    <p>训练时随机丢掉缓存中的 KV chunk。对一个 <code>L = 12</code> chunk 的训练片段：
+    <b>sink chunk 永远保留</b>，另外在每个优化步随机抽 <b>5</b> 个幸存者——于是每一步模型只看到自己历史的<b>随机一半</b>（12 选 6）。</p>
+    <p>三个实现细节值得留意：</p>
+    <ul>
+      <li>注意力掩码相应受限：chunk <i>z<sub>k</sub></i> 的 query <b>只能注意到幸存的更早 chunk 的干净 key</b>，以及<b>它自己这一个 chunk</b>。</li>
+      <li><b>query 永远不丢</b>——所以每个 chunk 仍然拿得到自己的去噪损失，训练信号密度不变。</li>
+      <li>保留集每步<b>独立重采样</b>，并<b>广播</b>到所有数据并行 / 序列并行 rank，保证全局掩码一致（否则并行组之间的梯度会不匹配）。</li>
+    </ul>
+    <p>可以回到 <a href="#s-backbone">Fig. 3 的掩码查看器</a>切到「+ chunk-drop」那两档，看看被打洞后的掩码长什么样。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 8</span><span class="ti">训练看到的历史 vs 推理读到的历史</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 240" role="img" aria-label="标准训练看到连续完整前缀，推理读到稀疏拼接的缓存，chunk-drop 训练把两者对齐">
+      <text x="24" y="40" class="f-ink big">标准 teacher forcing</text>
+      <text x="24" y="57" class="f-ink3 sml">连续、完整的因果前缀</text>
+      <g id="fd-row1"></g>
+
+      <text x="24" y="112" class="f-Bi big">推理期实际读到的</text>
+      <text x="24" y="129" class="f-ink3 sml">sink + 召回的 landmark + 最近窗口</text>
+      <g id="fd-row2"></g>
+
+      <text x="24" y="184" class="f-Oi big">chunk-drop 训练</text>
+      <text x="24" y="201" class="f-ink3 sml">每步随机保留 sink + 5 个</text>
+      <g id="fd-row3"></g>
+
+      <path d="M 706 76 C 716 88, 716 96, 706 108" class="nofill s-B" stroke-width="1.5"/>
+      <path d="M 706 180 C 716 168, 716 160, 706 148" class="nofill s-O" stroke-width="1.5"/>
+      <text x="360" y="232" class="f-ink3 sml" text-anchor="middle">第一行与第二行的分布错配 → 一旦有 chunk 被逐出就糊、就漂；第三行把第二行拉回分布内</text>
+    </svg>
+    </div>
+    <figcaption>第二行不是随便画的：它就是 Eq. (3) 的 12 格——最左一格 sink、中间是按位姿召回回来的 landmark（在时间轴上位置任意）、最右五格是 recent 窗口。
+    chunk-drop 的作用不是「数据增强」，而是<b>让第三行的分布覆盖第二行</b>。</figcaption>
+  </figure>
+
+  <div class="call note">
+    <div class="hd">▸ 被拿来对照的四种策略</div>
+    <p>论文在<b>同一预算 B = 12</b> 下比较了五个推理臂：<b>full-KV</b>（不设限，不可部署的上界）、
+    <b>window</b>（带 sink 的滑动窗口，遗忘基线）、<b>naive-merge</b>（把老 chunk 做均值池化压缩而不是淘汰）、
+    <b>consolidation w/o bank</b>（6 个静态的位姿去重 landmark，无检索）、以及完整的 <b>consolidation w/ bank</b>。
+    结果见 <a href="#s-abl">Sec. 11</a> 的 Tab. 6。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 08 DMD -->
+<section class="sec" id="s-dmd">
+  <div class="eyebrow"><span class="n">08</span><span class="t">Real-Time</span><span class="line"></span></div>
+  <h2>四步实时化：把蒸馏关进一个 LoRA 里</h2>
+  <p class="lead">要跑实时，ReWorld 只用 <b>4 步</b>去噪。做法是把步数蒸馏<b>限制在一个可插拔的 LoRA 内部</b>，
+  走的是 LongLive 系列「先 AR 训练、再插上蒸馏 LoRA」的路线。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 9</span><span class="ti">DMD LoRA：一套骨干，两个工作点</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 288" role="img" aria-label="冻结骨干加 rank128 LoRA 作为学生，DMD critic 也是 LoRA，控制路径不带 LoRA">
+      <!-- teacher -->
+      <rect x="24" y="40" width="180" height="86" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="114" y="64" class="f-ink big" text-anchor="middle">教师 = 多步模型</text>
+      <text x="114" y="83" class="f-ink3 sml" text-anchor="middle">原骨干，adapter 关闭</text>
+      <text x="114" y="102" class="f-ink3 sml" text-anchor="middle">高保真工作点</text>
+      <text x="114" y="118" class="f-ink3 sml mono" text-anchor="middle">Wan2.2-TI2V-5B</text>
+
+      <path d="M 208 83 L 244 83" class="nofill s-rule" stroke-width="1.5" marker-end="url(#ar-i)"/>
+      <text x="226" y="74" class="f-ink3 sml" text-anchor="middle">DMD</text>
+
+      <!-- student -->
+      <rect x="248" y="24" width="224" height="118" rx="12" class="fs-L s-L" stroke-width="1.5"/>
+      <text x="360" y="48" class="f-Li big" text-anchor="middle">学生 = 同一套骨干（冻结）</text>
+      <rect x="266" y="60" width="188" height="30" rx="8" class="f-surf s-L" stroke-width="1.3"/>
+      <text x="360" y="80" class="f-Li lbl" text-anchor="middle">rank-128 LoRA · attn + FFN</text>
+      <text x="360" y="108" class="f-ink2 sml" text-anchor="middle">唯一被训练的东西</text>
+      <text x="360" y="126" class="f-ink3 sml mono" text-anchor="middle">2.6 GB adapter · 4 步去噪</text>
+
+      <!-- critic -->
+      <rect x="248" y="164" width="224" height="60" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="360" y="186" class="f-ink lbl" text-anchor="middle" font-weight="600">DMD critic</text>
+      <text x="360" y="205" class="f-ink3 sml" text-anchor="middle">同样是冻结权重之上的一个 LoRA</text>
+      <path d="M 360 146 L 360 160" class="nofill s-rule" stroke-width="1.4" marker-end="url(#ar-i)"/>
+
+      <!-- control path -->
+      <rect x="24" y="164" width="180" height="60" rx="12" class="fs-C s-C" stroke-width="1.4"/>
+      <text x="114" y="186" class="f-Ci lbl" text-anchor="middle" font-weight="600">动作 / 位姿注入路径</text>
+      <text x="114" y="206" class="f-Ci sml" text-anchor="middle">不带任何 LoRA → 控制不被蒸馏改动</text>
+      <path d="M 208 194 L 244 194" class="nofill s-C" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ar-c)"/>
+
+      <!-- self forcing -->
+      <rect x="496" y="24" width="200" height="118" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="596" y="48" class="f-ink big" text-anchor="middle">self-forcing rollout</text>
+      <text x="596" y="70" class="f-ink2 sml" text-anchor="middle">学生从<tspan font-weight="600">自己的 KV cache</tspan>流式</text>
+      <text x="596" y="86" class="f-ink2 sml" text-anchor="middle">吐 chunk，和部署时一模一样</text>
+      <text x="596" y="110" class="f-Oi sml" text-anchor="middle">因此蒸馏<tspan font-weight="600">只需要文本 prompt</tspan></text>
+      <text x="596" y="126" class="f-Oi sml" text-anchor="middle">完全不需要视频</text>
+      <path d="M 476 83 L 492 83" class="nofill s-rule" stroke-width="1.4" marker-end="url(#ar-i)"/>
+
+      <rect x="496" y="164" width="200" height="60" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="596" y="186" class="f-ink lbl" text-anchor="middle" font-weight="600">蒸馏用 prompt</text>
+      <text x="596" y="205" class="f-ink3 sml" text-anchor="middle">248K 条来自另一个域的通用长 caption</text>
+      <text x="596" y="219" class="f-ink3 sml" text-anchor="middle">（在 VidProM 基础上扩展）</text>
+
+      <!-- two modes -->
+      <rect x="24" y="242" width="672" height="36" rx="10" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="40" y="265" class="f-ink lbl"><tspan font-weight="600">一套骨干两个模式：</tspan>adapter 关 = 原始多步高保真模型；adapter 开 = 4 步实时流式。adapter 还能跨 base checkpoint 迁移，必要时 2k–4k 步重蒸即可。</text>
+    </svg>
+    </div>
+    <figcaption>关键设计是「<b>控制路径不带 LoRA</b>」：动作与位姿注入通路完全不参与蒸馏，
+    所以实时模式的控制行为与多步模式一致——这也让 Sec. 4 里那些用 4 步蒸馏模型跑出来的控制指标可以和多步模型对话。</figcaption>
+  </figure>
+
+  <div class="call note">
+    <div class="hd">▸ 两条工程经验（论文原文给出）</div>
+    <p><b>1.</b> 在<b>部署分辨率</b>上蒸馏，并且用<b>与部署 prompt 相似</b>的 prompt。<br>
+    <b>2.</b> 生产用的学生取 block size 16、单条 rollout，并把 classifier-free guidance <b>折进 adapter</b>（推理时 CFG scale = 1）。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 09 DATA -->
+<section class="sec" id="s-data">
+  <div class="eyebrow"><span class="n">09</span><span class="t">Data Engine</span><span class="line"></span></div>
+  <h2>八源语料：把不同世界放到同一把物理尺子上</h2>
+  <p class="lead">条件化每个 latent chunk 的动作 <i>a<sub>k</sub></i> ∈ ℝ<sup>6</sup> 是一个<b>逐帧 6-DoF 相机增量</b>。
+  这意味着：<b>同一个指令必须在每个来源里对应同样的运动</b>——屏幕上看起来一样，位姿数字上也要一样。
+  这条约束驱动了整个数据管线的设计。</p>
+
+  <h3><span class="ix">9.1</span>八个来源，220,724 个片段</h3>
+  <div class="tblwrap">
+    <table>
+      <caption>Table 2 · 八源联合训练语料（#Clips 为逐源过滤后的数量）</caption>
+      <thead><tr><th>来源</th><th>#Clips</th><th>占比</th><th>时长</th><th style="text-align:left">位姿来源</th><th style="text-align:left">文本标注</th></tr></thead>
+      <tbody>
+        <tr><td><span class="mdot" style="background:var(--m4)"></span>UE control（自建）</td><td>95,895</td><td>43.4%</td><td>15 s</td><td style="text-align:left">引擎 GT（c2w, cm）</td><td style="text-align:left">管线自动生成</td></tr>
+        <tr><td><span class="mdot" style="background:var(--m4)"></span>UE expansion（自建）</td><td>42,536</td><td>19.3%</td><td>30–60 s</td><td style="text-align:left">引擎 GT（c2w, cm）</td><td style="text-align:left">场景摘要 + 相机描述</td></tr>
+        <tr><td><span class="mdot" style="background:var(--m3)"></span>DL3DV</td><td>29,864</td><td>13.5%</td><td>15 s</td><td style="text-align:left">VIPE</td><td style="text-align:left">Qwen-VL</td></tr>
+        <tr><td><span class="mdot" style="background:var(--m3)"></span>RealEstate10K</td><td>12,065</td><td>5.5%</td><td>≥ 8 s</td><td style="text-align:left">VIPE（重新估计）</td><td style="text-align:left">预计算</td></tr>
+        <tr><td><span class="mdot" style="background:var(--m3)"></span>Sekai real-walking-hq</td><td>14,730</td><td>6.7%</td><td>60 s</td><td style="text-align:left">MegaSaM（c2w）</td><td style="text-align:left">官方 CSV</td></tr>
+        <tr><td><span class="mdot" style="background:var(--m1)"></span>Game roaming（79 款游戏）</td><td>18,387</td><td>8.3%</td><td>15 s</td><td style="text-align:left">VIPE（已是米制）</td><td style="text-align:left">Qwen-VL</td></tr>
+        <tr><td><span class="mdot" style="background:var(--m1)"></span>OmniWorld-Game</td><td>5,629</td><td>2.6%</td><td>≈12 s</td><td style="text-align:left">引擎（w2c→c2w）</td><td style="text-align:left">逐片段 JSON</td></tr>
+        <tr><td><span class="mdot" style="background:var(--m1)"></span>Sekai game-walking</td><td>1,618</td><td>0.7%</td><td>60 s</td><td style="text-align:left">引擎 GT（UE5, c2w）</td><td style="text-align:left">官方 CSV</td></tr>
+        <tr style="font-weight:600"><td>合计</td><td>220,724</td><td>100%</td><td colspan="3" style="text-align:left;font-weight:400;color:var(--ink3)">按 clip 均匀采样 → 混合比例 = clip 数比例，与片段时长无关</td></tr>
+      </tbody>
+    </table>
+    <p class="tnote">混合结果：<b>63% UE 合成 · 26% 真实 · 11% 游戏</b>。
+    自建的两个 UE 源担着双重角色——既是<b>米制尺度的锚</b>，其轨迹又是<b>专门为相机控制生成的</b>。</p>
+  </div>
+
+  <h3><span class="ix">9.2</span>UE 渲染管线与「方向均衡」的轨迹</h3>
+  <div class="prose">
+    <p>一个跑在 UE 编辑器内部的自动化服务串起：场景加载 → 几何勘察 → 导航网格（NavMesh）构建 → 兴趣点发现 → 轨迹规划 → Movie Render Queue 渲染；
+    外层批处理编排器把这条链扫过 <b>337 个环境</b>（购买 + 自建的室内、城市与地景），产出 130,986 个原始片段。</p>
+    <p>六种轨迹模式按预设占比生成，每种以自己恒定的速度行走：
+    <code>local_explore ≈29%</code>、<code>reveal_pan ≈26%</code>、<code>aerial ≈15.5%</code>、<code>control ≈15%</code>、<code>wandering ≈8%</code>、<code>boomerang ≈6%</code>；
+    control 模式 180 cm/s，探索类模式 120 cm/s。</p>
+    <p><b>control 模式的轨迹是为控制而不是为覆盖设计的</b>：每条路径锚定在两个兴趣点上，中间用随机运动段填满，
+    使得<b>后退、横移、斜向运动与前进被同样频繁地采样</b>。论文特意说明：Sec. 4 里的动作跟随精度，
+    <b>有相当一部分要归功于这些方向均衡的轨迹</b>，而不只是模型设计——因为偏前进的素材几乎不给稀有方向提供监督。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 10</span><span class="ti">四阶段数据管线</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 232" role="img" aria-label="八源采集、UE 自动渲染、curation 漏斗、统一到同一米制尺度、片段级采样">
+      <!-- stage boxes -->
+      <rect x="16" y="52" width="150" height="104" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="91" y="42" class="f-ink3 sml mono" text-anchor="middle">STAGE 1</text>
+      <text x="91" y="76" class="f-ink lbl" text-anchor="middle" font-weight="600">八个来源</text>
+      <text x="91" y="96" class="f-ink3 sml" text-anchor="middle">UE 渲染 / 真实拍摄</text>
+      <text x="91" y="110" class="f-ink3 sml" text-anchor="middle">/ 游戏录像</text>
+      <text x="91" y="134" class="f-ink2 sml" text-anchor="middle">RGB + 逐帧位姿 + caption</text>
+
+      <path d="M 170 104 L 190 104" class="nofill s-rule" stroke-width="1.5" marker-end="url(#ar-i)"/>
+
+      <rect x="194" y="52" width="150" height="104" rx="12" class="fs-C s-C" stroke-width="1.3"/>
+      <text x="269" y="42" class="f-ink3 sml mono" text-anchor="middle">STAGE 2</text>
+      <text x="269" y="76" class="f-Ci lbl" text-anchor="middle" font-weight="600">UE 自动渲染服务</text>
+      <text x="269" y="96" class="f-ink2 sml" text-anchor="middle">337 个环境 · NavMesh 规划</text>
+      <text x="269" y="112" class="f-ink2 sml" text-anchor="middle">control 模式：两个兴趣点</text>
+      <text x="269" y="126" class="f-ink2 sml" text-anchor="middle">＋方向均衡的随机段</text>
+      <text x="269" y="146" class="f-ink3 sml" text-anchor="middle">6 种模式，各自恒速</text>
+
+      <path d="M 348 104 L 368 104" class="nofill s-rule" stroke-width="1.5" marker-end="url(#ar-i)"/>
+
+      <rect x="372" y="52" width="150" height="104" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="447" y="42" class="f-ink3 sml mono" text-anchor="middle">STAGE 3</text>
+      <text x="447" y="76" class="f-ink lbl" text-anchor="middle" font-weight="600">curation 漏斗</text>
+      <text x="447" y="96" class="f-ink3 sml" text-anchor="middle">切分 · 速度过滤 · 加字幕</text>
+      <text x="447" y="110" class="f-ink3 sml" text-anchor="middle">暗帧 / 贴墙过滤</text>
+      <text x="447" y="134" class="f-Oi sml" text-anchor="middle">抹平屏幕上的运动速度</text>
+
+      <path d="M 526 104 L 546 104" class="nofill s-rule" stroke-width="1.5" marker-end="url(#ar-i)"/>
+
+      <rect x="550" y="52" width="154" height="104" rx="12" class="fs-M s-M" stroke-width="1.3"/>
+      <text x="627" y="42" class="f-ink3 sml mono" text-anchor="middle">STAGE 4</text>
+      <text x="627" y="76" class="f-Mi lbl" text-anchor="middle" font-weight="600">尺度统一</text>
+      <text x="627" y="96" class="f-ink2 sml" text-anchor="middle">逐源一个除数 σ<tspan dy="3" font-size="9">s</tspan></text>
+      <text x="627" y="116" class="f-ink2 sml" text-anchor="middle">坐标系统一到 OpenCV c2w</text>
+      <text x="627" y="140" class="f-Mi sml" text-anchor="middle">同一按键 = 同一物理距离</text>
+
+      <text x="360" y="184" class="f-ink2 lbl" text-anchor="middle">→ 片段级均匀采样：每次访问随机取一个 189 帧窗口，重采样到 24 fps（≈7.88 s = 48 latent steps）</text>
+      <text x="360" y="206" class="f-Li lbl" text-anchor="middle">→ 两个 UE 源上以 0.2 的概率把窗口替换成 <tspan font-weight="600">palindrome</tspan>（随机取半个窗口 + 它的时间倒序）</text>
+      <text x="360" y="222" class="f-ink3 sml" text-anchor="middle">这是长时空间记忆所需要的「重访证据」的<tspan font-weight="600">唯一</tspan>来源</text>
+    </svg>
+    </div>
+    <figcaption>注意两处分工：<b>curation 负责屏幕上的一半</b>（速度过滤让幸存片段的像素速度接近），
+    <b>尺度统一负责数字上的另一半</b>（估计出来的位姿只定义到尺度，引擎位姿单位又各不相同）。两件事解决的不是同一个问题。</figcaption>
+  </figure>
+
+  <h3><span class="ix">9.3</span>米制对齐：一个来源一个标量就够了</h3>
+  <div class="eqwrap acc-M">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn">σ<sub>s</sub> <span class="op">=</span>
+        <span style="display:inline-block;text-align:center;vertical-align:middle">
+          <span style="display:block;border-bottom:1px solid currentColor;padding:0 .4em">med<sub>s</sub>[‖Δ<i>t</i>‖]</span>
+          <span style="display:block;padding:0 .4em">med<sub>UE</sub>[‖Δ<i>t</i>‖]</span></span>,
+        &emsp; med<sub>UE</sub>[‖Δ<i>t</i>‖] <span class="op">=</span> 0.3667, &emsp; <i>t</i> <span class="op">←</span> <i>t</i> / σ<sub>s</sub></div>
+      </div>
+      <div class="eqno">(4)</div>
+    </div>
+    <div class="eqcap">测量方式很讲究：<b>回放训练时真实的窗口切分逻辑、关掉所有轨迹增强</b>，把位姿转成 per-latent-step 的平移增量 Δ<i>t</i>，
+    再把增量模长在采样片段上汇总取中位数。<b>只有平移过这个除数；旋转本来就是无量纲的弧度，从不缩放。</b></div>
+  </div>
+
+  <div class="grid2">
+    <div class="card mm">
+      <h5>逐源除数 σ<sub>s</sub></h5>
+      <p class="mono" style="line-height:2.1">
+      UE　　　　　　 100（cm→m，锚）<br>
+      DL3DV　　　　 0.1923<br>
+      RealEstate10K　0.2273<br>
+      OmniWorld-Game 1.75<br>
+      Sekai real　　 0.0086<br>
+      Sekai game　　 0.0107<br>
+      Game roaming　 1（VIPE 已米制）</p>
+      <p style="margin-top:10px;font-size:13px;color:var(--ink3)">OmniWorld-Game 的除数只在<b>步行子集</b>上汇总——因为 UE 锚本身以步行为主，
+      把 29% 的车辆片段算进来会把除数抬高。</p>
+    </div>
+    <div class="card oo">
+      <h5>事后审计：重缩放之后真的对齐了吗</h5>
+      <div style="margin-top:6px">
+        <svg viewBox="0 0 340 176" role="img" aria-label="各来源重缩放后的中位平移增量相对 UE 的比值，均接近 1.0">
+          <line x1="172" y1="18" x2="172" y2="146" class="s-O" stroke-width="1.6" stroke-dasharray="4 3"/>
+          <text x="172" y="164" class="f-Oi sml mono" text-anchor="middle">1.00</text>
+          <text x="96" y="164" class="f-ink3 sml mono" text-anchor="middle">0.85</text>
+          <text x="300" y="164" class="f-ink3 sml mono" text-anchor="middle">1.25</text>
+          <line x1="96" y1="146" x2="300" y2="146" class="s-rule1" stroke-width="1"/>
+          <g class="mono f-ink3 sml">
+            <text x="84" y="34" text-anchor="end">UE</text>
+            <text x="84" y="56" text-anchor="end">DL3DV</text>
+            <text x="84" y="78" text-anchor="end">RE10K</text>
+            <text x="84" y="100" text-anchor="end">OmniW-G</text>
+            <text x="84" y="122" text-anchor="end">Sekai real</text>
+            <text x="84" y="140" text-anchor="end">Sekai game</text>
+          </g>
+          <line x1="172" y1="30" x2="172" y2="30" class="s-M" stroke-width="2"/>
+          <line x1="132" y1="52" x2="172" y2="52" class="s-M" stroke-width="1.6" opacity=".45"/>
+          <line x1="172" y1="74" x2="172" y2="74" class="s-M" stroke-width="2"/>
+          <line x1="172" y1="96" x2="280" y2="96" class="s-C" stroke-width="1.6" opacity=".45"/>
+          <line x1="152" y1="118" x2="172" y2="118" class="s-M" stroke-width="1.6" opacity=".45"/>
+          <line x1="142" y1="136" x2="172" y2="136" class="s-M" stroke-width="1.6" opacity=".45"/>
+          <circle cx="172" cy="30" r="4.5" class="f-O"/>
+          <circle cx="132" cy="52" r="4.5" class="f-M"/>
+          <circle cx="172" cy="74" r="4.5" class="f-O"/>
+          <circle cx="280" cy="96" r="4.5" class="f-C"/>
+          <circle cx="152" cy="118" r="4.5" class="f-M"/>
+          <circle cx="142" cy="136" r="4.5" class="f-M"/>
+          <g class="mono f-ink2 sml">
+            <text x="182" y="34">1.00</text><text x="120" y="56" text-anchor="end">0.92</text>
+            <text x="182" y="78">1.00</text><text x="290" y="100">1.21</text>
+            <text x="140" y="122" text-anchor="end">0.96</text><text x="130" y="140" text-anchor="end">0.94</text>
+          </g>
+          <text x="200" y="14" class="f-ink3 sml" text-anchor="middle">重缩放后 median‖Δt‖ 相对 UE 的比值</text>
+        </svg>
+      </div>
+      <p style="margin-top:8px;font-size:13px">OmniWorld-Game 的 1.21 是<b>车辆片段的长尾</b>造成的，论文明确承认。
+      逐片段尺度离散度（p<sub>90</sub>/p<sub>10</sub>）为 3.65 / 2.66 / 2.86 / 2.67，都在一个数量级以内，所以<b>一个来源一个全局标量就够</b>，不需要逐场景归一或用度量深度重估。</p>
+    </div>
+  </div>
+
+  <details>
+    <summary>坐标约定的统一（这一段藏着一个容易踩的坑）</summary>
+    <div class="dc">
+      <p>所有来源被统一成 <b>OpenCV 相机基</b>（前 +z、下 +y）下的 camera-to-world 矩阵：</p>
+      <ul>
+        <li>UE 的相机基是「前 +x、上 +y」，需要用一个<b>绕竖直轴 90° 的非平凡旋转</b>做共轭变换。
+        论文特别指出：<b>常见的 diag(1, −1, −1) 符号翻转是错的</b>，他们是通过对着引擎轨迹做经验推导排除掉这个做法的。</li>
+        <li>OmniWorld 发布的是 world-to-camera 外参，在建片段时就取逆转成 c2w。</li>
+        <li>Sekai 的外参本来就是 c2w，直接摄入不取逆。</li>
+        <li>RealEstate10K 那个 legacy 的 camera-referenced (w2c) 模式在联合配置里不使用。</li>
+      </ul>
+      <p>审计还验证了两件事：每个来源里<b>前进运动都映射到主导的 +t<sub>z</sub></b>（DL3DV 在总体上是 t<sub>x</sub> 主导，但那反映的是它环绕/横移的拍摄风格而不是约定错误），
+      以及 <b>yaw 映射到同一个欧拉分量且符号一致</b>。</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>窗口抽取与 palindrome 增强的实现细节</summary>
+    <div class="dc">
+      <p>长片段内部，189 帧窗口从<b>均匀随机的起始帧</b>开始，按均匀步长重采样到 24 fps（不足长度的片段用线性索引插值拉伸）。
+      于是一条 60 s 的 Sekai 片段在每个 epoch 会贡献一个<b>不同的 ≈7.88 s 摘录</b>，
+      把长的未剪辑素材转换成多样的窗口级监督，而不需要离线重新切片。</p>
+      <p>palindrome 增强强迫相机<b>在单个训练窗口内重走自己的路</b>，顺带提供反向运动的覆盖。
+      在这个增强下，位姿降采样必须是 <b>SE(3)-aware 的（旋转走 slerp）</b>——因为在 palindrome 的镜像点上做算术平均会产生奇异矩阵。
+      loader 里还有一个整窗反转的概率，但在联合配置中被关闭。</p>
+      <p>最终发给模型的条件：189 个帧位姿降采样到 48 个 latent step，重锚使第一个相机为单位阵，
+      再做差分得到 per-step 的 6-DoF 增量（3 个平移 + 3 个欧拉角），按 latent chunk 分组成 <i>a<sub>k</sub></i> ∈ ℝ<sup>6</sup>。
+      MRoPE 消费的是相对 c2w 轨迹 <i>P<sub>k</sub></i> 本身，其平移<b>额外</b>按窗口的最大半径归一化——一个保持单位阵锚点的纯缩放，
+      让位姿索引工作在一个有界、与来源无关的坐标系里。</p>
+    </div>
+  </details>
+
+  <div class="call mine">
+    <div class="hd">▸ 我的读解：重访监督全部来自合成数据</div>
+    <p>palindrome 增强<b>只施加在两个 UE 源上</b>（概率 0.2）。也就是说，训练里所有显式的「重访证据」都是<b>引擎渲染的静态场景</b>。
+    真实footage（DL3DV / RealEstate10K / Sekai，占 26%）不提供 palindrome 监督。
+    这在逻辑上说得通（真实素材没有精确重走路径的 GT），但它意味着<b>长时记忆能力的泛化是从合成到真实的跨域外推</b>，
+    而论文的记忆评测（Sec. 4.3）用的是「12 张起始图 + 构造出来的 palindrome 轨迹」，同样是构造的。
+    我没有在文中找到「在真实场景重访上的评测」。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 10 EXPERIMENTS -->
+<section class="sec" id="s-exp">
+  <div class="eyebrow"><span class="n">10</span><span class="t">Evaluation</span><span class="line"></span></div>
+  <h2>三轴评测：动作跟随、长时召回、视频质量</h2>
+
+  <h3><span class="ix">10.1</span>训练与推理设置</h3>
+  <div class="grid2">
+    <div class="card">
+      <p class="mono">TRAINING</p>
+      <h5>两段分辨率</h5>
+      <p>在 Wan2.2-TI2V-5B 上分两阶段训练：先 <b>480p（384×640）预训练</b>，再 <b>720p（704×1280）warm-start</b>，
+      空间 RoPE 位置做插值。每个训练窗口 <code>L=12</code> 个 latent chunk，条件是 per-chunk 的 <i>a<sub>k</sub></i> 与 <i>P<sub>k</sub></i>。</p>
+      <p>训练期同时开着：24 头中 6 个全局（其余 <code>w=12</code> 局部）、每步在 12 组随机分区中轮换、KV chunk 随机丢到「5 个幸存 + 1 个 sink」。</p>
+    </div>
+    <div class="card">
+      <p class="mono">INFERENCE</p>
+      <h5>4 步蒸馏工作点</h5>
+      <p>除非特别说明，所有部署与计时结果都用 <b>4 步 DMD 蒸馏 LoRA</b>（rank 128、block size 16、单 rollout 学生）作用在多步模型的 <b>EMA 权重</b>上。
+      720p、4 步去噪、<b>CFG scale = 1</b>、每 block 16 个 latent frame。</p>
+      <p><b>per-head 窗口在评测时不施加</b>——所有头都读那个有界 cache。有界记忆臂的预算 <code>B=12</code>，landmark bank <code>K=30</code>。</p>
+    </div>
+  </div>
+
+  <h3><span class="ix">10.2</span>相机可控性</h3>
+  <div class="prose">
+    <p>基准由 <b>40 张起始图 × 6 条标准轨迹 = 240 个片段/方法</b>构成。40 张起始图<b>取自六个基线各自官方仓库</b>（704×1280），
+    以免偏向任何一方。六条轨迹是 dolly（持续前进）、strafe（左右平移）、arc_yaw（前进+偏航）、arc_pitch（前进+俯仰）、
+    s_curve（前进+交替偏航）、palindrome（前进后原路返回）——<b>每一条都含前向平移</b>，因为纯旋转的 GT 位移为零会让相似变换对齐退化。</p>
+    <p>每个方法收到<b>同一个相机意图</b>，翻译成它自己的原生控制接口（动作键、位姿序列或文本）。生成结果用 <b>ViPE</b> 重新跟踪，
+    估计轨迹通过 <b>Sim(3) 位置对齐 + 全局朝向对齐（限定 det=+1）</b>配准到目标轨迹上，
+    吸收各方法在步长幅度、手性与坐标系上的约定差异，让比较只落在<b>轨迹形状是否跟随意图</b>上。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Chart 1</span><span class="ti">相机可控性（Tab. 3）</span></div>
+    <div class="ctl">
+      <label>指标</label>
+      <div class="seg" id="c1Seg">
+        <button type="button" data-k="rot" class="on">RotErr °</button>
+        <button type="button" data-k="trans">TransErr</button>
+        <button type="button" data-k="cammc">CamMC</button>
+      </div>
+      <span style="font-size:12.5px;color:var(--ink3)">三项都是越低越好</span>
+    </div>
+    <div class="chart"><div><svg viewBox="0 0 720 252" id="c1Svg" role="img" aria-label="七个方法的相机可控性指标条形图"></svg></div></div>
+    <div class="tblwrap">
+      <table>
+        <caption>Table 3 · 逐轨迹 RotErr（°，↓）与总体指标</caption>
+        <thead><tr><th>方法</th><th>RotErr°↓</th><th>TransErr↓</th><th>CamMC↓</th><th>dolly</th><th>strafe</th><th>arc_yaw</th><th>arc_pitch</th><th>s_curve</th><th>palindrome</th></tr></thead>
+        <tbody>
+          <tr><td>SANA-WM</td><td>13.02</td><td>0.123</td><td>0.388</td><td>4.95</td><td>1.51</td><td>32.01</td><td>21.33</td><td>17.54</td><td>0.80</td></tr>
+          <tr><td>DreamX</td><td>13.10</td><td>0.114</td><td>0.381</td><td>2.50</td><td>1.21</td><td>33.00</td><td>20.71</td><td>18.06</td><td>3.13</td></tr>
+          <tr><td>HY-WorldPlay</td><td>14.66</td><td>0.114</td><td>0.427</td><td class="best">0.26</td><td class="best">0.24</td><td>43.53</td><td>22.00</td><td>21.73</td><td class="best">0.20</td></tr>
+          <tr><td>Matrix-Game 3.0</td><td>15.45</td><td class="best">0.075</td><td>0.394</td><td>8.19</td><td>1.00</td><td>39.93</td><td class="best">20.59</td><td>17.75</td><td>5.24</td></tr>
+          <tr><td>LingBot-World</td><td class="second">12.59</td><td>0.107</td><td class="second">0.354</td><td>3.10</td><td>6.01</td><td class="best">26.21</td><td>26.83</td><td class="best">12.23</td><td>1.16</td></tr>
+          <tr><td>Yume-1.5</td><td>14.24</td><td>0.131</td><td>0.428</td><td>0.84</td><td>2.01</td><td>29.05</td><td>24.57</td><td>25.60</td><td>3.38</td></tr>
+          <tr class="ours"><td>ReWorld（本文）</td><td class="best">11.95</td><td>0.102</td><td class="best">0.332</td><td>2.69</td><td>1.07</td><td class="second">27.63</td><td>23.61</td><td class="second">16.06</td><td class="second">0.64</td></tr>
+        </tbody>
+      </table>
+      <p class="tnote">ReWorld 拿到最好的总体 RotErr 与 CamMC；<b>TransErr 的最优属于 Matrix-Game 3.0（0.075）</b>，ReWorld 排第三。
+      在平移主导的轨迹（dolly / strafe / palindrome）上处于第一梯队，在旋转主导的两条弧线上只是「有竞争力」——论文自己也说旋转弧是所有方法最难的一档。</p>
+    </div>
+    <figcaption>值得注意的现象：HY-WorldPlay 在 dolly / strafe / palindrome 三条<b>平移轨迹</b>上误差极低（0.26 / 0.24 / 0.20），
+    但在 arc_yaw 上高达 43.53——结合下一节它「走得最少」的事实，这更像是<b>整体运动幅度偏保守</b>的表现，而不是纯粹的跟随精度差异。
+    RotErr 在 Sim(3) 对齐之后仍然会被运动幅度影响，读表时要一起看。</figcaption>
+  </figure>
+
+  <h3><span class="ix">10.3</span>长时记忆：palindrome 上的 needle-in-a-haystack</h3>
+  <div class="prose">
+    <p>协议建在 palindrome 轨迹上：相机走出去再原路退回，于是<b>片段早期生成的视角必须在很长的时间间隔之后被重新生成出来</b>——这些早期视角就是 needle。
+    基线基准是 <b>12 张起始图 × 3 条标准 palindrome</b>（strafe、dolly、yaw），两个 rollout 长度 <code>k ∈ {48, 96}</code> latents（≈8 s / 16 s），
+    每个方法每个长度 36 个片段。计分的重访对是 palindrome 的<b>镜像对 (t, k−1−t)</b>，锚在片段最早的五分之一内，
+    且只保留间隔跨过至少一半 rollout 的那些，每片段最多 5 对。</p>
+    <p>对自家的几个臂，论文另跑了一个更长的版本：把分组动作探索补全成 palindrome，长度 <code>k ∈ {96, 192, 288, 384}</code>，
+    <b>每个长度都是同一条轨迹的前缀</b>，所以跨 k 的分数可比。Sec. 11 的消融就跑在这个测试上。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 11</span><span class="ti">三种构造 palindrome 与镜像对计分</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 210" role="img" aria-label="strafe、dolly、yaw 三种 palindrome 轨迹与镜像对的计分方式">
+      <!-- strafe -->
+      <text x="24" y="26" class="f-ink lbl" font-weight="600">(a) strafe</text>
+      <text x="24" y="42" class="f-ink3 sml">向左平移，再向右退回</text>
+      <line x1="30" y1="82" x2="200" y2="82" class="s-M" stroke-width="2.4" marker-end="url(#ar-m)"/>
+      <line x1="200" y1="98" x2="30" y2="98" class="s-C" stroke-width="2.4" stroke-dasharray="6 4" marker-end="url(#ar-c)"/>
+      <circle cx="30" cy="90" r="6" class="f-L"/>
+      <text x="30" y="118" class="f-Li sml" text-anchor="middle">needle</text>
+      <text x="204" y="86" class="f-Mi sml">折返</text>
+
+      <!-- dolly -->
+      <text x="252" y="26" class="f-ink lbl" font-weight="600">(b) dolly</text>
+      <text x="252" y="42" class="f-ink3 sml">前进，再原路后退</text>
+      <path d="M 258 96 L 420 74" class="nofill s-M" stroke-width="2.4" marker-end="url(#ar-m)"/>
+      <path d="M 420 90 L 258 110" class="nofill s-C" stroke-width="2.4" stroke-dasharray="6 4" marker-end="url(#ar-c)"/>
+      <circle cx="258" cy="103" r="6" class="f-L"/>
+      <text x="258" y="128" class="f-Li sml" text-anchor="middle">needle</text>
+
+      <!-- yaw -->
+      <text x="480" y="26" class="f-ink lbl" font-weight="600">(c) yaw</text>
+      <text x="480" y="42" class="f-ink3 sml">原地转开，再转回来</text>
+      <circle cx="560" cy="92" r="34" class="nofill s-rule1" stroke-width="1" stroke-dasharray="3 4"/>
+      <path d="M 560 92 L 594 92" class="nofill s-L" stroke-width="2.4" marker-end="url(#ar-l)"/>
+      <path d="M 584 68 A 34 34 0 0 0 560 58" class="nofill s-M" stroke-width="2.2" marker-end="url(#ar-m)"/>
+      <path d="M 560 126 A 34 34 0 0 0 586 114" class="nofill s-C" stroke-width="2.2" stroke-dasharray="5 3" marker-end="url(#ar-c)"/>
+      <circle cx="560" cy="92" r="4" class="f-ink3"/>
+      <text x="620" y="96" class="f-Li sml">needle 朝向</text>
+
+      <!-- scoring strip -->
+      <rect x="24" y="146" width="672" height="52" rx="11" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="40" y="166" class="f-ink lbl" font-weight="600">计分：镜像对 (t, k−1−t)</text>
+      <line x1="240" y1="176" x2="680" y2="176" class="s-rule" stroke-width="1.2"/>
+      <circle cx="248" cy="176" r="5" class="f-L"/><text x="248" y="194" class="f-Li sml" text-anchor="middle">t = 0</text>
+      <circle cx="290" cy="176" r="4" class="f-L"/>
+      <circle cx="460" cy="176" r="5" class="f-ink3"/><text x="460" y="194" class="f-ink3 sml" text-anchor="middle">折返点</text>
+      <circle cx="630" cy="176" r="4" class="f-C"/>
+      <circle cx="672" cy="176" r="5" class="f-C"/><text x="672" y="194" class="f-Ci sml" text-anchor="middle">t = k−1</text>
+      <path d="M 248 168 C 340 140, 580 140, 672 168" class="nofill s-O" stroke-width="1.4" stroke-dasharray="4 3"/>
+      <text x="460" y="146" class="f-Oi sml" text-anchor="middle">间隔必须跨过至少一半 rollout</text>
+      <text x="40" y="186" class="f-ink3 sml">锚在最早五分之一</text>
+    </svg>
+    </div>
+    <figcaption>四个记忆指标各问一个不同的问题：<b>SSIM</b> 问像素结构、<b>LPIPS</b> 问深度特征上的感知距离（越低越好）、
+    <b>DINO</b> 问两帧是不是同一个场景布局（DINO ViT 特征余弦相似度）、<b>ORB</b> 问<b>具体的地标有没有回到原位</b>（匹配上的 ORB 关键点比例）。
+    ORB 是四个里最「较真」的一个。</figcaption>
+  </figure>
+
+  <div class="call warn">
+    <div class="hd">▲ 读这张表之前必须先知道的事</div>
+    <p><b>一个几乎没动的 rollout 在任何相似度指标上都拿高分。</b>所以论文额外报告了每个方法的<b>实际执行路径长度</b>
+    （去程累计的中位光流，单位像素）——它衡量的是「转身之前到底走过了多少视觉地面」。
+    HY-WorldPlay 在四个记忆指标上全部第一，但它的路径长度是 113 / 210 px，而其他方法是 279–352 / 454–834 px。
+    <b>这不是一个可以直接比大小的表。</b></p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Chart 2</span><span class="ti">路径长度 vs 重访相似度（Tab. 4）——把混杂因素画出来</span></div>
+    <div class="ctl">
+      <label>rollout 长度</label>
+      <div class="seg" id="c2K"><button type="button" data-k="48">k = 48</button><button type="button" data-k="96" class="on">k = 96</button></div>
+      <label>指标</label>
+      <div class="seg" id="c2M">
+        <button type="button" data-m="ssim" class="on">SSIM ↑</button>
+        <button type="button" data-m="lpips">LPIPS ↓</button>
+        <button type="button" data-m="dino">DINO ↑</button>
+        <button type="button" data-m="orb">ORB ↑</button>
+      </div>
+    </div>
+    <div class="chart"><div><svg viewBox="0 0 720 296" id="c2Svg" role="img" aria-label="横轴为执行路径长度、纵轴为重访相似度的散点图"></svg></div></div>
+    <figcaption>横轴越靠右 = 这个方法在折返前真的走出去了；纵轴越靠上（LPIPS 是越靠下）= 重访还原得越好。
+    <b>右上角（LPIPS 的右下角）才是「走得远又记得住」。</b>
+    在 k=96 上，ReWorld 是唯一同时位于「路径 &gt; 600 px」且四项指标都排第二的方法；
+    HY-WorldPlay 的四项第一伴随着 210 px 的路径长度。
+    另一个值得注意的现象：ReWorld 的 SSIM 从 k=48 的 0.349 <b>升到</b> k=96 的 0.384，是七个方法里唯一随 rollout 变长而变好的，
+    <span style="color:var(--ink3)">（我的推测：更长的 rollout 让 landmark bank 有机会真正积累并被召回，而 k=48 时 recent 窗口本身就还没被挤爆）</span>。</figcaption>
+  </figure>
+
+  <div class="tblwrap">
+    <table>
+      <caption>Table 4 · palindrome 重访基准上的绝对分数（路径长度为描述性数据，不参与排名）</caption>
+      <thead><tr><th>方法</th><th>路径 k=48</th><th>SSIM↑</th><th>LPIPS↓</th><th>DINO↑</th><th>ORB↑</th><th>路径 k=96</th><th>SSIM↑</th><th>LPIPS↓</th><th>DINO↑</th><th>ORB↑</th></tr></thead>
+      <tbody>
+        <tr><td>SANA-WM</td><td>296</td><td>0.318</td><td>0.433</td><td>0.810</td><td>0.174</td><td>499</td><td>0.313</td><td>0.528</td><td>0.700</td><td>0.161</td></tr>
+        <tr><td>DreamX</td><td>279</td><td>0.214</td><td>0.553</td><td>0.740</td><td>0.180</td><td>454</td><td>0.194</td><td>0.627</td><td>0.603</td><td>0.159</td></tr>
+        <tr><td>HY-WorldPlay</td><td>113<sup>†</sup></td><td class="best">0.448</td><td class="best">0.163</td><td class="best">0.969</td><td class="best">0.464</td><td>210<sup>†</sup></td><td class="best">0.427</td><td class="best">0.247</td><td class="best">0.942</td><td class="best">0.460</td></tr>
+        <tr><td>Matrix-Game 3.0</td><td>312</td><td>0.318</td><td>0.369</td><td>0.891</td><td>0.292</td><td>724</td><td>0.275</td><td>0.478</td><td>0.850</td><td>0.247</td></tr>
+        <tr><td>LingBot-World</td><td>352</td><td>0.274</td><td>0.557</td><td>0.663</td><td>0.177</td><td>834</td><td>0.251</td><td>0.635</td><td>0.509</td><td>0.162</td></tr>
+        <tr><td>Yume-1.5</td><td>165</td><td>0.268</td><td>0.533</td><td>0.747</td><td>0.179</td><td>332</td><td>0.269</td><td>0.586</td><td>0.661</td><td>0.152</td></tr>
+        <tr class="ours"><td>ReWorld（本文）</td><td>286</td><td class="second">0.349</td><td class="second">0.282</td><td class="second">0.913</td><td class="second">0.325</td><td>615</td><td class="second">0.384</td><td class="second">0.332</td><td class="second">0.932</td><td class="second">0.379</td></tr>
+      </tbody>
+    </table>
+    <p class="tnote"><sup>†</sup> HY-WorldPlay 执行的路径远短于其他所有方法：113 / 210 px vs 其余的 279–352 / 454–834 px（论文原注）。
+    k=48 是一个「合理性检查」长度——LingBot-World 保有 52 latent 的窗口，SANA-WM（线性注意力）与 Yume-1.5 是无界的，几个基线光靠 context 就能解；
+    <b>k=96 才是有区分度的长度</b>：间隔达到 95 latents，起始视角已经离开了所有有界窗口，必须从记忆里召回。</p>
+  </div>
+
+  <h3><span class="ix">10.4</span>生成质量：VBench 七个「无需文本」的维度</h3>
+  <div class="prose">
+    <p>为了让不同方法可比，所有片段被归一到同一规格后再打分：<b>跨整段均匀采样 32 帧、缩放到 1280×704、按 16 fps 重编码</b>。
+    这让比较在内部自洽，但<b>不能直接与各方法在原生长度上报告的数字对比</b>。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Chart 3</span><span class="ti">VBench 七维（Tab. 5）</span></div>
+    <div class="chart"><div><svg viewBox="0 0 720 264" id="c3Svg" role="img" aria-label="七个方法在 VBench 七个维度上的均值条形图与各维度对比"></svg></div></div>
+    <div class="tblwrap">
+      <table>
+        <caption>Table 5 · VBench 七个视频内禀维度（越高越好）</caption>
+        <thead><tr><th>方法</th><th>均值↑</th><th>Imaging</th><th>Aesthetic</th><th>Subject Cons.</th><th>Background Cons.</th><th>Temporal Flick.</th><th>Dynamic Degree</th><th>Motion Smooth.</th></tr></thead>
+        <tbody>
+          <tr><td>SANA-WM</td><td>0.835</td><td>0.668</td><td>0.537</td><td>0.908</td><td>0.919</td><td>0.942</td><td>0.900</td><td>0.969</td></tr>
+          <tr><td>DreamX</td><td>0.828</td><td>0.670</td><td>0.542</td><td>0.880</td><td>0.904</td><td>0.909</td><td>0.946</td><td>0.946</td></tr>
+          <tr><td>HY-WorldPlay</td><td>0.842</td><td>0.670</td><td class="best">0.601</td><td class="best">0.976</td><td class="best">0.957</td><td class="best">0.973</td><td>0.733</td><td class="best">0.987</td></tr>
+          <tr><td>Matrix-Game 3.0</td><td>0.836</td><td class="best">0.713</td><td>0.461</td><td>0.894</td><td>0.919</td><td>0.921</td><td>0.983</td><td>0.962</td></tr>
+          <tr><td>LingBot-World</td><td>0.841</td><td>0.692</td><td>0.577</td><td>0.905</td><td>0.915</td><td>0.918</td><td>0.933</td><td>0.947</td></tr>
+          <tr><td>Yume-1.5</td><td class="second">0.844</td><td>0.669</td><td>0.565</td><td>0.878</td><td>0.911</td><td>0.934</td><td class="best">0.988</td><td>0.964</td></tr>
+          <tr class="ours"><td>ReWorld（本文）</td><td class="best">0.850</td><td>0.665</td><td class="second">0.579</td><td>0.929</td><td>0.929</td><td class="second">0.952</td><td>0.912</td><td class="second">0.979</td></tr>
+        </tbody>
+      </table>
+      <p class="tnote">ReWorld 拿到最好的<b>均值</b>，但<b>没有任何一个单项是第一</b>：它在时间轴维度（Motion Smoothness、Temporal Flickering）处于第一梯队，
+      同时把 Dynamic Degree 维持在 0.912；而单项冠军最多的 HY-WorldPlay 是<b>用明显更低的运动量换来的一致性分数</b>（Dynamic Degree 只有 0.733）。
+      论文自己提醒：<b>Dynamic Degree 必须和 Sec. 4.3 的重访指标一起读</b>——一致性类和重访类指标都偏爱低运动的 rollout。</p>
+    </div>
+    <figcaption>这是我认为这篇论文在评测叙事上最诚实的一处：它两次主动点破「低运动量会同时抬高一致性与重访分数」这个共同的混杂因素，
+    而不是把 HY-WorldPlay 的领先一笔带过。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 11 ABLATION -->
+<section class="sec" id="s-abl">
+  <div class="eyebrow"><span class="n">11</span><span class="t">Ablations</span><span class="line"></span></div>
+  <h2>消融：训练配方与推理策略各自贡献了多少</h2>
+  <p class="lead">Tab. 6 在长 rollout 记忆测试上拆了两条轴，报告的是 <b>revisit SSIM</b>。
+  上半块<b>固定推理臂（consolidation）只改训练配方</b>——四个变体都从零开始、720p、20k steps、其余设置完全一致；
+  下半块<b>固定最终配方只改推理缓存策略</b>，每个有界臂都保留同一个 sink chunk，差别只在剩下的预算怎么填。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Chart 4</span><span class="ti">Revisit SSIM 随 rollout 长度的变化（Tab. 6）</span></div>
+    <div class="ctl">
+      <label>对比轴</label>
+      <div class="seg" id="c4Seg">
+        <button type="button" data-k="recipe" class="on">训练配方</button>
+        <button type="button" data-k="cache">推理缓存策略</button>
+      </div>
+      <span style="font-size:12.5px;color:var(--ink3)">k = 96 / 192 / 288 / 384 latents（≈16 / 32 / 48 / 64 s）</span>
+    </div>
+    <div class="chart"><div><svg viewBox="0 0 720 300" id="c4Svg" role="img" aria-label="revisit SSIM 随 rollout 长度变化的折线图，可切换训练配方与推理缓存策略两组"></svg></div></div>
+    <figcaption>把两块画在同一坐标里最能看清的是<b>斜率</b>而不是绝对值：
+    真正的分野发生在 <b>k ≥ 288</b>——这也是论文自己指出的「有区分度的设置」，因为到那个长度滑动窗口<b>必然</b>已经把 needle 挤出去了。
+    <b>full-KV 在 k=288 之后 OOM</b>，这正是整个方法要解决的问题：那条最强的曲线在最需要它的地方消失了。</figcaption>
+  </figure>
+
+  <div class="tblwrap">
+    <table>
+      <caption>Table 6 · 长 rollout 记忆测试上的 revisit SSIM ↑</caption>
+      <thead><tr><th>方法</th><th>k = 96</th><th>k = 192</th><th>k = 288</th><th>k = 384</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="5">训练配方（推理臂固定为本文的 consolidation）</td></tr>
+        <tr><td>base</td><td>0.4019</td><td>0.3747</td><td>0.3698</td><td>0.3387</td></tr>
+        <tr><td>+ CD（仅 chunk-drop）</td><td>0.4043</td><td class="best">0.3941</td><td>0.3846</td><td>0.3463</td></tr>
+        <tr><td>+ RH（仅随机头路由）</td><td>0.4319</td><td>0.3787</td><td>0.3836</td><td>0.3565</td></tr>
+        <tr class="ours"><td>+ CD + RH（本文）</td><td class="best">0.4358</td><td class="second">0.3929</td><td class="best">0.3943</td><td class="best">0.3752</td></tr>
+        <tr class="grp"><td colspan="5">推理缓存策略（配方固定为本文完整配方，预算同为 B = 12）</td></tr>
+        <tr><td>full-KV（不可部署的上界）</td><td class="best">0.4463</td><td class="best">0.4231</td><td style="color:var(--bad-ink)">OOM</td><td style="color:var(--bad-ink)">OOM</td></tr>
+        <tr><td>window（sink + 滑动窗口）</td><td>0.4129</td><td>0.3687</td><td>0.3505</td><td>0.3476</td></tr>
+        <tr><td>naive-merge（老 chunk 均值池化）</td><td>0.3741</td><td>0.3371</td><td>0.3467</td><td>0.3541</td></tr>
+        <tr><td>consolidation w/o bank（6 个静态 landmark，无检索）</td><td class="second">0.4376</td><td>0.3758</td><td>0.3743</td><td>0.3629</td></tr>
+        <tr class="ours"><td>consolidation w/ bank（本文）</td><td>0.4358</td><td class="second">0.3929</td><td class="second">0.3943</td><td class="second">0.3752</td></tr>
+      </tbody>
+    </table>
+    <p class="tnote">几处值得停下来看的：<br>
+    <b>①</b> 单加 CD 在 k=192 上甚至略高于完整配方（0.3941 vs 0.3929），两者在中段基本打平；随机头路由的收益集中在<b>两端</b>（k=96 与 k=384）。<br>
+    <b>②</b> <b>在 k=96 上，「无 bank」的静态 landmark（0.4376）反而略高于「有 bank」（0.4358）</b>——bank 的价值到 k≥192 才显现。这说明 bank 是一个<b>纯粹的长程装置</b>。<br>
+    <b>③</b> naive-merge 在短长度上是最差的（0.3741），但它随 k 增长几乎不掉（到 k=384 是 0.3541，超过了 window）。池化压缩牺牲的是保真度而不是覆盖率，曲线形状和「遗忘型」基线完全不同。</p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">▸ 我的读解：这张表的说服力有一个上限</div>
+    <p>在 k=384 上，本文（0.3752）相对最强的有界基线 window（0.3476）领先 <b>7.9%</b>，相对 naive-merge（0.3541）领先 <b>6.0%</b>。
+    这是真实的领先，但<b>不是数量级的差距</b>。而且整张消融表<b>只报告 SSIM 一个指标</b>，
+    而在与基线对比时论文用了 SSIM / LPIPS / DINO / ORB 四个——其中 <b>ORB 恰恰是最能回答「地标有没有回到原位」的那一个</b>。
+    如果 landmark bank 的卖点是「地标层面的空间一致性」，那么在消融里补上 ORB / LPIPS 会比只报 SSIM 有说服力得多。
+    （SSIM 对全局亮度/结构变化敏感，对「同一栋楼挪了两米」相对不敏感。）</p>
+  </div>
+</section>
+
+<!-- ============================================================ 12 CRITIQUE -->
+<section class="sec" id="s-crit">
+  <div class="eyebrow"><span class="n">12</span><span class="t">Critical Reading</span><span class="line"></span></div>
+  <h2>局限，以及我读下来的保留意见</h2>
+  <p class="lead">先说结论：<b>方法本身我认为是扎实且优雅的</b>——「按窗口拆分能力、用随机换岗解绑」是一个很难得的、
+  既有清晰机理又几乎零成本的设计。下面这些保留意见针对的是<b>证据链</b>，不是想法。</p>
+
+  <h3><span class="ix">12.1</span>「实时」这个词全文没有任何数字支撑</h3>
+  <div class="call warn">
+    <div class="hd">▲ 最显眼的缺口</div>
+    <p>论文标题、摘要、引言、结论都把 <b>real-time / streaming</b> 作为三大目标之一，
+    Sec. 2.4 专门为此做了四步蒸馏。但<b>全文没有出现任何 FPS、延迟、吞吐或硬件型号</b>。
+    Sec. 4.1 的「Real-time inference」一段只写了分辨率、去噪步数、CFG scale 与 block size，没有速度。
+    这意味着：<b>「一个骨干两个工作点」这个卖点里，实时那一端的具体位置是未知的</b>。
+    在本仓库的 System Comparison 表里，ReWorld 的 FPS 单元格只能填 <code>—</code>。</p>
+  </div>
+
+  <h3><span class="ix">12.2</span>论文自己提出的可证伪预测，似乎没有被实际制表</h3>
+  <div class="prose">
+    <p>Sec. 2.2 两次给出这条预测：「<b>在推理时更换 cache 压缩策略，控制误差应当保持不变</b>——Sec. 4.5 会检验它」。
+    我把 Sec. 4.5 的两张表逐格看过：</p>
+    <ul>
+      <li><b>Tab. 6</b> 确实变化了推理缓存策略（window / naive-merge / w-o bank / w bank / full-KV），但它<b>只报告 revisit SSIM</b>，一个控制指标都没有。</li>
+      <li><b>Tab. 7</b> 确实报告了控制指标（RotErr / TransErr / CamMC），但它变化的是<b>动作—位姿融合方式</b>，不是缓存策略。</li>
+    </ul>
+    <p>换句话说，就本文呈现的表格而言，<b>「换 cache 策略 → 控制误差不变」这条预测没有被制表验证</b>。
+    这不一定说明作者没测（很可能测了但没放进来），但对读者来说，这条最漂亮的因果论证目前<b>停在论证层面</b>。
+    补一张「五种 cache 策略 × RotErr」的表，成本极低，说服力却会显著提升。</p>
+  </div>
+
+  <h3><span class="ix">12.3</span>记忆表的混杂因素被承认了，但没有被消解</h3>
+  <div class="prose">
+    <p>论文很坦诚地指出「走得少的方法在任何相似度指标上都占便宜」，并给出了路径长度作为描述性数据。
+    但它<b>没有提出任何归一化指标</b>（比如按路径长度分箱比较，或报告「单位路径长度的重访保真度」）。
+    结果是：Tab. 4 上 ReWorld 四项全是<b>第二</b>，第一全被一个走得只有它三分之一远的方法拿走。
+    读者只能凭那句脚注自行折算。我认为这是全文最需要补强的一处实验设计——不是数据不好，而是<b>比较协议没有把已知的混杂因素纳入进去</b>。</p>
+  </div>
+
+  <h3><span class="ix">12.4</span>可复现性：训练细节的指针指向了一个不存在的地方</h3>
+  <div class="prose">
+    <p>Sec. 4.1 写道「optimizer、guidance 与 parallelism 设置<b>遵循 Sec. 2.2 的训练细节</b>」，
+    但 Sec. 2.2（Camera-Controllable Streaming Generation）通篇没有这些内容；
+    而 v1 版本的<b>唯一附录是 Appendix A（数据管线细节）</b>，没有训练配置附录。
+    于是：<b>主模型的学习率、batch size、总步数、训练硬件与耗时全部缺失</b>，只有消融变体标了「720p, 20k steps」。
+    同时论文页面上<b>没有代码或权重链接</b>（项目主页只有视频）。数据侧的细节反而写得非常充分——这个详略比例有点反常。</p>
+  </div>
+
+  <h3><span class="ix">12.5</span>几处更细的观察</h3>
+  <div class="grid2">
+    <div class="card bb">
+      <h5>bank 的收益是长程专属的</h5>
+      <p>k=96 时「无 bank」（0.4376）略优于「有 bank」（0.4358）。
+      所以「landmark bank」不该被读成一个普遍改进，它是<b>为 k ≥ 192 设计的装置</b>。
+      对只跑十几秒 rollout 的应用，这个部件可能是净负担（它还要维护 host↔device 的分层存储与预取）。</p>
+    </div>
+    <div class="card bb">
+      <h5>固定池 |P| = 12 没有被消融</h5>
+      <p>72 个「全局名额」摊到 24 个头，平均 3 次，但随机抽的 12 组不会均匀——
+      <a href="#s-split">Fig. 6</a> 的示意池里就有一个头 0 次、两个头 6 次。
+      论文没有说是否对池做过平衡，也没有 |P| 的敏感性实验。如果 |P| 很大（接近每步现抽）或很小（接近固定分组）结果差别很大，
+      那这个超参就不像正文写的那么无关紧要。</p>
+    </div>
+    <div class="card bb">
+      <h5>重访监督完全来自合成数据</h5>
+      <p>palindrome 增强只加在两个 UE 源上（p=0.2），记忆评测也用构造出来的 palindrome 轨迹。
+      <b>真实场景下的重访一致性没有被直接评测过</b>。考虑到真实素材占训练混合的 26%，这是一个值得补的实验。</p>
+    </div>
+    <div class="card bb">
+      <h5>位姿是唯一的记忆键</h5>
+      <p>作者在结论里主动承认：记忆仍然只按相机位姿索引，扩展到<b>动态场景</b>与更丰富的非导航交互是下一步。
+      我补一点：纯位姿键还有一个静态假设——<b>「同一个位姿必然对应同一个场景」</b>。
+      在多层建筑、可破坏场景、或场景本身随时间改变的设定里，这个假设会直接失效，而里程计准入规则也无从区分。</p>
+    </div>
+    <div class="card bb">
+      <h5>MRoPE 的成本优势是分析出来的</h5>
+      <p>Tab. 1 用「注意力遍数」和「≈2× FLOPs」做论证，但<b>没有实测的 wall-clock 或显存对比</b>。
+      考虑到 MRoPE 还额外引入了 V/O 上的 SE(3) 残差（两个线性层，作用在全部 token 上），
+      真实开销未必是「一个小 MLP」那么轻。</p>
+    </div>
+    <div class="card bb">
+      <h5>基线的接口翻译难以审计</h5>
+      <p>「每个方法收到同一个相机意图，翻译成它的原生控制接口（动作键 / 位姿序列 / 文本）」——
+      这个翻译是作者做的。用起始图取自各基线官方仓库来避免图像偏向是很好的做法，
+      但<b>控制接口的翻译质量</b>是一个无法从论文里核验的自由度，尤其对那些只吃文本或离散按键的方法。</p>
+    </div>
+  </div>
+
+  <div class="call key">
+    <div class="hd">◆ 我认为最有价值的三点</div>
+    <p><b>1. 「随机头路由」的论证是完整的。</b>它不是「加一点随机性有好处」这种模糊说法，
+    而是从一个明确的部署约束（推理时所有头共享同一个 cache）反推出的必要条件，并且给出了可证伪的预测。这种从部署倒推训练的推理方式值得借鉴。</p>
+    <p><b>2. 里程计准入规则拒绝去重，是个反直觉但正确的判断。</b>「bank 覆盖的是轨迹，不是场景」——
+    这一句配上 64% 覆盖率的反例数据，是全文我最欣赏的设计决策。</p>
+    <p><b>3. 米制尺度对齐被当成一等公民。</b>「同一按键在每个来源移动同样的物理距离」听起来是工程琐事，
+    但它是「动作 = 6-DoF 增量」这个定义能跨源工作的前提。Appendix A 里那个 diag(1,−1,−1) 是错的的注记，说明他们真的踩过坑。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 13 REPO -->
+<section class="sec" id="s-repo">
+  <div class="eyebrow"><span class="n">13</span><span class="t">Positioning</span><span class="line"></span></div>
+  <h2>放回 Awesome-Interactive-Video-World-Models 的坐标系里</h2>
+  <p class="lead">ReWorld 同时踩在本仓库的三个分区上，但重心明确落在 <b>Long-Horizon Memory &amp; Consistency</b>。
+  它的独特之处不在于「用了记忆库」，而在于<b>这个库活在模型自己的 KV 空间里</b>。</p>
+
+  <h3><span class="ix">13.1</span>记忆机制谱系里的位置</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 12</span><span class="ti">四类记忆机制，以及 ReWorld 站在哪</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 268" role="img" aria-label="context、compressive、spatial recon、retrieval 四类记忆机制的对比，以及 ReWorld 的混合位置">
+      <!-- four columns -->
+      <rect x="16" y="40" width="160" height="150" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="96" y="30" class="f-ink3 sml mono" text-anchor="middle">CONTEXT</text>
+      <text x="96" y="64" class="f-ink lbl" text-anchor="middle" font-weight="600">滑动窗口 + sink</text>
+      <text x="96" y="90" class="f-ink3 sml" text-anchor="middle">成本恒定</text>
+      <text x="96" y="108" class="f-Bi sml" text-anchor="middle">窗口之外全部遗忘</text>
+      <text x="96" y="140" class="f-ink3 sml" text-anchor="middle">StreamingLLM 一系</text>
+      <text x="96" y="172" class="f-ink3 sml" text-anchor="middle">本文的 window 对照臂</text>
+
+      <rect x="188" y="40" width="160" height="150" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="268" y="30" class="f-ink3 sml mono" text-anchor="middle">COMPRESSIVE</text>
+      <text x="268" y="64" class="f-ink lbl" text-anchor="middle" font-weight="600">KV 压缩 / 池化</text>
+      <text x="268" y="90" class="f-ink3 sml" text-anchor="middle">保留全部覆盖</text>
+      <text x="268" y="108" class="f-Bi sml" text-anchor="middle">但整体降质</text>
+      <text x="268" y="140" class="f-ink3 sml" text-anchor="middle">TokenTrim / merge 一系</text>
+      <text x="268" y="172" class="f-ink3 sml" text-anchor="middle">本文的 naive-merge 对照臂</text>
+
+      <rect x="360" y="40" width="160" height="150" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="440" y="30" class="f-ink3 sml mono" text-anchor="middle">SPATIAL (RECON)</text>
+      <text x="440" y="64" class="f-ink lbl" text-anchor="middle" font-weight="600">显式 3D 重建</text>
+      <text x="440" y="90" class="f-ink3 sml" text-anchor="middle">几何一致性最强</text>
+      <text x="440" y="108" class="f-Bi sml" text-anchor="middle">记忆活在生成器之外</text>
+      <text x="440" y="140" class="f-ink3 sml" text-anchor="middle">Long-term Spatial Memory</text>
+      <text x="440" y="172" class="f-ink3 sml" text-anchor="middle">HunyuanWorld 一系</text>
+
+      <rect x="532" y="40" width="172" height="150" rx="12" class="fs-L s-L" stroke-width="1.5"/>
+      <text x="618" y="30" class="f-Li sml mono" text-anchor="middle">RETRIEVAL（本文）</text>
+      <text x="618" y="64" class="f-Li lbl" text-anchor="middle" font-weight="600">KV 空间内的地标库</text>
+      <text x="618" y="90" class="f-ink2 sml" text-anchor="middle">少存，但存全分辨率</text>
+      <text x="618" y="108" class="f-ink2 sml" text-anchor="middle">按位姿就近召回</text>
+      <text x="618" y="134" class="f-ink2 sml" text-anchor="middle">记忆仍在模型自己的</text>
+      <text x="618" y="150" class="f-ink2 sml" text-anchor="middle">注意力表示里</text>
+      <text x="618" y="176" class="f-Oi sml" text-anchor="middle">＋ chunk-drop 让拼接可读</text>
+
+      <rect x="16" y="206" width="688" height="50" rx="11" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="32" y="228" class="f-ink lbl"><tspan font-weight="600">两条正交的轴：</tspan>「存多少」（覆盖率）与「存多好」（保真度）。前两类各自牺牲一个；</text>
+      <text x="32" y="246" class="f-ink lbl">第三类把记忆搬出模型换取几何；ReWorld 选择<tspan class="f-Li" font-weight="600">牺牲密度、保住保真度与覆盖范围</tspan>——用里程计控密度、用冗余淘汰控多样性。</text>
+    </svg>
+    </div>
+    <figcaption>WorldMem、Context-as-Memory 这些「外部记忆库 / 挑帧回填」的方案和 ReWorld 最接近，
+    差别在于 ReWorld 的库存的是 <b>KV 而不是像素帧</b>，召回后直接进注意力，不需要重新编码；
+    而 MRoPE 保证了「时间上很远的 chunk 仍然按位姿可寻址」，这是召回能生效的前提。</figcaption>
+  </figure>
+
+  <h3><span class="ix">13.2</span>建议加进 System Comparison 的那一行</h3>
+  <div class="tblwrap">
+    <table>
+      <caption>按仓库现有列的口径填写（<code>—</code> 表示论文未报告）</caption>
+      <thead><tr><th>System</th><th>Date</th><th style="text-align:left">Backbone</th><th style="text-align:left">Action</th><th>FPS</th><th style="text-align:left">Memory</th><th>Open</th></tr></thead>
+      <tbody>
+        <tr class="ours"><td>ReWorld</td><td>2026-08</td><td style="text-align:left">causal diffusion</td><td style="text-align:left">camera</td><td style="color:var(--bad-ink)">—</td><td style="text-align:left">hybrid: context + retrieval</td><td>no</td></tr>
+      </tbody>
+    </table>
+    <p class="tnote">依据：骨干是 Wan2.2-TI2V-5B 被改造成分块因果（causal diffusion）；动作空间是 6-DoF 相机增量（camera）；
+    记忆是「有界 KV cache（context）+ 位姿检索的 landmark bank（retrieval）」；
+    <b>FPS 论文未报告</b>；截至本文未见代码或权重链接。
+    分区归属建议：<b>Long-Horizon Memory &amp; Consistency</b>（主）、<b>Interactive Video World Models</b> 与 <b>Real-Time &amp; Streaming Generation</b>（次）。</p>
+  </div>
+
+  <h3><span class="ix">13.3</span>论文对比的六个基线，都在这个列表里</h3>
+  <div class="prose">
+    <p>SANA-WM（混合线性注意力，分钟级）、DreamX-World 1.0（检索型记忆）、HY-WorldPlay / WorldPlay（长期几何一致性）、
+    Matrix-Game 3.0（实时流式 + 长时记忆）、LingBot-World（开源世界模型）、Yume-1.5（文本控制交互世界生成）。
+    这六个几乎覆盖了 2025Q4–2026Q3 这一年里交互式世界模型的主要路线，
+    所以 Tab. 3 / 4 / 5 其实可以当成一份<b>横向快照</b>来读——但要记得所有片段都被归一到 32 帧 / 1280×704 / 16 fps 之后才打的分，
+    与各方法官方报告的数字不可直接对比。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 14 APPENDIX -->
+<section class="sec" id="s-appendix">
+  <div class="eyebrow"><span class="n">14</span><span class="t">Cheat Sheet</span><span class="line"></span></div>
+  <h2>附录速查</h2>
+
+  <h3><span class="ix">14.1</span>超参一览（论文中出现过的全部数字）</h3>
+  <div class="tblwrap">
+    <table>
+      <thead><tr><th style="text-align:left">项目</th><th style="text-align:left">值</th><th style="text-align:left">出处 / 备注</th></tr></thead>
+      <tbody>
+        <tr><td>骨干</td><td>Wan2.2-TI2V-5B</td><td style="text-align:left">因果 VAE 隐空间上的 DiT</td></tr>
+        <tr><td>训练分辨率</td><td>480p (384×640) → 720p (704×1280)</td><td style="text-align:left">720p 阶段对空间 RoPE 位置做插值 warm-start</td></tr>
+        <tr><td>训练窗口</td><td>L = 12 chunk × 4 latent frame = 48</td><td style="text-align:left">对应 189 帧 @24fps ≈ 7.88 s</td></tr>
+        <tr><td>注意力头</td><td>H = 24（18 局部 + 6 全局）</td><td style="text-align:left">1:3 固定比例</td></tr>
+        <tr><td>局部窗口</td><td>w = 12 latent frames</td><td style="text-align:left">= 3 个 chunk</td></tr>
+        <tr><td>路由池</td><td>|P| = 12 组随机六头集</td><td style="text-align:left">每个 optimizer step 切换到下一组</td></tr>
+        <tr><td>Chunk-drop</td><td>sink + 随机 5 个 = 12 选 6</td><td style="text-align:left">每步重采样，跨并行 rank 广播</td></tr>
+        <tr><td>KV 预算</td><td>B = 12（1 sink + 5 recent + 6 landmark）</td><td style="text-align:left">Eq. (3)</td></tr>
+        <tr><td>Landmark bank</td><td>K = 30</td><td style="text-align:left">pinned host memory 主副本，工作集才上 device</td></tr>
+        <tr><td>准入规则</td><td>里程 ≥ δ（以中位步长计）</td><td style="text-align:left">δ 的具体取值论文未给出</td></tr>
+        <tr><td>淘汰规则</td><td>最近邻距离最小者；前两个成员永不淘汰</td><td style="text-align:left">位姿空间冗余度</td></tr>
+        <tr><td>蒸馏</td><td>DMD + self-forcing，rank-128 LoRA（attn + FFN）</td><td style="text-align:left">critic 也是 LoRA；控制路径不带 LoRA</td></tr>
+        <tr><td>adapter 体积</td><td>2.6 GB</td><td style="text-align:left">跨 base checkpoint 迁移需 2k–4k 步重蒸</td></tr>
+        <tr><td>蒸馏语料</td><td>248K 条通用长 caption（扩展自 VidProM）</td><td style="text-align:left">纯文本，不需要视频</td></tr>
+        <tr><td>推理配置</td><td>720p / 4 步 / CFG = 1 / block size 16 latent frames</td><td style="text-align:left">作用在多步模型的 EMA 权重上</td></tr>
+        <tr><td>训练语料</td><td>220,724 clips（63% UE / 26% 真实 / 11% 游戏）</td><td style="text-align:left">8 个来源，clip 级均匀采样</td></tr>
+        <tr><td>UE 环境</td><td>337 个；6 种轨迹模式</td><td style="text-align:left">control 模式 180 cm/s，探索模式 120 cm/s</td></tr>
+        <tr><td>Palindrome 概率</td><td>0.2（仅两个 UE 源）</td><td style="text-align:left">随机半窗 + 其时间倒序</td></tr>
+        <tr><td>米制锚</td><td>med<sub>UE</sub>[‖Δt‖] = 0.3667</td><td style="text-align:left">per-latent-step 平移增量中位数</td></tr>
+        <tr><td style="color:var(--bad-ink)">学习率 / batch / 总步数 / 硬件</td><td style="color:var(--bad-ink)">未报告</td><td style="text-align:left">Sec. 4.1 指向 Sec. 2.2，但该节无此内容；v1 无训练附录</td></tr>
+        <tr><td style="color:var(--bad-ink)">FPS / 延迟</td><td style="color:var(--bad-ink)">未报告</td><td style="text-align:left">全文无速度数字</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3><span class="ix">14.2</span>逐源尺度除数与审计</h3>
+  <div class="tblwrap">
+    <table>
+      <thead><tr><th style="text-align:left">来源</th><th>原始 med‖Δt‖</th><th>除数 σ<sub>s</sub></th><th>重缩放后相对 UE</th><th>p<sub>90</sub>/p<sub>10</sub> 离散度</th></tr></thead>
+      <tbody>
+        <tr><td>UE（锚）</td><td>0.3667</td><td>100（cm→m）</td><td>1.00</td><td>—</td></tr>
+        <tr><td>DL3DV</td><td>0.0709</td><td>0.1923</td><td>0.92</td><td>3.65</td></tr>
+        <tr><td>RealEstate10K</td><td>0.0825</td><td>0.2273</td><td>1.00</td><td>2.66</td></tr>
+        <tr><td>OmniWorld-Game</td><td>0.641</td><td>1.75</td><td>1.21</td><td>—</td></tr>
+        <tr><td>Sekai real-walking</td><td>0.0032</td><td>0.0086</td><td>0.96</td><td>2.86</td></tr>
+        <tr><td>Sekai game-walking</td><td>0.0039</td><td>0.0107</td><td>0.94</td><td>2.67</td></tr>
+        <tr><td>Game roaming</td><td>—</td><td>1（VIPE 已米制）</td><td>—</td><td>—</td></tr>
+      </tbody>
+    </table>
+    <p class="tnote">UE expansion 集<b>刻意不单独归一化</b>：它的原始 per-latent-step 平移中位数约 20 cm，而 control 集约 37 cm——
+    作者判断这是<b>真实的速度差异而非尺度误差</b>，所以保留。这个判断本身也是一处值得留意的主观选择。</p>
+  </div>
+
+  <h3><span class="ix">14.3</span>一页纸总结</h3>
+  <div class="call key">
+    <div class="hd">◆ ReWorld 的五句话</div>
+    <p><b>1.</b> 交互式世界模型的三个要求（响应 / 记忆 / 流式）对注意力窗口提出互斥的要求，这是结构性的，不是容量问题。</p>
+    <p><b>2.</b> 训练期把 24 个头拆成 18 局部 + 6 全局，让控制在短窗口下学、记忆在长窗口下学；
+    再用 12 组随机分区每步换岗，把两种能力从具体的头上解绑——因为部署时所有头共享同一个有界 cache。</p>
+    <p><b>3.</b> 推理期用 12 格定额 cache：1 个 sink + 5 个最近 chunk + 6 个按位姿召回的 landmark；
+    老 chunk 按<b>走过的里程</b>入库（绝不做地点去重）、按<b>位姿冗余</b>淘汰，全分辨率保存。</p>
+    <p><b>4.</b> chunk-drop 训练（12 选 6，query 不丢）把这种稀疏拼接的 cache 变成分布内输入；MRoPE 让远处的 chunk 依然按位姿可寻址。</p>
+    <p><b>5.</b> 八源语料统一到同一物理尺度，palindrome 增强提供重访监督；DMD LoRA 把采样压到 4 步，一个骨干两个工作点。</p>
+  </div>
+</section>
+
+<footer>
+  <p><b>信息来源</b>：全部方法描述、公式、表格数值与超参均出自 arXiv:2608.23565v1（ReWorld, Chen &amp; Wang et al., 2026-08-24）正文与附录 A；
+  项目主页链接见页首。文中凡标注「我的读解 / 推断 / 保留意见」的段落为本页作者的分析，不属于论文原文。</p>
+  <p style="margin-top:10px">本页为方法精读的可视化整理，<b>未转载论文中的任何图片或视频帧</b>；所有图解均为按论文文字描述重绘的示意图。
+  Fig. 6 的头分区、Fig. 7 的轨迹与库容参数均为便于演示而构造，不是论文发布的实际配置。</p>
+  <p style="margin-top:10px; color:var(--ink3)">生成于 2026-08-27 · 单文件、无外部依赖（字体在离线时自动回退到系统字体）</p>
+</footer>
+
+<button class="tbtn toTop" id="toTop" type="button" aria-label="回到顶部">↑</button>
+</main>
+</div>
+<div class="tip" id="tip" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+"use strict";
+var $=function(s,r){return (r||document).querySelector(s)};
+var $$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
+var NS="http://www.w3.org/2000/svg";
+function E(tag,attrs,txt){
+  var n=document.createElementNS(NS,tag);
+  if(attrs) for(var k in attrs){ if(attrs[k]!==null&&attrs[k]!==undefined) n.setAttribute(k,attrs[k]); }
+  if(txt!==undefined&&txt!==null) n.textContent=txt;
+  return n;
+}
+function clr(g){ while(g.firstChild) g.removeChild(g.firstChild); }
+
+/* ---------------------------------------------------------- theme */
+var root=document.documentElement;
+$('#themeBtn').addEventListener('click',function(){
+  var cur=root.getAttribute('data-theme');
+  if(!cur){ cur = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light':'dark'; }
+  root.setAttribute('data-theme', cur==='dark'?'light':'dark');
+});
+
+/* ---------------------------------------------------------- progress + toc + toTop */
+var prog=$('#prog'), toTop=$('#toTop');
+function onScroll(){
+  var h=document.documentElement.scrollHeight-window.innerHeight;
+  prog.style.width=(h>0?(window.scrollY/h*100):0)+'%';
+  toTop.classList.toggle('show', window.scrollY>700);
+}
+window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+toTop.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'})});
+
+var links=$$('#toc a');
+var secs=links.map(function(a){return document.getElementById(a.getAttribute('href').slice(1))}).filter(Boolean);
+if('IntersectionObserver' in window){
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting){
+        links.forEach(function(a){a.classList.remove('on')});
+        var m=links.filter(function(a){return a.getAttribute('href')==='#'+e.target.id})[0];
+        if(m)m.classList.add('on');
+      }
+    });
+  },{rootMargin:'-84px 0px -70% 0px',threshold:0});
+  secs.forEach(function(s){io.observe(s)});
+}
+
+/* ---------------------------------------------------------- tooltip */
+var tip=$('#tip');
+function showTip(e,html){
+  tip.innerHTML=html; tip.style.opacity='1';
+  var x=e.clientX+14, y=e.clientY+14;
+  if(x+tip.offsetWidth>window.innerWidth-10) x=e.clientX-tip.offsetWidth-14;
+  if(y+tip.offsetHeight>window.innerHeight-10) y=e.clientY-tip.offsetHeight-14;
+  tip.style.left=x+'px'; tip.style.top=y+'px';
+}
+function hideTip(){tip.style.opacity='0'}
+function bindTip(node,html){
+  node.addEventListener('mousemove',function(e){showTip(e,html)});
+  node.addEventListener('mouseleave',hideTip);
+  node.style.cursor='crosshair';
+}
+
+/* ---------------------------------------------------------- generic seg control */
+function seg(id,cb){
+  var box=$(id); if(!box) return;
+  $$('button',box).forEach(function(b){
+    b.addEventListener('click',function(){
+      $$('button',box).forEach(function(o){o.classList.toggle('on',o===b)});
+      cb(b.dataset);
+    });
+  });
+}
+
+/* ---------------------------------------------------------- fig1 tabs */
+var tabs=$$('.tabs [role=tab]');
+tabs.forEach(function(t){
+  t.addEventListener('click',function(){
+    tabs.forEach(function(o){
+      o.setAttribute('aria-selected', String(o===t));
+      var p=document.getElementById(o.getAttribute('aria-controls'));
+      if(p) p.hidden = (o!==t);
+    });
+  });
+});
+
+/* ---------------------------------------------------------- fig1b head chips */
+(function(){
+  var gl=$('#f1b-local'), gg=$('#f1b-global');
+  if(!gl||!gg) return;
+  var i,r,c;
+  for(i=0;i<18;i++){
+    r=Math.floor(i/6); c=i%6;
+    gl.appendChild(E('rect',{x:40+c*44,y:108+r*19,width:38,height:14,rx:4,class:'fs-C s-C','stroke-width':1}));
+  }
+  for(i=0;i<6;i++){
+    r=Math.floor(i/3); c=i%3;
+    gg.appendChild(E('rect',{x:360+c*48,y:108+r*22,width:42,height:17,rx:5,class:'fs-M s-M','stroke-width':1.3}));
+  }
+})();
+
+/* ---------------------------------------------------------- fig1c cache slots + bank */
+(function(){
+  var gs=$('#f1c-slots'), gb=$('#f1c-bank');
+  if(!gs||!gb) return;
+  var labels=['sink','L1','L2','L3','L4','L5','L6','k−5','k−4','k−3','k−2','k−1'];
+  var cls=['fs-O s-O'].concat(['fs-L s-L','fs-L s-L','fs-L s-L','fs-L s-L','fs-L s-L','fs-L s-L'],
+                              ['fs-C s-C','fs-C s-C','fs-C s-C','fs-C s-C','fs-C s-C']);
+  var tc=['f-Oi','f-Li','f-Li','f-Li','f-Li','f-Li','f-Li','f-Ci','f-Ci','f-Ci','f-Ci','f-Ci'];
+  for(var i=0;i<12;i++){
+    var x=26+i*56;
+    gs.appendChild(E('rect',{x:x,y:62,width:50,height:44,rx:9,class:cls[i],'stroke-width':1.4}));
+    gs.appendChild(E('text',{x:x+25,y:89,class:tc[i]+' sml mono','text-anchor':'middle'},labels[i]));
+  }
+  for(var j=0;j<9;j++){
+    gb.appendChild(E('rect',{x:44+j*38,y:174,width:30,height:30,rx:7,class:'f-surf s-L','stroke-width':1.2}));
+    gb.appendChild(E('circle',{cx:59+j*38,cy:189,r:3.4,class:'f-L'}));
+  }
+  gb.appendChild(E('text',{x:44+9*38+8,y:193,class:'f-Li sml mono'},'… K = 30'));
+})();
+
+/* ---------------------------------------------------------- fig8 chunk-drop rows */
+(function(){
+  var rows=[$('#fd-row1'),$('#fd-row2'),$('#fd-row3')];
+  if(!rows[0]) return;
+  var x0=198, bw=38, gap=4, ys=[30,102,174];
+  // row1: all present, contiguous
+  for(var i=0;i<12;i++){
+    rows[0].appendChild(E('rect',{x:x0+i*(bw+gap),y:ys[0],width:bw,height:32,rx:7,class:'fs-C s-C','stroke-width':1.2}));
+  }
+  rows[0].appendChild(E('text',{x:x0+250,y:ys[0]+20,class:'f-Ci sml mono','text-anchor':'middle'},'12 / 12 完整前缀'));
+  // row2: sink + scattered landmarks + recent 5
+  var present2={0:'O',3:'L',6:'L',8:'L',7:'L',9:'C',10:'C',11:'C'};
+  var mapc={O:'fs-O s-O',L:'fs-L s-L',C:'fs-C s-C'};
+  for(var i2=0;i2<12;i2++){
+    var t=present2[i2];
+    if(t){ rows[1].appendChild(E('rect',{x:x0+i2*(bw+gap),y:ys[1],width:bw,height:32,rx:7,class:mapc[t],'stroke-width':1.4})); }
+    else { rows[1].appendChild(E('rect',{x:x0+i2*(bw+gap),y:ys[1],width:bw,height:32,rx:7,fill:'url(#hatch)',opacity:.35})); }
+  }
+  rows[1].appendChild(E('text',{x:x0+8,y:ys[1]+50,class:'f-Oi sml mono'},'sink'));
+  rows[1].appendChild(E('text',{x:x0+4*(bw+gap)+30,y:ys[1]+50,class:'f-Li sml mono'},'召回的 landmark（时间上不连续）'));
+  rows[1].appendChild(E('text',{x:x0+9*(bw+gap)+50,y:ys[1]-8,class:'f-Ci sml mono','text-anchor':'middle'},'recent'));
+  // row3: sink + 5 random
+  var keep3={0:1,2:1,5:1,6:1,9:1,11:1};
+  for(var i3=0;i3<12;i3++){
+    if(keep3[i3]){ rows[2].appendChild(E('rect',{x:x0+i3*(bw+gap),y:ys[2],width:bw,height:32,rx:7,class:i3===0?'fs-O s-O':'fs-M s-M','stroke-width':1.4})); }
+    else { rows[2].appendChild(E('rect',{x:x0+i3*(bw+gap),y:ys[2],width:bw,height:32,rx:7,fill:'url(#hatch)',opacity:.35})); }
+  }
+  rows[2].appendChild(E('text',{x:x0+250,y:ys[2]+52,class:'f-Oi sml mono','text-anchor':'middle'},'6 / 12 保留，每步重新采样'));
+})();
+
+/* ---------------------------------------------------------- seeded rng */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return ((t^t>>>14)>>>0)/4294967296}}
+
+/* ---------------------------------------------------------- fig3 mask viewer */
+(function(){
+  var g=$('#maskGrid'); if(!g) return;
+  var read=$('#maskRead');
+  var mode='g', keep=null, rng=mulberry32(20260824);
+  function resample(){
+    var pool=[1,2,3,4,5,6,7,8,9,10,11];
+    for(var i=pool.length-1;i>0;i--){var j=Math.floor(rng()*(i+1));var t=pool[i];pool[i]=pool[j];pool[j]=t;}
+    keep={0:1}; pool.slice(0,5).forEach(function(v){keep[v]=1});
+  }
+  resample();
+  var CELL=22, X0=214, Y0=86;
+  function allowed(i,j){
+    if(j>i) return false;
+    if(mode==='l'||mode==='ld'){ if(i-j>2) return false; }
+    if(mode==='gd'||mode==='ld'){ if(j!==i && !keep[j]) return false; }
+    return true;
+  }
+  function render(){
+    clr(g);
+    var i,j,n=0;
+    g.appendChild(E('text',{x:X0+6*CELL,y:34,class:'f-ink big','text-anchor':'middle'},'key chunk（被注意的历史） →'));
+    g.appendChild(E('text',{x:174,y:Y0+6*CELL,class:'f-ink big','text-anchor':'middle',transform:'rotate(-90 174 '+(Y0+6*CELL)+')'},'query chunk ↓'));
+    for(j=0;j<12;j++){
+      var dropped=(mode==='gd'||mode==='ld')&&!keep[j];
+      g.appendChild(E('text',{x:X0+j*CELL+CELL/2,y:Y0-22,class:(dropped?'f-Bi':'f-ink3')+' sml mono','text-anchor':'middle'},String(j+1)));
+      if(j===0) g.appendChild(E('text',{x:X0+CELL/2,y:Y0-36,class:'f-Oi sml mono','text-anchor':'middle'},'sink'));
+      if(dropped) g.appendChild(E('line',{x1:X0+j*CELL+4,y1:Y0-26,x2:X0+j*CELL+CELL-4,y2:Y0-26,class:'s-B','stroke-width':1.4}));
+    }
+    for(i=0;i<12;i++){
+      g.appendChild(E('text',{x:X0-10,y:Y0+i*CELL+15,class:'f-ink3 sml mono','text-anchor':'end'},String(i+1)));
+      for(j=0;j<12;j++){
+        var a=allowed(i,j), self=(i===j);
+        var cls, op;
+        if(!a){ cls='f-surf2'; op=1; }
+        else if(self){ cls=(mode==='l'||mode==='ld')?'f-C':'f-M'; op=.92; }
+        else { cls=(mode==='l'||mode==='ld')?'fs-C':'fs-M'; op=1; }
+        var r=E('rect',{x:X0+j*CELL+1,y:Y0+i*CELL+1,width:CELL-2,height:CELL-2,rx:4,class:cls,opacity:op});
+        if(a) { r.setAttribute('stroke-width',1); r.setAttribute('class',cls+' '+((mode==='l'||mode==='ld')?'s-C':'s-M')); }
+        else { r.setAttribute('stroke-width',.8); r.setAttribute('class',cls+' s-rule1'); }
+        g.appendChild(r);
+        if(a) n++;
+      }
+    }
+    // legend
+    var ly=Y0+12*CELL+26;
+    var lg=[[(mode==='l'||mode==='ld')?'fs-C s-C':'fs-M s-M','可注意'],['f-surf2 s-rule1','被掩掉'],[(mode==='l'||mode==='ld')?'f-C':'f-M','自身 chunk（全注意力）']];
+    var lx=X0;
+    lg.forEach(function(it){
+      g.appendChild(E('rect',{x:lx,y:ly-11,width:14,height:14,rx:3,class:it[0],'stroke-width':1}));
+      g.appendChild(E('text',{x:lx+20,y:ly,class:'f-ink3 sml'},it[1]));
+      lx+=it[1].length*11+52;
+    });
+    var NOTE={
+      g:['全局头看得见完整因果','历史。这是「检索」唯一','可能被学会的地方——看','不见远处，就没有可检索','的对象。'],
+      l:['局部头只看含自身在内','的 3 个 chunk。控制被逼','着在短窗口内闭环，因此','不依赖部署时给多长的','窗口。'],
+      gd:['在完整历史上再随机打','洞。sink 永远保留、query','永不丢，所以每个 chunk','仍然拿得到自己的去噪','损失。'],
+      ld:['论文训练时的真实掩码','之一：局部窗口 ∩ chunk-','drop。两种约束是叠加，','而不是二选一。']
+    };
+    var nb=E('rect',{x:512,y:Y0-46,width:196,height:132,rx:11,class:'f-surf2 s-rule1','stroke-width':1});
+    g.appendChild(nb);
+    NOTE[mode].forEach(function(line,li){
+      g.appendChild(E('text',{x:526,y:Y0-24+li*20,class:'f-ink2 sml'},line));
+    });
+    var pct=(n/144*100).toFixed(0);
+    var names={g:'全局头 · 完整因果历史',l:'局部头 · w=12 latent frames（3 chunk）',gd:'全局头 + chunk-drop',ld:'局部头 + chunk-drop'};
+    read.textContent=names[mode]+'　·　可见 '+n+'/144 格（'+pct+'%）';
+  }
+  seg('#maskSeg',function(d){mode=d.m; render();});
+  $('#maskResample').addEventListener('click',function(){resample(); render();});
+  render();
+})();
+
+/* ---------------------------------------------------------- fig6 routing */
+(function(){
+  var gg=$('#rhGrid'), gb=$('#rhBars'); if(!gg) return;
+  var slider=$('#rhSlider'), read=$('#rhRead'), playBtn=$('#rhPlay'), fixedBtn=$('#rhFixed');
+  var rng=mulberry32(97531), POOL=[], p, i, j;
+  for(p=0;p<12;p++){
+    var idx=[]; for(i=0;i<24;i++) idx.push(i);
+    for(i=idx.length-1;i>0;i--){ j=Math.floor(rng()*(i+1)); var t=idx[i]; idx[i]=idx[j]; idx[j]=t; }
+    POOL.push(idx.slice(0,6).sort(function(a,b){return a-b}));
+  }
+  var FIXED=[0,1,2,3,4,5];
+  var fixedMode=false, step=1, timer=null;
+  function counts(){
+    var c=new Array(24).fill(0);
+    if(fixedMode){ for(var s=0;s<12;s++) FIXED.forEach(function(h){c[h]++}); }
+    else { POOL.forEach(function(set){ set.forEach(function(h){c[h]++}); }); }
+    return c;
+  }
+  function render(){
+    clr(gg); clr(gb);
+    var set = fixedMode ? FIXED : POOL[step-1];
+    var isG={}; set.forEach(function(h){isG[h]=1});
+    gg.appendChild(E('text',{x:30,y:26,class:'f-ink big'},fixedMode?'对照：固定分组（论文要避免的情形）':'本步的全局/局部分工'));
+    gg.appendChild(E('text',{x:550,y:26,class:'f-ink3 sml mono','text-anchor':'end'},'H = 24 heads · |G| = 6'));
+    for(var h=0;h<24;h++){
+      var r=Math.floor(h/6), c=h%6, x=30+c*88, y=48+r*40;
+      gg.appendChild(E('rect',{x:x,y:y,width:80,height:32,rx:8,class:isG[h]?'fs-M s-M':'fs-C s-C','stroke-width':isG[h]?1.8:1.1}));
+      gg.appendChild(E('text',{x:x+40,y:y+15,class:(isG[h]?'f-Mi':'f-Ci')+' sml mono','text-anchor':'middle'},'head '+h));
+      gg.appendChild(E('text',{x:x+40,y:y+27,class:(isG[h]?'f-Mi':'f-Ci')+' sml','text-anchor':'middle'},isG[h]?'全局':'局部 w=12'));
+    }
+    // legend box
+    gg.appendChild(E('rect',{x:568,y:48,width:132,height:152,rx:11,class:'f-surf2 s-rule1','stroke-width':1}));
+    gg.appendChild(E('rect',{x:582,y:64,width:22,height:14,rx:4,class:'fs-M s-M','stroke-width':1.4}));
+    gg.appendChild(E('text',{x:610,y:76,class:'f-Mi sml'},'全局头'));
+    gg.appendChild(E('text',{x:582,y:94,class:'f-ink3 sml'},'看完整因果历史'));
+    gg.appendChild(E('rect',{x:582,y:112,width:22,height:14,rx:4,class:'fs-C s-C','stroke-width':1.1}));
+    gg.appendChild(E('text',{x:610,y:124,class:'f-Ci sml'},'局部头'));
+    gg.appendChild(E('text',{x:582,y:142,class:'f-ink3 sml'},'只看最近 12 帧'));
+    gg.appendChild(E('text',{x:582,y:168,class:'f-ink3 sml'},fixedMode?'12 步全部相同':'|P| = 12 组'));
+    gg.appendChild(E('text',{x:582,y:184,class:'f-ink3 sml'},fixedMode?'→ 能力绑死在头上':'每步轮换一组'));
+    // bars
+    var c2=counts(), maxc=Math.max.apply(null,c2)||1;
+    gb.appendChild(E('text',{x:30,y:232,class:'f-ink big'},'每个头在整个 12 组池里担任全局头的次数'));
+    gb.appendChild(E('line',{x1:30,y1:300,x2:556,y2:300,class:'s-rule','stroke-width':1}));
+    for(var h2=0;h2<24;h2++){
+      var bh=c2[h2]/maxc*48, bx=30+h2*22;
+      var rect=E('rect',{x:bx,y:300-bh,width:18,height:Math.max(bh,0.5),rx:3,class:c2[h2]>0?'f-M':'f-surf3'});
+      if(isG[h2]) rect.setAttribute('class','f-L');
+      gb.appendChild(rect);
+      gb.appendChild(E('text',{x:bx+9,y:314,class:'f-ink3 sml mono','text-anchor':'middle'},String(h2)));
+      gb.appendChild(E('text',{x:bx+9,y:300-bh-4,class:(c2[h2]===0?'f-Bi':'f-ink3')+' sml mono','text-anchor':'middle'},String(c2[h2])));
+      if(c2[h2]===0) gb.appendChild(E('rect',{x:bx,y:297,width:18,height:3,rx:1.5,class:'f-B'}));
+    }
+    gb.appendChild(E('text',{x:576,y:270,class:'f-ink3 sml'},fixedMode?'6 个头 12/12，':'平均 3 次/头'));
+    gb.appendChild(E('text',{x:576,y:286,class:'f-ink3 sml'},fixedMode?'18 个头 0/12':'但分布并不均匀'));
+    gb.appendChild(E('text',{x:576,y:314,class:'f-Li sml'},'紫色 = 本步当班'));
+    read.textContent = fixedMode ? '固定分组（对照）' : ('step '+step+' / 池中第 '+step+' 组');
+  }
+  slider.addEventListener('input',function(){ step=parseInt(slider.value,10); fixedMode=false; fixedBtn.classList.remove('on'); render(); });
+  fixedBtn.addEventListener('click',function(){ fixedMode=!fixedMode; fixedBtn.classList.toggle('on',fixedMode); render(); });
+  playBtn.addEventListener('click',function(){
+    if(timer){ clearInterval(timer); timer=null; playBtn.textContent='▶ 自动播放'; return; }
+    playBtn.textContent='⏸ 暂停'; fixedMode=false; fixedBtn.classList.remove('on');
+    timer=setInterval(function(){ step=step%12+1; slider.value=step; render(); },700);
+  });
+  render();
+})();
+
+/* ---------------------------------------------------------- fig7 landmark bank */
+(function(){
+  var gm=$('#lbMap'), gbk=$('#lbBank'), gc=$('#lbCache'); if(!gm) return;
+  var sStep=$('#lbStep'), sDelta=$('#lbDelta'), sK=$('#lbK');
+  var rStep=$('#lbStepRead'), rDelta=$('#lbDeltaRead'), rK=$('#lbKRead'), playBtn=$('#lbPlay');
+  var N=44, NEEDLE=5, policy='bank', timer=null;
+  var pts=[];
+  for(var i=0;i<22;i++){ pts.push({x:60+i*18, y:258-i*7+30*Math.sin(i*0.42)}); }
+  function pos(k){ return k<=21 ? pts[k] : pts[43-k]; }
+  var cum=[0];
+  for(var k=1;k<N;k++){ var a=pos(k-1),b=pos(k); cum.push(cum[k-1]+Math.hypot(b.x-a.x,b.y-a.y)); }
+  var steps=[]; for(var k2=1;k2<N;k2++){ var a2=pos(k2-1),b2=pos(k2); steps.push(Math.hypot(b2.x-a2.x,b2.y-a2.y)); }
+  var sorted=steps.slice().sort(function(p,q){return p-q});
+  var MED=sorted[Math.floor(sorted.length/2)];
+  function dist(p,q){ return Math.hypot(p.x-q.x,p.y-q.y); }
+
+  function simulate(K,delta,upto){
+    var bank=[], lastStored=null, evicted=[];
+    for(var k=0;k<=upto;k++){
+      var aged=k-6;
+      if(aged>=1){
+        var ok = (lastStored===null) || ((cum[aged]-cum[lastStored]) >= delta*MED);
+        if(ok){
+          if(bank.length>=K){
+            var worst=-1, worstD=Infinity;
+            for(var a=2;a<bank.length;a++){
+              var nn=Infinity;
+              for(var b=0;b<bank.length;b++){ if(a===b) continue; nn=Math.min(nn,dist(bank[a],bank[b])); }
+              if(nn<worstD){ worstD=nn; worst=a; }
+            }
+            if(worst>=0){ evicted.push(bank[worst].chunk); bank.splice(worst,1); }
+          }
+          var p=pos(aged);
+          bank.push({chunk:aged,x:p.x,y:p.y});
+          lastStored=aged;
+        }
+      }
+    }
+    return {bank:bank,evicted:evicted};
+  }
+
+  function render(){
+    var k=parseInt(sStep.value,10), delta=parseInt(sDelta.value,10), K=parseInt(sK.value,10);
+    rStep.textContent='k = '+k; rDelta.textContent='δ = '+delta; rK.textContent='K = '+K;
+    clr(gm); clr(gbk); clr(gc);
+    var sim=simulate(K,delta,k), bank=sim.bank;
+    var cur=pos(k);
+    var retrieved=[];
+    if(policy==='bank'){
+      retrieved=bank.slice().sort(function(p,q){return dist(p,cur)-dist(q,cur)}).slice(0,6);
+    }
+    var retSet={}; retrieved.forEach(function(m){retSet[m.chunk]=1});
+
+    /* ---- map ---- */
+    gm.appendChild(E('rect',{x:16,y:40,width:456,height:270,rx:12,class:'f-surf2 s-rule1','stroke-width':1}));
+    gm.appendChild(E('text',{x:30,y:30,class:'f-ink big'},'俯视图 · 44 chunk 的 palindrome 轨迹'));
+    // full path faint (outbound)
+    var d1=''; for(var i=0;i<22;i++){ d1+=(i?' L ':'M ')+pts[i].x+' '+pts[i].y; }
+    gm.appendChild(E('path',{d:d1,class:'nofill s-rule1','stroke-width':2,'stroke-dasharray':'3 4'}));
+    // traversed outbound
+    var oEnd=Math.min(k,21);
+    var d2=''; for(var i2=0;i2<=oEnd;i2++){ d2+=(i2?' L ':'M ')+pts[i2].x+' '+pts[i2].y; }
+    if(oEnd>0) gm.appendChild(E('path',{d:d2,class:'nofill s-M','stroke-width':2.6,'stroke-linecap':'round'}));
+    // traversed return (offset for legibility)
+    if(k>=22){
+      var d3='';
+      for(var i3=22;i3<=k;i3++){ var pp=pos(i3); d3+=(i3===22?'M ':' L ')+pp.x+' '+(pp.y+9); }
+      gm.appendChild(E('path',{d:d3,class:'nofill s-C','stroke-width':2.6,'stroke-dasharray':'6 4','stroke-linecap':'round'}));
+    }
+    // needle marker
+    var np=pos(NEEDLE);
+    gm.appendChild(E('circle',{cx:np.x,cy:np.y,r:16,class:'nofill s-L','stroke-width':1.4,'stroke-dasharray':'3 3'}));
+    gm.appendChild(E('circle',{cx:np.x,cy:np.y,r:5,class:'f-L'}));
+    gm.appendChild(E('text',{x:np.x,y:np.y+32,class:'f-Li sml mono','text-anchor':'middle'},'needle k=5'));
+    // recent-window positions (both policies)
+    var recFrom = policy==='bank' ? Math.max(1,k-5) : Math.max(1,k-11);
+    for(var rr=recFrom; rr<k; rr++){
+      var rp=pos(rr);
+      gm.appendChild(E('circle',{cx:rp.x,cy:rp.y+(rr>=22?9:0),r:3.4,class:'f-C',opacity:.85}));
+    }
+    // landmarks
+    (policy==='bank'?bank:[]).forEach(function(m){
+      var isRet=retSet[m.chunk];
+      if(isRet) gm.appendChild(E('circle',{cx:m.x,cy:m.y,r:10,class:'nofill s-L','stroke-width':2.2}));
+      var c=E('circle',{cx:m.x,cy:m.y,r:5,class:isRet?'f-L':'f-surf3'});
+      if(!isRet){ c.setAttribute('class','f-surf3 s-L'); c.setAttribute('stroke-width',1.6); }
+      gm.appendChild(c);
+      bindTip(c,'<b>landmark</b>chunk '+m.chunk+(isRet?'<br>本步被召回':'<br>在库中，未召回'));
+    });
+    // current camera
+    gm.appendChild(E('circle',{cx:cur.x,cy:cur.y+(k>=22?9:0),r:8,class:'f-C'}));
+    gm.appendChild(E('circle',{cx:cur.x,cy:cur.y+(k>=22?9:0),r:13,class:'nofill s-C','stroke-width':1.6}));
+    gm.appendChild(E('text',{x:cur.x,y:cur.y+(k>=22?9:0)-20,class:'f-Ci sml mono','text-anchor':'middle'},'k='+k));
+    // legend
+    gm.appendChild(E('text',{x:30,y:300,class:'f-Mi sml'},'去程 k=0…21'));
+    gm.appendChild(E('text',{x:120,y:300,class:'f-Ci sml'},'回程 k=22…43（画成偏移虚线）'));
+
+    /* ---- bank panel ---- */
+    gbk.appendChild(E('rect',{x:486,y:40,width:218,height:270,rx:12,class:policy==='bank'?'fs-L s-L':'f-surf2 s-rule1','stroke-width':policy==='bank'?1.4:1}));
+    gbk.appendChild(E('text',{x:498,y:30,class:'f-ink big'},'landmark bank'));
+    if(policy!=='bank'){
+      gbk.appendChild(E('text',{x:595,y:160,class:'f-ink3 lbl','text-anchor':'middle'},'滑动窗口策略'));
+      gbk.appendChild(E('text',{x:595,y:180,class:'f-ink3 lbl','text-anchor':'middle'},'不维护任何库'));
+      gbk.appendChild(E('text',{x:595,y:206,class:'f-Bi sml','text-anchor':'middle'},'历史一旦滑出窗口即永久丢失'));
+    } else {
+      gbk.appendChild(E('text',{x:498,y:60,class:'f-ink3 sml mono'},'|ℳ| = '+bank.length+' / K = '+K));
+      gbk.appendChild(E('text',{x:498,y:78,class:'f-ink3 sml mono'},'里程门限 δ·med = '+(parseInt(sDelta.value,10)*MED).toFixed(1)+' px'));
+      var rows=bank.slice().sort(function(p,q){return p.chunk-q.chunk});
+      rows.forEach(function(m,ri){
+        var y=94+ri*15;
+        if(y>296) return;
+        var isRet=retSet[m.chunk];
+        gbk.appendChild(E('rect',{x:498,y:y-10,width:194,height:13,rx:4,class:isRet?'fs-L s-L':'f-surf','stroke-width':isRet?1.2:0.8}));
+        if(!isRet) gbk.appendChild(E('rect',{x:498,y:y-10,width:194,height:13,rx:4,class:'nofill s-rule1','stroke-width':.8}));
+        gbk.appendChild(E('text',{x:504,y:y,class:(isRet?'f-Li':'f-ink3')+' sml mono'},'chunk '+(m.chunk<10?' ':'')+m.chunk));
+        gbk.appendChild(E('text',{x:566,y:y,class:(isRet?'f-Li':'f-ink3')+' sml mono'},'d='+dist(m,cur).toFixed(0)));
+        if(ri<2) gbk.appendChild(E('text',{x:626,y:y,class:'f-Oi sml mono'},'永不淘汰'));
+        else if(isRet) gbk.appendChild(E('text',{x:636,y:y,class:'f-Li sml mono'},'召回'));
+      });
+      if(sim.evicted.length) gbk.appendChild(E('text',{x:498,y:302,class:'f-Bi sml'},'已淘汰 '+sim.evicted.length+' 个：chunk '+sim.evicted.slice(-6).join(', ')));
+    }
+
+    /* ---- cache strip ---- */
+    var cache=[];
+    if(policy==='bank'){
+      cache.push({t:'sink',v:0});
+      retrieved.slice().sort(function(p,q){return p.chunk-q.chunk}).forEach(function(m){cache.push({t:'land',v:m.chunk})});
+      for(var r2=Math.max(1,k-5);r2<k;r2++) cache.push({t:'rec',v:r2});
+    } else {
+      cache.push({t:'sink',v:0});
+      for(var r3=Math.max(1,k-11);r3<k;r3++) cache.push({t:'rec',v:r3});
+    }
+    cache=cache.slice(0,12);
+    gc.appendChild(E('text',{x:18,y:334,class:'f-ink big'},'device 上的 KV cache · B = 12 格'));
+    gc.appendChild(E('text',{x:702,y:334,class:'f-ink3 sml mono','text-anchor':'end'},'占用 '+cache.length+'/12'));
+    for(var s=0;s<12;s++){
+      var x=18+s*57, it=cache[s];
+      if(!it){
+        gc.appendChild(E('rect',{x:x,y:344,width:52,height:38,rx:8,class:'f-surf2 s-rule1','stroke-width':1,'stroke-dasharray':'3 3'}));
+        continue;
+      }
+      var cl = it.t==='sink'?'fs-O s-O': (it.t==='land'?'fs-L s-L':'fs-C s-C');
+      var tc = it.t==='sink'?'f-Oi': (it.t==='land'?'f-Li':'f-Ci');
+      gc.appendChild(E('rect',{x:x,y:344,width:52,height:38,rx:8,class:cl,'stroke-width':1.4}));
+      gc.appendChild(E('text',{x:x+26,y:361,class:tc+' sml mono','text-anchor':'middle'},'c'+it.v));
+      gc.appendChild(E('text',{x:x+26,y:374,class:tc+' sml','text-anchor':'middle'},it.t==='sink'?'sink':(it.t==='land'?'landmark':'recent')));
+    }
+    /* ---- needle status ---- */
+    var R=1.8*MED, covered=false, by=null;
+    // 只有【去程】生成的 chunk 才算证据：回程刚生成的那几帧正是保真度待检验的对象，不能自证
+    cache.forEach(function(c){ if(c.v<=21 && dist(pos(c.v),np)<=R){ covered=true; if(by===null||c.v<by) by=c.v; } });
+    var msg, cls;
+    if(k<24){ msg='rollout 还没走到镜像重访区（k ≥ 24 之后才构成长间隔重访）'; cls='f-ink3'; }
+    else if(covered){ msg='✓ cache 里有一条【去程】证据落在起始区域：chunk '+by+'（距 needle '+dist(pos(by),np).toFixed(0)+' px）'; cls='f-Oi'; }
+    else { msg='✗ cache 里没有任何来自去程的证据落在起始区域——回程刚生成的那几帧不能自证，重访只能靠模型编'; cls='f-Bi'; }
+    gc.appendChild(E('rect',{x:18,y:392,width:686,height:30,rx:9,class:(k<24)?'f-surf2 s-rule1':(covered?'fs-O s-O':'fs-B s-B'),'stroke-width':1.2}));
+    gc.appendChild(E('text',{x:30,y:412,class:cls+' lbl'},msg));
+    if(k>=34 && k<=43) gc.appendChild(E('text',{x:698,y:412,class:'f-Li sml mono','text-anchor':'end'},'k=38 ↔ needle k=5'));
+  }
+  function lastTravel(bank){ return bank.length? cum[bank[bank.length-1].chunk] : 0; }
+
+  [sStep,sDelta,sK].forEach(function(s){ s.addEventListener('input',render); });
+  seg('#lbPolicy',function(d){ policy=d.p; render(); });
+  playBtn.addEventListener('click',function(){
+    if(timer){ clearInterval(timer); timer=null; playBtn.textContent='▶ 播放 rollout'; return; }
+    playBtn.textContent='⏸ 暂停';
+    timer=setInterval(function(){
+      var v=parseInt(sStep.value,10); v=(v+1)%44; sStep.value=v; render();
+    },420);
+  });
+  render();
+})();
+
+/* ---------------------------------------------------------- experiment data */
+var METHODS=[
+  {n:'SANA-WM',       c:'var(--m6)', rot:13.02, trans:0.123, cammc:0.388,
+   p48:296,s48:0.318,l48:0.433,d48:0.810,o48:0.174, p96:499,s96:0.313,l96:0.528,d96:0.700,o96:0.161,
+   vb:0.835, dd:0.900, sc:0.908},
+  {n:'DreamX',        c:'var(--m5)', rot:13.10, trans:0.114, cammc:0.381,
+   p48:279,s48:0.214,l48:0.553,d48:0.740,o48:0.180, p96:454,s96:0.194,l96:0.627,d96:0.603,o96:0.159,
+   vb:0.828, dd:0.946, sc:0.880},
+  {n:'HY-WorldPlay',  c:'var(--m2)', rot:14.66, trans:0.114, cammc:0.427,
+   p48:113,s48:0.448,l48:0.163,d48:0.969,o48:0.464, p96:210,s96:0.427,l96:0.247,d96:0.942,o96:0.460,
+   vb:0.842, dd:0.733, sc:0.976},
+  {n:'Matrix-Game 3.0',c:'var(--m4)',rot:15.45, trans:0.075, cammc:0.394,
+   p48:312,s48:0.318,l48:0.369,d48:0.891,o48:0.292, p96:724,s96:0.275,l96:0.478,d96:0.850,o96:0.247,
+   vb:0.836, dd:0.983, sc:0.894},
+  {n:'LingBot-World', c:'var(--m1)', rot:12.59, trans:0.107, cammc:0.354,
+   p48:352,s48:0.274,l48:0.557,d48:0.663,o48:0.177, p96:834,s96:0.251,l96:0.635,d96:0.509,o96:0.162,
+   vb:0.841, dd:0.933, sc:0.905},
+  {n:'Yume-1.5',      c:'var(--m7)', rot:14.24, trans:0.131, cammc:0.428,
+   p48:165,s48:0.268,l48:0.533,d48:0.747,o48:0.179, p96:332,s96:0.269,l96:0.586,d96:0.661,o96:0.152,
+   vb:0.844, dd:0.988, sc:0.878},
+  {n:'ReWorld',       c:'var(--land)',rot:11.95, trans:0.102, cammc:0.332, ours:1,
+   p48:286,s48:0.349,l48:0.282,d48:0.913,o48:0.325, p96:615,s96:0.384,l96:0.332,d96:0.932,o96:0.379,
+   vb:0.850, dd:0.912, sc:0.929}
+];
+
+/* ---------------------------------------------------------- chart 1 */
+(function(){
+  var svg=$('#c1Svg'); if(!svg) return;
+  var key='rot';
+  var META={rot:{lab:'RotErr（度）',dec:2,lo:11.5,hi:16.0,st:1},
+            trans:{lab:'TransErr',dec:3,lo:0.07,hi:0.135,st:0.02},
+            cammc:{lab:'CamMC',dec:3,lo:0.32,hi:0.44,st:0.03}};
+  function render(){
+    clr(svg);
+    var m=META[key], X0=160, X1=612, ROW=26, Y0=48;
+    function px(v){return X0+(X1-X0)*(v-m.lo)/(m.hi-m.lo)}
+    svg.appendChild(E('text',{x:0,y:22,class:'f-ink big'},m.lab+' · 越低越好'));
+    svg.appendChild(E('text',{x:0,y:38,class:'f-ink3 sml'},'点图，横轴自 '+m.lo+' 起截断'));
+    var t;
+    for(t=m.lo;t<=m.hi+1e-9;t+=m.st){
+      var gx=px(t);
+      svg.appendChild(E('line',{x1:gx,y1:Y0-8,x2:gx,y2:Y0+7*ROW-4,class:'s-rule1','stroke-width':.8,'stroke-dasharray':'2 5'}));
+      svg.appendChild(E('text',{x:gx,y:Y0+7*ROW+14,class:'f-ink3 sml mono','text-anchor':'middle'},key==='rot'?t.toFixed(1):t.toFixed(3)));
+    }
+    var sorted=METHODS.slice().sort(function(a,b){return a[key]-b[key]});
+    sorted.forEach(function(d,i){
+      var y=Y0+i*ROW+11, cx=px(d[key]);
+      svg.appendChild(E('text',{x:X0-12,y:y+4,class:(d.ours?'f-Li':'f-ink2')+' lbl','text-anchor':'end','font-weight':d.ours?600:400},d.n));
+      svg.appendChild(E('line',{x1:X0,y1:y,x2:cx,y2:y,stroke:d.c,'stroke-width':2,opacity:.35}));
+      if(d.ours) svg.appendChild(E('circle',{cx:cx,cy:y,r:10,class:'nofill s-L','stroke-width':2.2}));
+      var c=E('circle',{cx:cx,cy:y,r:d.ours?6:5.5,fill:d.c,opacity:d.ours?1:.9});
+      svg.appendChild(c);
+      bindTip(c,'<b>'+d.n+'</b>RotErr '+d.rot.toFixed(2)+'°<br>TransErr '+d.trans.toFixed(3)+'<br>CamMC '+d.cammc.toFixed(3));
+      svg.appendChild(E('text',{x:cx+16,y:y+4,class:(d.ours?'f-Li':'f-ink3')+' sml mono'},d[key].toFixed(m.dec)));
+      if(i===0) svg.appendChild(E('text',{x:cx+64,y:y+4,class:'f-Oi sml'},'最优'));
+    });
+    svg.appendChild(E('line',{x1:X0,y1:Y0-8,x2:X0,y2:Y0+7*ROW-4,class:'s-rule','stroke-width':1}));
+  }
+  seg('#c1Seg',function(d){key=d.k; render();});
+  render();
+})();
+
+/* ---------------------------------------------------------- chart 2 */
+(function(){
+  var svg=$('#c2Svg'); if(!svg) return;
+  var K='96', M='ssim';
+  var MM={ssim:{k:'s',lab:'重访 SSIM ↑',hi:1},lpips:{k:'l',lab:'LPIPS ↓（越低越好）',hi:0},
+          dino:{k:'d',lab:'DINO 相似度 ↑',hi:1},orb:{k:'o',lab:'ORB 匹配率 ↑',hi:1}};
+  function render(){
+    clr(svg);
+    var mm=MM[M], suf=K, X0=96,X1=650,Y0=44,Y1=224;
+    var xs=METHODS.map(function(d){return d['p'+suf]});
+    var ys=METHODS.map(function(d){return d[mm.k+suf]});
+    var xmin=0, xmax=Math.ceil(Math.max.apply(null,xs)/100)*100;
+    var ymin=Math.min.apply(null,ys), ymax=Math.max.apply(null,ys);
+    var pad=(ymax-ymin)*0.18; ymin-=pad; ymax+=pad;
+    function px(v){return X0+(X1-X0)*(v-xmin)/(xmax-xmin)}
+    function py(v){return Y1-(Y1-Y0)*(v-ymin)/(ymax-ymin)}
+    svg.appendChild(E('rect',{x:X0,y:Y0,width:X1-X0,height:Y1-Y0,class:'nofill s-rule1','stroke-width':1}));
+    var t;
+    for(t=0;t<=4;t++){
+      var gx=X0+(X1-X0)*t/4, gv=xmin+(xmax-xmin)*t/4;
+      svg.appendChild(E('line',{x1:gx,y1:Y0,x2:gx,y2:Y1,class:'s-rule1','stroke-width':.8,'stroke-dasharray':'2 5'}));
+      svg.appendChild(E('text',{x:gx,y:Y1+18,class:'f-ink3 sml mono','text-anchor':'middle'},Math.round(gv)));
+      var gy=Y0+(Y1-Y0)*t/4, gvy=ymax-(ymax-ymin)*t/4;
+      svg.appendChild(E('line',{x1:X0,y1:gy,x2:X1,y2:gy,class:'s-rule1','stroke-width':.8,'stroke-dasharray':'2 5'}));
+      svg.appendChild(E('text',{x:X0-8,y:gy+4,class:'f-ink3 sml mono','text-anchor':'end'},gvy.toFixed(3)));
+    }
+    svg.appendChild(E('text',{x:(X0+X1)/2,y:Y1+42,class:'f-Ci lbl','text-anchor':'middle'},'执行路径长度（去程累计中位光流，px）→ 越靠右 = 真的走出去了'));
+    svg.appendChild(E('text',{x:26,y:(Y0+Y1)/2,class:'f-Mi lbl','text-anchor':'middle',transform:'rotate(-90 26 '+((Y0+Y1)/2)+')'},mm.lab));
+    // desirable corner hint
+    var cornerY = mm.hi ? Y0+6 : Y1-6;
+    svg.appendChild(E('text',{x:X1-8,y:mm.hi?Y0+18:Y1-10,class:'f-Oi sml','text-anchor':'end'},'走得远又还原得好 ↗'));
+    var placed=[];
+    METHODS.slice().sort(function(a,b){return a[mm.k+suf]-b[mm.k+suf]}).forEach(function(d){
+      var cx=px(d['p'+suf]), cy=py(d[mm.k+suf]);
+      if(d.ours){
+        svg.appendChild(E('circle',{cx:cx,cy:cy,r:11,class:'nofill s-L','stroke-width':2.4}));
+      }
+      var c=E('circle',{cx:cx,cy:cy,r:d.ours?6:5.5,fill:d.c,opacity:d.ours?1:.85});
+      svg.appendChild(c);
+      bindTip(c,'<b>'+d.n+' · k='+suf+'</b>路径 '+d['p'+suf]+' px<br>SSIM '+d['s'+suf].toFixed(3)+' · LPIPS '+d['l'+suf].toFixed(3)+'<br>DINO '+d['d'+suf].toFixed(3)+' · ORB '+d['o'+suf].toFixed(3));
+      var anchor = cx>X1-120?'end':'start';
+      var lx = cx+(anchor==='end'?-12:12), ly=cy+4, tries=[0,-15,15,-28,28,-41,41], dy=0;
+      for(var ti=0;ti<tries.length;ti++){
+        dy=tries[ti]; var ok=true;
+        for(var pi=0;pi<placed.length;pi++){
+          if(Math.abs(placed[pi][0]-lx)<130 && Math.abs(placed[pi][1]-(ly+dy))<13){ ok=false; break; }
+        }
+        if(ok) break;
+      }
+      placed.push([lx,ly+dy]);
+      svg.appendChild(E('text',{x:lx,y:ly+dy,class:(d.ours?'f-Li':'f-ink2')+' sml','text-anchor':anchor,'font-weight':d.ours?600:400},d.n));
+      if(dy!==0) svg.appendChild(E('line',{x1:cx+(anchor==='end'?-7:7),y1:cy,x2:lx+(anchor==='end'?-2:2),y2:ly+dy-4,stroke:d.c,'stroke-width':1,opacity:.5}));
+    });
+    // HY annotation
+    var hy=METHODS[2];
+    svg.appendChild(E('text',{x:px(hy['p'+suf]),y:py(hy[mm.k+suf])-16,class:'f-Bi sml','text-anchor':'middle'},'走得最少'));
+    svg.appendChild(E('text',{x:(X0+X1)/2,y:284,class:'f-ink3 sml','text-anchor':'middle'},'k = '+suf+' latents（≈'+(suf==='48'?'8':'16')+' s）· 所有方法收到相同的动作指令，但实际走出的距离差别很大'));
+  }
+  seg('#c2K',function(d){K=d.k; render();});
+  seg('#c2M',function(d){M=d.m; render();});
+  render();
+})();
+
+/* ---------------------------------------------------------- chart 3 */
+(function(){
+  var svg=$('#c3Svg'); if(!svg) return;
+  clr(svg);
+  // left: mean bars
+  var X0=118,X1=330,ROW=26,Y0=48, lo=0.820, hi=0.856;
+  svg.appendChild(E('text',{x:0,y:24,class:'f-ink big'},'七维均值'));
+  svg.appendChild(E('text',{x:0,y:40,class:'f-ink3 sml'},'横轴自 0.820 起截断以显示差异'));
+  var srt=METHODS.slice().sort(function(a,b){return b.vb-a.vb});
+  srt.forEach(function(d,i){
+    var y=Y0+i*ROW+9, cx=X0+(X1-X0)*(d.vb-lo)/(hi-lo);
+    svg.appendChild(E('text',{x:X0-10,y:y+4,class:(d.ours?'f-Li':'f-ink2')+' sml','text-anchor':'end','font-weight':d.ours?600:400},d.n));
+    svg.appendChild(E('line',{x1:X0,y1:y,x2:cx,y2:y,stroke:d.c,'stroke-width':2,opacity:.35}));
+    if(d.ours) svg.appendChild(E('circle',{cx:cx,cy:y,r:9,class:'nofill s-L','stroke-width':2.2}));
+    var r=E('circle',{cx:cx,cy:y,r:d.ours?5.5:5,fill:d.c,opacity:d.ours?1:.9});
+    svg.appendChild(r);
+    bindTip(r,'<b>'+d.n+'</b>VBench 七维均值 '+d.vb.toFixed(3));
+    svg.appendChild(E('text',{x:cx+14,y:y+4,class:(d.ours?'f-Li':'f-ink3')+' sml mono'},d.vb.toFixed(3)));
+  });
+  svg.appendChild(E('line',{x1:X0,y1:Y0-2,x2:X0,y2:Y0+7*ROW+2,class:'s-rule','stroke-width':1}));
+  // right: dynamic degree vs subject consistency
+  var A0=452,A1=692,B0=54,B1=198;
+  svg.appendChild(E('text',{x:A0-40,y:24,class:'f-ink big'},'一致性 vs 运动量：混杂因素'));
+  svg.appendChild(E('text',{x:A0-40,y:40,class:'f-ink3 sml'},'两个维度都取自 Tab. 5 原始数值 · 点的颜色与左图一致'));
+  svg.appendChild(E('rect',{x:A0,y:B0,width:A1-A0,height:B1-B0,class:'nofill s-rule1','stroke-width':1}));
+  function ax(v){return A0+(A1-A0)*(v-0.70)/(1.00-0.70)}
+  function ay(v){return B1-(B1-B0)*(v-0.86)/(0.99-0.86)}
+  [0.70,0.80,0.90,1.00].forEach(function(v){
+    svg.appendChild(E('line',{x1:ax(v),y1:B0,x2:ax(v),y2:B1,class:'s-rule1','stroke-width':.8,'stroke-dasharray':'2 5'}));
+    svg.appendChild(E('text',{x:ax(v),y:B1+16,class:'f-ink3 sml mono','text-anchor':'middle'},v.toFixed(2)));
+  });
+  [0.88,0.92,0.96].forEach(function(v){
+    svg.appendChild(E('line',{x1:A0,y1:ay(v),x2:A1,y2:ay(v),class:'s-rule1','stroke-width':.8,'stroke-dasharray':'2 5'}));
+    svg.appendChild(E('text',{x:A0-6,y:ay(v)+4,class:'f-ink3 sml mono','text-anchor':'end'},v.toFixed(2)));
+  });
+  svg.appendChild(E('text',{x:(A0+A1)/2,y:B1+34,class:'f-ink3 sml','text-anchor':'middle'},'Dynamic Degree →'));
+  svg.appendChild(E('text',{x:A0-38,y:(B0+B1)/2,class:'f-ink3 sml','text-anchor':'middle',transform:'rotate(-90 '+(A0-38)+' '+((B0+B1)/2)+')'},'Subject Consistency →'));
+  METHODS.forEach(function(d){
+    var cx=ax(d.dd), cy=ay(d.sc);
+    if(d.ours) svg.appendChild(E('circle',{cx:cx,cy:cy,r:10,class:'nofill s-L','stroke-width':2.2}));
+    var c=E('circle',{cx:cx,cy:cy,r:5.5,fill:d.c,opacity:d.ours?1:.85});
+    svg.appendChild(c);
+    bindTip(c,'<b>'+d.n+'</b>Dynamic Degree '+d.dd.toFixed(3)+'<br>Subject Cons. '+d.sc.toFixed(3)+'<br>七维均值 '+d.vb.toFixed(3));
+  });
+  svg.appendChild(E('text',{x:ax(0.733)+8,y:ay(0.976)+4,class:'f-Bi sml'},'HY-WorldPlay'));
+  svg.appendChild(E('text',{x:ax(0.912),y:ay(0.929)-14,class:'f-Li sml','text-anchor':'middle'},'ReWorld'));
+  svg.appendChild(E('text',{x:(A0+A1)/2,y:256,class:'f-ink3 sml','text-anchor':'middle'},'左上角的一致性冠军，是用右下角的运动量换来的'));
+  svg.appendChild(E('text',{x:0,y:256,class:'f-ink3 sml'},'ReWorld 均值第一，但没有任何单项第一'));
+})();
+
+/* ---------------------------------------------------------- chart 4 */
+(function(){
+  var svg=$('#c4Svg'); if(!svg) return;
+  var mode='recipe';
+  var KS=[96,192,288,384];
+  var RECIPE=[
+    {n:'base',            v:[0.4019,0.3747,0.3698,0.3387], c:'var(--ink3)'},
+    {n:'+ CD',            v:[0.4043,0.3941,0.3846,0.3463], c:'var(--m1)'},
+    {n:'+ RH',            v:[0.4319,0.3787,0.3836,0.3565], c:'var(--m3)'},
+    {n:'+ CD + RH（本文）', v:[0.4358,0.3929,0.3943,0.3752], c:'var(--land)', ours:1}
+  ];
+  var CACHE=[
+    {n:'full-KV（上界）',   v:[0.4463,0.4231,null,null],     c:'var(--m4)', dash:'5 4'},
+    {n:'window',           v:[0.4129,0.3687,0.3505,0.3476], c:'var(--m2)'},
+    {n:'naive-merge',      v:[0.3741,0.3371,0.3467,0.3541], c:'var(--m6)'},
+    {n:'w/o bank',         v:[0.4376,0.3758,0.3743,0.3629], c:'var(--m1)'},
+    {n:'w/ bank（本文）',   v:[0.4358,0.3929,0.3943,0.3752], c:'var(--land)', ours:1}
+  ];
+  function render(){
+    clr(svg);
+    var S = mode==='recipe'?RECIPE:CACHE;
+    var X0=86,X1=556,Y0=40,Y1=238, lo=0.330, hi=0.450;
+    function px(i){return X0+(X1-X0)*i/3}
+    function py(v){return Y1-(Y1-Y0)*(v-lo)/(hi-lo)}
+    svg.appendChild(E('rect',{x:X0,y:Y0,width:X1-X0,height:Y1-Y0,class:'nofill s-rule1','stroke-width':1}));
+    var t;
+    for(t=0;t<=4;t++){
+      var v=lo+(hi-lo)*t/4, gy=py(v);
+      svg.appendChild(E('line',{x1:X0,y1:gy,x2:X1,y2:gy,class:'s-rule1','stroke-width':.8,'stroke-dasharray':'2 5'}));
+      svg.appendChild(E('text',{x:X0-8,y:gy+4,class:'f-ink3 sml mono','text-anchor':'end'},v.toFixed(3)));
+    }
+    KS.forEach(function(k,i){
+      svg.appendChild(E('line',{x1:px(i),y1:Y0,x2:px(i),y2:Y1,class:'s-rule1','stroke-width':.8,'stroke-dasharray':'2 5'}));
+      svg.appendChild(E('text',{x:px(i),y:Y1+18,class:'f-ink3 sml mono','text-anchor':'middle'},'k='+k));
+      svg.appendChild(E('text',{x:px(i),y:Y1+32,class:'f-ink3 sml','text-anchor':'middle'},'≈'+Math.round(k/6)+' s'));
+    });
+    svg.appendChild(E('text',{x:26,y:(Y0+Y1)/2,class:'f-ink3 lbl','text-anchor':'middle',transform:'rotate(-90 26 '+((Y0+Y1)/2)+')'},'revisit SSIM ↑'));
+    // discriminative region
+    svg.appendChild(E('rect',{x:px(2)-14,y:Y0,width:X1-px(2)+14,height:Y1-Y0,class:'fs-L',opacity:.35}));
+    svg.appendChild(E('text',{x:(px(2)+X1)/2,y:Y0+16,class:'f-Li sml','text-anchor':'middle'},'有区分度的长度'));
+    S.forEach(function(d,si){
+      var dstr='', pts=[];
+      d.v.forEach(function(v,i){ if(v===null) return; pts.push([px(i),py(v)]); });
+      pts.forEach(function(p,i){ dstr+=(i?' L ':'M ')+p[0]+' '+p[1]; });
+      svg.appendChild(E('path',{d:dstr,fill:'none',stroke:d.c,'stroke-width':d.ours?3:1.9,'stroke-dasharray':d.dash||null,'stroke-linecap':'round'}));
+      d.v.forEach(function(v,i){
+        if(v===null) return;
+        var c=E('circle',{cx:px(i),cy:py(v),r:d.ours?5:4,fill:d.c});
+        svg.appendChild(c);
+        bindTip(c,'<b>'+d.n+' · k='+KS[i]+'</b>revisit SSIM '+v.toFixed(4));
+      });
+      if(d.v[3]===null){
+        var lastI=d.v[1]===null?0:1;
+        svg.appendChild(E('text',{x:px(lastI)+12,y:py(d.v[lastI])-10,class:'f-Bi sml mono'},'OOM →'));
+      }
+      // legend
+      var ly=Y0+14+si*24;
+      svg.appendChild(E('line',{x1:X1+18,y1:ly-4,x2:X1+40,y2:ly-4,stroke:d.c,'stroke-width':d.ours?3:1.9,'stroke-dasharray':d.dash||null}));
+      svg.appendChild(E('circle',{cx:X1+29,cy:ly-4,r:3.5,fill:d.c}));
+      svg.appendChild(E('text',{x:X1+46,y:ly,class:(d.ours?'f-Li':'f-ink2')+' sml','font-weight':d.ours?600:400},d.n));
+      var last=d.v[3]!==null?d.v[3]:d.v[1];
+      svg.appendChild(E('text',{x:X1+46,y:ly+12,class:'f-ink3 sml mono'},(d.v[3]!==null?'k=384: ':'k=192: ')+last.toFixed(4)));
+    });
+    svg.appendChild(E('text',{x:X0,y:288,class:'f-ink3 sml'},mode==='recipe'
+      ? '四个变体都从零训练（720p / 20k steps），推理臂固定为本文的 consolidation —— 只有训练配方不同'
+      : '训练配方固定为本文完整配方，预算同为 B=12，每个有界臂都保留同一个 sink —— 只有缓存策略不同'));
+  }
+  seg('#c4Seg',function(d){mode=d.k; render();});
+  render();
+})();
+
+})();
+</script>
+</body>
+</html>

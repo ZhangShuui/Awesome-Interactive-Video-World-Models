@@ -1,0 +1,2458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code World Model 精读</title>
+<meta name="description" content="arXiv 2608.25927 · Code World Model: Coding Agent as World Brain —— 方法精读、proxy 接口拆解与交互图解">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   Code World Model 精读 — tokens.
+   语义配色即论点：这篇论文的全部结构都是「谁负责哪一段」，
+   所以每个功能角色固定一个色，全篇不换：
+     紫  = coding agent（稀疏、复杂、会改机制的那一端）
+     金  = code / 可执行世界状态 S^exe（稠密、确定性、高频）
+     青  = proxy（几何条件通道，白盒、可寻址）
+     绿  = structured text（语义条件通道）
+     品红 = video model / 视觉观测 S^vis（生成先验的那一端）
+   暗色为默认地面，亮色是完整设计的第二主题。
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0c0e11; --surf:#121519; --surf2:#171b20; --surf3:#1f242b;
+  --rule:#242a31; --rule2:#363d47;
+  --ink:#eef0f3; --ink2:#a9b1bb; --ink3:#79818c;
+
+  --ag:#7a5ed0;  --ag-ink:#a692ee;  --ag-soft:rgba(122,94,208,.20);
+  --cd:#c08a1c;  --cd-ink:#e3b04a;  --cd-soft:rgba(192,138,28,.18);
+  --px:#1d93ad;  --px-ink:#4ec1d7;  --px-soft:rgba(29,147,173,.18);
+  --tx:#2f9a6a;  --tx-ink:#54c191;  --tx-soft:rgba(47,154,106,.17);
+  --vd:#bb4a86;  --vd-ink:#e57fb4;  --vd-soft:rgba(187,74,134,.18);
+
+  --bad:#d55f55;  --bad-ink:#ee8078;  --bad-soft:rgba(213,95,85,.15);
+  --ok:#3aa877;   --ok-ink:#5cc796;   --ok-soft:rgba(58,168,119,.15);
+  --warn:#c9903a; --warn-ink:#e0ac5c; --warn-soft:rgba(201,144,58,.14);
+
+  --grid:#1f242b; --axis:#363d47;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.35);
+  --tint:rgba(255,255,255,.045);
+  --font-display:"Archivo","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f1ed; --surf:#fbfaf8; --surf2:#eceae4; --surf3:#e2e0d8;
+    --rule:#dedbd3; --rule2:#c3bfb4;
+    --ink:#15171b; --ink2:#4d525a; --ink3:#787e88;
+    --ag:#5b3fb0;  --ag-ink:#4a2f9c;  --ag-soft:rgba(91,63,176,.13);
+    --cd:#8f6403;  --cd-ink:#75510a;  --cd-soft:rgba(143,100,3,.14);
+    --px:#0c7b92;  --px-ink:#086a7d;  --px-soft:rgba(12,123,146,.14);
+    --tx:#1c7a50;  --tx-ink:#136040;  --tx-soft:rgba(28,122,80,.13);
+    --vd:#a92c6f;  --vd-ink:#8a1f59;  --vd-soft:rgba(169,44,111,.12);
+    --bad:#c33a30;  --bad-ink:#a52b23;  --bad-soft:rgba(195,58,48,.11);
+    --ok:#1c7a50;   --ok-ink:#136040;   --ok-soft:rgba(28,122,80,.12);
+    --warn:#9a6a10; --warn-ink:#7d5608; --warn-soft:rgba(154,106,16,.13);
+    --grid:#e2e0d8; --axis:#c3bfb4;
+    --shadow:0 1px 2px rgba(40,36,28,.10), 0 10px 28px rgba(40,36,28,.09);
+    --tint:rgba(20,18,14,.035);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#0c0e11; --surf:#121519; --surf2:#171b20; --surf3:#1f242b;
+  --rule:#242a31; --rule2:#363d47;
+  --ink:#eef0f3; --ink2:#a9b1bb; --ink3:#79818c;
+  --ag:#7a5ed0;  --ag-ink:#a692ee;  --ag-soft:rgba(122,94,208,.20);
+  --cd:#c08a1c;  --cd-ink:#e3b04a;  --cd-soft:rgba(192,138,28,.18);
+  --px:#1d93ad;  --px-ink:#4ec1d7;  --px-soft:rgba(29,147,173,.18);
+  --tx:#2f9a6a;  --tx-ink:#54c191;  --tx-soft:rgba(47,154,106,.17);
+  --vd:#bb4a86;  --vd-ink:#e57fb4;  --vd-soft:rgba(187,74,134,.18);
+  --bad:#d55f55;  --bad-ink:#ee8078;  --bad-soft:rgba(213,95,85,.15);
+  --ok:#3aa877;   --ok-ink:#5cc796;   --ok-soft:rgba(58,168,119,.15);
+  --warn:#c9903a; --warn-ink:#e0ac5c; --warn-soft:rgba(201,144,58,.14);
+  --grid:#1f242b; --axis:#363d47;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.35);
+  --tint:rgba(255,255,255,.045);
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f1ed; --surf:#fbfaf8; --surf2:#eceae4; --surf3:#e2e0d8;
+  --rule:#dedbd3; --rule2:#c3bfb4;
+  --ink:#15171b; --ink2:#4d525a; --ink3:#787e88;
+  --ag:#5b3fb0;  --ag-ink:#4a2f9c;  --ag-soft:rgba(91,63,176,.13);
+  --cd:#8f6403;  --cd-ink:#75510a;  --cd-soft:rgba(143,100,3,.14);
+  --px:#0c7b92;  --px-ink:#086a7d;  --px-soft:rgba(12,123,146,.14);
+  --tx:#1c7a50;  --tx-ink:#136040;  --tx-soft:rgba(28,122,80,.13);
+  --vd:#a92c6f;  --vd-ink:#8a1f59;  --vd-soft:rgba(169,44,111,.12);
+  --bad:#c33a30;  --bad-ink:#a52b23;  --bad-soft:rgba(195,58,48,.11);
+  --ok:#1c7a50;   --ok-ink:#136040;   --ok-soft:rgba(28,122,80,.12);
+  --warn:#9a6a10; --warn-ink:#7d5608; --warn-soft:rgba(154,106,16,.13);
+  --grid:#e2e0d8; --axis:#c3bfb4;
+  --shadow:0 1px 2px rgba(40,36,28,.10), 0 10px 28px rgba(40,36,28,.09);
+  --tint:rgba(20,18,14,.035);
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16.5px; line-height:1.78;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+::selection{background:var(--px-soft); color:var(--ink)}
+
+/* ---------- layout ---------- */
+.wrap{max-width:1140px; margin:0 auto; padding:0 26px}
+.col{max-width:760px}
+section{padding:52px 0; border-top:1px solid var(--rule)}
+section:first-of-type{border-top:none}
+h1,h2,h3,h4{font-family:var(--font-display); font-weight:700; letter-spacing:-.012em; line-height:1.22; margin:0}
+h2{font-size:clamp(22px,3.1vw,30px); margin:0 0 6px}
+h3{font-size:18.5px; margin:34px 0 8px; letter-spacing:-.005em}
+h4{font-size:15px; margin:22px 0 6px; color:var(--ink2); font-weight:600}
+p{margin:0 0 15px}
+.prose p:last-child{margin-bottom:0}
+a{color:var(--px-ink); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--px-ink) 35%, transparent)}
+a:hover{border-bottom-color:var(--px-ink)}
+strong{font-weight:600; color:var(--ink)}
+em{font-style:normal; background:var(--tint); padding:0 .28em; border-radius:3px}
+code,.mono{font-family:var(--font-mono); font-size:.885em; font-variant-ligatures:none}
+p code, li code, td code{background:var(--surf2); border:1px solid var(--rule); border-radius:4px; padding:.06em .34em; color:var(--ink)}
+ul,ol{margin:0 0 15px; padding-left:1.25em}
+li{margin:0 0 7px}
+.sml{font-size:13px; line-height:1.62}
+.lbl{font-size:11.5px; letter-spacing:.09em; text-transform:uppercase; font-weight:600}
+.eyebrow{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink3); margin:0 0 10px}
+.lead{font-size:18px; line-height:1.72; color:var(--ink2); margin:0 0 20px}
+.lead strong{color:var(--ink)}
+.f-ink{color:var(--ink)} .f-ink2{color:var(--ink2)} .f-ink3{color:var(--ink3)}
+.c-ag{color:var(--ag-ink)} .c-cd{color:var(--cd-ink)} .c-px{color:var(--px-ink)}
+.c-tx{color:var(--tx-ink)} .c-vd{color:var(--vd-ink)} .c-bad{color:var(--bad-ink)} .c-ok{color:var(--ok-ink)}
+.c-warn{color:var(--warn-ink)}
+
+/* ---------- topbar ---------- */
+.topbar{position:sticky; top:0; z-index:60; background:color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter:blur(14px) saturate(1.3); -webkit-backdrop-filter:blur(14px) saturate(1.3);
+  border-bottom:1px solid var(--rule)}
+.topbar-in{max-width:1140px; margin:0 auto; padding:9px 26px; display:flex; align-items:center; gap:14px}
+.brand{font-family:var(--font-display); font-weight:700; font-size:14px; letter-spacing:-.01em; white-space:nowrap}
+.brand .dot{display:inline-block; width:7px; height:7px; border-radius:2px; background:var(--px); margin-right:7px; vertical-align:middle}
+.prog{flex:1; height:3px; background:var(--surf3); border-radius:2px; overflow:hidden; min-width:40px}
+.prog i{display:block; height:100%; width:0; background:linear-gradient(90deg,var(--ag),var(--cd),var(--px),var(--vd)); transition:width .1s linear}
+.tbtn{font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; padding:5px 9px; border-radius:6px;
+  border:1px solid var(--rule2); background:var(--surf2); color:var(--ink2); cursor:pointer; white-space:nowrap}
+.tbtn:hover{color:var(--ink); border-color:var(--ink3)}
+
+/* ---------- hero ---------- */
+.hero{padding:56px 0 30px; border:none}
+.hero h1{font-size:clamp(31px,5.4vw,52px); line-height:1.08; letter-spacing:-.025em; margin:0 0 16px}
+.hero h1 .sub{display:block; font-size:clamp(15px,2.1vw,20px); font-weight:500; color:var(--ink3); letter-spacing:.005em; margin-top:12px; font-family:var(--font-body)}
+.chips{display:flex; flex-wrap:wrap; gap:7px; margin:20px 0 0}
+.chip{font-family:var(--font-mono); font-size:11.5px; padding:4px 9px; border-radius:5px; background:var(--surf2); border:1px solid var(--rule); color:var(--ink2)}
+.chip b{color:var(--ink); font-weight:600}
+.tldr{margin:30px 0 0; border:1px solid var(--rule); border-left:3px solid var(--px); background:var(--surf); border-radius:0 10px 10px 0; padding:18px 22px}
+.tldr .lbl{color:var(--px-ink); margin-bottom:8px}
+.tldr p{margin:0 0 10px} .tldr p:last-child{margin:0}
+
+/* ---------- TOC ---------- */
+.toc{margin:34px 0 0; border:1px solid var(--rule); border-radius:10px; background:var(--surf); overflow:hidden}
+.toc summary{cursor:pointer; padding:12px 18px; font-family:var(--font-mono); font-size:11.5px; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--ink3); list-style:none; user-select:none}
+.toc summary::-webkit-details-marker{display:none}
+.toc summary::after{content:"▾"; float:right; transition:transform .2s}
+.toc[open] summary::after{transform:rotate(180deg)}
+.toc ol{margin:0; padding:0 18px 16px 18px; list-style:none; counter-reset:t;
+  columns:2; column-gap:26px}
+@media(max-width:720px){ .toc ol{columns:1} }
+.toc li{counter-increment:t; margin:0 0 5px; break-inside:avoid}
+.toc a{display:block; font-size:14px; color:var(--ink2); border:none; padding:2px 0}
+.toc a::before{content:counter(t,decimal-leading-zero); font-family:var(--font-mono); font-size:11px; color:var(--ink3); margin-right:9px}
+.toc a:hover{color:var(--px-ink)}
+
+/* ---------- figures ---------- */
+.fig{margin:30px 0; border:1px solid var(--rule); border-radius:12px; background:var(--surf); overflow:hidden; box-shadow:var(--shadow)}
+.fig.wide{width:min(1236px, calc(100vw - 56px)); margin-left:50%; transform:translateX(-50%)}
+.fh{padding:13px 18px; border-bottom:1px solid var(--rule); background:var(--surf2); display:flex; align-items:baseline; gap:12px; flex-wrap:wrap}
+.fh .n{font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; color:var(--px-ink); font-weight:600; white-space:nowrap}
+.fh .t{font-family:var(--font-display); font-weight:600; font-size:15px; letter-spacing:-.005em}
+.fh .hint{margin-left:auto; font-size:11.5px; color:var(--ink3); font-family:var(--font-mono)}
+.figbody{padding:20px 18px}
+.figcap{padding:12px 18px 15px; border-top:1px solid var(--rule); background:var(--surf2); font-size:13px; line-height:1.62; color:var(--ink2)}
+.figcap b{color:var(--ink)}
+svg{display:block; max-width:100%; height:auto}
+.svgscroll{overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch}
+.svgscroll svg{min-width:640px}
+.scrollhint{font-family:var(--font-mono); font-size:10.5px; color:var(--ink3); margin:0 0 6px; letter-spacing:.04em}
+
+/* ---------- controls ---------- */
+.ctl{display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; padding:11px 18px;
+  border-bottom:1px solid var(--rule); background:color-mix(in srgb,var(--surf2) 60%, var(--surf))}
+.ctl.bot{border-bottom:none; border-top:1px solid var(--rule)}
+.ctlg{display:flex; align-items:center; gap:8px}
+.ctlg > .lbl{color:var(--ink3); font-size:10.5px}
+.seg{display:inline-flex; border:1px solid var(--rule2); border-radius:7px; overflow:hidden; background:var(--surf)}
+.seg button{border:none; background:transparent; color:var(--ink3); font-family:var(--font-mono); font-size:11.5px;
+  padding:5px 11px; cursor:pointer; border-right:1px solid var(--rule2); white-space:nowrap; transition:background .13s,color .13s}
+.seg button:last-child{border-right:none}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--px-soft); color:var(--px-ink); font-weight:600}
+.seg.ag button[aria-pressed="true"]{background:var(--ag-soft); color:var(--ag-ink)}
+.seg.vd button[aria-pressed="true"]{background:var(--vd-soft); color:var(--vd-ink)}
+input[type=range]{-webkit-appearance:none; appearance:none; height:4px; border-radius:3px; background:var(--surf3);
+  outline:none; cursor:pointer; width:150px; border:1px solid var(--rule)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:15px; height:15px; border-radius:50%;
+  background:var(--px-ink); border:2px solid var(--bg); cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,.4)}
+input[type=range]::-moz-range-thumb{width:13px; height:13px; border-radius:50%; background:var(--px-ink);
+  border:2px solid var(--bg); cursor:pointer}
+.chk{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink2); cursor:pointer; user-select:none}
+.chk input{accent-color:var(--px); width:14px; height:14px; cursor:pointer}
+.readout{font-family:var(--font-mono); font-size:12px; color:var(--ink); background:var(--surf3);
+  border:1px solid var(--rule); border-radius:5px; padding:3px 9px; min-width:52px; text-align:center}
+.btn{font-family:var(--font-mono); font-size:11.5px; padding:5px 11px; border-radius:6px; border:1px solid var(--rule2);
+  background:var(--surf); color:var(--ink2); cursor:pointer}
+.btn:hover{color:var(--ink); border-color:var(--ink3)}
+.btn.on{background:var(--px-soft); color:var(--px-ink); border-color:var(--px)}
+
+/* ---------- callouts ---------- */
+.note{margin:24px 0; padding:15px 18px; border-radius:10px; border:1px solid var(--rule); background:var(--surf); font-size:14.5px; line-height:1.68}
+.note .lbl{display:block; margin-bottom:7px}
+.note.key{border-left:3px solid var(--px); background:var(--px-soft)} .note.key .lbl{color:var(--px-ink)}
+.note.warnb{border-left:3px solid var(--warn); background:var(--warn-soft)} .note.warnb .lbl{color:var(--warn-ink)}
+.note.crit{border-left:3px solid var(--bad); background:var(--bad-soft)} .note.crit .lbl{color:var(--bad-ink)}
+.note.quote{border-left:3px solid var(--rule2); font-family:var(--font-math); font-style:italic; color:var(--ink2)}
+.note.quote .src{display:block; margin-top:8px; font-style:normal; font-family:var(--font-mono); font-size:11.5px; color:var(--ink3)}
+.note p:last-child{margin-bottom:0}
+
+/* ---------- equations ---------- */
+.eqwrap{margin:24px 0; border:1px solid var(--rule); border-radius:10px; background:var(--surf); overflow:hidden}
+.eqrow{display:flex; align-items:center; gap:16px; padding:16px 18px; border-bottom:1px solid var(--rule)}
+.eqrow:last-child{border-bottom:none}
+.eqn{flex:1; font-family:var(--font-math); font-size:17px; line-height:1.6; overflow-x:auto}
+.eqno{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3)}
+.eqcap{padding:11px 18px; background:var(--surf2); font-size:13px; color:var(--ink2); border-top:1px solid var(--rule)}
+.sym{font-family:var(--font-math); font-style:italic}
+.sub{font-size:.72em; vertical-align:-.28em; font-style:normal}
+.sup{font-size:.68em; vertical-align:.42em; font-style:normal}
+.hl{border-radius:4px; padding:.05em .22em; cursor:help; transition:background .15s}
+.hl-ag{background:var(--ag-soft); color:var(--ag-ink)}
+.hl-cd{background:var(--cd-soft); color:var(--cd-ink)}
+.hl-px{background:var(--px-soft); color:var(--px-ink)}
+.hl-vd{background:var(--vd-soft); color:var(--vd-ink)}
+.hl-tx{background:var(--tx-soft); color:var(--tx-ink)}
+
+/* ---------- tables ---------- */
+.tblwrap{margin:24px 0; border:1px solid var(--rule); border-radius:10px; overflow:hidden; background:var(--surf)}
+.tblscroll{overflow-x:auto}
+table{border-collapse:collapse; width:100%; font-size:13.5px; min-width:520px}
+th,td{padding:9px 13px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:top}
+th{background:var(--surf2); font-weight:600; font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink3); white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:var(--tint)}
+td.mono,th.mono{font-family:var(--font-mono); font-size:12.5px}
+.tnote{padding:10px 13px; background:var(--surf2); border-top:1px solid var(--rule); font-size:12.5px; color:var(--ink3)}
+
+/* ---------- code ---------- */
+.cd{margin:24px 0; border:1px solid var(--rule); border-radius:10px; background:var(--surf); overflow:hidden}
+.cd .hd{padding:9px 14px; background:var(--surf2); border-bottom:1px solid var(--rule);
+  font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); display:flex; gap:10px; align-items:center}
+.cd .hd .tag{margin-left:auto; font-size:10.5px; padding:2px 7px; border-radius:4px; background:var(--warn-soft); color:var(--warn-ink)}
+.cd pre{margin:0; padding:14px 16px; overflow-x:auto; font-family:var(--font-mono); font-size:12.5px; line-height:1.66; color:var(--ink2)}
+.cd .cm{color:var(--ink3); font-style:italic}
+.cd .kw{color:var(--ag-ink)} .cd .st{color:var(--tx-ink)} .cd .nu{color:var(--cd-ink)} .cd .fn{color:var(--px-ink)}
+
+/* ---------- grids / cards ---------- */
+.g2{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+.g3{display:grid; grid-template-columns:repeat(3,1fr); gap:12px}
+@media(max-width:760px){ .g2,.g3{grid-template-columns:1fr} }
+.card{border:1px solid var(--rule); border-radius:10px; background:var(--surf2); padding:14px 16px}
+.card .lbl{display:block; margin-bottom:7px}
+.card p{margin:0 0 8px; font-size:14px; line-height:1.65} .card p:last-child{margin:0}
+.card.ag{border-top:2px solid var(--ag)} .card.ag .lbl{color:var(--ag-ink)}
+.card.cd2{border-top:2px solid var(--cd)} .card.cd2 .lbl{color:var(--cd-ink)}
+.card.px{border-top:2px solid var(--px)} .card.px .lbl{color:var(--px-ink)}
+.card.tx{border-top:2px solid var(--tx)} .card.tx .lbl{color:var(--tx-ink)}
+.card.vd{border-top:2px solid var(--vd)} .card.vd .lbl{color:var(--vd-ink)}
+.card.bad{border-top:2px solid var(--bad)} .card.bad .lbl{color:var(--bad-ink)}
+.card.ok{border-top:2px solid var(--ok)} .card.ok .lbl{color:var(--ok-ink)}
+
+/* ---------- misc ---------- */
+.kv{display:grid; grid-template-columns:auto 1fr; gap:4px 14px; font-size:13.5px; margin:14px 0}
+.kv dt{font-family:var(--font-mono); font-size:12px; color:var(--ink3); white-space:nowrap}
+.kv dd{margin:0; color:var(--ink2)}
+.legend{display:flex; flex-wrap:wrap; gap:6px 16px; padding:10px 18px; border-top:1px solid var(--rule); background:var(--surf2); font-size:12px; color:var(--ink2)}
+.legend i{display:inline-block; width:11px; height:11px; border-radius:3px; margin-right:6px; vertical-align:-1px}
+.pill{display:inline-block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.05em; padding:2px 7px; border-radius:20px; border:1px solid currentColor; opacity:.9}
+footer{border-top:1px solid var(--rule); padding:34px 0 60px; color:var(--ink3); font-size:13px}
+footer a{color:var(--ink2)}
+.anchor{color:inherit; border:none; opacity:0; margin-left:8px; font-size:.6em; vertical-align:middle}
+h2:hover .anchor{opacity:.4}
+.anchor:hover{opacity:1 !important}
+@media (prefers-reduced-motion: reduce){ *{animation-duration:.001ms !important; transition-duration:.001ms !important} }
+canvas{display:block; max-width:100%}
+@media(max-width:820px){ .pxgrid{grid-template-columns:1fr !important} }
+@media(max-width:640px){
+  .seg{flex-wrap:wrap; gap:1px; padding:1px; background:var(--rule2); max-width:100%}
+  .seg button{border-right:none; border-radius:5px; background:var(--surf)}
+  .ctlg{max-width:100%; flex-wrap:wrap}
+  input[type=range]{width:min(150px, 46vw)}
+}
+details summary::-webkit-details-marker{display:none}
+.pixel{image-rendering:pixelated; image-rendering:crisp-edges}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--rule2)"/></marker>
+  <marker id="ahx" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--px)"/></marker>
+  <marker id="ahb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--bad)"/></marker>
+</defs></svg>
+<div class="topbar">
+  <div class="topbar-in">
+    <span class="brand"><span class="dot"></span>Code World Model 精读</span>
+    <span class="prog"><i id="prog"></i></span>
+    <button class="tbtn" id="themeBtn" title="切换配色">◐ 主题</button>
+  </div>
+</div>
+
+<main class="wrap">
+
+<header class="hero col">
+  <p class="eyebrow">arXiv 2608.25927v1 · cs.CV · 2026-08-26 · Westlake AGI Lab × NTU</p>
+  <h1>让写代码的 agent 当世界的大脑
+    <span class="sub">Code World Model: Coding Agent as World Brain —— 把「世界怎么演化」从「世界长什么样」里拆出来</span>
+  </h1>
+  <div class="chips">
+    <span class="chip">作者 <b>Yiwen Chen · Guosheng Lin · Chi Zhang</b></span>
+    <span class="chip">视频骨干 <b>MiniMax-H3 Ref2VA</b></span>
+    <span class="chip">coding agent <b>GPT-5.6 Sol</b></span>
+    <span class="chip">微调数据 <b>≈5.6 h GTA V</b></span>
+    <span class="chip">训练量 <b>LoRA r128 · 8×H800 · 3 epoch</b></span>
+    <span class="chip">代码 <b>尚未开放</b></span>
+  </div>
+
+  <div class="tldr">
+    <span class="lbl">一句话</span>
+    <p>视频世界模型是从<strong>结果</strong>里学<strong>机制</strong>——每一帧游戏画面都是执行一段代码渲染出来的，但那段代码在渲染完就被丢掉了，模型只能从稀疏的视觉后果里反推它。这篇论文的回答是：<strong>别再反推了，把代码本身放回环里</strong>。让 coding agent 用可执行、可修改的代码维护世界状态，视频模型只负责把状态画出来。</p>
+    <p>两端之间需要一个接口。论文给出的答案叫 <strong class="c-px">proxy</strong>：一个由 agent 程序化构造的<strong>粗糙几何表示</strong>，被一个确定性编译器渲染成低分辨率的 <em>proxy video</em>，逐帧给视频模型下时空约束；<strong class="c-tx">结构化文本</strong>负责说清外观、身份和动作语义。两条通道都源自同一份世界状态。</p>
+  </div>
+
+  <details class="toc" open>
+    <summary>本页结构</summary>
+    <ol>
+      <li><a href="#s1">一图看懂：状态存在哪，决定了世界能不能长期自洽</a></li>
+      <li><a href="#s2">问题设定：视频只记录结果，不记录机制</a></li>
+      <li><a href="#s3">两种计算体制：稀疏而复杂的推理 vs 稠密而重复的执行</a></li>
+      <li><a href="#s4">形式化：把 S 拆成可执行态与视觉态</a></li>
+      <li><a href="#s5">状态→条件：为什么纯文本一个人扛不住</a></li>
+      <li><a href="#s6">Proxy 编译器：把世界状态先摆进画面坐标</a></li>
+      <li><a href="#s7">Condition bandwidth：可构造性与约束强度的权衡</a></li>
+      <li><a href="#s8">数据（一）：游戏对，从同一次执行里同步录出来</a></li>
+      <li><a href="#s9">数据（二）：真实视频，用几何代替动作标签</a></li>
+      <li><a href="#s10">训练与推理实现逐条走读</a></li>
+      <li><a href="#s11">长视频：124 帧窗口、34 帧重叠与那张锚图</a></li>
+      <li><a href="#s12">结构化文本长什么样：附录 prompt schema 拆解</a></li>
+      <li><a href="#s13">证据边界：它证明了什么，没证明什么</a></li>
+      <li><a href="#s14">位置、同名之辨与速查表</a></li>
+    </ol>
+  </details>
+</header>
+<section id="s1">
+  <div class="col">
+    <p class="eyebrow">01 · 一图看懂</p>
+    <h2>状态存在哪，决定了世界能不能长期自洽<a class="anchor" href="#s1">§</a></h2>
+    <p class="lead">论文开篇用的例子值得原样搬过来：<strong>玩家刺杀了一座城的统治者，然后离开</strong>。这件事应当继续影响继位、治安、贸易、派系关系，以及大量 NPC 的信念、目标和行为；这些后果会在城市<strong>不在画面里</strong>的时候继续发展，和后来的事件互相纠缠，等玩家很久以后回来才第一次被看见。</p>
+    <p>一个系统要处理这个场景，需要回答的不只是「玩家回来时这座城该长什么样」，还有：玩家不在的这段时间<strong>发生了什么、为什么发生、哪些后果还在生效、当前局面会如何塑造之后的演化</strong>。下面这张图把两种架构放在同一个事件上对照，用上面的按钮推进世界时间。</p>
+  </div>
+
+  <figure class="fig wide" id="fig1">
+    <div class="fh">
+      <span class="n">FIG 1</span>
+      <span class="t">同一个事件，两种存放方式</span>
+      <span class="hint">点按钮推进世界时间 →</span>
+    </div>
+    <div class="ctl">
+      <div class="ctlg"><span class="lbl">世界时间</span>
+        <div class="seg" id="f1seg" role="group">
+          <button data-s="0" aria-pressed="true">① 事件发生</button>
+          <button data-s="1" aria-pressed="false">② 离屏 10 分钟</button>
+          <button data-s="2" aria-pressed="false">③ 玩家回到这座城</button>
+        </div>
+      </div>
+      <div class="ctlg"><button class="btn on" id="f1anim">⏸ 数据流动画</button></div>
+    </div>
+    <div class="figbody">
+      <div class="svgscroll">
+      <svg id="f1svg" viewBox="0 0 960 470" role="img" aria-label="视频世界模型与 Code World Model 的信息流对照图">
+
+        <!-- ============ ROW A ============ -->
+        <text x="8" y="20" font-family="var(--font-mono)" font-size="11" letter-spacing="1.4" fill="var(--ink3)">A · 现有视频世界模型 — 状态活在视觉历史里</text>
+        <line x1="8" y1="28" x2="952" y2="28" stroke="var(--rule)" stroke-width="1"/>
+
+        <g id="a1">
+          <rect x="16" y="72" width="150" height="56" rx="8" fill="var(--surf2)" stroke="var(--rule2)"/>
+          <text x="91" y="96" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">动作 A</text>
+          <text x="91" y="114" text-anchor="middle" font-size="11" fill="var(--ink3)">刺杀城主</text>
+        </g>
+        <path d="M170 100 L206 100" stroke="var(--rule2)" stroke-width="1.6" marker-end="url(#ah)" fill="none"/>
+
+        <g id="a2">
+          <rect x="212" y="46" width="292" height="108" rx="10" fill="var(--vd-soft)" stroke="var(--vd)" stroke-width="1.4"/>
+          <text x="228" y="68" font-size="12.5" font-weight="700" fill="var(--vd-ink)">Video Model</text>
+          <text x="492" y="68" text-anchor="end" font-size="10" font-family="var(--font-mono)" fill="var(--vd-ink)" opacity=".8">全部机制隐含在权重与上下文里</text>
+          <g font-size="10.5" fill="var(--ink3)" font-family="var(--font-mono)">
+            <rect x="228" y="80" width="120" height="26" rx="5" fill="none" stroke="var(--rule2)" stroke-dasharray="3 3"/>
+            <text x="288" y="97" text-anchor="middle">世界规则？</text>
+            <rect x="360" y="80" width="128" height="26" rx="5" fill="none" stroke="var(--rule2)" stroke-dasharray="3 3"/>
+            <text x="424" y="97" text-anchor="middle">实体关系？</text>
+            <rect x="228" y="114" width="120" height="26" rx="5" fill="none" stroke="var(--rule2)" stroke-dasharray="3 3"/>
+            <text x="288" y="131" text-anchor="middle">离屏状态？</text>
+            <rect x="360" y="114" width="128" height="26" rx="5" fill="none" stroke="var(--rule2)" stroke-dasharray="3 3"/>
+            <text x="424" y="131" text-anchor="middle">长程后果？</text>
+          </g>
+        </g>
+        <path d="M508 100 L546 100" stroke="var(--rule2)" stroke-width="1.6" marker-end="url(#ah)" fill="none"/>
+
+        <g id="a3">
+          <rect x="552" y="72" width="126" height="56" rx="8" fill="var(--vd-soft)" stroke="var(--vd)"/>
+          <text x="615" y="96" text-anchor="middle" font-size="13" font-weight="600" fill="var(--vd-ink)">观测 O</text>
+          <text x="615" y="114" text-anchor="middle" font-size="10.5" fill="var(--ink3)">下一段画面</text>
+        </g>
+
+        <!-- feedback: visual history -->
+        <path id="a-fb" d="M615 132 L615 176 L358 176 L358 158" stroke="var(--rule2)" stroke-width="1.4" fill="none" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+        <text x="486" y="192" text-anchor="middle" font-size="10.5" font-family="var(--font-mono)" fill="var(--ink3)">视觉历史 / 隐藏上下文 = 唯一的记忆载体</text>
+
+        <!-- storage badge A -->
+        <g id="aStore" opacity="0">
+          <rect x="212" y="46" width="292" height="108" rx="10" fill="none" stroke="var(--bad)" stroke-width="2" stroke-dasharray="6 4"/>
+          <rect x="360" y="34" width="146" height="20" rx="10" fill="var(--bad)"/>
+          <text x="433" y="48" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff" font-family="var(--font-mono)">后果必须存在这里</text>
+        </g>
+        <text id="aVerdict" x="700" y="100" font-size="12" fill="var(--ink3)"></text>
+        <text id="aVerdict2" x="700" y="120" font-size="12" fill="var(--ink3)"></text>
+
+        <line x1="8" y1="228" x2="952" y2="228" stroke="var(--rule)" stroke-width="1"/>
+
+        <!-- ============ ROW B ============ -->
+        <text x="8" y="252" font-family="var(--font-mono)" font-size="11" letter-spacing="1.4" fill="var(--ink3)">B · Code World Model — 状态活在可执行代码里</text>
+
+        <!-- line 1 -->
+        <g id="b1">
+          <rect x="16" y="282" width="84" height="52" rx="8" fill="var(--surf2)" stroke="var(--rule2)"/>
+          <text x="58" y="305" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">交互</text>
+          <text x="58" y="322" text-anchor="middle" font-size="10" fill="var(--ink3)">intent</text>
+        </g>
+        <path d="M104 308 L134 308" stroke="var(--rule2)" stroke-width="1.6" marker-end="url(#ah)" fill="none"/>
+        <g id="b2">
+          <rect x="140" y="276" width="126" height="64" rx="9" fill="var(--ag-soft)" stroke="var(--ag)" stroke-width="1.4"/>
+          <text x="203" y="300" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ag-ink)">Coding Agent</text>
+          <text x="203" y="318" text-anchor="middle" font-size="10" fill="var(--ink3)">稀疏 · 复杂 · 改机制</text>
+        </g>
+        <path d="M270 300 L304 300" stroke="var(--rule2)" stroke-width="1.6" marker-end="url(#ah)" fill="none"/>
+        <text x="287" y="292" text-anchor="middle" font-size="9.5" font-family="var(--font-mono)" fill="var(--ink3)">write / call</text>
+        <g id="b3">
+          <rect x="310" y="276" width="92" height="64" rx="9" fill="var(--cd-soft)" stroke="var(--cd)" stroke-width="1.4"/>
+          <text x="356" y="300" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--cd-ink)">Code</text>
+          <text x="356" y="318" text-anchor="middle" font-size="10" fill="var(--ink3)">稠密 · 确定性</text>
+        </g>
+        <path d="M406 308 L438 308" stroke="var(--rule2)" stroke-width="1.6" marker-end="url(#ah)" fill="none"/>
+        <text x="422" y="300" text-anchor="middle" font-size="9.5" font-family="var(--font-mono)" fill="var(--ink3)">update</text>
+        <g id="b4">
+          <rect x="444" y="276" width="148" height="64" rx="9" fill="var(--cd-soft)" stroke="var(--cd)" stroke-width="1.4"/>
+          <text x="518" y="299" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--cd-ink)">World State S<tspan class="sup" font-size="8" dy="-5">exe</tspan></text>
+          <text x="518" y="320" text-anchor="middle" font-size="10" fill="var(--ink3)">实体 · 规则 · 关系 · 事件史</text>
+        </g>
+        <!-- state feedback arc back to agent -->
+        <path d="M518 274 C 518 246, 203 246, 203 272" stroke="var(--cd)" stroke-width="1.3" fill="none" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+        <text x="430" y="243" text-anchor="middle" font-size="9.5" font-family="var(--font-mono)" fill="var(--cd-ink)">state feedback</text>
+
+        <!-- storage badge B -->
+        <g id="bStore" opacity="0">
+          <rect x="444" y="276" width="148" height="64" rx="9" fill="none" stroke="var(--ok)" stroke-width="2" stroke-dasharray="6 4"/>
+          <text x="612" y="300" font-size="11.5" font-weight="700" fill="var(--ok)">后果持久存在这里</text>
+          <text x="612" y="318" font-size="10" fill="var(--ink3)">可读 · 可查 · 可测试 · 可改</text>
+        </g>
+
+        <!-- line 2 -->
+        <path d="M518 344 L518 364 L432 364 L432 372" stroke="var(--px)" stroke-width="1.5" fill="none" marker-end="url(#ahx)"/>
+        <text x="528" y="360" font-size="9.5" font-family="var(--font-mono)" fill="var(--px-ink)">condition</text>
+        <g id="b5">
+          <rect x="356" y="378" width="152" height="56" rx="9" fill="var(--px-soft)" stroke="var(--px)" stroke-width="1.4"/>
+          <text x="432" y="401" text-anchor="middle" font-size="12" font-weight="700" fill="var(--px-ink)">proxy compiler</text>
+          <text x="432" y="419" text-anchor="middle" font-size="10" fill="var(--ink3)">确定性 · 轻量光栅化</text>
+        </g>
+        <path d="M512 396 L544 396" stroke="var(--px)" stroke-width="1.5" marker-end="url(#ahx)" fill="none"/>
+        <path d="M512 416 L544 416" stroke="var(--tx)" stroke-width="1.5" marker-end="url(#ahx)" fill="none"/>
+        <g id="b6">
+          <rect x="550" y="376" width="132" height="26" rx="6" fill="var(--px-soft)" stroke="var(--px)"/>
+          <text x="616" y="393" text-anchor="middle" font-size="11" font-weight="600" fill="var(--px-ink)">proxy video</text>
+          <rect x="550" y="410" width="132" height="26" rx="6" fill="var(--tx-soft)" stroke="var(--tx)"/>
+          <text x="616" y="427" text-anchor="middle" font-size="11" font-weight="600" fill="var(--tx-ink)">structured text</text>
+        </g>
+        <path d="M686 396 L716 400" stroke="var(--rule2)" stroke-width="1.5" marker-end="url(#ah)" fill="none"/>
+        <path d="M686 420 L716 412" stroke="var(--rule2)" stroke-width="1.5" marker-end="url(#ah)" fill="none"/>
+        <g id="b7">
+          <rect x="722" y="378" width="104" height="56" rx="9" fill="var(--vd-soft)" stroke="var(--vd)" stroke-width="1.4"/>
+          <text x="774" y="401" text-anchor="middle" font-size="12" font-weight="700" fill="var(--vd-ink)">Video Model</text>
+          <text x="774" y="419" text-anchor="middle" font-size="10" fill="var(--ink3)">只管「长什么样」</text>
+        </g>
+        <path d="M830 406 L858 406" stroke="var(--rule2)" stroke-width="1.6" marker-end="url(#ah)" fill="none"/>
+        <g id="b8">
+          <rect x="864" y="378" width="88" height="56" rx="9" fill="var(--vd-soft)" stroke="var(--vd)"/>
+          <text x="908" y="401" text-anchor="middle" font-size="12" font-weight="700" fill="var(--vd-ink)">观测 O</text>
+          <text x="908" y="419" text-anchor="middle" font-size="10" fill="var(--ink3)">S<tspan font-size="8" dy="-4">vis</tspan></text>
+        </g>
+        <path d="M908 440 L908 458 L58 458 L58 340" stroke="var(--rule2)" stroke-width="1.3" fill="none" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+        <text x="470" y="454" text-anchor="middle" font-size="9.5" font-family="var(--font-mono)" fill="var(--ink3)">feedback</text>
+
+        <!-- flow packets -->
+        <g id="f1packets">
+          <circle r="3.6" fill="var(--vd-ink)"><animateMotion dur="3.2s" repeatCount="indefinite" path="M170 100 L206 100 M508 100 L546 100"/></circle>
+          <circle r="3.6" fill="var(--cd-ink)"><animateMotion dur="2.6s" repeatCount="indefinite" path="M104 308 L134 308 L270 300 L304 300 L406 308 L438 308"/></circle>
+          <circle r="3.6" fill="var(--px-ink)"><animateMotion dur="3.0s" repeatCount="indefinite" path="M596 308 L636 308 L636 356 L432 356 L432 372 L432 434 L512 396 L544 396 L686 396 L716 400 L830 406 L858 406"/></circle>
+        </g>
+      </svg>
+      </div>
+
+      <div class="g2" style="margin-top:16px">
+        <div class="card bad" id="f1cardA">
+          <span class="lbl">A · 视频世界模型</span>
+          <p id="f1txtA"></p>
+        </div>
+        <div class="card ok" id="f1cardB">
+          <span class="lbl">B · Code World Model</span>
+          <p id="f1txtB"></p>
+        </div>
+      </div>
+    </div>
+    <figcaption class="figcap">
+      结构对应论文 Fig. 2。两行的差别不在「谁更强」，而在<b>后果被存在哪种介质里</b>：A 行只有像素和隐藏上下文，B 行有一份可执行、可读、可改的世界状态。论文的原话是，coding agent 「直接参与世界的可执行演化」，而不只是给视频模型下高层指导。
+    </figcaption>
+    <div class="legend">
+      <span><i style="background:var(--ag)"></i>coding agent</span>
+      <span><i style="background:var(--cd)"></i>code / 可执行状态 S<sup>exe</sup></span>
+      <span><i style="background:var(--px)"></i>proxy 几何条件通道</span>
+      <span><i style="background:var(--tx)"></i>结构化文本通道</span>
+      <span><i style="background:var(--vd)"></i>video model / 视觉观测 S<sup>vis</sup></span>
+    </div>
+  </figure>
+
+  <div class="col">
+    <div class="note key">
+      <span class="lbl">这篇论文真正的主张</span>
+      <p>不是「视频模型不够好」，而是<strong>让视频模型同时承担世界演化和视觉实现，是一次功能上的错配</strong>。世界演化需要的是知识、关系推理、长程规划和后果传播；视觉实现需要的是外观、运动和交互先验。这两组能力已经分别在<strong>文本/代码</strong>和<strong>视频</strong>两种数据上被大规模训练出来了，论文的做法就是让它们各自回到自己擅长的那一半。</p>
+    </div>
+  </div>
+</section>
+<section id="s2">
+  <div class="col">
+    <p class="eyebrow">02 · 问题设定</p>
+    <h2>视频只记录结果，不记录机制<a class="anchor" href="#s2">§</a></h2>
+    <p class="lead">这是全文的地基，值得逐句拆：<strong>「每一帧都是执行固定的游戏代码渲染出来的，但产生这一帧的可执行逻辑在渲染之后就被丢弃了，只能通过它稀疏的视觉后果被间接观察到。」</strong></p>
+    <p>换句话说，游戏录像是一条<em>有损信道</em>：上游有一份完整的、结构化的、因果闭合的世界状态和一套规则，下游只留下一串 RGB 像素。视频世界模型的训练任务，本质上是<strong>从信道下游反演上游</strong>。论文指出这件事有三重结构性障碍，而它们都不是「多喂数据」能解决的：</p>
+    <ol>
+      <li><strong>后果稀疏。</strong>规则只在被触发时才在画面上留下痕迹，绝大多数时刻的规则是不可见的。</li>
+      <li><strong>离屏无记录。</strong>大量状态变化发生在画面之外——论文的原话是「off-screen character states have no continuous visual record」。这部分连稀疏证据都没有。</li>
+      <li><strong>时间尺度不匹配。</strong>当前视频模型的训练上下文窗口通常<strong>不到一分钟</strong>，而许多需要推理的因果过程在世界时间里要展开<strong>数天甚至数年</strong>。</li>
+    </ol>
+    <p>论文由此下了一个相当强的判断：把规模继续做大，得到的是<strong>更多被观察到的结果，而不是关于机制的直接证据</strong>（“more observed outcomes but no direct evidence of the underlying mechanisms”）。学习过程因此「高度低效，并且最终是次优的」。</p>
+  </div>
+
+  <figure class="fig wide" id="fig2">
+    <div class="fh">
+      <span class="n">FIG 2</span>
+      <span class="t">渲染即丢弃 · 以及两个数量级差出去的时间尺度</span>
+      <span class="hint">拖动下方滑块 →</span>
+    </div>
+    <div class="figbody">
+      <div class="svgscroll">
+      <svg id="f2svg" viewBox="0 0 960 250" role="img" aria-label="游戏渲染管线中信息被丢弃的示意">
+        <text x="8" y="18" font-family="var(--font-mono)" font-size="11" letter-spacing="1.2" fill="var(--ink3)">一帧游戏画面的来历（左 → 右），以及训练时还剩下什么</text>
+
+        <g id="f2chain">
+          <rect x="16" y="46" width="150" height="86" rx="9" fill="var(--cd-soft)" stroke="var(--cd)" stroke-width="1.3"/>
+          <text x="91" y="68" text-anchor="middle" font-size="12" font-weight="700" fill="var(--cd-ink)">world state</text>
+          <text x="91" y="87" text-anchor="middle" font-size="10" fill="var(--ink3)">实体属性 · 关系</text>
+          <text x="91" y="103" text-anchor="middle" font-size="10" fill="var(--ink3)">冷却 · 日程 · 事件史</text>
+          <text x="91" y="121" text-anchor="middle" font-size="10" fill="var(--ink3)">数千个变量</text>
+
+          <path d="M170 89 L206 89" stroke="var(--rule2)" stroke-width="1.6" marker-end="url(#ah)" fill="none"/>
+
+          <rect x="212" y="46" width="150" height="86" rx="9" fill="var(--cd-soft)" stroke="var(--cd)" stroke-width="1.3"/>
+          <text x="287" y="68" text-anchor="middle" font-size="12" font-weight="700" fill="var(--cd-ink)">game code</text>
+          <text x="287" y="87" text-anchor="middle" font-size="10" fill="var(--ink3)">碰撞 · 攻击范围</text>
+          <text x="287" y="103" text-anchor="middle" font-size="10" fill="var(--ink3)">命中判定 · 连锁触发</text>
+          <text x="287" y="121" text-anchor="middle" font-size="10" fill="var(--ink3)">规则在这里被执行</text>
+
+          <path d="M366 89 L402 89" stroke="var(--rule2)" stroke-width="1.6" marker-end="url(#ah)" fill="none"/>
+
+          <rect x="408" y="46" width="132" height="86" rx="9" fill="var(--surf2)" stroke="var(--rule2)"/>
+          <text x="474" y="68" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink2)">renderer</text>
+          <text x="474" y="90" text-anchor="middle" font-size="10" fill="var(--ink3)">资产 · 材质 · 光照</text>
+          <text x="474" y="110" text-anchor="middle" font-size="10" fill="var(--ink3)">动画 · 后处理</text>
+
+          <path d="M544 89 L580 89" stroke="var(--rule2)" stroke-width="1.6" marker-end="url(#ah)" fill="none"/>
+
+          <rect x="586" y="46" width="118" height="86" rx="9" fill="var(--vd-soft)" stroke="var(--vd)" stroke-width="1.6"/>
+          <text x="645" y="72" text-anchor="middle" font-size="12" font-weight="700" fill="var(--vd-ink)">RGB 帧</text>
+          <text x="645" y="94" text-anchor="middle" font-size="10" fill="var(--ink3)">被保留的</text>
+          <text x="645" y="112" text-anchor="middle" font-size="10" fill="var(--ink3)">只有这一格</text>
+        </g>
+
+        <!-- discard overlay -->
+        <g id="f2discard" opacity="1">
+          <rect x="10" y="40" width="536" height="98" rx="12" fill="none" stroke="var(--bad)" stroke-width="1.6" stroke-dasharray="7 5"/>
+          <rect x="176" y="30" width="200" height="20" rx="10" fill="var(--bad)"/>
+          <text x="276" y="44" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff" font-family="var(--font-mono)">渲染完成后全部丢弃</text>
+        </g>
+
+        <!-- inverse arrow -->
+        <path d="M645 142 C 645 190, 91 190, 91 148" stroke="var(--vd)" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#ah)"/>
+        <text x="368" y="206" text-anchor="middle" font-size="11.5" fill="var(--vd-ink)" font-weight="600">视频世界模型的学习任务：只拿最右一格，反推左边全部</text>
+        <text x="368" y="226" text-anchor="middle" font-size="10.5" font-family="var(--font-mono)" fill="var(--ink3)">论文：“highly inefficient and ultimately suboptimal”</text>
+
+        <!-- right note -->
+        <rect x="726" y="46" width="226" height="86" rx="9" fill="var(--surf2)" stroke="var(--rule)"/>
+        <text x="740" y="68" font-size="11" font-weight="700" fill="var(--ink2)">而 CWM 的做法</text>
+        <text x="740" y="88" font-size="10.5" fill="var(--ink3)">不去反推被丢掉的那部分，</text>
+        <text x="740" y="106" font-size="10.5" fill="var(--ink3)">而是把它<tspan fill="var(--cd-ink)" font-weight="600">重新放回运行时</tspan>，</text>
+        <text x="740" y="124" font-size="10.5" fill="var(--ink3)">由 coding agent 持续维护。</text>
+      </svg>
+      </div>
+    </div>
+    <div class="ctl bot">
+      <div class="ctlg"><span class="lbl">因果过程的时间跨度</span>
+        <input type="range" id="f2r" min="0" max="6" step="1" value="1" style="width:220px">
+        <span class="readout" id="f2ro">5.17 s</span>
+      </div>
+      <div class="ctlg"><span class="lbl" id="f2verdict" style="color:var(--ok-ink)">在上下文内</span></div>
+    </div>
+    <div class="figbody" style="padding-top:14px">
+      <div class="svgscroll">
+      <svg id="f3svg" viewBox="0 0 960 132" role="img" aria-label="时间尺度对数轴">
+        <line x1="40" y1="86" x2="920" y2="86" stroke="var(--axis)" stroke-width="1.4"/>
+        <g id="f2ticks"></g>
+        <rect id="f2ctxband" x="40" y="72" width="0" height="28" fill="var(--ok-soft)" stroke="var(--ok)" stroke-dasharray="4 3"/>
+        <text id="f2ctxlbl" x="46" y="66" font-size="10.5" font-family="var(--font-mono)" fill="var(--ok-ink)">视频模型的训练上下文窗口 &lt; 60 s</text>
+        <g id="f2marker">
+          <line x1="0" y1="60" x2="0" y2="112" stroke="var(--vd)" stroke-width="2"/>
+          <circle cx="0" cy="86" r="5.5" fill="var(--vd)" stroke="var(--bg)" stroke-width="2"/>
+          <text x="0" y="126" text-anchor="middle" font-size="10.5" font-family="var(--font-mono)" fill="var(--vd-ink)" id="f2mlbl"></text>
+        </g>
+      </svg>
+      </div>
+      <p class="sml f-ink3" style="margin:10px 0 0">对数轴。绿色区间是论文说的「当前视频模型的训练上下文通常短于一分钟」；把滑块推到右边，就是论文说的「需要推理的因果过程在世界时间里展开数天甚至数年」。中间差了<strong class="f-ink">六到八个数量级</strong>，这不是一个可以靠拉长上下文补上的差距。</p>
+    </div>
+    <figcaption class="figcap">
+      左图对应论文 §1 与 §3.1 的论证。注意它成立的前提很朴素：<b>训练数据是渲染产物</b>。只要监督信号是像素，产生像素的那套逻辑就永远只以「后果」的形式出现。右图的时间轴是按论文给出的两个界（生成窗口 124 帧 / 24 FPS = 5.17 s；训练上下文 &lt; 1 min）画的，更长的刻度为示意。
+    </figcaption>
+  </figure>
+
+  <div class="col">
+    <div class="note quote">
+      「Videos record the observable outcomes of world dynamics, whereas the world knowledge, commonsense rules, inter-entity relations, long-horizon plans, and mechanisms of consequence propagation that produce these outcomes are not directly observable.」
+      <span class="src">§1 Introduction</span>
+    </div>
+  </div>
+</section>
+<section id="s3">
+  <div class="col">
+    <p class="eyebrow">03 · 分工</p>
+    <h2>稀疏而复杂的推理，和稠密而重复的执行<a class="anchor" href="#s3">§</a></h2>
+    <p class="lead">论文把「运行一个复杂世界」拆成两类完全不同的负载，这个拆法是整个框架的支点。</p>
+    <div class="g2">
+      <div class="card ag">
+        <span class="lbl">① 稀疏但语义复杂的推理</span>
+        <p>解释新事件、把它接到世界知识／人物关系／社会结构上、判断哪些实体和机制受影响、在长时段上规划后果。</p>
+        <p class="sml f-ink3">频率低，但每一次都要求很强的推理。→ <strong class="c-ag">coding agent</strong></p>
+      </div>
+      <div class="card cd2">
+        <span class="lbl">② 稠密而重复的执行</span>
+        <p>维护位置、属性、日程、冷却、碰撞和数值规则，把高层决策翻译成具体的状态更新。</p>
+        <p class="sml f-ink3">频率必须显著高于前者，但每一步都简单、确定、可复用。→ <strong class="c-cd">code</strong></p>
+      </div>
+    </div>
+    <p style="margin-top:18px">论文对第二类给了一个很实的理由：<strong>语言模型可以为每一次低层更新都被调用一次，但这既不经济也不可靠</strong>——「Invoking a language model for every low-level interaction is feasible but computationally inefficient; moreover, critical outcomes often need to be rule-consistent and reproducible」。攻击是否命中，应当由当前世界状态（距离、攻击范围）决定；没有稳定规则，玩家就无法对自己的行为形成可靠预期。</p>
+    <p>于是有了这句定义性的话：<strong>代码既不是被开发者冻结的游戏逻辑，也不是独立于 agent 的控制器，而是 coding agent 持续维护的、可执行且可修改的延伸</strong>（“Code is therefore neither permanently frozen game logic nor a controller independent of the agent; it is the coding agent's continuously maintained, executable, and modifiable extension.”）。</p>
+  </div>
+
+  <figure class="fig wide" id="fig3">
+    <div class="fh">
+      <span class="n">FIG 3</span>
+      <span class="t">三个互相解耦的时钟</span>
+      <span class="hint">拖动实体数与 tick 频率 →</span>
+    </div>
+    <div class="ctl">
+      <div class="ctlg"><span class="lbl">世界里的实体数</span>
+        <input type="range" id="f3n" min="1" max="4" step="1" value="2" style="width:150px">
+        <span class="readout" id="f3nro">120</span>
+      </div>
+      <div class="ctlg"><span class="lbl">code tick（示意）</span>
+        <input type="range" id="f3hz" min="10" max="240" step="10" value="60" style="width:150px">
+        <span class="readout" id="f3hzro">60 Hz</span>
+      </div>
+      <div class="ctlg"><span class="lbl">agent 介入</span>
+        <input type="range" id="f3ag" min="0" max="5" step="1" value="2" style="width:110px">
+        <span class="readout" id="f3agro">2 次</span>
+      </div>
+    </div>
+    <div class="figbody">
+      <div class="svgscroll">
+      <svg id="f3clocks" viewBox="0 0 960 250" role="img" aria-label="agent 调用、code tick 与视频帧三条时间轴的密度对照"></svg>
+      </div>
+      <div class="g3" style="margin-top:14px">
+        <div class="card ag"><span class="lbl">coding agent 调用</span><p class="mono" style="font-size:22px" id="f3sAg">2</p><p class="sml f-ink3">这 5.17 s 内。只在目标改变、出现异常、或机制需要修订时介入。</p></div>
+        <div class="card cd2"><span class="lbl">code 状态更新</span><p class="mono" style="font-size:22px" id="f3sCd">37,200</p><p class="sml f-ink3">= 实体数 × tick 频率 × 时长。全部不需要模型调用。</p></div>
+        <div class="card vd"><span class="lbl">视频帧</span><p class="mono" style="font-size:22px">124</p><p class="sml f-ink3">124 帧 @ 24 FPS。生成帧率与前两者都无关。</p></div>
+      </div>
+      <div class="note crit" style="margin:16px 0 0">
+        <span class="lbl">如果没有这层解耦</span>
+        <p class="sml">把 code 那一格换成「每次更新都调一次语言模型」，这 5.17 秒就需要 <strong class="c-bad mono" id="f3blow">37,200</strong> 次模型调用。这正是论文拒绝「让 agent 做整个世界的逐步执行者」的原因：<em>agent 不应该成为世界的执行器，只应该是它的作者和维护者。</em></p>
+      </div>
+    </div>
+    <figcaption class="figcap">
+      三条轴的<b>密度关系</b>来自论文（agent 稀疏介入、code 高频执行、视频帧率独立于两者，且世界状态「可以以事件驱动的方式推进，或以高于视觉生成的频率推进」）；<b>具体数值为示意</b>——论文没有给出 tick 频率或实体规模的实测数字。
+    </figcaption>
+  </figure>
+
+  <div class="col">
+    <h3>agent–code 回路：一次介入的完整形状</h3>
+    <p>论文把这个持续回路写得很具体，四步一循环：</p>
+    <div class="g2" style="margin-bottom:16px">
+      <div class="card"><span class="lbl c-ag">① 情境改变</span><p class="sml">一次交互或世界事件先改变当前局面。</p></div>
+      <div class="card"><span class="lbl c-ag">② agent 读状态并决策</span><p class="sml">读取被维护的世界状态，选择<strong>调用已有代码</strong>，或者<strong>局部修改世界程序</strong>。</p></div>
+      <div class="card"><span class="lbl c-cd">③ code 执行</span><p class="sml">运行可复用机制，一次推进大量状态变量。绝大多数重复更新不需要任何额外的模型调用。</p></div>
+      <div class="card"><span class="lbl c-cd">④ 反馈回流</span><p class="sml">执行结果、<strong>测试</strong>、以及新的世界反馈回到 agent，成为它下一次决策的证据。</p></div>
+    </div>
+    <p>回到刺杀城主的例子：agent 决定这座城进入紧急状态之后，它可以<strong>改变派系目标</strong>、<strong>激活已有的行为规则</strong>，或者<strong>新增巡逻、继位、消息传播等机制</strong>。此后它只需要决定每个角色的高层行为，并在目标改变、出现异常、或机制需要修订时介入；其余时间由代码按既有规则高频更新位置、朝向和其他运行时状态。</p>
+    <div class="note warnb">
+      <span class="lbl">这里有一个容易被跳过的词：测试</span>
+      <p class="sml">论文在描述回流时明确写了 “execution results, <strong>tests</strong>, and new world feedback return to the coding agent as evidence”。也就是说，世界程序是可以被<strong>验证</strong>的——这是把状态放进代码相对于放进权重的一个额外收益：机制可检查、可测试、可回归。论文本身没有实现或评测这条测试回路，但它在论证里是被算进去的。</p>
+    </div>
+  </div>
+</section>
+<section id="s4">
+  <div class="col">
+    <p class="eyebrow">04 · 形式化</p>
+    <h2>把 S 拆成可执行态与视觉态<a class="anchor" href="#s4">§</a></h2>
+    <p class="lead">论文的形式化只有四个式子，但拆法本身就是主张。先看常规世界模型的写法：</p>
+  </div>
+
+  <figure class="fig" id="fig4">
+    <div class="fh"><span class="n">FIG 4</span><span class="t">四个式子，逐个符号点开</span><span class="hint">点击带底色的符号 →</span></div>
+    <div class="figbody">
+      <div class="eqwrap" style="margin:0">
+        <div class="eqrow">
+          <div class="eqn"><span class="sym">S</span><span class="sub">t+1</span> ~ <span class="sym">p</span>(<span class="sym">S</span><span class="sub">t+1</span> | <span class="sym">S</span><span class="sub">t</span>, <span class="sym">A</span><span class="sub">t</span>),&nbsp;&nbsp;&nbsp; <span class="sym">O</span><span class="sub">t+1</span> ~ <span class="sym">p</span>(<span class="sym">O</span><span class="sub">t+1</span> | <span class="sym">S</span><span class="sub">t+1</span>)</div>
+          <div class="eqno">(1)</div>
+        </div>
+        <div class="eqcap">常规写法：状态与动作决定下一个状态，下一个状态产生下一个观测。CWM 不改这个骨架，只改 <span class="sym">S</span> 的内部结构。</div>
+      </div>
+
+      <div class="eqwrap">
+        <div class="eqrow">
+          <div class="eqn"><span class="sym">S</span><span class="sub">t</span> = ( <span class="hl hl-cd" data-sym="exe"><span class="sym">S</span><span class="sup">exe</span><span class="sub">t</span></span> , <span class="hl hl-vd" data-sym="vis"><span class="sym">S</span><span class="sup">vis</span><span class="sub">t</span></span> )</div>
+          <div class="eqno">(2)</div>
+        </div>
+        <div class="eqrow">
+          <div class="eqn"><span class="hl hl-cd" data-sym="exe"><span class="sym">S</span><span class="sup">exe</span><span class="sub">t+1</span></span> <b style="font-family:var(--font-mono)">=</b> <span class="hl hl-ag" data-sym="tac"><span class="sym">T</span><span class="sub">AC</span></span>( <span class="sym">S</span><span class="sup">exe</span><span class="sub">t</span> , <span class="sym">A</span><span class="sub">t</span> )</div>
+          <div class="eqno">(3)</div>
+        </div>
+        <div class="eqrow">
+          <div class="eqn"><span class="hl hl-vd" data-sym="vis"><span class="sym">S</span><span class="sup">vis</span><span class="sub">t+1</span></span> ~ <span class="hl hl-vd" data-sym="g"><span class="sym">G</span><span class="sub">θ</span></span>( <span class="sym">S</span><span class="sup">vis</span><span class="sub">t</span> , <span class="hl hl-px" data-sym="cond"><span class="sym">S</span><span class="sup">exe</span><span class="sub">t+1</span></span> )</div>
+          <div class="eqno">(4)</div>
+        </div>
+        <div class="eqcap" id="f4cap">点击上面任意一个带底色的符号，这里会展开它在论文里的确切含义。</div>
+      </div>
+
+      <div class="note key" style="margin:18px 0 0">
+        <span class="lbl">一个只有细读才会注意到的排版细节</span>
+        <p class="sml">式 (3) 用的是<strong>等号</strong>，式 (1) 和 (4) 用的是<strong>采样号 ~</strong>。可执行状态的转移被写成一个<em>函数</em>——它是确定性的、可复现的、可执行的；视觉状态的转移被写成一次<em>采样</em>——它是生成式的。论文关于「规则一致、可复现」的那段论证，在符号上就已经落实了。</p>
+      </div>
+    </div>
+    <figcaption class="figcap">对应论文 §3.1 的式 (1)–(4)。<b>T<sub>AC</sub></b> 是「joint agent-code transition」——注意它是一个合成算子：code 反复执行高频确定性更新，agent 按目标与反馈调用、组合或修订这些机制，二者<b>共同</b>产出下一个可执行状态。</figcaption>
+  </figure>
+
+  <div class="col">
+    <div class="note crit">
+      <span class="lbl">最容易被误读的一句</span>
+      <p>式 (4) 把 <span class="mono">S<sup>exe</sup><sub>t+1</sub></span> 写成 <span class="mono">G<sub>θ</sub></span> 的输入，<strong>只表达一种抽象的条件依赖，不意味着把原始代码或完整可执行状态直接喂进网络</strong>（论文原话：“it does not mean that raw code or the complete executable state is passed directly to the network”）。怎么从 <span class="mono">S<sup>exe</sup></span> 里<strong>选出</strong>相关信息、并把它<strong>表示成</strong>视频模型能用的条件，正是 §3.2 要解决的问题，也是 proxy 存在的全部理由。</p>
+    </div>
+
+    <h3>视觉一致性被存去了哪里</h3>
+    <p>还有一句很关键、但混在段落里容易滑过去：<strong>「必须持久的视觉信息被保留在世界状态中，由 coding agent 管理，并在相关角色、地点或事件再次出现时重新提供。」</strong></p>
+    <p>这句话把「长期身份一致性」从一个<em>模型记忆问题</em>改写成了一个<em>状态管理问题</em>。视频模型不需要记住十分钟前那个 NPC 长什么样——那份描述本来就写在 <span class="mono">S<sup>exe</sup></span> 的身份记录里，等他再出场时由 agent 重新塞进 prompt。这与用检索历史帧、持久视角表示、surfel 索引等做法来「补记忆」的那条线（论文引的 [32,38,39,40,41]）是两种完全不同的解法。</p>
+  </div>
+</section>
+<section id="s5">
+  <div class="col">
+    <p class="eyebrow">05 · 接口问题</p>
+    <h2>状态 → 条件：为什么纯文本一个人扛不住<a class="anchor" href="#s5">§</a></h2>
+    <p class="lead">世界状态在代码里跑得好好的，视频模型该怎么<strong>知道</strong>它？这是全篇最有工程含量的一节。论文先认真地把最优雅的方案摆出来，再说明自己为什么放弃了它。</p>
+    <h3>方案一：把状态序列化成结构化文本</h3>
+    <p>做法完全可行且自洽：agent 为每个<strong>持久身份</strong>写下外观、角色、目标的语义描述，存进由代码管理的<em>身份记录</em>；世界运行时，代码持续更新实体的位置、朝向、关系、行为和战斗状态；系统按<strong>身份、时间、事件</strong>自动组织这些持久描述与运行时变量，与 agent 当前的高层意图和原始文本 prompt 合并，交给视频模型。</p>
+    <p>论文自己的评价是：<strong>「这是最简单、最优雅、看起来也最可扩展的选择」</strong>——不引入新的条件模态，天然容纳新的物体、属性和规则。</p>
+    <div class="note crit">
+      <span class="lbl">然后是那句否定</span>
+      <p>「我们在大规模训练的近期视频世界模型 <a href="https://arxiv.org/abs/2607.07534" target="_blank" rel="noopener">[31]</a> 上的实验表明，<strong>文本条件即便配上专门的相机条件通路，仍然无法对相机轨迹和实体运动提供精确控制。</strong>」</p>
+      <p class="sml" style="margin-top:8px">论文紧接着做了一次很克制的界定：这<strong>不</strong>意味着语言无法表达精确状态——给足够长的描述，语言理论上可以指定每一帧的每一个像素。问题是三条现实约束：<strong>token 效率极低</strong>、<strong>撑不住实时交互的延迟要求</strong>、<strong>当前视频模型也无法可靠遵循这种复杂度的指令</strong>。</p>
+    </div>
+    <p class="sml f-ink3">注：[31] 是 <em>Infinite worlds with versatile interactions</em>（arXiv 2607.07534），即论文相关工作里描述的 LingBot-World 2.0——一个用 pilot / director agent 增强因果视频生成器、支持语义动作与 rollout 中途干预的系统。也就是说，这个否定性结论来自与本文思路<strong>最接近</strong>的一条基线。</p>
+  </div>
+
+  <figure class="fig wide" id="fig5">
+    <div class="fh"><span class="n">FIG 5</span><span class="t">三条「状态 → 条件」路线的取舍</span><span class="hint">切换路线 →</span></div>
+    <div class="ctl">
+      <div class="ctlg"><span class="lbl">路线</span>
+        <div class="seg" id="f5seg" role="group">
+          <button data-r="0" aria-pressed="true">① 结构化文本</button>
+          <button data-r="1" aria-pressed="false">② 显式 3D 世界</button>
+          <button data-r="2" aria-pressed="false">③ proxy（本文）</button>
+        </div>
+      </div>
+    </div>
+    <div class="figbody">
+      <div class="g2" style="align-items:start">
+        <div>
+          <div class="card" id="f5card">
+            <span class="lbl" id="f5title">结构化文本</span>
+            <p id="f5how"></p>
+            <p class="sml f-ink3" id="f5why"></p>
+          </div>
+        </div>
+        <div>
+          <div>
+          <svg id="f5bars" viewBox="0 0 440 212" role="img" aria-label="四个维度的强弱对照条" style="max-width:440px"></svg>
+          </div>
+        </div>
+      </div>
+      <div class="svgscroll" style="margin-top:6px">
+      <svg id="f5map" viewBox="0 0 960 252" role="img" aria-label="构造成本与时空约束强度的二维定位图"></svg>
+      </div>
+    </div>
+    <figcaption class="figcap">
+      条形的<b>相对高低来自论文的论证</b>（文本构造成本最低但空间控制最弱；显式 3D 空间控制强但构造成本高且过早锁死视觉上限；proxy 取中并保留白盒可控），<b>具体刻度为示意，不是实测分数</b>——论文没有给这三条路线的定量对比。
+    </figcaption>
+  </figure>
+
+  <div class="col">
+    <h3>方案二：让 agent 直接搭一个显式 3D 世界</h3>
+    <p>这条路（论文引 HunyuanWorld 1.0 <span class="mono">[75]</span>、WorldGen <span class="mono">[76]</span>）能给出更强的空间控制，但论文列了三条代价：</p>
+    <ul>
+      <li>需要<strong>生产级</strong>的几何、资产、动画、材质和渲染系统，成本高；</li>
+      <li><strong>过早锁死</strong>最终的视觉实现（“prematurely constrains the final visual realization”）；</li>
+      <li>更根本的是，这条路的<strong>上限由资产与模拟器的保真度和覆盖度决定</strong>——开放世界会不断引入未被现有管线预料的新角色、物体、行为和情境，每一个都要配上新的资产、动作和物理响应。</li>
+    </ul>
+    <p>而视频模型这条路的成本是另一种：<strong>每一帧新观测都要跑一次生成推理</strong>，边际计算和延迟都高于常规渲染。论文对此的态度很直白——为了视觉保真度和开放式生成的目标，认为这个质量收益值这个代价，并且预期视频推理会越来越便宜。</p>
+  </div>
+</section>
+<section id="s6">
+  <div class="col">
+    <p class="eyebrow">06 · 核心设计</p>
+    <h2>Proxy：把世界状态先摆进画面坐标，再交给视频模型<a class="anchor" href="#s6">§</a></h2>
+    <p class="lead">既然目标输出本身是视频，那就<strong>用同一种时空模态来表达控制</strong>。这样的条件可以直接在图像坐标里指定相机运动、实体位置、遮挡、相对关系和轨迹；视频模型读到的控制信息，其时空组织方式<strong>已经是它熟悉的那种</strong>。</p>
+    <p>论文对 proxy 的定义是：把影响当前观测的<strong>相机、实体位置、姿态、轨迹和空间关系</strong>组织成一个<em>粗糙的、可编程的世界表示</em>；再由一个<strong>确定性的渲染过程</strong>把它变成时空视觉条件，即 <strong class="c-px">proxy video</strong>。</p>
+    <div class="note key">
+      <span class="lbl">proxy 不是什么</span>
+      <p>它<strong>不</strong>试图尽可能完整地表示目标世界，只保留当前观测<strong>必须遵守</strong>的粗结构与交互状态；它<strong>不</strong>表达纹理、材质、精细光照等应当由视频模型生成的外观信息。论文写得很清楚：<em>「它的目标不是提供一段低质量的目标视频，而是用最简单可用的形式表达所需的状态与时空关系。」</em></p>
+    </div>
+  </div>
+
+  <figure class="fig wide" id="fig6">
+    <div class="fh">
+      <span class="n">FIG 6</span>
+      <span class="t">proxy 编译器沙盒 — 一个能跑的微型实现</span>
+      <span class="hint">拖小地图上的实体 / 相机 →</span>
+    </div>
+    <div class="ctl">
+      <div class="ctlg">
+        <button class="btn" id="pxPlay">▶ 播放 124 帧</button>
+      </div>
+      <div class="ctlg"><span class="lbl">帧</span>
+        <input type="range" id="pxT" min="0" max="123" step="1" value="0" style="width:230px">
+        <span class="readout" id="pxTro">000</span>
+      </div>
+      <div class="ctlg"><span class="lbl">通道</span>
+        <div class="seg" id="pxCh" role="group">
+          <button data-c="depth" aria-pressed="false">depth</button>
+          <button data-c="sem" aria-pressed="false">semantic ID</button>
+          <button data-c="comp" aria-pressed="true">合成</button>
+        </div>
+      </div>
+    </div>
+    <div class="figbody">
+      <div style="display:grid; grid-template-columns:minmax(0,1.55fr) minmax(0,1fr); gap:16px; align-items:start" class="pxgrid">
+        <div>
+          <div style="position:relative; border:1px solid var(--rule2); border-radius:8px; overflow:hidden; background:#000">
+            <canvas id="pxCanvas" class="pixel" width="336" height="192" style="width:100%; height:auto; display:block"></canvas>
+            <div style="position:absolute; left:8px; top:7px; font-family:var(--font-mono); font-size:10px; letter-spacing:.06em; color:#fff; background:rgba(0,0,0,.55); padding:2px 7px; border-radius:4px" id="pxBadge">336 × 192 · proxy</div>
+          </div>
+          <div class="legend" style="border:1px solid var(--rule); border-top:none; border-radius:0 0 8px 8px; margin-top:-1px" id="pxLegend"></div>
+          <div class="card px" style="margin-top:12px">
+            <span class="lbl">这张图里可以验证的三件事</span>
+            <p class="sml" style="margin-bottom:6px"><strong>① 遮挡由状态决定。</strong>把复杂物体拖到树前面，遮挡关系立刻改变——它来自<strong>共享 z-buffer</strong>，不来自任何生成模型。</p>
+            <p class="sml" style="margin-bottom:6px"><strong>② 相机与轨迹是逐帧的。</strong>按播放：主角沿 +x 行走、相机同时绕它弧摇 78°，两者<strong>都由代码算出来</strong>，不需要动作标签或相机位姿。</p>
+            <p class="sml"><strong>③ 带宽是可选的。</strong>勾「退化为 bbox」看复杂物体如何塌成一个粗体量；勾「只保留交互关键实体」看 agent 如何只 ground 它在意的那几个。</p>
+          </div>
+        </div>
+        <div>
+          <div style="border:1px solid var(--rule2); border-radius:8px; overflow:hidden; background:var(--surf2)">
+            <div style="padding:7px 11px; border-bottom:1px solid var(--rule); font-family:var(--font-mono); font-size:10.5px; color:var(--ink3)">俯视图 · 拖动实体或相机</div>
+            <canvas id="pxMap" width="360" height="270" style="width:100%; height:auto; display:block; cursor:grab; touch-action:none"></canvas>
+          </div>
+          <div class="ctl" style="border:1px solid var(--rule); border-top:none; border-radius:0 0 8px 8px; padding:9px 11px; background:var(--surf2)">
+            <label class="chk"><input type="checkbox" id="pxBbox"> 复杂物体退化为 bbox</label>
+            <label class="chk"><input type="checkbox" id="pxKey"> 只保留交互关键实体</label>
+            <label class="chk"><input type="checkbox" id="pxEdge" checked> 基元描边</label>
+          </div>
+          <div class="card px" style="margin-top:12px">
+            <span class="lbl">条件带宽核算</span>
+            <p class="sml mono" id="pxMath"></p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <figcaption class="figcap">
+      这是我按论文描述<b>自己写的一个最小复现</b>（不是官方代码，官方仓库目前只有公告）：旋成体近似的胶囊人、低模锥体树、体量车、粗体量建筑、无限地平面，全部经一个<b>共享 z-buffer</b> 光栅化，输出 <b>fixed-log 深度</b>与<b>类别语义 ID</b> 两个通道，分辨率取 336×192。它的作用是让「粗基元 + 确定性编译器 + 共享深度缓冲 = 逐帧时空约束」这句话变成可以用手拖的东西——遮挡关系、相机运动、实体轨迹全部由状态决定，没有任何一处来自生成模型。
+    </figcaption>
+  </figure>
+
+  <div class="col">
+    <h3>白盒是硬性要求，不是附赠品</h3>
+    <p>论文在这里下了一条相当克制、但含义很重的限制：<strong>这个视觉条件里的信息应当完全来自 coding agent 与代码共同构造并执行的世界状态，不应由另一个信息源或生成模型（例如一个学出来的 3D 生成器）来补充</strong>。理由只有一句：那会引入一段 <em>agent 无法直接检查或控制的映射</em>。</p>
+    <p>于是 proxy 的性质被钉死为四个词：<strong>可构造、可检查、可寻址、可局部编辑</strong>（constructible, inspectable, addressable, locally editable），而不是「一个学出来的 3D 生成器给出的不透明视觉提案」。从状态到条件的整条路径对 agent 保持白盒——<em>每一个控制信号都能追溯回世界状态</em>。</p>
+    <div class="g2">
+      <div class="card px">
+        <span class="lbl">proxy 通道说什么</span>
+        <p class="sml">相机运动、实体位置与朝向、近似尺度、场景布局、轨迹、遮挡、交互关键状态。<strong>逐帧、在图像坐标里、可调</strong>。</p>
+      </div>
+      <div class="card tx">
+        <span class="lbl">文本通道说什么</span>
+        <p class="sml">角色与物体的<strong>外观与身份</strong>、动作语义，以及 proxy 未指定的动态细节。两者来自<strong>同一份世界状态</strong>，只是表示方式不同。</p>
+      </div>
+    </div>
+    <h3>构造成本被刻意压到很低</h3>
+    <p>agent 不需要建模：它<strong>程序化地调用并组合一组给定的、简单可复用的基元</strong>，每个基元只用几行代码就能表达，因此「几乎不增加 agent 的表示负担」。可寻址的参数指定实体位置、尺度、姿态、布局、相机和状态标记，再由一个简单的确定性编译器做轻量光栅化——不需要生产级资产、复杂材质、光照、精细动画或昂贵渲染。</p>
+    <div class="note warnb">
+      <span class="lbl">token 成本：这一节最好核对的一个数</span>
+      <p class="sml">proxy 在每个空间维度上取目标视频分辨率的 <strong>1/4</strong>（336×192 对 1344×768），因此像素数是 <strong>1/16</strong>，给 omni transformer 增加的视觉 token 也只有目标视频的 1/16。论文据此判断「额外推理负担可以忽略」。<span class="f-ink3">这个换算本身是对的；不过 1/16 是<em>相对于目标视频那一份 token</em>而言，不是相对于模型总输入——文本、系统指令与参考图分支不在这个比例里。</span></p>
+    </div>
+  </div>
+</section>
+<section id="s7">
+  <div class="col">
+    <p class="eyebrow">07 · 权衡</p>
+    <h2>Condition bandwidth：可构造性与约束强度<a class="anchor" href="#s7">§</a></h2>
+    <p class="lead">论文说，proxy 设计的<strong>核心选择就是它的条件带宽</strong>。这句话背后是一条并不显然的约束链——proxy 越丰富，grounding 越强，但要求 agent 在<strong>推理时</strong>构造和维护的基元与参数也越多。</p>
+    <p>论文给的例子极其具体：<strong>如果 proxy 在关节级别编码角色的铰接运动，那么 agent 在推理时也必须控制这个角色的关节轨迹</strong>；而当前的 coding agent「仍然难以可靠实现这种关节级运动控制」，这会反过来限制最终性能。反过来，信息太少的 proxy 构造轻松，但可能无法施加足够的时空约束。</p>
+    <p>所以论文把 proxy 设计形式化成一个权衡：<strong>在「可构造性」和「grounding 强度」之间，取当前观测必须遵守的<em>最小充分状态</em></strong>，把最终外观和精细动态留给视频模型。</p>
+  </div>
+
+  <figure class="fig wide" id="fig7">
+    <div class="fh"><span class="n">FIG 7</span><span class="t">条件带宽谱：论文停在哪一档，为什么</span><span class="hint">拖动滑块 →</span></div>
+    <div class="ctl">
+      <div class="ctlg"><span class="lbl">带宽档位</span>
+        <input type="range" id="f7r" min="0" max="5" step="1" value="2" style="width:260px">
+        <span class="readout" id="f7ro">粗基元</span>
+      </div>
+      <div class="ctlg"><button class="btn" id="f7reset">回到论文选择</button></div>
+    </div>
+    <div class="figbody">
+      <div class="svgscroll">
+      <svg id="f7svg" viewBox="-14 0 990 344" role="img" aria-label="条件带宽与 grounding 强度、可构造性的权衡曲线"></svg>
+      </div>
+      <div class="card px" style="margin-top:14px" id="f7card">
+        <span class="lbl" id="f7t">粗基元 + 深度 / 语义 ID（本文）</span>
+        <p class="sml" id="f7d"></p>
+      </div>
+    </div>
+    <figcaption class="figcap">
+      两条曲线的<b>方向与交叉关系</b>来自论文的论证（带宽↑ 则 grounding↑、可构造性↓；关节级已超出当前 coding agent 的可靠维护范围），<b>纵轴刻度为示意</b>。虚线是论文明确点名的能力边界：关节级铰接运动。
+    </figcaption>
+  </figure>
+
+  <div class="col">
+    <h3>一个漂亮的闭环：训练数据的表示上限，由推理时的可构造性倒推</h3>
+    <p>这条设计约束藏在 Fig. 3 的图注里，但它其实是全篇最见功力的一处：</p>
+    <div class="note quote">
+      「Note that, <strong>to ensure that the coding agent can easily reproduce the proxy at inference time</strong>, we exclude skeletal pose, detailed 3D models, and other representations that are difficult for coding agents to construct and maintain.」
+      <span class="src">Fig. 3 caption</span>
+    </div>
+    <p>也就是说，训练数据里<strong>刻意不放</strong>骨骼姿态和精细 3D 模型——不是因为拿不到（游戏运行时当然有），而是因为<strong>推理时 agent 造不出来</strong>。如果训练时用了 agent 在推理时无法复现的通道，模型学到的将是一个<em>推理阶段永远无法满足的条件分布</em>。</p>
+
+    <figure class="fig" id="fig8" style="margin-top:22px">
+      <div class="fh"><span class="n">FIG 8</span><span class="t">可构造性闭环</span></div>
+      <div class="figbody" style="padding:22px 18px">
+        <div class="svgscroll">
+        <svg viewBox="0 0 720 200" role="img" aria-label="训练时的标注通道与推理时 agent 可构造性之间的闭环">
+          <rect x="30" y="46" width="230" height="72" rx="10" fill="var(--cd-soft)" stroke="var(--cd)" stroke-width="1.3"/>
+          <text x="145" y="72" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--cd-ink)">训练时：从运行时抽取的通道</text>
+          <text x="145" y="93" text-anchor="middle" font-size="10.5" fill="var(--ink3)">相机 · 位置朝向 · 近似尺度</text>
+          <text x="145" y="109" text-anchor="middle" font-size="10.5" fill="var(--ink3)">场景布局 · 交互关键状态</text>
+
+          <rect x="460" y="46" width="230" height="72" rx="10" fill="var(--ag-soft)" stroke="var(--ag)" stroke-width="1.3"/>
+          <text x="575" y="72" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ag-ink)">推理时：agent 能造出什么</text>
+          <text x="575" y="93" text-anchor="middle" font-size="10.5" fill="var(--ink3)">几行代码一个基元</text>
+          <text x="575" y="109" text-anchor="middle" font-size="10.5" fill="var(--ink3)">可寻址参数 · 可局部编辑</text>
+
+          <path d="M266 70 L452 70" stroke="var(--rule2)" stroke-width="1.6" marker-end="url(#ah)" fill="none"/>
+          <text x="359" y="61" text-anchor="middle" font-size="10.5" font-family="var(--font-mono)" fill="var(--ink3)">必须能被复现</text>
+          <path d="M452 96 L268 96" stroke="var(--bad)" stroke-width="1.6" marker-end="url(#ahb)" fill="none"/>
+          <text x="359" y="114" text-anchor="middle" font-size="10.5" font-family="var(--font-mono)" fill="var(--bad-ink)">反过来裁掉了通道集合</text>
+
+          <rect x="180" y="146" width="360" height="38" rx="8" fill="var(--bad-soft)" stroke="var(--bad)" stroke-dasharray="5 4"/>
+          <text x="360" y="170" text-anchor="middle" font-size="11.5" fill="var(--bad-ink)">被裁掉：骨骼姿态 · 精细 3D 模型 · 纹理材质</text>
+        </svg>
+        </div>
+      </div>
+      <figcaption class="figcap">因为抽取和编译都是<b>基于代码</b>的，agent 可以通过很小的局部程序改动来增删或修订保留的标注通道——这个闭环是可调的，不是一次性写死的。</figcaption>
+    </figure>
+
+    <h3>proxy 是视觉版的 prompt，不是全局固定的条件</h3>
+    <p>论文特意澄清了一个可能的误解：proxy <strong>不应被理解为一个全局固定的条件</strong>，它是 coding agent 用来控制视频模型的<em>视觉提示工具</em>，是文本 prompt 的视觉对应物。在一个完整的 Code World Model 里，是 <strong>agent 自己</strong>根据当前世界和生成任务决定：</p>
+    <ul>
+      <li>文本足够时，<strong>不用</strong> proxy；</li>
+      <li>观测必须紧跟位置、轨迹、空间关系或交互拓扑时，<strong>启用</strong>相关的 proxy；</li>
+      <li>进一步<strong>挑选交互关键的实体和区域</strong>，并调整所表示的状态类型、空间粒度、分辨率和条件帧率。</li>
+    </ul>
+    <div class="note crit">
+      <span class="lbl">但这一段是设计空间，不是本文的实现</span>
+      <p class="sml">论文自己划了界：<strong>「本文实例化并评测的是一个<em>固定的</em> proxy 设计；自主切换与带宽调节仍属于这个更大范式的设计空间。」</strong>读这一节时要把「agent 可以自主决定启用/关闭/调粒度」当成路线图，而不是已经跑通的能力。</p>
+    </div>
+    <div class="note">
+      <span class="lbl">还有一个反直觉的推论</span>
+      <p class="sml">论文指出，即使把语言模型和视频模型<strong>统一成一个全模态网络</strong>，这个「状态 → 条件」的问题也不会消失：由代码维护的、持续变化的外部世界状态，仍然必须被编码并供给视觉生成过程。<em>参数共享只是简化了组件间的通信，并没有取消表示问题。</em></p>
+    </div>
+  </div>
+</section>
+<section id="s8">
+  <div class="col">
+    <p class="eyebrow">08 · 数据（一）</p>
+    <h2>游戏对：从同一次执行里同步录出来<a class="anchor" href="#s8">§</a></h2>
+    <p class="lead">要训练视频模型「跟随 proxy」，就需要<strong>时空严格对齐</strong>的 proxy–目标视频对。游戏是最合适的来源，理由只有一句话：<strong>目标视频和它对应的运行时状态，可以从同一次执行里同步获得</strong>。</p>
+    <p>而且因为动作后果和相机运动<strong>已经被表示在 proxy video 里</strong>，这个接口既不需要单独的动作标签，也不需要显式的相机位姿标注——这一点在下一节处理真实视频时会变成决定性优势。</p>
+  </div>
+
+  <figure class="fig wide" id="fig9">
+    <div class="fh">
+      <span class="n">FIG 9</span>
+      <span class="t">两条配对数据管线</span>
+      <span class="hint">点步骤看细节 →</span>
+    </div>
+    <div class="ctl">
+      <div class="ctlg"><span class="lbl">来源</span>
+        <div class="seg" id="f9src" role="group">
+          <button data-s="game" aria-pressed="true">游戏对 (Fig. 3a)</button>
+          <button data-s="real" aria-pressed="false">真实对 (Fig. 3b · KITTI-360)</button>
+        </div>
+      </div>
+      <div class="ctlg"><span class="lbl">步骤</span>
+        <div class="seg" id="f9step" role="group">
+          <button data-i="0" aria-pressed="true">1</button>
+          <button data-i="1" aria-pressed="false">2</button>
+          <button data-i="2" aria-pressed="false">3</button>
+          <button data-i="3" aria-pressed="false">4</button>
+        </div>
+      </div>
+    </div>
+    <div class="figbody">
+      <div class="svgscroll">
+      <svg id="f9svg" viewBox="0 0 960 250" role="img" aria-label="配对数据构造管线示意"></svg>
+      </div>
+      <div class="card" id="f9card" style="margin-top:14px; min-height:104px">
+        <span class="lbl" id="f9t"></span>
+        <p class="sml" id="f9d"></p>
+      </div>
+    </div>
+    <figcaption class="figcap" id="f9cap"></figcaption>
+  </figure>
+
+  <div class="col">
+    <h3>三个值得单独拎出来的设计</h3>
+    <div class="g2">
+      <div class="card cd2">
+        <span class="lbl">① 可重编译</span>
+        <p class="sml">同一份运行时记录可以被<strong>重新编译成覆盖度与信息粒度不同的 proxy</strong>，而不需要重新采集目标视频。换句话说，proxy 的表示实验可以在<strong>零采集成本</strong>下迭代——这在视频数据集里是相当奢侈的性质。</p>
+      </div>
+      <div class="card px">
+        <span class="lbl">② 基元词表不必统一</span>
+        <p class="sml">论文发现当代视频模型<strong>能够学会「不同形状、粒度、视觉风格的粗基元」与目标视觉物体之间的对应</strong>。所以基元词表不需要在全部数据上固定成一套。</p>
+      </div>
+      <div class="card tx">
+        <span class="lbl">③ 像素级实例图把文本绑到区域上</span>
+        <p class="sml">运行时记录还提供精确的身份对应：proxy video 的<strong>每一帧都有一张像素级的 ground-truth instance map</strong>，标出每个像素属于哪个身份。它把结构化文本里每个身份的外观、属性、动作描述<strong>绑定到对应的 proxy 区域</strong>，得到更精确的条件。</p>
+      </div>
+      <div class="card">
+        <span class="lbl">退化路径：bounding box</span>
+        <p class="sml">对于用简单基元无法保持足够可区分性的复杂物体，proxy 可以<strong>只用一个包围盒</strong>传达位置与粗略范围，身份和属性交给结构化文本。这条退路让 agent 不必去重建复杂几何，同时仍然告诉视频模型「那个位置上有这么个东西」。</p>
+      </div>
+    </div>
+    <p style="margin-top:16px">论文还报告了一个关于 agent 自主性的观察：对于人、树、车辆、灌木、普通建筑这类常见类别，agent 能够<strong>自主地为每个身份分类并组合出对应的基元</strong>；对于结构复杂或不常见的物体，它先<strong>判断简单基元是否还能保持可区分性</strong>，不能就退回包围盒。这是全篇少数几处直接描述 agent 行为的实证观察之一。</p>
+  </div>
+</section>
+
+<section id="s9">
+  <div class="col">
+    <p class="eyebrow">09 · 数据（二）</p>
+    <h2>真实视频：用几何代替动作标签<a class="anchor" href="#s9">§</a></h2>
+    <p class="lead">这一节的论证比它的篇幅更重要。对依赖单独动作或相机条件的方法（论文引 <span class="mono">[26,34,37]</span>）来说，把真实视频变成训练数据通常需要动作标签或相机轨迹——而<strong>真实世界视频里的「动作」可以在不同语义粒度上定义，标注天然歧义；连续相机运动也难以估计和标注</strong>。</p>
+    <p>proxy 接口只需要三样东西：<strong>目标视频、对应的 proxy video、结构化 prompt</strong>。动作和相机运动的视觉效果<em>直接被表示在 proxy video 里</em>，而不是被定义成独立的标签。标注负担因此被大幅降低。</p>
+    <div class="note key">
+      <span class="lbl">为什么非要真实视频不可</span>
+      <p class="sml">论文给的理由不是「规模」，而是<strong>天花板</strong>：真实视频提供游戏的资产、动画、模拟和渲染管线<em>无法完全覆盖</em>的高保真外观、运动和物理交互。这对具身智能体尤其重要——它们的任务需要关于<strong>尺度、遮挡、接触、相机自运动，以及动作引起的运动与物理响应</strong>的线索。真实数据能让生成的视觉环境更接近智能体的部署分布，使 CWM 不只服务虚拟世界生成，也能作为可扩展的真实世界视觉环境用于训练和评测。</p>
+    </div>
+    <div class="note warnb">
+      <span class="lbl">读这一节时请把它当作 proof of concept</span>
+      <p class="sml">论文的措辞是 “we build a <strong>geometry-assisted proof of concept</strong> on KITTI-360”，目的是「验证 proxy–观测对<strong>可以</strong>从真实录像构造出来」。<strong>本文的视频模型并没有在这批真实数据上训练</strong>——微调只用了游戏对。真实这一路目前只有构造，没有训练结果。</p>
+    </div>
+    <h3>一个容易被漏掉的通道差异</h3>
+    <p>游戏那一路的 proxy 是「<strong>fixed-log 深度 + 类别语义 ID 图</strong>」（§4.1 实现细节）；真实那一路除了投影得到的 <strong>metric depth</strong>，还额外算了<strong>由深度导出的表面法向</strong>，并且论文用的是复数 “across all conditions”。两路的通道构成并不完全相同——在读 Fig. 3 的两张子图时值得留意这一点。</p>
+  </div>
+</section>
+<section id="s10">
+  <div class="col">
+    <p class="eyebrow">10 · 实现</p>
+    <h2>训练与推理逐条走读<a class="anchor" href="#s10">§</a></h2>
+    <p class="lead">这一节把 §4.1 的每个数字摆出来，并核对它们之间是否自洽。先说结论：<strong>能核的都对得上</strong>，只有一处措辞上的小出入（Fig. 4 图注说「五小时」，实现细节说「约 5.6 小时」）。</p>
+  </div>
+
+  <figure class="fig wide" id="fig10">
+    <div class="fh"><span class="n">FIG 10</span><span class="t">条件是怎么进到模型里的</span></div>
+    <div class="figbody">
+      <div class="svgscroll">
+      <svg viewBox="0 0 960 340" role="img" aria-label="proxy、文本与外观锚图进入模型的三条路径">
+        <!-- inputs -->
+        <text x="8" y="18" font-family="var(--font-mono)" font-size="11" letter-spacing="1.2" fill="var(--ink3)">输入</text>
+
+        <rect x="12" y="34" width="186" height="46" rx="8" fill="var(--tx-soft)" stroke="var(--tx)" stroke-width="1.2"/>
+        <text x="105" y="54" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--tx-ink)">system instruction</text>
+        <text x="105" y="70" text-anchor="middle" font-size="10" fill="var(--ink3)">固定系统指令</text>
+
+        <rect x="12" y="90" width="186" height="46" rx="8" fill="var(--tx-soft)" stroke="var(--tx)" stroke-width="1.2"/>
+        <text x="105" y="110" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--tx-ink)">clip 文本描述</text>
+        <text x="105" y="126" text-anchor="middle" font-size="10" fill="var(--ink3)">外观 / 动作时间线 / 其他角色</text>
+
+        <rect x="12" y="146" width="186" height="56" rx="8" fill="var(--px-soft)" stroke="var(--px)" stroke-width="1.2"/>
+        <text x="105" y="166" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--px-ink)">11 帧 proxy</text>
+        <text x="105" y="182" text-anchor="middle" font-size="10" fill="var(--ink3)">offset 0, 12, 24, … , 120</text>
+        <text x="105" y="196" text-anchor="middle" font-size="10" fill="var(--ink3)">（注意：121–123 未被采样）</text>
+
+        <rect x="12" y="212" width="186" height="56" rx="8" fill="var(--px-soft)" stroke="var(--px)" stroke-width="1.6"/>
+        <text x="105" y="232" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--px-ink)">完整 124 帧 proxy</text>
+        <text x="105" y="248" text-anchor="middle" font-size="10" fill="var(--ink3)">336 × 192 · fixed-log depth</text>
+        <text x="105" y="262" text-anchor="middle" font-size="10" fill="var(--ink3)">+ 类别语义 ID 图</text>
+
+        <rect x="12" y="278" width="186" height="50" rx="8" fill="var(--vd-soft)" stroke="var(--vd)" stroke-width="1.2"/>
+        <text x="105" y="298" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--vd-ink)">外观锚图</text>
+        <text x="105" y="314" text-anchor="middle" font-size="10" fill="var(--ink3)">GPT Image 2 · 1536×864 → 1344×768</text>
+
+        <!-- encoders -->
+        <text x="330" y="18" font-family="var(--font-mono)" font-size="11" letter-spacing="1.2" fill="var(--ink3)">编码 / 主干</text>
+
+        <rect x="300" y="56" width="188" height="96" rx="10" fill="var(--surf2)" stroke="var(--rule2)" stroke-width="1.3"/>
+        <text x="394" y="82" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">multimodal encoder</text>
+        <text x="394" y="104" text-anchor="middle" font-size="10.5" fill="var(--ink3)">吃文本 + 稀疏 proxy 帧</text>
+        <text x="394" y="122" text-anchor="middle" font-size="10.5" fill="var(--ink3)">+ 外观锚图</text>
+        <text x="394" y="140" text-anchor="middle" font-size="10" font-family="var(--font-mono)" fill="var(--ink3)">语义级条件</text>
+
+        <rect x="300" y="188" width="188" height="80" rx="10" fill="var(--vd-soft)" stroke="var(--vd)" stroke-width="1.3"/>
+        <text x="394" y="214" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--vd-ink)">Ref2VA 参考分支</text>
+        <text x="394" y="236" text-anchor="middle" font-size="10.5" fill="var(--ink3)">外观参考通路</text>
+        <text x="394" y="254" text-anchor="middle" font-size="10.5" fill="var(--ink3)">锚图同时也走这里</text>
+
+        <!-- transformer -->
+        <rect x="560" y="56" width="212" height="212" rx="12" fill="var(--cd-soft)" stroke="var(--cd)" stroke-width="1.5"/>
+        <text x="666" y="84" text-anchor="middle" font-size="13" font-weight="700" fill="var(--cd-ink)">omni transformer</text>
+        <text x="666" y="106" text-anchor="middle" font-size="10.5" fill="var(--ink3)">MiniMax-H3 Ref2VA</text>
+        <text x="666" y="126" text-anchor="middle" font-size="10.5" fill="var(--ink3)">50 blocks · 全部挂 LoRA r128</text>
+        <text x="666" y="146" text-anchor="middle" font-size="10.5" fill="var(--ink3)">≈ 596 M 可训练参数</text>
+        <line x1="580" y1="160" x2="752" y2="160" stroke="var(--rule2)" stroke-dasharray="3 3"/>
+        <text x="666" y="180" text-anchor="middle" font-size="10.5" fill="var(--ink3)">target latent slot 0 ← 锚图</text>
+        <text x="666" y="200" text-anchor="middle" font-size="10.5" fill="var(--ink3)">逐帧 proxy token：目标的 1/16</text>
+        <text x="666" y="222" text-anchor="middle" font-size="10.5" fill="var(--ink3)">audio loss 关闭 · 只优化视频目标</text>
+        <text x="666" y="248" text-anchor="middle" font-size="10.5" font-family="var(--font-mono)" fill="var(--cd-ink)">explicit Euler · 20 步</text>
+
+        <rect x="820" y="122" width="128" height="80" rx="10" fill="var(--vd-soft)" stroke="var(--vd)" stroke-width="1.4"/>
+        <text x="884" y="150" text-anchor="middle" font-size="12" font-weight="700" fill="var(--vd-ink)">124 帧</text>
+        <text x="884" y="170" text-anchor="middle" font-size="10.5" fill="var(--ink3)">1344 × 768</text>
+        <text x="884" y="188" text-anchor="middle" font-size="10.5" fill="var(--ink3)">24 FPS · 5.17 s</text>
+
+        <!-- arrows -->
+        <path d="M202 57 L294 78" stroke="var(--tx)" stroke-width="1.3" marker-end="url(#ah)" fill="none"/>
+        <path d="M202 113 L294 100" stroke="var(--tx)" stroke-width="1.3" marker-end="url(#ah)" fill="none"/>
+        <path d="M202 174 L294 122" stroke="var(--px)" stroke-width="1.3" marker-end="url(#ahx)" fill="none"/>
+        <path d="M202 303 L294 232" stroke="var(--vd)" stroke-width="1.3" marker-end="url(#ah)" fill="none"/>
+        <path d="M202 292 L250 292 L250 140 L294 136" stroke="var(--vd)" stroke-width="1.1" stroke-dasharray="4 3" marker-end="url(#ah)" fill="none"/>
+        <path d="M202 240 L530 240 L530 200 L554 200" stroke="var(--px)" stroke-width="1.8" marker-end="url(#ahx)" fill="none"/>
+        <text x="360" y="234" font-size="10" font-family="var(--font-mono)" fill="var(--px-ink)">完整序列直接作为视觉 token</text>
+        <path d="M492 104 L554 104" stroke="var(--rule2)" stroke-width="1.4" marker-end="url(#ah)" fill="none"/>
+        <path d="M492 228 L520 228 L520 150 L554 146" stroke="var(--rule2)" stroke-width="1.4" marker-end="url(#ah)" fill="none"/>
+        <path d="M776 162 L814 162" stroke="var(--rule2)" stroke-width="1.6" marker-end="url(#ah)" fill="none"/>
+      </svg>
+      </div>
+    </div>
+    <figcaption class="figcap">
+      注意 proxy <b>走了两条路</b>：完整的 124 帧低分辨率序列作为视觉 token 进入 omni transformer（就是那个「1/16 token」的来源），另有 11 帧被稀疏采样后送进 multimodal encoder 与文本一起编码。<b>外观锚图也走两条路</b>：既进 multimodal encoder，又进 Ref2VA 的外观参考分支，同时初始化目标 latent 的第 0 槽。<span class="f-ink3">论文没有逐字描述这张连线图；它是把 §4.1 里「124 帧 336×192 的 proxy 条件」「multimodal encoder 收到 11 帧」「proxy 给 omni transformer 增加 1/16 视觉 token」三句话合起来读出来的结构。</span>
+    </figcaption>
+  </figure>
+
+  <div class="col">
+    <div class="tblwrap">
+      <div class="tblscroll">
+      <table>
+        <thead><tr><th>项</th><th>值</th><th>出处 / 备注</th></tr></thead>
+        <tbody>
+          <tr><td>视频骨干</td><td class="mono">MiniMax-H3 Ref2VA（官方 checkpoint）</td><td>[77]，只做 LoRA 适配</td></tr>
+          <tr><td>源数据</td><td class="mono">157 takes ≈ 5.6 h</td><td>GTA V 游戏录像（Fig. 4 图注称「五小时」）</td></tr>
+          <tr><td>训练片段</td><td class="mono">9,420 个 5 秒 clip，2 秒步长</td><td>同一份录像的重叠切片</td></tr>
+          <tr><td>目标</td><td class="mono">124 帧 · 1344×768 · 24 FPS</td><td>= 5.17 s</td></tr>
+          <tr><td>proxy 条件</td><td class="mono">124 帧 · 336×192</td><td>fixed-log depth + 类别语义 ID 图</td></tr>
+          <tr><td>送进 multimodal encoder</td><td class="mono">system instruction + clip 文本 + 11 帧 proxy</td><td>offset 0,12,…,120</td></tr>
+          <tr><td>可训练参数</td><td class="mono">LoRA r=128 · 全部 50 blocks · ≈596 M</td><td>[94]</td></tr>
+          <tr><td>硬件与优化</td><td class="mono">8× H800 · AdamW · global batch 8</td><td>wd 0.01 · grad-clip 1.0 · BF16 · FlashAttention-3 [95] · gradient checkpointing</td></tr>
+          <tr><td>目标函数</td><td class="mono">仅视频目标，audio loss 关闭</td><td>骨干是全模态模型，音频分支被关掉</td></tr>
+          <tr><td>训练量</td><td class="mono">3 epoch = 3,534 步</td><td>100 步 warmup，cosine 2e-5 → 1e-6</td></tr>
+          <tr><td>采样</td><td class="mono">step-3534 checkpoint · explicit Euler · 20 步</td><td>推理仅视频</td></tr>
+          <tr><td>coding agent</td><td class="mono">GPT-5.6 Sol</td><td>推理时给它现成的引擎代码与同一套 proxy 基元</td></tr>
+          <tr><td>首帧外观锚</td><td class="mono">GPT Image 2 · 1536×864 → 1344×768</td><td>条件为第一帧 proxy + agent 写的图像 prompt</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="tnote">论文<strong>没有</strong>报告：任何定量指标、proxy 遵循度的数值评测、消融实验、推理延迟。§4.2 只有定性结果与项目页上的对比视频。</div>
+    </div>
+
+    <h3>数字自洽性核对</h3>
+    <p class="sml f-ink3" style="margin-bottom:12px">读实现细节时，交叉验算是最省力的纠错手段。点开每一条看算式。</p>
+    <div id="f11checks"></div>
+
+    <h3>Coding agent 在推理时到底做了什么</h3>
+    <p>这一段的诚实程度值得赞赏。论文明确写：<strong>「从零构建 AAA 规模的场景与复杂交互逻辑，对当前的 coding agent 来说仍然困难。」</strong>它们的做法是给 agent 现成的脚手架：</p>
+    <ul>
+      <li>现成的<strong>游戏引擎代码</strong>——基础的玩家控制、碰撞处理、运行时更新循环；</li>
+      <li>与构造训练数据时<strong>完全相同的那套 proxy 基元</strong>；</li>
+      <li>现成的 <strong>AAA 游戏场景与玩法逻辑作为模板</strong>，由 agent 组合、扩展、重写，构造出目标世界。</li>
+    </ul>
+    <p>结果是一个<strong>可执行、可玩家操控</strong>的世界，其中与视觉相关的状态用<strong>粗糙的 proxy 几何</strong>表示，而不是精细 3D 资产。然后：在用户操控下运行这个世界、<strong>录下 proxy video</strong>、把这段序列作为逐帧条件交给下游视频模型。</p>
+    <div class="note crit">
+      <span class="lbl">这句话决定了如何解读 Fig. 2 的那个闭环</span>
+      <p>「录下 proxy video，然后把它交给视频模型」意味着<strong>本文的原型是离线的两段式</strong>：先跑世界录 proxy，再离线生成视频。Fig. 2 里从 <span class="mono">Visual World</span> 回到 <span class="mono">Interaction</span> 的那条反馈边，以及视频观测反过来影响 agent 决策的路径，<strong>在这个原型里没有闭合</strong>。论文自己在局限里也承认「没有实现自回归实时生成」。把 Fig. 2 当作<em>范式图</em>读，不要当作<em>系统图</em>读。</p>
+    </div>
+  </div>
+</section>
+<section id="s11">
+  <div class="col">
+    <p class="eyebrow">11 · 长视频</p>
+    <h2>124 帧窗口、34 帧重叠，以及那张一直被重复喂进去的锚图<a class="anchor" href="#s11">§</a></h2>
+    <p class="lead">单次推理只能生成 124 帧（5.17 秒）。要拿到项目页上那种数十秒的连续片段，论文用的是<strong>重叠窗口 + 全局锚图</strong>的组合，而不是自回归。</p>
+  </div>
+
+  <figure class="fig wide" id="fig12">
+    <div class="fh"><span class="n">FIG 11</span><span class="t">窗口拼接：留什么、丢什么</span><span class="hint">拖动窗口数 →</span></div>
+    <div class="ctl">
+      <div class="ctlg"><span class="lbl">窗口数</span>
+        <input type="range" id="f12n" min="1" max="6" step="1" value="3" style="width:170px">
+        <span class="readout" id="f12nro">3</span>
+      </div>
+      <div class="ctlg"><span class="readout" id="f12len">304 帧 · 12.7 s</span></div>
+      <div class="ctlg"><label class="chk"><input type="checkbox" id="f12anchor" checked> 显示锚图重复注入</label></div>
+    </div>
+    <div class="figbody">
+      <div class="svgscroll">
+      <svg id="f12svg" viewBox="0 0 960 300" role="img" aria-label="重叠窗口拼接时间线"></svg>
+      </div>
+    </div>
+    <figcaption class="figcap">
+      每个窗口都<b>完整生成 124 帧</b>；拼接时保留第一个窗口的全部帧，此后每个窗口<b>丢掉重新生成的那 34 帧重叠</b>，只接上剩下的 90 帧。那 34 帧的作用是把上一个窗口的末尾 RGB 作为<b>续写上下文</b>塞进来，维持局部时间连续性；而全局身份与外观的一致性，靠的是<b>同一张锚图被反复注入每一个窗口</b>。逐帧对齐的 proxy 条件在整段序列上始终提供。
+    </figcaption>
+  </figure>
+
+  <div class="col">
+    <div class="note crit">
+      <span class="lbl">这里有个值得警惕的依赖</span>
+      <p>论文的定性结果里，<strong>身份与视觉风格的一致性主要由 GPT Image 2 生成的那张外观锚图承担</strong>——它初始化第 0 个 latent 槽，同时进 multimodal encoder 和 Ref2VA 参考分支，并且在<strong>每一个后续窗口里被再次注入</strong>。也就是说，一个不属于本文框架的外部图像模型，在最终视觉结果里出力不小。这不影响「视频模型能跟随 proxy」这个结论（那由逐帧 proxy 保证），但在评估「视觉保真度」时应当把它计入。</p>
+    </div>
+    <p>另外，这套拼接是<strong>非因果、离线</strong>的：每个窗口都要完整生成 124 帧再丢掉 34 帧，重叠部分的算力是纯浪费（窗口数越多越趋近 34/124 ≈ 27%）。这与论文局限里说的「未实现自回归实时生成」是同一件事的两面。相关工作里那条做 self-forcing、causal distillation、streaming 的线（<span class="mono">[42,50–55]</span>）正是为了解决这个问题——本文没有走那条路，它把注意力放在了接口设计上。</p>
+  </div>
+</section>
+
+<section id="s12">
+  <div class="col">
+    <p class="eyebrow">12 · 附录</p>
+    <h2>结构化文本长什么样<a class="anchor" href="#s12">§</a></h2>
+    <p class="lead">附录 A 给了三个完整的 prompt 示例。它们很值得读——因为这才是「文本通道」在这套系统里的<strong>真实形态</strong>：不是一句话描述，而是一份带时间片的规格说明书。</p>
+    <p>schema 是固定的三段：</p>
+    <div class="g3">
+      <div class="card tx"><span class="lbl">Appearance and scene</span><p class="sml">主角的<strong>稳定身份特征</strong>（论文原文反复用 “stable identity features” 这个词）、服饰材质、开场姿态与画面位置；场景布局、材质、光照、天气、色调、绘画风格；以及<strong>相机的完整运动描述</strong>。</p></div>
+      <div class="card tx"><span class="lbl">Protagonist action timeline</span><p class="sml">按<strong>时间片</strong>切分的动作说明，覆盖 0.00–5.17 s。片段长度不均匀——静止段可以合并成 2.25 s，动作密集段切到 0.75 s。</p></div>
+      <div class="card tx"><span class="lbl">Other visible actors</span><p class="sml">其他可见角色/物体在时间区间上的状态。<strong>「没有其他角色」也要显式写出来</strong>，而不是留空。</p></div>
+    </div>
+  </div>
+
+  <figure class="fig wide" id="fig13">
+    <div class="fh"><span class="n">FIG 12</span><span class="t">附录 A · Example 1「The Rainkeeper's Steps」逐段拆</span><span class="hint">拖时间轴 →</span></div>
+    <div class="ctl">
+      <div class="ctlg"><span class="lbl">段落</span>
+        <div class="seg" id="f13seg" role="group">
+          <button data-p="0" aria-pressed="true">Appearance and scene</button>
+          <button data-p="1" aria-pressed="false">Action timeline</button>
+          <button data-p="2" aria-pressed="false">Other actors</button>
+        </div>
+      </div>
+    </div>
+    <div class="figbody">
+      <div id="f13tl" style="margin-bottom:14px"></div>
+      <div class="cd" style="margin:0">
+        <div class="hd"><span id="f13hd">appearance_and_scene</span><span class="tag">附录原文节选</span></div>
+        <pre id="f13pre"></pre>
+      </div>
+      <p class="sml f-ink3" id="f13note" style="margin-top:12px"></p>
+    </div>
+    <figcaption class="figcap">
+      三个附录示例是被<b>设计成受控测试</b>的：<b>Ex.1 Rainkeeper's Steps</b> —— 主体静止、相机从侧面弧摇到背面再摇回，把「相机跟随」与「实体位移」分离开；<b>Ex.2 Hollowfacet Hill</b> —— 上坡行走、失去平衡、进入连续跌落，给出一个「包含多个时序运动状态」的 prompt；<b>Ex.3 The Mycelial Provision Road</b> —— 原地细微待机动作，测试精细运动与场景保持。
+    </figcaption>
+  </figure>
+
+  <div class="col">
+    <div class="note key">
+      <span class="lbl">从 prompt 反推设计意图</span>
+      <p class="sml">这些 prompt 里几乎每一句都在做<strong>约束</strong>而不是<strong>描述</strong>：「both feet remaining outside the visible area」「the initial lower edge crops the figure at the lower shins」「maintaining level shoulders, a straight torso, softly bent elbows」。这正好印证了 §3.2 的分工——proxy 给的是粗几何与相机，<strong>文本必须补上 proxy 表达不了的那一层：裁切关系、肢体细节、材质、光照、以及「不要出现什么」</strong>。也解释了为什么关节级姿态被排除在 proxy 之外后，文本会变得这么长。</p>
+    </div>
+  </div>
+</section>
+<section id="s13">
+  <div class="col">
+    <p class="eyebrow">13 · 批判性阅读</p>
+    <h2>它证明了什么，没证明什么<a class="anchor" href="#s13">§</a></h2>
+    <p class="lead">论文自己的定位是「preliminary evidence for the viability of the framework's two key components」——为框架的<strong>两个关键组件</strong>提供初步证据。这个措辞相当精确，值得逐字对待：是<strong>两个组件</strong>各自可行，不是<strong>整个回路</strong>已经跑通。</p>
+  </div>
+
+  <figure class="fig wide" id="fig14">
+    <div class="fh"><span class="n">FIG 13</span><span class="t">把 Fig. 2 的每条边标上证据等级</span><span class="hint">悬停或点击边 →</span></div>
+    <div class="figbody">
+      <div class="svgscroll">
+      <svg id="f14svg" viewBox="0 0 960 300" role="img" aria-label="框架各环节的证据等级标注"></svg>
+      </div>
+      <div class="card" id="f14card" style="margin-top:14px; min-height:78px">
+        <span class="lbl" id="f14t">点一条边看它的证据状态</span>
+        <p class="sml" id="f14d">论文在 §4 只报告了定性视觉结果（Fig. 4 的五个 prompt），没有任何定量表格、消融或延迟测量。</p>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--ok)"></i>本文有实证支持（定性）</span>
+      <span><i style="background:var(--warn)"></i>部分成立 / 依赖外部脚手架</span>
+      <span><i style="background:var(--bad)"></i>本文未展示，属于范式承诺</span>
+    </div>
+    <figcaption class="figcap">边的等级是我按论文 §4.1／§4.2／§5 的表述判定的，判据写在每条边的说明里。<b>这不是对论文的指控</b>——一篇提出范式的论文本来就不必把所有边都做完；标出来是为了避免读者把 Fig. 2 的完整闭环误当作已实现的系统。</figcaption>
+  </figure>
+
+  <div class="col">
+    <h3>论文自己列的两条局限</h3>
+    <div class="g2">
+      <div class="card bad">
+        <span class="lbl">① 算力受限</span>
+        <p class="sml">训练规模因此很小，生成质量仍然有限；也<strong>没有实现自回归实时生成</strong>。</p>
+      </div>
+      <div class="card bad">
+        <span class="lbl">② coding agent 的能力上限</span>
+        <p class="sml">尽管进步很快，当前 coding agent 仍难以可靠地<strong>从零实现高度复杂的游戏机制</strong>。因此原型<strong>没有展示自主构建一个完整开放世界游戏或模拟器</strong>。</p>
+      </div>
+    </div>
+
+    <h3>我在细读中额外注意到的几点</h3>
+    <ol>
+      <li><strong>两个组件是分别验证的，不是端到端串起来验证的。</strong>agent 那半边的证据是「它能用现成引擎代码和 AAA 场景模板组合出一个可玩的世界」；视频那半边的证据是「LoRA 微调后能跟随录下来的 proxy」。中间没有一个实验展示<em>agent 因为看到生成结果而改变了世界程序</em>。</li>
+      <li><strong>没有 proxy 遵循度的定量指标。</strong>这个接口最核心的经验主张是「视频模型会听 proxy 的话」，但论文没有报告任何位置误差、轨迹一致性、遮挡正确率之类的数字，只有定性帧序列和项目页视频。而且论文明说对比「不考虑推理延迟」，这对一个以交互世界为目标的系统是个不小的免责。</li>
+      <li><strong>可构造性约束把铰接运动整段推给了文本。</strong>骨骼姿态被排除在 proxy 之外，意味着角色的具体肢体动作完全由文本 + 视频模型先验决定。附录 prompt 之所以要一秒一秒地写「肩膀保持水平、手肘微屈、手掌垂在腿侧」，正是在补这个洞。这是设计权衡的直接代价，也是最可能出现身份/动作漂移的地方。</li>
+      <li><strong>外部图像模型承担了相当一部分视觉质量。</strong>见上一节关于 GPT Image 2 锚图的讨论。</li>
+      <li><strong>真实数据这一路只有构造，没有训练。</strong>KITTI-360 上做的是离线编译的 proof of concept，微调数据全部来自游戏。「proxy 可以作为学习世界状态的接口」在真实域上仍是待验证的。</li>
+      <li><strong>与最接近的基线的比较只在项目页上。</strong>与 <span class="mono">[31,34,37]</span> 的对比视频不在正文里，正文只给了「更精确、更灵敏」的定性判断。</li>
+    </ol>
+
+    <div class="note key">
+      <span class="lbl">这不妨碍它是一篇有分量的论文</span>
+      <p>它的贡献主要是<strong>问题的重新切分</strong>，而不是某个 SOTA 数字：把「世界怎么演化」从「世界长什么样」里干净地剥离出来，并且给出了一个<strong>具体到可实现</strong>的接口（proxy），还顺手说明了这个接口为什么让真实视频数据变得便宜（不需要动作标签和相机位姿）。这三件事里的任何一件单独拿出来都站得住。</p>
+    </div>
+  </div>
+</section>
+
+<section id="s14">
+  <div class="col">
+    <p class="eyebrow">14 · 定位</p>
+    <h2>它在这条研究线上的位置<a class="anchor" href="#s14">§</a></h2>
+    <p class="lead">论文的相关工作分三块，每一块的落点都很明确。</p>
+    <div class="tblwrap">
+      <div class="tblscroll">
+      <table>
+        <thead><tr><th>研究线</th><th>它们把世界状态放在哪</th><th>CWM 的差别</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>交互式视频世界模型</strong><br><span class="sml f-ink3">Genie 系列、Matrix-Game、WorldPlay、Context-as-Memory、VMem、LingBot-World 2.0 …</span></td>
+            <td>视觉历史、隐上下文、视觉记忆。中心建模对象始终是<strong>生成的观测序列</strong>。</td>
+            <td>把显式世界状态交给 coding agent 和它的持久代码，<strong>包括那些必须继续影响后续交互的后果</strong>；视频模型仍负责外观与动态，但通过 proxy 接收相关状态，而不必内化整个演化过程。</td>
+          </tr>
+          <tr>
+            <td><strong>生成式 3D 世界</strong><br><span class="sml f-ink3">HunyuanWorld 1.0 [75]、WorldGen [76] …</span></td>
+            <td>生成的几何、资产与渲染管线<strong>就是</strong>视觉世界本身。</td>
+            <td>proxy <strong>不是</strong>最终 3D 世界，也不规定生产级几何与外观；它只是一个粗糙的、程序化构造的条件。显式 3D 在这里是<strong>通往视觉生成的接口</strong>，而不是终点。</td>
+          </tr>
+          <tr>
+            <td><strong>coding agent 与程序化世界模型</strong><br><span class="sml f-ink3">WorldCoder [67]、Dainese 等 [68]、Lehrach 等 [70]、ARC-AGI-3 [91] …</span></td>
+            <td>把状态转移、合法动作、观测、奖励、终止写成程序函数，供 planner 使用。世界规则被<strong>外化成可检查、可测试、可修订的代码</strong>。</td>
+            <td>沿用「规则外化为代码」这一点，但把输出端从<strong>符号观测/planner</strong>换成了<strong>高保真视频</strong>；coding agent 治理的是一个开放视觉世界的演化，而不只是一个可规划的抽象环境。</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <h3>顺便澄清一个同名问题</h3>
+    <p>「Code World Model」这个名字在 2025–2026 年被至少三拨人用过，方向还不一样。读文献时很容易串：</p>
+    <div class="g3">
+      <div class="card px">
+        <span class="lbl">本文 · arXiv 2608.25927</span>
+        <p class="sml"><strong>用代码去做世界模型</strong>。coding agent 当大脑，视频模型当渲染器。</p>
+      </div>
+      <div class="card">
+        <span class="lbl">Meta FAIR · CWM · arXiv 2510.02387</span>
+        <p class="sml"><strong>用世界模型去做代码</strong>。在 Python 执行轨迹和 agentic 交互上做 mid-training，让 LLM 学会模拟代码执行，以增强代码生成与推理。方向正好相反。</p>
+      </div>
+      <div class="card">
+        <span class="lbl">Lehrach 等 · arXiv 2510.04542</span>
+        <p class="sml"><strong>Code world models for general game playing</strong>：把状态转移、合法动作、观测、奖励、终止合成为程序函数供 planner 消费。本文引作 [70]。</p>
+      </div>
+    </div>
+
+    <h3>速查</h3>
+    <dl class="kv">
+      <dt>核心命题</dt><dd>世界演化（知识驱动、规则一致、可持久）与视觉实现（生成先验、开放外观）应当解耦，由代码和视频模型分别承担。</dd>
+      <dt>关键机制</dt><dd>proxy —— 由世界状态确定性编译出的粗糙时空视觉条件，逐帧约束视频模型；与结构化文本构成两条互补通道。</dd>
+      <dt>关键约束</dt><dd>condition bandwidth 是可构造性与 grounding 强度之间的权衡；训练通道的上限由推理时 agent 的可构造性倒推决定。</dd>
+      <dt>关键数字</dt><dd>124 帧 / 24 FPS / 5.17 s；proxy 336×192 = 目标 1/16 token；LoRA r128 × 50 blocks ≈ 596 M；3,534 步；长视频 124 帧窗口、34 帧重叠、步进 90 帧。</dd>
+      <dt>最强的一句</dt><dd>“Code is neither permanently frozen game logic nor a controller independent of the agent; it is the coding agent's continuously maintained, executable, and modifiable extension.”</dd>
+      <dt>最该保留怀疑的一句</dt><dd>关于 agent 自主启用/关闭/调节 proxy 带宽的那一段——论文明确说本文只实例化了<strong>一个固定的</strong> proxy 设计。</dd>
+    </dl>
+
+    <h3>如果要接着往下做</h3>
+    <ul>
+      <li><strong>把回路闭上。</strong>让生成的观测真正回流到 agent 的决策里（哪怕只是通过一个 VLM 读回关键状态做校验），是从「范式图」变成「系统」的最短一步。</li>
+      <li><strong>给 proxy 遵循度一个指标。</strong>用录制的运行时状态作为 ground truth，量测生成视频里实体位置、遮挡、相机轨迹的误差——数据管线本身就自带这份标注。</li>
+      <li><strong>验证「带宽自适应」。</strong>让 agent 在同一段序列里对不同实体使用不同粒度（关键实体用完整基元，背景退回 bbox 甚至关闭），这是论文画出来但没做的那部分设计空间。</li>
+      <li><strong>把真实那一路训起来。</strong>KITTI-360 的编译管线已经在了，缺的是在其上微调并验证跨域迁移。</li>
+    </ul>
+  </div>
+</section>
+
+<footer class="wrap">
+  <div class="col">
+    <p><strong>原始出处</strong></p>
+    <ul>
+      <li>Yiwen Chen, Guosheng Lin, Chi Zhang. <em>Code World Model: Coding Agent as World Brain.</em> arXiv:2608.25927v1 [cs.CV], 2026-08-26. Westlake AGI Lab / Nanyang Technological University. <a href="https://arxiv.org/abs/2608.25927" target="_blank" rel="noopener">arxiv.org/abs/2608.25927</a></li>
+      <li>项目页（含长时程生成与对比视频）: <a href="https://buaacyw.github.io/cwm/" target="_blank" rel="noopener">buaacyw.github.io/cwm</a></li>
+      <li>代码仓库（目前仅公告）: <a href="https://github.com/buaacyw/code-world-model" target="_blank" rel="noopener">github.com/buaacyw/code-world-model</a></li>
+    </ul>
+    <p class="sml">本页所有引述均来自上述预印本正文、图注与附录 A。<strong>FIG 6 的 proxy 编译器是我按论文描述写的最小复现，不是官方实现</strong>；FIG 3、FIG 5、FIG 7 中标注「示意」的刻度不是论文报告的实测值。凡是论文没有给出的数字，页面里都已显式标注。</p>
+  </div>
+</footer>
+</main>
+<script>
+"use strict";
+/* ============================================================
+   Code World Model 精读 — 交互层
+   全部原生 JS，无外部依赖。每个 fig 一个独立 IIFE，
+   任一处抛错不影响其它图。
+   ============================================================ */
+const $  = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const NS = "http://www.w3.org/2000/svg";
+function E(tag, attrs, text) {
+  const n = document.createElementNS(NS, tag);
+  if (attrs) for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (text !== undefined && text !== null) n.textContent = text;
+  return n;
+}
+function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+function segCtl(root, cb) {
+  if (!root) return;
+  root.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b || !root.contains(b)) return;
+    $$("button", root).forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    cb(b);
+  });
+}
+function guard(name, fn) { try { fn(); } catch (err) { console.error("[" + name + "]", err); } }
+/* 中英混排换行：CJK 逐字可断，ASCII 单词整体不断。units 以「一个汉字宽」为 1。 */
+function wrapMixed(text, units, maxLines) {
+  const toks = String(text).match(/[A-Za-z0-9][A-Za-z0-9._%+\/-]*|\s+|[\s\S]/g) || [];
+  const w = t => /^[A-Za-z0-9]/.test(t) ? t.length * 0.56 : (/^\s+$/.test(t) ? 0.5 : 1);
+  const lines = []; let cur = "", cw = 0, truncated = false;
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i], tw = w(t);
+    if (cw + tw > units && cur) {
+      lines.push(cur); cur = /^\s+$/.test(t) ? "" : t; cw = /^\s+$/.test(t) ? 0 : tw;
+      if (lines.length >= maxLines) { truncated = i < toks.length - 1; cur = ""; break; }
+    } else { cur += t; cw += tw; }
+  }
+  if (cur && lines.length < maxLines) lines.push(cur);
+  return { lines: lines, truncated: truncated };
+}
+
+/* ---------- theme + progress ---------- */
+guard("chrome", function () {
+  const btn = $("#themeBtn");
+  const stored = (() => { try { return localStorage.getItem("cwm-theme"); } catch (e) { return null; } })();
+  if (stored === "dark" || stored === "light") document.documentElement.setAttribute("data-theme", stored);
+  btn.addEventListener("click", () => {
+    const cur = document.documentElement.getAttribute("data-theme");
+    const sysDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const next = cur ? (cur === "dark" ? "light" : "dark") : (sysDark ? "light" : "dark");
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("cwm-theme", next); } catch (e) {}
+  });
+  const bar = $("#prog");
+  const onScroll = () => {
+    const h = document.documentElement.scrollHeight - window.innerHeight;
+    bar.style.width = (h > 0 ? Math.min(100, Math.max(0, (window.scrollY / h) * 100)) : 0) + "%";
+  };
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", onScroll);
+  onScroll();
+});
+
+/* ---------- 横向可滚动提示：只在真的溢出时出现 ---------- */
+guard("scrollhint", function () {
+  const mark = () => {
+    $$(".svgscroll").forEach(el => {
+      const over = el.scrollWidth > el.clientWidth + 4;
+      let h = el.previousElementSibling;
+      const isHint = h && h.classList && h.classList.contains("scrollhint");
+      if (over && !isHint) {
+        const d = document.createElement("div");
+        d.className = "scrollhint";
+        d.textContent = "⇄ 图较宽，可横向拖动";
+        el.parentNode.insertBefore(d, el);
+      } else if (!over && isHint) { h.remove(); }
+    });
+  };
+  mark();
+  window.addEventListener("resize", () => { clearTimeout(window.__sh); window.__sh = setTimeout(mark, 200); });
+});
+
+/* ---------- FIG 1 : two architectures ---------- */
+guard("fig1", function () {
+  const TXT = [
+    {
+      a: "刺杀发生在画面内。视频模型确实能把这一刻画出来——这从来不是它的短板。但这个事件产生的<strong>后果</strong>（继位、治安、派系关系）没有任何结构化的落点，只能作为像素留在最近几帧里。",
+      b: "交互意图进入 coding agent。它读当前世界状态，决定这座城进入紧急状态：改变派系目标、激活已有行为规则、必要时<strong>新增</strong>巡逻／继位／消息传播的机制，并把这些决定写成可执行代码。"
+    },
+    {
+      a: "城市离开画面。<strong class='c-bad'>这十分钟没有任何视觉记录。</strong>模型的上下文窗口通常不到一分钟，那几帧也早已滑出上下文。没有被观测到的状态变化，等价于没有发生。",
+      b: "代码继续以高频推进状态：NPC 位置与日程、派系关系、消息传播、继位进程。<strong class='c-ok'>整个过程一次模型调用都不需要</strong>，agent 只在目标改变或出现异常时才介入。"
+    },
+    {
+      a: "玩家回来。模型只能<strong class='c-bad'>重新想象</strong>这座城应该长什么样——它无从知道十分钟里发生过什么、哪些后果还生效。一致性只能靠运气或者外挂的记忆检索模块。",
+      b: "agent 从 <span class='mono'>S<sup>exe</sup></span> 里读出当前局面，把相关实体与布局编译成 proxy，把身份／外观描述重新写进结构化文本。<strong class='c-ok'>视频模型不需要记得任何事</strong>，它只负责把这一份状态画出来。"
+    }
+  ];
+  const svg = $("#f1svg");
+  const aS = $("#aStore"), bS = $("#bStore"), aV = $("#aVerdict"), aV2 = $("#aVerdict2");
+  function set(i) {
+    $("#f1txtA").innerHTML = TXT[i].a;
+    $("#f1txtB").innerHTML = TXT[i].b;
+    aS.setAttribute("opacity", i === 0 ? "1" : (i === 1 ? "1" : "1"));
+    bS.setAttribute("opacity", "1");
+    const lines = [
+      ["唯一的记忆载体是画面本身。", ""],
+      ["这十分钟没有任何视觉记录，", "而上下文窗口通常 < 1 分钟。"],
+      ["后果已经滑出上下文：", "只能重新想象，无法查询。"]
+    ][i];
+    aV.textContent = lines[0]; aV2.textContent = lines[1];
+    aV.setAttribute("fill", i === 0 ? "var(--ink3)" : "var(--bad-ink)");
+    aV2.setAttribute("fill", i === 0 ? "var(--ink3)" : "var(--bad-ink)");
+  }
+  segCtl($("#f1seg"), b => set(+b.dataset.s));
+  set(0);
+
+  const anim = $("#f1anim"); let on = true;
+  anim.addEventListener("click", () => {
+    on = !on;
+    $("#f1packets").style.display = on ? "" : "none";
+    anim.textContent = on ? "⏸ 数据流动画" : "▶ 数据流动画";
+    anim.classList.toggle("on", on);
+    try { on ? svg.unpauseAnimations() : svg.pauseAnimations(); } catch (e) {}
+  });
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) anim.click();
+});
+
+/* ---------- FIG 2 : time-scale ruler ---------- */
+guard("fig2", function () {
+  const STOPS = [
+    { s: 1 / 24, l: "单帧 42 ms", d: "24 FPS 下一帧的时长。" },
+    { s: 5.17, l: "5.17 s", d: "一次推理生成的窗口：124 帧 @ 24 FPS。附录里的动作时间线正好写到 5.17 s。" },
+    { s: 60, l: "1 min", d: "论文给的界：当前视频模型的训练上下文窗口「通常短于一分钟」。" },
+    { s: 600, l: "10 min", d: "玩家离开一座城再回来。已经完全在上下文之外。" },
+    { s: 7200, l: "2 h", d: "一场战役的推进、一次围城。" },
+    { s: 86400 * 3, l: "3 天", d: "继位、贸易路线改道、消息在城邦之间传开。" },
+    { s: 86400 * 365, l: "1 年", d: "派系关系重排。论文原话：因果过程「在世界时间里展开数天甚至数年」。" }
+  ];
+  const svg = $("#f3svg"), g = $("#f2ticks");
+  const X0 = 40, X1 = 920;
+  const LMIN = Math.log10(1 / 24), LMAX = Math.log10(86400 * 365);
+  const px = v => X0 + (Math.log10(v) - LMIN) / (LMAX - LMIN) * (X1 - X0);
+  clear(g);
+  [1 / 24, 1, 60, 3600, 86400, 86400 * 30, 86400 * 365].forEach((v, i) => {
+    const x = px(v);
+    g.appendChild(E("line", { x1: x, y1: 80, x2: x, y2: 92, stroke: "var(--axis)", "stroke-width": 1 }));
+    const lbl = ["42ms", "1s", "1min", "1h", "1天", "1月", "1年"][i];
+    g.appendChild(E("text", { x: x, y: 108, "text-anchor": "middle", "font-size": 10, "font-family": "var(--font-mono)", fill: "var(--ink3)" }, lbl));
+  });
+  const band = $("#f2ctxband");
+  band.setAttribute("x", px(1 / 24)); band.setAttribute("width", Math.max(2, px(60) - px(1 / 24)));
+  $("#f2ctxlbl").setAttribute("x", px(1 / 24) + 4);
+  const mk = $("#f2marker");
+  function set(i) {
+    const st = STOPS[i], x = px(st.s);
+    mk.setAttribute("transform", "translate(" + x + ",0)");
+    $("#f2mlbl").textContent = st.l;
+    $("#f2mlbl").setAttribute("x", 0);
+    $("#f2mlbl").setAttribute("text-anchor", x > 800 ? "end" : (x < 90 ? "start" : "middle"));
+    $("#f2ro").textContent = st.l;
+    const inCtx = st.s <= 60;
+    const v = $("#f2verdict");
+    v.textContent = inCtx ? "在上下文内" : "远在上下文之外 — " + st.d;
+    v.style.color = inCtx ? "var(--ok-ink)" : "var(--bad-ink)";
+    v.style.textTransform = "none"; v.style.letterSpacing = "0";
+  }
+  $("#f2r").addEventListener("input", e => set(+e.target.value));
+  set(1);
+});
+
+/* ---------- FIG 3 : three clocks ---------- */
+guard("fig3", function () {
+  const svg = $("#f3clocks");
+  // 三条轴共享同一段 5.17 s
+  const NS_ = [12, 120, 600, 2000];
+  const X0 = 138, X1 = 936, DUR = 124 / 24;
+  function fmt(n) { return n.toLocaleString("en-US"); }
+  function draw() {
+    const n = NS_[+$("#f3n").value], hz = +$("#f3hz").value, ag = +$("#f3ag").value;
+    $("#f3nro").textContent = fmt(n);
+    $("#f3hzro").textContent = hz + " Hz";
+    $("#f3agro").textContent = ag + " 次";
+    clear(svg);
+    const rows = [
+      { y: 46, c: "var(--ag)", ci: "var(--ag-ink)", name: "coding agent", sub: "事件驱动 · 稀疏", n: ag, mode: "sparse" },
+      { y: 118, c: "var(--cd)", ci: "var(--cd-ink)", name: "code tick", sub: hz + " Hz · " + fmt(n) + " 个实体", n: Math.round(hz * DUR), unit: " tick × " + fmt(n) + " 实体 = " + fmt(Math.round(hz * DUR * n)) + " 次更新", mode: "dense" },
+      { y: 190, c: "var(--vd)", ci: "var(--vd-ink)", name: "video frame", sub: "24 FPS · 固定", n: 124, unit: " 帧 / 5.17 s", mode: "dense" }
+    ];
+    rows.forEach(r => {
+      svg.appendChild(E("text", { x: 8, y: r.y - 6, "font-size": 12, "font-weight": 700, fill: r.ci }, r.name));
+      svg.appendChild(E("text", { x: 8, y: r.y + 12, "font-size": 10, "font-family": "var(--font-mono)", fill: "var(--ink3)" }, r.sub));
+      svg.appendChild(E("rect", { x: X0, y: r.y - 16, width: X1 - X0, height: 34, rx: 6, fill: "var(--surf2)", stroke: "var(--rule)" }));
+      if (r.mode === "sparse") {
+        const pts = [0.08, 0.31, 0.47, 0.66, 0.88].slice(0, r.n);
+        pts.forEach(p => {
+          const x = X0 + p * (X1 - X0);
+          svg.appendChild(E("line", { x1: x, y1: r.y - 16, x2: x, y2: r.y + 18, stroke: r.c, "stroke-width": 2.4 }));
+          svg.appendChild(E("circle", { cx: x, cy: r.y + 1, r: 5, fill: r.c, stroke: "var(--surf2)", "stroke-width": 1.5 }));
+        });
+        if (r.n === 0) svg.appendChild(E("text", { x: (X0 + X1) / 2, y: r.y + 6, "text-anchor": "middle", "font-size": 11, fill: "var(--ink3)" }, "本窗口内 agent 完全未介入 —— 世界照常演化"));
+      } else {
+        const total = r.n, step = (X1 - X0) / total;
+        const drawn = Math.min(total, 620);
+        const dstep = (X1 - X0) / drawn;
+        for (let i = 0; i < drawn; i++) {
+          const x = X0 + i * dstep + dstep / 2;
+          svg.appendChild(E("line", { x1: x, y1: r.y - 12, x2: x, y2: r.y + 14, stroke: r.c, "stroke-width": Math.max(0.5, Math.min(1.6, dstep * 0.42)), opacity: 0.72 }));
+        }
+        svg.appendChild(E("text", { x: X1 - 6, y: r.y + 32, "text-anchor": "end", "font-size": 10, "font-family": "var(--font-mono)", fill: "var(--ink3)" },
+          fmt(total) + (r.unit || "") + (total > 620 ? "（图示已抽稀）" : "")));
+      }
+    });
+    svg.appendChild(E("line", { x1: X0, y1: 232, x2: X1, y2: 232, stroke: "var(--axis)" }));
+    for (let s = 0; s <= 5; s++) {
+      const x = X0 + (s / DUR) * (X1 - X0);
+      if (x > X1) break;
+      svg.appendChild(E("line", { x1: x, y1: 228, x2: x, y2: 236, stroke: "var(--axis)" }));
+      svg.appendChild(E("text", { x: x, y: 248, "text-anchor": "middle", "font-size": 10, "font-family": "var(--font-mono)", fill: "var(--ink3)" }, s + "s"));
+    }
+    const codeTotal = Math.round(hz * DUR * n);
+    $("#f3sAg").textContent = ag;
+    $("#f3sCd").textContent = fmt(codeTotal);
+    $("#f3blow").textContent = fmt(codeTotal);
+  }
+  ["#f3n", "#f3hz", "#f3ag"].forEach(s => $(s).addEventListener("input", draw));
+  draw();
+  window.addEventListener("resize", () => { clearTimeout(window.__f3t); window.__f3t = setTimeout(draw, 200); });
+});
+
+/* ---------- FIG 4 : equation symbols ---------- */
+guard("fig4", function () {
+  const D = {
+    exe: ["S<sup>exe</sup> · 可执行状态", "包含<strong>正在演化的世界程序</strong>、实体属性、规则、关系、事件历史，以及其它可以被直接操作的变量。它是代码的操作对象，也是 agent 的读写对象——论文列举时把「world program」放在第一位，这不是修辞：程序本身是状态的一部分，因此机制可以在运行中被改写。"],
+    vis: ["S<sup>vis</sup> · 视觉状态", "包含由视频模型产生的外观、运动等视觉信息，且<strong>必须随时间保持一致</strong>。注意论文补了一句关键的话：需要持久的视觉信息会被<em>保留在世界状态里、由 agent 管理</em>，并在相关角色/地点/事件再次出现时重新提供。"],
+    tac: ["T<sub>AC</sub> · agent–code 联合转移", "不是单个算子，而是两种节奏的合成：<strong>code</strong> 在既有规则下反复执行高频确定性更新；<strong>agent</strong> 按目标与世界反馈来调用、组合或修订这些机制。二者共同产出下一个可执行状态。"],
+    g: ["G<sub>θ</sub> · 视频模型", "本文中是做了 LoRA 适配的 MiniMax-H3 Ref2VA。它的输入是上一时刻的视觉状态与「当前可执行状态的某种条件表示」，输出是下一段视觉状态——注意这里用的是采样号，它是生成式的。"],
+    cond: ["这个位置是全篇的技术核心", "把 S<sup>exe</sup><sub>t+1</sub> 写在这里<strong>只表达抽象的条件依赖</strong>，不代表把原始代码或完整可执行状态喂给网络。如何<em>选出</em>相关信息、并把它<em>表示</em>成视频模型能用的条件，就是 §3.2 的全部内容，答案是 proxy video + 结构化文本这两条通道。"]
+  };
+  const cap = $("#f4cap");
+  $$(".hl[data-sym]").forEach(el => {
+    el.addEventListener("click", () => {
+      const d = D[el.dataset.sym]; if (!d) return;
+      cap.innerHTML = "<strong style='color:var(--ink)'>" + d[0] + "</strong> —— " + d[1];
+      $$(".hl[data-sym]").forEach(x => x.style.outline = "");
+      $$('.hl[data-sym="' + el.dataset.sym + '"]').forEach(x => x.style.outline = "2px solid currentColor");
+    });
+  });
+});
+
+/* ---------- FIG 5 : three conditioning routes ---------- */
+guard("fig5", function () {
+  const R = [
+    {
+      k: "结构化文本", cls: "tx",
+      how: "agent 为每个持久身份写下外观、角色、目标的语义描述并存进代码管理的身份记录；代码持续更新位置、朝向、关系、行为、战斗状态；系统按身份/时间/事件组织这些内容，与当前高层意图和原始 prompt 合并后交给视频模型。",
+      why: "论文评价：「最简单、最优雅、看起来也最可扩展」。否决理由：即便配上专门的相机条件通路，仍无法精确控制相机轨迹与实体运动；理论上语言能指定每个像素，但 token 效率、延迟与指令遵循能力都撑不住。",
+      bars: [96, 18, 95, 60], x: 0.06, y: 0.14
+    },
+    {
+      k: "显式 3D 世界", cls: "vd",
+      how: "让 coding agent 构造一个完整的显式 3D 环境，用它的渲染结果作为视频模型的条件（或直接作为最终画面）。论文引 HunyuanWorld 1.0 [75] 与 WorldGen [76]。",
+      why: "空间控制最强，但要求生产级几何、资产、动画、材质与渲染系统，成本高；并且<strong>过早锁死视觉实现</strong>——上限由资产与模拟器的保真度和覆盖度决定，难以逼近真实世界的视觉丰富度。",
+      bars: [22, 96, 30, 92], x: 0.86, y: 0.9
+    },
+    {
+      k: "proxy（本文）", cls: "px",
+      how: "把相机、实体位置、姿态、轨迹、空间关系组织成粗糙可编程表示，由确定性编译器轻量光栅化成 336×192 的 proxy video；与结构化文本一起作为条件。基元只需几行代码，参数可寻址、可局部编辑。",
+      why: "保留文本方案的灵活性，同时找回显式 3D 的空间控制。刻意<strong>不表达</strong>纹理、材质、精细光照——那些留给视频模型的先验。额外视觉 token 只有目标视频的 1/16。",
+      bars: [72, 78, 88, 90], x: 0.44, y: 0.72
+    }
+  ];
+  const LBL = ["构造 / 维护成本低", "时空约束强度", "视觉上限（留给生成先验）", "对 agent 白盒可控"];
+  function bars(r) {
+    const svg = $("#f5bars"); clear(svg);
+    r.bars.forEach((v, i) => {
+      const y = 16 + i * 50;
+      svg.appendChild(E("text", { x: 0, y: y, "font-size": 12, fill: "var(--ink2)" }, LBL[i]));
+      svg.appendChild(E("rect", { x: 0, y: y + 9, width: 440, height: 11, rx: 5.5, fill: "var(--surf3)", stroke: "var(--rule)" }));
+      const bar = E("rect", { x: 0, y: y + 9, width: 0, height: 11, rx: 5.5, fill: "var(--" + (r.cls) + ")", style: "transition:width .35s cubic-bezier(.4,0,.2,1)" });
+      svg.appendChild(bar);
+      requestAnimationFrame(() => { bar.setAttribute("width", v * 4.4); });
+    });
+  }
+  function map(active) {
+    const svg = $("#f5map"); clear(svg);
+    const X0 = 92, X1 = 872, Y0 = 202, Y1 = 34;
+    svg.appendChild(E("line", { x1: X0, y1: Y0, x2: X1, y2: Y0, stroke: "var(--axis)" }));
+    svg.appendChild(E("line", { x1: X0, y1: Y0, x2: X0, y2: Y1, stroke: "var(--axis)" }));
+    svg.appendChild(E("text", { x: (X0 + X1) / 2, y: Y0 + 36, "text-anchor": "middle", "font-size": 11.5, fill: "var(--ink3)" }, "构造 / 维护成本（agent 需要负担多少） →"));
+    const yl = E("text", { x: 34, y: (Y0 + Y1) / 2, "text-anchor": "middle", "font-size": 11.5, fill: "var(--ink3)", transform: "rotate(-90 34 " + ((Y0 + Y1) / 2) + ")" }, "时空约束强度 →");
+    svg.appendChild(yl);
+    // desirable corner
+    svg.appendChild(E("rect", { x: X0 + 6, y: Y1, width: 288, height: 82, rx: 10, fill: "var(--ok-soft)", stroke: "var(--ok)", "stroke-dasharray": "5 4" }));
+    svg.appendChild(E("text", { x: X0 + 18, y: Y1 + 26, "font-size": 11.5, fill: "var(--ok-ink)", "font-weight": 600 }, "理想区：成本低而约束强"));
+    svg.appendChild(E("text", { x: X0 + 18, y: Y1 + 46, "font-size": 10.5, fill: "var(--ink3)" }, "论文的设计目标就是往这个角落挪"));
+    R.forEach((r, i) => {
+      const cx = X0 + r.x * (X1 - X0), cy = Y0 - r.y * (Y0 - Y1);
+      const on = i === active;
+      svg.appendChild(E("circle", { cx: cx, cy: cy, r: on ? 13 : 8, fill: "var(--" + r.cls + "-soft)", stroke: "var(--" + r.cls + ")", "stroke-width": on ? 2.4 : 1.4 }));
+      svg.appendChild(E("circle", { cx: cx, cy: cy, r: 3.2, fill: "var(--" + r.cls + ")" }));
+      const t = E("text", { x: cx + (i === 1 ? -18 : 20), y: cy + 4, "font-size": 12, "font-weight": on ? 700 : 500, fill: on ? "var(--" + r.cls + "-ink)" : "var(--ink3)", "text-anchor": i === 1 ? "end" : "start" }, r.k);
+      svg.appendChild(t);
+    });
+  }
+  function set(i) {
+    const r = R[i];
+    $("#f5title").textContent = r.k;
+    $("#f5title").style.color = "var(--" + r.cls + "-ink)";
+    $("#f5card").style.borderTop = "2px solid var(--" + r.cls + ")";
+    $("#f5how").innerHTML = r.how;
+    $("#f5why").innerHTML = r.why;
+    bars(r); map(i);
+  }
+  segCtl($("#f5seg"), b => set(+b.dataset.r));
+  set(0);
+});
+</script>
+<script>
+"use strict";
+/* ============================================================
+   FIG 6 — proxy 编译器沙盒
+   一个最小的软件光栅化器：粗基元 → 共享 z-buffer →
+   fixed-log 深度通道 + 类别语义 ID 通道。
+   按论文 §3.2 / §4.1 的描述复现，不是官方实现。
+   ============================================================ */
+guard("proxy-sandbox", function () {
+  const PXW = 336, PXH = 192, NEAR = 0.28, FOV = 52 * Math.PI / 180;
+  const F = (PXH / 2) / Math.tan(FOV / 2);
+  const cv = document.getElementById("pxCanvas");
+  const ctx = cv.getContext("2d", { alpha: false });
+  const img = ctx.createImageData(PXW, PXH);
+  const zbuf = new Float32Array(PXW * PXH);
+  const idbuf = new Uint8Array(PXW * PXH);
+
+  const SEM = [
+    { n: "天空 / 空", c: [14, 16, 21] },
+    { n: "地面", c: [72, 80, 96] },
+    { n: "主角 · 胶囊基元", c: [230, 116, 58] },
+    { n: "车辆 · 体量基元", c: [58, 172, 206] },
+    { n: "植被 · 低模", c: [82, 178, 118] },
+    { n: "建筑 · 粗体量", c: [148, 118, 208] },
+    { n: "复杂物体 / bbox 退化", c: [232, 190, 76] }
+  ];
+
+  const BASE = [
+    { k: "capsule", id: 2, x: 0.0, z: 0.5, r: 0.44, h: 1.85, name: "主角", drag: true, key: true },
+    { k: "box", id: 3, x: 6.6, z: -5.4, sx: 4.4, sy: 1.5, sz: 2.0, yaw: 0.22, name: "车辆", drag: true, key: true },
+    { k: "complex", id: 6, x: 2.4, z: 5.2, name: "复杂物体", drag: true, key: true },
+    { k: "tree", id: 4, x: -5.6, z: -1.2, r: 1.5, h: 5.0, name: "树", drag: true, key: false },
+    { k: "tree", id: 4, x: 7.6, z: 3.4, r: 1.2, h: 4.0, name: "树", drag: true, key: false },
+    { k: "box", id: 5, x: -12.5, z: -13.0, sx: 9, sy: 11, sz: 8, yaw: 0.10, name: "建筑", drag: false, key: false },
+    { k: "box", id: 5, x: 12.5, z: -15.0, sx: 8, sy: 14, sz: 7, yaw: -0.20, name: "建筑", drag: false, key: false }
+  ];
+  const ents = BASE.map(o => Object.assign({}, o));
+  const cam = { x: -6.4, z: 8.6, y: 2.15 };
+
+  let channel = "comp", playing = false, raf = 0;
+
+  /* ---------- geometry ---------- */
+  function pushBox(tris, cx, cz, sx, sy, sz, yaw, id) {
+    const hx = sx / 2, hz = sz / 2, c = Math.cos(yaw), s = Math.sin(yaw);
+    const P = [];
+    [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]].forEach(p => {
+      const wx = cx + p[0] * c - p[1] * s, wz = cz + p[0] * s + p[1] * c;
+      P.push([wx, 0, wz], [wx, sy, wz]);
+    });
+    // P index: corner i -> bottom 2i, top 2i+1
+    const q = (a, b, cc, d) => { tris.push([P[a], P[b], P[cc], id], [P[a], P[cc], P[d], id]); };
+    q(0, 2, 3, 1); q(2, 4, 5, 3); q(4, 6, 7, 5); q(6, 0, 1, 7); // sides
+    q(1, 3, 5, 7); // top
+  }
+  function pushLathe(tris, cx, cz, profile, segs, id) {
+    for (let i = 0; i < profile.length - 1; i++) {
+      const y0 = profile[i][0], r0 = profile[i][1], y1 = profile[i + 1][0], r1 = profile[i + 1][1];
+      for (let s = 0; s < segs; s++) {
+        const a0 = (s / segs) * Math.PI * 2, a1 = ((s + 1) / segs) * Math.PI * 2;
+        const p00 = [cx + r0 * Math.cos(a0), y0, cz + r0 * Math.sin(a0)];
+        const p01 = [cx + r0 * Math.cos(a1), y0, cz + r0 * Math.sin(a1)];
+        const p10 = [cx + r1 * Math.cos(a0), y1, cz + r1 * Math.sin(a0)];
+        const p11 = [cx + r1 * Math.cos(a1), y1, cz + r1 * Math.sin(a1)];
+        tris.push([p00, p01, p11, id], [p00, p11, p10, id]);
+      }
+    }
+  }
+  function capsuleProfile(r, h) {
+    return [[0, 0], [r * 0.42, r * 0.92], [r, r], [h - r, r], [h - r * 0.35, r * 0.86], [h, 0]];
+  }
+  function buildScene(t) {
+    const tris = [];
+    // ground: 两个大三角形即可 —— 1/z 在屏幕空间线性插值，深度是精确的
+    const G = 220;
+    tris.push([[-G, 0, -G], [G, 0, -G], [G, 0, G], 1], [[-G, 0, -G], [G, 0, G], [-G, 0, G], 1]);
+    const keyOnly = document.getElementById("pxKey").checked;
+    const bbox = document.getElementById("pxBbox").checked;
+    const walk = (t / 123) * 5.2;
+    ents.forEach((e, i) => {
+      if (keyOnly && !e.key) return;
+      const ex = e.x + (i === 0 ? walk : 0);
+      if (e.k === "capsule") {
+        pushLathe(tris, ex, e.z, capsuleProfile(e.r, e.h), 10, e.id);
+      } else if (e.k === "box") {
+        pushBox(tris, ex, e.z, e.sx, e.sy, e.sz, e.yaw, e.id);
+      } else if (e.k === "tree") {
+        pushLathe(tris, ex, e.z, [[0, e.r * 0.16], [e.h * 0.34, e.r * 0.13]], 6, e.id);
+        pushLathe(tris, ex, e.z, [[e.h * 0.30, 0], [e.h * 0.34, e.r], [e.h * 0.62, e.r * 0.74], [e.h, 0]], 8, e.id);
+      } else if (e.k === "complex") {
+        if (bbox) {
+          pushBox(tris, ex, e.z, 1.7, 2.9, 1.7, 0.3, e.id);
+        } else {
+          pushBox(tris, ex, e.z, 1.4, 0.35, 1.4, 0.3, e.id);
+          pushLathe(tris, ex, e.z, [[0.35, 0.42], [1.5, 0.5], [1.9, 0.3]], 9, e.id);
+          pushLathe(tris, ex, e.z, [[1.9, 0.34], [2.9, 0]], 9, e.id);
+          pushBox(tris, ex - 0.72, e.z, 0.22, 1.1, 0.22, 0, e.id);
+          pushBox(tris, ex + 0.72, e.z, 0.22, 1.1, 0.22, 0, e.id);
+        }
+      }
+    });
+    return tris;
+  }
+  function makeCam(t) {
+    const p0 = ents[0], walk = (t / 123) * 5.2;
+    const tgt = { x: p0.x + walk, y: 1.05, z: p0.z };
+    const dx = cam.x - p0.x, dz = cam.z - p0.z;
+    const R = Math.max(2.2, Math.hypot(dx, dz)), th0 = Math.atan2(dz, dx);
+    const th = th0 + (t / 123) * (78 * Math.PI / 180);
+    const cx = tgt.x + R * Math.cos(th), cz = tgt.z + R * Math.sin(th), cy = cam.y;
+    const hx = tgt.x - cx, hz = tgt.z - cz, hy = tgt.y - cy;
+    const H = Math.max(1e-4, Math.hypot(hx, hz));
+    return { x: cx, y: cy, z: cz, yaw: Math.atan2(-hx, -hz), pitch: Math.atan2(-hy, H), R: R, th: th, tgt: tgt };
+  }
+
+  /* ---------- raster ---------- */
+  function toView(p, c) {
+    const dx = p[0] - c.x, dy = p[1] - c.y, dz = p[2] - c.z;
+    const cy = Math.cos(c.yaw), sy = Math.sin(c.yaw);
+    const vx = dx * cy - dz * sy;
+    const fz = -(dx * sy + dz * cy);
+    const cp = Math.cos(c.pitch), sp = Math.sin(c.pitch);
+    return [vx, dy * cp + fz * sp, fz * cp - dy * sp];
+  }
+  function raster(a, b, c, id) {
+    const den = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+    if (Math.abs(den) < 1e-9) return;
+    const idn = 1 / den;
+    let minx = Math.max(0, Math.floor(Math.min(a[0], b[0], c[0])));
+    let maxx = Math.min(PXW - 1, Math.ceil(Math.max(a[0], b[0], c[0])));
+    let miny = Math.max(0, Math.floor(Math.min(a[1], b[1], c[1])));
+    let maxy = Math.min(PXH - 1, Math.ceil(Math.max(a[1], b[1], c[1])));
+    if (minx > maxx || miny > maxy) return;
+    for (let y = miny; y <= maxy; y++) {
+      const py = y + 0.5;
+      for (let x = minx; x <= maxx; x++) {
+        const pxx = x + 0.5;
+        const l0 = ((b[1] - c[1]) * (pxx - c[0]) + (c[0] - b[0]) * (py - c[1])) * idn;
+        if (l0 < 0) continue;
+        const l1 = ((c[1] - a[1]) * (pxx - c[0]) + (a[0] - c[0]) * (py - c[1])) * idn;
+        if (l1 < 0) continue;
+        const l2 = 1 - l0 - l1;
+        if (l2 < 0) continue;
+        const iz = l0 * a[2] + l1 * b[2] + l2 * c[2];
+        const k = y * PXW + x;
+        if (iz > zbuf[k]) { zbuf[k] = iz; idbuf[k] = id; }
+      }
+    }
+  }
+  function drawTri(tri, c) {
+    const v = [toView(tri[0], c), toView(tri[1], c), toView(tri[2], c)];
+    const id = tri[3];
+    let poly = [];
+    for (let i = 0; i < 3; i++) {
+      const A = v[i], B = v[(i + 1) % 3];
+      const ain = A[2] >= NEAR, bin = B[2] >= NEAR;
+      if (ain) poly.push(A);
+      if (ain !== bin) {
+        const t = (NEAR - A[2]) / (B[2] - A[2]);
+        poly.push([A[0] + t * (B[0] - A[0]), A[1] + t * (B[1] - A[1]), NEAR]);
+      }
+    }
+    if (poly.length < 3) return;
+    const S = poly.map(p => [PXW / 2 + F * p[0] / p[2], PXH / 2 - F * p[1] / p[2], 1 / p[2]]);
+    for (let i = 1; i < S.length - 1; i++) raster(S[0], S[i], S[i + 1], id);
+  }
+
+  /* ---------- paint ---------- */
+  const LN = Math.log(0.9), LFAR = Math.log(150);
+  function paint() {
+    const d = img.data, edge = document.getElementById("pxEdge").checked;
+    for (let k = 0; k < PXW * PXH; k++) {
+      const id = idbuf[k], iz = zbuf[k];
+      let dep = 1;
+      if (iz > 0) {
+        const z = 1 / iz;
+        dep = (Math.log(Math.max(0.9, z)) - LN) / (LFAR - LN);
+        dep = dep < 0 ? 0 : (dep > 1 ? 1 : dep);
+      }
+      let r, g, b;
+      if (channel === "depth") {
+        const v = iz > 0 ? Math.round(28 + 227 * (1 - dep)) : 10;
+        r = g = b = v;
+      } else if (channel === "sem") {
+        const c = SEM[id].c; r = c[0]; g = c[1]; b = c[2];
+      } else {
+        const c = SEM[id].c, s = id === 0 ? 1 : (0.30 + 0.72 * (1 - dep));
+        r = c[0] * s; g = c[1] * s; b = c[2] * s;
+      }
+      const o = k * 4; d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+    }
+    if (edge && channel === "comp") {
+      for (let y = 0; y < PXH - 1; y++) for (let x = 0; x < PXW - 1; x++) {
+        const k = y * PXW + x;
+        if (idbuf[k] !== idbuf[k + 1] || idbuf[k] !== idbuf[k + PXW]) {
+          const o = k * 4;
+          d[o] = Math.min(255, d[o] + 90); d[o + 1] = Math.min(255, d[o + 1] + 90); d[o + 2] = Math.min(255, d[o + 2] + 90);
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  /* ---------- minimap ---------- */
+  const mp = document.getElementById("pxMap"), mctx = mp.getContext("2d");
+  const SC = 9, OX = 20, OZ = 16;
+  const w2m = (x, z) => [(x + OX) * SC, (z + OZ) * SC];
+  const m2w = (mx, mz) => [mx / SC - OX, mz / SC - OZ];
+  function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim() || "#888"; }
+  function drawMap(t, c) {
+    const W = mp.width, H = mp.height;
+    mctx.clearRect(0, 0, W, H);
+    mctx.fillStyle = css("--surf"); mctx.fillRect(0, 0, W, H);
+    mctx.strokeStyle = css("--rule"); mctx.lineWidth = 1;
+    for (let i = -20; i <= 20; i += 5) { const p = w2m(i, 0); mctx.beginPath(); mctx.moveTo(p[0], 0); mctx.lineTo(p[0], H); mctx.stroke(); }
+    for (let j = -16; j <= 14; j += 5) { const p = w2m(0, j); mctx.beginPath(); mctx.moveTo(0, p[1]); mctx.lineTo(W, p[1]); mctx.stroke(); }
+    // protagonist path
+    const p0 = ents[0], a = w2m(p0.x, p0.z), b = w2m(p0.x + 5.2, p0.z);
+    mctx.strokeStyle = css("--px"); mctx.setLineDash([4, 3]); mctx.lineWidth = 1.5;
+    mctx.beginPath(); mctx.moveTo(a[0], a[1]); mctx.lineTo(b[0], b[1]); mctx.stroke(); mctx.setLineDash([]);
+    // camera arc
+    mctx.strokeStyle = css("--vd"); mctx.setLineDash([3, 3]);
+    mctx.beginPath();
+    for (let i = 0; i <= 24; i++) {
+      const cc = makeCam(i / 24 * 123), q = w2m(cc.x, cc.z);
+      i ? mctx.lineTo(q[0], q[1]) : mctx.moveTo(q[0], q[1]);
+    }
+    mctx.stroke(); mctx.setLineDash([]);
+    // entities
+    const keyOnly = document.getElementById("pxKey").checked;
+    const walk = (t / 123) * 5.2;
+    ents.forEach((e, i) => {
+      const dim = keyOnly && !e.key;
+      const ex = e.x + (i === 0 ? walk : 0), q = w2m(ex, e.z);
+      const col = "rgb(" + SEM[e.id].c.join(",") + ")";
+      mctx.globalAlpha = dim ? 0.22 : 1;
+      mctx.fillStyle = col; mctx.strokeStyle = css("--bg"); mctx.lineWidth = 1.5;
+      if (e.k === "box") {
+        const hw = e.sx / 2 * SC, hh = e.sz / 2 * SC;
+        mctx.save(); mctx.translate(q[0], q[1]); mctx.rotate(e.yaw);
+        mctx.fillRect(-hw, -hh, hw * 2, hh * 2); mctx.strokeRect(-hw, -hh, hw * 2, hh * 2); mctx.restore();
+      } else {
+        const r = (e.k === "capsule" ? 5 : e.k === "complex" ? 7 : (e.r || 1) * SC * 0.7);
+        mctx.beginPath(); mctx.arc(q[0], q[1], r, 0, 6.2832); mctx.fill(); mctx.stroke();
+      }
+      if (i === 0) {
+        mctx.fillStyle = css("--ink2"); mctx.font = "10px ui-monospace,monospace";
+        mctx.fillText("主角", q[0] - 10, q[1] - 9);
+      }
+      mctx.globalAlpha = 1;
+    });
+    // camera gizmo
+    const q = w2m(c.x, c.z);
+    const dirx = -Math.sin(c.yaw), dirz = -Math.cos(c.yaw);
+    const half = FOV / 2 * 1.25;
+    mctx.fillStyle = "rgba(187,74,134,.16)"; mctx.strokeStyle = css("--vd"); mctx.lineWidth = 1.4;
+    mctx.beginPath(); mctx.moveTo(q[0], q[1]);
+    for (let s = -1; s <= 1; s += 0.25) {
+      const a2 = Math.atan2(dirz, dirx) + s * half;
+      mctx.lineTo(q[0] + Math.cos(a2) * 11 * SC, q[1] + Math.sin(a2) * 11 * SC);
+    }
+    mctx.closePath(); mctx.fill();
+    mctx.beginPath(); mctx.arc(q[0], q[1], 6, 0, 6.2832); mctx.fillStyle = css("--vd"); mctx.fill();
+    mctx.strokeStyle = css("--bg"); mctx.lineWidth = 2; mctx.stroke();
+    mctx.fillStyle = css("--ink3"); mctx.font = "10px ui-monospace,monospace";
+    mctx.fillText("camera", q[0] + 9, q[1] + 3);
+  }
+
+  /* ---------- drive ---------- */
+  function render() {
+    const t = +document.getElementById("pxT").value;
+    document.getElementById("pxTro").textContent = String(t).padStart(3, "0");
+    const c = makeCam(t);
+    zbuf.fill(0); idbuf.fill(0);
+    const tris = buildScene(t);
+    for (let i = 0; i < tris.length; i++) drawTri(tris[i], c);
+    paint();
+    drawMap(t, c);
+    const names = { depth: "fixed-log depth", sem: "categorical semantic ID", comp: "两通道合成视图" };
+    document.getElementById("pxBadge").textContent = "336 × 192 · " + names[channel] + " · frame " + String(t).padStart(3, "0");
+    document.getElementById("pxMath").innerHTML =
+      "proxy&nbsp;&nbsp;336 × 192 = 64,512 px<br>" +
+      "target 1344 × 768 = 1,032,192 px<br>" +
+      "比值 = 1/16 —— 每维 1/4<br>" +
+      "<span style='color:var(--ink3)'>三角形 " + tris.length.toLocaleString("en-US") + " · 基元皆为几行代码可写</span>";
+  }
+  function legend() {
+    const L = document.getElementById("pxLegend"); clear(L);
+    SEM.forEach((s, i) => {
+      if (i === 0) return;
+      const sp = document.createElement("span");
+      sp.innerHTML = "<i style='background:rgb(" + s.c.join(",") + ")'></i>" + s.n;
+      L.appendChild(sp);
+    });
+  }
+
+  /* drag */
+  let dragging = null;
+  function pick(mx, my) {
+    const w = m2w(mx, my), t = +document.getElementById("pxT").value, walk = (t / 123) * 5.2;
+    let best = null, bd = 2.6;
+    const c = makeCam(t);
+    let d = Math.hypot(c.x - w[0], c.z - w[1]);
+    if (d < bd) { bd = d; best = { type: "cam" }; }
+    ents.forEach((e, i) => {
+      if (!e.drag) return;
+      const ex = e.x + (i === 0 ? walk : 0);
+      const dd = Math.hypot(ex - w[0], e.z - w[1]);
+      if (dd < bd) { bd = dd; best = { type: "ent", i: i, off: (i === 0 ? walk : 0) }; }
+    });
+    return best;
+  }
+  function evPos(ev) {
+    const r = mp.getBoundingClientRect();
+    return [(ev.clientX - r.left) * (mp.width / r.width), (ev.clientY - r.top) * (mp.height / r.height)];
+  }
+  mp.addEventListener("pointerdown", ev => {
+    const p = evPos(ev); dragging = pick(p[0], p[1]);
+    if (dragging) { mp.setPointerCapture(ev.pointerId); mp.style.cursor = "grabbing"; ev.preventDefault(); }
+  });
+  mp.addEventListener("pointermove", ev => {
+    if (!dragging) return;
+    const p = evPos(ev), w = m2w(p[0], p[1]);
+    const cx = Math.max(-19, Math.min(19, w[0])), cz = Math.max(-15, Math.min(13, w[1]));
+    if (dragging.type === "cam") {
+      const t = +document.getElementById("pxT").value;
+      const p0 = ents[0], tgt = { x: p0.x + (t / 123) * 5.2, z: p0.z };
+      const R = Math.max(2.4, Math.hypot(cx - tgt.x, cz - tgt.z));
+      const th = Math.atan2(cz - tgt.z, cx - tgt.x) - (t / 123) * (78 * Math.PI / 180);
+      cam.x = p0.x + R * Math.cos(th); cam.z = p0.z + R * Math.sin(th);
+    } else {
+      ents[dragging.i].x = cx - dragging.off; ents[dragging.i].z = cz;
+    }
+    render();
+  });
+  ["pointerup", "pointercancel"].forEach(k => mp.addEventListener(k, () => { dragging = null; mp.style.cursor = "grab"; }));
+
+  document.getElementById("pxT").addEventListener("input", render);
+  ["pxBbox", "pxKey", "pxEdge"].forEach(id => document.getElementById(id).addEventListener("change", render));
+  segCtl(document.getElementById("pxCh"), b => { channel = b.dataset.c; render(); });
+  const playBtn = document.getElementById("pxPlay");
+  function tick() {
+    if (!playing) return;
+    const el = document.getElementById("pxT");
+    el.value = (+el.value + 1) % 124;
+    render();
+    raf = setTimeout(() => requestAnimationFrame(tick), 55);
+  }
+  playBtn.addEventListener("click", () => {
+    playing = !playing;
+    playBtn.textContent = playing ? "⏸ 暂停" : "▶ 播放 124 帧";
+    playBtn.classList.toggle("on", playing);
+    if (playing) tick(); else clearTimeout(raf);
+  });
+  legend(); render();
+  window.addEventListener("resize", () => { clearTimeout(window.__pxr); window.__pxr = setTimeout(render, 220); });
+  const mo = new MutationObserver(render);
+  mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+});
+</script>
+<script>
+"use strict";
+
+/* ---------- FIG 7 : condition bandwidth ---------- */
+guard("fig7", function () {
+  const S = [
+    { k: "纯文本（不启用 proxy）", s: "纯文本", g: 8, c: 99, cls: "tx", d: "论文明确说这是允许的：<strong>当文本足够时，agent 可以省略 proxy</strong>。构造负担为零，但对相机轨迹与实体运动几乎没有精确约束——这正是 §3.2 开头那组失败实验的位置。" },
+    { k: "仅 bounding box", s: "仅 bbox", g: 34, c: 92, cls: "px", d: "论文给复杂物体准备的<strong>退化路径</strong>：包围盒只传达位置与粗略空间范围，身份、类别、外观、动作全部交给结构化文本。它避免 agent 去重建复杂几何，同时仍告诉视频模型「那个位置上有个东西」。" },
+    { k: "粗基元 + 深度 / 语义 ID", s: "粗基元 ★", g: 70, c: 74, cls: "px", d: "<strong>本文实例化并评测的那一档。</strong>人用胶囊、树用低模、车用体量、大建筑用粗范围；编译成 336×192 的 fixed-log 深度与类别语义 ID 双通道。刻意<strong>不含</strong>骨骼姿态与精细 3D 模型——因为推理时 agent 必须能复现。" },
+    { k: "更细粒度 + 状态标记", s: "更细粒度", g: 80, c: 58, cls: "px", d: "论文把「所表示的状态类型、空间粒度、分辨率、条件帧率」都列为 agent 可调的参数，并提到可寻址参数中包含 <em>state markers</em>。这一档在设计空间里，但本文没有实例化。" },
+    { k: "关节级铰接骨架", s: "关节级骨架", g: 91, c: 26, cls: "warn", d: "论文点名的<strong>能力边界</strong>：如果 proxy 在关节级编码铰接运动，agent 在推理时就必须控制关节轨迹；而「当前 coding agent 仍难以可靠实现这种关节级运动控制，这会限制最终性能」。" },
+    { k: "完整 3D 资产与渲染管线", s: "完整 3D", g: 98, c: 8, cls: "vd", d: "grounding 最强，但这已经不是 proxy 而是显式 3D 路线：需要生产级几何、材质、动画与渲染，成本高、过早锁死视觉上限，且开放世界里每个新物体都要配一套资产。" }
+  ];
+  const svg = document.querySelector("#f7svg");
+  // viewBox 高度留出 x 轴两行标签
+  const X0 = 104, X1 = 872, Y0 = 258, Y1 = 56;
+  const px = i => X0 + (i / (S.length - 1)) * (X1 - X0);
+  const py = v => Y0 - (v / 100) * (Y0 - Y1);
+  function draw(sel) {
+    clear(svg);
+    for (let v = 0; v <= 100; v += 25) {
+      svg.appendChild(E("line", { x1: X0, y1: py(v), x2: X1, y2: py(v), stroke: "var(--grid)" }));
+      svg.appendChild(E("text", { x: X0 - 10, y: py(v) + 4, "text-anchor": "end", "font-size": 10, "font-family": "var(--font-mono)", fill: "var(--ink3)" }, v));
+    }
+    // capability boundary
+    const bx = px(3.55);
+    svg.appendChild(E("rect", { x: bx, y: Y1 - 4, width: X1 - bx, height: Y0 - Y1 + 4, fill: "var(--bad-soft)" }));
+    svg.appendChild(E("line", { x1: bx, y1: Y1 - 4, x2: bx, y2: Y0, stroke: "var(--bad)", "stroke-dasharray": "5 4", "stroke-width": 1.4 }));
+    svg.appendChild(E("text", { x: bx + 10, y: Y0 - 10, "font-size": 11, fill: "var(--bad-ink)", "font-weight": 600 }, "当前 coding agent 难以可靠维护的区域"));
+    const mk = (key, color, label) => {
+      let d = "";
+      S.forEach((s, i) => { d += (i ? "L" : "M") + px(i) + " " + py(s[key]); });
+      svg.appendChild(E("path", { d: d, fill: "none", stroke: color, "stroke-width": 2.2, "stroke-linejoin": "round" }));
+      S.forEach((s, i) => svg.appendChild(E("circle", { cx: px(i), cy: py(s[key]), r: i === sel ? 6 : 3.6, fill: i === sel ? color : "var(--surf)", stroke: color, "stroke-width": 2 })));
+      const ly = key === "g" ? 22 : 40;
+      svg.appendChild(E("rect", { x: X1 - 122, y: ly - 11, width: 11, height: 3, rx: 1.5, fill: color }));
+      svg.appendChild(E("text", { x: X1 - 104, y: ly - 6, "font-size": 11.5, "font-weight": 600, fill: color }, label));
+    };
+    mk("g", "var(--px)", "grounding 强度");
+    mk("c", "var(--ag)", "可构造性（agent 能维护）");
+    // selected marker
+    svg.appendChild(E("line", { x1: px(sel), y1: Y1 - 4, x2: px(sel), y2: Y0 + 6, stroke: "var(--ink3)", "stroke-width": 1, "stroke-dasharray": "3 3" }));
+    // paper choice
+    svg.appendChild(E("circle", { cx: px(2), cy: Y0 + 22, r: 4, fill: "var(--px)" }));
+    svg.appendChild(E("text", { x: px(2) + 10, y: Y0 + 26, "font-size": 10.5, "font-weight": 600, fill: "var(--px-ink)" }, "论文停在这里"));
+    // x labels
+    S.forEach((s, i) => {
+      const t = E("text", { x: px(i), y: Y0 + 46, "text-anchor": "middle", "font-size": 11, fill: i === sel ? "var(--ink)" : "var(--ink3)", "font-weight": i === sel ? 700 : 400 }, s.s);
+      svg.appendChild(t);
+    });
+    svg.appendChild(E("text", { x: X0 - 24, y: Y0 + 68, "text-anchor": "start", "font-size": 10.5, "font-family": "var(--font-mono)", fill: "var(--ink3)" }, "← 带宽低 · 构造轻"));
+    svg.appendChild(E("text", { x: X1 + 24, y: Y0 + 68, "text-anchor": "end", "font-size": 10.5, "font-family": "var(--font-mono)", fill: "var(--ink3)" }, "带宽高 · 构造重 →"));
+    const s = S[sel];
+    document.querySelector("#f7ro").textContent = s.s;
+    document.querySelector("#f7t").textContent = s.k + (sel === 2 ? "（本文）" : "");
+    document.querySelector("#f7t").style.color = "var(--" + s.cls + "-ink)";
+    document.querySelector("#f7card").style.borderTop = "2px solid var(--" + s.cls + ")";
+    document.querySelector("#f7d").innerHTML = s.d;
+  }
+  document.querySelector("#f7r").addEventListener("input", e => draw(+e.target.value));
+  document.querySelector("#f7reset").addEventListener("click", () => { document.querySelector("#f7r").value = 2; draw(2); });
+  draw(2);
+});
+
+/* ---------- FIG 9 : data pipelines ---------- */
+guard("fig9", function () {
+  const P = {
+    game: {
+      cap: "对应论文 Fig. 3a 与 §3.3「Game data」。关键前提是<b>目标视频与运行时状态来自同一次执行</b>，因此对齐是构造出来的，不是估计出来的。",
+      steps: [
+        { t: "同一次执行，双路记录", d: "游戏进行时同步录下<strong>目标视频</strong>，并从运行时只抽取构造 proxy 所需的状态：相机状态、实体位置与朝向、近似尺度、场景布局、交互关键状态。<strong>不保留</strong>完整 3D 模型、纹理与材质。" },
+        { t: "程序化构造 proxy", d: "代码读结构化运行时标注，为每个身份分类并组合基元（人、树、车辆、灌木、普通建筑等常见类别 agent 可自主处理）。结构复杂或不常见的物体：先判断简单基元是否还能保持可区分性，不能就<strong>退回包围盒</strong>。" },
+        { t: "沿目标相机轨迹渲染", d: "把 proxy <strong>沿目标视频自己的相机轨迹</strong>渲染出来，得到同一段游戏过程的「条件—目标」对。同时得到逐帧的<strong>像素级 ground-truth 实例图</strong>，标出每个像素属于哪个身份。" },
+        { t: "绑定文本 + 可重编译", d: "实例图把结构化文本里每个身份的外观、属性、动作描述<strong>绑定到对应的 proxy 区域</strong>，得到更精确的条件。同一份运行时记录还可以被<strong>重编译成覆盖度与粒度不同的 proxy</strong>，无需重新采集目标视频。" }
+      ]
+    },
+    real: {
+      cap: "对应论文 Fig. 3b 与 §3.3「Real-world data」。这是一个 <b>proof of concept</b>：验证 proxy–观测对可以从真实录像编译出来。<b>本文的视频模型并没有在这批数据上训练。</b>",
+      steps: [
+        { t: "KITTI-360 的矫正 RGB 帧作为目标", d: "目标观测就是数据集里的 rectified RGB 帧。整条管线<strong>不需要动作标签，也不需要相机位姿标注</strong>——动作与相机运动的视觉效果直接被表示在 proxy video 里。" },
+        { t: "三样东西只在离线构造时使用", d: "标定相机位姿、累积的语义 3D 重建、3D 物体标注。论文强调：<strong>这三样都不提供给视频模型</strong>，它们只用来编译条件。" },
+        { t: "投影出几何通道", d: "在每个时间戳把静态场景几何投影到标定视角，得到 <strong>metric depth</strong> 与<strong>由深度导出的表面法向</strong>。需要显式空间 grounding 的场景元素用与游戏数据<strong>同一套粗基元词表</strong>表示：行人=胶囊骨架，车辆=线框，植被=低模，大型建筑=粗 3D 范围。" },
+        { t: "共享 depth buffer 光栅化", d: "投影几何与 proxy 基元通过一个<strong>共享的深度缓冲</strong>一起光栅化，从而在所有条件通道上保住相机运动、空间对齐与<strong>遮挡关系</strong>。用同一个数据集帧号建立 RGB 目标与条件的一一对应。" }
+      ]
+    }
+  };
+  let src = "game", idx = 0;
+  const svg = document.querySelector("#f9svg");
+  function draw() {
+    const set = P[src];
+    clear(svg);
+    const X0 = 14, W = 226, GAP = 18;
+    set.steps.forEach((s, i) => {
+      const x = X0 + i * (W + GAP), on = i === idx;
+      const col = src === "game" ? "--cd" : "--px";
+      svg.appendChild(E("rect", { x: x, y: 46, width: W, height: 132, rx: 11, fill: on ? "var(" + col + "-soft)" : "var(--surf2)", stroke: on ? "var(" + col + ")" : "var(--rule)", "stroke-width": on ? 1.8 : 1 }));
+      svg.appendChild(E("circle", { cx: x + 24, cy: 74, r: 13, fill: on ? "var(" + col + ")" : "var(--surf3)", stroke: on ? "none" : "var(--rule2)" }));
+      svg.appendChild(E("text", { x: x + 24, y: 79, "text-anchor": "middle", "font-size": 12, "font-weight": 700, fill: on ? "#fff" : "var(--ink3)", "font-family": "var(--font-mono)" }, i + 1));
+      const t = E("text", { x: x + 46, y: 79, "font-size": 12.5, "font-weight": 700, fill: on ? "var(" + col + "-ink)" : "var(--ink2)" }, s.t);
+      svg.appendChild(t);
+      const wrapped = wrapMixed(s.d.replace(/<[^>]+>/g, ""), 18, 5);
+      wrapped.lines.forEach((ln, k) => svg.appendChild(E("text", { x: x + 18, y: 106 + k * 15, "font-size": 10.5, fill: "var(--ink3)" },
+        ln + (wrapped.truncated && k === wrapped.lines.length - 1 ? "…" : ""))));
+      if (i < 3) svg.appendChild(E("path", { d: "M" + (x + W + 2) + " 112 L" + (x + W + GAP - 4) + " 112", stroke: "var(--rule2)", "stroke-width": 1.6, "marker-end": "url(#ah)", fill: "none" }));
+    });
+    svg.appendChild(E("text", { x: 14, y: 24, "font-size": 11, "font-family": "var(--font-mono)", "letter-spacing": 1.2, fill: "var(--ink3)" },
+      src === "game" ? "游戏对：同一次执行 → 双路记录 → 程序化编译 → 条件—目标对" : "真实对：现成 3D 重建 → 离线投影 → 共享 depth buffer → 条件—目标对"));
+    svg.appendChild(E("text", { x: 14, y: 208, "font-size": 11, fill: src === "game" ? "var(--cd-ink)" : "var(--px-ink)", "font-weight": 600 },
+      src === "game" ? "不需要：动作标签 · 相机位姿标注 · 完整 3D 资产" : "不给视频模型：相机位姿 · 3D 重建 · 物体标注（仅离线构造时使用）"));
+    svg.appendChild(E("text", { x: 14, y: 230, "font-size": 11, fill: "var(--ink3)" },
+      src === "game" ? "→ 因为动作后果与相机运动已经被表示在 proxy video 里" : "→ 真实视频里「动作」的语义粒度本就歧义，连续相机运动也难以估计"));
+    document.querySelector("#f9t").textContent = (idx + 1) + " · " + set.steps[idx].t;
+    document.querySelector("#f9t").style.color = src === "game" ? "var(--cd-ink)" : "var(--px-ink)";
+    document.querySelector("#f9card").style.borderTop = "2px solid var(--" + (src === "game" ? "cd" : "px") + ")";
+    document.querySelector("#f9d").innerHTML = set.steps[idx].d;
+    document.querySelector("#f9cap").innerHTML = set.cap;
+  }
+  segCtl(document.querySelector("#f9src"), b => { src = b.dataset.s; draw(); });
+  segCtl(document.querySelector("#f9step"), b => { idx = +b.dataset.i; draw(); });
+  draw();
+});
+
+/* ---------- consistency checks ---------- */
+guard("checks", function () {
+  const C = [
+    { q: "124 帧 @ 24 FPS 是不是 5.17 秒？", a: "✓ 一致", ok: true, m: "124 / 24 = 5.1667 s ≈ 5.17 s。附录 A 的动作时间线正好写到 <span class='mono'>4.50-5.17s</span> 收尾，两处对得上。" },
+    { q: "9,420 个 clip、batch 8、3 epoch，能得到 3,534 步吗？", a: "✓ 基本一致", ok: true, m: "9,420 × 3 / 8 = <span class='mono'>3,532.5</span> 步，论文报告 <span class='mono'>3,534</span> 步。差 1.5 步属于分布式采样器补齐/取整的正常范围。" },
+    { q: "5.6 小时素材、5 秒 clip、2 秒步长，能切出 9,420 个吗？", a: "✓ 数量级一致", ok: true, m: "5.6 h = 20,160 s。157 段平均 128 s，每段可切 ⌊(128−5)/2⌋+1 ≈ 62 个，×157 ≈ <span class='mono'>9,700</span>。论文的 9,420 略少——各段长度不均、末尾不足 5 秒的部分被丢弃，完全说得通。" },
+    { q: "336×192 相对 1344×768 真的是 1/16 token 吗？", a: "✓ 一致", ok: true, m: "1344/336 = 4，768/192 = 4，每维 1/4 → 像素数 1/16 = <span class='mono'>64,512 / 1,032,192</span>。前提是两者用同一套 patch 化方式；论文说的是「1/16 as many visual tokens」，这个前提是隐含成立的。" },
+    { q: "offset 0,12,…,120 是不是 11 帧？", a: "✓ 一致，但注意尾部", ok: true, m: "(120 − 0)/12 + 1 = <span class='mono'>11</span> 帧。<strong>注意 120 &lt; 123</strong>：窗口最后三帧（121–123）不进 multimodal encoder，只以完整 124 帧序列的形式进入 transformer 的视觉 token。" },
+    { q: "Fig. 4 图注说「五小时 GTA V」，§4.1 说「约 5.6 小时」", a: "△ 措辞不一", ok: false, m: "同一批数据的两种说法。5.6 h 是 157 段源视频的总时长，「五小时」应是图注里的约数。<strong>不影响结论，但引用数字时请以 §4.1 的 5.6 h 为准。</strong>" },
+    { q: "长视频：124 帧窗口、34 帧重叠、步进 90，自洽吗？", a: "✓ 一致", ok: true, m: "124 − 34 = <span class='mono'>90</span>。保留第一窗口全部 124 帧，此后每窗贡献 90 帧 → n 个窗口共 <span class='mono'>124 + 90(n−1)</span> 帧。重叠部分被重新生成又丢弃，约 27% 的算力是冗余的。" }
+  ];
+  const root = document.querySelector("#f11checks");
+  C.forEach((c, i) => {
+    const d = document.createElement("details");
+    d.style.cssText = "border:1px solid var(--rule); border-radius:9px; background:var(--surf); margin:0 0 8px; overflow:hidden";
+    const s = document.createElement("summary");
+    s.style.cssText = "cursor:pointer; padding:10px 14px; font-size:14px; list-style:none; display:flex; gap:12px; align-items:baseline";
+    s.innerHTML = "<span class='mono' style='font-size:11px; color:" + (c.ok ? "var(--ok-ink)" : "var(--warn-ink)") + "; white-space:nowrap'>" + c.a + "</span><span style='flex:1'>" + c.q + "</span><span style='color:var(--ink3); font-size:11px'>▾</span>";
+    const b = document.createElement("div");
+    b.style.cssText = "padding:0 14px 12px 14px; font-size:13.5px; line-height:1.65; color:var(--ink2); border-top:1px solid var(--rule); padding-top:11px";
+    b.innerHTML = c.m;
+    d.appendChild(s); d.appendChild(b); root.appendChild(d);
+  });
+});
+
+/* ---------- FIG 11 : sliding windows ---------- */
+guard("fig12", function () {
+  const svg = document.querySelector("#f12svg"), WIN = 124, OV = 34, STRIDE = 90;
+  function draw() {
+    const n = +document.querySelector("#f12n").value;
+    const showAnchor = document.querySelector("#f12anchor").checked;
+    const total = WIN + STRIDE * (n - 1);
+    document.querySelector("#f12nro").textContent = n;
+    document.querySelector("#f12len").textContent = total + " 帧 · " + (total / 24).toFixed(1) + " s";
+    clear(svg);
+    const X0 = 168, X1 = 930, sc = (X1 - X0) / total;
+    const rowH = 26, top = 44;
+    for (let i = 0; i < n; i++) {
+      const s = i * STRIDE, y = top + i * (rowH + 8);
+      svg.appendChild(E("text", { x: 12, y: y + 17, "font-size": 11, "font-family": "var(--font-mono)", fill: "var(--ink3)" }, "window " + i + " · " + s + "–" + (s + WIN - 1)));
+      // kept part
+      const kx = X0 + (i === 0 ? s : s + OV) * sc, kw = (i === 0 ? WIN : STRIDE) * sc;
+      if (i > 0) {
+        svg.appendChild(E("rect", { x: X0 + s * sc, y: y, width: OV * sc, height: rowH, rx: 4, fill: "var(--bad-soft)", stroke: "var(--bad)", "stroke-dasharray": "4 3" }));
+        if (OV * sc > 52) svg.appendChild(E("text", { x: X0 + (s + OV / 2) * sc, y: y + 17, "text-anchor": "middle", "font-size": 10, fill: "var(--bad-ink)", "font-family": "var(--font-mono)" }, "丢弃 34"));
+      }
+      svg.appendChild(E("rect", { x: kx, y: y, width: kw, height: rowH, rx: 4, fill: "var(--px-soft)", stroke: "var(--px)" }));
+      svg.appendChild(E("text", { x: kx + kw / 2, y: y + 17, "text-anchor": "middle", "font-size": 10.5, fill: "var(--px-ink)", "font-family": "var(--font-mono)" }, "保留 " + (i === 0 ? WIN : STRIDE)));
+      if (i > 0) {
+        // continuation context arrow from previous window tail
+        const px_ = X0 + (s + OV / 2) * sc, py_ = y - 8;
+        svg.appendChild(E("path", { d: "M" + px_ + " " + (py_ - rowH + 2) + " L" + px_ + " " + (y - 2), stroke: "var(--vd)", "stroke-width": 1.4, "marker-end": "url(#ah)", fill: "none" }));
+      }
+      if (showAnchor) {
+        svg.appendChild(E("circle", { cx: X0 - 18, cy: y + rowH / 2, r: 7, fill: "var(--vd-soft)", stroke: "var(--vd)", "stroke-width": 1.6 }));
+        svg.appendChild(E("text", { x: X0 - 18, y: y + rowH / 2 + 3.6, "text-anchor": "middle", "font-size": 9, fill: "var(--vd-ink)", "font-weight": 700 }, "A"));
+      }
+    }
+    const oy = top + n * (rowH + 8) + 22;
+    svg.appendChild(E("text", { x: 12, y: oy + 18, "font-size": 11, "font-family": "var(--font-mono)", fill: "var(--ink)", "font-weight": 600 }, "拼接输出"));
+    svg.appendChild(E("rect", { x: X0, y: oy, width: X1 - X0, height: 28, rx: 5, fill: "var(--ok-soft)", stroke: "var(--ok)" }));
+    for (let i = 1; i < n; i++) {
+      const x = X0 + (WIN + (i - 1) * STRIDE) * sc;
+      svg.appendChild(E("line", { x1: x, y1: oy, x2: x, y2: oy + 28, stroke: "var(--ok)", "stroke-dasharray": "3 3" }));
+    }
+    svg.appendChild(E("text", { x: (X0 + X1) / 2, y: oy + 18, "text-anchor": "middle", "font-size": 11, fill: "var(--ok-ink)", "font-family": "var(--font-mono)" }, total + " 帧 · " + (total / 24).toFixed(1) + " s · 1344×768"));
+    // legend
+    svg.appendChild(E("text", { x: 12, y: 24, "font-size": 11, "font-family": "var(--font-mono)", "letter-spacing": 1.2, fill: "var(--ink3)" }, "每个窗口都完整生成 124 帧；紫色箭头＝上一窗口末 34 帧 RGB 作为续写上下文" + (showAnchor ? "；A＝同一张外观锚图被再次注入" : "")));
+    svg.setAttribute("viewBox", "0 0 960 " + (oy + 66));
+    svg.appendChild(E("text", { x: X1, y: oy + 48, "text-anchor": "end", "font-size": 10.5, fill: "var(--ink3)" }, "被丢弃的生成帧占比 " + (n > 1 ? (OV * (n - 1) / (WIN * n) * 100).toFixed(1) : "0.0") + "%（n→∞ 时趋近 34/124 ≈ 27.4%）"));
+  }
+  document.querySelector("#f12n").addEventListener("input", draw);
+  document.querySelector("#f12anchor").addEventListener("change", draw);
+  draw();
+});
+
+/* ---------- FIG 12 : prompt schema ---------- */
+guard("fig13", function () {
+  const SEG = [
+    { a: 0, b: 0.75, t: "The solitary reed-masked rainkeeper holds the exact opening stance at lower center-left, upright in near right-facing profile with the masked face and torso directed toward screen-right. Both arms remain relaxed, the gloved hands hang beside the thighs, and the broad reed mantle settles heavily over the shoulders while the camera begins moving from the rainkeeper's left side toward a rear three-quarter view." },
+    { a: 0.75, b: 1.5, t: "The solitary reed-masked rainkeeper remains planted without stepping as the camera continues its smooth arc behind the body. The visible profile narrows, the back of the conical reed hat and layered mantle becomes dominant, and the figure shifts toward the lower center of the composition while still facing along the same open length of spillway." },
+    { a: 1.5, b: 3.75, t: "The solitary reed-masked rainkeeper stands motionless in a centered rear view, maintaining level shoulders, a straight torso, softly bent elbows, and evenly lowered hands. Only restrained breathing lifts the layered raincloth, loose reed tips stir under the rainfall, and water glides continuously through the pale channels as the camera holds nearly steady behind the figure." },
+    { a: 3.75, b: 4.5, t: "The solitary reed-masked rainkeeper preserves the same footing and world-facing orientation while the camera resumes its lateral arc from the rear toward the figure's left side. The mantle's rear layers gradually give way to the celadon mask's returning profile, and the rainkeeper drifts visually from lower center toward lower center-left as the terraced valley slides across the background." },
+    { a: 4.5, b: 5.17, t: "The solitary reed-masked rainkeeper finishes in a near right-facing side profile closely matching the opening orientation, with the chin level, arms lowered, gloves still, and weight evenly supported. The camera settles into a broad side view as rain beads on the hat brim and mantle, silver water continues coursing through the inset channels, and the solitary figure remains upright against the storm-dark terraces." }
+  ];
+  const APP = "The protagonist is the solitary reed-masked rainkeeper, an adult humanlike valley guardian with a\nsturdy, upright build. A softly weathered celadon mask covers the entire face, forming a smooth\nbrow, straight nose, closed lips, and calm sculpted cheeks above a firm jaw. ...\nThe celadon mask, shadowed eyes, humanlike proportions, and reed-covered silhouette are\nSTABLE IDENTITY FEATURES. A dense mantle of dark woven river reeds spreads across the\nshoulders and hangs in layered, uneven lengths past the hips ...\n\nThe solitary reed-masked rainkeeper begins at lower center-left, shown nearly in right-facing\nprofile with the whole body oriented toward screen-right. The posture is neutral and balanced ...\n\n[场景] The rainkeeper stands upon an elevated, walkable stone spillway crossing a vast\nmonsoon-washed terraced valley. ... Deep viridian vegetation, wet umber masonry, muted indigo\ncloth, and restrained silver reflections remain unified by moody classical oil-painting realism,\nvisible disciplined brushwork, rich glazing, and atmospheric depth.\n\n[相机] The camera begins in a wide horizontal view near the rainkeeper's upper-torso height,\nviewing the figure from the left side with the lower shins cropped; it then arcs smoothly behind\nthe stationary rainkeeper, holds a broad rear view across the spillway, and returns toward the\ninitial side profile near the end.";
+  const OTH = "No other character, creature, mount, vessel, or moving identity occupies the sanctuary. The\nsolitary reed-masked rainkeeper remains the only salient living figure throughout the visible\nlandscape.\n\n0.00-5.17s, no other visible actors: The spillway, parapet, stepped terraces, irrigation shrines,\nbamboo rain gauges, distant mountains, and storm sky remain unoccupied by any other people,\ncreatures, mounts, vessels, or independently moving identities throughout.";
+  const NOTE = [
+    "整段里没有一句是「氛围描写」：面具颜色、眼窝阴影、比例、芦苇剪影被明确标为 <strong>stable identity features</strong>——它们是跨窗口保持身份的锚点。场景段落一直写到画风（「moody classical oil-painting realism, visible disciplined brushwork」），相机段落则完整描述了整段弧摇。",
+    "五个时间片，长度<strong>不均匀</strong>：静止段合并成 2.25 s，运动变化处切到 0.75 s。这本身就是一种带宽分配——文本把描述密度放在需要精确控制的时刻上。注意其中大量内容是在补 proxy 表达不了的东西：肩膀是否水平、手肘弯曲程度、呼吸带起的衣料起伏。",
+    "「没有其他角色」被<strong>显式写出来</strong>，而且写了两遍（外观段一次、actors 段一次）。对生成模型来说，「不要出现什么」是必须说的，留空等于不约束。"
+  ];
+  let part = 0, seg = 0;
+  const tl = document.querySelector("#f13tl");
+  function drawTL() {
+    tl.innerHTML = "";
+    if (part !== 1) return;
+    const svg = E("svg", { viewBox: "0 0 900 74", role: "img" });
+    svg.style.width = "100%";
+    const X0 = 10, X1 = 890, T = 5.17;
+    SEG.forEach((s, i) => {
+      const x = X0 + (s.a / T) * (X1 - X0), w = ((s.b - s.a) / T) * (X1 - X0);
+      const g = E("g", { style: "cursor:pointer" });
+      g.appendChild(E("rect", { x: x + 1.5, y: 16, width: w - 3, height: 30, rx: 5, fill: i === seg ? "var(--tx-soft)" : "var(--surf2)", stroke: i === seg ? "var(--tx)" : "var(--rule2)", "stroke-width": i === seg ? 1.8 : 1 }));
+      g.appendChild(E("text", { x: x + w / 2, y: 36, "text-anchor": "middle", "font-size": 11, "font-family": "var(--font-mono)", fill: i === seg ? "var(--tx-ink)" : "var(--ink3)" }, s.a.toFixed(2) + "–" + s.b.toFixed(2)));
+      g.addEventListener("click", () => { seg = i; render(); });
+      svg.appendChild(g);
+    });
+    for (let s = 0; s <= 5; s++) {
+      const x = X0 + (s / T) * (X1 - X0);
+      svg.appendChild(E("line", { x1: x, y1: 48, x2: x, y2: 54, stroke: "var(--axis)" }));
+      svg.appendChild(E("text", { x: x, y: 68, "text-anchor": "middle", "font-size": 10, "font-family": "var(--font-mono)", fill: "var(--ink3)" }, s + "s"));
+    }
+    svg.appendChild(E("text", { x: X0, y: 11, "font-size": 10.5, "font-family": "var(--font-mono)", fill: "var(--ink3)" }, "点时间片切换 · 片长不均匀"));
+    tl.appendChild(svg);
+  }
+  function render() {
+    drawTL();
+    const hd = ["appearance_and_scene", "protagonist_action_timeline[" + seg + "]", "other_visible_actors"][part];
+    document.querySelector("#f13hd").textContent = hd;
+    document.querySelector("#f13pre").textContent = part === 0 ? APP : part === 2 ? OTH : (SEG[seg].a.toFixed(2) + "-" + SEG[seg].b.toFixed(2) + "s: " + SEG[seg].t);
+    document.querySelector("#f13note").innerHTML = NOTE[part];
+  }
+  segCtl(document.querySelector("#f13seg"), b => { part = +b.dataset.p; render(); });
+  render();
+});
+
+/* ---------- FIG 13 : evidence grading ---------- */
+guard("fig14", function () {
+  const N = [
+    { id: "int", x: 40, y: 118, w: 96, h: 52, l: "交互 / 意图", c: "--ink3" },
+    { id: "ag", x: 176, y: 110, w: 128, h: 68, l: "Coding Agent", c: "--ag" },
+    { id: "cd", x: 344, y: 110, w: 104, h: 68, l: "Code", c: "--cd" },
+    { id: "ws", x: 488, y: 110, w: 140, h: 68, l: "World State", c: "--cd" },
+    { id: "px", x: 668, y: 110, w: 120, h: 68, l: "proxy + text", c: "--px" },
+    { id: "vm", x: 828, y: 110, w: 112, h: 68, l: "Video Model", c: "--vd" }
+  ];
+  const EDGES = [
+    { a: "int", b: "ag", g: 1, t: "交互 → agent（intent）", d: "原型里世界确实是<strong>玩家可操控</strong>的，用户操控下运行并录下 proxy。但「agent 读取世界状态、解释新事件、决定后果」这一步<strong>没有被单独展示或评测</strong>——论文只描述了它应该怎么工作。" },
+    { a: "ag", b: "cd", g: 0, t: "agent → code（write / call）", d: "<strong>有定性证据。</strong>论文报告 agent 能用现成引擎代码（玩家控制、碰撞、更新循环）和 AAA 场景/玩法逻辑作为模板，组合、扩展、重写出目标世界；也能为常见类别自主分类并组合基元，对复杂物体判断是否退回 bbox。<span class='c-warn'>依赖外部脚手架</span>：从零构建复杂机制仍然做不到，论文自己写明了。" },
+    { a: "cd", b: "ws", g: 0, t: "code → world state（update）", d: "<strong>平凡成立。</strong>这就是程序执行本身。世界是可执行、可玩家操控的。" },
+    { a: "ws", b: "ag", g: 2, t: "world state → agent（state feedback）", d: "<strong>本文未展示。</strong>没有实验显示 agent 因为读到执行结果、测试或世界反馈而修改了世界程序。这条边是范式承诺的核心，也是最值得后续工作补上的一条。" },
+    { a: "ws", b: "px", g: 0, t: "world state → proxy + text（condition）", d: "<strong>本文的主战场。</strong>数据管线（游戏 / KITTI-360）与 LoRA 微调都在这条边上；Fig. 4 展示了视频模型跟随 proxy 指定的位置、轨迹、布局与相机运动。<span class='c-warn'>但没有任何定量的遵循度指标</span>。" },
+    { a: "px", b: "vm", g: 0, t: "条件 → 视频模型（generate）", d: "<strong>有定性证据。</strong>124 帧 @1344×768，20 步 explicit Euler。仅用约 5.6 小时 GTA V 数据 LoRA 微调，跨角色、环境、运动和相机轨迹展示了泛化。<span class='c-warn'>视觉身份与风格很大程度依赖 GPT Image 2 生成的外观锚图。</span>" },
+    { a: "vm", b: "int", g: 2, t: "观测 → 交互（feedback）", d: "<strong>未闭合。</strong>原型是离线两段式：先跑世界录 proxy，再离线生成视频。论文局限里也承认「没有实现自回归实时生成」。Fig. 2 的这条回边应当读作范式，而不是已实现的系统。" }
+  ];
+  const COL = ["var(--ok)", "var(--warn)", "var(--bad)"];
+  const svg = document.querySelector("#f14svg");
+  const byId = {}; N.forEach(n => byId[n.id] = n);
+  function draw(sel) {
+    clear(svg);
+    svg.appendChild(E("text", { x: 12, y: 22, "font-size": 11, "font-family": "var(--font-mono)", "letter-spacing": 1.2, fill: "var(--ink3)" }, "点任意一条边查看它的证据判定"));
+    EDGES.forEach((e, i) => {
+      const A = byId[e.a], B = byId[e.b];
+      let d, mid;
+      if (e.a === "ws" && e.b === "ag") {
+        d = "M" + (A.x + A.w / 2) + " " + A.y + " C " + (A.x + A.w / 2) + " 52, " + (B.x + B.w / 2) + " 52, " + (B.x + B.w / 2) + " " + B.y;
+        mid = [(A.x + A.w / 2 + B.x + B.w / 2) / 2, 62];
+      } else if (e.a === "vm" && e.b === "int") {
+        d = "M" + (A.x + A.w / 2) + " " + (A.y + A.h) + " L" + (A.x + A.w / 2) + " 244 L" + (B.x + B.w / 2) + " 244 L" + (B.x + B.w / 2) + " " + (B.y + B.h);
+        mid = [490, 258];
+      } else {
+        d = "M" + (A.x + A.w) + " " + (A.y + A.h / 2) + " L" + (B.x - 4) + " " + (B.y + B.h / 2);
+        mid = [(A.x + A.w + B.x) / 2, (A.y + A.h / 2) - 10];
+      }
+      const p = E("path", { d: d, fill: "none", stroke: COL[e.g], "stroke-width": i === sel ? 3.4 : 2, "marker-end": "url(#ah)", style: "cursor:pointer", opacity: i === sel ? 1 : 0.75 });
+      p.addEventListener("click", () => show(i));
+      svg.appendChild(p);
+      const hit = E("path", { d: d, fill: "none", stroke: "transparent", "stroke-width": 16, style: "cursor:pointer" });
+      hit.addEventListener("click", () => show(i));
+      svg.appendChild(hit);
+      const badge = E("circle", { cx: mid[0], cy: mid[1], r: i === sel ? 9 : 7, fill: COL[e.g], style: "cursor:pointer" });
+      badge.addEventListener("click", () => show(i));
+      svg.appendChild(badge);
+      const tx = E("text", { x: mid[0], y: mid[1] + 3.6, "text-anchor": "middle", "font-size": 9.5, "font-weight": 700, fill: "#fff", "font-family": "var(--font-mono)", style: "cursor:pointer; pointer-events:none" }, i + 1);
+      svg.appendChild(tx);
+    });
+    N.forEach(n => {
+      svg.appendChild(E("rect", { x: n.x, y: n.y, width: n.w, height: n.h, rx: 9, fill: n.c === "--ink3" ? "var(--surf2)" : "var(" + n.c + "-soft)", stroke: n.c === "--ink3" ? "var(--rule2)" : "var(" + n.c + ")", "stroke-width": 1.4 }));
+      svg.appendChild(E("text", { x: n.x + n.w / 2, y: n.y + n.h / 2 + 4, "text-anchor": "middle", "font-size": 12, "font-weight": 700, fill: n.c === "--ink3" ? "var(--ink2)" : "var(" + n.c + "-ink)" }, n.l));
+    });
+  }
+  function show(i) {
+    const e = EDGES[i];
+    document.querySelector("#f14t").textContent = (i + 1) + " · " + e.t;
+    document.querySelector("#f14t").style.color = COL[e.g];
+    document.querySelector("#f14card").style.borderTop = "2px solid " + COL[e.g];
+    document.querySelector("#f14d").innerHTML = e.d;
+    draw(i);
+  }
+  draw(-1);
+});
+</script>
+</body>
+</html>

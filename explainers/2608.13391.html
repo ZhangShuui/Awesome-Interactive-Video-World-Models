@@ -1,0 +1,1758 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context-Matched Distillation (CMD) · 方法详解</title>
+<style>
+/* ============ tokens ============ */
+:root{
+  --surface-0:#f6f5f2; --surface-1:#fcfcfb; --surface-2:#efedE8; --surface-3:#e6e3dc;
+  --border:#dcd9d2; --border-strong:#c4c0b6;
+  --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#7c7a74;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s7:#4a3aa7; --s8:#e34948;
+  --critical:#d03b3b; --good:#0ca30c; --warning:#fab219;
+  --grid:#e4e1da; --shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.06);
+  --code-bg:#f0eee9;
+}
+html[data-theme="dark"]{
+  --surface-0:#121211; --surface-1:#1a1a19; --surface-2:#212120; --surface-3:#2a2a28;
+  --border:#33332f; --border-strong:#4a4a45;
+  --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#8f8e85;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s7:#9085e9; --s8:#e66767;
+  --critical:#d03b3b; --good:#0ca30c; --warning:#fab219;
+  --grid:#2b2b28; --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  --code-bg:#232322;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:76px}
+body{
+  margin:0; background:var(--surface-0); color:var(--text-primary);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  font-size:16px; line-height:1.75; -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{line-height:1.3; margin:0}
+a{color:var(--s1); text-decoration:none}
+a:hover{text-decoration:underline}
+code,.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace; font-size:.875em}
+code{background:var(--code-bg); padding:.12em .38em; border-radius:4px; border:1px solid var(--border)}
+
+/* ============ chrome ============ */
+#progress{position:fixed;top:0;left:0;height:2px;background:var(--s1);width:0;z-index:120;transition:width .1s linear}
+header.top{
+  position:fixed;top:0;left:0;right:0;height:56px;z-index:110;
+  background:color-mix(in srgb, var(--surface-1) 88%, transparent);
+  backdrop-filter:saturate(1.4) blur(12px); border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:16px;padding:0 20px;
+}
+.brand{font-weight:700;letter-spacing:-.01em;font-size:15px;white-space:nowrap}
+.brand span{color:var(--text-muted);font-weight:500}
+nav.toc{display:flex;gap:2px;overflow-x:auto;flex:1;scrollbar-width:none}
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{
+  font-size:13px;color:var(--text-secondary);padding:5px 10px;border-radius:7px;white-space:nowrap;
+  border:1px solid transparent;transition:.15s
+}
+nav.toc a:hover{background:var(--surface-2);text-decoration:none;color:var(--text-primary)}
+nav.toc a.active{background:var(--surface-3);color:var(--text-primary);border-color:var(--border)}
+.iconbtn{
+  background:var(--surface-2);border:1px solid var(--border);color:var(--text-secondary);
+  width:34px;height:34px;border-radius:9px;cursor:pointer;display:grid;place-items:center;font-size:15px;flex:none
+}
+.iconbtn:hover{color:var(--text-primary);border-color:var(--border-strong)}
+
+/* ============ layout ============ */
+main{max-width:1080px;margin:0 auto;padding:56px 24px 120px}
+section{padding:56px 0 8px;border-top:1px solid var(--border)}
+section:first-of-type{border-top:none}
+.eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--s1);font-weight:700;margin-bottom:10px}
+h2{font-size:30px;letter-spacing:-.02em;margin-bottom:8px}
+h3{font-size:19px;letter-spacing:-.01em;margin:34px 0 10px}
+h4{font-size:15.5px;margin:22px 0 6px;color:var(--text-primary)}
+p{margin:12px 0;color:var(--text-secondary)}
+p.lead{font-size:17.5px;color:var(--text-primary)}
+ul,ol{color:var(--text-secondary);padding-left:22px;margin:12px 0}
+li{margin:6px 0}
+strong{color:var(--text-primary);font-weight:650}
+.muted{color:var(--text-muted);font-size:13.5px}
+
+/* ============ hero ============ */
+.hero{padding:104px 0 40px;border:none}
+.badges{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+.badge{
+  font-size:12px;padding:4px 11px;border-radius:999px;border:1px solid var(--border);
+  background:var(--surface-2);color:var(--text-secondary)
+}
+.badge.hl{border-color:color-mix(in srgb,var(--s1) 45%,transparent);color:var(--s1);background:color-mix(in srgb,var(--s1) 10%,transparent)}
+h1{font-size:clamp(30px,5vw,46px);letter-spacing:-.035em;margin-bottom:6px}
+.subtitle{font-size:clamp(16px,2.4vw,21px);color:var(--text-secondary);font-weight:450;letter-spacing:-.01em}
+.authors{margin-top:18px;font-size:13.5px;color:var(--text-muted);line-height:1.7}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:30px 0 6px}
+.tile{background:var(--surface-1);border:1px solid var(--border);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow)}
+.tile .k{font-size:11.5px;color:var(--text-muted);letter-spacing:.04em;text-transform:uppercase;font-weight:600}
+.tile .v{font-size:30px;font-weight:700;letter-spacing:-.03em;margin:4px 0 2px;font-variant-numeric:tabular-nums}
+.tile .d{font-size:12.5px;color:var(--text-secondary)}
+.tile .up{color:var(--good);font-weight:650}
+.tile .down{color:var(--s1);font-weight:650}
+
+/* ============ cards / callouts ============ */
+.card{background:var(--surface-1);border:1px solid var(--border);border-radius:16px;padding:22px;margin:22px 0;box-shadow:var(--shadow)}
+.card.tight{padding:16px}
+.note{border-left:3px solid var(--s1);background:color-mix(in srgb,var(--s1) 7%,var(--surface-1));border-radius:0 12px 12px 0;padding:14px 18px;margin:18px 0}
+.note.warn{border-left-color:var(--warning);background:color-mix(in srgb,var(--warning) 8%,var(--surface-1))}
+.note.bad{border-left-color:var(--critical);background:color-mix(in srgb,var(--critical) 7%,var(--surface-1))}
+.note .t{font-weight:700;font-size:13.5px;color:var(--text-primary);margin-bottom:2px}
+.note p{margin:4px 0;font-size:14.5px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:820px){.grid2{grid-template-columns:1fr}}
+
+/* ============ math ============ */
+.math{
+  font-family:"Latin Modern Math","Cambria Math","STIX Two Math","Times New Roman",Georgia,serif;
+  font-size:17px;color:var(--text-primary);
+}
+.math i,.mi{font-style:italic}
+.mo{font-style:normal}
+.eq{
+  display:block;text-align:center;padding:16px 14px;margin:16px 0;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:12px;overflow-x:auto
+}
+.eq .tag{float:right;color:var(--text-muted);font-size:13px;font-family:inherit;font-style:normal}
+sub,sup{font-size:.68em;line-height:0}
+.frac{display:inline-flex;flex-direction:column;vertical-align:middle;text-align:center;margin:0 .2em;font-size:.9em}
+.frac>span:first-child{border-bottom:1.2px solid currentColor;padding:0 .3em}
+.frac>span:last-child{padding:0 .3em}
+.big{font-size:1.5em;vertical-align:-.22em;font-style:normal}
+
+/* ============ interactive shells ============ */
+.demo{background:var(--surface-1);border:1px solid var(--border);border-radius:18px;overflow:hidden;margin:26px 0;box-shadow:var(--shadow)}
+.demo-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--surface-2)}
+.demo-title{font-weight:700;font-size:14.5px;flex:1;min-width:180px}
+.demo-title .sub{display:block;font-weight:450;font-size:12.5px;color:var(--text-muted);margin-top:1px}
+.demo-body{padding:22px}
+.seg{display:inline-flex;background:var(--surface-3);border:1px solid var(--border);border-radius:10px;padding:3px;gap:2px;flex-wrap:wrap}
+.seg button{
+  border:none;background:transparent;color:var(--text-secondary);font:inherit;font-size:12.5px;
+  padding:5px 11px;border-radius:7px;cursor:pointer;white-space:nowrap;transition:.15s
+}
+.seg button:hover{color:var(--text-primary)}
+.seg button[aria-pressed="true"]{background:var(--surface-1);color:var(--text-primary);box-shadow:0 1px 3px rgba(0,0,0,.15);font-weight:600}
+.btn{
+  border:1px solid var(--border);background:var(--surface-1);color:var(--text-primary);font:inherit;font-size:12.5px;
+  padding:6px 13px;border-radius:9px;cursor:pointer
+}
+.btn:hover{border-color:var(--border-strong)}
+.btn.primary{background:var(--s1);border-color:var(--s1);color:#fff}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:16px;font-size:12.5px;color:var(--text-secondary)}
+.legend .it{display:flex;align-items:center;gap:6px}
+.sw{width:13px;height:13px;border-radius:4px;border:1px solid var(--border-strong);flex:none}
+
+/* ============ tables ============ */
+.tblwrap{overflow-x:auto;margin:18px 0;border:1px solid var(--border);border-radius:14px;background:var(--surface-1)}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{padding:8px 11px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
+th{font-weight:650;color:var(--text-muted);font-size:11.5px;letter-spacing:.03em;text-transform:uppercase;position:sticky;top:0;background:var(--surface-2)}
+td:first-child,th:first-child{text-align:left;position:sticky;left:0;background:var(--surface-1);z-index:1}
+th:first-child{background:var(--surface-2);z-index:2}
+tbody tr:hover td{background:var(--surface-2)}
+tbody tr:hover td:first-child{background:var(--surface-2)}
+tr.ours td{background:color-mix(in srgb,var(--s1) 9%,var(--surface-1))}
+tr.ours td:first-child{background:color-mix(in srgb,var(--s1) 9%,var(--surface-1));font-weight:650}
+tr.ours:hover td,tr.ours:hover td:first-child{background:color-mix(in srgb,var(--s1) 15%,var(--surface-1))}
+td.best{font-weight:700;color:var(--text-primary)}
+td.best::after{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--s1);margin-left:5px;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+caption{caption-side:bottom;padding:10px 12px;font-size:12.5px;color:var(--text-muted);text-align:left}
+
+/* ============ charts ============ */
+.chart{width:100%}
+.chart text{font-family:inherit;font-size:11.5px;fill:var(--text-secondary)}
+.chart .lbl{fill:var(--text-secondary)}
+.chart .val{fill:var(--text-primary);font-weight:650;font-variant-numeric:tabular-nums}
+.chart .axis line,.chart .axis path{stroke:var(--grid)}
+.chart .gridline{stroke:var(--grid);stroke-width:1}
+.chart .bar{transition:opacity .15s}
+.chart g.row:hover .bar{opacity:.82}
+.tooltip{
+  position:fixed;pointer-events:none;z-index:200;background:var(--surface-1);border:1px solid var(--border-strong);
+  border-radius:10px;padding:8px 11px;font-size:12.5px;box-shadow:var(--shadow);opacity:0;transition:opacity .12s;max-width:260px
+}
+.tooltip .tt{font-weight:700;margin-bottom:2px;color:var(--text-primary)}
+.tooltip .tv{color:var(--text-secondary)}
+
+/* ============ frame strip (info-set explorer) ============ */
+.strip{display:flex;gap:6px;align-items:flex-end;overflow-x:auto;padding:6px 2px 10px}
+.fr{
+  flex:none;width:62px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface-2);
+  padding:8px 4px 6px;text-align:center;cursor:pointer;transition:.16s;position:relative
+}
+.fr .id{font-size:12px;font-weight:650;color:var(--text-secondary)}
+.fr .tagline{font-size:10px;color:var(--text-muted);margin-top:2px;height:12px}
+.fr .thumb{height:34px;border-radius:6px;margin:5px 3px 3px;background:linear-gradient(160deg,var(--surface-3),var(--surface-2));border:1px solid var(--border)}
+.fr:hover{border-color:var(--border-strong)}
+.fr.ctx{border-color:var(--s1);background:color-mix(in srgb,var(--s1) 14%,var(--surface-1))}
+.fr.ctx .thumb{background:linear-gradient(160deg,color-mix(in srgb,var(--s1) 45%,transparent),color-mix(in srgb,var(--s1) 18%,transparent));border-color:color-mix(in srgb,var(--s1) 50%,transparent)}
+.fr.tgt{border-color:var(--s3);background:color-mix(in srgb,var(--s3) 16%,var(--surface-1))}
+.fr.tgt .thumb{background:repeating-linear-gradient(45deg,color-mix(in srgb,var(--s3) 40%,transparent) 0 5px,color-mix(in srgb,var(--s3) 18%,transparent) 5px 10px);border-color:color-mix(in srgb,var(--s3) 55%,transparent)}
+.fr.leak{border-color:var(--critical);background:color-mix(in srgb,var(--critical) 13%,var(--surface-1))}
+.fr.leak .thumb{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--critical) 42%,transparent) 0 5px,color-mix(in srgb,var(--critical) 15%,transparent) 5px 10px);border-color:color-mix(in srgb,var(--critical) 50%,transparent)}
+.fr.img{border-color:var(--s7)}
+.fr.img .thumb{background:linear-gradient(160deg,color-mix(in srgb,var(--s7) 50%,transparent),color-mix(in srgb,var(--s7) 20%,transparent));border-color:color-mix(in srgb,var(--s7) 50%,transparent)}
+.fr.off{opacity:.34}
+.ctrlchip{
+  font-size:10px;margin-top:4px;padding:2px 0;border-radius:5px;border:1px solid var(--border);
+  color:var(--text-muted);background:var(--surface-1)
+}
+.fr.ctx .ctrlchip{border-color:color-mix(in srgb,var(--s1) 50%,transparent);color:var(--s1)}
+.fr.leak .ctrlchip{border-color:color-mix(in srgb,var(--critical) 50%,transparent);color:var(--critical)}
+.readout{
+  margin-top:14px;padding:14px 16px;border-radius:12px;background:var(--surface-2);border:1px solid var(--border);
+  font-size:14px;color:var(--text-secondary);min-height:76px
+}
+.readout .hd{font-weight:700;color:var(--text-primary);font-size:13.5px;margin-bottom:6px}
+.readout .hd .pill{margin-right:8px;vertical-align:1px}
+.pill{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:650;display:inline-block}
+.pill.ok{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}
+.pill.bad{background:color-mix(in srgb,var(--critical) 18%,transparent);color:var(--critical)}
+.sliderrow{display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap}
+input[type=range]{accent-color:var(--s1);flex:1;min-width:180px}
+
+/* ============ mask grid ============ */
+.maskwrap{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start}
+.maskgrid{display:inline-grid;gap:3px;font-size:11px}
+.mcell{width:34px;height:34px;border-radius:6px;border:1px solid var(--border);background:var(--surface-2);display:grid;place-items:center;font-size:10px;color:var(--text-muted);transition:.15s}
+.mcell.vis{background:color-mix(in srgb,var(--s1) 78%,transparent);border-color:var(--s1);color:#fff}
+.mcell.noisy{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--s2) 78%,transparent) 0 4px,color-mix(in srgb,var(--s2) 34%,transparent) 4px 8px);border-color:var(--s2);color:#fff}
+.mcell.corrupt{background:color-mix(in srgb,var(--s1) 70%,transparent);border-color:var(--s2);box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--s2) 75%,transparent);color:#fff}
+.mcell.leak{background:repeating-linear-gradient(45deg,color-mix(in srgb,var(--critical) 82%,transparent) 0 4px,color-mix(in srgb,var(--critical) 30%,transparent) 4px 8px);border-color:var(--critical);color:#fff;font-weight:700}
+.mcell.self{background:color-mix(in srgb,var(--s3) 80%,transparent);border-color:var(--s3);color:#fff}
+.mcell.img{background:color-mix(in srgb,var(--s7) 72%,transparent);border-color:var(--s7);color:#fff}
+.mrow-lbl,.mcol-lbl{color:var(--text-muted);font-size:11px;display:grid;place-items:center;height:34px;width:38px}
+.mcol-lbl{height:22px;width:34px}
+.maskgrid .rowsel{cursor:pointer}
+.maskgrid .rowsel.on .mcell{outline:1.5px solid var(--border-strong);outline-offset:-1px}
+
+/* ============ pipeline stepper ============ */
+.steps{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.step{
+  flex:1;min-width:150px;border:1px solid var(--border);border-radius:12px;padding:11px 13px;background:var(--surface-2);
+  cursor:pointer;transition:.16s;position:relative
+}
+.step:hover{border-color:var(--border-strong)}
+.step[aria-selected="true"]{border-color:var(--s1);background:color-mix(in srgb,var(--s1) 10%,var(--surface-1))}
+.step .n{font-size:10.5px;font-weight:700;color:var(--s1);letter-spacing:.08em}
+.step .t{font-size:13.5px;font-weight:650;margin-top:2px;line-height:1.35}
+.stepbody{border:1px solid var(--border);border-radius:14px;padding:18px;background:var(--surface-2)}
+.stepbody h4{margin-top:0}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13.5px;margin-top:10px}
+.kv dt{color:var(--text-muted)}
+.kv dd{margin:0;color:var(--text-secondary)}
+
+/* ============ misc ============ */
+.timeline{display:flex;gap:3px;overflow-x:auto;padding:8px 0}
+.tf{flex:none;width:26px;height:44px;border-radius:6px;border:1px solid var(--border);background:var(--surface-2);display:grid;place-items:center;font-size:9.5px;color:var(--text-muted);position:relative}
+.tf.win{background:color-mix(in srgb,var(--s1) 42%,transparent);border-color:color-mix(in srgb,var(--s1) 60%,transparent);color:#fff}
+.tf.cur{background:color-mix(in srgb,var(--s3) 62%,transparent);border-color:var(--s3);color:#fff;font-weight:700}
+.tf.leak{background:repeating-linear-gradient(45deg,color-mix(in srgb,var(--critical) 58%,transparent) 0 4px,color-mix(in srgb,var(--critical) 20%,transparent) 4px 8px);border-color:var(--critical);color:#fff}
+.tf.lost{background:var(--surface-2);border-style:dashed;border-color:var(--critical);color:var(--critical)}
+.tf .bnd{position:absolute;top:-7px;left:50%;transform:translateX(-50%);font-size:8px;color:var(--text-muted)}
+.rollbar{display:flex;gap:3px;margin-bottom:2px}
+.rollseg{border-radius:5px;height:5px;background:var(--surface-3);border:1px solid var(--border)}
+
+.cam{display:flex;gap:6px;flex-wrap:wrap}
+.camstep{
+  width:74px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface-2);padding:8px 4px;text-align:center;cursor:pointer;transition:.16s
+}
+.camstep .k{font-size:16px;font-weight:700}
+.camstep .sm{font-size:10px;color:var(--text-muted)}
+.camstep.ctx{border-color:var(--s1);background:color-mix(in srgb,var(--s1) 14%,var(--surface-1))}
+.camstep.tgt{border-color:var(--s3);background:color-mix(in srgb,var(--s3) 16%,var(--surface-1))}
+.camstep.leak{border-color:var(--critical);background:color-mix(in srgb,var(--critical) 13%,var(--surface-1))}
+.camstep.off{opacity:.35}
+
+details.acc{border:1px solid var(--border);border-radius:12px;background:var(--surface-1);margin:14px 0;overflow:hidden}
+details.acc>summary{padding:12px 16px;cursor:pointer;font-weight:650;font-size:14px;list-style:none;display:flex;align-items:center;gap:8px;background:var(--surface-2)}
+details.acc>summary::-webkit-details-marker{display:none}
+details.acc>summary::before{content:"▸";color:var(--s1);transition:.2s;display:inline-block}
+details.acc[open]>summary::before{transform:rotate(90deg)}
+details.acc .inner{padding:4px 18px 16px}
+
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:4px;overflow-x:auto}
+.tabs button{
+  border:none;background:transparent;font:inherit;font-size:13.5px;color:var(--text-secondary);
+  padding:9px 13px;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;margin-bottom:-1px
+}
+.tabs button[aria-selected="true"]{color:var(--text-primary);border-bottom-color:var(--s1);font-weight:650}
+.tabs button:hover{color:var(--text-primary)}
+
+footer{border-top:1px solid var(--border);margin-top:60px;padding:26px 0;font-size:13px;color:var(--text-muted)}
+.tocmini{position:fixed;right:calc(50% - 700px);top:120px;width:180px;font-size:12.5px;display:none}
+@media(min-width:1440px){.tocmini{display:block}}
+.tocmini a{display:block;color:var(--text-muted);padding:3px 0 3px 10px;border-left:2px solid var(--border)}
+.tocmini a.active{color:var(--text-primary);border-left-color:var(--s1)}
+.tocmini a:hover{text-decoration:none;color:var(--text-primary)}
+.hl-s1{color:var(--s1);font-weight:650}
+.hl-s2{color:var(--s2);font-weight:650}
+.hl-s3{color:var(--s3);font-weight:650}
+.hl-bad{color:var(--critical);font-weight:650}
+.hl-s7{color:var(--s7);font-weight:650}
+@media(max-width:640px){
+  main{padding:56px 16px 90px}
+  h2{font-size:25px}
+  .demo-body{padding:16px}
+}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<div class="tooltip" id="tip"></div>
+<header class="top">
+  <div class="brand">CMD <span>· 上下文匹配蒸馏</span></div>
+  <nav class="toc" id="topnav">
+    <a href="#tldr">概览</a>
+    <a href="#mismatch">核心问题</a>
+    <a href="#prelim">预备知识</a>
+    <a href="#pipeline">方法流水线</a>
+    <a href="#scoring">三层打分机制</a>
+    <a href="#longvideo">长视频</a>
+    <a href="#camera">相机控制</a>
+    <a href="#results">实验结果</a>
+    <a href="#ablation">消融分析</a>
+    <a href="#takeaway">评述与局限</a>
+  </nav>
+  <button class="iconbtn" id="themebtn" title="切换明暗主题" aria-label="切换明暗主题">◐</button>
+</header>
+
+<main>
+
+<!-- ================= HERO ================= -->
+<section class="hero" id="tldr">
+  <div class="badges">
+    <span class="badge hl">arXiv 2608.13391</span>
+    <span class="badge">cs.CV · 2026-08-13</span>
+    <span class="badge">NVIDIA × University of Surrey</span>
+    <span class="badge">自回归视频蒸馏</span>
+  </div>
+  <h1>Context-Matched Distillation</h1>
+  <div class="subtitle">让教师的“打分上下文”与学生的“生成上下文”严格对齐 —— 面向自回归视频蒸馏的教师因果性</div>
+  <div class="authors">
+    Hmrishav Bandyopadhyay, Xuanchi Ren, Zijian Huang, Jay Zhangjie Wu, Tianshi Cao, Ruilong Li, Bryan Chu, Sanja Fidler, Yi-Zhe Song, Zian Wang<br>
+    <a href="https://arxiv.org/pdf/2608.13391" target="_blank" rel="noopener">论文 PDF</a> ·
+    <a href="https://hmrishavbandy.github.io/cmd-site/" target="_blank" rel="noopener">项目主页</a>
+  </div>
+
+  <p class="lead" style="margin-top:26px">
+    交互式自回归视频生成需要<strong>低延迟</strong>与<strong>在线可控</strong>。少步蒸馏（few-step distillation）解决了延迟，
+    但主流的 DMD 蒸馏管线存在一个被长期忽视的结构性缺陷：<strong>学生是因果的，教师却是双向的</strong>。
+    教师在给第 <span class="math"><i>t</i></span> 帧打分时能看到 <span class="math"><i>t</i></span> 之后的帧和控制信号 ——
+    而这些信息在学生真正生成该帧时根本不存在。CMD 用一个<strong>因果教师</strong>替换双向教师，
+    并进一步用 <strong>Prefix Scoring</strong> 把打分上下文对齐到「学生当时真正用的那段历史」，
+    用 <strong>Prefix Corruption</strong> 稳定训练早期的不可靠 rollout。
+  </p>
+
+  <div class="tiles">
+    <div class="tile">
+      <div class="k">VBench-I2V Total</div>
+      <div class="v">88.47</div>
+      <div class="d"><span class="up">+0.84</span> vs 最强基线 (87.63)</div>
+    </div>
+    <div class="tile">
+      <div class="k">Camera Motion</div>
+      <div class="v">76.12</div>
+      <div class="d"><span class="up">+33.58</span> vs 最强基线 (42.54)</div>
+    </div>
+    <div class="tile">
+      <div class="k">长视频 Total (30s)</div>
+      <div class="v">70.02</div>
+      <div class="d"><span class="up">+0.77</span> vs Context Forcing</div>
+    </div>
+    <div class="tile">
+      <div class="k">相机旋转误差 (Hard)</div>
+      <div class="v">1.27°</div>
+      <div class="d"><span class="down">↓38%</span> vs 次优 (2.05°)</div>
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:26px">
+    <div class="card tight">
+      <h4 style="margin-top:0">一句话总结</h4>
+      <p style="font-size:14.5px">
+        DMD 的梯度是 <span class="math">(<i>s</i><sub>real</sub> − <i>s</i><sub>fake</sub>)</span>。
+        以往工作只关心「学生怎么采样」，CMD 指出<strong>「教师在什么信息集上求这个分数」同样关键</strong>——
+        把教师的信息集从「整段 clip」收缩到「学生生成该 token 时真实拥有的那段缓存前缀」，
+        无需改动 DMD 目标本身，就能大幅提升可控性与长程质量。
+      </p>
+    </div>
+    <div class="card tight">
+      <h4 style="margin-top:0">三个组件，逐层递进</h4>
+      <ul style="font-size:14.5px;margin-bottom:0">
+        <li><span class="hl-s1">Base CMD</span>：因果教师 + block-causal mask，切断未来信息（<em>时间边界对齐</em>）</li>
+        <li><span class="hl-s3">Prefix Scoring</span>：条件换成缓存的学生 rollout 前缀（<em>实际历史对齐</em>）</li>
+        <li><span class="hl-s2">Prefix Corruption</span>：对前缀加噪，抑制早期漂移主导梯度（<em>鲁棒化</em>）</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= MISMATCH ================= -->
+<section id="mismatch">
+  <div class="eyebrow">Section 01 · Motivation</div>
+  <h2>核心问题：Teacher–Student Context Mismatch</h2>
+  <p class="lead">
+    自回归学生按 <span class="math"><i>p</i><sub>θ</sub>(x<sub>t</sub> | x<sub>&lt;t</sub>, c<sub>≤t</sub>)</span> 逐帧生成；
+    而双向教师在打分时把整段 <span class="math">x<sub>1:T</sub></span> 一起看。二者的<strong>信息集（information set）不同</strong>，
+    于是「教师告诉学生这帧该长什么样」这句话本身就建立在学生做不到的前提上。
+  </p>
+
+  <p>
+    形式化地说：双向教师给出的是全片得分
+    <span class="math"><i>s</i><sub>real</sub>(x<sub>1:T</sub>) = ∇<sub>x<sub>1:T</sub></sub> log <i>p</i><sub>real</sub>(x<sub>1:T</sub> | x<sub>0</sub>=ℐ<sub>0</sub>, c<sub>1:T</sub>)</span>，
+    其第 <span class="math"><i>t</i></span> 个分量依赖 <span class="math">x<sub>&gt;t</sub></span> 与 <span class="math">c<sub>&gt;t</sub></span>；
+    而学生生成 <span class="math">x<sub>t</sub></span> 时只有 <span class="math"><i>h</i><sub>t</sub> = (x<sub>&lt;t</sub>, c<sub>≤t</sub>)</span>。
+    CMD 直接把教师的打分改写为逐帧因果形式：
+  </p>
+
+  <div class="eq math">
+    <i>s</i><sub>real,<i>t</i></sub>(x<sub><i>t</i></sub>, <i>h</i><sub><i>t</i></sub>) = ∇<sub>x<sub><i>t</i></sub></sub> log <i>p</i><sub>real</sub>(x<sub><i>t</i></sub> | <i>h</i><sub><i>t</i></sub>),
+    &nbsp;&nbsp; <i>h</i><sub><i>t</i></sub> = (x<sub>&lt;<i>t</i></sub>, c<sub>≤<i>t</i></sub>)
+  </div>
+
+  <p>
+    并让 <span class="math"><i>s</i><sub>fake</sub></span> 在<strong>同一个</strong>信息边界上求值，从而得到逐帧的分数差
+    <span class="math"><i>s</i><sub>real,<i>t</i></sub> − <i>s</i><sub>fake,<i>t</i></sub></span>。
+    DMD 更新的形式完全没变，变的只是「在哪儿求分数」。
+  </p>
+
+  <!-- Interactive A -->
+  <div class="demo" id="demoA">
+    <div class="demo-head">
+      <div class="demo-title">图解 1 · 信息集浏览器
+        <span class="sub">拖动或点击选择目标帧 t，观察三种角色分别「能看到」哪些帧与控制信号</span>
+      </div>
+      <div class="seg" role="group" id="segA">
+        <button data-role="student" aria-pressed="true">自回归学生（生成时）</button>
+        <button data-role="bidir" aria-pressed="false">双向教师（打分时）</button>
+        <button data-role="causal" aria-pressed="false">CMD 因果教师</button>
+      </div>
+    </div>
+    <div class="demo-body">
+      <div class="strip" id="stripA"></div>
+      <div class="sliderrow">
+        <span class="muted" style="white-space:nowrap">目标帧 t =&nbsp;<strong id="tvalA" style="color:var(--s3)">4</strong></span>
+        <input type="range" id="rangeA" min="1" max="8" value="4" step="1">
+      </div>
+      <div class="readout" id="readA"></div>
+      <div class="legend">
+        <div class="it"><span class="sw" style="background:color-mix(in srgb,var(--s7) 50%,transparent);border-color:var(--s7)"></span>图像条件 ℐ₀</div>
+        <div class="it"><span class="sw" style="background:color-mix(in srgb,var(--s1) 45%,transparent);border-color:var(--s1)"></span>合法因果上下文</div>
+        <div class="it"><span class="sw" style="background:repeating-linear-gradient(45deg,color-mix(in srgb,var(--s3) 40%,transparent) 0 4px,color-mix(in srgb,var(--s3) 18%,transparent) 4px 8px);border-color:var(--s3)"></span>当前目标帧</div>
+        <div class="it"><span class="sw" style="background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--critical) 42%,transparent) 0 4px,color-mix(in srgb,var(--critical) 15%,transparent) 4px 8px);border-color:var(--critical)"></span>未来信息泄漏</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="note bad">
+      <div class="t">为什么这在相机控制上尤其致命</div>
+      <p>双向教师看到<strong>整条相机轨迹</strong>。它可以用「后面镜头要右转」来解释当前帧的内容，
+      于是给出的分数隐含了未来位姿。而部署时学生只知道当下这一条指令 —— 监督信号从一开始就无法执行。</p>
+    </div>
+    <div class="note bad">
+      <div class="t">为什么这在长视频上尤其致命</div>
+      <p>长 rollout 中，双向教师把每个局部窗口当作<strong>自包含的 clip</strong> 打分：
+      既<strong>丢掉了</strong>产生该窗口早期帧的前置 rollout 上下文，又<strong>允许</strong>这些早期帧去注意窗口内的后续帧。双重错配。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PRELIM ================= -->
+<section id="prelim">
+  <div class="eyebrow">Section 02 · Preliminaries</div>
+  <h2>预备知识：DMD、自回归分解、Diffusion Forcing</h2>
+  <p>三块拼图撑起了 CMD。如果你已熟悉，可直接跳到<a href="#pipeline">方法流水线</a>。</p>
+
+  <details class="acc" open>
+    <summary>① Distribution Matching Distillation (DMD)</summary>
+    <div class="inner">
+      <p>DMD 把多步教师蒸馏成少步学生 <span class="math"><i>G</i><sub>θ</sub></span>，方式是让学生分布
+      <span class="math"><i>p</i><sub>fake</sub></span> 逼近教师分布 <span class="math"><i>p</i><sub>real</sub></span>。
+      它不直接算 KL，而是用两者<strong>score function 之差</strong>作为分布差异的代理：</p>
+      <div class="eq math">
+        ∇<sub>θ</sub> ℒ<sub>DMD</sub> = −𝔼<sub>x∼<i>p</i><sub>fake</sub></sub>
+        [ ( <i>s</i><sub>real</sub>(x) − <i>s</i><sub>fake</sub>(x) ) <span class="frac"><span>d<i>G</i><sub>θ</sub></span><span>dθ</span></span> ]
+        <span class="tag">(1)</span>
+      </div>
+      <p class="muted">记号约定：<span class="math"><i>s</i>(x)</span> 表示在加噪版本
+      <span class="math">x<sub>τ</sub> = (1−τ)x + τ·ε</span>（<span class="math">ε∼𝒩(0,I)</span>，<span class="math">τ∈[0,1]</span>）上求的 score，为简洁省略了时间步。</p>
+      <p><strong>关键观察：</strong>式 (1) 只规定了「在学生样本上求分数差」，<em>并没有规定教师必须以什么条件求这个分数</em>。
+      这正是 CMD 切入的缝隙。</p>
+    </div>
+  </details>
+
+  <details class="acc">
+    <summary>② 自回归视频生成的因式分解</summary>
+    <div class="inner">
+      <p>记 I2V 潜变量序列 <span class="math">x ≡ x<sub>0:T</sub></span>，其中 <span class="math">x<sub>0</sub> = ℐ<sub>0</sub></span> 是输入图像的 latent，
+      <span class="math">c<sub>1:T</sub></span> 是逐帧控制（如相机运动）。</p>
+      <p><strong>Chunk-wise（块自回归）</strong>：把生成 latent 与控制切成 <span class="math"><i>N</i></span> 个对齐的块
+      <span class="math">B<sub>1:N</sub></span>、<span class="math"><i>C</i><sub>1:N</sub></span>，每块 <span class="math"><i>K</i></span> 帧：</p>
+      <div class="eq math">
+        <i>p</i><sub>θ</sub>(B<sub>1:<i>N</i></sub> | ℐ<sub>0</sub>, <i>C</i><sub>1:<i>N</i></sub>) =
+        <span class="big">∏</span><sub><i>i</i>=1</sub><sup><i>N</i></sup>
+        <i>p</i><sub>θ</sub>(B<sub><i>i</i></sub> | ℐ<sub>0</sub>, B<sub>&lt;<i>i</i></sub>, <i>C</i><sub>≤<i>i</i></sub>)
+        <span class="tag">(2)</span>
+      </div>
+      <p>块<em>之间</em>是因果的，块<em>内部</em>的帧可以双向交互。<span class="math"><i>K</i>=1</span> 退化为逐帧自回归：</p>
+      <div class="eq math">
+        <i>p</i><sub>θ</sub>(x<sub>1:<i>T</i></sub> | x<sub>0</sub>=ℐ<sub>0</sub>, c<sub>1:<i>T</i></sub>) =
+        <span class="big">∏</span><sub><i>t</i>=1</sub><sup><i>T</i></sup>
+        <i>p</i><sub>θ</sub>(x<sub><i>t</i></sub> | x<sub>&lt;<i>t</i></sub>, c<sub>≤<i>t</i></sub>)
+        <span class="tag">(3)</span>
+      </div>
+      <p class="muted">论文强调：输入图像 <span class="math">ℐ<sub>0</sub></span> 被当作<strong>普通的因果历史</strong>，而不是永久保留在局部注意力窗口之外的特殊 token。</p>
+    </div>
+  </details>
+
+  <details class="acc">
+    <summary>③ Diffusion Forcing</summary>
+    <div class="inner">
+      <p>Diffusion Forcing 训练因果序列模型时，<strong>对每一帧独立采样噪声等级</strong>，让模型在「历史本身是带噪的」条件下去噪当前帧。
+      这样模型在推理阶段面对自己生成的、不完美的历史时更鲁棒 —— 正是自回归 rollout 的常态。CMD 用它来预训练因果教师。</p>
+    </div>
+  </details>
+</section>
+
+<!-- ================= PIPELINE ================= -->
+<section id="pipeline">
+  <div class="eyebrow">Section 03 · Method Overview</div>
+  <h2>方法流水线：一个模型家族，贯穿三个阶段</h2>
+  <p class="lead">
+    CMD 最优雅的一点是<strong>结构上的一致性</strong>：因果教师训练 → 学生初始化 → 蒸馏打分 → 推理，
+    全程使用<strong>同一套因果架构与条件方式</strong>。没有「双向教师 + 因果学生」的接缝，
+    也不需要额外的 ODE-matching 或 consistency distillation 阶段来初始化学生。
+  </p>
+
+  <div class="demo" id="demoP">
+    <div class="demo-head">
+      <div class="demo-title">图解 2 · 四阶段流水线
+        <span class="sub">点击任一阶段查看细节</span>
+      </div>
+    </div>
+    <div class="demo-body">
+      <div class="steps" id="stepsP" role="tablist"></div>
+      <div class="stepbody" id="stepbodyP"></div>
+    </div>
+  </div>
+
+  <div class="note">
+    <div class="t">工程上的顺带好处</div>
+    <p>加一个新的控制信号（比如相机）时，传统做法要<strong>分别</strong>适配一个双向条件教师和一个因果学生。
+    CMD 只需要训练一个因果条件教师，学生直接从它初始化 —— 少了一套需要单独适配的模型，也少了一处错配来源。（论文只做了这一定性陈述，未量化成本。）</p>
+  </div>
+</section>
+
+<!-- ================= SCORING ================= -->
+<section id="scoring">
+  <div class="eyebrow">Section 04 · Core Method</div>
+  <h2>三层递进的打分机制</h2>
+  <p class="lead">
+    这是全文最核心的部分。四种打分方式的差别，可以用一句话概括：
+    <strong>教师在给第 t 个目标打分时，把什么东西塞进了它的 KV cache。</strong>
+  </p>
+
+  <!-- Interactive B: mask grid -->
+  <div class="demo" id="demoB">
+    <div class="demo-head">
+      <div class="demo-title">图解 3 · 打分上下文矩阵（Scoring Context Matrix）
+        <span class="sub">行 = 被打分的目标 t；列 = 教师可注意到的上下文 token。点击行查看该目标的条件式</span>
+      </div>
+      <div class="seg" role="group" id="segB">
+        <button data-v="sf" aria-pressed="true">Self-Forcing<br><span style="font-size:10px;opacity:.7">双向教师</span></button>
+        <button data-v="base" aria-pressed="false">Base CMD</button>
+        <button data-v="ps" aria-pressed="false">+ Prefix Scoring</button>
+        <button data-v="full" aria-pressed="false">Full CMD<br><span style="font-size:10px;opacity:.7">+ Prefix Corruption</span></button>
+      </div>
+    </div>
+    <div class="demo-body">
+      <div class="maskwrap">
+        <div>
+          <div id="maskB"></div>
+          <div class="legend" style="max-width:420px">
+            <div class="it"><span class="sw" style="background:color-mix(in srgb,var(--s7) 55%,transparent);border-color:var(--s7)"></span>ℐ₀ 图像条件</div>
+            <div class="it"><span class="sw" style="background:color-mix(in srgb,var(--s1) 55%,transparent);border-color:var(--s1)"></span>干净学生前缀 x̂<sub>&lt;t</sub></div>
+            <div class="it"><span class="sw" style="background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--s2) 78%,transparent) 0 4px,color-mix(in srgb,var(--s2) 34%,transparent) 4px 8px);border-color:var(--s2)"></span>加噪 DMD 目标 x̂<sup>DMD</sup></div>
+            <div class="it"><span class="sw" style="background:color-mix(in srgb,var(--s1) 48%,transparent);border-color:var(--s2);box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--s2) 60%,transparent)"></span>腐蚀后的前缀 𝒞<sub>ρ</sub>(x̂)</div>
+            <div class="it"><span class="sw" style="background:color-mix(in srgb,var(--s3) 60%,transparent);border-color:var(--s3)"></span>目标自身</div>
+            <div class="it"><span class="sw" style="background:repeating-linear-gradient(45deg,color-mix(in srgb,var(--critical) 60%,transparent) 0 4px,color-mix(in srgb,var(--critical) 22%,transparent) 4px 8px);border-color:var(--critical)"></span>未来泄漏（违反因果）</div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:280px">
+          <div class="readout" id="readB" style="min-height:210px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3>4.1 因果教师预训练：把双向模型改造成 Diffusion-Forcing 因果模型</h3>
+  <p>
+    给定真实视频 latent <span class="math">x<sub>0:T</sub></span>（<span class="math">x<sub>0</sub>=ℐ<sub>0</sub></span> 保持干净），
+    对每一帧<strong>独立随机</strong>采样噪声等级加噪；block mask 限制目标帧 <span class="math"><i>t</i></span> 只能看到
+    <span class="math"><i>h</i><sub><i>t</i></sub> = (ℐ<sub>0</sub>, x̃<sub>1:<i>t</i>−1</sub>, c<sub>1:<i>t</i></sub>)</span>。
+    用标准 flow-matching 损失训练：
+  </p>
+  <div class="eq math">
+    ℒ<sub>DF</sub> = 𝔼 ‖ <i>v</i><sub><i>t</i></sub> − η<sub>φ</sub>(x<sub><i>t</i>,τ</sub>, τ, <i>h</i><sub><i>t</i></sub>) ‖<sub>2</sub><sup>2</sup>,
+    &nbsp;&nbsp; <i>v</i><sub><i>t</i></sub> = (ε − x<sub><i>t</i></sub>)
+    <span class="tag">(4)</span>
+  </div>
+  <p>学到的 flow field <span class="math">η<sub>φ</sub></span> 按 DMD 中标准的 flow ↔ score 关系换算后，即可用作因果 score
+    <span class="math"><i>s</i><sub>real</sub>(x<sub>t,τ</sub>, τ, <i>h</i><sub>t</sub>)</span>。</p>
+
+  <h3>4.2 Base CMD：先把时间边界对齐</h3>
+  <p>
+    学生从教师权重初始化，按推理时的方式做 on-policy rollout（backward simulation，同 Self-Forcing）：
+    <span class="math">x̂<sub>0</sub>=ℐ<sub>0</sub></span>，逐帧生成 <span class="math">v̂<sub>t,τ</sub> = <i>G</i><sub>θ</sub>(x̂<sub>t,τ</sub>, τ, <i>h</i><sub>t</sub>)</span>（历史 latent 从梯度图上 detach）。
+    每个生成目标 <span class="math">x̂<sub>t</sub></span> 被加噪成 <span class="math">x̂<sup>DMD</sup><sub>t,τ</sub></span>，
+    然后在 block-causal mask 下由因果教师与 fake-score 网络打分。此时打分上下文为：
+  </p>
+  <div class="eq math">
+    <i>h</i><sup>CMD</sup><sub><i>t</i></sub> = ( ℐ<sub>0</sub>, { x̂<sup>DMD</sup><sub><i>i</i>,τ</sub> }<sub><i>i</i>=1</sub><sup><i>t</i>−1</sup>, c<sub>1:<i>t</i></sub> )
+  </div>
+  <p class="muted">
+    ✔ 未来帧与未来控制被 mask 挡住了。<br>
+    ✘ 但条件是「之前那些<em>加噪的 DMD 目标</em>」，而不是学生生成当前帧时<em>真正用过的</em>那段历史。
+  </p>
+
+  <h3>4.3 Prefix Scoring：再把「真实历史」对齐</h3>
+  <p>
+    在 on-policy rollout 过程中，缓存下每个目标所依赖的生成历史 <span class="math">x̂<sub>&lt;t</sub></span> 与控制 <span class="math">c<sub>≤t</sub></span>。
+    打分时，冻结的因果教师与 fake-score 网络都用这段<strong>缓存前缀</strong>作为条件：
+  </p>
+  <div class="eq math">
+    <i>h</i><sub><i>t</i></sub> = ( ℐ<sub>0</sub>, x̂<sub>1:<i>t</i>−1</sub>, c<sub>1:<i>t</i></sub> )
+    &nbsp;⟹&nbsp;
+    <i>s</i><sub>real</sub>(x̂<sup>DMD</sup><sub><i>t</i>,τ</sub>, τ, <i>h</i><sub><i>t</i></sub>),
+    &nbsp; <i>s</i><sub>fake</sub>(x̂<sup>DMD</sup><sub><i>t</i>,τ</sub>, τ, <i>h</i><sub><i>t</i></sub>)
+  </div>
+  <p>
+    <strong>效率上的关键设计：</strong>朴素实现需要为每一帧单独跑一次教师前向。CMD 的做法是
+    把输入图像与学生生成帧作为「条件记忆」一并送入，配合 <strong>block-causal mask</strong> 让每个打分 query
+    只注意到它自己的因果前缀 —— 于是<strong>所有目标在一次教师前向中并行打分</strong>（类似 Teacher Forcing 的打包方式）。
+  </p>
+
+  <div class="demo" id="demoPack">
+    <div class="demo-head">
+      <div class="demo-title">图解 4 · 单次前向的高效 Prefix Scoring
+        <span class="sub">对应论文 Fig. 3 —— 点击步骤逐段查看数据流</span>
+      </div>
+    </div>
+    <div class="demo-body">
+      <div class="steps" id="stepsPack" role="tablist"></div>
+      <div class="stepbody" id="stepbodyPack"></div>
+    </div>
+  </div>
+
+  <h3>4.4 Prefix Corruption：给「不可靠的早期 rollout」上保险</h3>
+  <p>
+    少步学生在刚初始化时会剧烈漂移。如果教师严格地在这些<strong>严重 OOD 的伪影</strong>上求条件分数，
+    这些伪影会主导训练信号。CMD 因此对条件前缀注入高斯噪声，降低教师对颜色/纹理类漂移细节的敏感度：
+  </p>
+  <div class="eq math">
+    h̃<sup>(ρ)</sup><sub><i>t</i></sub> = ( ℐ<sub>0</sub>, 𝒞<sub>ρ</sub>(x̂<sub>1:<i>t</i>−1</sub>), c<sub>1:<i>t</i></sub> ),
+    &nbsp;&nbsp; 𝒞<sub>ρ</sub>(x̂<sub>1:<i>t</i>−1</sub>) = (1−ρ)·x̂<sub>1:<i>t</i>−1</sub> + ρ·ε,
+    &nbsp; ε∼𝒩(0,I)
+    <span class="tag">(5)</span>
+  </div>
+  <p>最终的 Prefix Scoring DMD 目标：</p>
+  <div class="eq math">
+    ∇<sub>θ</sub> ℒ<sub>DMD</sub> = −𝔼<sub>x̂<sup>DMD</sup><sub><i>t</i>,τ</sub>, τ</sub>
+    [ ( <i>s</i><sub>real</sub>(x̂<sup>DMD</sup><sub><i>t</i>,τ</sub>, τ, h̃<sup>(ρ)</sup><sub><i>t</i></sub>)
+    − <i>s</i><sub>fake</sub>(x̂<sup>DMD</sup><sub><i>t</i>,τ</sub>, τ, h̃<sup>(ρ)</sup><sub><i>t</i></sub>) )
+    <span class="frac"><span>d<i>G</i><sub>θ</sub></span><span>dθ</span></span> ]
+    <span class="tag">(6)</span>
+  </div>
+  <div class="note warn">
+    <div class="t">容易读混的两点</div>
+    <p>① Prefix Corruption 扰动的是 <strong>on-policy 前缀</strong>，不是 Base CMD 里那条「加噪 DMD 目标」序列；<br>
+       ② 前缀噪声用<strong>独立的噪声等级</strong>（由调度器时间步 <span class="math"><i>t</i><sub>prefix</sub></span> 决定 ρ），
+       与目标侧随机采样的 DMD 时间步 τ <strong>解耦</strong> —— 它只调节「上下文有多可信」，不改动目标侧的 DMD。</p>
+  </div>
+
+  <!-- Interactive C -->
+  <div class="demo" id="demoC">
+    <div class="demo-head">
+      <div class="demo-title">图解 5 · Prefix Corruption 强度与消融曲线
+        <span class="sub">拖动滑块改变 t<sub>prefix</sub>，观察前缀被腐蚀的程度与对应的 VBench-I2V 指标</span>
+      </div>
+    </div>
+    <div class="demo-body">
+      <div class="grid2" style="align-items:start">
+        <div>
+          <div class="sliderrow" style="margin-bottom:10px">
+            <span class="muted" style="white-space:nowrap">t<sub>prefix</sub> =&nbsp;<strong id="tpVal" style="color:var(--s2)">256</strong></span>
+            <input type="range" id="rangeC" min="0" max="3" value="2" step="1">
+          </div>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <div>
+              <div class="muted" style="font-size:11.5px;margin-bottom:4px">缓存前缀 x̂</div>
+              <canvas id="cvClean" width="150" height="96" style="border-radius:9px;border:1px solid var(--border);display:block"></canvas>
+            </div>
+            <div style="font-size:20px;color:var(--text-muted)">→</div>
+            <div>
+              <div class="muted" style="font-size:11.5px;margin-bottom:4px">𝒞<sub>ρ</sub>(x̂) 送入教师</div>
+              <canvas id="cvNoisy" width="150" height="96" style="border-radius:9px;border:1px solid var(--border);display:block"></canvas>
+            </div>
+          </div>
+          <p class="muted" style="margin-top:10px;font-size:12.5px">
+            画布为<strong>示意</strong>：论文只给出调度器时间步 t<sub>prefix</sub> ∈ {0,128,256,512}，未公布对应的 ρ 数值。论文只说「ρ 默认取一个较小的值」。此处假设调度器总步数为 1000、取 ρ ≈ t<sub>prefix</sub>/1000，演示 (1−ρ)x̂ + ρ·ε 的视觉效果，真实强度可能更弱。
+          </p>
+          <div class="readout" id="readC" style="min-height:60px"></div>
+        </div>
+        <div>
+          <div id="chartC"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= LONG VIDEO ================= -->
+<section id="longvideo">
+  <div class="eyebrow">Section 05 · Extension A</div>
+  <h2>扩展一：长视频的 bounded prefix</h2>
+  <p class="lead">
+    学生和因果教师<strong>共用同一个局部注意力窗口</strong>。设学生保留 <span class="math"><i>M</i></span> 帧历史，
+    则 <span class="math"><i>t</i> &gt; <i>M</i></span> 时学生在
+    <span class="math"><i>h</i><sup><i>M</i></sup><sub><i>t</i></sub> = (x̂<sub><i>t</i>−<i>M</i>:<i>t</i>−1</sub>, c<sub><i>t</i>−<i>M</i>:<i>t</i></sub>)</span>
+    下生成第 <span class="math"><i>t</i></span> 帧 —— CMD 让教师在<strong>完全相同</strong>的窗口下打分。
+  </p>
+
+  <div class="demo" id="demoL">
+    <div class="demo-head">
+      <div class="demo-title">图解 6 · 长视频打分窗口对比
+        <span class="sub">示意参数 R=3 段 rollout × T=8 帧、局部窗口 M=5（论文只定义符号，未给出具体取值）。播放动画观察两种打分方式的差异</span>
+      </div>
+      <div class="seg" role="group" id="segL">
+        <button data-v="bidir" aria-pressed="true">双向教师 · 局部 clip</button>
+        <button data-v="cmd" aria-pressed="false">CMD · 因果 bounded prefix</button>
+      </div>
+      <button class="btn primary" id="playL">▶ 播放</button>
+    </div>
+    <div class="demo-body">
+      <div id="rollbarL" class="rollbar"></div>
+      <div class="timeline" id="tlL"></div>
+      <div class="sliderrow">
+        <span class="muted" style="white-space:nowrap">当前目标帧 t =&nbsp;<strong id="tvalL" style="color:var(--s3)">12</strong></span>
+        <input type="range" id="rangeL" min="1" max="24" value="12" step="1">
+      </div>
+      <div class="readout" id="readL"></div>
+      <div class="legend">
+        <div class="it"><span class="sw" style="background:color-mix(in srgb,var(--s1) 42%,transparent);border-color:var(--s1)"></span>教师可见上下文</div>
+        <div class="it"><span class="sw" style="background:color-mix(in srgb,var(--s3) 62%,transparent);border-color:var(--s3)"></span>当前目标</div>
+        <div class="it"><span class="sw" style="background:repeating-linear-gradient(45deg,color-mix(in srgb,var(--critical) 58%,transparent) 0 4px,color-mix(in srgb,var(--critical) 20%,transparent) 4px 8px);border-color:var(--critical)"></span>违规访问的未来帧</div>
+        <div class="it"><span class="sw" style="background:transparent;border:1px dashed var(--critical)"></span>本应可见却被丢弃的历史</div>
+      </div>
+    </div>
+  </div>
+
+  <h3>训练配置与 ρ<sub>t</sub> 调度</h3>
+  <ul>
+    <li>训练 <span class="math">(<i>RT</i>+1)</span> 帧的视频：<span class="math"><i>R</i></span> 段连续 rollout，每段生成 <span class="math"><i>T</i></span> 帧，
+      <span class="math">ℐ<sub>0</sub></span> 只出现在第一段。每段结束后其生成帧被缓存为下一段的上下文，
+      因此靠近段边界的帧其上下文会<strong>跨段</strong>包含前一段的帧。</li>
+    <li>缓存帧同时提供局部注意力上下文与（如适用）sink token，学生与因果教师<strong>共享</strong>这份缓存。</li>
+    <li>长视频训练把固定的 ρ 换成<strong>随帧位置变化的调度</strong> <span class="math">ρ<sub><i>t</i></sub></span>：
+      早期帧漂移尚小 → 弱腐蚀；后期帧 rollout 误差累积 → 强腐蚀。</li>
+    <li>把 score-distillation 损失施加到 <span class="math"><i>R</i></span> 段中的<strong>每一帧</strong>，
+      即可监督完整因果轨迹，而每个目标只需注意 bounded prefix。
+      <strong>视频变长 = 增加待打分的 rollout 段数，而不是扩大教师的注意力窗口</strong> —— 这是它能 scale 到任意长度的原因。</li>
+  </ul>
+
+  <div class="card">
+    <h4 style="margin-top:0">ρ<sub>t</sub> 帧位置调度（示意）</h4>
+    <div id="chartRho"></div>
+  </div>
+</section>
+
+<!-- ================= CAMERA ================= -->
+<section id="camera">
+  <div class="eyebrow">Section 06 · Extension B</div>
+  <h2>扩展二：相机条件的因果蒸馏</h2>
+  <p class="lead">
+    相机控制是「上下文错配」暴露得最彻底的场景。CMD 的处理分两步：
+    <strong>①</strong> 采用 frame-relative 相机参数化；<strong>②</strong> 让教师只看到 ≤t 的位姿。
+  </p>
+
+  <h3>帧相对位姿 + ray map</h3>
+  <p>
+    设 <span class="math"><i>E</i><sub>t</sub> ∈ SE(3)</span> 为第 <span class="math"><i>t</i></span> 帧的 camera-to-world 位姿，
+    <span class="math"><i>K</i><sub>t</sub></span> 为内参。CMD 把轨迹转成<strong>帧间增量</strong>：
+  </p>
+  <div class="eq math">
+    Δ<i>E</i><sub><i>t</i></sub> =
+    <span style="display:inline-block;border-left:1.5px solid currentColor;padding-left:8px;text-align:left;vertical-align:middle;font-size:.92em">
+      <i>I</i>, &nbsp; <i>t</i> = 0<br>
+      <i>E</i><sup>−1</sup><sub><i>t</i>−1</sub> <i>E</i><sub><i>t</i></sub>, &nbsp; <i>t</i> &gt; 0
+    </span>
+    <span class="tag">(7)</span>
+  </div>
+  <p>
+    再对每个 latent 空间位置 <span class="math">(<i>u</i>,<i>v</i>)</span> 用 <span class="math"><i>K</i><sub>t</sub></span> 反投影出射线、
+    用 <span class="math">Δ<i>E</i><sub>t</sub></span> 变换，得到与视频 token <strong>空间对齐</strong>的 ray 嵌入：
+  </p>
+  <div class="eq math">
+    c<sub><i>t</i></sub> = Φ<sub><i>t</i></sub>(<i>u</i>,<i>v</i>) = φ(Δ<i>E</i><sub><i>t</i></sub>, <i>K</i><sub><i>t</i></sub>, <i>u</i>, <i>v</i>)
+    <span class="tag">(8)</span>
+  </div>
+  <p>这种表示保留了指令相机运动的局部几何，同时<strong>摆脱了对任意全局坐标系的依赖</strong>。</p>
+
+  <div class="note">
+    <div class="t">论文强调的关键区分</div>
+    <p>即使用了<strong>相对</strong>相机表示，只要把<strong>整条</strong>轨迹交给双向教师，第 t 帧的分数依然可能依赖
+    <span class="math">Φ<sub>&gt;t</sub></span> —— 教师可以用「后面还要往右转」来解释当前帧。
+    <strong>相机表示的选择与教师的因果性是两个正交的问题，必须同时解决。</strong>
+    消融（Table 6）也证实：ray map 在两个 split 的全部 VBench 指标、平移误差与 CamMC 上优于 PRoPE（<strong>旋转误差除外</strong> —— Simple split 上 PRoPE 的 1.2546 反而低于 ray map 的 1.3675），而两种表示下 CMD 都显著优于双向打分。</p>
+  </div>
+
+  <div class="demo" id="demoCam">
+    <div class="demo-head">
+      <div class="demo-title">图解 7 · 相机指令的未来泄漏
+        <span class="sub">一条 W/A/S/D + 视角指令序列。切换视角，看教师能取用哪些位姿</span>
+      </div>
+      <div class="seg" role="group" id="segCam">
+        <button data-v="bidir" aria-pressed="true">双向教师（看到整条轨迹）</button>
+        <button data-v="cmd" aria-pressed="false">CMD 因果教师（只到 t）</button>
+      </div>
+    </div>
+    <div class="demo-body">
+      <div class="cam" id="camStrip"></div>
+      <div class="sliderrow">
+        <span class="muted" style="white-space:nowrap">正在打分的帧 t =&nbsp;<strong id="tvalCam" style="color:var(--s3)">4</strong></span>
+        <input type="range" id="rangeCam" min="1" max="8" value="4" step="1">
+      </div>
+      <div class="readout" id="readCam"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= RESULTS ================= -->
+<section id="results">
+  <div class="eyebrow">Section 07 · Experiments</div>
+  <h2>实验结果</h2>
+
+  <div class="card tight">
+    <h4 style="margin-top:0">训练与评测设置</h4>
+    <div class="grid2" style="gap:8px 24px">
+      <ul style="margin:6px 0;font-size:14px">
+        <li>基座：<strong>Cosmos-Predict2.5-2B</strong>，微调为自回归 I2V</li>
+        <li>数据：非相机控制用生成+精选视频（Wan）；相机控制用 <strong>DL3DV</strong></li>
+        <li>字幕：Qwen3-VL-8B-Instruct</li>
+        <li>训练量（非相机）：teacher chunk-1/chunk-4 各 ~8K iter；短视频 student ~3.2K/5.1K iter；长视频 student 在短视频 ckpt 上再 ~0.8K/0.9K iter</li>
+        <li>训练量（相机）：teacher ~11K/8K；student ~3K/0.9K</li>
+      </ul>
+      <ul style="margin:6px 0;font-size:14px">
+        <li>短视频：VBench-I2V，每个 image–prompt 对 5 个固定 seed</li>
+        <li>长视频：SANA-WM Simple split 的 80 张图与原始 prompt，501 帧 @16fps（约 30 秒），480×832，无相机输入</li>
+        <li>相机：SANA-WM Simple / Hard split，每场景 8 个 125 帧窗口 → 每 split 640 个视频；用 <strong>π³</strong> 恢复位姿 + <strong>Umeyama Sim(3)</strong> 对齐后计算误差</li>
+        <li>感知评测：Gemini 3.1 Pro Preview 盲测双选，100 个样本 × 6 个基线 × 2 个模型 = 1200 次配对</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="tabs" id="resTabs" role="tablist">
+    <button aria-selected="true" data-p="short">短视频 · VBench-I2V</button>
+    <button aria-selected="false" data-p="long">长视频 · SANA-WM (30s)</button>
+    <button aria-selected="false" data-p="cam">相机控制 · SANA-WM</button>
+    <button aria-selected="false" data-p="llm">LLM 盲测偏好</button>
+  </div>
+
+  <div id="panel-short" class="respanel">
+    <p>CMD chunk-4 拿下 Total (88.47)、I2V (96.54) 与 Camera Motion (76.12) 三项第一；chunk-1 在这三项上均列第二。</p>
+    <div id="chartShortTotal"></div>
+    <div id="chartShortCM" style="margin-top:26px"></div>
+    <div class="tblwrap"><table id="tblShort"></table></div>
+    <p class="muted">Q: Quality Score；IS/IB: I2V Subject/Background Consistency；CM: Camera Motion；SC/BC: Subject/Background Consistency；TF: Temporal Flickering；MS: Motion Smoothness；AQ/IQ: Aesthetic/Imaging Quality；DD: Dynamic Degree。数据来源：论文 Table 1。</p>
+  </div>
+
+  <div id="panel-long" class="respanel" hidden>
+    <p>chunk-1 在全部三个聚合指标（Quality / Semantic / Total）上都是最好。注意<strong>一致性与动态度之间的权衡</strong>：
+      LongLive 与 Rolling Forcing 的一致性分数更高，但 Dynamic Degree 仅 8.75 / 3.75 —— 画面几乎不动，一致性自然高。</p>
+    <div class="grid2">
+      <div id="chartLongTotal"></div>
+      <div id="chartLongDD"></div>
+    </div>
+    <div class="tblwrap"><table id="tblLong"></table></div>
+    <p class="muted">数据来源：论文 Table 2。</p>
+  </div>
+
+  <div id="panel-cam" class="respanel" hidden>
+    <p>chunk-1 在两个 split 上都取得最好的 Semantic 与 Total；chunk-4 在两个 split 上都取得<strong>最低的旋转、平移与 CamMC 误差</strong>。
+      三项误差量纲不同，故分别用独立坐标轴的小图呈现。</p>
+    <div class="seg" style="margin:8px 0 16px" role="group" id="segCamSplit">
+      <button data-v="Simple" aria-pressed="true">Simple split</button>
+      <button data-v="Hard" aria-pressed="false">Hard split</button>
+    </div>
+    <div class="grid2">
+      <div id="chartCamRot"></div>
+      <div id="chartCamTrans"></div>
+    </div>
+    <div style="margin-top:20px" id="chartCamMC"></div>
+    <div class="tblwrap"><table id="tblCam"></table></div>
+    <p class="muted">Rot. 单位为度，Trans. 与 CamMC 为对齐后的欧氏 / Frobenius 距离，三者均越低越好。数据来源：论文 Table 3。</p>
+  </div>
+
+  <div id="panel-llm" class="respanel" hidden>
+    <p>Gemini 3.1 Pro Preview 盲测（temperature 1，高推理强度），按层级规则判定胜者：
+      先看<strong>指定运动是否被执行</strong>，再看参考图保真度与运动完整性，最后才看画质与构图。</p>
+    <div id="chartLLM"></div>
+    <div class="legend" style="margin-left:12px">
+      <div class="it"><span class="sw" style="background:var(--s1);border-color:var(--s1)"></span>CMD chunk-1（逐帧自回归）</div>
+      <div class="it"><span class="sw" style="background:var(--s2);border-color:var(--s2)"></span>CMD chunk-4（4 帧一块）</div>
+    </div>
+    <p class="muted">数值为 CMD 相对各基线的胜率（%）。每个「模型–基线」对 100 次比较，共 1200 次配对试验。数据来源：论文 Fig. 6。</p>
+  </div>
+</section>
+
+<!-- ================= ABLATION ================= -->
+<section id="ablation">
+  <div class="eyebrow">Section 08 · Ablations</div>
+  <h2>消融分析：增益到底来自哪里</h2>
+
+  <h3>短视频：因果打分贡献了绝大部分增益</h3>
+  <div id="chartWaterfall"></div>
+  <p>
+    从双向打分换到 Base CMD，Total <strong>+5.68</strong>（82.65 → 88.33）—— 这是全文最大的单一增益，
+    说明<strong>「教师是否因果」比后面所有精修都重要</strong>。
+    在 Base CMD 之上，默认的 prefix-conditioned 模型再提升 Total +0.13、Camera Motion +2.98、Dynamic Degree +5.85。
+  </p>
+  <div class="note warn">
+    <div class="t">一个反直觉但很关键的结果</div>
+    <p><strong>单加 Prefix Scoring（干净前缀，t<sub>prefix</sub>=0）反而不如 Base CMD</strong>：Total 从 88.33 掉到 87.25。
+    也就是说「让教师看到学生的真实历史」本身并不自动带来提升 —— 因为那段历史在训练早期充满漂移伪影。
+    必须配合 Prefix Corruption 才能把这条路走通，而且腐蚀强度存在最优点（t<sub>prefix</sub>=256）：
+    更弱（128）或更强（512）在 Camera Motion 上都更差。</p>
+  </div>
+  <div class="tblwrap"><table id="tblAbShort"></table></div>
+  <p class="muted">PS = Prefix Scoring；PC<sub>k</sub> = Prefix Corruption 且 t<sub>prefix</sub>=k。Full CMD = PS + PC<sub>256</sub>。数据来源：论文 Table 4。</p>
+
+  <h3>长视频：跨段前缀带来额外收益</h3>
+  <p>Base CMD 相对双向打分 Total +3.39；Full CMD（教师收到与学生相同的 bounded 跨段前缀）相对双向打分 Total +4.04、Semantic +0.58。</p>
+  <div class="tblwrap"><table id="tblAbLong"></table></div>
+  <p class="muted">三个因果学生使用相同 seed 与 80 条 SANA-WM prompt 评测。数据来源：论文 Table 5。</p>
+
+  <h3>相机控制：表示与因果性各自的贡献</h3>
+  <ul>
+    <li><strong>PRoPE 表示下</strong>：CMD 在<strong>每一项</strong>指标上都优于双向打分（Simple split 旋转误差 11.24° → 1.25°；Hard split 12.42° → 3.24°）。</li>
+    <li><strong>Ray map 表示下</strong>：Base CMD 相对双向打分 Quality +0.0216 / +0.0192（Simple/Hard），并降低全部相机误差。</li>
+    <li><strong>再加缓存前缀</strong>：Total 再涨 +0.0313 / +0.0319，主要由 Semantic 大幅提升（+0.1377 / +0.1369）驱动；
+      Simple split 上相机误差进一步下降，但 <strong>Hard split 上 Base CMD 的相机误差反而更低</strong>。</li>
+    <li>整体上 ray map 优于 PRoPE：两个 split 的全部 SANA-WM VBench 指标、平移误差与 CamMC 都更好。</li>
+  </ul>
+  <div class="tblwrap"><table id="tblAbCam"></table></div>
+  <p class="muted">全部变体 chunk size = 1。数据来源：论文 Table 6。</p>
+</section>
+
+<!-- ================= TAKEAWAY ================= -->
+<section id="takeaway">
+  <div class="eyebrow">Section 09 · Discussion</div>
+  <h2>要点、边界与我的一些保留</h2>
+
+  <h3>值得记住的三点</h3>
+  <ol>
+    <li><strong>DMD 里「教师条件」是一个被低估的设计维度。</strong>
+      过去的改进大多集中在<strong>学生侧</strong>：怎么初始化（ODE matching、consistency distillation）、怎么采样（self-forcing）。
+      需要公允地说明：Causal Forcing 与 Causal Forcing++ <strong>已经用因果教师来初始化学生</strong>（论文 §2 亦如此陈述），
+      CMD 的真正区分点是<strong>用同一个因果教师同时承担初始化与带因果前缀的 DMD 打分</strong>。
+      在这个前提下，CMD 把注意力转向对称的另一半 —— 教师在什么信息集上求分数 —— 并显示这同样值数个点。
+      需要注意的是，论文<strong>没有报告</strong>这一改动的成本（延迟、显存、相对逐帧打分的加速比都缺失）；
+      它支持的是两个较弱的陈述：block-causal 打包让一次教师前向替代逐帧前向，以及教师注意力窗口不随视频变长而扩大。</li>
+    <li><strong>因果性应当贯穿整条链路。</strong>
+      教师训练、学生初始化、蒸馏打分、推理使用同一套因果结构，消除了「双向教师 + 因果学生」的接缝，
+      顺带省掉了 ODE-matching / consistency-distillation 的初始化阶段。</li>
+    <li><strong>“对齐真实历史” 需要配套的鲁棒化。</strong>
+      Prefix Scoring 单独使用会被早期漂移反噬；Prefix Corruption 不是可选装饰，而是让这条路可行的必要条件。</li>
+  </ol>
+
+  <h3>我在读的时候留意到的几处保留</h3>
+  <ul>
+    <li><strong>Dynamic Degree 的对比需要小心解读。</strong>短视频上 CMD chunk-1 的 DD 是 48.21，
+      明显低于 Causal Forcing 的 87.15；而长视频上 CMD 的 DD 又远高于 LongLive/Rolling Forcing。
+      DD 本身不是「越高越好」的单调指标（画面乱动也会拿高分），跨方法比较时它更像一个<strong>需要配合视觉检查的诊断量</strong>，
+      而非可直接排序的质量指标。论文用它来说明基线「几乎不动」是合理的，但反过来也提醒：CMD 在短视频上的 DD 并不领先。</li>
+    <li><strong>chunk-1 与 chunk-4 在 Semantic 上的巨大差距（0.2413 vs 0.1810，相机 Simple split）缺少解释。</strong>
+      同一方法两个 chunk 设置之间相差 0.06 以上，比多数方法间的差距还大；论文没有分析这个现象的来源。</li>
+    <li><strong>Prefix Corruption 引入了新的超参敏感性。</strong>t<sub>prefix</sub> 在 128/256/512 之间的
+      Camera Motion 分数分别是 56.15 / 63.64 / 55.75 —— 最优点附近相当尖锐，说明这个超参需要针对新任务重新搜索。
+      论文也没有给出 ρ 与 t<sub>prefix</sub> 的换算关系。</li>
+    <li><strong>Hard split 上的不一致。</strong>加入缓存前缀后，Simple split 相机误差全面下降，
+      但 Hard split 上 Base CMD 仍保持更低的相机误差 —— 前缀条件在困难轨迹下是否总是有益，还没有结论。</li>
+    <li><strong>缺少速度/显存的定量报告。</strong>论文强调 block-causal mask 让所有目标能在单次教师前向中打分，
+      但没有给出相对 per-frame 朴素实现的实测加速比，也没有报告推理延迟（这对「交互式」这个卖点其实挺重要）。</li>
+    <li><strong>基线的复现口径。</strong>多个 T2V 基线是通过「把首个生成帧替换为输入图像」适配到 I2V 的，
+      这种适配对基线是否公平（尤其是 I2V Consistency 类指标）值得留意。</li>
+  </ul>
+
+  <div class="note">
+    <div class="t">一句话收尾</div>
+    <p>CMD 的贡献不在于某个新模块，而在于把一个<strong>一直存在却被默认接受的错配</strong>指出来，
+    并给出一个不改动 DMD 目标本身的修法：<em>让教师只在学生当时真正拥有的信息上说话</em>。</p>
+  </div>
+</section>
+
+<footer>
+  <p style="margin:0">
+    内容整理自 <a href="https://arxiv.org/pdf/2608.13391" target="_blank" rel="noopener">arXiv:2608.13391v1</a>
+    《Context-Matched Distillation: Teacher Causality for Autoregressive Video Distillation》（NVIDIA · University of Surrey，2026-08-13）。
+    所有数值均取自论文正文表格；图解为便于理解而作的示意，非论文原图。
+  </p>
+</footer>
+
+</main>
+<style>
+.chart .bar-n{fill:color-mix(in srgb,var(--text-muted) 40%,transparent)}
+.chart .bar-a{fill:var(--s1)}
+.chart .bar-b{fill:var(--s2)}
+.chart .dot-n{fill:var(--surface-1);stroke:color-mix(in srgb,var(--text-muted) 70%,transparent);stroke-width:2}
+.chart .dot-a{fill:var(--s1);stroke:var(--surface-1);stroke-width:2}
+.chart .dot-b{fill:var(--s2);stroke:var(--surface-1);stroke-width:2}
+.chart .ctitle{fill:var(--text-primary);font-weight:650;font-size:13.5px}
+.chart .csub{fill:var(--text-muted);font-size:11.5px}
+.chart .rule{stroke:var(--grid);stroke-width:1}
+.chart .refline{stroke:var(--text-muted);stroke-width:1;stroke-dasharray:3 3;opacity:.6}
+.chart .hit{fill:transparent;cursor:default}
+</style>
+<script>
+(function(){
+'use strict';
+const $=(s,r)=>(r||document).querySelector(s);
+const $$=(s,r)=>Array.from((r||document).querySelectorAll(s));
+const SVGNS='http://www.w3.org/2000/svg';
+function el(tag,attrs,txt){const e=document.createElementNS(SVGNS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(txt!=null)e.textContent=txt;return e;}
+
+/* ---------- chrome ---------- */
+const htmlEl=document.documentElement;
+$('#themebtn').addEventListener('click',()=>{
+  const cur=htmlEl.getAttribute('data-theme')==='dark'?'light':'dark';
+  htmlEl.setAttribute('data-theme',cur);
+  redrawAll();
+});
+const prog=$('#progress');
+function onScroll(){
+  const h=document.body.scrollHeight-innerHeight;
+  prog.style.width=(h>0?(scrollY/h*100):0)+'%';
+}
+addEventListener('scroll',onScroll,{passive:true});onScroll();
+
+const navLinks=$$('#topnav a');
+const secs=navLinks.map(a=>document.querySelector(a.getAttribute('href'))).filter(Boolean);
+const io=new IntersectionObserver(es=>{
+  es.forEach(e=>{
+    if(e.isIntersecting){
+      const id='#'+e.target.id;
+      navLinks.forEach(a=>a.classList.toggle('active',a.getAttribute('href')===id));
+    }
+  });
+},{rootMargin:'-60px 0px -70% 0px',threshold:0});
+secs.forEach(s=>io.observe(s));
+
+/* ---------- tooltip ---------- */
+const tip=$('#tip');
+function showTip(e,title,val){
+  tip.innerHTML='<div class="tt">'+title+'</div><div class="tv">'+val+'</div>';
+  tip.style.opacity='1';
+  const pad=14;let x=e.clientX+pad,y=e.clientY+pad;
+  const r=tip.getBoundingClientRect();
+  if(x+r.width>innerWidth-8)x=e.clientX-r.width-pad;
+  if(y+r.height>innerHeight-8)y=e.clientY-r.height-pad;
+  tip.style.left=x+'px';tip.style.top=y+'px';
+}
+function hideTip(){tip.style.opacity='0';}
+function bindTip(node,title,val){
+  node.addEventListener('mousemove',e=>showTip(e,title,val));
+  node.addEventListener('mouseleave',hideTip);
+}
+
+/* ---------- chart helpers ---------- */
+function niceTicks(min,max,n){
+  const span=max-min;if(span<=0)return[min];
+  const raw=span/n,mag=Math.pow(10,Math.floor(Math.log10(raw)));
+  const norm=raw/mag;let step;
+  if(norm<1.5)step=1;else if(norm<3)step=2;else if(norm<7)step=5;else step=10;
+  step*=mag;
+  const out=[];for(let v=Math.ceil(min/step)*step;v<=max+1e-9;v+=step)out.push(+v.toFixed(10));
+  return out;
+}
+function barPath(x,y,w,h,r){
+  r=Math.max(0,Math.min(r,w,h/2));
+  if(w<=0.5)return 'M'+x+','+y+' h0.5 v'+h+' h-0.5 Z';
+  return 'M'+x+','+y+' H'+(x+w-r)+' A'+r+','+r+' 0 0 1 '+(x+w)+','+(y+r)+' V'+(y+h-r)+' A'+r+','+r+' 0 0 1 '+(x+w-r)+','+(y+h)+' H'+x+' Z';
+}
+const LBLW=168;
+
+function hbars(host,opt){
+  host.innerHTML='';
+  const data=opt.data,n=data.length,series=opt.series||1;
+  const rowH=opt.rowH||(series>1?30:24),gap=8;
+  const top=opt.title?52:16,bot=30;
+  const H=top+n*(rowH+gap)+bot;
+  const W=host.clientWidth||640;
+  const plotL=LBLW,plotR=W-58,plotW=plotR-plotL;
+  const maxV=opt.max!=null?opt.max:Math.max.apply(null,data.map(d=>series>1?Math.max.apply(null,d.values):d.value))*1.08;
+  const svg=el('svg',{class:'chart',viewBox:'0 0 '+W+' '+H,width:'100%',height:H});
+  if(opt.title)svg.appendChild(el('text',{x:0,y:16,class:'ctitle'},opt.title));
+  if(opt.subtitle)svg.appendChild(el('text',{x:0,y:34,class:'csub'},opt.subtitle));
+  const x=v=>plotL+(v/maxV)*plotW;
+  niceTicks(0,maxV,4).forEach(t=>{
+    svg.appendChild(el('line',{x1:x(t),x2:x(t),y1:top-6,y2:top+n*(rowH+gap)-gap+4,class:'rule'}));
+    svg.appendChild(el('text',{x:x(t),y:top+n*(rowH+gap)-gap+18,'text-anchor':'middle',class:'csub'},opt.fmt?opt.fmt(t):t));
+  });
+  if(opt.ref!=null){
+    svg.appendChild(el('line',{x1:x(opt.ref),x2:x(opt.ref),y1:top-6,y2:top+n*(rowH+gap)-gap+4,class:'refline'}));
+  }
+  data.forEach((d,i)=>{
+    const y0=top+i*(rowH+gap);
+    const g=el('g',{class:'row'});
+    g.appendChild(el('text',{x:LBLW-12,y:y0+rowH/2+4,'text-anchor':'end',class:'lbl'},d.label));
+    if(series>1){
+      const bh=(rowH-2)/series;
+      d.values.forEach((v,k)=>{
+        const bar=el('path',{d:barPath(plotL,y0+k*(bh+2),Math.max(1,x(v)-plotL),bh-1,4),class:k===0?'bar bar-a':'bar bar-b'});
+        g.appendChild(bar);
+        bindTip(bar,d.label,(opt.names?opt.names[k]+': ':'')+(opt.fmt?opt.fmt(v):v));
+        g.appendChild(el('text',{x:x(v)+7,y:y0+k*(bh+2)+bh/2+3,class:'val','font-size':'11'},opt.fmt?opt.fmt(v):v));
+      });
+    }else{
+      const cls=d.hl===2?'bar bar-b':(d.hl?'bar bar-a':'bar bar-n');
+      const bar=el('path',{d:barPath(plotL,y0,Math.max(1,x(d.value)-plotL),rowH,4),class:cls});
+      g.appendChild(bar);
+      bindTip(bar,d.label,(opt.unit||'')+(opt.fmt?opt.fmt(d.value):d.value));
+      g.appendChild(el('text',{x:x(d.value)+7,y:y0+rowH/2+4,class:'val'},opt.fmt?opt.fmt(d.value):d.value));
+    }
+    svg.appendChild(g);
+  });
+  host.appendChild(svg);
+}
+
+function dotplot(host,opt){
+  host.innerHTML='';
+  const data=opt.data,n=data.length;
+  const rowH=opt.rowH||22,gap=6;
+  const top=opt.title?52:16,bot=30;
+  const H=top+n*(rowH+gap)+bot;
+  const W=host.clientWidth||640;
+  const plotL=LBLW,plotR=W-56,plotW=plotR-plotL;
+  const vals=data.map(d=>d.value);
+  let lo=opt.domain?opt.domain[0]:Math.min.apply(null,vals),hi=opt.domain?opt.domain[1]:Math.max.apply(null,vals);
+  if(!opt.domain){const pad=(hi-lo)*0.18||1;lo-=pad;hi+=pad;}
+  const svg=el('svg',{class:'chart',viewBox:'0 0 '+W+' '+H,width:'100%',height:H});
+  if(opt.title)svg.appendChild(el('text',{x:0,y:16,class:'ctitle'},opt.title));
+  if(opt.subtitle)svg.appendChild(el('text',{x:0,y:34,class:'csub'},opt.subtitle));
+  const x=v=>plotL+((v-lo)/(hi-lo))*plotW;
+  niceTicks(lo,hi,4).forEach(t=>{
+    svg.appendChild(el('line',{x1:x(t),x2:x(t),y1:top-6,y2:top+n*(rowH+gap)-gap+4,class:'rule'}));
+    svg.appendChild(el('text',{x:x(t),y:top+n*(rowH+gap)-gap+18,'text-anchor':'middle',class:'csub'},opt.fmt?opt.fmt(t):t));
+  });
+  data.forEach((d,i)=>{
+    const y0=top+i*(rowH+gap)+rowH/2;
+    const g=el('g',{class:'row'});
+    g.appendChild(el('line',{x1:plotL,x2:plotR,y1:y0,y2:y0,class:'rule',opacity:.5}));
+    g.appendChild(el('text',{x:LBLW-12,y:y0+4,'text-anchor':'end',class:'lbl'},d.label));
+    const c=el('circle',{cx:x(d.value),cy:y0,r:d.hl?6.5:5,class:d.hl===2?'dot-b':(d.hl?'dot-a':'dot-n')});
+    g.appendChild(c);
+    bindTip(c,d.label,(opt.unit||'')+(opt.fmt?opt.fmt(d.value):d.value));
+    g.appendChild(el('text',{x:x(d.value)+11,y:y0+4,class:'val','font-size':'11.5'},opt.fmt?opt.fmt(d.value):d.value));
+    svg.appendChild(g);
+  });
+  host.appendChild(svg);
+}
+
+function linechart(host,opt){
+  host.innerHTML='';
+  const W=host.clientWidth||620,H=opt.height||190;
+  const L=48,R=16,T=opt.title?46:14,B=34;
+  const pts=opt.points;
+  const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]);
+  const x0=Math.min.apply(null,xs),x1=Math.max.apply(null,xs);
+  const y0=0,y1=Math.max.apply(null,ys)*1.2;
+  const X=v=>L+(v-x0)/(x1-x0)*(W-L-R);
+  const Y=v=>H-B-(v-y0)/(y1-y0)*(H-T-B);
+  const svg=el('svg',{class:'chart',viewBox:'0 0 '+W+' '+H,width:'100%',height:H});
+  if(opt.title)svg.appendChild(el('text',{x:0,y:16,class:'ctitle'},opt.title));
+  if(opt.subtitle)svg.appendChild(el('text',{x:0,y:32,class:'csub'},opt.subtitle));
+  niceTicks(y0,y1,3).forEach(t=>{
+    svg.appendChild(el('line',{x1:L,x2:W-R,y1:Y(t),y2:Y(t),class:'rule'}));
+    svg.appendChild(el('text',{x:L-8,y:Y(t)+4,'text-anchor':'end',class:'csub'},t.toFixed(2)));
+  });
+  niceTicks(x0,x1,5).forEach(t=>{
+    svg.appendChild(el('text',{x:X(t),y:H-12,'text-anchor':'middle',class:'csub'},t));
+  });
+  const d=pts.map((p,i)=>(i?'L':'M')+X(p[0])+','+Y(p[1])).join(' ');
+  svg.appendChild(el('path',{d:d,fill:'none',stroke:'var(--s2)','stroke-width':2,'stroke-linecap':'round','stroke-linejoin':'round'}));
+  pts.forEach(p=>{
+    if(p[2]){
+      const c=el('circle',{cx:X(p[0]),cy:Y(p[1]),r:4,fill:'var(--s2)',stroke:'var(--surface-1)','stroke-width':2});
+      svg.appendChild(c);bindTip(c,'frame '+p[0],'ρ ≈ '+p[1].toFixed(2));
+    }
+  });
+  if(opt.xlabel)svg.appendChild(el('text',{x:(L+W-R)/2,y:H-1,'text-anchor':'middle',class:'csub'},opt.xlabel));
+  host.appendChild(svg);
+}
+
+/* ---------- table builder ---------- */
+function buildTable(tbl,cfg){
+  tbl.innerHTML='';
+  const thead=document.createElement('thead'),tr=document.createElement('tr');
+  cfg.cols.forEach(c=>{const th=document.createElement('th');th.innerHTML=c.l;if(c.title)th.title=c.title;tr.appendChild(th);});
+  thead.appendChild(tr);tbl.appendChild(thead);
+  const best={};
+  cfg.cols.forEach((c,ci)=>{
+    if(!c.dir)return;
+    let b=null;
+    cfg.rows.forEach(r=>{const v=r.v[ci];if(typeof v!=='number')return;if(b===null||(c.dir==='h'?v>b:v<b))b=v;});
+    best[ci]=b;
+  });
+  const tb=document.createElement('tbody');
+  cfg.rows.forEach(r=>{
+    const tr=document.createElement('tr');
+    if(r.ours)tr.className='ours';
+    r.v.forEach((v,ci)=>{
+      const td=document.createElement('td');
+      const c=cfg.cols[ci];
+      td.innerHTML=(typeof v==='number')?(c.fmt?c.fmt(v):v.toFixed(2)):v;
+      if(c.dir&&typeof v==='number'&&Math.abs(v-best[ci])<1e-9)td.className='best';
+      tr.appendChild(td);
+    });
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb);
+}
+const f2=v=>v.toFixed(2),f4=v=>v.toFixed(4);
+
+/* =========================================================
+   DEMO A · information set explorer
+   ========================================================= */
+const A={role:'student',t:4,N:8};
+const stripA=$('#stripA'),readA=$('#readA'),rangeA=$('#rangeA'),tvalA=$('#tvalA');
+function renderA(){
+  stripA.innerHTML='';
+  for(let i=0;i<=A.N;i++){
+    const d=document.createElement('div');d.className='fr';
+    const isTgt=(i===A.t);
+    let cls='';
+    if(i===0)cls='img ctx';
+    else if(isTgt)cls='tgt';
+    else if(i<A.t)cls='ctx';
+    else{ cls=(A.role==='bidir')?'leak':'off'; }
+    if(A.role==='student'&&i>A.t)cls='off';
+    if(A.role==='causal'&&i>A.t)cls='off';
+    d.className='fr '+cls;
+    d.innerHTML='<div class="id">'+(i===0?'ℐ₀':'x<sub>'+i+'</sub>')+'</div>'+
+                '<div class="thumb"></div>'+
+                '<div class="ctrlchip">'+(i===0?'—':'c<sub>'+i+'</sub>')+'</div>'+
+                '<div class="tagline">'+(isTgt?'目标':(i===0?'条件图':''))+'</div>';
+    d.addEventListener('click',()=>{if(i>=1){A.t=i;rangeA.value=i;renderA();}});
+    stripA.appendChild(d);
+  }
+  tvalA.textContent=A.t;
+  const future=A.N-A.t;
+  let hd,body;
+  if(A.role==='student'){
+    hd='<span class="pill ok">因果，合法</span> 自回归学生生成 x<sub>'+A.t+'</sub>';
+    body='学生只能取用 <span class="math"><i>h</i><sub>'+A.t+'</sub> = (x<sub>&lt;'+A.t+'</sub>, c<sub>≤'+A.t+'</sub>)</span>：'+
+         '图像条件 ℐ₀ 加上 '+(A.t-1)+' 帧已生成历史，以及第 1…'+A.t+' 个控制信号。'+
+         '后面的 '+future+' 帧与 '+future+' 个控制在这一刻<strong>根本不存在</strong>。';
+  }else if(A.role==='bidir'){
+    hd=(future>0?'<span class="pill bad">泄漏 '+future+' 帧未来信息</span>':'<span class="pill ok">末帧，无未来</span>')+' 双向教师为 x<sub>'+A.t+'</sub> 打分';
+    body='双向教师在完整 clip <span class="math">x<sub>1:'+A.N+'</sub></span> 上求 score，其第 '+A.t+' 个分量依赖 '+
+         '<span class="math">x<sub>&gt;'+A.t+'</sub></span> 与 <span class="math">c<sub>&gt;'+A.t+'</sub></span>。'+
+         (future>0?'这里有 <strong class="hl-bad">'+future+' 帧 + '+future+' 个控制信号</strong>是学生当时拿不到的 —— 监督信号建立在学生无法满足的前提上。'
+                  :'恰好是最后一帧，此时没有未来可泄漏；但前面每一帧都有。');
+  }else{
+    hd='<span class="pill ok">因果，与学生一致</span> CMD 因果教师为 x<sub>'+A.t+'</sub> 打分';
+    body='CMD 用 block-causal mask 把教师的信息集<strong>收缩到和学生完全相同</strong>：'+
+         '<span class="math"><i>s</i><sub>real,'+A.t+'</sub>(x<sub>'+A.t+'</sub>, <i>h</i><sub>'+A.t+'</sub>)</span>，'+
+         '<span class="math"><i>h</i><sub>'+A.t+'</sub> = (x<sub>&lt;'+A.t+'</sub>, c<sub>≤'+A.t+'</sub>)</span>。'+
+         '<span class="math"><i>s</i><sub>fake</sub></span> 在同一边界上求值，分数差因此是「同一信息集下的分布差异」。';
+  }
+  readA.innerHTML='<div class="hd">'+hd+'</div><div>'+body+'</div>';
+}
+rangeA.addEventListener('input',e=>{A.t=+e.target.value;renderA();});
+$$('#segA button').forEach(b=>b.addEventListener('click',()=>{
+  $$('#segA button').forEach(x=>x.setAttribute('aria-pressed','false'));
+  b.setAttribute('aria-pressed','true');A.role=b.dataset.role;renderA();
+}));
+renderA();
+
+/* =========================================================
+   DEMO P · pipeline stepper
+   ========================================================= */
+const PIPE=[
+ {n:'STAGE 1',t:'因果教师预训练',h:'把预训练的双向模型微调成多步因果 / 块因果生成器',
+  b:'保持 <span class="math">x<sub>0</sub>=ℐ<sub>0</sub></span> 干净，对其余每帧<strong>独立</strong>采样噪声等级；'+
+    'block mask 限定目标帧只见 <span class="math"><i>h</i><sub>t</sub>=(ℐ<sub>0</sub>, x̃<sub>1:t−1</sub>, c<sub>1:t</sub>)</span>；'+
+    '用 flow-matching 损失 (4) 训练。这一步沿用 Diffusion Forcing 的思路，让教师<strong>习惯带噪历史</strong>。',
+  kv:[['产物','多步因果教师 <span class="math">η<sub>φ</sub></span>'],['为何需要','推理时历史必然是生成的、不完美的'],['训练量','chunk-1 / chunk-4 各 ~8K iterations']]},
+ {n:'STAGE 2',t:'学生初始化',h:'直接从因果教师权重复制',
+  b:'少步学生 <span class="math"><i>G</i><sub>θ</sub></span> 从 <span class="math">η<sub>φ</sub></span> 初始化，'+
+    '天然继承教师的因果归纳偏置。<strong>不需要</strong> ODE-matching（CausVid）或 consistency distillation（Causal Forcing++）'+
+    '这类昂贵的额外预训练阶段 —— 因为教师本来就是因果的，学生与它结构同源。',
+  kv:[['省掉的阶段','ODE matching / Consistency Distillation'],['原因','教师与学生同属一个因果模型家族']]},
+ {n:'STAGE 3',t:'On-policy rollout',h:'学生按推理时的方式自回归展开，并缓存前缀',
+  b:'令 <span class="math">x̂<sub>0</sub>=ℐ<sub>0</sub></span>，逐帧生成 '+
+    '<span class="math">v̂<sub>t,τ</sub> = <i>G</i><sub>θ</sub>(x̂<sub>t,τ</sub>, τ, <i>h</i><sub>t</sub>)</span>，'+
+    '历史 latent 从梯度图 detach（backward simulation，同 Self-Forcing）。'+
+    '<strong>关键：同时缓存下每个目标所依赖的干净生成前缀 <span class="math">x̂<sub>&lt;t</sub></span> 与控制 <span class="math">c<sub>≤t</sub></span>。</strong>',
+  kv:[['为何 on-policy','减轻 exposure bias，学生看到自己的历史'],['新增动作','缓存 prefix，供 Stage 4 打分使用']]},
+ {n:'STAGE 4',t:'上下文匹配打分 + DMD 更新',h:'冻结因果教师与 fake-score 网络在同一前缀上打分',
+  b:'把生成目标加噪成 <span class="math">x̂<sup>DMD</sup><sub>t,τ</sub></span>，与（腐蚀后的）缓存前缀一起打包，'+
+    '在 block-causal mask 下<strong>一次前向</strong>并行打分，得到 '+
+    '<span class="math"><i>s</i><sub>real</sub></span> 与 <span class="math"><i>s</i><sub>fake</sub></span>，'+
+    '按式 (6) 回传梯度。教师全程冻结。',
+  kv:[['信息边界','与学生生成时完全一致'],['效率','block-causal mask → 单次教师前向'],['稳定化','Prefix Corruption，t<sub>prefix</sub>=256']]}
+];
+function stepper(stepsHost,bodyHost,items){
+  let cur=0;
+  function draw(){
+    stepsHost.innerHTML='';
+    items.forEach((s,i)=>{
+      const d=document.createElement('div');
+      d.className='step';d.setAttribute('role','tab');d.setAttribute('aria-selected',i===cur?'true':'false');
+      d.innerHTML='<div class="n">'+s.n+'</div><div class="t">'+s.t+'</div>';
+      d.addEventListener('click',()=>{cur=i;draw();});
+      stepsHost.appendChild(d);
+    });
+    const s=items[cur];
+    bodyHost.innerHTML='<h4>'+s.t+' — <span style="font-weight:450;color:var(--text-secondary)">'+s.h+'</span></h4>'+
+      '<p style="margin-top:8px">'+s.b+'</p>'+
+      (s.kv?'<dl class="kv">'+s.kv.map(k=>'<dt>'+k[0]+'</dt><dd>'+k[1]+'</dd>').join('')+'</dl>':'');
+  }
+  draw();
+}
+stepper($('#stepsP'),$('#stepbodyP'),PIPE);
+
+const PACK=[
+ {n:'① ROLLOUT',t:'学生自回归生成',h:'on-policy，逐帧/逐块推进',
+  b:'因果学生从 <span class="math">ℐ<sub>0</sub></span> 出发生成 <span class="math">x̂<sub>1:T</sub></span>。'+
+    '每生成一个目标，产生它的那段<strong>干净前缀</strong>被记录下来。'},
+ {n:'② CACHE',t:'缓存 target–prefix 配对',h:'把「谁由谁生成」这层对应关系存住',
+  b:'目标 <span class="math">x̂<sub>t</sub></span> ↔ 前缀 <span class="math">(ℐ<sub>0</sub>, x̂<sub>1:t−1</sub>, c<sub>1:t</sub>)</span>。'+
+    '这一步是 Prefix Scoring 与 Base CMD 的<strong>唯一区别来源</strong> —— Base CMD 用的是加噪 DMD 目标序列，不是这份缓存。'},
+ {n:'③ CORRUPT',t:'前缀腐蚀',h:'𝒞ρ(x̂) = (1−ρ)x̂ + ρ·ε',
+  b:'用<strong>独立于 DMD 时间步 τ</strong> 的噪声等级扰动前缀，降低教师对早期漂移伪影（颜色、纹理）的敏感度，'+
+    '同时<strong>保持因果顺序与控制信号不变</strong>。'},
+ {n:'④ PACK',t:'block-causal mask 打包',h:'所有 target 并行进入一次前向',
+  b:'腐蚀前缀与对应的加噪 DMD 目标按时间顺序打包；mask 让每个打分 query 只注意到自己的因果前缀。'+
+    '于是<strong>不需要为每帧单独跑一次教师</strong>，与 Teacher Forcing 的打包方式类似。'},
+ {n:'⑤ SCORE',t:'real / fake 双路打分 → DMD 梯度',h:'两者在完全相同的 prefix–target 上下文中求值',
+  b:'冻结因果教师给出 <span class="math"><i>s</i><sub>real</sub></span>，fake-score 网络给出 <span class="math"><i>s</i><sub>fake</sub></span>；'+
+    '二者之差乘以 <span class="math">d<i>G</i><sub>θ</sub>/dθ</span> 构成上下文匹配的 DMD 更新（式 6）。'}
+];
+stepper($('#stepsPack'),$('#stepbodyPack'),PACK);
+
+/* =========================================================
+   DEMO B · scoring context matrix
+   ========================================================= */
+const B={v:'sf',row:4,N:6};
+const maskB=$('#maskB'),readB=$('#readB');
+const BINFO={
+ sf:{name:'Self-Forcing（双向教师）',
+   pill:'<span class="pill bad">违反因果</span>',
+   desc:'学生因果地 rollout，但完整的加噪 rollout 交给<strong>双向</strong>教师一起打分。'+
+        '目标 t 的分数可以依赖 t 之后的块 —— 红色斜纹格就是泄漏进来的未来信息。',
+   ctx:t=>'教师条件 = 完整 clip（含 x<sub>&gt;'+t+'</sub>, c<sub>&gt;'+t+'</sub>）'},
+ base:{name:'Base CMD',
+   pill:'<span class="pill ok">时间边界已对齐</span>',
+   desc:'换成<strong>因果</strong>教师 + block-causal mask，未来被完全挡住。但条件是<strong>前面那些加噪的 DMD 目标</strong>'+
+        '<span class="math">{x̂<sup>DMD</sup><sub>i,τ</sub>}</span>，并不是学生生成这一帧时真正用过的历史。',
+   ctx:t=>'<span class="math"><i>h</i><sup>CMD</sup><sub>'+t+'</sub> = (ℐ<sub>0</sub>, {x̂<sup>DMD</sup><sub>i,τ</sub>}<sub>i=1</sub><sup>'+(t-1)+'</sup>, c<sub>1:'+t+'</sub>)</span>'},
+ ps:{name:'+ Prefix Scoring',
+   pill:'<span class="pill ok">真实历史已对齐</span>',
+   desc:'条件替换为 rollout 时缓存下来的<strong>干净学生前缀</strong>。教师现在评估的是「在这段真实历史之后，这个目标合理吗」——'+
+        '与学生的生成条件逐 token 对齐。<br><span class="muted">但单独使用会被早期漂移反噬：消融中 Total 从 88.33 掉到 87.25。</span>',
+   ctx:t=>'<span class="math"><i>h</i><sub>'+t+'</sub> = (ℐ<sub>0</sub>, x̂<sub>1:'+(t-1)+'</sub>, c<sub>1:'+t+'</sub>)</span>'},
+ full:{name:'Full CMD（+ Prefix Corruption）',
+   pill:'<span class="pill ok">对齐 + 鲁棒</span>',
+   desc:'对缓存前缀注入独立噪声 <span class="math">𝒞<sub>ρ</sub>(x̂) = (1−ρ)x̂ + ρ·ε</span>，'+
+        '削弱教师对漂移细节的敏感度，同时<strong>保留 target–context 的对应关系</strong>与控制信号。这是论文的默认配置。',
+   ctx:t=>'<span class="math">h̃<sup>(ρ)</sup><sub>'+t+'</sub> = (ℐ<sub>0</sub>, 𝒞<sub>ρ</sub>(x̂<sub>1:'+(t-1)+'</sub>), c<sub>1:'+t+'</sub>)</span>'}
+};
+function renderB(){
+  const N=B.N;
+  const g=document.createElement('div');
+  g.className='maskgrid';
+  g.style.gridTemplateColumns='38px repeat('+(N+1)+', 34px)';
+  g.appendChild(Object.assign(document.createElement('div'),{className:'mrow-lbl'}));
+  const heads=['ℐ₀'];for(let j=1;j<=N;j++)heads.push(''+j);
+  heads.forEach(h=>{const d=document.createElement('div');d.className='mcol-lbl';d.innerHTML=h;g.appendChild(d);});
+  for(let t=1;t<=N;t++){
+    const lbl=document.createElement('div');lbl.className='mrow-lbl';lbl.innerHTML='t='+t;
+    lbl.style.cursor='pointer';lbl.addEventListener('click',()=>{B.row=t;renderB();});
+    g.appendChild(lbl);
+    for(let j=0;j<=N;j++){
+      const c=document.createElement('div');c.className='mcell';
+      let k='';
+      if(j===0)k='img';
+      else if(j===t)k='self';
+      else if(j<t)k=(B.v==='sf'||B.v==='base')?'noisy':(B.v==='ps'?'vis':'corrupt');
+      else k=(B.v==='sf')?'leak':'';
+      if(k)c.className='mcell '+k;
+      if(k==='img')c.textContent='I';
+      else if(k==='self')c.textContent='◆';
+      else if(k==='leak')c.textContent='!';
+      else if(k==='noisy'||k==='corrupt')c.textContent='~';
+      if(t===B.row)c.style.outline='1.5px solid var(--border-strong)';
+      c.style.opacity=(t===B.row)?'1':'.72';
+      c.addEventListener('click',()=>{B.row=t;renderB();});
+      g.appendChild(c);
+    }
+  }
+  maskB.innerHTML='';
+  const cap=document.createElement('div');
+  cap.className='muted';cap.style.cssText='font-size:11.5px;margin-bottom:6px';
+  cap.innerHTML='列：ℐ₀ 与第 1…'+N+' 个位置的上下文 token　·　行：被打分的目标 t';
+  maskB.appendChild(cap);maskB.appendChild(g);
+  const info=BINFO[B.v],t=B.row;
+  const leak=(B.v==='sf')?(N-t):0;
+  readB.innerHTML='<div class="hd">'+info.pill+' '+info.name+'</div>'+
+    '<div style="margin-bottom:10px">'+info.desc+'</div>'+
+    '<div style="padding:10px 12px;border-radius:9px;background:var(--surface-1);border:1px solid var(--border)">'+
+      '<div class="muted" style="font-size:11.5px;margin-bottom:3px">选中行 t = '+t+' 的教师条件</div>'+
+      '<div style="font-size:14.5px">'+info.ctx(t)+'</div>'+
+      (leak>0?'<div style="margin-top:6px;font-size:12.5px" class="hl-bad">↳ 其中 '+leak+' 个位置是未来信息，学生生成时不可能拥有</div>':'')+
+    '</div>';
+}
+$$('#segB button').forEach(b=>b.addEventListener('click',()=>{
+  $$('#segB button').forEach(x=>x.setAttribute('aria-pressed','false'));
+  b.setAttribute('aria-pressed','true');B.v=b.dataset.v;renderB();
+}));
+renderB();
+
+/* =========================================================
+   DEMO C · prefix corruption
+   ========================================================= */
+const TP=[0,128,256,512];
+const AB_PC={0:{total:87.25,cm:55.49,dd:69.02,name:'PS only (t=0)'},
+             128:{total:88.04,cm:56.15,dd:42.44,name:'PC₁₂₈'},
+             256:{total:88.46,cm:63.64,dd:48.21,name:'PC₂₅₆ (默认)'},
+             512:{total:88.06,cm:55.75,dd:37.15,name:'PC₅₁₂'}};
+let tpIdx=2;
+const cvC=$('#cvClean'),cvN=$('#cvNoisy');
+function drawScene(ctx,w,h){
+  const g=ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#2b4a7a');g.addColorStop(.55,'#7aa6cf');g.addColorStop(1,'#c9b596');
+  ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+  ctx.fillStyle='#3c5a3a';ctx.beginPath();ctx.moveTo(0,h*.62);ctx.lineTo(w*.32,h*.36);ctx.lineTo(w*.6,h*.62);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#2f4730';ctx.beginPath();ctx.moveTo(w*.45,h*.66);ctx.lineTo(w*.75,h*.4);ctx.lineTo(w,h*.66);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#8a7a5c';ctx.fillRect(0,h*.66,w,h*.34);
+  ctx.fillStyle='#e8d9a8';ctx.beginPath();ctx.arc(w*.82,h*.2,10,0,7);ctx.fill();
+  ctx.fillStyle='#5a4a38';ctx.fillRect(w*.16,h*.6,6,h*.16);
+  ctx.fillStyle='#446b3e';ctx.beginPath();ctx.arc(w*.19,h*.58,13,0,7);ctx.fill();
+}
+function renderC(){
+  const tp=TP[tpIdx],rho=tp/1000;
+  $('#tpVal').textContent=tp;
+  [cvC,cvN].forEach((cv,k)=>{
+    const ctx=cv.getContext('2d'),w=cv.width,h=cv.height;
+    drawScene(ctx,w,h);
+    if(k===1&&rho>0){
+      const img=ctx.getImageData(0,0,w,h),d=img.data;
+      for(let i=0;i<d.length;i+=4){
+        const n1=(Math.random()*255),n2=(Math.random()*255),n3=(Math.random()*255);
+        d[i]=d[i]*(1-rho)+n1*rho;d[i+1]=d[i+1]*(1-rho)+n2*rho;d[i+2]=d[i+2]*(1-rho)+n3*rho;
+      }
+      ctx.putImageData(img,0,0);
+    }
+  });
+  const a=AB_PC[tp];
+  $('#readC').innerHTML='<div class="hd">'+a.name+'</div>'+
+    '<div style="font-size:13.5px">'+
+    (tp===0?'前缀保持干净。教师严格条件在学生的真实（但早期充满漂移伪影）历史上 —— 消融显示这<strong>反而拖累</strong>聚合分数。'
+     :tp===256?'论文默认。腐蚀强度恰好抹掉颜色/纹理级的漂移伪影，又保留足够的结构信息让 target–context 关系成立。'
+     :tp===128?'腐蚀偏弱：漂移伪影残留，Camera Motion 仅 56.15。'
+     :'腐蚀偏强：结构信息被噪声淹没，前缀提供的条件价值下降，Camera Motion 55.75。')+
+    '</div>';
+  drawChartC();
+}
+function drawChartC(){
+  const host=$('#chartC');host.innerHTML='';
+  const mk=(title,key,dom,unit)=>{
+    const d=document.createElement('div');d.style.marginBottom='14px';host.appendChild(d);
+    dotplot(d,{title:title,data:TP.map(t=>({label:AB_PC[t].name,value:AB_PC[t][key],hl:t===TP[tpIdx]?1:0})),
+      domain:dom,fmt:v=>v.toFixed(2),rowH:20});
+  };
+  mk('Total（VBench-I2V 聚合）','total',[86.8,88.9]);
+  mk('Camera Motion','cm',[52,66]);
+  mk('Dynamic Degree','dd',[34,72]);
+  const p=document.createElement('p');p.className='muted';p.style.fontSize='12px';
+  p.innerHTML='注：Base CMD（无 Prefix Scoring）的对应值为 Total 88.33 / CM 60.66 / DD 42.36，见消融表。';
+  host.appendChild(p);
+}
+$('#rangeC').addEventListener('input',e=>{tpIdx=+e.target.value;renderC();});
+renderC();
+
+/* =========================================================
+   DEMO L · long video window
+   ========================================================= */
+const L={v:'bidir',t:12,N:24,M:5,T:8};
+const tlL=$('#tlL'),readL=$('#readL'),rangeL=$('#rangeL');
+let playTimer=null;
+function renderL(){
+  tlL.innerHTML='';
+  const clipStart=Math.max(1,L.t-L.M);
+  for(let i=1;i<=L.N;i++){
+    const d=document.createElement('div');
+    let cls='tf';
+    if(i===L.t)cls+=' cur';
+    else if(L.v==='cmd'){ if(i>=clipStart&&i<L.t)cls+=' win'; }
+    else {
+      const cs=Math.floor((L.t-1)/(L.M+1))*(L.M+1)+1;
+      const ce=Math.min(L.N,cs+L.M);
+      if(i>=cs&&i<L.t)cls+=' win';
+      else if(i>L.t&&i<=ce)cls+=' leak';
+      else if(i>=clipStart&&i<cs)cls+=' lost';
+    }
+    d.className=cls;
+    d.innerHTML=(i%4===1?'<span class="bnd">'+i+'</span>':'')+(i===L.t?'t':'');
+    d.addEventListener('click',()=>{L.t=i;rangeL.value=i;renderL();});
+    tlL.appendChild(d);
+  }
+  const rb=$('#rollbarL');rb.innerHTML='';
+  for(let r=0;r<3;r++){
+    const s=document.createElement('div');s.className='rollseg';
+    s.style.flex=L.T;s.style.background=(Math.floor((L.t-1)/L.T)===r)?'var(--s1)':'var(--surface-3)';
+    s.title='rollout '+(r+1);rb.appendChild(s);
+  }
+  $('#tvalL').textContent=L.t;
+  const clipStart2=Math.max(1,L.t-L.M);
+  if(L.v==='cmd'){
+    readL.innerHTML='<div class="hd"><span class="pill ok">与学生完全一致</span> CMD 因果 bounded prefix</div>'+
+      '<div>教师条件 = <span class="math"><i>h</i><sup>M</sup><sub>'+L.t+'</sub> = (x̂<sub>'+clipStart2+':'+(L.t-1)+'</sub>, c<sub>'+clipStart2+':'+L.t+'</sub>)</span> —— '+
+      '与学生生成该帧时的窗口<strong>逐 token 相同</strong>。窗口可以跨 rollout 段边界取用上一段缓存的帧，'+
+      '因此段边界附近不会出现「上下文断层」。教师注意力窗口<strong>始终为 M='+L.M+'</strong>，视频再长也不变。</div>';
+  }else{
+    const cs=Math.floor((L.t-1)/(L.M+1))*(L.M+1)+1;
+    const ce=Math.min(L.N,cs+L.M);
+    const leak=Math.max(0,ce-L.t),lost=Math.max(0,cs-clipStart2);
+    readL.innerHTML='<div class="hd"><span class="pill bad">双重错配</span> 双向教师把局部 clip 当作自包含样本</div>'+
+      '<div>教师把 <span class="math">x̂<sub>'+cs+':'+ce+'</sub></span> 当成一段独立视频来打分：'+
+      '<br>① <strong class="hl-bad">丢失 '+lost+' 帧</strong>产生该 clip 早期帧的前置 rollout 上下文（虚线框）；'+
+      '<br>② <strong class="hl-bad">违规访问 '+leak+' 帧</strong>clip 内的后续帧（红色斜纹）。'+
+      '<br>结果：教师给出的分数不符合学生的因果因式分解。</div>';
+  }
+}
+rangeL.addEventListener('input',e=>{L.t=+e.target.value;renderL();});
+$$('#segL button').forEach(b=>b.addEventListener('click',()=>{
+  $$('#segL button').forEach(x=>x.setAttribute('aria-pressed','false'));
+  b.setAttribute('aria-pressed','true');L.v=b.dataset.v;renderL();
+}));
+$('#playL').addEventListener('click',function(){
+  if(playTimer){clearInterval(playTimer);playTimer=null;this.textContent='▶ 播放';return;}
+  this.textContent='⏸ 暂停';
+  playTimer=setInterval(()=>{L.t=L.t>=L.N?1:L.t+1;rangeL.value=L.t;renderL();},480);
+});
+renderL();
+
+/* =========================================================
+   DEMO Cam
+   ========================================================= */
+const CAMSEQ=[['W','前进'],['W','前进'],['A','左移'],['↰','左转'],['W','前进'],['D','右移'],['↱','右转'],['S','后退']];
+const C2={v:'bidir',t:4};
+function renderCam(){
+  const host=$('#camStrip');host.innerHTML='';
+  CAMSEQ.forEach((c,i)=>{
+    const idx=i+1;
+    const d=document.createElement('div');
+    let cls='camstep';
+    if(idx===C2.t)cls+=' tgt';
+    else if(idx<C2.t)cls+=' ctx';
+    else cls+=(C2.v==='bidir')?' leak':' off';
+    d.className=cls;
+    d.innerHTML='<div class="k">'+c[0]+'</div><div class="sm">Δ<i>E</i><sub>'+idx+'</sub></div><div class="sm">'+c[1]+'</div>';
+    d.addEventListener('click',()=>{C2.t=idx;$('#rangeCam').value=idx;renderCam();});
+    host.appendChild(d);
+  });
+  $('#tvalCam').textContent=C2.t;
+  const fut=CAMSEQ.length-C2.t;
+  if(C2.v==='bidir'){
+    $('#readCam').innerHTML='<div class="hd">'+(fut>0?'<span class="pill bad">'+fut+' 个未来位姿泄漏</span>':'<span class="pill ok">末帧</span>')+' 双向教师</div>'+
+      '<div>教师拿到<strong>整条</strong>相机轨迹 <span class="math">Φ<sub>1:8</sub></span>。给第 '+C2.t+' 帧打分时，'+
+      '它可以用后面的 '+fut+' 个指令（'+CAMSEQ.slice(C2.t).map(c=>c[1]).join('、')+'）来「解释」当前帧应该长什么样。'+
+      '而在线学生只知道 <span class="math">c<sub>≤'+C2.t+'</sub></span>。'+
+      '<br><strong>注意：换成相对位姿并不能解决这个问题</strong> —— 泄漏来自教师的注意力范围，不来自坐标系的选择。</div>';
+  }else{
+    $('#readCam').innerHTML='<div class="hd"><span class="pill ok">无未来位姿</span> CMD 因果教师</div>'+
+      '<div>教师的视觉上下文 = 缓存的生成前缀 <span class="math">x̂<sub>&lt;'+C2.t+'</sub></span>，'+
+      '相机上下文 = <span class="math">Φ<sub>≤'+C2.t+'</sub></span>。'+
+      '每一次位姿更新都在「学生真正执行它时所处的状态」下被评分 —— 这正是相机误差大幅下降的原因'+
+      '（chunk-4 在 Hard split 上旋转误差 1.27°，相比次优的 2.05° 下降约 38%）。</div>';
+  }
+}
+$('#rangeCam').addEventListener('input',e=>{C2.t=+e.target.value;renderCam();});
+$$('#segCam button').forEach(b=>b.addEventListener('click',()=>{
+  $$('#segCam button').forEach(x=>x.setAttribute('aria-pressed','false'));
+  b.setAttribute('aria-pressed','true');C2.v=b.dataset.v;renderCam();
+}));
+renderCam();
+
+/* =========================================================
+   DATA · results tables (paper Tables 1-6, Fig 6)
+   ========================================================= */
+const SHORT=[
+ ['CausVid',3,80.77,84.06,77.48,89.05,90.99,15.57,93.45,95.35,98.14,98.67,63.13,70.43,20.57,0],
+ ['Self-Forcing',3,85.69,92.02,79.35,95.74,96.76,26.13,96.82,96.80,98.04,99.11,62.29,72.31,24.15,0],
+ ['LongLive',3,84.93,91.22,78.64,95.03,96.22,24.90,96.72,96.97,98.43,99.24,62.76,72.04,14.80,0],
+ ['Rolling Forcing',3,85.54,92.61,78.46,96.24,97.28,25.69,96.37,96.89,98.04,98.90,62.36,72.01,17.07,0],
+ ['Context Forcing',3,85.41,90.66,80.16,94.47,95.63,27.76,94.75,95.90,97.80,98.74,62.79,72.11,42.28,0],
+ ['LingBot-World',3,86.86,93.76,79.96,96.00,98.04,42.54,91.96,95.16,96.06,97.37,62.77,68.96,64.39,0],
+ ['Causal Forcing',1,87.63,93.70,81.56,96.57,98.04,34.47,91.22,93.50,94.74,98.15,59.42,70.13,87.15,0],
+ ['Causal Forcing++',1,87.35,95.36,79.35,98.63,99.35,27.34,96.35,97.41,98.70,99.19,62.82,71.48,23.66,0],
+ ['CMD (Ours)',1,88.46,96.44,80.47,98.12,98.79,63.64,95.77,97.36,97.13,98.14,60.62,71.91,48.21,1],
+ ['CMD (Ours)',4,88.47,96.54,80.40,97.64,98.44,76.12,94.77,96.72,96.71,97.99,60.82,71.51,52.93,1]
+];
+const LONG=[
+ ['LingBot-World',3,80.23,24.20,69.03,91.00,93.82,97.35,98.11,51.25,60.20,67.37,0],
+ ['LongLive',3,80.04,23.86,68.80,95.43,95.08,98.38,99.16,8.75,61.20,73.07,0],
+ ['Rolling Forcing',3,80.04,23.66,68.77,96.09,95.41,98.60,99.13,3.75,61.63,73.48,0],
+ ['Context Forcing',3,80.72,23.38,69.25,91.72,93.45,98.06,98.95,32.50,62.03,72.92,0],
+ ['CMD (Ours)',1,81.39,24.51,70.02,88.59,91.93,96.24,98.13,67.50,60.70,74.58,1],
+ ['CMD (Ours)',4,80.84,24.50,69.57,86.97,91.34,95.83,97.84,77.50,60.50,71.02,1]
+];
+const CAM={
+ Simple:[
+  ['HY-WorldPlay',4,0.8178,0.1786,0.6900,2.5840,0.1639,0.1866,0],
+  ['LingBot-World',3,0.8173,0.1841,0.6906,4.7122,0.1562,0.2194,0],
+  ['SANA-WM',3,0.8355,0.1061,0.6896,1.2104,0.1316,0.1416,0],
+  ['minWM',4,0.8102,0.1826,0.6847,2.8637,0.2174,0.2388,0],
+  ['CMD (Ours)',1,0.8260,0.2413,0.7091,1.3675,0.1195,0.1312,1],
+  ['CMD (Ours)',4,0.8195,0.1810,0.6918,0.8601,0.0981,0.1027,1]],
+ Hard:[
+  ['HY-WorldPlay',4,0.8215,0.1740,0.6920,6.5991,0.2483,0.3225,0],
+  ['LingBot-World',3,0.8144,0.1792,0.6873,6.2291,0.1774,0.2618,0],
+  ['SANA-WM',3,0.8263,0.1073,0.6825,2.0453,0.1822,0.1982,0],
+  ['minWM',4,0.8167,0.1775,0.6889,6.9128,0.2811,0.3538,0],
+  ['CMD (Ours)',1,0.8184,0.2423,0.7032,2.5607,0.1447,0.1698,1],
+  ['CMD (Ours)',4,0.8139,0.1751,0.6862,1.2718,0.1109,0.1196,1]]
+};
+const LLM={base:['Causal Forcing','LingBot-World','Causal Forcing++','Self-Forcing','Context Forcing','SANA-WM'],
+           c1:[75,64,62,66,85,60],c4:[82,76,64,72,88,74]};
+const ABSHORT=[
+ ['Bidir. teacher',82.65,90.81,74.48,93.90,95.74,36.23,85.10,90.28,94.86,96.16,53.80,57.37,82.85,0],
+ ['Base CMD',88.33,96.40,80.25,98.25,98.84,60.66,96.08,97.55,97.58,98.36,61.02,71.89,42.36,0],
+ ['+ PS (t<sub>prefix</sub>=0)',87.25,94.83,79.67,97.20,97.69,55.49,92.47,94.33,94.79,97.07,58.53,70.83,69.02,0],
+ ['+ PS + PC<sub>128</sub>',88.04,96.18,79.90,98.20,98.86,56.15,95.53,97.38,97.24,98.18,60.49,71.91,42.44,0],
+ ['+ PS + PC<sub>512</sub>',88.06,96.23,79.89,98.31,98.88,55.75,96.28,97.67,97.62,98.37,61.06,71.98,37.15,0],
+ ['Full CMD (PC<sub>256</sub>)',88.46,96.44,80.47,98.12,98.79,63.64,95.77,97.36,97.13,98.14,60.62,71.91,48.21,1]
+];
+const ABLONG=[
+ ['Bidir. teacher',76.49,23.93,65.98,83.66,89.77,95.32,96.59,67.50,54.45,65.44,0],
+ ['Base CMD',80.75,23.86,69.37,87.44,91.44,96.16,98.06,70.00,59.12,73.20,0],
+ ['Full CMD',81.39,24.51,70.02,88.59,91.93,96.24,98.13,67.50,60.70,74.58,1]
+];
+const ABCAM=[
+ ['Bidir. teacher','PRoPE','Simple',0.6794,0.1133,0.5662,11.2383,0.5413,0.6726,0],
+ ['Bidir. teacher','PRoPE','Hard',0.6779,0.1142,0.5651,12.4233,0.5481,0.6885,0],
+ ['Full CMD','PRoPE','Simple',0.7775,0.1736,0.6567,1.2546,0.4043,0.4083,0],
+ ['Full CMD','PRoPE','Hard',0.7750,0.1691,0.6538,3.2393,0.4311,0.4543,0],
+ ['Bidir. teacher','Ray map','Simple',0.7998,0.1878,0.6774,5.7306,0.2858,0.3329,0],
+ ['Bidir. teacher','Ray map','Hard',0.7936,0.1818,0.6712,7.1274,0.3027,0.3733,0],
+ ['Base CMD','Ray map','Simple',0.8214,0.1036,0.6778,1.7265,0.1264,0.1416,0],
+ ['Base CMD','Ray map','Hard',0.8128,0.1054,0.6713,2.1606,0.1257,0.1468,0],
+ ['Full CMD','Ray map','Simple',0.8260,0.2413,0.7091,1.3675,0.1195,0.1312,1],
+ ['Full CMD','Ray map','Hard',0.8184,0.2423,0.7032,2.5607,0.1447,0.1698,1]
+];
+
+/* ---------- build tables ---------- */
+const CS=['Total','I2V','Q','IS','IB','CM','SC','BC','TF','MS','AQ','IQ','DD'];
+buildTable($('#tblShort'),{
+  cols:[{l:'方法'},{l:'Chunk',fmt:v=>'K='+v}].concat(CS.map(c=>({l:c,dir:(c==='DD'?null:'h'),fmt:f2}))),
+  rows:SHORT.map(r=>({ours:!!r[15],v:[r[0],r[1]].concat(r.slice(2,15))}))
+});
+const CL=['Q','S','Total','SC','BC','TF','MS','DD','AQ','IQ'];
+buildTable($('#tblLong'),{
+  cols:[{l:'方法'},{l:'Chunk',fmt:v=>'K='+v}].concat(CL.map(c=>({l:c,dir:(c==='DD'?null:'h'),fmt:f2}))),
+  rows:LONG.map(r=>({ours:!!r[12],v:[r[0],r[1]].concat(r.slice(2,12))}))
+});
+function buildCamTable(split){
+  buildTable($('#tblCam'),{
+    cols:[{l:'方法'},{l:'Chunk',fmt:v=>'K='+v},
+      {l:'Quality ↑',dir:'h',fmt:f4},{l:'Semantic ↑',dir:'h',fmt:f4},{l:'Total ↑',dir:'h',fmt:f4},
+      {l:'Rot. ↓',dir:'l',fmt:f4},{l:'Trans. ↓',dir:'l',fmt:f4},{l:'CamMC ↓',dir:'l',fmt:f4}],
+    rows:CAM[split].map(r=>({ours:!!r[8],v:[r[0],r[1],r[2],r[3],r[4],r[5],r[6],r[7]]}))
+  });
+}
+buildTable($('#tblAbShort'),{
+  cols:[{l:'变体'}].concat(CS.map(c=>({l:c,dir:(c==='DD'?null:'h'),fmt:f2}))),
+  rows:ABSHORT.map(r=>({ours:!!r[14],v:[r[0]].concat(r.slice(1,14))}))
+});
+buildTable($('#tblAbLong'),{
+  cols:[{l:'变体'}].concat(CL.map(c=>({l:c,dir:(c==='DD'?null:'h'),fmt:f2}))),
+  rows:ABLONG.map(r=>({ours:!!r[11],v:[r[0]].concat(r.slice(1,11))}))
+});
+buildTable($('#tblAbCam'),{
+  cols:[{l:'变体'},{l:'相机表示'},{l:'Split'},
+    {l:'Quality ↑',fmt:f4},{l:'Semantic ↑',fmt:f4},{l:'Total ↑',fmt:f4},
+    {l:'Rot. ↓',fmt:f4},{l:'Trans. ↓',fmt:f4},{l:'CamMC ↓',fmt:f4}],
+  rows:ABCAM.map(r=>({ours:!!r[9],v:r.slice(0,9)}))
+});
+
+/* ---------- charts ---------- */
+let camSplit='Simple';
+function drawResultCharts(){
+  const lbl=r=>r[0]+(r[1]?' · K='+r[1]:'');
+  dotplot($('#chartShortTotal'),{
+    title:'VBench-I2V · Total（越高越好）',subtitle:'点越靠右越好；蓝点为本文方法',
+    data:SHORT.map(r=>({label:lbl(r),value:r[2],hl:r[15]?1:0})),domain:[80,89.2],fmt:f2});
+  hbars($('#chartShortCM'),{
+    title:'VBench-I2V · Camera Motion（越高越好）',subtitle:'CMD 相对最强基线 LingBot-World 提升 33.58 个百分点',
+    data:SHORT.map(r=>({label:lbl(r),value:r[7],hl:r[15]?1:0})),fmt:f2,max:82});
+  dotplot($('#chartLongTotal'),{
+    title:'长视频 · Total（越高越好）',data:LONG.map(r=>({label:lbl(r),value:r[4],hl:r[12]?1:0})),
+    domain:[68.4,70.4],fmt:f2,rowH:20});
+  hbars($('#chartLongDD'),{
+    title:'长视频 · Dynamic Degree',subtitle:'高一致性基线的画面几乎静止',
+    data:LONG.map(r=>({label:lbl(r),value:r[9],hl:r[12]?1:0})),fmt:f2,max:88,rowH:20});
+  const rows=CAM[camSplit];
+  const cl=r=>r[0]+' · K='+r[1];
+  hbars($('#chartCamRot'),{title:'旋转误差 (°) · '+camSplit+' split',subtitle:'越低越好',
+    data:rows.map(r=>({label:cl(r),value:r[5],hl:r[8]?1:0})),fmt:v=>v.toFixed(2),rowH:20});
+  hbars($('#chartCamTrans'),{title:'平移误差 · '+camSplit+' split',subtitle:'越低越好',
+    data:rows.map(r=>({label:cl(r),value:r[6],hl:r[8]?1:0})),fmt:v=>v.toFixed(3),rowH:20});
+  hbars($('#chartCamMC'),{title:'CamMC（相机矩阵一致性误差）· '+camSplit+' split',subtitle:'越低越好',
+    data:rows.map(r=>({label:cl(r),value:r[7],hl:r[8]?1:0})),fmt:v=>v.toFixed(3),rowH:20});
+  hbars($('#chartLLM'),{
+    title:'LLM 盲测胜率（%）· CMD vs 各基线',subtitle:'虚线为 50% 平局线；每对 100 次比较',
+    data:LLM.base.map((b,i)=>({label:'vs '+b,values:[LLM.c1[i],LLM.c4[i]]})),
+    series:2,names:['CMD K=1','CMD K=4'],max:100,ref:50,fmt:v=>v+'%'});
+  dotplot($('#chartWaterfall'),{
+    title:'短视频消融 · Total 分数的来源分解',subtitle:'因果打分（Bidir → Base CMD）贡献 +5.68，是最大的单一增益',
+    data:[{label:'Bidir. teacher',value:82.65,hl:0},{label:'Base CMD',value:88.33,hl:2},
+          {label:'+ PS（干净前缀）',value:87.25,hl:0},{label:'+ PS + PC₁₂₈',value:88.04,hl:0},
+          {label:'+ PS + PC₅₁₂',value:88.06,hl:0},{label:'Full CMD (PC₂₅₆)',value:88.46,hl:1}],
+    domain:[82,89.2],fmt:f2});
+  const pts=[];for(let t=1;t<=24;t++)pts.push([t,0.12+0.30*(t-1)/23,t%4===0]);
+  linechart($('#chartRho'),{title:'',subtitle:'早期帧漂移小 → 弱腐蚀；后期帧误差累积 → 强腐蚀（示意曲线，论文未公布具体数值）',
+    points:pts,xlabel:'rollout 中的帧序号 t',height:190});
+}
+buildCamTable('Simple');
+
+/* tabs */
+$$('#resTabs button').forEach(b=>b.addEventListener('click',()=>{
+  $$('#resTabs button').forEach(x=>x.setAttribute('aria-selected','false'));
+  b.setAttribute('aria-selected','true');
+  $$('.respanel').forEach(p=>p.hidden=true);
+  $('#panel-'+b.dataset.p).hidden=false;
+  drawResultCharts();
+}));
+$$('#segCamSplit button').forEach(b=>b.addEventListener('click',()=>{
+  $$('#segCamSplit button').forEach(x=>x.setAttribute('aria-pressed','false'));
+  b.setAttribute('aria-pressed','true');camSplit=b.dataset.v;
+  buildCamTable(camSplit);drawResultCharts();
+}));
+
+function redrawAll(){drawResultCharts();drawChartC();}
+drawResultCharts();
+let rt;addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(redrawAll,180);});
+})();
+</script>
+</body>
+</html>

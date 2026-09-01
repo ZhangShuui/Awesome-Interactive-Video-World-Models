@@ -1,0 +1,2127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HPSD 混合策略自蒸馏</title>
+<meta name="description" content="arXiv 2608.13205 · Hybrid-Policy Self-Distillation for Text-Image-to-Video Diffusion Models 方法精读与图解">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   HPSD 精读 — tokens.  Dark is the default ground; light is a
+   fully designed second theme, reachable by OS setting or toggle.
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0e1013; --surf:#14161a; --surf2:#1a1d23; --surf3:#232830;
+  --rule:#272b33; --rule2:#39404b;
+  --ink:#eef1f5; --ink2:#aeb6c2; --ink3:#7e8794;
+  --teacher:#bf8615; --teacher-ink:#e0a53a; --teacher-soft:rgba(191,134,21,.18);
+  --student:#2492ad; --student-ink:#56c2db; --student-soft:rgba(36,146,173,.18);
+  --hybrid:#7f63d6;  --hybrid-ink:#a894f2;  --hybrid-soft:rgba(127,99,214,.20);
+  --bad:#e06a63;     --bad-ink:#ef8a83;     --bad-soft:rgba(224,106,99,.15);
+  --ok:#3fb27a;      --ok-ink:#5fc994;      --ok-soft:rgba(63,178,122,.15);
+  --m1:#199e70; --m2:#e66767; --m3:#3987e5; --m4:#c98500; --m5:#9085e9;
+  --grid:#232830; --axis:#39404b;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.35);
+  --tint:rgba(255,255,255,.045);
+  --font-display:"Archivo","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f1f2f5; --surf:#fbfbfc; --surf2:#ebedf1; --surf3:#e1e4ea;
+    --rule:#dde0e6; --rule2:#c3c9d3;
+    --ink:#12151a; --ink2:#4d545f; --ink3:#767e8b;
+    --teacher:#b0740a; --teacher-ink:#8a5a04; --teacher-soft:rgba(176,116,10,.14);
+    --student:#00829c; --student-ink:#02697f; --student-soft:rgba(0,130,156,.14);
+    --hybrid:#6d3fd1;  --hybrid-ink:#5a2fb8;  --hybrid-soft:rgba(109,63,209,.13);
+    --bad:#c8362f;     --bad-ink:#a92a24;     --bad-soft:rgba(200,54,47,.11);
+    --ok:#0f8a52;      --ok-ink:#0b7043;      --ok-soft:rgba(15,138,82,.12);
+    --m1:#1baf7a; --m2:#e34948; --m3:#2a78d6; --m4:#eda100; --m5:#4a3aa7;
+    --grid:#e3e6eb; --axis:#c3c9d3;
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+    --tint:rgba(16,20,28,.035);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f1f2f5; --surf:#fbfbfc; --surf2:#ebedf1; --surf3:#e1e4ea;
+  --rule:#dde0e6; --rule2:#c3c9d3;
+  --ink:#12151a; --ink2:#4d545f; --ink3:#767e8b;
+  --teacher:#b0740a; --teacher-ink:#8a5a04; --teacher-soft:rgba(176,116,10,.14);
+  --student:#00829c; --student-ink:#02697f; --student-soft:rgba(0,130,156,.14);
+  --hybrid:#6d3fd1;  --hybrid-ink:#5a2fb8;  --hybrid-soft:rgba(109,63,209,.13);
+  --bad:#c8362f;     --bad-ink:#a92a24;     --bad-soft:rgba(200,54,47,.11);
+  --ok:#0f8a52;      --ok-ink:#0b7043;      --ok-soft:rgba(15,138,82,.12);
+  --m1:#1baf7a; --m2:#e34948; --m3:#2a78d6; --m4:#eda100; --m5:#4a3aa7;
+  --grid:#e3e6eb; --axis:#c3c9d3;
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  --tint:rgba(16,20,28,.035);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+h1,h2,h3,h4{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--student-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--hybrid-ink); outline-offset:3px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); border:1px solid var(--rule);
+  padding:.08em .36em; border-radius:5px; white-space:nowrap}
+strong{font-weight:600; color:var(--ink)}
+hr{border:0; border-top:1px solid var(--rule); margin:40px 0}
+
+/* ============================================================ chrome */
+#prog{position:fixed; inset:0 auto auto 0; height:2px; width:0; z-index:200;
+  background:linear-gradient(90deg,var(--teacher),var(--hybrid)); transition:width .08s linear}
+.top{position:fixed; inset:0 0 auto 0; height:60px; z-index:150; display:flex; align-items:center; gap:18px;
+  padding:0 22px; background:color-mix(in srgb, var(--surf) 86%, transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2); background:var(--surf3)}
+
+/* ============================================================ shell */
+.shell{max-width:1340px; margin:0 auto; padding:60px 26px 120px;
+  display:grid; grid-template-columns:minmax(0,1fr); gap:0}
+@media(min-width:1080px){
+  .shell{grid-template-columns:236px minmax(0,1fr); gap:56px; padding-left:32px; padding-right:32px}
+}
+.rail{display:none}
+@media(min-width:1080px){
+  .rail{display:block; position:sticky; top:88px; align-self:start; max-height:calc(100vh - 120px); overflow-y:auto;
+    padding-right:6px; scrollbar-width:thin}
+  .rail .rl{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink3); margin:0 0 14px 12px}
+  .rail ol{list-style:none; margin:0; padding:0; position:relative}
+  .rail ol::before{content:""; position:absolute; left:4px; top:6px; bottom:6px; width:1px; background:var(--rule)}
+  .rail li{position:relative}
+  .rail a{display:block; padding:5px 0 5px 22px; font-size:13px; line-height:1.45; color:var(--ink3);
+    border:0; transition:.16s}
+  .rail a::before{content:""; position:absolute; left:1px; top:14px; width:7px; height:7px; border-radius:50%;
+    background:var(--rule2); transition:.16s}
+  .rail a:hover{color:var(--ink2)}
+  .rail a.on{color:var(--ink); font-weight:500}
+  .rail a.on::before{background:var(--hybrid); box-shadow:0 0 0 3px var(--hybrid-soft)}
+}
+main{min-width:0}
+
+/* ============================================================ hero */
+.hero{margin-bottom:64px}
+.kicker{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:22px}
+.tag{font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; padding:4px 9px; border-radius:6px;
+  border:1px solid var(--rule); color:var(--ink2); background:var(--surf2)}
+.tag.hl{color:var(--hybrid-ink); border-color:var(--hybrid); background:var(--hybrid-soft)}
+.hero h1{font-size:clamp(2.1rem,4.6vw,3.5rem); font-weight:700; letter-spacing:-.025em; margin-bottom:6px}
+.hero .zh{font-size:clamp(1.05rem,2vw,1.4rem); color:var(--ink2); font-family:var(--font-display); font-weight:500;
+  letter-spacing:.01em; margin-bottom:22px}
+.hero .thesis{font-size:1.06rem; line-height:1.9; color:var(--ink2); max-width:66ch; margin-bottom:24px}
+.hero .thesis b{color:var(--ink)}
+.authors{font-size:13.5px; color:var(--ink3); line-height:1.75; max-width:70ch; margin-bottom:8px}
+.authors b{color:var(--ink2); font-weight:500}
+.links{display:flex; flex-wrap:wrap; gap:10px; margin-top:18px}
+.links a{font-family:var(--font-mono); font-size:12.5px; padding:7px 13px; border-radius:8px;
+  border:1px solid var(--rule); background:var(--surf2); color:var(--ink2)}
+.links a:hover{border-color:var(--rule2); color:var(--ink); background:var(--surf3)}
+
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(158px,1fr)); gap:1px; margin-top:34px;
+  background:var(--rule); border:1px solid var(--rule); border-radius:14px; overflow:hidden}
+.stat{background:var(--surf); padding:18px 18px 16px}
+.stat .lb{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.11em; text-transform:uppercase; color:var(--ink3)}
+.stat .vl{font-family:var(--font-display); font-size:1.85rem; font-weight:700; letter-spacing:-.02em; margin:6px 0 2px;
+  font-variant-numeric:tabular-nums}
+.stat .dl{font-size:12px; color:var(--ink3); line-height:1.5}
+.stat .dl b{color:var(--ok-ink); font-weight:600}
+
+/* ============================================================ sections */
+.sec{margin:0 0 76px; scroll-margin-top:88px}
+.eyebrow{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.eyebrow .n{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; color:var(--hybrid-ink);
+  border:1px solid var(--hybrid); background:var(--hybrid-soft); padding:2px 8px; border-radius:5px}
+.eyebrow .t{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.19em; text-transform:uppercase; color:var(--ink3)}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec > h2{font-size:clamp(1.5rem,2.6vw,2rem); letter-spacing:-.02em; margin-bottom:18px}
+.sec h3{font-size:1.16rem; margin:44px 0 12px; letter-spacing:-.01em; display:flex; align-items:baseline; gap:10px}
+.sec h3 .ix{font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-weight:400}
+.sec h4{font-size:.98rem; margin:26px 0 8px; color:var(--ink2); font-weight:600}
+.prose p{max-width:74ch; margin:0 0 15px}
+.prose ul,.prose ol{max-width:74ch; margin:0 0 15px; padding-left:1.35em}
+.prose li{margin:0 0 7px}
+.prose li::marker{color:var(--ink3)}
+.lead{font-size:1.04rem; color:var(--ink2); max-width:70ch; margin-bottom:24px; line-height:1.9}
+
+/* ============================================================ roles */
+.rT{color:var(--teacher-ink); font-weight:600}
+.rS{color:var(--student-ink); font-weight:600}
+.rH{color:var(--hybrid-ink); font-weight:600}
+.rB{color:var(--bad-ink); font-weight:600}
+.rO{color:var(--ok-ink); font-weight:600}
+
+/* ============================================================ math */
+.eqwrap{margin:24px 0; border:1px solid var(--rule); border-radius:14px; background:var(--surf); overflow:hidden}
+.eqwrap.acc-T{border-left:3px solid var(--teacher)}
+.eqwrap.acc-S{border-left:3px solid var(--student)}
+.eqwrap.acc-H{border-left:3px solid var(--hybrid)}
+.eqwrap.acc-B{border-left:3px solid var(--bad)}
+.eqrow{display:flex; align-items:center; gap:16px; padding:20px 22px; overflow-x:auto}
+.eqrow .body{flex:1; min-width:0}
+.eqn{font-family:var(--font-math); font-size:1.08rem; line-height:2.1; white-space:nowrap}
+.eqn i{font-style:italic}
+.eqn .op{font-style:normal; padding:0 .18em}
+.eqn .fn{font-style:normal}
+.eqno{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); flex:none; align-self:flex-start; padding-top:6px}
+.eqcap{border-top:1px dashed var(--rule); padding:13px 22px 15px; font-size:14px; color:var(--ink2); background:var(--tint)}
+.eqcap b{color:var(--ink)}
+/* stacked super/sub script */
+.sc{display:inline-block; vertical-align:-.44em; font-size:.58em; line-height:1.18; text-align:left; margin-left:.1em;
+  font-style:normal; font-family:var(--font-body); letter-spacing:.01em}
+.sc > span{display:block; white-space:nowrap}
+.sc .dn{color:inherit}
+.eqn sub{font-size:.66em; vertical-align:-.28em; font-style:normal; font-family:var(--font-body)}
+.eqn .sc sub{font-size:.84em; vertical-align:-.16em}
+.eqn sup{font-size:.62em; vertical-align:.5em; font-style:normal; font-family:var(--font-body)}
+.nowrapfix{white-space:normal}
+
+/* ============================================================ callouts */
+.call{margin:22px 0; padding:16px 18px; border-radius:12px; border:1px solid var(--rule);
+  background:var(--surf); font-size:14.6px; line-height:1.82; color:var(--ink2)}
+.call .hd{display:flex; align-items:center; gap:9px; font-family:var(--font-mono); font-size:11px;
+  letter-spacing:.13em; text-transform:uppercase; margin-bottom:8px}
+.call p{max-width:none; margin:0 0 10px}
+.call p:last-child{margin-bottom:0}
+.call b{color:var(--ink)}
+.call.key{border-color:var(--hybrid); background:var(--hybrid-soft)}
+.call.key .hd{color:var(--hybrid-ink)}
+.call.warn{border-color:var(--bad); background:var(--bad-soft)}
+.call.warn .hd{color:var(--bad-ink)}
+.call.note .hd{color:var(--ink3)}
+.call.mine{border-color:var(--rule2); background:var(--surf2); border-left:3px solid var(--ink3)}
+.call.mine .hd{color:var(--ink3)}
+
+/* ============================================================ figures */
+figure{margin:30px 0; padding:0}
+.fig{background:var(--surf); border:1px solid var(--rule); border-radius:16px; padding:20px 20px 4px; box-shadow:var(--shadow)}
+.fig .fh{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:4px}
+.fig .fh .no{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3)}
+.fig .fh .ti{font-family:var(--font-display); font-weight:600; font-size:15px}
+.figbody{overflow-x:auto; padding:10px 0 4px}
+.fig svg{display:block; max-width:100%; height:auto; margin:0 auto}
+.figbody svg, .chart svg{min-width:620px}
+.chart > div{overflow-x:auto}
+figcaption{font-size:13px; color:var(--ink3); line-height:1.72; padding:12px 2px 16px; border-top:1px dashed var(--rule); margin-top:8px}
+figcaption b{color:var(--ink2); font-weight:500}
+
+/* svg semantic classes */
+.s-ink{stroke:var(--ink2)} .s-ink3{stroke:var(--ink3)} .s-rule{stroke:var(--rule2)}
+.f-ink{fill:var(--ink)} .f-ink2{fill:var(--ink2)} .f-ink3{fill:var(--ink3)}
+.s-T{stroke:var(--teacher)} .f-T{fill:var(--teacher)} .f-Ti{fill:var(--teacher-ink)} .fs-T{fill:var(--teacher-soft)}
+.s-S{stroke:var(--student)} .f-S{fill:var(--student)} .f-Si{fill:var(--student-ink)} .fs-S{fill:var(--student-soft)}
+.s-H{stroke:var(--hybrid)} .f-H{fill:var(--hybrid)} .f-Hi{fill:var(--hybrid-ink)} .fs-H{fill:var(--hybrid-soft)}
+.s-B{stroke:var(--bad)} .f-B{fill:var(--bad)} .f-Bi{fill:var(--bad-ink)} .fs-B{fill:var(--bad-soft)}
+.f-O{fill:var(--ok)} .f-Oi{fill:var(--ok-ink)} .fs-O{fill:var(--ok-soft)} .s-O{stroke:var(--ok)}
+.f-surf{fill:var(--surf)} .f-surf2{fill:var(--surf2)} .f-grain{fill:var(--ink3)}
+.fclean{fill:var(--teacher); fill-opacity:.34}
+.mk-T{fill:var(--teacher)} .mk-S{fill:var(--student)} .mk-H{fill:var(--hybrid)}
+.mk-B{fill:var(--bad)} .mk-I{fill:var(--ink3)}
+svg text{font-family:var(--font-body); font-size:12px}
+svg .mono{font-family:var(--font-mono)}
+svg .lbl{font-size:11.5px}
+svg .sml{font-size:10px; letter-spacing:.08em}
+svg .big{font-size:13px; font-weight:600}
+.nofill{fill:none}
+
+/* ============================================================ tabs / steppers */
+.tabs{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px}
+.tab{font-family:var(--font-body); font-size:13px; padding:7px 13px; border-radius:9px; cursor:pointer;
+  border:1px solid var(--rule); background:var(--surf2); color:var(--ink2); transition:.16s; font-weight:500}
+.tab:hover{color:var(--ink); border-color:var(--rule2)}
+.tab[aria-selected="true"]{background:var(--hybrid-soft); border-color:var(--hybrid); color:var(--hybrid-ink)}
+.tabpanel[hidden]{display:none}
+
+.stepbar{display:flex; gap:4px; flex-wrap:wrap; margin-bottom:14px}
+.stepbtn{font-family:var(--font-mono); font-size:11.5px; padding:6px 10px; border-radius:8px; cursor:pointer;
+  border:1px solid var(--rule); background:var(--surf2); color:var(--ink3); transition:.16s}
+.stepbtn:hover{color:var(--ink2)}
+.stepbtn.on{background:var(--hybrid); border-color:var(--hybrid); color:#fff}
+:root[data-theme="light"] .stepbtn.on{color:#fff}
+.stepinfo{border:1px solid var(--rule); border-radius:12px; background:var(--surf2); padding:15px 17px; margin-top:6px;
+  font-size:14.4px; line-height:1.8; color:var(--ink2); min-height:96px}
+.stepinfo h5{margin:0 0 6px; font-family:var(--font-display); font-size:14.5px; color:var(--ink); font-weight:600}
+.stepinfo .eqmini{font-family:var(--font-math); font-size:.98rem; color:var(--ink); margin-top:8px; display:block; overflow-x:auto}
+.dim{opacity:.16; transition:opacity .3s}
+.lit{opacity:1; transition:opacity .3s}
+
+/* ============================================================ controls */
+.ctl{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:8px 0 4px;
+  padding:12px 14px; border:1px solid var(--rule); border-radius:11px; background:var(--surf2)}
+.ctl label{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink3)}
+input[type=range]{-webkit-appearance:none; appearance:none; height:4px; border-radius:3px; background:var(--rule2);
+  flex:1; min-width:150px; outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:17px; height:17px; border-radius:50%;
+  background:var(--hybrid); border:2px solid var(--surf); cursor:pointer; box-shadow:0 0 0 1px var(--hybrid)}
+input[type=range]::-moz-range-thumb{width:15px; height:15px; border-radius:50%; background:var(--hybrid);
+  border:2px solid var(--surf); cursor:pointer}
+.readout{font-family:var(--font-mono); font-size:13px; color:var(--ink); font-variant-numeric:tabular-nums;
+  background:var(--surf3); border:1px solid var(--rule); padding:4px 10px; border-radius:7px}
+
+/* ============================================================ tables */
+.tblwrap{overflow-x:auto; border:1px solid var(--rule); border-radius:14px; background:var(--surf); margin:20px 0}
+table{border-collapse:collapse; width:100%; font-size:13.2px; font-variant-numeric:tabular-nums}
+caption{text-align:left; padding:14px 18px 0; font-size:13px; color:var(--ink3); caption-side:top}
+th,td{padding:9px 13px; text-align:right; border-bottom:1px solid var(--rule); white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--ink3); font-weight:500; background:var(--surf2); position:sticky; top:0}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--tint)}
+td.best{font-weight:700; color:var(--ink)}
+td.second{text-decoration:underline; text-underline-offset:3px; color:var(--ink)}
+tr.hpsd td{background:var(--hybrid-soft)}
+tr.hpsd:hover td{background:var(--hybrid-soft)}
+tr.hpsd td:first-child{font-weight:600; color:var(--hybrid-ink)}
+.mdot{display:inline-block; width:9px; height:9px; border-radius:3px; margin-right:8px; vertical-align:-1px}
+.tnote{font-size:12.4px; color:var(--ink3); padding:10px 18px 14px; line-height:1.7}
+
+/* ============================================================ chart */
+.chart{margin:6px 0}
+.chart .ctitle{font-family:var(--font-display); font-weight:600; font-size:14px; margin-bottom:2px}
+.chart .csub{font-size:12px; color:var(--ink3); margin-bottom:12px}
+.tip{position:fixed; z-index:300; pointer-events:none; background:var(--surf); border:1px solid var(--rule2);
+  border-radius:9px; padding:8px 11px; font-size:12.5px; box-shadow:var(--shadow); color:var(--ink);
+  font-variant-numeric:tabular-nums; opacity:0; transition:opacity .12s; max-width:260px}
+.tip b{display:block; font-size:11px; color:var(--ink3); font-weight:500; margin-bottom:3px;
+  font-family:var(--font-mono); letter-spacing:.06em; text-transform:uppercase}
+.legend{display:flex; gap:16px; flex-wrap:wrap; font-size:12.5px; color:var(--ink2); margin:12px 0 2px}
+.legend span{display:inline-flex; align-items:center; gap:7px}
+
+/* ============================================================ grids / cards */
+.grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; margin:20px 0}
+.card{border:1px solid var(--rule); border-radius:13px; background:var(--surf); padding:16px 17px}
+.card h5{margin:0 0 7px; font-family:var(--font-display); font-size:14.5px; font-weight:600}
+.card p{font-size:14px; color:var(--ink2); line-height:1.78; margin:0}
+.card .mono{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); letter-spacing:.06em}
+.card.tt{border-top:3px solid var(--teacher)}
+.card.ss{border-top:3px solid var(--student)}
+.card.hh{border-top:3px solid var(--hybrid)}
+.card.bb{border-top:3px solid var(--bad)}
+
+.matrix{display:grid; grid-template-columns:auto 1fr 1fr; gap:10px; margin:20px 0}
+.mcell{border:1px solid var(--rule); border-radius:12px; padding:14px; background:var(--surf); cursor:pointer;
+  transition:.16s; text-align:left}
+.mcell:hover{border-color:var(--rule2)}
+.mcell[aria-pressed="true"]{border-color:var(--hybrid); background:var(--hybrid-soft)}
+.mcell .cl{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink3)}
+.mcell .cv{font-family:var(--font-display); font-size:1.3rem; font-weight:700; margin:5px 0 2px; font-variant-numeric:tabular-nums}
+.mcell .cd{font-size:12px; color:var(--ink3); line-height:1.55}
+.mhead{font-family:var(--font-mono); font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink3);
+  display:flex; align-items:center; justify-content:center; text-align:center}
+.mside{writing-mode:vertical-rl; transform:rotate(180deg); font-family:var(--font-mono); font-size:11px;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--ink3); display:flex; align-items:center; justify-content:center}
+
+/* ============================================================ algorithm */
+.algo{border:1px solid var(--rule); border-radius:14px; background:var(--surf); overflow:hidden; margin:22px 0}
+.algo .ah{padding:12px 18px; border-bottom:1px solid var(--rule); background:var(--surf2);
+  font-family:var(--font-mono); font-size:11.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3)}
+.algo ol{list-style:none; margin:0; padding:8px 0; counter-reset:ln}
+.algo li{counter-increment:ln; display:grid; grid-template-columns:38px 1fr; gap:12px; padding:5px 18px;
+  font-family:var(--font-mono); font-size:12.8px; line-height:1.72; color:var(--ink2)}
+.algo li::before{content:counter(ln); color:var(--ink3); text-align:right; font-size:11px; padding-top:2px}
+.algo li.cmt{color:var(--ink3); font-style:italic}
+.algo li.cmt::before{content:""}
+.algo li b{color:var(--ink); font-weight:600}
+.algo li .cm{color:var(--hybrid-ink)}
+.algo li:hover{background:var(--tint)}
+.algo .an{padding:12px 18px; border-top:1px dashed var(--rule); font-size:13px; color:var(--ink3); font-family:var(--font-body)}
+
+/* ============================================================ notation */
+.nota{display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:1px; background:var(--rule);
+  border:1px solid var(--rule); border-radius:13px; overflow:hidden; margin:20px 0}
+.nota div{background:var(--surf); padding:11px 14px; display:flex; gap:12px; align-items:baseline}
+.nota .sym{font-family:var(--font-math); font-size:1rem; color:var(--ink); flex:none; min-width:62px}
+.nota .dsc{font-size:13px; color:var(--ink2); line-height:1.6}
+
+/* ============================================================ details */
+details{border:1px solid var(--rule); border-radius:12px; background:var(--surf); margin:14px 0; overflow:hidden}
+summary{cursor:pointer; padding:13px 17px; font-size:14px; font-weight:500; color:var(--ink2); list-style:none;
+  display:flex; align-items:center; gap:10px; user-select:none}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"＋"; font-family:var(--font-mono); color:var(--ink3); font-size:13px}
+details[open] summary::before{content:"−"}
+summary:hover{color:var(--ink); background:var(--tint)}
+details .dc{padding:4px 17px 16px; font-size:14px; color:var(--ink2); line-height:1.82; border-top:1px solid var(--rule)}
+details .dc pre{font-family:var(--font-mono); font-size:11.8px; line-height:1.68; white-space:pre-wrap;
+  background:var(--surf2); border:1px solid var(--rule); border-radius:9px; padding:13px 14px; color:var(--ink2);
+  overflow-x:auto; margin:10px 0}
+
+/* ============================================================ footer */
+footer{border-top:1px solid var(--rule); margin-top:80px; padding-top:26px; font-size:13px; color:var(--ink3); line-height:1.8}
+footer a{color:var(--ink2)}
+.toTop{position:fixed; right:22px; bottom:22px; z-index:140; opacity:0; pointer-events:none; transition:.2s}
+.toTop.show{opacity:1; pointer-events:auto}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms !important; transition-duration:.001ms !important}
+  html{scroll-behavior:auto}
+}
+@media print{
+  .top,.rail,.toTop,#prog{display:none}
+  body{background:#fff; color:#000}
+}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">HPSD<em>混合策略自蒸馏 · 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<!-- shared SVG defs (same document, referenced by fragment id) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <marker id="ar-i" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-I"/></marker>
+  <marker id="ar-t" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-T"/></marker>
+  <marker id="ar-s" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-S"/></marker>
+  <marker id="ar-h" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-H"/></marker>
+  <marker id="ar-b" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-B"/></marker>
+  <pattern id="grain" width="7" height="7" patternUnits="userSpaceOnUse">
+    <circle cx="1.6" cy="1.6" r=".85" class="f-grain"/>
+    <circle cx="5.1" cy="3.4" r=".68" class="f-grain"/>
+    <circle cx="2.9" cy="5.6" r=".6" class="f-grain"/>
+    <circle cx="6.2" cy="6.4" r=".45" class="f-grain"/>
+  </pattern>
+</defs></svg>
+
+<div class="shell">
+
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-tldr">00 · 一图看懂</a></li>
+    <li><a href="#s-bg">01 · TI2V 与「特权条件」</a></li>
+    <li><a href="#s-prelim">02 · 预备知识与符号</a></li>
+    <li><a href="#s-fail">03 · 两条旧路为何都走不通</a></li>
+    <li><a href="#s-method">04 · HPSD 方法拆解</a></li>
+    <li><a href="#s-k">05 · K：范式旋钮</a></li>
+    <li><a href="#s-algo">06 · 算法与训练开销</a></li>
+    <li><a href="#s-exp">07 · 实验设置与主结果</a></li>
+    <li><a href="#s-vbench">08 · VBench 与动态度之争</a></li>
+    <li><a href="#s-abl">09 · 消融实验</a></li>
+    <li><a href="#s-crit">10 · 局限与批判性阅读</a></li>
+    <li><a href="#s-repo">11 · 与本仓库的关联</a></li>
+    <li><a href="#s-appendix">12 · 附录速查</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <div class="kicker">
+    <span class="tag">arXiv 2608.13205v1</span>
+    <span class="tag">cs.CV · 2026-08-13</span>
+    <span class="tag">Preprint</span>
+    <span class="tag hl">自蒸馏 / 视频扩散</span>
+  </div>
+  <h1>Hybrid-Policy<br>Self-Distillation</h1>
+  <p class="zh">HPSD · 混合策略自蒸馏：把「特权条件激发出的能力」内化进模型自身</p>
+  <p class="thesis">一个 TI2V 模型，给它<b>高质量首帧</b>和<b>改写后的详细提示词</b>，出片质量会明显高于它自己在纯 T2V 模式下的水平。
+  HPSD 让<b>同一套权重</b>分饰两角：<span class="rT">教师</span>在特权条件下跑完整条去噪轨迹作为锚点，<span class="rS">学生</span>只拿原始提示词、从锚点出发用自己的速度场再走 K 步，
+  然后在这个<span class="rH">既被教师锚定、又由学生演化</span>的状态上接受速度级监督。</p>
+
+  <p class="authors"><b>Jiazi Bu</b>, <b>Pengyang Ling</b>, <b>Yujie Zhou</b>, Yibin Wang, Yuhang Zang, Xuanlang Dai, Shengyuan Ding, Tianyi Wei, Xiaohang Zhan, Jiaqi Wang, Tong Wu, Dahua Lin, Xingang Pan</p>
+  <p class="authors">上海交通大学 · 南洋理工 S-Lab · 上海人工智能实验室 · 中国科学技术大学 · 复旦大学 · 上海创智学院 · 香港中文大学 · CPII · 京东 · Adobe Research</p>
+
+  <div class="links">
+    <a href="https://arxiv.org/abs/2608.13205" target="_blank" rel="noopener">arXiv 摘要 ↗</a>
+    <a href="https://arxiv.org/pdf/2608.13205" target="_blank" rel="noopener">PDF ↗</a>
+    <a href="https://bujiazi.github.io/hpsd.github.io/" target="_blank" rel="noopener">项目主页 ↗</a>
+    <a href="https://github.com/Bujiazi/HPSD" target="_blank" rel="noopener">代码 ↗</a>
+    <a href="https://huggingface.co/Bujiazi/HPSD" target="_blank" rel="noopener">权重 ↗</a>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="lb">VideoAlign · WAN-2.2 T2V</div>
+      <div class="vl">1.8753</div>
+      <div class="dl">原始 0.5335 &rarr; <b>+251%</b></div>
+    </div>
+    <div class="stat">
+      <div class="lb">相对次优基线 SFT</div>
+      <div class="vl">+55.7%</div>
+      <div class="dl">SFT 1.2046 &rarr; HPSD 1.8753</div>
+    </div>
+    <div class="stat">
+      <div class="lb">TI2V 模式（顺带收益）</div>
+      <div class="vl">+55.0%</div>
+      <div class="dl">0.7831 &rarr; <b>1.2139</b></div>
+    </div>
+    <div class="stat">
+      <div class="lb">训练成本</div>
+      <div class="vl">500 步</div>
+      <div class="dl">8&times;H200 · LoRA r=32 · bf16</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 00 TL;DR -->
+<section class="sec" id="s-tldr">
+  <div class="eyebrow"><span class="n">00</span><span class="t">TL;DR</span><span class="line"></span></div>
+  <h2>一图看懂：三种自蒸馏范式的差别</h2>
+  <p class="lead">整篇论文的技术张力只在一件事上：<strong>监督信号应该打在哪个状态上？</strong>
+  Off-policy 打在教师给的固定状态上（安全但过时），On-policy 打在学生自己走出来的状态上（贴身但在 TI2V 里非法），
+  HPSD 打在一个混血状态上——起点来自教师，终点由学生走出。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 1</span><span class="ti">监督点落在哪里：三种范式</span></div>
+    <div class="tabs" role="tablist" aria-label="蒸馏范式">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="p1a" id="t1a">(a) Off-Policy SFT</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p1b" id="t1b">(b) On-Policy 蒸馏</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p1c" id="t1c">(c) HPSD 混合策略</button>
+    </div>
+
+    <div class="figbody">
+    <!-- ---------------- panel a ---------------- -->
+    <div class="tabpanel" id="p1a" role="tabpanel" aria-labelledby="t1a">
+    <svg viewBox="0 0 720 252" role="img" aria-label="Off-policy SFT：监督点固定在教师终点的加噪版本上，与学生实际访问的状态分布随训练渐行渐远">
+      <line x1="170" y1="228" x2="676" y2="228" class="s-rule" stroke-width="1.2" marker-end="url(#ar-i)"/>
+      <text x="170" y="245" class="f-ink3 sml mono">t = 1 噪声</text>
+      <text x="420" y="245" class="f-ink3 sml" text-anchor="middle">去噪方向</text>
+      <text x="660" y="245" class="f-ink3 sml mono" text-anchor="end">t = 0 视频</text>
+
+      <text x="146" y="48" class="f-Ti big" text-anchor="end">教师 rollout</text>
+      <text x="146" y="64" class="f-ink3 sml" text-anchor="end">特权条件 · TI2V 模式</text>
+      <polyline points="176,52 250,46 324,54 398,48 472,56 546,48 640,52" class="nofill s-T" stroke-width="2.4" stroke-linecap="round"/>
+      <circle cx="176" cy="52" r="3.6" class="f-T"/><circle cx="250" cy="46" r="3.6" class="f-T"/>
+      <circle cx="324" cy="54" r="3.6" class="f-T"/><circle cx="398" cy="48" r="3.6" class="f-T"/>
+      <circle cx="472" cy="56" r="3.6" class="f-T"/><circle cx="546" cy="48" r="3.6" class="f-T"/>
+      <circle cx="640" cy="52" r="8" class="f-T"/>
+      <text x="668" y="40" class="f-Ti lbl" text-anchor="end">教师终点</text>
+      <text x="668" y="72" class="f-ink3 sml mono" text-anchor="end">x₀ᵀᵉᵃ</text>
+
+      <path d="M 636 62 C 596 108, 500 122, 434 126" class="nofill s-H" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#ar-h)"/>
+      <text x="520" y="100" class="f-Hi sml" text-anchor="middle">重新加噪</text>
+
+      <text x="146" y="122" class="f-Hi big" text-anchor="end">SFT 监督</text>
+      <text x="146" y="138" class="f-ink3 sml mono" text-anchor="end">off-policy</text>
+      <line x1="176" y1="130" x2="640" y2="130" class="s-ink3" stroke-width="1.2" stroke-dasharray="2 6"/>
+      <circle cx="410" cy="130" r="9.5" class="nofill s-H" stroke-width="2.3"/>
+      <circle cx="410" cy="130" r="3.4" class="f-H"/>
+      <text x="188" y="126" class="f-ink3 sml">固定的离线分布，训练全程不变</text>
+      <text x="424" y="140" class="f-Hi sml">x_tᵀᵉᵃ = (1−t)x₀ᵀᵉᵃ + tε</text>
+
+      <line x1="410" y1="142" x2="410" y2="174" class="s-B" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#ar-b)"/>
+      <text x="398" y="162" class="f-Bi sml" text-anchor="end">分布漂移 · exposure bias</text>
+
+      <rect x="176" y="178" width="464" height="34" rx="11" class="fs-S s-S" stroke-width="1.4" stroke-dasharray="6 4"/>
+      <text x="408" y="200" class="f-Si lbl" text-anchor="middle">学生当前策略实际访问的状态</text>
+      <text x="146" y="194" class="f-Si big" text-anchor="end">学生策略</text>
+      <text x="146" y="210" class="f-ink3 sml mono" text-anchor="end">随训练不断移动</text>
+    </svg>
+    </div>
+
+    <!-- ---------------- panel b ---------------- -->
+    <div class="tabpanel" id="p1b" role="tabpanel" aria-labelledby="t1b" hidden>
+    <svg viewBox="0 0 720 252" role="img" aria-label="On-policy 蒸馏：教师被查询在学生访问的状态上，但 TI2V 教师要求首帧干净，于是构成一个内容不连续的非法混合状态">
+      <line x1="170" y1="228" x2="676" y2="228" class="s-rule" stroke-width="1.2" marker-end="url(#ar-i)"/>
+      <text x="170" y="245" class="f-ink3 sml mono">t = 1 噪声</text>
+      <text x="660" y="245" class="f-ink3 sml mono" text-anchor="end">t = 0 视频</text>
+
+      <text x="146" y="48" class="f-Si big" text-anchor="end">学生 rollout</text>
+      <text x="146" y="64" class="f-ink3 sml" text-anchor="end">T2V 模式 · 只有文本</text>
+      <polyline points="176,50 250,54 324,46 398,52 472,46 546,54 640,48" class="nofill s-S" stroke-width="2.4" stroke-linecap="round"/>
+      <circle cx="176" cy="50" r="3.6" class="f-S"/><circle cx="250" cy="54" r="3.6" class="f-S"/>
+      <circle cx="324" cy="46" r="3.6" class="f-S"/><circle cx="472" cy="46" r="3.6" class="f-S"/>
+      <circle cx="546" cy="54" r="3.6" class="f-S"/><circle cx="640" cy="48" r="3.6" class="f-S"/>
+      <circle cx="398" cy="52" r="9" class="nofill s-S" stroke-width="2.4"/><circle cx="398" cy="52" r="3.4" class="f-S"/>
+      <text x="398" y="30" class="f-Si sml mono" text-anchor="middle">x_t^Stu</text>
+
+      <line x1="398" y1="64" x2="398" y2="94" class="s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <text x="408" y="84" class="f-ink3 sml">把这个状态交给教师</text>
+
+      <rect x="176" y="100" width="404" height="86" rx="13" class="f-surf2 s-B" stroke-width="1.5"/>
+      <text x="192" y="120" class="f-Bi sml mono">教师输入格式：首帧槽位必须是干净的 c_img</text>
+
+      <rect x="192" y="130" width="44" height="32" rx="4" class="fs-T s-T" stroke-width="1.3"/>
+      <circle cx="214" cy="146" r="6.5" class="f-T"/>
+      <text x="214" y="176" class="f-Ti sml" text-anchor="middle">c_img</text>
+
+      <polyline points="248,126 242,134 252,142 242,150 252,158 246,166" class="nofill s-B" stroke-width="2"/>
+
+      <rect x="262" y="130" width="44" height="32" rx="4" class="fs-S s-S" stroke-width="1.3"/>
+      <polygon points="284,139 291,153 277,153" class="f-S"/><rect x="262" y="130" width="44" height="32" rx="4" fill="url(#grain)" opacity=".5"/>
+      <rect x="314" y="130" width="44" height="32" rx="4" class="fs-S s-S" stroke-width="1.3"/>
+      <polygon points="336,139 343,153 329,153" class="f-S"/><rect x="314" y="130" width="44" height="32" rx="4" fill="url(#grain)" opacity=".5"/>
+      <rect x="366" y="130" width="44" height="32" rx="4" class="fs-S s-S" stroke-width="1.3"/>
+      <polygon points="388,139 395,153 381,153" class="f-S"/><rect x="366" y="130" width="44" height="32" rx="4" fill="url(#grain)" opacity=".5"/>
+      <rect x="418" y="130" width="44" height="32" rx="4" class="fs-S s-S" stroke-width="1.3"/>
+      <polygon points="440,139 447,153 433,153" class="f-S"/><rect x="418" y="130" width="44" height="32" rx="4" fill="url(#grain)" opacity=".5"/>
+      <text x="362" y="176" class="f-Si sml" text-anchor="middle">学生自由生成的内容（带噪）</text>
+
+      <text x="566" y="142" class="f-Bi big" text-anchor="end">✗ 非法状态</text>
+      <text x="566" y="158" class="f-Bi sml" text-anchor="end">时间上完全不连续</text>
+
+      <circle cx="606" cy="140" r="3.5" class="f-ink3"/>
+      <line x1="610" y1="137" x2="662" y2="116" class="s-S" stroke-width="1.8" marker-end="url(#ar-s)"/>
+      <line x1="610" y1="144" x2="662" y2="166" class="s-T" stroke-width="1.8" marker-end="url(#ar-t)"/>
+      <text x="676" y="108" class="f-Si sml" text-anchor="end">学生内容方向</text>
+      <text x="676" y="182" class="f-Ti sml" text-anchor="end">教师速度指向 c_img</text>
+      <path d="M 646 128 A 22 22 0 0 1 646 156" class="nofill s-B" stroke-width="1.4" stroke-dasharray="3 3"/>
+      <text x="200" y="206" class="f-Bi lbl">condition-state mismatch：监督被引向首帧内容，而不是修正学生自己的内容</text>
+    </svg>
+    </div>
+
+    <!-- ---------------- panel c ---------------- -->
+    <div class="tabpanel" id="p1c" role="tabpanel" aria-labelledby="t1c" hidden>
+    <svg viewBox="0 0 720 252" role="img" aria-label="HPSD：学生从教师锚点轨迹的中间状态出发，用自己的速度场走 K 步，在终点接受教师的速度级监督">
+      <line x1="170" y1="228" x2="676" y2="228" class="s-rule" stroke-width="1.2" marker-end="url(#ar-i)"/>
+      <text x="170" y="245" class="f-ink3 sml mono">t = 1 噪声</text>
+      <text x="660" y="245" class="f-ink3 sml mono" text-anchor="end">t = 0 视频</text>
+
+      <text x="146" y="50" class="f-Ti big" text-anchor="end">锚点轨迹</text>
+      <text x="146" y="66" class="f-ink3 sml mono" text-anchor="end">教师 · off-policy</text>
+      <polyline points="176,52 236,48 296,54 356,48 416,54 476,48 536,54 596,48 652,52" class="nofill s-T" stroke-width="2.4" stroke-linecap="round"/>
+      <circle cx="176" cy="52" r="3.2" class="f-T"/><circle cx="236" cy="48" r="3.2" class="f-T"/>
+      <circle cx="356" cy="48" r="3.2" class="f-T"/><circle cx="476" cy="48" r="3.2" class="f-T"/>
+      <circle cx="596" cy="48" r="3.2" class="f-T"/><circle cx="652" cy="52" r="3.2" class="f-T"/>
+      <circle cx="296" cy="54" r="8.5" class="nofill s-T" stroke-width="2.4"/><circle cx="296" cy="54" r="3.2" class="f-T"/>
+      <circle cx="416" cy="54" r="8.5" class="nofill s-T" stroke-width="2.4"/><circle cx="416" cy="54" r="3.2" class="f-T"/>
+      <circle cx="536" cy="54" r="8.5" class="nofill s-T" stroke-width="2.4"/><circle cx="536" cy="54" r="3.2" class="f-T"/>
+      <text x="296" y="30" class="f-Ti sml mono" text-anchor="middle">锚点 A₁</text>
+      <text x="416" y="30" class="f-Ti sml mono" text-anchor="middle">A₂</text>
+      <text x="536" y="30" class="f-Ti sml mono" text-anchor="middle">A₃</text>
+
+      <polyline points="296,64 316,80 336,92 354,102" class="nofill s-S" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="316" cy="80" r="2.8" class="f-S"/><circle cx="336" cy="92" r="2.8" class="f-S"/>
+      <polyline points="416,64 436,80 456,92 474,102" class="nofill s-S" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="436" cy="80" r="2.8" class="f-S"/><circle cx="456" cy="92" r="2.8" class="f-S"/>
+      <polyline points="536,64 556,80 576,92 594,102" class="nofill s-S" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="556" cy="80" r="2.8" class="f-S"/><circle cx="576" cy="92" r="2.8" class="f-S"/>
+      <text x="146" y="96" class="f-Si big" text-anchor="end">K 步子轨迹</text>
+      <text x="146" y="112" class="f-ink3 sml mono" text-anchor="end">学生 · on-policy</text>
+
+      <circle cx="354" cy="104" r="8.5" class="nofill s-H" stroke-width="2.4"/><circle cx="354" cy="104" r="3.2" class="f-H"/>
+      <circle cx="474" cy="104" r="8.5" class="nofill s-H" stroke-width="2.4"/><circle cx="474" cy="104" r="3.2" class="f-H"/>
+      <circle cx="594" cy="104" r="8.5" class="nofill s-H" stroke-width="2.4"/><circle cx="594" cy="104" r="3.2" class="f-H"/>
+
+      <line x1="474" y1="115" x2="474" y2="132" class="s-H" stroke-width="1.5" marker-end="url(#ar-h)"/>
+      <rect x="332" y="134" width="288" height="56" rx="12" class="f-surf2 s-H" stroke-width="1.5"/>
+      <text x="348" y="154" class="f-Hi lbl">① 贴回干净首帧 c_img → 查询教师 ṽ</text>
+      <text x="348" y="174" class="f-Hi lbl">② 速度匹配，仅监督第 2…F 帧</text>
+      <text x="146" y="160" class="f-Hi big" text-anchor="end">监督</text>
+      <text x="146" y="176" class="f-ink3 sml mono" text-anchor="end">hybrid-policy</text>
+
+      <path d="M 660 60 C 692 78, 692 150, 640 164" class="nofill s-T" stroke-width="1.5" stroke-dasharray="5 4" marker-start="url(#ar-t)"/>
+      <text x="676" y="116" class="f-Ti sml" text-anchor="middle">EMA</text>
+    </svg>
+    </div>
+    </div>
+
+    <figcaption><b>(a)</b> SFT 只在「教师终点的加噪版本」上给监督，这个分布在训练开始前就冻结了，而学生策略一直在动，两者越差越远。
+    <b>(b)</b> On-policy 蒸馏把教师查询在学生状态上，但 TI2V 教师的首帧槽位必须放干净的 <code>c_img</code>；
+    于是输入变成「A 的干净首帧 + B 的带噪后续帧」，模型从未见过这种时间上断裂的状态，输出的速度场是被污染的，监督反而把学生往 <code>c_img</code> 的内容上拽。
+    <b>(c)</b> HPSD 让学生从教师轨迹的中间状态出发再走 K 步：状态的内容仍源自教师（因此和 <code>c_img</code> 兼容），但已经被学生自己的策略推进过（因此贴合当前策略）。三个锚点都执行同样的操作，图中只标注了中间一个。</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <div class="card tt"><div class="mono">教师 TEACHER</div><h5>同一套权重，特权条件</h5>
+      <p>TI2V 模式：合成的高质量首帧 <code>c_img</code> + LLM 改写后的增强提示词 <code>c⁺_txt</code>。它不是一个更大的模型，只是同一个模型被喂了更好的输入——外加权重是学生的 EMA。</p></div>
+    <div class="card ss"><div class="mono">学生 STUDENT</div><h5>裸奔的基础模式</h5>
+      <p>T2V 模式：没有首帧，只有用户原始的、往往很短的提示词。这正是我们真正想提升的那条推理路径。</p></div>
+    <div class="card hh"><div class="mono">混合 HYBRID</div><h5>被锚定、被演化的状态</h5>
+      <p>起点由教师给定（内容与 <code>c_img</code> 相容），终点由学生走出（贴合当前策略）。K 就是这两种性质之间的配比旋钮。</p></div>
+  </div>
+</section>
+
+<!-- ============================================================ 01 背景 -->
+<section class="sec" id="s-bg">
+  <div class="eyebrow"><span class="n">01</span><span class="t">Motivation</span><span class="line"></span></div>
+  <h2>TI2V 统一架构，和它被「特权条件」唤醒的能力</h2>
+
+  <p class="lead">近两年 T2V 与 I2V 逐渐被收进同一套权重里，形成 <strong>TI2V（Text-Image-to-Video）</strong> 统一模型：
+  WAN-2.2、LTX-2 都是这一路。首帧图像是<strong>可选</strong>输入——给了就是 I2V，不给就是 T2V。论文的出发点是一个很朴素的观察。</p>
+
+  <h3><span class="ix">1.1</span>同一个模型，条件不同，画质差一大截</h3>
+  <p class="prose">给 TI2V 模型一张精心生成的首帧，或者把用户那句「purple car in a videogame.」交给 LLM 扩写成一段有光线、材质、镜头语言的详细提示词，
+  出片质量都会明显好过它自己在纯 T2V 模式下的表现；两者叠加则最好。论文把这类输入称为 <strong>特权条件（privileged conditions）</strong>，
+  把它们唤醒的那部分能力称为 <strong>条件激发能力（condition-elicited capability）</strong>。</p>
+  <p class="prose">关键在于：<strong>这不是模型变强了，而是同一套权重在不同外部条件下的表现差异。</strong>
+  特权条件本质上是把额外的内容先验与运动先验注入去噪过程，降低了生成的不确定性。于是论文提出了本文要解决的问题——</p>
+
+  <div class="call key">
+    <div class="hd">◆ 核心命题</div>
+    <p>能不能把「靠外部特权条件才激发出来的能力」，<b>内化</b>进模型自身的基础生成能力里？
+    也就是说，让模型在<b>没有</b>首帧、<b>没有</b>提示词改写的裸 T2V 模式下，也能拿出接近特权条件下的画质。</p>
+  </div>
+
+  <h3><span class="ix">1.2</span>四种条件组合，能力是递进的</h3>
+  <p class="prose">点击任一格子查看说明。论文 Fig. 2 用同一条提示词横向对比了这四种组合，但正文只给出了其中两格的量化数值，
+  另外两格是定性展示——下面如实标注。</p>
+
+  <div class="matrix" id="condMatrix">
+    <div></div>
+    <div class="mhead">原始提示词 c_txt</div>
+    <div class="mhead">增强提示词 c⁺_txt</div>
+
+    <div class="mside">无首帧</div>
+    <button class="mcell" type="button" aria-pressed="true" data-k="a">
+      <div class="cl">基础 T2V 模式</div><div class="cv">0.5335</div>
+      <div class="cd">VideoAlign · 我们真正想提升的那条路径</div>
+    </button>
+    <button class="mcell" type="button" aria-pressed="false" data-k="b">
+      <div class="cl">T2V + 提示词改写</div><div class="cv" style="color:var(--ink3)">—</div>
+      <div class="cd">论文 Fig. 2 定性展示明显提升，正文未给数值</div>
+    </button>
+
+    <div class="mside">有首帧 c_img</div>
+    <button class="mcell" type="button" aria-pressed="false" data-k="c">
+      <div class="cl">TI2V 模式（vanilla 文本）</div><div class="cv" style="color:var(--teacher-ink)">0.7831</div>
+      <div class="cd">VideoAlign · 相对基础 T2V <b>+46.8%</b></div>
+    </button>
+    <button class="mcell" type="button" aria-pressed="false" data-k="d">
+      <div class="cl">教师配置（双特权）</div><div class="cv" style="color:var(--ink3)">最佳</div>
+      <div class="cd">论文 Fig. 2 显示四者中最优，正文未给数值</div>
+    </button>
+  </div>
+  <div class="stepinfo" id="condInfo"></div>
+
+  <div class="call note">
+    <div class="hd">▸ 数值来源与保留</div>
+    <p>0.5335 来自 Tab. 1 / Tab. 3(b) 的 Vanilla T2V；0.7831 来自 Tab. 3(c) 的 Vanilla TI2V，指基础模型在 TI2V 模式下的表现。
+    论文没有明说 Tab. 3(c) 评测时首帧从哪来，按训练流程推断应当同样由 Z-Image-Turbo 合成——<b>这一点属于我的推断，不是论文明文</b>。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 02 预备知识 -->
+<section class="sec" id="s-prelim">
+  <div class="eyebrow"><span class="n">02</span><span class="t">Preliminaries</span><span class="line"></span></div>
+  <h2>预备知识与符号系统</h2>
+  <p class="lead">这一节把后面所有公式要用到的记号一次性讲清楚。如果你熟悉 flow matching，可以只看 2.2 的 TI2V 状态定义——
+  HPSD 的全部技巧都长在那个「首帧槽位」上。</p>
+
+  <h3><span class="ix">2.1</span>Flow Matching：直线插值与速度场</h3>
+  <p class="prose">论文用的是 rectified flow / flow matching 框架，不是 DDPM 的记号。给定数据 <code>x₀</code> 与噪声 <code>ε ~ N(0, I)</code>，
+  中间状态是一条<strong>直线插值</strong>，目标速度是一个常量向量：</p>
+
+  <div class="eqwrap">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn"><i>x</i><sub>t</sub> <span class="op">=</span> (1 <span class="op">−</span> <i>t</i>)<i>x</i><sub>0</sub> <span class="op">+</span> <i>t</i>ε<span class="op">,</span> &nbsp;&nbsp;&nbsp; <i>v</i><sup>∗</sup> <span class="op">=</span> ε <span class="op">−</span> <i>x</i><sub>0</sub></div>
+        <div class="eqn">𝓛<sub>FM</sub> <span class="op">=</span> 𝔼 ‖ <i>v</i><sub>θ</sub>(<i>x</i><sub>t</sub>, <i>t</i>, <i>c</i>) <span class="op">−</span> <i>v</i><sup>∗</sup> ‖²</div>
+        <div class="eqn">d<i>x</i><sub>t</sub> / d<i>t</i> <span class="op">=</span> <i>v</i><sub>θ</sub>(<i>x</i><sub>t</sub>, <i>t</i>, <i>c</i>)</div>
+      </div>
+      <div class="eqno">Eq. 1</div>
+    </div>
+    <div class="eqcap"><b>读法：</b><code>t = 1</code> 是纯噪声，<code>t = 0</code> 是干净数据；采样就是把速度场从 <code>t = 1</code> 积分到 <code>t = 0</code>。
+    <code>c</code> 是条件（文本、参考图）。注意 <code>v* = ε − x₀</code> 与 <code>t</code> 无关——这是 flow matching 相对 DDPM 记号上的简化，
+    后面 Eq. 3 的 SFT 目标就是直接用这个解析值。</div>
+  </div>
+
+  <h3><span class="ix">2.2</span>TI2V 的状态长什么样：那个「干净的首帧槽位」</h3>
+  <p class="prose">这是全篇最需要盯住的一个定义。T2V 模式下，模型只吃文本：<code>v_θ(x_t, t | c_txt)</code>，所有帧共享同一噪声水平。
+  TI2V 模式下，首帧条件<strong>不是</strong>作为一个额外的编码向量注入，而是<strong>直接占据第 1 帧的 latent 槽位，并且全程保持干净、不参与去噪</strong>：</p>
+
+  <div class="eqwrap acc-T">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn"><i>v</i><sub>θ</sub>( x̂<sub>t</sub>, <i>t</i> <span class="op">|</span> <i>c</i><sub>txt</sub>, <i>c</i><sub>img</sub> )<span class="op">,</span> &nbsp;&nbsp;&nbsp;
+        x̂<sub>t</sub> <span class="op">=</span> [ <i>c</i><sub>img</sub>, <i>x</i><sub>t</sub><sup>(2:F)</sup> ]</div>
+      </div>
+      <div class="eqno">Eq. 2</div>
+    </div>
+    <div class="eqcap"><b>读法：</b>方括号是沿时间维的拼接。第 1 帧槽位<b>永远</b>是干净的 <code>c_img</code>，第 2…F 帧才处于噪声水平 <code>t</code>。
+    全文用 <code>x</code> 表示所有帧同噪声水平的 T2V 状态，用 <code>x̂</code>（带帽子）表示带干净首帧槽位的 TI2V 状态。
+    <b>这个「帽子」是后面所有麻烦与所有技巧的来源。</b></div>
+  </div>
+
+  <h3><span class="ix">2.3</span>符号速查表</h3>
+  <div class="nota">
+    <div><span class="sym">x<sub>t</sub></span><span class="dsc">T2V 状态：F 帧共享同一噪声水平 t</span></div>
+    <div><span class="sym">x̂<sub>t</sub></span><span class="dsc">TI2V 状态：首帧槽位干净，其余帧在 t</span></div>
+    <div><span class="sym">t ∈ [0,1]</span><span class="dsc">流匹配时间，1 = 纯噪声，0 = 干净视频</span></div>
+    <div><span class="sym">ε</span><span class="dsc">标准高斯噪声</span></div>
+    <div><span class="sym">v<sup>∗</sup></span><span class="dsc">解析目标速度 ε − x₀</span></div>
+    <div><span class="sym">v<sub>φ</sub></span><span class="dsc">学生速度场（可训练；实现上是 LoRA）</span></div>
+    <div><span class="sym">ṽ</span><span class="dsc">教师速度场（学生的 EMA，梯度截断）</span></div>
+    <div><span class="sym">c<sub>txt</sub></span><span class="dsc">用户原始提示词（vanilla）</span></div>
+    <div><span class="sym">c⁺<sub>txt</sub></span><span class="dsc">LLM 改写后的增强提示词</span></div>
+    <div><span class="sym">c<sub>ff</sub></span><span class="dsc">首帧图像提示词（给 T2I 用）</span></div>
+    <div><span class="sym">c<sub>img</sub></span><span class="dsc">合成的高质量首帧（特权图像条件）</span></div>
+    <div><span class="sym">F</span><span class="dsc">视频帧数（训练用 33 帧）</span></div>
+    <div><span class="sym">(2:F)</span><span class="dsc">第 2 到第 F 帧，即真正被去噪的那些帧</span></div>
+    <div><span class="sym">𝒜 = {t<sub>i</sub>}</span><span class="dsc">锚点时间步集合，|𝒜| = 6，随机采样</span></div>
+    <div><span class="sym">K</span><span class="dsc">子轨迹长度：学生自走的步数，默认 3</span></div>
+    <div><span class="sym">sg[·]</span><span class="dsc">stop-gradient，教师侧不回传梯度</span></div>
+    <div><span class="sym">ℳ<sub>rw</sub></span><span class="dsc">LLM 改写器（Qwen3.6-27B）</span></div>
+    <div><span class="sym">𝒢<sub>t2i</sub></span><span class="dsc">辅助文生图模型（Z-Image-Turbo）</span></div>
+  </div>
+</section>
+
+<!-- ============================================================ 03 病灶 -->
+<section class="sec" id="s-fail">
+  <div class="eyebrow"><span class="n">03</span><span class="t">Diagnosis</span><span class="line"></span></div>
+  <h2>两条旧路：一条过时，一条非法</h2>
+  <p class="lead">要把教师能力蒸给学生，同时必须满足两个<strong>互相打架</strong>的要求：
+  ① 监督要打在学生<strong>当前真正会访问</strong>的状态上（否则修正不精准）；
+  ② 教师的监督不能和学生手上的<strong>实际内容</strong>冲突（否则修正是错的）。
+  已有的两种范式各满足一个、破坏另一个。</p>
+
+  <h3><span class="ix">3.1</span>Off-policy SFT：安全，但监督是过期的</h3>
+  <p class="prose">最直接的做法是拿教师生成的视频去做监督微调。教师先在特权条件下跑完整条去噪链，得到终点 <code>x₀^Tea</code>，
+  再对它重新加噪，用解析目标速度训学生：</p>
+
+  <div class="eqwrap acc-H">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn">𝓛<sub>SFT</sub> <span class="op">=</span> 𝔼<sub>t</sub> ‖ <i>v</i><sub>φ</sub>( <i>x</i><span class="sc"><span>Tea</span><span class="dn">t</span></span>, <i>t</i> ) <span class="op">−</span> <i>v</i><sup>∗</sup> ‖²<span class="op">,</span>
+        &nbsp;&nbsp; <i>x</i><span class="sc"><span>Tea</span><span class="dn">t</span></span> <span class="op">=</span> (1<span class="op">−</span><i>t</i>)<i>x</i><span class="sc"><span>Tea</span><span class="dn">0</span></span> <span class="op">+</span> <i>t</i>ε</div>
+      </div>
+      <div class="eqno">Eq. 3</div>
+    </div>
+    <div class="eqcap"><b>问题：</b>监督状态完全由<b>训练开始前就冻结</b>的教师终点分布决定。学生策略在训练中一直移动，
+    它实际访问的状态会离这批离线状态越来越远——这就是 exposure bias。教师没有机会针对「学生现在正在犯的错」做修正。</div>
+  </div>
+
+  <h3><span class="ix">3.2</span>On-policy 蒸馏：贴身，但在 TI2V 里是非法输入</h3>
+  <p class="prose">LLM 那边 on-policy distillation 已经被验证有效，思路是把教师查询在<strong>学生自己走出来的状态</strong>上，
+  沿学生 roll-out 提供逐状态的密集监督：</p>
+
+  <div class="eqwrap acc-S">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn">𝓛<sub>OPD</sub> <span class="op">=</span> 𝔼<sub>t</sub> ‖ <i>v</i><sub>φ</sub>( <i>x</i><span class="sc"><span>Stu</span><span class="dn">t</span></span>, <i>t</i> ) <span class="op">−</span> sg[ ṽ( <i>x</i><span class="sc"><span>Stu</span><span class="dn">t</span></span>, <i>t</i> ) ] ‖²<span class="op">,</span>
+        &nbsp;&nbsp; <i>x</i><span class="sc"><span>Stu</span><span class="dn">t</span></span> <span class="op">∼</span> <span class="fn">Rollout</span>(<i>v</i><sub>φ</sub>)</div>
+      </div>
+      <div class="eqno">Eq. 4</div>
+    </div>
+    <div class="eqcap"><b>问题不在损失，在于「怎么把状态喂给教师」。</b>学生在 T2V 模式下 roll-out，生成的是一段<b>自洽</b>的 F 帧序列；
+    而 TI2V 教师硬性要求首帧槽位放干净的 <code>c_img</code>。于是查询状态只能被硬拼成：</div>
+  </div>
+
+  <div class="eqwrap acc-B">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn">x̂<span class="sc"><span>Mismatch</span><span class="dn">t</span></span> <span class="op">=</span> [ <i>c</i><sub>img</sub><span class="op">,</span> <i>x</i><span class="sc"><span>Stu,(2:F)</span><span class="dn">t</span></span> ]</div>
+      </div>
+      <div class="eqno">Eq. 5</div>
+    </div>
+    <div class="eqcap"><b>condition-state mismatch。</b>干净的 <code>c_img</code>（内容 A）被迫和学生那段自由生成的带噪帧（内容 B）拼在一起，
+    时间上严重断裂。这是模型训练时<b>从未见过</b>的输入分布，教师输出的是一个被污染的速度场，
+    它给出的信号是「把后面的帧掰回 <code>c_img</code> 的内容」，而不是「把学生自己的内容修得更好」。</div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 2</span><span class="ti">状态的解剖：什么是合法输入，什么不是</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 262" role="img" aria-label="三种状态的帧级构成对比：T2V 状态所有帧同噪声水平且内容自洽，TI2V 状态首帧干净且内容与后续帧一致，OPD 混合状态首帧内容与后续帧内容互不相干因而非法">
+      <text x="212" y="26" class="f-ink3 sml mono">帧 1</text>
+      <text x="500" y="26" class="f-ink3 sml mono" text-anchor="end">帧 2 … 帧 F</text>
+      <line x1="212" y1="32" x2="528" y2="32" class="s-rule" stroke-width="1"/>
+
+      <!-- row 1 : T2V state -->
+      <text x="196" y="58" class="f-Si big" text-anchor="end">T2V 状态 x_t</text>
+      <text x="196" y="74" class="f-ink3 sml" text-anchor="end">学生 rollout 中间态</text>
+      <g>
+        <rect x="212" y="44" width="46" height="36" rx="5" class="fs-S s-S" stroke-width="1.3"/><polygon points="235,54 243,70 227,70" class="f-S"/><rect x="212" y="44" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+        <rect x="266" y="44" width="46" height="36" rx="5" class="fs-S s-S" stroke-width="1.3"/><polygon points="289,54 297,70 281,70" class="f-S"/><rect x="266" y="44" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+        <rect x="320" y="44" width="46" height="36" rx="5" class="fs-S s-S" stroke-width="1.3"/><polygon points="343,54 351,70 335,70" class="f-S"/><rect x="320" y="44" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+        <rect x="374" y="44" width="46" height="36" rx="5" class="fs-S s-S" stroke-width="1.3"/><polygon points="397,54 405,70 389,70" class="f-S"/><rect x="374" y="44" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+        <rect x="428" y="44" width="46" height="36" rx="5" class="fs-S s-S" stroke-width="1.3"/><polygon points="451,54 459,70 443,70" class="f-S"/><rect x="428" y="44" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+        <rect x="482" y="44" width="46" height="36" rx="5" class="fs-S s-S" stroke-width="1.3"/><polygon points="505,54 513,70 497,70" class="f-S"/><rect x="482" y="44" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+      </g>
+      <rect x="552" y="48" width="150" height="28" rx="9" class="fs-O s-O" stroke-width="1.2"/>
+      <text x="627" y="66" class="f-Oi lbl" text-anchor="middle">✓ 合法 · 噪声一致</text>
+
+      <!-- row 2 : TI2V state -->
+      <text x="196" y="136" class="f-Ti big" text-anchor="end">TI2V 状态 x̂_t</text>
+      <text x="196" y="152" class="f-ink3 sml" text-anchor="end">教师 rollout 中间态</text>
+      <g>
+        <rect x="212" y="122" width="46" height="36" rx="5" class="fclean s-T" stroke-width="2.2"/><circle cx="235" cy="140" r="8" class="f-T"/>
+        <rect x="266" y="122" width="46" height="36" rx="5" class="fs-T s-T" stroke-width="1.3"/><circle cx="289" cy="140" r="8" class="f-T"/><rect x="266" y="122" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+        <rect x="320" y="122" width="46" height="36" rx="5" class="fs-T s-T" stroke-width="1.3"/><circle cx="343" cy="140" r="8" class="f-T"/><rect x="320" y="122" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+        <rect x="374" y="122" width="46" height="36" rx="5" class="fs-T s-T" stroke-width="1.3"/><circle cx="397" cy="140" r="8" class="f-T"/><rect x="374" y="122" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+        <rect x="428" y="122" width="46" height="36" rx="5" class="fs-T s-T" stroke-width="1.3"/><circle cx="451" cy="140" r="8" class="f-T"/><rect x="428" y="122" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+        <rect x="482" y="122" width="46" height="36" rx="5" class="fs-T s-T" stroke-width="1.3"/><circle cx="505" cy="140" r="8" class="f-T"/><rect x="482" y="122" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+      </g>
+      <text x="235" y="176" class="f-Ti sml" text-anchor="middle">干净 c_img</text>
+      <rect x="552" y="126" width="150" height="28" rx="9" class="fs-O s-O" stroke-width="1.2"/>
+      <text x="627" y="144" class="f-Oi lbl" text-anchor="middle">✓ 合法 · 内容一致</text>
+
+      <!-- row 3 : mismatch -->
+      <text x="196" y="214" class="f-Bi big" text-anchor="end">OPD 查询状态</text>
+      <text x="196" y="230" class="f-ink3 sml" text-anchor="end">首帧 A ＋ 学生内容 B（Eq. 5）</text>
+      <g>
+        <rect x="212" y="200" width="46" height="36" rx="5" class="fclean s-T" stroke-width="2.2"/><circle cx="235" cy="218" r="8" class="f-T"/>
+        <rect x="266" y="200" width="46" height="36" rx="5" class="fs-S s-S" stroke-width="1.3"/><polygon points="289,210 297,226 281,226" class="f-S"/><rect x="266" y="200" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+        <rect x="320" y="200" width="46" height="36" rx="5" class="fs-S s-S" stroke-width="1.3"/><polygon points="343,210 351,226 335,226" class="f-S"/><rect x="320" y="200" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+        <rect x="374" y="200" width="46" height="36" rx="5" class="fs-S s-S" stroke-width="1.3"/><polygon points="397,210 405,226 389,226" class="f-S"/><rect x="374" y="200" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+        <rect x="428" y="200" width="46" height="36" rx="5" class="fs-S s-S" stroke-width="1.3"/><polygon points="451,210 459,226 443,226" class="f-S"/><rect x="428" y="200" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+        <rect x="482" y="200" width="46" height="36" rx="5" class="fs-S s-S" stroke-width="1.3"/><polygon points="505,210 513,226 497,226" class="f-S"/><rect x="482" y="200" width="46" height="36" rx="5" fill="url(#grain)" opacity=".7"/>
+      </g>
+      <polyline points="264,196 258,206 268,214 258,222 268,230 262,240" class="nofill s-B" stroke-width="2.2"/>
+      <rect x="552" y="204" width="150" height="28" rx="9" class="fs-B s-B" stroke-width="1.2"/>
+      <text x="627" y="222" class="f-Bi lbl" text-anchor="middle">✗ 非法 · 内容断裂</text>
+    </svg>
+    </div>
+    <figcaption>方块 = 一帧 latent；<b>颗粒</b>表示噪声水平，<b>圆形/三角形</b>表示两段互不相干的内容（A 与 B）。
+    前两行是模型训练时真实见过的输入格式：要么所有帧同噪声水平、内容自洽（T2V），要么首帧干净、且和后续帧描述的是同一段内容（TI2V）。
+    第三行是 on-policy 蒸馏被迫构造出来的东西：首帧是内容 A 的干净图，后面是内容 B 的带噪帧。<b>它不在模型的输入分布里</b>，
+    教师在这里输出的速度场没有意义。实验上这一点非常致命：OPD 让 WAN-2.2 的 VBench 主体一致性从 0.9654 掉到 0.5241。</figcaption>
+  </figure>
+
+  <div class="call warn">
+    <div class="hd">▲ 一个容易读漏的细节</div>
+    <p>论文特别指出，D-OPSD 这类已有的自蒸馏方法之所以在这里只能「打半场」，是因为它<b>依赖一个多模态编码器</b>把图像信息注入去噪过程，
+    而 TI2V 模型通常没有这个部件。所以对比实验里 D-OPSD 只蒸馏了<b>文本</b>那一半特权条件（表中标注为 <code>D-OPSD (Text)</code>），
+    上限被结构性地卡住了。文本条件<b>不会</b>触发 condition-state mismatch，这也是论文在消融里省略「只用 c⁺_txt」那一格的理由。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 04 方法 -->
+<section class="sec" id="s-method">
+  <div class="eyebrow"><span class="n">04</span><span class="t">Method</span><span class="line"></span></div>
+  <h2>HPSD：让学生「从教师的轨迹出发，用自己的脚走完剩下几步」</h2>
+  <p class="lead">一句话概括：<strong>锚点来自教师（off-policy），演化来自学生（on-policy）</strong>。
+  被监督的那个状态因此同时具备两种性质——内容仍然和 <code>c_img</code> 相容（所以教师的监督不冲突），
+  又已经被学生当前的速度场推进过（所以监督贴合当前策略）。下面按训练流水线的顺序逐步拆开。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 3</span><span class="ti">HPSD 全流程 · 点击步骤逐段点亮</span></div>
+    <div class="stepbar" id="pipeBar" role="group" aria-label="流程步骤"></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 336" id="pipeSvg" role="img" aria-label="HPSD 流水线：离线阶段用 LLM 改写提示词并用文生图模型合成首帧；在线阶段教师 rollout 得到锚点轨迹，采样锚点后重加噪首帧，学生走 K 步，再贴回干净首帧查询教师速度，做速度匹配并用 EMA 更新教师">
+      <!-- containers -->
+      <rect x="14" y="18" width="692" height="94" rx="14" class="f-surf2 s-rule" stroke-width="1.2" stroke-dasharray="6 5"/>
+      <text x="30" y="38" class="f-ink3 sml mono">(A) 离线阶段 · 每条 prompt 只算一次，结果缓存</text>
+      <rect x="14" y="124" width="692" height="200" rx="14" class="f-surf2 s-rule" stroke-width="1.2" stroke-dasharray="6 5"/>
+      <text x="30" y="144" class="f-ink3 sml mono">(B) 在线阶段 · 每个训练 step 重复</text>
+
+      <!-- offline: source prompt (always lit) -->
+      <rect x="28" y="60" width="104" height="32" rx="8" class="f-surf s-rule" stroke-width="1.2"/>
+      <text x="80" y="80" class="f-ink2 lbl" text-anchor="middle">c_txt 原始提示</text>
+
+      <!-- step 1 -->
+      <g class="stp" id="st1">
+        <line x1="132" y1="76" x2="152" y2="76" class="s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+        <rect x="156" y="60" width="96" height="32" rx="8" class="f-surf s-T" stroke-width="1.5"/>
+        <text x="204" y="74" class="f-Ti lbl" text-anchor="middle">ℳ_rw 改写</text>
+        <text x="204" y="87" class="f-ink3 sml" text-anchor="middle">Qwen3.6-27B</text>
+        <line x1="252" y1="72" x2="272" y2="58" class="s-T" stroke-width="1.4" marker-end="url(#ar-t)"/>
+        <line x1="252" y1="80" x2="272" y2="94" class="s-T" stroke-width="1.4" marker-end="url(#ar-t)"/>
+        <rect x="276" y="42" width="112" height="28" rx="7" class="fs-T s-T" stroke-width="1.2"/>
+        <text x="332" y="60" class="f-Ti lbl" text-anchor="middle">c⁺_txt 增强提示</text>
+        <rect x="276" y="82" width="112" height="28" rx="7" class="f-surf s-rule" stroke-width="1.2"/>
+        <text x="332" y="100" class="f-ink2 lbl" text-anchor="middle">c_ff 首帧提示</text>
+      </g>
+
+      <!-- step 2 -->
+      <g class="stp" id="st2">
+        <line x1="388" y1="96" x2="408" y2="94" class="s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+        <rect x="412" y="76" width="96" height="32" rx="8" class="f-surf s-T" stroke-width="1.5"/>
+        <text x="460" y="90" class="f-Ti lbl" text-anchor="middle">𝒢_t2i 文生图</text>
+        <text x="460" y="103" class="f-ink3 sml" text-anchor="middle">Z-Image-Turbo</text>
+        <line x1="508" y1="92" x2="528" y2="92" class="s-T" stroke-width="1.4" marker-end="url(#ar-t)"/>
+        <rect x="532" y="76" width="88" height="32" rx="7" class="fs-T s-T" stroke-width="1.4"/>
+        <text x="576" y="96" class="f-Ti lbl" text-anchor="middle">c_img 首帧</text>
+        <text x="700" y="70" class="f-ink3 sml" text-anchor="end">特权条件</text>
+        <text x="700" y="84" class="f-ink3 sml" text-anchor="end">缓存待用</text>
+        <path d="M 638 92 C 664 92, 672 100, 672 118" class="nofill s-T" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#ar-t)"/>
+      </g>
+
+      <!-- step 3 : teacher rollout -->
+      <g class="stp" id="st3">
+        <rect x="28" y="158" width="116" height="48" rx="10" class="f-surf s-T" stroke-width="1.6"/>
+        <text x="86" y="176" class="f-Ti lbl" text-anchor="middle">教师 rollout</text>
+        <polyline points="42,194 60,190 78,196 96,190 114,196 130,192" class="nofill s-T" stroke-width="1.8"/>
+        <circle cx="42" cy="194" r="2.4" class="f-T"/><circle cx="78" cy="196" r="2.4" class="f-T"/><circle cx="130" cy="192" r="2.4" class="f-T"/>
+        <text x="100" y="222" class="f-ink3 sml" text-anchor="middle">50 步（LTX 为 30）</text>
+      </g>
+
+      <!-- step 4 : anchors -->
+      <g class="stp" id="st4">
+        <line x1="144" y1="182" x2="158" y2="182" class="s-T" stroke-width="1.4" marker-end="url(#ar-t)"/>
+        <rect x="162" y="158" width="98" height="48" rx="10" class="f-surf s-T" stroke-width="1.6"/>
+        <text x="211" y="176" class="f-Ti lbl" text-anchor="middle">取锚点 ×6</text>
+        <circle cx="182" cy="192" r="5.5" class="nofill s-T" stroke-width="1.8"/><circle cx="182" cy="192" r="2" class="f-T"/>
+        <circle cx="211" cy="192" r="5.5" class="nofill s-T" stroke-width="1.8"/><circle cx="211" cy="192" r="2" class="f-T"/>
+        <circle cx="240" cy="192" r="5.5" class="nofill s-T" stroke-width="1.8"/><circle cx="240" cy="192" r="2" class="f-T"/>
+        <text x="211" y="222" class="f-ink3 sml" text-anchor="middle">随机采样 t_i</text>
+      </g>
+
+      <!-- step 5 : renoise -->
+      <g class="stp" id="st5">
+        <line x1="260" y1="182" x2="274" y2="182" class="s-T" stroke-width="1.4" marker-end="url(#ar-t)"/>
+        <rect x="278" y="158" width="104" height="48" rx="10" class="f-surf s-H" stroke-width="1.6"/>
+        <text x="330" y="176" class="f-Hi lbl" text-anchor="middle">首帧重加噪</text>
+        <rect x="292" y="186" width="14" height="14" rx="3" class="fs-T s-T" stroke-width="1"/><rect x="292" y="186" width="14" height="14" rx="3" fill="url(#grain)" opacity=".55"/>
+        <rect x="310" y="186" width="14" height="14" rx="3" class="fs-T s-T" stroke-width="1"/><rect x="310" y="186" width="14" height="14" rx="3" fill="url(#grain)" opacity=".55"/>
+        <rect x="328" y="186" width="14" height="14" rx="3" class="fs-T s-T" stroke-width="1"/><rect x="328" y="186" width="14" height="14" rx="3" fill="url(#grain)" opacity=".55"/>
+        <rect x="346" y="186" width="14" height="14" rx="3" class="fs-T s-T" stroke-width="1"/><rect x="346" y="186" width="14" height="14" rx="3" fill="url(#grain)" opacity=".55"/>
+        <text x="330" y="222" class="f-ink3 sml" text-anchor="middle">变成学生可用的状态</text>
+      </g>
+
+      <!-- step 6 : student K steps -->
+      <g class="stp" id="st6">
+        <line x1="382" y1="182" x2="396" y2="182" class="s-H" stroke-width="1.4" marker-end="url(#ar-h)"/>
+        <rect x="400" y="158" width="104" height="48" rx="10" class="f-surf s-S" stroke-width="1.6"/>
+        <text x="452" y="176" class="f-Si lbl" text-anchor="middle">学生走 K 步</text>
+        <polyline points="416,186 430,192 444,197 460,200" class="nofill s-S" stroke-width="1.8"/>
+        <circle cx="416" cy="186" r="2.6" class="f-T"/><circle cx="430" cy="192" r="2.2" class="f-S"/>
+        <circle cx="444" cy="197" r="2.2" class="f-S"/><circle cx="460" cy="200" r="3" class="f-H"/>
+        <text x="452" y="222" class="f-ink3 sml" text-anchor="middle">K = 3 · 无梯度</text>
+      </g>
+
+      <!-- step 7 : teacher query -->
+      <g class="stp" id="st7">
+        <line x1="504" y1="182" x2="518" y2="182" class="s-S" stroke-width="1.4" marker-end="url(#ar-s)"/>
+        <rect x="522" y="158" width="168" height="48" rx="10" class="f-surf s-T" stroke-width="1.6"/>
+        <text x="606" y="176" class="f-Ti lbl" text-anchor="middle">贴回干净首帧 → 查询教师 ṽ</text>
+        <rect x="546" y="186" width="14" height="14" rx="3" class="fs-T s-T" stroke-width="1.3"/>
+        <rect x="564" y="186" width="14" height="14" rx="3" class="fs-T s-S" stroke-width="1" stroke-dasharray="2 1.5"/><rect x="564" y="186" width="14" height="14" rx="3" fill="url(#grain)" opacity=".35"/>
+        <rect x="582" y="186" width="14" height="14" rx="3" class="fs-T s-S" stroke-width="1" stroke-dasharray="2 1.5"/><rect x="582" y="186" width="14" height="14" rx="3" fill="url(#grain)" opacity=".35"/>
+        <rect x="600" y="186" width="14" height="14" rx="3" class="fs-T s-S" stroke-width="1" stroke-dasharray="2 1.5"/><rect x="600" y="186" width="14" height="14" rx="3" fill="url(#grain)" opacity=".35"/>
+        <text x="640" y="198" class="f-Oi sml">✓ 内容相容</text>
+      </g>
+
+      <!-- step 8 : loss + updates -->
+      <g class="stp" id="st8">
+        <line x1="606" y1="206" x2="606" y2="240" class="s-H" stroke-width="1.5" marker-end="url(#ar-h)"/>
+        <rect x="380" y="244" width="310" height="38" rx="10" class="fs-H s-H" stroke-width="1.6"/>
+        <text x="535" y="268" class="f-Hi lbl" text-anchor="middle">𝓛_HPSD 速度匹配 · 只算第 2…F 帧</text>
+        <line x1="380" y1="263" x2="362" y2="263" class="s-H" stroke-width="1.5" marker-end="url(#ar-h)"/>
+        <rect x="214" y="244" width="146" height="38" rx="10" class="f-surf s-S" stroke-width="1.5"/>
+        <text x="287" y="268" class="f-Si lbl" text-anchor="middle">更新学生 v_φ（LoRA）</text>
+        <line x1="214" y1="263" x2="196" y2="263" class="s-S" stroke-width="1.5" marker-end="url(#ar-s)"/>
+        <rect x="28" y="244" width="166" height="38" rx="10" class="f-surf s-T" stroke-width="1.5"/>
+        <text x="111" y="268" class="f-Ti lbl" text-anchor="middle">EMA 0.999 → 教师 ṽ</text>
+        <path d="M 40 244 L 40 212" class="nofill s-T" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ar-t)"/>
+      </g>
+    </svg>
+    </div>
+    <div class="stepinfo" id="pipeInfo"></div>
+    <figcaption>灰度深浅表示噪声水平，纯色实心表示干净帧。离线阶段是<b>一次性</b>的：每条训练 prompt 只需要跑一次 LLM 改写与一次文生图，结果缓存复用。
+    在线阶段每个训练 step 都要重跑教师轨迹——因为教师权重在被 EMA 持续更新。</figcaption>
+  </figure>
+
+  <h3><span class="ix">4.1</span>第一步：离线构造特权条件</h3>
+  <p class="prose">给定训练提示词 <code>c_txt</code>，用一个外部 LLM 把它改写成增强提示 <code>c⁺_txt</code>，
+  同时设计一段首帧描述 <code>c_ff</code>，再交给辅助 T2I 模型渲染成高质量首帧 <code>c_img</code>：</p>
+
+  <div class="eqwrap acc-T">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn"><i>c</i><sup>+</sup><sub>txt</sub>, <i>c</i><sub>ff</sub> <span class="op">∼</span> ℳ<sub>rw</sub>( · <span class="op">|</span> <i>c</i><sub>txt</sub> )<span class="op">,</span>
+        &nbsp;&nbsp;&nbsp; <i>c</i><sub>img</sub> <span class="op">∼</span> 𝒢<sub>t2i</sub>( · <span class="op">|</span> <i>c</i><sub>ff</sub> )</div>
+      </div>
+      <div class="eqno">Eq. 6</div>
+    </div>
+    <div class="eqcap"><b>实现：</b><code>ℳ_rw</code> = Qwen3.6-27B，<code>𝒢_t2i</code> = Z-Image-Turbo（附录另测了 Flux.2-Klein-4B）。
+    两个改写模板的措辞很关键，见 <a href="#s-appendix">附录速查</a>——它们直接影响到后面 VBench 动态度下降的解释。</div>
+  </div>
+
+  <h3><span class="ix">4.2</span>第二步：教师的 off-policy 锚点轨迹</h3>
+  <p class="prose">教师在双特权条件下跑<strong>完整</strong>的去噪轨迹（WAN-2.2 是 50 步）。注意只有第 2…F 帧在更新，首帧槽位始终是干净的 <code>c_img</code>：</p>
+
+  <div class="eqwrap acc-T">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn">x̂<span class="sc"><span>Tea,(2:F)</span><span class="dn">t<sub>j+1</sub></span></span> <span class="op">=</span>
+        x̂<span class="sc"><span>Tea,(2:F)</span><span class="dn">t<sub>j</sub></span></span> <span class="op">+</span>
+        (<i>t</i><sub>j+1</sub> <span class="op">−</span> <i>t</i><sub>j</sub>) · ṽ( x̂<span class="sc"><span>Tea</span><span class="dn">t<sub>j</sub></span></span>, <i>t</i><sub>j</sub> <span class="op">|</span> <i>c</i><sup>+</sup><sub>txt</sub>, <i>c</i><sub>img</sub> )</div>
+      </div>
+      <div class="eqno">Eq. 7</div>
+    </div>
+    <div class="eqcap"><b>读法：</b>轨迹从 t = 1 的纯噪声出发（<code>x̂ᵀᵉᵃ,(2:F) = ε</code>），<code>j</code> 增大时 <code>t</code> 递减，所以系数 <code>(t_{j+1} − t_j)</code> 是负的——这就是标准的从 t=1 积分到 t=0。
+    从这条轨迹上按集合 <code>𝒜 = {t_i}</code>（|𝒜| = 6，随机采样）取出 6 个中间状态作为<b>锚点</b>。<br>
+    这些锚点携带的是<b>特权条件激发出来的生成内容</b>——它们就是要传给学生的东西。</div>
+  </div>
+
+  <h4>关键操作 ①：把锚点「翻译」成学生看得懂的格式</h4>
+  <p class="prose">教师的锚点状态 <code>x̂^Tea_{t_i}</code> 首帧槽位是干净的，而学生做 T2V 推理时所有帧噪声水平一致。
+  直接把这个状态交给学生，学生同样会遇到分布外输入。论文的处理很干脆：<strong>把首帧按当前噪声水平重新加噪</strong>：</p>
+
+  <div class="eqwrap acc-H">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn"><i>x</i><span class="sc"><span>Tea</span><span class="dn">t<sub>i</sub></span></span> <span class="op">=</span>
+        [ (1 <span class="op">−</span> <i>t</i><sub>i</sub>)<i>c</i><sub>img</sub> <span class="op">+</span> <i>t</i><sub>i</sub>ε<span class="op">,</span>
+        &nbsp; x̂<span class="sc"><span>Tea,(2:F)</span><span class="dn">t<sub>i</sub></span></span> ]<span class="op">,</span> &nbsp;&nbsp; ε <span class="op">∼</span> 𝒩(0, I)</div>
+      </div>
+      <div class="eqno">Eq. 8</div>
+    </div>
+    <div class="eqcap"><b>这一步是整个方法能成立的枢纽。</b>加噪用的正是 Eq. 1 的插值公式，噪声水平与其余帧对齐，
+    于是所有 F 帧回到「同一噪声水平」的 T2V 格式；同时首帧承载的<b>内容</b>依然是 <code>c_img</code>，与第 2…F 帧描述的是同一段视频。
+    格式对上了，内容也没丢——这才是一个合法的学生 roll-out 起点。</div>
+  </div>
+
+  <h3><span class="ix">4.3</span>第三步：学生的 hybrid-policy 子轨迹</h3>
+  <p class="prose">从每个锚点出发，学生<strong>用自己的速度场、只拿原始提示词</strong>，向前走 K 步：</p>
+
+  <div class="eqwrap acc-S">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn"><i>x</i><span class="sc"><span>Hyb</span><span class="dn">t<sub>j+1</sub></span></span> <span class="op">=</span>
+        <i>x</i><span class="sc"><span>Hyb</span><span class="dn">t<sub>j</sub></span></span> <span class="op">+</span>
+        (<i>t</i><sub>j+1</sub> <span class="op">−</span> <i>t</i><sub>j</sub>) · <i>v</i><sub>φ</sub>( <i>x</i><span class="sc"><span>Hyb</span><span class="dn">t<sub>j</sub></span></span>, <i>t</i><sub>j</sub> <span class="op">|</span> <i>c</i><sub>txt</sub> )</div>
+        <div class="eqn" style="font-size:.94rem"><i>j</i> <span class="op">=</span> <i>i</i>, …, <i>i</i>+K−1<span class="op">,</span> &nbsp;&nbsp;
+        <i>x</i><span class="sc"><span>Hyb</span><span class="dn">t<sub>i</sub></span></span> <span class="op">:=</span> <i>x</i><span class="sc"><span>Tea</span><span class="dn">t<sub>i</sub></span></span></div>
+      </div>
+      <div class="eqno">Eq. 9</div>
+    </div>
+    <div class="eqcap"><b>读法：</b>子轨迹沿用锚点轨迹本身的时间步网格（同一套 50 步离散化）。终点 <code>x^Hyb_{t_{i+K}}</code> 就是被监督的那个状态：
+    <b>内容继承自教师，动力学来自学生。</b>论文在局限性一节明确说明，这 K 步是在 <b>inference 模式</b>下跑的，不保存梯度——
+    真正回传梯度的只有最后那一次学生前向。</div>
+  </div>
+
+  <h4>关键操作 ②：把混合态「翻译」回教师看得懂的格式</h4>
+  <p class="prose">要向教师要监督，就得按教师的输入格式（Eq. 2）来。于是把干净首帧<strong>贴回去</strong>：</p>
+
+  <div class="eqwrap acc-T">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn">x̂<span class="sc"><span>Hyb</span><span class="dn">t<sub>i+K</sub></span></span> <span class="op">=</span>
+        [ <i>c</i><sub>img</sub><span class="op">,</span> &nbsp; <i>x</i><span class="sc"><span>Hyb,(2:F)</span><span class="dn">t<sub>i+K</sub></span></span> ]</div>
+      </div>
+      <div class="eqno">Eq. 10</div>
+    </div>
+    <div class="eqcap"><b>形式上，这和 Eq. 5 的非法拼接一模一样——差别全在内容。</b>
+    OPD 拼的是「A 的首帧 + B 的帧」，HPSD 拼的是「A 的首帧 + 从 A 演化出来的帧」。
+    因为学生只走了 K = 3 步，内容还没来得及漂离锚点，所以拼出来的状态是时间连续的，落在模型见过的分布里。</div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 4</span><span class="ti">两次首帧转换：把状态在两种格式之间来回搬运</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 210" role="img" aria-label="四个状态的帧级构成：教师锚点状态首帧干净；重加噪后所有帧噪声水平一致，成为学生可用起点；学生走 K 步后噪声降低且内容由学生推进；最后贴回干净首帧构成教师可查询状态">
+      <text x="74.5" y="42" class="f-Ti lbl" text-anchor="middle">x̂ᵀᵉᵃ_tᵢ</text>
+      <text x="74.5" y="57" class="f-ink3 sml" text-anchor="middle">教师锚点</text>
+      <g>
+      <rect x="18" y="72" width="26" height="34" rx="4" class="fclean s-T" stroke-width="2.2"/>
+      <circle cx="31.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="47" y="72" width="26" height="34" rx="4" class="fs-T s-T" stroke-width="1"/>
+      <circle cx="60.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="47" y="72" width="26" height="34" rx="4" fill="url(#grain)" opacity=".7"/>
+      <rect x="76" y="72" width="26" height="34" rx="4" class="fs-T s-T" stroke-width="1"/>
+      <circle cx="89.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="76" y="72" width="26" height="34" rx="4" fill="url(#grain)" opacity=".7"/>
+      <rect x="105" y="72" width="26" height="34" rx="4" class="fs-T s-T" stroke-width="1"/>
+      <circle cx="118.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="105" y="72" width="26" height="34" rx="4" fill="url(#grain)" opacity=".7"/>
+      </g>
+      <text x="74.5" y="126" class="f-ink3 sml" text-anchor="middle">首帧干净 · 其余在 t_i</text>
+      <text x="258.5" y="42" class="f-Hi lbl" text-anchor="middle">xᵀᵉᵃ_tᵢ</text>
+      <text x="258.5" y="57" class="f-ink3 sml" text-anchor="middle">学生可用起点</text>
+      <g>
+      <rect x="202" y="72" width="26" height="34" rx="4" class="fs-T s-T" stroke-width="1"/>
+      <circle cx="215.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="202" y="72" width="26" height="34" rx="4" fill="url(#grain)" opacity=".7"/>
+      <rect x="231" y="72" width="26" height="34" rx="4" class="fs-T s-T" stroke-width="1"/>
+      <circle cx="244.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="231" y="72" width="26" height="34" rx="4" fill="url(#grain)" opacity=".7"/>
+      <rect x="260" y="72" width="26" height="34" rx="4" class="fs-T s-T" stroke-width="1"/>
+      <circle cx="273.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="260" y="72" width="26" height="34" rx="4" fill="url(#grain)" opacity=".7"/>
+      <rect x="289" y="72" width="26" height="34" rx="4" class="fs-T s-T" stroke-width="1"/>
+      <circle cx="302.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="289" y="72" width="26" height="34" rx="4" fill="url(#grain)" opacity=".7"/>
+      </g>
+      <text x="258.5" y="126" class="f-ink3 sml" text-anchor="middle">所有帧同噪声水平 t_i</text>
+      <text x="442.5" y="42" class="f-Si lbl" text-anchor="middle">xᴴʸᵇ_tᵢ₊ₖ</text>
+      <text x="442.5" y="57" class="f-ink3 sml" text-anchor="middle">混合策略终点</text>
+      <g>
+      <rect x="386" y="72" width="26" height="34" rx="4" class="fs-T s-S" stroke-width="1.5" stroke-dasharray="3 2"/>
+      <circle cx="399.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="386" y="72" width="26" height="34" rx="4" fill="url(#grain)" opacity=".38"/>
+      <rect x="415" y="72" width="26" height="34" rx="4" class="fs-T s-S" stroke-width="1.5" stroke-dasharray="3 2"/>
+      <circle cx="428.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="415" y="72" width="26" height="34" rx="4" fill="url(#grain)" opacity=".38"/>
+      <rect x="444" y="72" width="26" height="34" rx="4" class="fs-T s-S" stroke-width="1.5" stroke-dasharray="3 2"/>
+      <circle cx="457.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="444" y="72" width="26" height="34" rx="4" fill="url(#grain)" opacity=".38"/>
+      <rect x="473" y="72" width="26" height="34" rx="4" class="fs-T s-S" stroke-width="1.5" stroke-dasharray="3 2"/>
+      <circle cx="486.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="473" y="72" width="26" height="34" rx="4" fill="url(#grain)" opacity=".38"/>
+      </g>
+      <text x="442.5" y="126" class="f-ink3 sml" text-anchor="middle">内容源自教师 · 学生推进</text>
+      <text x="626.5" y="42" class="f-Ti lbl" text-anchor="middle">x̂ᴴʸᵇ_tᵢ₊ₖ</text>
+      <text x="626.5" y="57" class="f-ink3 sml" text-anchor="middle">教师查询状态</text>
+      <g>
+      <rect x="570" y="72" width="26" height="34" rx="4" class="fclean s-T" stroke-width="2.2"/>
+      <circle cx="583.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="599" y="72" width="26" height="34" rx="4" class="fs-T s-S" stroke-width="1.5" stroke-dasharray="3 2"/>
+      <circle cx="612.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="599" y="72" width="26" height="34" rx="4" fill="url(#grain)" opacity=".38"/>
+      <rect x="628" y="72" width="26" height="34" rx="4" class="fs-T s-S" stroke-width="1.5" stroke-dasharray="3 2"/>
+      <circle cx="641.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="628" y="72" width="26" height="34" rx="4" fill="url(#grain)" opacity=".38"/>
+      <rect x="657" y="72" width="26" height="34" rx="4" class="fs-T s-S" stroke-width="1.5" stroke-dasharray="3 2"/>
+      <circle cx="670.0" cy="89.0" r="5.5" class="f-T"/>
+      <rect x="657" y="72" width="26" height="34" rx="4" fill="url(#grain)" opacity=".38"/>
+      </g>
+      <text x="626.5" y="126" class="f-ink3 sml" text-anchor="middle">形式同 Eq.5，内容不同</text>
+      <line x1="140" y1="89" x2="193" y2="89" class="s-H" stroke-width="1.8" marker-end="url(#ar-h)"/>
+      <text x="166.5" y="76" class="f-Hi sml" text-anchor="middle">Eq. 8</text>
+      <text x="166.5" y="108" class="f-ink3 sml" text-anchor="middle">首帧重加噪</text>
+      <line x1="324" y1="89" x2="377" y2="89" class="s-S" stroke-width="1.8" marker-end="url(#ar-s)"/>
+      <text x="350.5" y="76" class="f-Si sml" text-anchor="middle">Eq. 9</text>
+      <text x="350.5" y="108" class="f-ink3 sml" text-anchor="middle">学生走 K 步</text>
+      <line x1="508" y1="89" x2="561" y2="89" class="s-T" stroke-width="1.8" marker-end="url(#ar-t)"/>
+      <text x="534.5" y="76" class="f-Ti sml" text-anchor="middle">Eq. 10</text>
+      <text x="534.5" y="108" class="f-ink3 sml" text-anchor="middle">贴回干净首帧</text>
+      <rect x="558" y="142" width="136" height="26" rx="9" class="fs-O s-O" stroke-width="1.2"/>
+      <text x="626" y="159" class="f-Oi sml" text-anchor="middle">✓ 时间连续 · 合法</text>
+      <line x1="18" y1="192" x2="58" y2="192" class="s-T" stroke-width="2.4"/>
+      <text x="66" y="196" class="f-ink3 sml">教师内容（圆形）</text>
+      <line x1="196" y1="192" x2="236" y2="192" class="s-S" stroke-width="2.4" stroke-dasharray="3 2"/>
+      <text x="244" y="196" class="f-ink3 sml">虚线边框 = 已被学生策略推进</text>
+      <rect x="470" y="185" width="26" height="14" rx="3" class="fs-T s-T" stroke-width="1"/><rect x="470" y="185" width="26" height="14" rx="3" fill="url(#grain)" opacity=".7"/>
+      <text x="504" y="196" class="f-ink3 sml">颗粒密度 = 噪声水平</text>
+      </svg>
+    </div>
+    <figcaption>四个状态形式上只差「首帧槽位是干净还是带噪」，但每一次转换都在解决一个具体的兼容性问题：
+    <b>Eq. 8</b> 解决「教师状态 → 学生输入格式」，<b>Eq. 10</b> 解决「学生状态 → 教师输入格式」。
+    OPD 只做了后者而跳过了前者，所以第 2…F 帧的内容与 <code>c_img</code> 毫无关系；HPSD 两次都做，内容链条始终连着。</figcaption>
+  </figure>
+
+  <h3><span class="ix">4.4</span>第四步：速度级监督</h3>
+  <div class="eqwrap acc-H">
+    <div class="eqrow">
+      <div class="body">
+        <div class="eqn">𝓛<sub>HPSD</sub> <span class="op">=</span> 𝔼<sub>t<sub>i</sub>∼𝒜</sub> ‖ <i>v</i><sub>φ</sub>( <i>x</i><span class="sc"><span>Hyb</span><span class="dn">t<sub>i+K</sub></span></span>, <i>t</i><sub>i+K</sub> <span class="op">|</span> <i>c</i><sub>txt</sub> )
+        <span class="op">−</span> sg[ ṽ( x̂<span class="sc"><span>Hyb</span><span class="dn">t<sub>i+K</sub></span></span>, <i>t</i><sub>i+K</sub> <span class="op">|</span> <i>c</i><sup>+</sup><sub>txt</sub>, <i>c</i><sub>img</sub> ) ] ‖²<sub>(2:F)</sub></div>
+      </div>
+      <div class="eqno">Eq. 11</div>
+    </div>
+    <div class="eqcap"><b>三个必须盯住的细节：</b><br>
+    ① <b>两侧输入不同。</b>学生看 <code>x^Hyb</code>（首帧槽位是它自己演化出来的带噪帧）+ 原始提示；教师看 <code>x̂^Hyb</code>（首帧槽位换成干净 <code>c_img</code>）+ 增强提示。
+    这是一次<b>非对称</b>蒸馏——差的不只是首帧，还有提示词。<br>
+    ② <b>下标 (2:F)。</b>损失只在第 2 到第 F 帧上计算。教师在干净首帧槽位上输出的速度没有去噪含义，必须排除。<br>
+    ③ <b>sg[·]。</b>教师侧梯度截断；教师权重靠 EMA（衰减 0.999）跟随学生，而不是靠反传。</div>
+  </div>
+
+  <div class="call key">
+    <div class="hd">◆ 为什么这个设计同时满足了两个互斥要求</div>
+    <p><b>① 教师的监督不再和样本内容冲突：</b>被监督的状态继承自教师锚点，它的第 2…F 帧内容本来就是「以 <code>c_img</code> 为首帧」的那段视频，
+    所以贴回 <code>c_img</code> 之后依然时间连续。</p>
+    <p><b>② 监督仍然贴合当前策略：</b>这个状态是学生用<b>此刻</b>的速度场推进 K 步得到的，学生策略一变，它就跟着变。
+    这正是 off-policy SFT 拿不到的那份「state-aware 的精准修正」。</p>
+  </div>
+
+  <h3><span class="ix">4.5</span>EMA 教师：两个角色一起变强</h3>
+  <p class="prose">教师不是冻结的。它是学生的指数滑动平均（decay = 0.999），这带来两个后果：</p>
+  <ul class="prose">
+    <li><strong>目标分布被稳定住。</strong>如果教师就是学生本身，速度匹配会变成自指的、容易发散的目标；EMA 起到了 target network 的作用。</li>
+    <li><strong>教师会随学生一起进步。</strong>学生变强 → EMA 权重变强 → 同一套权重在特权条件下也更强 → 锚点轨迹质量提高。这解释了为什么 Tab. 3(c) 里 TI2V 模式也涨了 55%。</li>
+  </ul>
+  <div class="call mine">
+    <div class="hd">▸ 我的读解</div>
+    <p>值得留意：训练<b>刚开始</b>时教师和学生是同一套权重，教师的全部优势<b>只来自条件</b>，不来自参数。
+    也就是说 HPSD 的第一推动力完全是「同一个模型在更好输入下的表现差」——这是「自蒸馏」这个词在这里最实在的含义。
+    随后 EMA 才把这份增益慢慢固化进权重，形成一个自举循环。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 05 K -->
+<section class="sec" id="s-k">
+  <div class="eyebrow"><span class="n">05</span><span class="t">The Knob</span><span class="line"></span></div>
+  <h2>K：一个把 off-policy 和 on-policy 连成连续谱的旋钮</h2>
+  <p class="lead">HPSD 最漂亮的一点，是它没有把「off-policy vs on-policy」当成二选一，而是把它变成了一个可调参数。
+  <strong>K = 0</strong> 时监督直接打在教师锚点上，就是在教师轨迹上做 off-policy 蒸馏；
+  <strong>K 增大</strong>时状态越来越由学生主导，逐渐逼近纯 on-policy——也逐渐重新招来 condition-state mismatch。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 5</span><span class="ti">拖动 K，看监督点往哪边滑</span></div>
+    <div class="ctl">
+      <label for="kSlider">子轨迹长度 K</label>
+      <input type="range" id="kSlider" min="0" max="7" step="1" value="3" aria-describedby="kRead">
+      <span class="readout" id="kRead">K = 3</span>
+      <span class="readout" id="kVA">VideoAlign 1.8753</span>
+    </div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 236" role="img" aria-label="随 K 增大，学生子轨迹变长，被监督的状态从教师锚点滑向学生自身分布">
+      <text x="30" y="56" class="f-Ti sml">教师锚点轨迹（off-policy）</text>
+      <polyline points="30,90 90,86 150,92 210,86 270,92 330,86 390,92 440,88" class="nofill s-T" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="150" cy="92" r="3" class="f-T"/><circle cx="210" cy="86" r="3" class="f-T"/>
+      <circle cx="270" cy="92" r="3" class="f-T"/><circle cx="330" cy="86" r="3" class="f-T"/>
+      <circle cx="90" cy="86" r="9" class="nofill s-T" stroke-width="2.4"/><circle cx="90" cy="86" r="3.2" class="f-T"/>
+      <text x="90" y="72" class="f-Ti sml mono" text-anchor="middle">锚点 t_i</text>
+
+      <polyline id="kPoly" points="" class="nofill s-S" stroke-width="2.2" stroke-linecap="round"/>
+      <g id="kDots"></g>
+      <circle id="kMarkRing" cx="90" cy="86" r="9.5" class="nofill s-H" stroke-width="2.4"/>
+      <circle id="kMarkDot" cx="90" cy="86" r="3.4" class="f-H"/>
+      <text id="kMarkLbl" x="106" y="90" class="f-Hi sml">监督点</text>
+      <text x="230" y="212" class="f-Si sml" id="kSubLbl">学生子轨迹：K = 3 步</text>
+
+      <line x1="470" y1="40" x2="470" y2="212" class="s-rule" stroke-width="1" stroke-dasharray="4 4"/>
+
+      <text x="496" y="58" class="f-ink3 sml mono">范式位置</text>
+      <rect x="496" y="68" width="194" height="8" rx="4" class="f-surf2 s-rule" stroke-width="1"/>
+      <rect x="496" y="68" width="97" height="8" rx="4" class="fs-T"/>
+      <rect x="593" y="68" width="97" height="8" rx="4" class="fs-S"/>
+      <polygon id="kSpec" points="496,60 502,50 490,50" class="f-H"/>
+      <text x="496" y="92" class="f-Ti sml">off-policy</text>
+      <text x="690" y="92" class="f-Si sml" text-anchor="end">on-policy</text>
+
+      <text x="496" y="124" class="f-ink3 sml">与 c_img 的内容相容度</text>
+      <rect x="496" y="130" width="194" height="9" rx="4.5" class="f-surf2 s-rule" stroke-width="1"/>
+      <rect id="kBar1" x="496" y="130" width="194" height="9" rx="4.5" class="f-T"/>
+
+      <text x="496" y="166" class="f-ink3 sml">与学生当前策略的贴合度</text>
+      <rect x="496" y="172" width="194" height="9" rx="4.5" class="f-surf2 s-rule" stroke-width="1"/>
+      <rect id="kBar2" x="496" y="172" width="0" height="9" rx="4.5" class="f-S"/>
+
+      <text x="496" y="206" class="f-ink3 sml" id="kNote1">论文实测：K = 3 最优</text>
+      <text x="496" y="222" class="f-ink3 sml" id="kNote2">1.8753（VideoAlign · WAN-2.2）</text>
+    </svg>
+    </div>
+    <figcaption>右侧两根条是<b>示意</b>，用来表达机制上的此消彼长，并非论文测量值；只有底部的 VideoAlign 是实测数据（Tab. 3a，K ∈ {0,1,3,5,7} 有测量，其余未测）。
+    左侧的锚点轨迹与子轨迹是按几何比例画的：K 越大，被监督的状态离教师锚点越远。</figcaption>
+  </figure>
+
+  <div class="chart" id="chartK"></div>
+
+  <p class="prose">论文对这条曲线的解释是两端各有一个失败模式：</p>
+  <div class="grid2">
+    <div class="card tt"><div class="mono">K 太小</div><h5>过于 off-policy</h5>
+      <p>子轨迹还没走到学生自己的分布上，监督点几乎就是教师状态本身，退化成「在教师轨迹上做蒸馏」——拿不到针对当前策略的精准修正。</p></div>
+    <div class="card bb"><div class="mono">K 太大</div><h5>重新招来错配</h5>
+      <p>状态漂离教师先验太远，第 2…F 帧的内容逐渐与 <code>c_img</code> 脱钩，Eq. 10 贴回干净首帧时又开始产生时间断裂——condition-state mismatch 卷土重来。</p></div>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">▸ 我的读解：增益的来源可以被拆开</div>
+    <p>把 Tab. 3(a) 和 Tab. 1 放一起看，WAN-2.2 上的 VideoAlign 是这样递进的：
+    <b>SFT 1.2046 → K=0 的 1.5587 → K=3 的 1.8753</b>。</p>
+    <p>相对 SFT 的总增益 0.6707 里，<b>约 53% 来自「K=0」这一步</b>——也就是「沿整条教师轨迹做速度级蒸馏」而不是「只在教师终点的加噪版本上做流匹配」；
+    剩下 <b>约 47% 才来自 hybrid roll-out 本身</b>。换句话说，论文标题里的 hybrid-policy 确实贡献了将近一半，
+    但另一半属于一个更朴素、也更容易被忽略的改动：<b>把监督从「终点 + 解析目标」换成「全轨迹 + 教师速度」</b>。这两件事在论文里没有被分开报告，是我按数字推的。</p>
+  </div>
+
+  <div class="call warn">
+    <div class="hd">▲ 一处数字上的小出入</div>
+    <p>Tab. 3(a) 里 VideoAlign 在 K=3 达到峰值（1.8753），但 <b>VisionReward 的峰值其实在 K=5</b>（0.1194 vs K=3 的 0.1191），
+    论文正文只说「先升后降」并选定 K=3，没有点破这一点。差距很小，不影响结论，但如果你要复现或调参，值得知道最优 K 在不同指标上并不完全一致。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 06 算法 -->
+<section class="sec" id="s-algo">
+  <div class="eyebrow"><span class="n">06</span><span class="t">Algorithm</span><span class="line"></span></div>
+  <h2>算法逐行走读，以及真实的训练开销</h2>
+
+  <div class="algo">
+    <div class="ah">Algorithm 1 · Hybrid-Policy Self-Distillation</div>
+    <ol>
+      <li class="cmt">Require：学生 v_φ 与 EMA 教师 ṽ（同一个 TI2V 模型）；prompt 集 𝒟；子轨迹长度 K；锚点步集 𝒜 = {t_i}, |𝒜| = 6</li>
+      <li class="cmt"><span class="cm">// 离线阶段：构造特权条件</span></li>
+      <li><b>for all</b> c_txt ∈ 𝒟 <b>do</b></li>
+      <li>　把 c_txt 改写为 c⁺_txt，并合成首帧 c_img　<span class="cm">▷ Eq. 6</span></li>
+      <li><b>end for</b></li>
+      <li class="cmt"><span class="cm">// 在线阶段：混合策略自蒸馏</span></li>
+      <li><b>for</b> 每个训练 step <b>do</b></li>
+      <li>　采样 prompt batch {c_txt} ⊂ 𝒟；载入缓存的 (c⁺_txt, c_img)</li>
+      <li>　<span class="cm">// off-policy 锚点轨迹</span></li>
+      <li>　用 ṽ(·|c⁺_txt, c_img) 跑完整 rollout；收集锚点状态 {x̂ᵀᵉᵃ_tᵢ}　<span class="cm">▷ Eq. 7</span></li>
+      <li>　把每个锚点转换成学生可用状态 xᵀᵉᵃ_tᵢ　<span class="cm">▷ Eq. 8</span></li>
+      <li>　<span class="cm">// hybrid-policy 子轨迹</span></li>
+      <li>　<b>for all</b> 锚点 xᵀᵉᵃ_tᵢ <b>do</b></li>
+      <li>　　用 v_φ(·|c_txt) 去噪 K 步 → xᴴʸᵇ_tᵢ₊ₖ　<span class="cm">▷ Eq. 9</span></li>
+      <li>　　贴回干净首帧，构造教师查询 x̂ᴴʸᵇ_tᵢ₊ₖ　<span class="cm">▷ Eq. 10</span></li>
+      <li>　<b>end for</b></li>
+      <li>　<span class="cm">// 速度级匹配</span></li>
+      <li>　计算 𝓛_HPSD 并更新学生 v_φ　<span class="cm">▷ Eq. 11</span></li>
+      <li>　用学生的 EMA 更新教师 ṽ</li>
+      <li><b>end for</b></li>
+    </ol>
+    <div class="an">注意第 10 行在<b>每个</b>训练 step 都要重跑：教师权重被 EMA 持续更新，上一步的锚点轨迹不能复用。</div>
+  </div>
+
+  <h3><span class="ix">6.1</span>一个训练 step 到底要跑多少次前向</h3>
+  <p class="prose">论文没有给出前向次数的统计，下面这笔账是我按 Alg. 1 与附录超参（WAN-2.2：锚点轨迹 50 步、|𝒜| = 6、K = 3）自己算的，
+  <strong>属于推算而非论文原文</strong>：</p>
+
+  <div class="tblwrap">
+    <table>
+      <caption>单个 prompt 在一个训练 step 内的前向次数（推算）</caption>
+      <thead><tr><th>环节</th><th>模型</th><th>次数</th><th>是否需要梯度</th></tr></thead>
+      <tbody>
+        <tr><td>教师锚点轨迹 rollout（Eq. 7）</td><td>教师 ṽ</td><td>50</td><td>否</td></tr>
+        <tr><td>学生子轨迹 6 × K = 6 × 3（Eq. 9）</td><td>学生 v_φ</td><td>18</td><td><b>否</b>（inference 模式）</td></tr>
+        <tr><td>教师在 6 个查询状态上给速度（Eq. 11 右）</td><td>教师 ṽ</td><td>6</td><td>否（sg）</td></tr>
+        <tr class="hpsd"><td>学生在 6 个监督状态上的前向（Eq. 11 左）</td><td>学生 v_φ</td><td>6</td><td><b>是</b></td></tr>
+        <tr><td><b>合计</b></td><td>—</td><td><b>≈ 80</b></td><td>其中仅 6 次带梯度</td></tr>
+      </tbody>
+    </table>
+    <div class="tnote">对照：off-policy SFT 每个样本只需 1 次带梯度前向（数据已离线生成）；OPD 需要一次学生 rollout 到随机时间步 + 1 次教师 + 1 次学生。
+    HPSD 的算力开销明显更高，但换来的是 <b>500 步就收敛</b>，且显存压力只由那 6 次带梯度前向决定。</div>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">▸ 我的读解：数据其实用得很少</div>
+    <p>batch size 每卡 1、8 卡、500 步 ⇒ 整个训练只消费了大约 <b>4000 条 prompt</b>，而 prompt 池（Pref-GRPO 数据集）有约 5 万条。
+    也就是说不到 10% 的数据就跑满了收益（Fig. 9 的曲线在 500 步后确实基本走平）。</p>
+    <p>这有两个含义：<b>①</b> 离线阶段如果真的把 5 万条全部做了 LLM 改写 + 文生图，大部分是白做的，实际部署可以只对采样到的子集预计算；
+    <b>②</b> 也反过来说明这套方法不是在「学新知识」，而是在<b>把模型已有的能力重新对齐到裸提示词那条路径上</b>——LoRA + 4000 样本够用，本身就是这个结论的旁证。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 07 实验 -->
+<section class="sec" id="s-exp">
+  <div class="eyebrow"><span class="n">07</span><span class="t">Experiments</span><span class="line"></span></div>
+  <h2>实验设置与主结果</h2>
+
+  <h3><span class="ix">7.1</span>设置一览</h3>
+  <div class="grid2">
+    <div class="card"><div class="mono">训练数据</div><h5>Pref-GRPO prompt 集</h5>
+      <p>约 <b>5 万条</b> prompt，主题与主体类别覆盖较广。只用 prompt，不用真实视频——所有「数据」都是模型自己生成的。</p></div>
+    <div class="card"><div class="mono">特权条件构造</div><h5>Qwen3.6-27B + Z-Image-Turbo</h5>
+      <p>LLM 负责改写增强提示与首帧提示，蒸馏版 T2I 负责快速出图。附录另用 Flux.2-Klein-4B 验证了泛化性。</p></div>
+    <div class="card"><div class="mono">底座 A</div><h5>WAN-2.2-TI2V-5B</h5>
+      <p>原生分辨率 1280×704，50 步推理；锚点轨迹长度 = 50。</p></div>
+    <div class="card"><div class="mono">底座 B</div><h5>LTX-2.3</h5>
+      <p>768×512，30 步；<b>只用第一阶段生成</b>，不启用二阶段超分与 refine，锚点轨迹长度 = 30。</p></div>
+    <div class="card"><div class="mono">训练</div><h5>8×H200 · 500 步 · LoRA</h5>
+      <p>每卡 batch 1，AdamW，lr 1e-4，weight decay 0，bf16，训练用 33 帧，训练时 guidance scale = 1.0（不开 CFG），LoRA r=32 / α=64，EMA 0.999。</p></div>
+    <div class="card"><div class="mono">评测</div><h5>500 条 prompt</h5>
+      <p>采样自 VideoDPO 与 VideoFeedback。指标分三类：视频奖励模型、图像奖励模型（逐帧）、VBench。</p></div>
+  </div>
+
+  <details>
+    <summary>指标名词速查：这 8 个数分别在量什么</summary>
+    <div class="dc">
+      <p><b>VideoAlign</b> —— 视频奖励模型（Liu et al., 2025），对齐人类反馈；本文中数值跨度最大、区分度最高的指标。<br>
+      <b>VisionReward</b> —— 细粒度多维人类偏好模型（Xu et al., AAAI 2026）。<br>
+      <b>UR-v1 / UR-v2</b> —— UnifiedReward，统一的图像-视频奖励模型；v2 拆成三个维度：<b>A</b> = Alignment（文本对齐）、<b>P</b> = Physics（物理合理性）、<b>S</b> = Style（风格/美学）。<br>
+      <b>HPS</b> —— Human Preference Score v2，本文按<b>逐帧</b>计算。<br>
+      <b>CLIP</b> —— 逐帧图文相似度。<br>
+      <b>VBench</b> —— SC 主体一致性 / BC 背景一致性 / MS 运动平滑度 / DD 动态程度 / AQ 美学质量 / IQ 成像质量。</p>
+      <p style="color:var(--ink3)">注意：前六个都是<b>学习出来的偏好模型</b>。它们对锐度、饱和度、光影这类「一眼好看」的属性敏感，这一点在读第 10 节的批判时要记住。</p>
+    </div>
+  </details>
+
+  <h3><span class="ix">7.2</span>主结果：奖励模型指标</h3>
+  <p class="prose">HPSD 在 WAN-2.2 上<strong>八项全胜</strong>，在 LTX-2.3 上<strong>八项中拿下七项</strong>（唯一失手的是 UR-v2-Alignment，被 D-OPSD 以 2.903 对 2.887 略胜）。
+  最刺眼的是 VideoAlign：相对次优的 SFT 提升约 <strong>56%</strong>。</p>
+
+  <div class="ctl">
+    <label>底座</label>
+    <button class="tab" data-bb="wan" aria-selected="true" type="button">WAN-2.2</button>
+    <button class="tab" data-bb="ltx" aria-selected="false" type="button">LTX-2.3</button>
+    <span style="flex:1"></span>
+    <label for="metricSel">图表指标</label>
+    <select id="metricSel" class="readout" style="cursor:pointer"></select>
+  </div>
+  <div id="tbl1"></div>
+  <div class="fig" style="margin-top:14px"><div class="chart" id="chart1"></div></div>
+
+  <div class="call warn">
+    <div class="hd">▲ On-Policy 蒸馏不是「效果一般」，是直接崩了</div>
+    <p>WAN-2.2 上 OPD 的 VideoAlign 从 0.5335 <b>掉到 0.2613</b>，CLIP 从 0.3684 掉到 0.2847；LTX-2.3 上 VideoAlign 掉到 0.0242。
+    论文把原因归给 condition-state mismatch：训练时被污染的教师速度让模型学会了「早期帧糊掉 + 内容不连贯」。
+    这条基线本身也说明，<b>把 LLM 那套 on-policy 蒸馏直接搬到 TI2V 上是会出事的</b>——这正是本文存在的理由。</p>
+  </div>
+
+  <h3><span class="ix">7.3</span>定性对比里能看到什么</h3>
+  <p class="prose">论文 Fig. 5（WAN-2.2）与 Fig. 6（LTX-2.3）的对比可以概括为四种典型面貌：</p>
+  <ul class="prose">
+    <li><strong>Vanilla T2V：</strong>色彩偏灰、纹理粗糙，构图平庸。</li>
+    <li><strong>OPD：</strong>整体崩溃——早期帧带噪、主体重影（ghosting）。</li>
+    <li><strong>SFT / D-OPSD：</strong>内容是合理的，但细节不够、主体一致性一般、缺少电影感光照。</li>
+    <li><strong>HPSD：</strong>纹理更锐、色彩更饱满、提示词遵循更好（论文举的例子是「电影感的贵宾犬」和「纹理鲜明的巨型蓝蝴蝶」）。</li>
+  </ul>
+  <p class="prose" style="color:var(--ink3); font-size:14px">（本页不转载论文图片；上述为论文 Fig. 5/6 与 §4.2 文字描述的转述。）</p>
+</section>
+
+<!-- ============================================================ 08 VBench -->
+<section class="sec" id="s-vbench">
+  <div class="eyebrow"><span class="n">08</span><span class="t">VBench</span><span class="line"></span></div>
+  <h2>VBench：多数维度领先，但动态程度掉了</h2>
+  <div id="tbl2"></div>
+
+  <p class="prose">HPSD 在两个底座上都拿下了主体一致性、背景一致性、运动平滑度与美学质量；成像质量在 WAN-2.2 上略输 SFT（0.6996 vs 0.7049）。
+  唯一系统性下降的是 <strong>Dynamic Degree（动态程度）</strong>：WAN-2.2 从 0.560 掉到 0.422，LTX-2.3 从 0.330 掉到 0.302。</p>
+
+  <p class="prose"><strong>论文的辩护是：</strong>动态程度下降不等于质量下降，观察到的是显著更强的时间一致性、更少的突兀跳变、更好的物理合理性，
+  并用 UR-v2-Physics 的提升（3.167 → 3.203）与 Fig. 8 的例子（划桨突然出现 / 液体静止不动）来佐证。</p>
+
+  <div class="call mine">
+    <div class="hd">▸ 我的读解：这个下降有一个更直接、论文没提的解释</div>
+    <p>看一眼附录 Fig. 10 的<b>提示词改写模板</b>就会发现，它明确要求 LLM：
+    「prioritizing <b>motion stability</b> and temporal consistency」、
+    「Keep the scene continuous and stable, emphasizing natural motion ... <b>rather than dramatic camera movement</b>」，
+    示例输出里甚至直接写着「<b>Keep the camera static</b> with a fixed medium shot」。</p>
+    <p>也就是说，教师的增强提示词在设计上<b>系统性地偏向低运动、稳镜头</b>。学生被蒸馏去对齐这样的教师，动态程度下降几乎是构造上的必然，
+    不完全是「一致性变好的副产品」。这不否定论文的结论，但它意味着：<b>动态程度是可以通过改写模板调回来的</b>，
+    而不是 HPSD 框架本身的固有代价。谁要复现，这是最值得先动的一个旋钮。</p>
+    <p>另外 D-OPSD 的动态程度掉得更狠（WAN-2.2 0.404、LTX-2.3 0.236），而它只蒸馏了<b>文本</b>特权条件——这条旁证也指向提示词改写而非首帧。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 09 消融 -->
+<section class="sec" id="s-abl">
+  <div class="eyebrow"><span class="n">09</span><span class="t">Ablations</span><span class="line"></span></div>
+  <h2>消融：增益从哪来，能不能迁移</h2>
+
+  <h3><span class="ix">9.1</span>(a) 子轨迹长度 K</h3>
+  <div id="tbl3a"></div>
+  <p class="prose">先升后降，K = 3 在 VideoAlign 与四项 UR 指标上最优。详见 <a href="#s-k">第 05 节</a>的机制解释与那处 VisionReward 的小出入。</p>
+
+  <h3><span class="ix">9.2</span>(b) 特权条件的贡献是叠加的</h3>
+  <div id="tbl3b"></div>
+  <p class="prose">只蒸馏首帧特权（<code>+c_img</code>）就把 VideoAlign 从 0.5335 拉到 1.5006，占最终增益的绝大部分；
+  再叠加增强提示词（<code>+c⁺_txt</code>）到 1.8753。论文明确说明<strong>省略了「只用 c⁺_txt」那一格</strong>，
+  理由是文本条件不会触发 condition-state mismatch，标准 OPD 就能处理——这个消融的目的本来就是验证「更强的条件 → 更强的教师 → 更好的监督」这条链。</p>
+
+  <h3><span class="ix">9.3</span>(c) 反哺：TI2V 模式也跟着变强</h3>
+  <div id="tbl3c"></div>
+  <p class="prose">HPSD 是奔着 T2V 去优化的，但 TI2V 模式的 VideoAlign 也从 0.7831 涨到 1.2139（约 +55%）。
+  论文把功劳归给<strong>非对称提示词蒸馏</strong>：强迫「用原始提示词的学生」去对齐「用增强提示词的教师」，
+  本身就是在训练模型更好地理解和执行平实的文本输入，这个能力与有没有首帧无关。</p>
+  <div class="call note">
+    <div class="hd">▸ 注意一处细节</div>
+    <p>TI2V 模式下 VisionReward 与 UR-v2-Style 是<b>微降</b>的（0.1348 → 0.1344，3.273 → 3.271）。幅度极小，可以当作噪声，
+    但它提示这次反哺并非在所有维度上都是纯收益。</p>
+  </div>
+
+  <h3><span class="ix">9.4</span>收敛：500 步就够</h3>
+  <div class="fig"><div class="chart" id="chartConv"></div></div>
+  <p class="prose">论文用 VisionReward 监控训练过程（WAN-2.2），指标在前期快速上升、约 500 步后走平，因此把 500 步定为主实验配置。</p>
+
+  <h3><span class="ix">9.5</span>换一个首帧生成器还成立吗</h3>
+  <div id="tbl5"></div>
+  <p class="prose">把 Z-Image-Turbo 换成 Flux.2-Klein-4B，HPSD 仍然全面超过原始 T2V，说明框架不依赖某个特定 T2I 模型。
+  但要注意数值确实<strong>下降了</strong>（VideoAlign 1.8753 → 1.6587，UR-v2-Physics 3.203 → 3.171），
+  说明<strong>教师的上限受制于辅助模型的画质</strong>——这既是限制，也是论文所说的「性能天花板可以随辅助模型进步而自然抬高」。</p>
+</section>
+
+<!-- ============================================================ 10 批判 -->
+<section class="sec" id="s-crit">
+  <div class="eyebrow"><span class="n">10</span><span class="t">Critique</span><span class="line"></span></div>
+  <h2>局限，以及我读下来的保留意见</h2>
+
+  <h3><span class="ix">10.1</span>论文自己承认的两点</h3>
+  <ul class="prose">
+    <li><strong>离线构造成本。</strong>每条 prompt 都要调一次 LLM 和一次 T2I。论文的辩解是这是一次性开销，且可用蒸馏/量化模型（如 Z-Image-Turbo）压下去，
+    同时性能天花板会随辅助模型进步自然抬高。</li>
+    <li><strong>训练时的额外前向。</strong>形成 hybrid 子轨迹需要多跑几次学生前向。论文强调这些中间步<strong>严格在 inference 模式下</strong>执行、不存梯度，
+    因此显存开销不大——但算力开销确实上去了（见 <a href="#s-algo">6.1 的推算</a>）。</li>
+  </ul>
+
+  <h3><span class="ix">10.2</span>我的保留意见</h3>
+
+  <div class="call mine">
+    <div class="hd">① 主要证据是奖励模型，而不同奖励模型的口径差异极大</div>
+    <p>同一组结果（WAN-2.2，Vanilla T2V → HPSD）在不同指标上的涨幅是：
+    <b>VideoAlign +251%</b>、<b>HPS +13.9%</b>、<b>CLIP 仅 +2.2%</b>、<b>UR-v1 +4.8%</b>、<b>UR-v2-Physics +1.1%</b>。</p>
+    <p>把这几个数放一起看会更清醒：VideoAlign 的巨幅提升更像是<b>该模型对画质/美学变化极度敏感</b>，而不是「视频整体好了 3.5 倍」。
+    真正跨指标一致的、幅度温和的提升（HPS、UR 系列、VBench 美学）才是可信区间。论文没有做人评（human study），
+    对一篇主打「画质内化」的工作来说，这是最想看到而没有的证据。</p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">② 第 1 帧从头到尾没有被监督过</div>
+    <p>Eq. 11 的损失下标是 <code>(2:F)</code>——第 1 帧被排除，因为教师在干净首帧槽位上的输出没有去噪含义。
+    可是学生在真实 T2V 推理时<b>必须自己生成第 1 帧</b>。整套 HPSD 里，第 1 帧只在 Eq. 8 中作为「被重加噪的载体」出现，
+    从未接受过任何速度级监督。</p>
+    <p>大概率靠 DiT 的全局注意力能把改进传导过去，但论文既没有讨论也没有测量首帧质量是否落后于后续帧。
+    这是我最想看到的一个补充实验：<b>逐帧拆开 HPS/CLIP，看第 1 帧的提升是否显著低于第 2…F 帧。</b></p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">③ 学生被拉向了 T2I 模型的美学分布</div>
+    <p>锚点轨迹的内容是从合成首帧长出来的，而首帧来自 Z-Image-Turbo。学生因此不只是「变好看了」，
+    更准确地说是<b>被对齐到某个文生图模型的审美先验上</b>。Tab. 5 换成 Flux.2-Klein-4B 后指标整体下移（VideoAlign 1.8753 → 1.6587），
+    正说明这层依赖是实在的。</p>
+    <p>顺着这条线要问的是<b>多样性</b>：如果所有训练锚点都源自同一个 T2I 模型，输出分布会不会收窄？
+    论文 Fig. 31 展示了不同随机种子的结果，但<b>没有任何多样性/模式坍缩的量化指标</b>。</p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">④ 动态程度的下降有更简单的解释</div>
+    <p>见 <a href="#s-vbench">第 08 节</a>：附录的提示词改写模板本身就在系统性地要求「稳镜头、低动态、强调时间一致性」。
+    把这归因于「时间一致性变好」是站得住的，但不完整。</p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">⑤ 有一个更强的 SFT 基线被藏在了消融表里</div>
+    <p>论文的 SFT 基线 = 教师终点 + 加噪 + 解析流匹配目标。而 Tab. 3(a) 的 <b>K = 0</b> 其实是另一种 off-policy 蒸馏：
+    沿<b>整条</b>教师轨迹取状态 + <b>速度级</b>教师监督，它拿到 1.5587，已经把 SFT 的 1.2046 甩开一大截。</p>
+    <p>如果把 K=0 当成「强化版 SFT」来命名，本文 hybrid-policy 的净贡献就是 1.5587 → 1.8753。这个数依然可观，
+    但「+56% over SFT」这个卖点里有一半属于另一项改动。<b>论文没有做这个归因拆分</b>，是我按表推的。</p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">⑥ 验证面偏窄</div>
+    <p>两个底座都是 5B 量级、都用 LoRA（r=32）、都只训 500 步；LTX-2.3 还只用了第一阶段生成，
+    没验证结论能否传导到含二阶段超分与 refine 的完整管线。
+    全参微调、更大模型、更长训练下 EMA 自举会不会漂移（reward hacking），都没有数据。Fig. 9 画到 800 步仍平稳，算一个部分回应。</p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">⑦ 几处复现细节缺失</div>
+    <p>锚点步 <code>𝒜</code> 说的是「从锚点轨迹上随机采样」，但<b>采样分布未说明</b>（均匀？偏向高噪声端？）——
+    考虑到 K 步之后落点由 <code>t_i</code> 决定，这个分布对结果应当不是无关紧要的。
+    另外 Eq. 8 每次重加噪用的 <code>ε</code> 与 Eq. 7 rollout 时的噪声是否共享，论文也没写。</p>
+  </div>
+
+  <h3><span class="ix">10.3</span>值得追问的问题</h3>
+  <ul class="prose">
+    <li>把改写模板里的「稳镜头」约束去掉，动态程度能否补回来，同时保住一致性收益？</li>
+    <li>特权条件还能是什么？深度图、光流、多视角、更长的参考片段——凡是「模型支持但用户平时不给」的条件，理论上都能走这套内化流程。</li>
+    <li>K 能不能做成随训练自适应的（早期小 K 稳一点，后期大 K 更贴策略）？现在是固定常数。</li>
+    <li>迭代自蒸馏：把 HPSD 之后的模型当新的底座再来一轮，收益会衰减到什么程度？</li>
+    <li>教师用增强提示、学生用原始提示是「非对称蒸馏」；如果反过来在推理时也给学生增强提示，两份增益会叠加还是重叠？</li>
+  </ul>
+</section>
+
+<!-- ============================================================ 11 仓库 -->
+<section class="sec" id="s-repo">
+  <div class="eyebrow"><span class="n">11</span><span class="t">Connections</span><span class="line"></span></div>
+  <h2>和交互式视频世界模型的关系</h2>
+  <p class="lead">HPSD 本身不是世界模型工作，但它处理的那个结构性问题，在自回归 / 流式视频世界模型里是<strong>同一类问题的另一个化身</strong>：
+  <strong>教师被查询时所处的上下文，和学生真实所处的上下文，不是同一个东西。</strong></p>
+
+  <h3><span class="ix">11.1</span>与 CMD 的对照</h3>
+  <p class="prose">本仓库 <code>docs/</code> 下已有一份 Context-Matched Distillation（arXiv 2608.13391，同为 2026-08-13）的精读。
+  两篇论文放在一起看，会发现它们是同一枚硬币的两面——而且给出的是<strong>方向相反</strong>的解法：</p>
+
+  <div class="tblwrap">
+    <table>
+      <caption>两种「错配」及其修复方向</caption>
+      <thead><tr><th>维度</th><th>CMD · 2608.13391</th><th>HPSD · 2608.13205</th></tr></thead>
+      <tbody>
+        <tr><td>错配的对象</td><td>教师的<b>信息集</b>：双向教师看得到未来帧与未来控制信号</td><td>教师的<b>条件槽位</b>：TI2V 教师要求首帧永远干净</td></tr>
+        <tr><td>学生的处境</td><td>因果自回归，只能看已生成的历史</td><td>纯 T2V，根本没有首帧</td></tr>
+        <tr><td>修复方向</td><td>把<b>教师收缩</b>到学生的信息集（因果教师 + Prefix Scoring）</td><td>把<b>学生拉进</b>教师的条件相容流形（锚点 + K 步演化）</td></tr>
+        <tr><td>稳定化手段</td><td>Prefix Corruption：对前缀加噪，抑制早期漂移</td><td>Eq. 8 首帧重加噪 + EMA 教师</td></tr>
+        <tr><td>蒸馏目标</td><td>DMD 型：s_real − s_fake</td><td>速度匹配：v_φ − sg[ṽ]</td></tr>
+        <tr><td>主要收益</td><td>可控性、长时程质量</td><td>基础画质、提示词遵循</td></tr>
+      </tbody>
+    </table>
+    <div class="tnote">CMD 一栏依据本仓库既有的精读文档整理，属于二手转述；以原文为准。</div>
+  </div>
+
+  <h3><span class="ix">11.2</span>可以直接迁移的三条</h3>
+  <div class="grid2">
+    <div class="card hh"><h5>「特权条件」是个可复用的框</h5>
+      <p>世界模型里同样存在大量「模型支持、但线上拿不到」的输入：真值动作序列、仿真器内部状态、未来帧、多视角、深度/光流。
+      HPSD 提供的模板是：<b>让同一套权重在特权条件下当教师，把能力蒸回裸条件的那条推理路径</b>。</p></div>
+    <div class="card ss"><h5>锚点 + 短 rollout 是治 exposure bias 的通用配方</h5>
+      <p>自回归视频生成里，teacher forcing 用干净历史、学生用自己生成的历史，这是同一类错配。
+      「从真值/教师上下文出发，让学生自走 K 步，在落点上给监督」可以直接搬过去，
+      并且和 Diffusion Forcing / Self-Forcing / Context Forcing 这条线是同源的。</p></div>
+    <div class="card tt"><h5>K 是个应该被显式暴露的超参</h5>
+      <p>很多长时程一致性方法实际上隐含地固定了「学生自走多久」。把它显式化成一个 off/on-policy 旋钮并做曲线，
+      是 HPSD 在方法论上最值得借鉴的动作。</p></div>
+  </div>
+</section>
+
+<!-- ============================================================ 12 附录 -->
+<section class="sec" id="s-appendix">
+  <div class="eyebrow"><span class="n">12</span><span class="t">Appendix</span><span class="line"></span></div>
+  <h2>附录速查</h2>
+
+  <h3><span class="ix">12.1</span>完整超参表</h3>
+  <div class="tblwrap">
+    <table>
+      <caption>论文 Tab. 4，除特别说明外所有实验共用</caption>
+      <thead><tr><th>参数</th><th>取值</th><th>参数</th><th>取值</th></tr></thead>
+      <tbody>
+        <tr><td>底座模型</td><td>WAN-2.2 / LTX-2.3</td><td>LoRA</td><td>r = 32, α = 64</td></tr>
+        <tr><td>训练帧数</td><td>33</td><td>锚点轨迹长度（WAN-2.2）</td><td>50</td></tr>
+        <tr><td>每卡 batch size</td><td>1</td><td>锚点轨迹长度（LTX-2.3）</td><td>30</td></tr>
+        <tr><td>GPU 数</td><td>8 × H200</td><td>优化器</td><td>AdamW</td></tr>
+        <tr><td>训练步数</td><td>500</td><td>学习率</td><td>1 × 10⁻⁴</td></tr>
+        <tr><td>训练 guidance scale</td><td>1.0</td><td>weight decay</td><td>0.0</td></tr>
+        <tr class="hpsd"><td>锚点步数 |𝒜|</td><td>6</td><td>混合精度</td><td>bfloat16</td></tr>
+        <tr><td>分辨率（WAN-2.2）</td><td>1280 × 704</td><td>EMA 衰减</td><td>0.999</td></tr>
+        <tr class="hpsd"><td>分辨率（LTX-2.3）</td><td>768 × 512</td><td>子轨迹长度 K</td><td>3</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3><span class="ix">12.2</span>两个 LLM 改写模板（原文照录）</h3>
+  <p class="prose">这两段是复现 HPSD 时最容易被忽略、但影响最直接的部分——尤其是第一段里那几句关于「稳定运动」的措辞。</p>
+
+  <details>
+    <summary>模板 A · 增强提示词生成（论文 Fig. 10）</summary>
+    <div class="dc"><pre>You are a prompt engineer specialized for TI2V (text-to-video with a given first frame).
+Your task is to rewrite a given Video Prompt into a motion-optimized TI2V prompt that works
+with an already provided high-quality first frame.
+Your core goal is to improve in-scene motion executability while preserving intent.
+You will be provided with a complete Video Prompt.
+
+Rewrite rules:
+1) Preserve intent: keep subject, scene, style, and key objects; do not add conflicting settings.
+2) Motion-first: focus on motion of existing elements, such as body micro-actions, facial changes,
+   fabric movement, light/shadow variation, smoke/water/foliage dynamics.
+3) Clear timeline: use concise temporal connectors (first, then, finally).
+4) Moderate detail: avoid verbose quality stacking; prioritize actionable motion cues.
+5) Output only the final rewritten prompt text with no explanation or list formatting.
+6) Never output any reasoning process, analysis steps, or meta explanation.
+7) Preferred length: around 80-130 words, prioritizing motion stability and temporal consistency.
+
+[Input Video Prompt] : {VIDEO_PROMPT}</pre>
+    <p style="color:var(--ink3); font-size:13px">论文给了三个示例输出，其中反复出现「Keep the scene continuous and stable ... rather than dramatic camera movement」
+    这类措辞——这正是第 08 节里我怀疑动态程度下降来源的直接证据。</p></div>
+  </details>
+
+  <details>
+    <summary>模板 B · 首帧提示词生成（论文 Fig. 11）</summary>
+    <div class="dc"><pre>Act as an expert AI Visual Director and Prompt Engineer specializing in Image-to-Video (I2V)
+and Text-to-Image (T2I) workflows.
+Your task is to design a highly detailed Text-to-Image prompt that will serve as the first frame
+for a video generation model.
+You will be provided with a complete Video Prompt.
+
+Follow these rules:
+1. Convert dynamic actions into a static, ready-to-move opening frame.
+2. Preserve the subject, environment, style, camera angle, lighting, and atmosphere.
+3. Output only one English image prompt, without explanations.
+
+[Input Video Prompt] : {VIDEO_PROMPT}</pre>
+    <p style="color:var(--ink3); font-size:13px">「ready-to-move opening frame」是这个模板的核心：首帧不能是一个动作的中段，
+    否则视频从第 2 帧起就得倒推动作，容易崩。</p></div>
+  </details>
+
+  <details>
+    <summary>特权条件示例（论文 Fig. 13 之一）</summary>
+    <div class="dc">
+      <p><b>原始 prompt：</b>The girl wanders among the colorful flowers, inhaling the sweet fragrance, cinematic photorealistic</p>
+      <p><b>增强 prompt：</b>In a sun-dappled garden, a girl walks slowly through vibrant flowers, her dress swaying gently with each step.
+      She pauses to lean toward a bloom, inhaling deeply with eyes closed, then smiles softly as she continues forward.
+      Petals drift lazily on a light breeze, and dappled sunlight shifts subtly across the foliage and her skin.
+      <b>Keep the camera static with a fixed medium shot</b>, focusing on her natural movements, facial expressions,
+      and the gentle sway of surrounding flora to maintain temporal consistency and cinematic realism.</p>
+      <p style="color:var(--ink3)">加粗是我标的。三个示例里都出现了类似的镜头稳定约束。</p>
+    </div>
+  </details>
+
+  <h3><span class="ix">12.3</span>一页纸总结</h3>
+  <div class="call key">
+    <div class="hd">◆ 如果只记三件事</div>
+    <p><b>1.</b> TI2V 模型在特权条件（高质量首帧 + 增强提示）下的表现，本身就是一个可以被蒸馏的「免费教师」——不需要更大的模型。</p>
+    <p><b>2.</b> 把 on-policy 蒸馏搬到 TI2V 上会失败，因为「干净首帧 + 学生自由生成的带噪帧」是一个模型没见过的非法状态（condition-state mismatch）。</p>
+    <p><b>3.</b> HPSD 的解法是让被监督的状态「起点归教师、终点归学生」，用 K 步子轨迹在两种范式之间取平衡；K = 3 最优，K = 0 退化为 off-policy，K 过大重新招来错配。</p>
+  </div>
+</section>
+
+<footer>
+  <p><b>信息来源</b>：全部方法描述、公式、表格数值与超参均出自 arXiv:2608.13205v1（HPSD, Bu et al., 2026-08-13）正文与附录；
+  项目主页与代码/权重链接见页首。文中凡标注「我的读解 / 推算 / 保留意见」的段落为本页作者的分析，不属于论文原文。</p>
+  <p style="margin-top:10px">本页为方法精读的可视化整理，未转载论文中的任何图片或视频帧；所有图解均为按论文描述重绘的示意图。</p>
+  <p style="margin-top:10px; color:var(--ink3)">生成于 2026-08-26 · 单文件、无外部依赖（字体在离线时自动回退到系统字体）</p>
+</footer>
+
+<button class="tbtn toTop" id="toTop" type="button" aria-label="回到顶部">↑</button>
+</main>
+</div>
+<div class="tip" id="tip" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+"use strict";
+var $=function(s,r){return (r||document).querySelector(s)};
+var $$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
+
+/* ---------------------------------------------------------- theme */
+var root=document.documentElement;
+$('#themeBtn').addEventListener('click',function(){
+  var cur=root.getAttribute('data-theme');
+  if(!cur){ cur = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light':'dark'; }
+  root.setAttribute('data-theme', cur==='dark'?'light':'dark');
+});
+
+/* ---------------------------------------------------------- progress + toc + toTop */
+var prog=$('#prog'), toTop=$('#toTop');
+function onScroll(){
+  var h=document.documentElement.scrollHeight-window.innerHeight;
+  prog.style.width=(h>0?(window.scrollY/h*100):0)+'%';
+  toTop.classList.toggle('show', window.scrollY>700);
+}
+window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+toTop.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'})});
+
+var links=$$('#toc a');
+var secs=links.map(function(a){return document.getElementById(a.getAttribute('href').slice(1))}).filter(Boolean);
+if('IntersectionObserver' in window){
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting){
+        links.forEach(function(a){a.classList.remove('on')});
+        var m=links.filter(function(a){return a.getAttribute('href')==='#'+e.target.id})[0];
+        if(m)m.classList.add('on');
+      }
+    });
+  },{rootMargin:'-84px 0px -70% 0px',threshold:0});
+  secs.forEach(function(s){io.observe(s)});
+}
+
+/* ---------------------------------------------------------- fig1 tabs */
+var tabs=$$('.tabs [role=tab]');
+tabs.forEach(function(t){
+  t.addEventListener('click',function(){
+    tabs.forEach(function(o){
+      o.setAttribute('aria-selected', String(o===t));
+      var p=document.getElementById(o.getAttribute('aria-controls'));
+      if(p) p.hidden = (o!==t);
+    });
+  });
+});
+
+/* ---------------------------------------------------------- condition matrix */
+var COND={
+  a:{h:'基础 T2V 模式 —— 这就是我们要提升的目标',
+     p:'没有首帧，只有用户原始那句短提示。TI2V 模型在这个模式下的表现，就是它的“基础生成能力”。WAN-2.2 上 VideoAlign = 0.5335（Tab. 1）。HPSD 全部的努力都是为了把这一格的数字抬起来。'},
+  b:{h:'只给增强提示词',
+     p:'把原始提示交给 LLM 扩写成一段有光线、材质、镜头语言的详细描述。论文 Fig. 2 显示画质明显改善，但正文没有给出这一格的量化值。注意：文本条件不会造成 condition-state mismatch，所以标准 on-policy 蒸馏本来就能处理它——这也是消融里省略这一格的原因。'},
+  c:{h:'只给高质量首帧 —— 教师能力的主要来源',
+     p:'首帧作为干净 latent 直接占住第 1 帧槽位，全程不参与去噪，等于给整段视频钉死了内容、构图与色调。VideoAlign 从 0.5335 抬到 0.7831（Tab. 3c），相对提升 46.8%。消融 Tab. 3(b) 也显示，只蒸馏这一个特权条件就能把学生推到 1.5006。'},
+  d:{h:'双特权条件 —— 教师的实际配置',
+     p:'首帧 + 增强提示同时给。论文 Fig. 2 显示四者中最优，正文未给数值。这就是 HPSD 里教师使用的配置：c⁺_txt 管运动与细节，c_img 管构图与画质，两者互补。最终把学生推到 1.8753。'}
+};
+var condInfo=$('#condInfo'), mcells=$$('#condMatrix .mcell');
+function setCond(k){
+  mcells.forEach(function(c){c.setAttribute('aria-pressed', String(c.dataset.k===k))});
+  condInfo.innerHTML='<h5>'+COND[k].h+'</h5>'+COND[k].p;
+}
+mcells.forEach(function(c){c.addEventListener('click',function(){setCond(c.dataset.k)})});
+setCond('a');
+
+/* ---------------------------------------------------------- pipeline stepper */
+var STEPS=[
+ {t:'全流程',       d:'离线阶段把特权条件算好并缓存；在线阶段每个训练 step 走一遍“教师 rollout → 取锚点 → 重加噪 → 学生走 K 步 → 贴回首帧查教师 → 速度匹配 → EMA”。点击下面任一步骤单独查看。', e:''},
+ {t:'① 离线 · 提示词改写', d:'外部 LLM（Qwen3.6-27B）把用户那句原始提示改写成两样东西：给教师用的增强提示 c⁺_txt，和给文生图模型用的首帧描述 c_ff。改写模板的措辞很关键，见附录 12.2。', e:'c⁺_txt , c_ff  ∼  ℳ_rw( · | c_txt )　　(Eq. 6)'},
+ {t:'② 离线 · 合成首帧', d:'Z-Image-Turbo 把 c_ff 渲染成高质量首帧 c_img。两个特权条件都在训练开始前算好并缓存，训练时直接读取，不占在线算力。', e:'c_img  ∼  𝒢_t2i( · | c_ff )　　(Eq. 6)'},
+ {t:'③ 教师 rollout', d:'教师（= 学生权重的 EMA）在双特权条件下跑完整条去噪轨迹，WAN-2.2 为 50 步、LTX-2.3 为 30 步。首帧槽位全程是干净的 c_img，只有第 2…F 帧在更新。每个训练 step 都要重跑，因为教师权重一直在被 EMA 更新。', e:'x̂ᵀᵉᵃ(t_{j+1}) = x̂ᵀᵉᵃ(t_j) + [ t_{j+1} − t_j ] · ṽ( x̂ᵀᵉᵃ(t_j), t_j | c⁺_txt, c_img )　　(Eq. 7)'},
+ {t:'④ 采样锚点', d:'从这条轨迹上随机取 6 个中间状态作为锚点。它们携带的正是“特权条件激发出来的生成内容”——也就是要传给学生的东西。', e:'𝒜 = { t_i }, |𝒜| = 6，随机采样'},
+ {t:'⑤ 首帧重加噪', d:'教师状态的首帧是干净的，而学生做 T2V 推理时所有帧噪声水平一致。按当前噪声水平 t_i 把首帧重新加噪，让全部 F 帧对齐到同一水平——格式变成学生看得懂的，内容仍然是 c_img。这是整个方法的枢纽。', e:'xᵀᵉᵃ(tᵢ) = [ (1 − tᵢ)·c_img + tᵢ·ε ,　x̂ᵀᵉᵃ,(2:F)(tᵢ) ]　　(Eq. 8)'},
+ {t:'⑥ 学生走 K 步', d:'学生只拿原始提示 c_txt，用自己当前的速度场从锚点向前走 K = 3 步。论文明确这几步在 inference 模式下执行、不保存梯度，因此显存开销可控。终点状态“内容来自教师、动力学来自学生”。', e:'xᴴʸᵇ(t_{j+1}) = xᴴʸᵇ(t_j) + [ t_{j+1} − t_j ] · v_φ( xᴴʸᵇ(t_j), t_j | c_txt ),　j = i … i+K−1　　(Eq. 9)'},
+ {t:'⑦ 贴回首帧、查询教师', d:'把干净的 c_img 贴回第 1 帧槽位，构造教师能接受的输入格式。形式上和 OPD 的非法拼接一模一样，但因为内容一路源自 c_img、学生又只走了 3 步，这次拼接是时间连续的，落在模型见过的分布内。', e:'x̂ᴴʸᵇ(tᵢ₊ₖ) = [ c_img ,　xᴴʸᵇ,(2:F)(tᵢ₊ₖ) ]　　(Eq. 10)'},
+ {t:'⑧ 速度匹配与更新', d:'学生在 xᴴʸᵇ 上的速度去对齐教师在 x̂ᴴʸᵇ 上的速度，损失只算第 2…F 帧（教师在干净首帧上的速度没有去噪含义）。教师侧 stop-gradient；反传只更新学生的 LoRA，然后用 EMA(0.999) 把学生的进步同步给教师。', e:'𝓛_HPSD = 𝔼 ‖ v_φ( xᴴʸᵇ(tᵢ₊ₖ) | c_txt ) − sg[ ṽ( x̂ᴴʸᵇ(tᵢ₊ₖ) | c⁺_txt, c_img ) ] ‖²₍₂:F₎　　(Eq. 11)'}
+];
+var pipeBar=$('#pipeBar'), pipeInfo=$('#pipeInfo'), stepGs=$$('#pipeSvg .stp');
+STEPS.forEach(function(s,i){
+  var b=document.createElement('button');
+  b.type='button'; b.className='stepbtn'; b.textContent = i===0?'全部':('0'+i);
+  b.addEventListener('click',function(){setStep(i)});
+  pipeBar.appendChild(b);
+});
+function setStep(i){
+  $$('#pipeBar .stepbtn').forEach(function(b,j){b.classList.toggle('on', j===i)});
+  stepGs.forEach(function(g,j){
+    g.classList.remove('dim','lit');
+    if(i!==0 && j!==i-1) g.classList.add('dim'); else g.classList.add('lit');
+  });
+  var s=STEPS[i];
+  pipeInfo.innerHTML='<h5>'+s.t+'</h5>'+s.d+(s.e?'<span class="eqmini">'+s.e+'</span>':'');
+}
+setStep(0);
+
+/* ---------------------------------------------------------- K slider */
+var KVA={0:1.5587,1:1.6653,3:1.8753,5:1.7794,7:1.7130};
+var kEls={
+  s:$('#kSlider'), read:$('#kRead'), va:$('#kVA'), poly:$('#kPoly'), dots:$('#kDots'),
+  ring:$('#kMarkRing'), dot:$('#kMarkDot'), lbl:$('#kMarkLbl'), sub:$('#kSubLbl'),
+  spec:$('#kSpec'), b1:$('#kBar1'), b2:$('#kBar2'), n1:$('#kNote1'), n2:$('#kNote2')
+};
+var AX=90, AY=86, DX=42, DY=13;
+function setK(k){
+  var pts=[], d='';
+  for(var i=0;i<=k;i++){pts.push((AX+i*DX)+','+(AY+i*DY))}
+  kEls.poly.setAttribute('points', k>0?pts.join(' '):'');
+  var dd='';
+  for(var j=1;j<k;j++){dd+='<circle cx="'+(AX+j*DX)+'" cy="'+(AY+j*DY)+'" r="3" class="f-S"></circle>'}
+  kEls.dots.innerHTML=dd;
+  var ex=AX+k*DX, ey=AY+k*DY;
+  kEls.ring.setAttribute('cx',ex); kEls.ring.setAttribute('cy',ey);
+  kEls.dot.setAttribute('cx',ex);  kEls.dot.setAttribute('cy',ey);
+  kEls.lbl.setAttribute('x',ex+16); kEls.lbl.setAttribute('y',ey+4);
+  kEls.read.textContent='K = '+k;
+  kEls.sub.textContent = k===0 ? '学生子轨迹：0 步（监督点 = 教师锚点本身）' : ('学生子轨迹：K = '+k+' 步');
+  var sx=496+(k/7)*194;
+  kEls.spec.setAttribute('points', sx+',60 '+(sx+6)+',50 '+(sx-6)+',50');
+  var c1=Math.max(0,194*(1-k*0.11)), c2=Math.min(194,194*(k*0.14));
+  kEls.b1.setAttribute('width',c1.toFixed(1)); kEls.b2.setAttribute('width',c2.toFixed(1));
+  if(KVA[k]!==undefined){
+    kEls.va.textContent='VideoAlign '+KVA[k].toFixed(4);
+    kEls.n1.textContent = k===3 ? '论文实测：K = 3 最优' : '论文实测值';
+    kEls.n2.textContent = KVA[k].toFixed(4)+'（VideoAlign · WAN-2.2）';
+  }else{
+    kEls.va.textContent='VideoAlign 未测';
+    kEls.n1.textContent='论文未测量此 K';
+    kEls.n2.textContent='仅 K ∈ {0, 1, 3, 5, 7} 有实验数据';
+  }
+}
+kEls.s.addEventListener('input',function(){setK(parseInt(kEls.s.value,10))});
+setK(3);
+
+/* ---------------------------------------------------------- tooltip */
+var tip=$('#tip');
+function showTip(e,html){
+  tip.innerHTML=html; tip.style.opacity='1';
+  var x=e.clientX+14, y=e.clientY+14;
+  if(x+tip.offsetWidth>window.innerWidth-10) x=e.clientX-tip.offsetWidth-14;
+  if(y+tip.offsetHeight>window.innerHeight-10) y=e.clientY-tip.offsetHeight-14;
+  tip.style.left=x+'px'; tip.style.top=y+'px';
+}
+function hideTip(){tip.style.opacity='0'}
+
+/* ---------------------------------------------------------- data */
+var COLS8=['VideoAlign','VisionReward','UR-v1','UR-v2-A','UR-v2-P','UR-v2-S','HPS','CLIP'];
+var PREC8=[4,4,3,3,3,3,4,4];
+var COLS6=['VideoAlign','VisionReward','UR-v1','UR-v2-A','UR-v2-P','UR-v2-S'];
+var PREC6=[4,4,3,3,3,3];
+var COLSV=['VBench-SC','VBench-BC','VBench-MS','VBench-DD','VBench-AQ','VBench-IQ'];
+var PRECV=[4,4,4,3,4,4];
+
+var T1={
+ wan:[
+  {m:'Vanilla T2V',c:'--m1',v:[0.5335,0.0965,2.683,2.802,3.167,3.100,0.2472,0.3684]},
+  {m:'On-Policy Distillation',c:'--m2',v:[0.2613,0.0482,2.463,2.724,3.171,3.204,0.2561,0.2847]},
+  {m:'D-OPSD (Text)',c:'--m3',v:[0.6379,0.1076,2.739,2.825,3.189,3.187,0.2493,0.3712]},
+  {m:'Supervised Fine-Tuning',c:'--m4',v:[1.2046,0.1043,2.763,2.854,3.181,3.207,0.2670,0.3710]},
+  {m:'HPSD (Ours)',c:'--m5',v:[1.8753,0.1191,2.812,2.890,3.203,3.275,0.2815,0.3765],hp:1}
+ ],
+ ltx:[
+  {m:'Vanilla T2V',c:'--m1',v:[0.2307,0.0566,2.648,2.877,3.100,2.956,0.2068,0.3320]},
+  {m:'On-Policy Distillation',c:'--m2',v:[0.0242,0.0405,2.594,2.825,3.089,3.093,0.2278,0.3048]},
+  {m:'D-OPSD (Text)',c:'--m3',v:[0.4380,0.1008,2.824,2.903,3.173,3.114,0.2451,0.3808]},
+  {m:'Supervised Fine-Tuning',c:'--m4',v:[0.9584,0.0826,2.733,2.873,3.068,3.131,0.2349,0.3626]},
+  {m:'HPSD (Ours)',c:'--m5',v:[1.5244,0.1123,2.827,2.887,3.198,3.182,0.2731,0.3853],hp:1}
+ ]
+};
+var T2={
+ wan:[
+  {m:'Vanilla T2V',c:'--m1',v:[0.9654,0.9667,0.9878,0.560,0.5773,0.6981]},
+  {m:'On-Policy Distillation',c:'--m2',v:[0.5241,0.7284,0.9799,0.516,0.6066,0.6683]},
+  {m:'D-OPSD (Text)',c:'--m3',v:[0.9691,0.9692,0.9874,0.404,0.5889,0.6300]},
+  {m:'Supervised Fine-Tuning',c:'--m4',v:[0.9679,0.9675,0.9837,0.526,0.6095,0.7049]},
+  {m:'HPSD (Ours)',c:'--m5',v:[0.9722,0.9705,0.9880,0.422,0.6343,0.6996],hp:1}
+ ],
+ ltx:[
+  {m:'Vanilla T2V',c:'--m1',v:[0.9388,0.9467,0.9901,0.330,0.5791,0.6517]},
+  {m:'On-Policy Distillation',c:'--m2',v:[0.5337,0.7715,0.9899,0.366,0.5800,0.6345]},
+  {m:'D-OPSD (Text)',c:'--m3',v:[0.9419,0.9454,0.9897,0.236,0.5994,0.6383]},
+  {m:'Supervised Fine-Tuning',c:'--m4',v:[0.9466,0.9465,0.9903,0.278,0.5994,0.6723]},
+  {m:'HPSD (Ours)',c:'--m5',v:[0.9515,0.9554,0.9905,0.302,0.6375,0.6886],hp:1}
+ ]
+};
+var T3A=[
+ {m:'K = 0',v:[1.5587,0.1131,2.750,2.853,3.163,3.223]},
+ {m:'K = 1',v:[1.6653,0.1144,2.761,2.846,3.180,3.232]},
+ {m:'K = 3　（默认）',v:[1.8753,0.1191,2.812,2.890,3.203,3.275],hp:1},
+ {m:'K = 5',v:[1.7794,0.1194,2.790,2.865,3.190,3.260]},
+ {m:'K = 7',v:[1.7130,0.1168,2.777,2.869,3.189,3.251]}
+];
+var T3B=[
+ {m:'Vanilla T2V',v:[0.5335,0.0965,2.683,2.802,3.167,3.100]},
+ {m:'+ c_img（仅首帧特权）',v:[1.5006,0.1157,2.787,2.855,3.194,3.247]},
+ {m:'+ c⁺_txt + c_img（HPSD）',v:[1.8753,0.1191,2.812,2.890,3.203,3.275],hp:1}
+];
+var T3C=[
+ {m:'Vanilla TI2V',v:[0.7831,0.1348,2.840,2.926,3.211,3.273]},
+ {m:'TI2V after HPSD',v:[1.2139,0.1344,2.859,2.932,3.215,3.271],hp:1}
+];
+var T5=[
+ {m:'Vanilla T2V',v:[0.5335,0.0965,2.683,2.802,3.167,3.100,0.2472,0.3684]},
+ {m:'HPSD + Flux.2-Klein-4B',v:[1.6587,0.1167,2.793,2.865,3.171,3.252,0.2819,0.3785],hp:1},
+ {m:'HPSD + Z-Image-Turbo（主实验）',v:[1.8753,0.1191,2.812,2.890,3.203,3.275,0.2815,0.3765],hp:1}
+];
+
+/* ---------------------------------------------------------- table renderer */
+function renderTable(el, cols, prec, rows, opts){
+  opts=opts||{};
+  var skip=opts.skipRank||[];
+  var best=[], second=[];
+  cols.forEach(function(_,ci){
+    if(skip.indexOf(ci)>=0){best.push(null);second.push(null);return}
+    var vals=rows.map(function(r){return r.v[ci]}).slice().sort(function(a,b){return b-a});
+    best.push(vals[0]);
+    var s=vals.filter(function(v){return v<vals[0]})[0];
+    second.push(s===undefined?null:s);
+  });
+  var h='<div class="tblwrap"><table>';
+  if(opts.caption) h+='<caption>'+opts.caption+'</caption>';
+  h+='<thead><tr><th>'+(opts.first||'方法')+'</th>';
+  cols.forEach(function(c){h+='<th>'+c+'</th>'});
+  h+='</tr></thead><tbody>';
+  rows.forEach(function(r){
+    h+='<tr'+(r.hp?' class="hpsd"':'')+'><td>'+
+      (r.c?'<span class="mdot" style="background:var('+r.c+')"></span>':'')+r.m+'</td>';
+    r.v.forEach(function(v,ci){
+      var cls = (v===best[ci])?'best':((v===second[ci])?'second':'');
+      h+='<td class="'+cls+'">'+v.toFixed(prec[ci])+'</td>';
+    });
+    h+='</tr>';
+  });
+  h+='</tbody></table>';
+  if(opts.note) h+='<div class="tnote">'+opts.note+'</div>';
+  h+='</div>';
+  el.innerHTML=h;
+}
+
+/* ---------------------------------------------------------- charts */
+function cssv(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()}
+function hbars(el, o){
+  var W=700, padL=200, padR=86, rowH=40, top=6;
+  var H=top+o.rows.length*rowH+8;
+  var max=Math.max.apply(null,o.rows.map(function(r){return r.v}));
+  var innerW=W-padL-padR, sc=innerW/(max*1.02);
+  var s='<div class="ctitle">'+o.title+'</div><div class="csub">'+o.sub+'</div>';
+  s+='<div style="overflow-x:auto"><svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+o.title+'" style="max-width:100%;height:auto;display:block">';
+  s+='<line x1="'+padL+'" y1="'+top+'" x2="'+padL+'" y2="'+(H-8)+'" stroke="'+cssv('--axis')+'" stroke-width="1"/>';
+  o.rows.forEach(function(r,i){
+    var y=top+i*rowH+8, h=22, w=Math.max(2,r.v*sc), rr=4, x1=padL+w;
+    var d='M '+padL+' '+y+' H '+(x1-rr)+' A '+rr+' '+rr+' 0 0 1 '+x1+' '+(y+rr)+
+          ' V '+(y+h-rr)+' A '+rr+' '+rr+' 0 0 1 '+(x1-rr)+' '+(y+h)+' H '+padL+' Z';
+    s+='<path d="'+d+'" fill="var('+r.c+')" class="bar" data-t="'+r.t+'"/>';
+    s+='<text x="'+(padL-12)+'" y="'+(y+15)+'" text-anchor="end" fill="'+cssv('--ink2')+'" font-size="12.5">'+r.m+'</text>';
+    s+='<text x="'+(x1+9)+'" y="'+(y+15)+'" fill="'+cssv('--ink')+'" font-size="12.5" style="font-variant-numeric:tabular-nums">'+r.lab+'</text>';
+  });
+  s+='</svg></div>';
+  el.innerHTML=s;
+  $$('.bar',el).forEach(function(b){
+    b.style.cursor='crosshair';
+    b.addEventListener('mousemove',function(e){showTip(e,b.dataset.t)});
+    b.addEventListener('mouseleave',hideTip);
+  });
+}
+function lineChart(el,o){
+  var W=700,H=250,padL=64,padR=28,padT=18,padB=44;
+  var xs=o.pts.map(function(p){return p.x}), ys=o.pts.map(function(p){return p.y});
+  var x0=o.xmin!==undefined?o.xmin:Math.min.apply(null,xs), x1=o.xmax!==undefined?o.xmax:Math.max.apply(null,xs);
+  var y0=o.ymin!==undefined?o.ymin:Math.min.apply(null,ys), y1=o.ymax!==undefined?o.ymax:Math.max.apply(null,ys);
+  var X=function(v){return padL+(v-x0)/(x1-x0)*(W-padL-padR)};
+  var Y=function(v){return H-padB-(v-y0)/(y1-y0)*(H-padT-padB)};
+  var s='<div class="ctitle">'+o.title+'</div><div class="csub">'+o.sub+'</div>';
+  s+='<div style="overflow-x:auto"><svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+o.title+'" style="max-width:100%;height:auto;display:block">';
+  (o.yticks||[]).forEach(function(t){
+    s+='<line x1="'+padL+'" y1="'+Y(t)+'" x2="'+(W-padR)+'" y2="'+Y(t)+'" stroke="'+cssv('--grid')+'" stroke-width="1"/>';
+    s+='<text x="'+(padL-10)+'" y="'+(Y(t)+4)+'" text-anchor="end" fill="'+cssv('--ink3')+'" font-size="11" style="font-variant-numeric:tabular-nums">'+t.toFixed(o.ydec||3)+'</text>';
+  });
+  s+='<line x1="'+padL+'" y1="'+(H-padB)+'" x2="'+(W-padR)+'" y2="'+(H-padB)+'" stroke="'+cssv('--axis')+'" stroke-width="1"/>';
+  (o.xticks||xs).forEach(function(t){
+    s+='<text x="'+X(t)+'" y="'+(H-padB+20)+'" text-anchor="middle" fill="'+cssv('--ink3')+'" font-size="11" style="font-variant-numeric:tabular-nums">'+t+'</text>';
+  });
+  s+='<text x="'+((padL+W-padR)/2)+'" y="'+(H-6)+'" text-anchor="middle" fill="'+cssv('--ink3')+'" font-size="11.5">'+o.xlab+'</text>';
+  if(o.mark!==undefined){
+    s+='<line x1="'+X(o.mark)+'" y1="'+padT+'" x2="'+X(o.mark)+'" y2="'+(H-padB)+'" stroke="'+cssv('--hybrid')+'" stroke-width="1.4" stroke-dasharray="5 4"/>';
+    s+='<text x="'+(X(o.mark)+8)+'" y="'+(H-padB-9)+'" fill="'+cssv('--hybrid-ink')+'" font-size="11">'+o.markLab+'</text>';
+  }
+  s+='<polyline points="'+o.pts.map(function(p){return X(p.x)+','+Y(p.y)}).join(' ')+'" fill="none" stroke="var('+o.c+')" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+  o.pts.forEach(function(p){
+    s+='<circle cx="'+X(p.x)+'" cy="'+Y(p.y)+'" r="5.2" fill="var('+o.c+')" stroke="'+cssv('--surf')+'" stroke-width="2" class="pt" data-t="'+p.t+'"/>';
+    if(p.lab) s+='<text x="'+X(p.x)+'" y="'+(Y(p.y)-14)+'" text-anchor="middle" fill="'+cssv('--ink')+'" font-size="12" font-weight="600" style="font-variant-numeric:tabular-nums">'+p.lab+'</text>';
+  });
+  s+='</svg></div>';
+  el.innerHTML=s;
+  $$('.pt',el).forEach(function(b){
+    b.style.cursor='crosshair';
+    b.addEventListener('mousemove',function(e){showTip(e,b.dataset.t)});
+    b.addEventListener('mouseleave',hideTip);
+  });
+}
+
+/* ---------------------------------------------------------- wire up tables/charts */
+var bb='wan', mi=0;
+var sel=$('#metricSel');
+COLS8.forEach(function(c,i){var o=document.createElement('option');o.value=String(i);o.textContent=c;sel.appendChild(o)});
+function drawMain(){
+  renderTable($('#tbl1'), COLS8, PREC8, T1[bb], {
+    caption:'Tab. 1 · 奖励模型指标（'+(bb==='wan'?'WAN-2.2':'LTX-2.3')+'）　粗体 = 最佳，下划线 = 次佳，越高越好',
+    note: bb==='wan'
+      ? 'WAN-2.2 上 HPSD 八项全胜。注意 On-Policy Distillation 在 VideoAlign / VisionReward / CLIP 上都低于未训练的 Vanilla T2V —— 它不是提升有限，是训崩了。'
+      : 'LTX-2.3 上 HPSD 拿下八项中的七项，唯一失手的是 UR-v2-A（D-OPSD 2.903 vs HPSD 2.887）。'
+  });
+  var rows=T1[bb].map(function(r){
+    return {m:r.m, v:r.v[mi], c:r.c, lab:r.v[mi].toFixed(PREC8[mi]),
+      t:'<b>'+r.m+'</b>'+COLS8[mi]+' = '+r.v[mi].toFixed(PREC8[mi])};
+  });
+  hbars($('#chart1'), {
+    title: COLS8[mi]+' · '+(bb==='wan'?'WAN-2.2-TI2V-5B':'LTX-2.3'),
+    sub:'五种方法横向对比，越高越好；颜色固定绑定方法，切换指标不重新配色。',
+    rows:rows
+  });
+}
+$$('[data-bb]').forEach(function(b){
+  b.addEventListener('click',function(){
+    bb=b.dataset.bb;
+    $$('[data-bb]').forEach(function(o){o.setAttribute('aria-selected',String(o===b))});
+    drawMain(); drawV();
+  });
+});
+sel.addEventListener('change',function(){mi=parseInt(sel.value,10);drawMain()});
+
+function drawV(){
+  renderTable($('#tbl2'), COLSV, PRECV, T2[bb], {
+    caption:'Tab. 2 · VBench（'+(bb==='wan'?'WAN-2.2':'LTX-2.3')+'）　SC 主体一致性 / BC 背景一致性 / MS 运动平滑度 / DD 动态程度 / AQ 美学质量 / IQ 成像质量',
+    skipRank:[3],
+    note:'<b>DD 列刻意不标粗体/下划线</b>：动态程度高不等于质量好（论文自己也是这么论证的），把它和其他“越高越好”的列一起排名会造成误导。切换上方底座按钮可对比另一个模型。'
+  });
+}
+drawMain(); drawV();
+
+renderTable($('#tbl3a'), COLS6, PREC6, T3A, {first:'子轨迹长度', caption:'Tab. 3(a) · 子轨迹长度 K 的影响（WAN-2.2）'});
+renderTable($('#tbl3b'), COLS6, PREC6, T3B, {first:'教师的特权条件', caption:'Tab. 3(b) · 特权条件的贡献（WAN-2.2）',
+  note:'论文明确说明省略了「只用 c⁺_txt」这一格：文本条件不会触发 condition-state mismatch，标准 OPD 即可处理。'});
+renderTable($('#tbl3c'), COLS6, PREC6, T3C, {first:'TI2V 模式', caption:'Tab. 3(c) · HPSD 对 TI2V 模式的反哺（WAN-2.2）',
+  note:'注意 VisionReward 与 UR-v2-S 是微降的（0.1348→0.1344，3.273→3.271），幅度接近噪声，但说明反哺并非全维度纯收益。'});
+renderTable($('#tbl5'), COLS8, PREC8, T5, {first:'首帧生成器', caption:'Tab. 5 · 更换首帧生成器（WAN-2.2）',
+  note:'换成 Flux.2-Klein-4B 后 HPSD 依然全面超过 Vanilla T2V，但数值整体下移 —— 教师的上限确实受制于辅助 T2I 模型的画质。'});
+
+function drawAux(){
+  lineChart($('#chartK'), {
+    title:'子轨迹长度 K 对 VideoAlign 的影响',
+    sub:'WAN-2.2 · Tab. 3(a)。K = 0 等价于在教师轨迹上做 off-policy 蒸馏；K 增大逐渐逼近纯 on-policy。仅 K ∈ {0,1,3,5,7} 有实测。',
+    pts:[{x:0,y:1.5587,t:'<b>K = 0</b>VideoAlign 1.5587<br>退化为 off-policy 蒸馏'},
+         {x:1,y:1.6653,t:'<b>K = 1</b>VideoAlign 1.6653'},
+         {x:3,y:1.8753,t:'<b>K = 3</b>VideoAlign 1.8753<br>论文选定',lab:'1.8753'},
+         {x:5,y:1.7794,t:'<b>K = 5</b>VideoAlign 1.7794'},
+         {x:7,y:1.7130,t:'<b>K = 7</b>VideoAlign 1.7130<br>错配开始回来'}],
+    xticks:[0,1,3,5,7], yticks:[1.5,1.6,1.7,1.8,1.9], ydec:1,
+    ymin:1.48, ymax:1.94, xlab:'子轨迹长度 K（步）', c:'--m5', mark:3, markLab:'最优'
+  });
+  lineChart($('#chartConv'), {
+    title:'训练收敛曲线 · VisionReward',
+    sub:'WAN-2.2 · 论文 Fig. 9 标注值。约 500 步后走平，因此主实验取 500 步。',
+    pts:[{x:100,y:0.109,t:'<b>100 步</b>0.109'},{x:200,y:0.113,t:'<b>200 步</b>0.113'},
+         {x:300,y:0.115,t:'<b>300 步</b>0.115'},{x:400,y:0.114,t:'<b>400 步</b>0.114'},
+         {x:500,y:0.118,t:'<b>500 步</b>0.118 · 主实验配置',lab:'0.118'},
+         {x:600,y:0.119,t:'<b>600 步</b>0.119'},{x:700,y:0.118,t:'<b>700 步</b>0.118'},
+         {x:800,y:0.119,t:'<b>800 步</b>0.119'}],
+    xticks:[100,200,300,400,500,600,700,800], yticks:[0.110,0.112,0.114,0.116,0.118,0.120], ydec:3,
+    ymin:0.107, ymax:0.121, xlab:'训练步数', c:'--m5', mark:500, markLab:'选定 500 步'
+  });
+}
+drawAux();
+
+/* redraw charts on theme change so cssv() picks up new tokens */
+new MutationObserver(function(){drawMain();drawAux()}).observe(root,{attributes:true,attributeFilter:['data-theme']});
+})();
+</script>
+</body>
+</html>

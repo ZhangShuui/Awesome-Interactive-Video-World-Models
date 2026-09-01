@@ -1,0 +1,2411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FIRM-Video 先核验再打分</title>
+<meta name="description" content="arXiv 2608.21839 · FIRM-Video: Check Before You Score for Reliable Text-to-Video Reward Modeling 方法精读与交互图解">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   FIRM-Video 精读 — design tokens
+   深色是设计基准（与 docs/ 内既有精读页同族）；浅色是完整设计
+   的第二主题，可由系统设置或右上角开关抵达。
+   语义配色的分工就是这一页的骨架：
+     蓝   = IF   清单来自提示词（自上而下）
+     紫   = WC   清单来自视频 grounding（自下而上）
+     琥珀 = PQ   清单是固定的缺陷分类法
+     绿/红 只留给「核验通过 / 检出违背」，不挪作他用
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0d1014; --surf:#13171d; --surf2:#191e26; --surf3:#222932;
+  --rule:#262d36; --rule2:#3a434f;
+  --ink:#eef1f5; --ink2:#aab3bf; --ink3:#79828f;
+
+  --if:#2f7ec9;  --if-ink:#62aeee;  --if-soft:rgba(47,126,201,.17);
+  --wc:#7d5fd3;  --wc-ink:#ab93f2;  --wc-soft:rgba(125,95,211,.18);
+  --pq:#c0871a;  --pq-ink:#e0a839;  --pq-soft:rgba(192,135,26,.17);
+
+  --ok:#3f9d6d;  --ok-ink:#5cc48d;  --ok-soft:rgba(63,157,109,.16);
+  --no:#d0504a;  --no-ink:#ee817b;  --no-soft:rgba(208,80,74,.15);
+
+  --m1:#2f7ec9; --m2:#d0504a; --m3:#3f9d6d; --m4:#c0871a; --m5:#7d5fd3; --m6:#5c6672;
+  --grid:#222932; --axis:#3a434f;
+
+  --shadow:0 1px 2px rgba(0,0,0,.55), 0 12px 34px rgba(0,0,0,.34);
+  --tint:rgba(255,255,255,.045);
+  --sheet:rgba(255,255,255,.022);
+
+  --font-display:"Archivo","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f0f1f4; --surf:#fbfbfc; --surf2:#e9ebf0; --surf3:#dfe2e9;
+    --rule:#dcdfe6; --rule2:#c0c7d2;
+    --ink:#111419; --ink2:#4b525e; --ink3:#737b89;
+
+    --if:#1a68b4;  --if-ink:#12558f;  --if-soft:rgba(26,104,180,.12);
+    --wc:#6741c6;  --wc-ink:#5433ab;  --wc-soft:rgba(103,65,198,.12);
+    --pq:#a4700a;  --pq-ink:#845806;  --pq-soft:rgba(164,112,10,.13);
+
+    --ok:#12855a;  --ok-ink:#0c6b47;  --ok-soft:rgba(18,133,90,.12);
+    --no:#c03a33;  --no-ink:#a12c26;  --no-soft:rgba(192,58,51,.10);
+
+    --m1:#1a68b4; --m2:#c03a33; --m3:#12855a; --m4:#a4700a; --m5:#6741c6; --m6:#6b7480;
+    --grid:#e2e5eb; --axis:#c0c7d2;
+
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.09);
+    --tint:rgba(16,20,28,.035);
+    --sheet:rgba(16,20,28,.018);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f0f1f4; --surf:#fbfbfc; --surf2:#e9ebf0; --surf3:#dfe2e9;
+  --rule:#dcdfe6; --rule2:#c0c7d2;
+  --ink:#111419; --ink2:#4b525e; --ink3:#737b89;
+
+  --if:#1a68b4;  --if-ink:#12558f;  --if-soft:rgba(26,104,180,.12);
+  --wc:#6741c6;  --wc-ink:#5433ab;  --wc-soft:rgba(103,65,198,.12);
+  --pq:#a4700a;  --pq-ink:#845806;  --pq-soft:rgba(164,112,10,.13);
+
+  --ok:#12855a;  --ok-ink:#0c6b47;  --ok-soft:rgba(18,133,90,.12);
+  --no:#c03a33;  --no-ink:#a12c26;  --no-soft:rgba(192,58,51,.10);
+
+  --m1:#1a68b4; --m2:#c03a33; --m3:#12855a; --m4:#a4700a; --m5:#6741c6; --m6:#6b7480;
+  --grid:#e2e5eb; --axis:#c0c7d2;
+
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.09);
+  --tint:rgba(16,20,28,.035);
+  --sheet:rgba(16,20,28,.018);
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:78px}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{animation:none !important; transition:none !important} }
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.75;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+
+/* ---------------------------------------------------------- chrome */
+#prog{position:fixed; top:0; left:0; height:2px; width:0; background:var(--if); z-index:60}
+.top{
+  position:sticky; top:0; z-index:50; display:flex; align-items:center; gap:14px;
+  padding:11px 26px; background:color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter:blur(11px); border-bottom:1px solid var(--rule);
+}
+.brand{font-family:var(--font-display); font-weight:700; letter-spacing:.01em; font-size:15px}
+.brand em{font-style:normal; font-family:var(--font-body); font-weight:400; color:var(--ink3); font-size:13px; margin-left:10px}
+.spacer{flex:1}
+.tbtn{
+  font:inherit; font-size:12.5px; color:var(--ink2); background:var(--surf2);
+  border:1px solid var(--rule2); border-radius:7px; padding:5px 11px; cursor:pointer;
+}
+.tbtn:hover{color:var(--ink); border-color:var(--ink3)}
+.tbtn:focus-visible{outline:2px solid var(--if-ink); outline-offset:2px}
+
+.shell{display:grid; grid-template-columns:224px minmax(0,1fr); gap:34px; max-width:1240px; margin:0 auto; padding:0 26px 90px}
+.rail{position:sticky; top:74px; align-self:start; height:calc(100vh - 96px); overflow-y:auto; padding-top:34px}
+.rl{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink3); margin:0 0 12px}
+#toc{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px}
+#toc a{
+  display:block; padding:5px 10px; border-left:2px solid transparent; border-radius:0 5px 5px 0;
+  color:var(--ink3); text-decoration:none; font-size:12.6px; line-height:1.45;
+}
+#toc a:hover{color:var(--ink2); background:var(--tint)}
+#toc a.on{color:var(--ink); border-left-color:var(--if); background:var(--tint)}
+main{min-width:0; padding-top:34px}
+
+/* ---------------------------------------------------------- hero */
+.hero{padding:26px 0 40px; border-bottom:1px solid var(--rule)}
+.kicker{display:flex; flex-wrap:wrap; gap:7px; margin-bottom:22px}
+.tag{
+  font-family:var(--font-mono); font-size:11px; letter-spacing:.03em; color:var(--ink3);
+  border:1px solid var(--rule2); border-radius:999px; padding:2.5px 10px;
+}
+.tag.hl{color:var(--if-ink); border-color:color-mix(in srgb, var(--if) 55%, transparent); background:var(--if-soft)}
+.hero h1{
+  font-family:var(--font-display); font-weight:700; font-size:clamp(38px,6.4vw,62px);
+  line-height:1.03; letter-spacing:-.022em; margin:0 0 12px; text-wrap:balance;
+}
+.hero .zh{font-size:17.5px; color:var(--ink2); margin:0 0 24px; font-weight:500}
+.thesis{font-size:16.5px; line-height:1.85; max-width:66ch; margin:0 0 24px; color:var(--ink)}
+.thesis b{font-weight:600}
+.rIF{color:var(--if-ink); font-weight:600}
+.rWC{color:var(--wc-ink); font-weight:600}
+.rPQ{color:var(--pq-ink); font-weight:600}
+.rOK{color:var(--ok-ink); font-weight:600}
+.rNO{color:var(--no-ink); font-weight:600}
+.authors{font-size:13px; color:var(--ink3); margin:0 0 6px; line-height:1.7; max-width:78ch}
+.authors b{color:var(--ink2); font-weight:600}
+.links{display:flex; flex-wrap:wrap; gap:9px; margin:20px 0 26px}
+.links a{
+  font-family:var(--font-mono); font-size:12px; color:var(--ink2); text-decoration:none;
+  border:1px solid var(--rule2); border-radius:7px; padding:6px 12px; background:var(--surf);
+}
+.links a:hover{color:var(--ink); border-color:var(--if); background:var(--if-soft)}
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(178px,1fr)); gap:11px}
+.stat{background:var(--surf); border:1px solid var(--rule); border-radius:11px; padding:14px 15px}
+.stat .lb{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.05em; color:var(--ink3); text-transform:uppercase; margin-bottom:7px; line-height:1.4}
+.stat .vl{font-family:var(--font-display); font-weight:700; font-size:27px; line-height:1; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+.stat .dl{font-size:11.8px; color:var(--ink3); margin-top:7px; line-height:1.5}
+.stat .dl b{color:var(--ok-ink)}
+
+/* ---------------------------------------------------------- sections */
+.sec{padding:56px 0 8px; scroll-margin-top:78px}
+.eyebrow{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.eyebrow .n{font-family:var(--font-mono); font-size:11.5px; color:var(--if-ink); letter-spacing:.05em}
+.eyebrow .t{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--ink3)}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec h2{
+  font-family:var(--font-display); font-weight:600; font-size:clamp(24px,3.3vw,32px);
+  line-height:1.22; letter-spacing:-.016em; margin:0 0 16px; text-wrap:balance; max-width:26ch;
+}
+.sec h3{
+  font-family:var(--font-display); font-weight:600; font-size:18.5px; letter-spacing:-.008em;
+  margin:38px 0 12px; text-wrap:balance;
+}
+.sec h4{font-size:15px; font-weight:600; margin:24px 0 8px; color:var(--ink)}
+.lead{font-size:16.5px; line-height:1.85; color:var(--ink2); max-width:66ch; margin:0 0 22px}
+.lead strong{color:var(--ink); font-weight:600}
+.prose{max-width:66ch}
+.prose p{margin:0 0 15px; line-height:1.82}
+.prose strong{font-weight:600}
+.prose code{font-family:var(--font-mono); font-size:.9em; background:var(--surf2); border:1px solid var(--rule); border-radius:4px; padding:1px 5px}
+.prose ul,.prose ol{margin:0 0 16px; padding-left:20px}
+.prose li{margin-bottom:8px; line-height:1.78}
+.prose a{color:var(--if-ink); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--if) 45%, transparent)}
+.prose a:hover{border-bottom-color:var(--if-ink)}
+.sml{font-size:13.2px; line-height:1.7; color:var(--ink3)}
+.mono{font-family:var(--font-mono)}
+.op{opacity:.62}
+
+/* ---------------------------------------------------------- callouts */
+.call{
+  border:1px solid var(--rule); border-left:3px solid var(--if); border-radius:0 10px 10px 0;
+  background:var(--surf); padding:15px 18px; margin:22px 0; max-width:70ch;
+}
+.call h5{margin:0 0 7px; font-size:13px; font-family:var(--font-mono); letter-spacing:.05em; text-transform:uppercase; color:var(--if-ink); font-weight:500}
+.call p{margin:0 0 10px; font-size:14.5px; line-height:1.75; color:var(--ink2)}
+.call p:last-child{margin-bottom:0}
+.call.mine{border-left-color:var(--pq)}
+.call.mine h5{color:var(--pq-ink)}
+.call.warn{border-left-color:var(--no)}
+.call.warn h5{color:var(--no-ink)}
+.call.key{border-left-color:var(--ok)}
+.call.key h5{color:var(--ok-ink)}
+
+/* ---------------------------------------------------------- equations */
+.eqwrap{margin:22px 0; background:var(--surf); border:1px solid var(--rule); border-radius:11px; padding:16px 18px; overflow-x:auto}
+.eqrow{display:flex; align-items:center; gap:16px}
+.eqn{font-family:var(--font-math); font-size:17px; line-height:1.9; flex:1; min-width:0}
+.eqno{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); white-space:nowrap}
+.eqcap{font-size:13px; color:var(--ink3); margin-top:11px; line-height:1.65; border-top:1px dashed var(--rule); padding-top:10px}
+.sym{font-family:var(--font-math); font-style:italic}
+.sub{font-size:.78em; vertical-align:-.25em}
+.sup{font-size:.72em; vertical-align:.45em}
+
+/* ---------------------------------------------------------- figures */
+.fig{margin:26px 0 30px; background:var(--surf); border:1px solid var(--rule); border-radius:13px; overflow:hidden}
+.fh{display:flex; align-items:baseline; gap:12px; padding:12px 18px; border-bottom:1px solid var(--rule); background:var(--surf2); flex-wrap:wrap}
+.fh .no{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3)}
+.fh .ti{font-size:14px; font-weight:600; color:var(--ink)}
+.figbody{padding:18px}
+.figcap{font-size:12.8px; color:var(--ink3); line-height:1.65; padding:0 18px 16px; border-top:1px dashed var(--rule); padding-top:13px; margin:0 18px 16px 18px; padding-left:0; padding-right:0}
+.fig svg{display:block; max-width:100%; height:auto; margin:0 auto}
+.svgscroll{overflow-x:auto}
+
+.tabs{display:flex; gap:0; border-bottom:1px solid var(--rule); background:var(--surf2); flex-wrap:wrap}
+.tab{
+  font:inherit; font-size:13px; color:var(--ink3); background:none; border:none; cursor:pointer;
+  padding:10px 15px; border-bottom:2px solid transparent; margin-bottom:-1px;
+}
+.tab:hover{color:var(--ink2)}
+.tab[aria-selected="true"]{color:var(--ink); border-bottom-color:var(--if)}
+.tab:focus-visible{outline:2px solid var(--if-ink); outline-offset:-3px}
+
+/* ---------------------------------------------------------- svg helpers */
+.f-surf{fill:var(--surf)} .f-surf2{fill:var(--surf2)} .f-surf3{fill:var(--surf3)}
+.f-if{fill:var(--if)} .f-wc{fill:var(--wc)} .f-pq{fill:var(--pq)}
+.f-ifi{fill:var(--if-ink)} .f-wci{fill:var(--wc-ink)} .f-pqi{fill:var(--pq-ink)}
+.f-ok{fill:var(--ok)} .f-no{fill:var(--no)}
+.f-oki{fill:var(--ok-ink)} .f-noi{fill:var(--no-ink)}
+.f-ink{fill:var(--ink)} .f-ink2{fill:var(--ink2)} .f-ink3{fill:var(--ink3)}
+.f-ifs{fill:var(--if-soft)} .f-wcs{fill:var(--wc-soft)} .f-pqs{fill:var(--pq-soft)}
+.f-oks{fill:var(--ok-soft)} .f-nos{fill:var(--no-soft)}
+.s-rule{stroke:var(--rule)} .s-rule2{stroke:var(--rule2)}
+.s-if{stroke:var(--if)} .s-wc{stroke:var(--wc)} .s-pq{stroke:var(--pq)}
+.s-ok{stroke:var(--ok)} .s-no{stroke:var(--no)}
+.s-ink3{stroke:var(--ink3)} .s-ink2{stroke:var(--ink2)}
+.nofill{fill:none}
+.dash{stroke-dasharray:4 4}
+.dash2{stroke-dasharray:2 3}
+.mk-if{fill:var(--if)} .mk-wc{fill:var(--wc)} .mk-pq{fill:var(--pq)}
+.mk-i3{fill:var(--ink3)} .mk-ok{fill:var(--ok)} .mk-no{fill:var(--no)}
+svg text{font-family:var(--font-body); font-size:12px; fill:var(--ink2)}
+svg text.lbl{font-family:var(--font-mono); font-size:10px; letter-spacing:.07em; fill:var(--ink3); text-transform:uppercase}
+svg text.lbl.mx{text-transform:none; letter-spacing:.02em; font-size:11px}
+svg text.big{font-family:var(--font-display); font-weight:600; font-size:15px; fill:var(--ink)}
+svg text.num{font-family:var(--font-mono); font-size:11px; fill:var(--ink2)}
+svg text.tiny{font-size:10.5px; fill:var(--ink3)}
+svg .dim{opacity:.24; transition:opacity .22s}
+svg .lit{opacity:1; transition:opacity .22s}
+
+/* ---------------------------------------------------------- checklist sheet */
+.sheet{border:1px solid var(--rule); border-radius:11px; overflow:hidden; background:var(--sheet)}
+.sheet-hd{
+  display:grid; grid-template-columns:52px 1fr 92px 96px; gap:10px; align-items:center;
+  padding:8px 14px; background:var(--surf2); border-bottom:1px solid var(--rule);
+  font-family:var(--font-mono); font-size:10px; letter-spacing:.11em; text-transform:uppercase; color:var(--ink3);
+}
+.row{
+  display:grid; grid-template-columns:52px 1fr 92px 96px; gap:10px; align-items:center;
+  padding:9px 14px; border-bottom:1px solid var(--rule); font-size:13.6px; line-height:1.5;
+}
+.row:last-child{border-bottom:none}
+.row.off{opacity:.5}
+.imp{
+  font-family:var(--font-mono); font-size:11px; font-weight:600; text-align:center;
+  border-radius:6px; padding:3px 0; border:1px solid var(--rule2); background:var(--surf2); color:var(--ink2);
+  cursor:pointer; user-select:none;
+}
+.imp:hover{border-color:var(--ink3); color:var(--ink)}
+.imp:focus-visible{outline:2px solid var(--if-ink); outline-offset:1px}
+.imp[data-m="5"]{color:var(--ink); border-color:var(--rule2); background:var(--surf3)}
+.wbar{display:block; height:7px; border-radius:4px; background:var(--surf3); position:relative; overflow:hidden}
+.wbar i{position:absolute; inset:0 auto 0 0; display:block; border-radius:4px}
+.wnum{display:block; font-family:var(--font-mono); font-size:10.5px; color:var(--ink3); text-align:right; margin-top:3px; font-variant-numeric:tabular-nums}
+.vbtn{
+  font:inherit; font-family:var(--font-mono); font-size:11.5px; cursor:pointer;
+  border-radius:7px; padding:4px 0; width:100%; border:1px solid var(--rule2);
+  background:var(--surf2); color:var(--ink3);
+}
+.vbtn:focus-visible{outline:2px solid var(--if-ink); outline-offset:1px}
+.vbtn[data-v="1"]{background:var(--ok-soft); border-color:color-mix(in srgb, var(--ok) 60%, transparent); color:var(--ok-ink)}
+.vbtn[data-v="0"]{background:var(--no-soft); border-color:color-mix(in srgb, var(--no) 60%, transparent); color:var(--no-ink)}
+.rowgrp{border-bottom:1px solid var(--rule)}
+.rowgrp:last-child{border-bottom:none}
+.grphd{
+  display:flex; align-items:center; gap:9px; padding:9px 14px; background:var(--surf2);
+  border-bottom:1px solid var(--rule); font-size:13.2px;
+}
+.grphd .gname{font-weight:600; color:var(--ink)}
+.grphd .gkind{font-family:var(--font-mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3); border:1px solid var(--rule2); border-radius:999px; padding:1px 8px}
+.grphd .gc{margin-left:auto; font-family:var(--font-mono); font-size:11.5px; color:var(--ink2); font-variant-numeric:tabular-nums}
+.qrow{display:grid; grid-template-columns:1fr 96px; gap:10px; align-items:center; padding:7px 14px 7px 30px; font-size:13.2px; border-bottom:1px dashed var(--rule)}
+.qrow:last-child{border-bottom:none}
+
+.readout{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:11px; margin-top:16px}
+.ro{background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:11px 13px}
+.ro .k{font-family:var(--font-mono); font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink3); margin-bottom:5px}
+.ro .k.math{text-transform:none; letter-spacing:.02em; font-size:11px}
+.ro .v{font-family:var(--font-display); font-weight:700; font-size:23px; line-height:1.05; font-variant-numeric:tabular-nums}
+.ro .s{font-size:11.5px; color:var(--ink3); margin-top:5px; line-height:1.45}
+.ro.hero-ro .v{font-size:29px}
+
+.ctl{display:flex; flex-wrap:wrap; gap:9px; align-items:center; margin:14px 0 4px}
+.pill{
+  font:inherit; font-size:12.5px; cursor:pointer; border-radius:999px; padding:5px 13px;
+  border:1px solid var(--rule2); background:var(--surf2); color:var(--ink3);
+}
+.pill:hover{color:var(--ink); border-color:var(--ink3)}
+.pill.on{background:var(--if-soft); border-color:var(--if); color:var(--if-ink)}
+.pill:focus-visible{outline:2px solid var(--if-ink); outline-offset:2px}
+.ctl .hint{font-size:12px; color:var(--ink3)}
+
+/* ---------------------------------------------------------- tables */
+.tblwrap{overflow-x:auto; margin:22px 0; border:1px solid var(--rule); border-radius:11px; background:var(--surf)}
+table{border-collapse:collapse; width:100%; font-size:13px; font-variant-numeric:tabular-nums}
+th,td{padding:7px 11px; text-align:right; border-bottom:1px solid var(--rule); white-space:nowrap}
+th{font-family:var(--font-mono); font-size:10px; letter-spacing:.07em; text-transform:uppercase; color:var(--ink3); font-weight:500; background:var(--surf2); position:sticky; top:0}
+td:first-child,th:first-child{text-align:left}
+tr.grp td{background:var(--surf2); font-family:var(--font-mono); font-size:10px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink3); padding:5px 11px}
+tr.ours td{background:var(--if-soft)}
+tr.pipe td{background:var(--pq-soft)}
+td.best{color:var(--ok-ink); font-weight:600}
+td.sec2{color:var(--ink); font-weight:500; text-decoration:underline; text-decoration-color:var(--rule2); text-underline-offset:3px}
+tbody tr:hover td{background:var(--tint)}
+tbody tr.ours:hover td{background:color-mix(in srgb, var(--if-soft) 70%, var(--tint))}
+caption{caption-side:bottom; text-align:left; font-size:12.5px; color:var(--ink3); padding:11px; line-height:1.6}
+
+/* ---------------------------------------------------------- code */
+.code{
+  background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:14px 16px;
+  font-family:var(--font-mono); font-size:12.2px; line-height:1.68; color:var(--ink2);
+  overflow-x:auto; white-space:pre; margin:16px 0;
+}
+.code .c{color:var(--ink3)}
+.code .k{color:var(--if-ink)}
+.code .v{color:var(--ok-ink)}
+details{border:1px solid var(--rule); border-radius:10px; background:var(--surf); margin:14px 0; overflow:hidden}
+details>summary{
+  cursor:pointer; padding:11px 16px; font-size:13.5px; color:var(--ink2); list-style:none;
+  display:flex; align-items:center; gap:9px; background:var(--surf2);
+}
+details>summary::-webkit-details-marker{display:none}
+details>summary::before{content:"▸"; color:var(--ink3); font-size:11px}
+details[open]>summary::before{content:"▾"}
+details>summary:hover{color:var(--ink)}
+details>summary:focus-visible{outline:2px solid var(--if-ink); outline-offset:-3px}
+.dbody{padding:4px 16px 14px}
+
+/* ---------------------------------------------------------- misc */
+.grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(272px,1fr)); gap:14px; margin:20px 0}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:11px; padding:15px 17px}
+.card h5{margin:0 0 8px; font-size:14px; font-weight:600; display:flex; align-items:center; gap:8px}
+.card p{margin:0; font-size:13.6px; line-height:1.72; color:var(--ink2)}
+.dot{width:8px; height:8px; border-radius:50%; flex:none}
+.legend{display:flex; flex-wrap:wrap; gap:14px; margin:12px 0 0; font-size:12.2px; color:var(--ink3)}
+.legend span{display:flex; align-items:center; gap:6px}
+.legend i{width:11px; height:11px; border-radius:3px; display:block}
+.toTop{
+  position:fixed; right:20px; bottom:20px; width:38px; height:38px; border-radius:50%;
+  background:var(--surf2); border:1px solid var(--rule2); color:var(--ink2); cursor:pointer;
+  opacity:0; pointer-events:none; transition:opacity .2s; z-index:40; font-size:15px;
+}
+.toTop.show{opacity:1; pointer-events:auto}
+.toTop:hover{color:var(--ink); border-color:var(--ink3)}
+footer{border-top:1px solid var(--rule); margin-top:60px; padding-top:24px; font-size:12.6px; color:var(--ink3); line-height:1.8}
+footer a{color:var(--ink2); text-decoration:none; border-bottom:1px solid var(--rule2)}
+footer a:hover{color:var(--ink)}
+
+@media (max-width:920px){
+  .shell{grid-template-columns:1fr; gap:0; padding:0 18px 70px}
+  .rail{display:none}
+  .sheet-hd,.row{grid-template-columns:44px 1fr 74px 84px; gap:8px; padding-left:10px; padding-right:10px}
+  .qrow{grid-template-columns:1fr 84px; padding-left:20px}
+}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">FIRM-Video<em>先核验，再打分 · 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <marker id="a-i3" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8.5" markerHeight="6" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-i3"/></marker>
+  <marker id="a-if" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8.5" markerHeight="6" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-if"/></marker>
+  <marker id="a-wc" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8.5" markerHeight="6" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-wc"/></marker>
+  <marker id="a-pq" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8.5" markerHeight="6" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-pq"/></marker>
+  <marker id="a-no" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8.5" markerHeight="6" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-no"/></marker>
+  <marker id="a-ok" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8.5" markerHeight="6" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-ok"/></marker>
+</defs></svg>
+
+<div class="shell">
+
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-tldr">00 · 一图看懂</a></li>
+    <li><a href="#s-why">01 · 三种失效方式</a></li>
+    <li><a href="#s-arch">02 · 三条清单，三个出处</a></li>
+    <li><a href="#s-if">03 · IF：拆提示词</a></li>
+    <li><a href="#s-wc">04 · WC：拆视频</a></li>
+    <li><a href="#s-pq">05 · PQ：固定缺陷表</a></li>
+    <li><a href="#s-data">06 · 从核验到训练数据</a></li>
+    <li><a href="#s-train">07 · 训练与蒸馏账本</a></li>
+    <li><a href="#s-bench">08 · Bench 与主结果</a></li>
+    <li><a href="#s-bon">09 · 泛化与 Best-of-N</a></li>
+    <li><a href="#s-crit">10 · 局限与保留意见</a></li>
+    <li><a href="#s-repo">11 · 与本仓库的关系</a></li>
+    <li><a href="#s-appx">12 · 附录速查</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <div class="kicker">
+    <span class="tag">arXiv 2608.21839v1</span>
+    <span class="tag">cs.CV · 2026-08-22</span>
+    <span class="tag">Preprint</span>
+    <span class="tag hl">T2V 奖励模型 / 清单驱动数据合成</span>
+  </div>
+  <h1>Check Before<br>You Score</h1>
+  <p class="zh">FIRM-Video · 先把「要查什么」写成一张可核验的清单，逐条对着画面查完，再让分数从核验结果里算出来</p>
+  <p class="thesis">这篇论文真正解决的不是「怎么打分」，而是<b>怎么造出可信的打分监督</b>。
+  多阶段推理流水线判得准但太贵，端到端奖励模型够快但全看训练监督的成色——于是把昂贵的那条链<b>离线跑一遍</b>，
+  把它的可靠性蒸馏进一个 8B 模型。链的形状是三条：<span class="rIF">IF 的清单从提示词自上而下拆</span>、
+  <span class="rWC">WC 的清单从视频自下而上 ground</span>、<span class="rPQ">PQ 用一张固定的缺陷分类表</span>。
+  三条清单出处不同，<b>归因也就自动解耦</b>——同一处毛病不会被三个维度各扣一次。</p>
+
+  <p class="authors"><b>Peiyuan Zhang</b>, <b>Xiangyu Zhao</b>, Hongbo Liu, Xiaoxing Hu, Mingxin Liu, Shuran Ma, Yunhang Shen, Jian Hu, Haihan Gao, <b>Haoyu Cao</b>, <b>Xue Yang</b></p>
+  <p class="authors">上海交通大学 · 腾讯优图实验室 · 同济大学　|　论文日期 2026-08-25</p>
+
+  <div class="links">
+    <a href="https://arxiv.org/abs/2608.21839" target="_blank" rel="noopener">arXiv 摘要 ↗</a>
+    <a href="https://arxiv.org/pdf/2608.21839" target="_blank" rel="noopener">PDF ↗</a>
+    <a href="https://github.com/VisionXLab/FIRM-Reward" target="_blank" rel="noopener">代码 ↗</a>
+    <a href="https://huggingface.co/collections/VisionXLab/firm-reward" target="_blank" rel="noopener">HF 合集 ↗</a>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="lb">FIRM-Video-Bench · 总体 MAE</div>
+      <div class="vl">0.78</div>
+      <div class="dl">基座 Qwen3-VL-8B 1.33 &rarr; <b>全表最优</b>；最强基线 Doubao 1.05</div>
+    </div>
+    <div class="stat">
+      <div class="lb">世界一致性 WC · MAE</div>
+      <div class="vl">0.86</div>
+      <div class="dl">基座 1.79，最强基线 Gemini-3.1-Pro 1.27</div>
+    </div>
+    <div class="stat">
+      <div class="lb">合成监督规模</div>
+      <div class="vl">88,044</div>
+      <div class="dl">29,348 条视频 × 3 维度 · 3,012 个提示词</div>
+    </div>
+    <div class="stat">
+      <div class="lb">VBench Best-of-8</div>
+      <div class="vl">3 / 3</div>
+      <div class="dl">三个生成器上 Total 全部第一 <b>+0.27 ~ +1.01</b></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 00 TL;DR -->
+<section class="sec" id="s-tldr">
+  <div class="eyebrow"><span class="n">00</span><span class="t">TL;DR</span><span class="line"></span></div>
+  <h2>一图看懂：分数是从哪里冒出来的</h2>
+  <p class="lead">三种做法的差别只有一句话：<strong>分数和理由，谁先谁后。</strong>
+  固定量表让模型自己决定查什么；开放式推理让理由和分数在同一次生成里纠缠；
+  FIRM-Video 把顺序钉死——<strong>先有逐条核验，再有分数，最后才有理由，而理由不能反过来改分数。</strong></p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 1</span><span class="ti">分数的来源：三种评测范式</span></div>
+    <div class="tabs" role="tablist" aria-label="评测范式">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="p1a" id="t1a">(a) 固定量表整体判分</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p1b" id="t1b">(b) 开放式推理后判分</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p1c" id="t1c">(c) FIRM · 先核验再打分</button>
+    </div>
+    <div class="figbody">
+
+    <div class="tabpanel svgscroll" id="p1a" role="tabpanel" aria-labelledby="t1a">
+      <svg viewBox="0 0 760 232" role="img" aria-label="固定量表整体判分：提示词与视频送进单个判官模型，直接产出分数，理由可选，中间没有可核对的产物">
+        <rect x="24" y="52" width="112" height="36" rx="7" class="f-surf2 s-rule" stroke-width="1"/>
+        <text x="80" y="75" text-anchor="middle">提示词</text>
+        <rect x="24" y="104" width="112" height="36" rx="7" class="f-surf2 s-rule" stroke-width="1"/>
+        <text x="80" y="127" text-anchor="middle">视频 · 8 帧</text>
+        <line x1="136" y1="70" x2="172" y2="86" class="s-ink3" stroke-width="1.3" marker-end="url(#a-i3)"/>
+        <line x1="136" y1="122" x2="172" y2="106" class="s-ink3" stroke-width="1.3" marker-end="url(#a-i3)"/>
+
+        <rect x="176" y="12" width="150" height="32" rx="7" class="nofill s-rule2 dash" stroke-width="1.2"/>
+        <text x="251" y="32" text-anchor="middle" class="tiny">固定量表（所有样本共用）</text>
+        <line x1="251" y1="44" x2="251" y2="56" class="s-ink3 dash2" stroke-width="1.2" marker-end="url(#a-i3)"/>
+
+        <rect x="176" y="58" width="150" height="76" rx="9" class="f-surf2 s-rule2" stroke-width="1.4"/>
+        <text x="251" y="88" text-anchor="middle" class="big">整体判官</text>
+        <text x="251" y="110" text-anchor="middle" class="tiny">单次调用 · 查什么由它自己定</text>
+
+        <line x1="326" y1="96" x2="366" y2="96" class="s-ink3" stroke-width="1.3" marker-end="url(#a-i3)"/>
+        <rect x="370" y="74" width="104" height="44" rx="8" class="f-surf3 s-rule2" stroke-width="1.4"/>
+        <text x="422" y="102" text-anchor="middle" class="big">分数</text>
+
+        <line x1="474" y1="96" x2="514" y2="96" class="s-ink3 dash" stroke-width="1.3" marker-end="url(#a-i3)"/>
+        <rect x="518" y="74" width="150" height="44" rx="8" class="nofill s-rule dash" stroke-width="1.2"/>
+        <text x="593" y="101" text-anchor="middle" class="tiny">一句理由（可选）</text>
+
+        <line x1="24" y1="168" x2="736" y2="168" class="s-rule" stroke-width="1"/>
+        <circle cx="34" cy="188" r="3.5" class="f-no"/>
+        <text x="46" y="192" class="tiny">漏检：显著的全局属性容易被看见，提示词里的细属性、物体关系、短暂动作、事件先后、局部瑕疵容易被跳过</text>
+        <circle cx="34" cy="210" r="3.5" class="f-no"/>
+        <text x="46" y="214" class="tiny">链上没有任何可被人核对的中间产物——拿到一个 3 分，无法回溯它由哪几条证据支撑</text>
+      </svg>
+    </div>
+
+    <div class="tabpanel svgscroll" id="p1b" role="tabpanel" aria-labelledby="t1b" hidden>
+      <svg viewBox="0 0 760 232" role="img" aria-label="开放式推理后判分：自由推理与分数在同一次生成中产生，理由可能是事后合理化，且同一段推理被三个维度复用导致重复扣分">
+        <rect x="24" y="52" width="112" height="36" rx="7" class="f-surf2 s-rule" stroke-width="1"/>
+        <text x="80" y="75" text-anchor="middle">提示词</text>
+        <rect x="24" y="104" width="112" height="36" rx="7" class="f-surf2 s-rule" stroke-width="1"/>
+        <text x="80" y="127" text-anchor="middle">视频 · 8 帧</text>
+        <line x1="136" y1="70" x2="172" y2="86" class="s-ink3" stroke-width="1.3" marker-end="url(#a-i3)"/>
+        <line x1="136" y1="122" x2="172" y2="106" class="s-ink3" stroke-width="1.3" marker-end="url(#a-i3)"/>
+
+        <rect x="176" y="46" width="164" height="100" rx="9" class="f-surf2 s-rule2" stroke-width="1.4"/>
+        <text x="258" y="72" text-anchor="middle" class="big">开放式推理</text>
+        <path d="M196 92 q16 -9 32 0 t32 0 t32 0" class="nofill s-ink3" stroke-width="1.2" opacity=".7"/>
+        <path d="M196 108 q16 -9 32 0 t32 0 t32 0" class="nofill s-ink3" stroke-width="1.2" opacity=".5"/>
+        <text x="258" y="134" text-anchor="middle" class="tiny">理由与分数同一次生成</text>
+
+        <line x1="340" y1="96" x2="380" y2="96" class="s-ink3" stroke-width="1.3" marker-end="url(#a-i3)"/>
+        <rect x="384" y="74" width="104" height="44" rx="8" class="f-surf3 s-rule2" stroke-width="1.4"/>
+        <text x="436" y="102" text-anchor="middle" class="big">分数</text>
+        <path d="M436 74 q0 -34 -80 -34 t-98 6" class="nofill s-no dash" stroke-width="1.3" marker-end="url(#a-no)"/>
+        <text x="352" y="34" text-anchor="middle" class="tiny f-noi">事后合理化</text>
+
+        <rect x="552" y="42" width="104" height="28" rx="6" class="f-ifs s-if" stroke-width="1.2"/>
+        <text x="604" y="61" text-anchor="middle" class="tiny f-ifi">IF 扣一次</text>
+        <rect x="552" y="82" width="104" height="28" rx="6" class="f-wcs s-wc" stroke-width="1.2"/>
+        <text x="604" y="101" text-anchor="middle" class="tiny f-wci">WC 扣一次</text>
+        <rect x="552" y="122" width="104" height="28" rx="6" class="f-pqs s-pq" stroke-width="1.2"/>
+        <text x="604" y="141" text-anchor="middle" class="tiny f-pqi">PQ 扣一次</text>
+        <path d="M488 92 L540 56" class="s-ink3" stroke-width="1.1" marker-end="url(#a-i3)"/>
+        <path d="M488 96 L540 96" class="s-ink3" stroke-width="1.1" marker-end="url(#a-i3)"/>
+        <path d="M488 100 L540 136" class="s-ink3" stroke-width="1.1" marker-end="url(#a-i3)"/>
+        <text x="700" y="96" text-anchor="middle" class="tiny f-noi">同一处</text>
+        <text x="700" y="112" text-anchor="middle" class="tiny f-noi">毛病</text>
+
+        <line x1="24" y1="168" x2="736" y2="168" class="s-rule" stroke-width="1"/>
+        <circle cx="34" cy="188" r="3.5" class="f-no"/>
+        <text x="46" y="192" class="tiny">不忠实的理由：没有约束的推理，可能只是在为一个先想好的分数编理由，而不是分数由证据得出</text>
+        <circle cx="34" cy="210" r="3.5" class="f-no"/>
+        <text x="46" y="214" class="tiny">归因纠缠：同一段推理被三个维度复用，一处「手指变形」会同时算成语义不符、物理违背和画质缺陷，重复扣分</text>
+      </svg>
+    </div>
+
+    <div class="tabpanel svgscroll" id="p1c" role="tabpanel" aria-labelledby="t1c" hidden>
+      <svg viewBox="0 0 760 232" role="img" aria-label="FIRM 先核验再打分：构造清单、逐条核验、加权聚合得到分数，最后才把已核验的条目改写成自然语言分析，分析不能反过来改分数">
+        <rect x="14" y="60" width="94" height="34" rx="7" class="f-surf2 s-rule" stroke-width="1"/>
+        <text x="61" y="82" text-anchor="middle" font-size="11.5">提示词 / 视频</text>
+        <line x1="108" y1="77" x2="146" y2="77" class="s-if" stroke-width="1.4" marker-end="url(#a-if)"/>
+
+        <rect x="150" y="52" width="122" height="50" rx="8" class="f-ifs s-if" stroke-width="1.4"/>
+        <text x="211" y="73" text-anchor="middle" class="lbl">Step 1</text>
+        <text x="211" y="92" text-anchor="middle" font-size="13">构造清单</text>
+        <line x1="272" y1="77" x2="304" y2="77" class="s-if" stroke-width="1.4" marker-end="url(#a-if)"/>
+
+        <rect x="308" y="52" width="122" height="50" rx="8" class="f-ifs s-if" stroke-width="1.4"/>
+        <text x="369" y="73" text-anchor="middle" class="lbl">Step 2</text>
+        <text x="369" y="92" text-anchor="middle" font-size="13">逐条核验 + 证据</text>
+        <line x1="430" y1="77" x2="462" y2="77" class="s-if" stroke-width="1.4" marker-end="url(#a-if)"/>
+
+        <rect x="466" y="52" width="122" height="50" rx="8" class="f-ifs s-if" stroke-width="1.4"/>
+        <text x="527" y="73" text-anchor="middle" class="lbl">Step 3</text>
+        <text x="527" y="92" text-anchor="middle" font-size="13">加权聚合</text>
+        <line x1="588" y1="77" x2="620" y2="77" class="s-if" stroke-width="1.4" marker-end="url(#a-if)"/>
+
+        <rect x="624" y="52" width="116" height="50" rx="8" class="f-surf3 s-rule2" stroke-width="1.6"/>
+        <text x="682" y="84" text-anchor="middle" class="big">分数</text>
+
+        <path d="M682 102 L682 132 L560 132" class="nofill s-ok" stroke-width="1.5" marker-end="url(#a-ok)"/>
+        <text x="700" y="122" class="tiny">先定分</text>
+        <rect x="392" y="112" width="164" height="42" rx="8" class="f-oks s-ok" stroke-width="1.3"/>
+        <text x="474" y="138" text-anchor="middle" font-size="13">Step 4　改写为分析</text>
+
+        <path d="M392 133 L330 133" class="nofill s-no dash" stroke-width="1.4"/>
+        <line x1="356" y1="126" x2="368" y2="140" class="s-no" stroke-width="2"/>
+        <line x1="368" y1="126" x2="356" y2="140" class="s-no" stroke-width="2"/>
+        <text x="322" y="137" text-anchor="end" class="tiny f-noi">分析改不了分数</text>
+
+        <line x1="24" y1="176" x2="736" y2="176" class="s-rule" stroke-width="1"/>
+        <circle cx="34" cy="196" r="3.5" class="f-ok"/>
+        <text x="46" y="200" class="tiny">清单是这条链上唯一可被人逐条核对的中间产物：它写明了「这一条要查什么」，核验回来的是「查到没有 + 画面证据」</text>
+        <circle cx="34" cy="218" r="3.5" class="f-ok"/>
+        <text x="46" y="222" class="tiny">分数由公式从已核验的判定算出；自然语言分析只是把这些判定念出来，写在分数之后，因此没有机会替分数编理由</text>
+      </svg>
+    </div>
+
+    </div>
+    <p class="figcap"><b>(a)</b> 固定量表：一次调用同时决定「查什么」和「几分」。<b>(b)</b> 开放式推理：理由与分数同一次生成，且同一段推理被三个维度复用。
+    <b>(c)</b> FIRM-Video：清单 → 核验 → 聚合 → 分数 → 分析，四步单向。论文把这条原则叫 <span class="mono">check-before-score</span>。</p>
+  </figure>
+
+  <div class="call key">
+    <h5>一句话记住</h5>
+    <p>别的方法是让模型「看完视频说个分」；FIRM-Video 是<strong>先给这一条样本写一份专属的验收单</strong>，
+    对着画面一条条打勾，然后<strong>把勾算成分</strong>。验收单可以被人检查，分数可以被回溯到具体哪一条没过。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 01 WHY -->
+<section class="sec" id="s-why">
+  <div class="eyebrow"><span class="n">01</span><span class="t">Problem</span><span class="line"></span></div>
+  <h2>瓶颈不在模型，在监督</h2>
+  <p class="lead">奖励模型要同时满足两件互相拉扯的事：<strong>判得准</strong>和<strong>判得起</strong>。
+  多阶段推理流水线准，但每条视频要调好几个大模型，做不到规模化；端到端奖励模型一次前向就出分，
+  可它准不准<strong>完全取决于训练时喂了什么</strong>。所以论文把问题重新定义成一句话：
+  <strong>如何为端到端奖励模型构造可靠的监督。</strong></p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 2</span><span class="ti">准确度—开销平面，以及 FIRM 走的那一步</span></div>
+    <div class="figbody svgscroll">
+      <svg viewBox="0 0 640 302" role="img" aria-label="准确度与开销平面：多阶段流水线准但贵，端到端小模型便宜但不准，FIRM 把流水线离线跑一遍后蒸馏进 8B，落在既便宜又准的左上角">
+        <line x1="72" y1="42" x2="72" y2="244" class="s-rule2" stroke-width="1.2"/>
+        <line x1="72" y1="244" x2="596" y2="244" class="s-rule2" stroke-width="1.2"/>
+        <text x="72" y="30" class="lbl">总体 MAE（越低越好）</text>
+        <text x="596" y="266" text-anchor="end" class="lbl">评测一条视频的开销 →</text>
+
+        <line x1="68" y1="66" x2="596" y2="66" class="s-rule dash2" stroke-width="1"/>
+        <text x="64" y="70" text-anchor="end" class="num">0.73</text>
+        <line x1="68" y1="132" x2="596" y2="132" class="s-rule dash2" stroke-width="1"/>
+        <text x="64" y="136" text-anchor="end" class="num">1.08</text>
+        <line x1="68" y1="179" x2="596" y2="179" class="s-rule dash2" stroke-width="1"/>
+        <text x="64" y="183" text-anchor="end" class="num">1.33</text>
+        <line x1="68" y1="223" x2="596" y2="223" class="s-rule dash2" stroke-width="1"/>
+        <text x="64" y="227" text-anchor="end" class="num">1.56</text>
+
+        <text x="166" y="284" text-anchor="middle" class="tiny">8B 单模型 · 一次前向</text>
+        <text x="352" y="284" text-anchor="middle" class="tiny">单次调用大模型 / 闭源 API</text>
+        <text x="524" y="284" text-anchor="middle" class="tiny">多阶段 · 多模型流水线</text>
+
+        <circle cx="166" cy="223" r="6" class="f-surf3 s-rule2" stroke-width="1.5"/>
+        <text x="180" y="227" class="tiny">InternVL3-8B（基座）</text>
+        <circle cx="166" cy="179" r="6" class="f-surf3 s-rule2" stroke-width="1.5"/>
+        <text x="180" y="183" class="tiny">Qwen3-VL-8B（基座）</text>
+        <circle cx="352" cy="132" r="6" class="f-surf3 s-rule2" stroke-width="1.5"/>
+        <text x="366" y="136" class="tiny">GPT-5</text>
+
+        <circle cx="524" cy="66" r="7" class="f-pq"/>
+        <text x="512" y="52" text-anchor="end" class="tiny f-pqi">FIRM 数据构造流水线 0.73</text>
+        <circle cx="166" cy="75" r="8" class="f-if"/>
+        <text x="182" y="70" class="tiny f-ifi">FIRM-Video-8B 0.78</text>
+
+        <path d="M512 62 C 400 20, 250 26, 176 66" class="nofill s-if dash" stroke-width="1.6" marker-end="url(#a-if)"/>
+        <text x="344" y="22" text-anchor="middle" class="tiny f-ifi">离线跑一遍，把结果做成训练数据</text>
+
+        <path d="M166 83 L166 171" class="nofill s-ok" stroke-width="1.4" marker-end="url(#a-ok)"/>
+        <text x="152" y="130" text-anchor="end" class="tiny f-oki">同一个基座</text>
+        <text x="152" y="146" text-anchor="end" class="tiny f-oki">1.33 → 0.78</text>
+      </svg>
+    </div>
+    <p class="figcap">纵轴是 FIRM-Video-Bench 上的总体 MAE（论文表 1 实测值）；横轴只是开销量级的<b>示意</b>，论文没有报告计时。
+    关键在那条虚线箭头：昂贵的那条链<b>不出现在推理路径上</b>，它只被跑一次，用来生产 88,044 条监督。</p>
+  </figure>
+
+  <h3>被点名的三种失效方式</h3>
+  <p class="lead">论文对既有做法的批评很具体：它们缺一份<strong>逐样本的、可显式核验的评测合同</strong>——写明这一条样本要查什么，以及每个判断由什么证据支撑。缺了它，就会同时坏在三个地方。</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h5><span class="dot" style="background:var(--no)"></span>① 检查不全 Incomplete inspection</h5>
+      <p>评测者盯着显著的全局属性看，跳过提示词里指定的细属性、物体之间的关系、一闪而过的动作、事件的<b>先后顺序</b>，以及局部的画面瑕疵。
+      「整体感觉还行」和「第 3 条要求没实现」是两种精度。</p>
+    </div>
+    <div class="card">
+      <h5><span class="dot" style="background:var(--no)"></span>② 理由不忠实 Unfaithful justification</h5>
+      <p>不受约束的推理文本，可能是在为一个已经想好的分数<b>补理由</b>，而不是分数从这些理由里长出来。
+      读起来越顺，越难判断它是证据还是修辞。</p>
+    </div>
+    <div class="card">
+      <h5><span class="dot" style="background:var(--no)"></span>③ 归因纠缠 Entangled attribution</h5>
+      <p>同一段开放式推理被三个维度复用时，一处「手部结构畸变」会被同时读成语义不符、物理违背和画质缺陷——<b>一处毛病扣三次分</b>，
+      而三个维度本该是互补而非重叠的。</p>
+    </div>
+  </div>
+
+  <div class="call mine">
+    <h5>我的读法</h5>
+    <p>这三条不是并列的三个 bug，而是<b>同一个缺失的三个投影</b>：没有把「要查什么」从「查得怎么样」里分离出来。
+    一旦分离，① 由清单的<b>覆盖度</b>负责，② 由「分数先于理由」的<b>次序</b>负责，③ 由三条清单的<b>不同出处</b>负责。
+    FIRM-Video 的三个设计点，正好一一对应。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 02 ARCH -->
+<section class="sec" id="s-arch">
+  <div class="eyebrow"><span class="n">02</span><span class="t">Architecture</span><span class="line"></span></div>
+  <h2>三条清单，三个出处</h2>
+  <p class="lead">整套框架只有一个统一动作：<span class="mono">构造清单 → 逐条核验 → 只聚合已核验的判定</span>。
+  三个维度共用这个动作，<strong>但清单从哪来完全不同</strong>——这正是归因能解耦的原因。
+  <span class="rIF">IF 的清单是提示词拆出来的</span>（自上而下，提示词就是合同）；
+  <span class="rWC">WC 的清单是视频 ground 出来的</span>（自下而上，因为违背常常发生在提示词没提的东西上）；
+  <span class="rPQ">PQ 的清单是一张固定的缺陷分类表</span>（与样本无关，人工整理）。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 3</span><span class="ti">FIRM-Video 数据构造全景（点击切换车道）</span></div>
+    <div class="figbody">
+      <div class="ctl" role="group" aria-label="选择维度车道">
+        <button class="pill on" type="button" data-lane="all">全部</button>
+        <button class="pill" type="button" data-lane="if">指令遵循 IF</button>
+        <button class="pill" type="button" data-lane="wc">世界一致性 WC</button>
+        <button class="pill" type="button" data-lane="pq">画质 PQ</button>
+      </div>
+      <div class="svgscroll">
+      <svg viewBox="0 0 852 548" id="archSvg" role="img" aria-label="FIRM-Video 数据构造全景：三条车道分别以提示词、视频 grounding、固定缺陷表为清单出处，经核验与聚合得到分数，再改写为分析，汇成 FIRM-Video-90K 并训练 FIRM-Video-8B">
+        <text x="14" y="88" class="lbl" transform="rotate(-90 14 88)" text-anchor="middle">清单出处</text>
+        <text x="14" y="154" class="lbl" transform="rotate(-90 14 154)" text-anchor="middle">构造清单</text>
+        <text x="14" y="220" class="lbl" transform="rotate(-90 14 220)" text-anchor="middle">核验</text>
+        <text x="14" y="286" class="lbl" transform="rotate(-90 14 286)" text-anchor="middle">聚合</text>
+
+        <g class="lane" data-lane="if">
+          <rect x="26" y="16" width="248" height="32" rx="8" class="f-if"/>
+          <text x="150" y="37" text-anchor="middle" class="big" style="fill:#fff">指令遵循 · IF</text>
+
+          <rect x="26" y="62" width="248" height="52" rx="8" class="f-ifs s-if" stroke-width="1.4"/>
+          <text x="150" y="84" text-anchor="middle" font-size="13">提示词本身</text>
+          <text x="150" y="102" text-anchor="middle" class="tiny">自上而下：提示词即验收合同</text>
+          <line x1="150" y1="114" x2="150" y2="126" class="s-if" stroke-width="1.4" marker-end="url(#a-if)"/>
+
+          <rect x="26" y="128" width="248" height="52" rx="8" class="f-surf2 s-rule2" stroke-width="1.3"/>
+          <text x="150" y="150" text-anchor="middle" font-size="13">Qwen3-32B 拆成原子是非题</text>
+          <text x="150" y="168" text-anchor="middle" class="tiny">每条配重要度 m ∈ {1…5}，剔除音频要求</text>
+          <line x1="150" y1="180" x2="150" y2="192" class="s-if" stroke-width="1.4" marker-end="url(#a-if)"/>
+
+          <rect x="26" y="194" width="248" height="52" rx="8" class="f-surf2 s-rule2" stroke-width="1.3"/>
+          <text x="150" y="216" text-anchor="middle" font-size="13">闭源评测器逐条判 yes / no</text>
+          <text x="150" y="234" text-anchor="middle" class="tiny">附一句画面证据 · 无法确认 = 未满足</text>
+          <line x1="150" y1="246" x2="150" y2="258" class="s-if" stroke-width="1.4" marker-end="url(#a-if)"/>
+
+          <rect x="26" y="260" width="248" height="52" rx="8" class="f-surf3 s-rule2" stroke-width="1.4"/>
+          <text x="150" y="285" text-anchor="middle" font-size="14" class="f-ink">s&#8202;=&#8202;&#931;&#8202;w&#7522;&#8202;z&#7522;　→　1–5 分</text>
+          <text x="150" y="302" text-anchor="middle" class="tiny">重要度归一化后的满足比例</text>
+        </g>
+
+        <g class="lane" data-lane="wc">
+          <rect x="302" y="16" width="248" height="32" rx="8" class="f-wc"/>
+          <text x="426" y="37" text-anchor="middle" class="big" style="fill:#fff">世界一致性 · WC</text>
+
+          <rect x="302" y="62" width="248" height="52" rx="8" class="f-wcs s-wc" stroke-width="1.4"/>
+          <text x="426" y="84" text-anchor="middle" font-size="13">Qwen3-VL-235B grounding 视频</text>
+          <text x="426" y="102" text-anchor="middle" class="tiny">看不到提示词 · 产出实体与动作目标</text>
+          <line x1="426" y1="114" x2="426" y2="126" class="s-wc" stroke-width="1.4" marker-end="url(#a-wc)"/>
+
+          <rect x="302" y="128" width="248" height="52" rx="8" class="f-surf2 s-rule2" stroke-width="1.3"/>
+          <text x="426" y="150" text-anchor="middle" font-size="13">Qwen3-32B 按目标出题</text>
+          <text x="426" y="168" text-anchor="middle" class="tiny">提示词仅在此进场，用来判定「有意为之」</text>
+          <line x1="426" y1="180" x2="426" y2="192" class="s-wc" stroke-width="1.4" marker-end="url(#a-wc)"/>
+
+          <rect x="302" y="194" width="248" height="52" rx="8" class="f-surf2 s-rule2" stroke-width="1.3"/>
+          <text x="426" y="216" text-anchor="middle" font-size="13">闭源评测器盲验是否违背</text>
+          <text x="426" y="234" text-anchor="middle" class="tiny">看不到提示词，也看不到重要度</text>
+          <line x1="426" y1="246" x2="426" y2="258" class="s-wc" stroke-width="1.4" marker-end="url(#a-wc)"/>
+
+          <rect x="302" y="260" width="248" height="52" rx="8" class="f-surf3 s-rule2" stroke-width="1.4"/>
+          <text x="426" y="285" text-anchor="middle" font-size="14" class="f-ink">&#931;&#8202;&#945;(m&#8348;)&#8202;c&#8348;&#8202;/&#8202;&#931;&#8202;&#945;(m&#8348;)　→　1–5 分</text>
+          <text x="426" y="302" text-anchor="middle" class="tiny">按目标算干净率，再按重要度加权</text>
+        </g>
+
+        <g class="lane" data-lane="pq">
+          <rect x="578" y="16" width="248" height="32" rx="8" class="f-pq"/>
+          <text x="702" y="37" text-anchor="middle" class="big" style="fill:#fff">画质 · PQ</text>
+
+          <rect x="578" y="62" width="248" height="52" rx="8" class="f-pqs s-pq" stroke-width="1.4"/>
+          <text x="702" y="84" text-anchor="middle" font-size="13">人工整理的通用缺陷分类表</text>
+          <text x="702" y="102" text-anchor="middle" class="tiny">与样本无关，所有视频共用一张</text>
+          <line x1="702" y1="114" x2="702" y2="192" class="s-pq dash" stroke-width="1.4" marker-end="url(#a-pq)"/>
+
+          <rect x="578" y="128" width="248" height="52" rx="8" class="nofill s-rule dash" stroke-width="1.2"/>
+          <text x="702" y="159" text-anchor="middle" class="tiny">无需构造：清单是现成的</text>
+
+          <rect x="578" y="194" width="248" height="52" rx="8" class="f-surf2 s-rule2" stroke-width="1.3"/>
+          <text x="702" y="216" text-anchor="middle" font-size="13">闭源评测器一次给出理由 + 分数</text>
+          <text x="702" y="234" text-anchor="middle" class="tiny">提示词只用来区分「风格」与「缺陷」</text>
+          <line x1="702" y1="246" x2="702" y2="258" class="s-pq" stroke-width="1.4" marker-end="url(#a-pq)"/>
+
+          <rect x="578" y="260" width="248" height="52" rx="8" class="f-surf3 s-rule2" stroke-width="1.4"/>
+          <text x="702" y="285" text-anchor="middle" font-size="14" class="f-ink">直接就是 1–5 分</text>
+          <text x="702" y="302" text-anchor="middle" class="tiny">没有显式聚合公式</text>
+        </g>
+
+        <path d="M150 312 L150 336 L288 336 L288 352" class="nofill s-if" stroke-width="1.4" marker-end="url(#a-if)"/>
+        <path d="M426 312 L426 336 L336 336 L336 352" class="nofill s-wc" stroke-width="1.4" marker-end="url(#a-wc)"/>
+        <rect x="152" y="354" width="320" height="44" rx="9" class="f-oks s-ok" stroke-width="1.4"/>
+        <text x="312" y="374" text-anchor="middle" font-size="13">Qwen3-32B：把已核验的条目改写成自然语言分析</text>
+        <text x="312" y="391" text-anchor="middle" class="tiny">分数此时已经定好，改写只负责「念出来」</text>
+
+        <path d="M702 312 L702 420" class="nofill s-pq dash" stroke-width="1.4" marker-end="url(#a-pq)"/>
+        <text x="712" y="368" class="tiny">评测器已给出</text>
+        <text x="712" y="384" class="tiny">清单式理由，原样使用</text>
+
+        <path d="M312 398 L312 420" class="nofill s-ok" stroke-width="1.4" marker-end="url(#a-ok)"/>
+        <rect x="26" y="422" width="800" height="46" rx="9" class="f-surf2 s-rule2" stroke-width="1.4"/>
+        <text x="426" y="443" text-anchor="middle" class="big">FIRM-Video-90K</text>
+        <text x="426" y="461" text-anchor="middle" class="tiny">29,348 条视频 × 3 维度 = 88,044 条训练样本，目标是 JSON {"reasoning": …, "score": 1–5}</text>
+        <line x1="426" y1="468" x2="426" y2="486" class="s-ink3" stroke-width="1.4" marker-end="url(#a-i3)"/>
+
+        <rect x="26" y="488" width="800" height="46" rx="9" class="f-ifs s-if" stroke-width="1.5"/>
+        <text x="426" y="509" text-anchor="middle" class="big">FIRM-Video-8B　全参微调 Qwen3-VL-8B / InternVL3-8B</text>
+        <text x="426" y="527" text-anchor="middle" class="tiny">推理时只做一次前向：不再构造清单，也不再调用规划器、grounding 模型与核验器</text>
+      </svg>
+      </div>
+      <div class="ro" id="laneInfo" style="margin-top:16px"></div>
+    </div>
+    <p class="figcap">同一个「构造 → 核验 → 聚合」骨架，三次实例化。注意 PQ 这一列有两个格子是空的——它的清单不需要构造，聚合也没有公式。
+    这个不对称在后面的结果里会还回来（§05、§10）。</p>
+  </figure>
+
+  <h3>谁能看到什么：这套流水线里的信息屏蔽</h3>
+  <p class="lead">这篇论文最容易被读漏的设计，是<strong>每一步刻意不给某些信息</strong>。
+  grounding 不给提示词，是为了让「查什么」由画面决定而不是被提示词带偏；WC 的核验器<strong>既不给提示词，也不给重要度</strong>，是为了让「查得怎么样」不被「这条有多重要」污染，权重只在最后的聚合公式里出现一次。
+  （IF 的核验器能看到什么，论文只列了「提示词 + 按时间排序的帧 + 清单」，<strong>没有说明重要度是否随清单一起给进去</strong>。）</p>
+
+  <div class="tblwrap">
+  <table>
+    <caption>表 A：各阶段的可见信息（据论文 §3.2 描述整理）。这不是论文里的原表，是我按正文归纳的。</caption>
+    <thead><tr><th>阶段</th><th>执行模型</th><th>看到视频</th><th>看到提示词</th><th>看到重要度</th><th>输出</th></tr></thead>
+    <tbody>
+      <tr class="grp"><td colspan="6">指令遵循 IF</td></tr>
+      <tr><td>① 提示词分解</td><td>Qwen3-32B</td><td class="f-noi">✕</td><td>✓</td><td>产出方</td><td>原子是非题 + m<span class="sub">i</span></td></tr>
+      <tr><td>② 清单核验</td><td>闭源多模态评测器</td><td>✓</td><td>✓</td><td class="op">论文未说明</td><td>z<span class="sub">i</span> ∈ {0,1} + 画面证据</td></tr>
+      <tr class="grp"><td colspan="6">世界一致性 WC</td></tr>
+      <tr><td>① 视频 grounding</td><td>Qwen3-VL-235B-A22B</td><td>✓</td><td class="f-noi">✕</td><td>产出方</td><td>场景摘要 / 实体 / 动作 + m<span class="sub">t</span></td></tr>
+      <tr><td>② 清单构造</td><td>Qwen3-32B</td><td class="f-noi">✕</td><td>✓（仅作解释）</td><td>✓（继承）</td><td>每个目标一组核验问题</td></tr>
+      <tr><td>③ 清单核验</td><td>闭源多模态评测器</td><td>✓</td><td class="f-noi">✕</td><td class="f-noi">✕</td><td>b<span class="sub">j</span> ∈ {0,1}（1 = 检出违背）</td></tr>
+      <tr class="grp"><td colspan="6">画质 PQ</td></tr>
+      <tr><td>① 评测</td><td>闭源多模态评测器</td><td>✓</td><td>✓（仅作解释）</td><td>—</td><td>清单式理由 + 1–5 分</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="call">
+    <h5>论文的原话值得抄一遍</h5>
+    <p>「<b>grounding 阶段决定评什么，提示词决定怎么解释它。</b>」（the grounding stage determines what to evaluate, whereas the prompt specifies how it should be interpreted）
+    一句话把 WC 里提示词的角色限定死了：它不是评分依据，只是免责说明——如果提示词本来就要求一只会飞的鲸鱼，那么鲸鱼在天上就不算违背物理。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 03 IF -->
+<section class="sec" id="s-if">
+  <div class="eyebrow"><span class="n">03</span><span class="t">Instruction Following</span><span class="line"></span></div>
+  <h2>IF：把提示词拆成一份加权验收单</h2>
+  <p class="lead">IF 评的是「视频有多准确、多完整地照做了提示词」——主体、属性、动作、场景、视觉风格、镜头视角，以及<strong>事件的先后顺序</strong>。
+  两个阶段：先把提示词拆开，再对着画面逐条查。</p>
+
+  <div class="prose">
+    <h4>阶段一 · 提示词分解</h4>
+    <p>文本规划器（<b>Qwen3-32B</b>）只看提示词，把它拆成一组<b>原子的是非题</b>，覆盖所有被要求的视觉元素，
+    并剔除与音频相关的要求（模型只看帧，判不了声音）。每条对应<b>一个可观察的要求</b>，并配一个重要度
+    <span class="mono">m<span class="sub">i</span> ∈ {1,…,5}</span>。</p>
+    <p>一个容易被略过但很重要的细节：<b>同一个提示词生成的所有视频共用同一份清单。</b>
+    数据集里每个提示词平均对应约 10 个不同模型生成的视频，共用清单既省掉 9 次规划器调用，
+    也让这 10 个视频的打分建立在<b>完全相同的验收标准</b>上——横向比较才有意义。</p>
+
+    <h4>阶段二 · 清单核验</h4>
+    <p>闭源多模态评测器拿到「提示词 + 按时间排序的视频帧 + 清单」，对每一条给出二值答案和<b>一句画面证据</b>。
+    规则里有一条保守的默认值：<b>无法从视频中确认的要求，一律记为未满足。</b>
+    这个默认值是有代价的——只采样 8 帧的情况下，「一闪而过但确实发生了」的要求会被判负（见 §10）。</p>
+  </div>
+
+  <div class="eqwrap">
+    <div class="eqrow">
+      <div class="eqn">s<span class="sub">IF</span> = <span style="font-size:1.25em">Σ</span><span class="sub">i=1..N</span> w<span class="sub">i</span> z<span class="sub">i</span> ,　　w<span class="sub">i</span> = m<span class="sub">i</span> / <span style="font-size:1.15em">Σ</span><span class="sub">j</span> m<span class="sub">j</span>　　　s<span class="sub">IF</span> ∈ [0, 1]</div>
+      <div class="eqno">Eq. 1 / A.2</div>
+    </div>
+    <p class="eqcap"><b>z<span class="sub">i</span> ∈ {0,1}</b> 是第 i 条的核验结果。整个式子就是「按重要度归一化后的满足比例」。
+    附录 A.1 还写了序列化细节：权重四舍五入到两位小数；被舍成 0 的正权重强制设为 0.01；余量补给最大的那个权重，保证 Σw<span class="sub">i</span> = 1。分数保留四位小数。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 4</span><span class="ti">IF 打分器：改重要度、改核验结果，看分数怎么走</span></div>
+    <div class="figbody">
+      <p class="sml" style="margin-top:0">下面这个提示词和清单是<b>我为讲解构造的示意例子</b>（论文正文没有公开逐条清单样例），
+      但权重计算、四舍五入规则和评分映射全部按论文的公式实现。点重要度数字可以循环调 1–5，点右侧按钮可以在
+      <span class="rOK">满足</span> / <span class="rNO">未满足</span> / <span style="color:var(--ink3)">无法确认</span> 之间切换。</p>
+
+      <div class="code" style="white-space:pre-wrap">A golden retriever wearing a red scarf runs along a snow-covered beach at sunset,
+then stops and shakes the snow off its fur, while the camera slowly pans right.</div>
+
+      <div class="ctl" role="group" aria-label="预设">
+        <button class="pill" type="button" data-ifp="all">全部满足</button>
+        <button class="pill on" type="button" data-ifp="typ">典型失败</button>
+        <button class="pill" type="button" data-ifp="one">只差镜头运动</button>
+        <button class="pill" type="button" data-ifp="bad">主体就错了</button>
+        <span class="hint">重要度 m 决定权重 w，核验结果 z 决定这一条算不算数</span>
+      </div>
+
+      <div class="sheet" id="ifSheet">
+        <div class="sheet-hd"><span>m</span><span>原子要求（yes / no 可判定）</span><span>权重 w</span><span>核验 z</span></div>
+        <div class="row" data-i="0" data-m="5" data-z="1">
+          <button class="imp" type="button" data-m="5">5</button>
+          <span>画面中出现一只金毛寻回犬</span>
+          <span><span class="wbar"><i></i></span><span class="wnum"></span></span>
+          <button class="vbtn" type="button" data-v="1">满足</button>
+        </div>
+        <div class="row" data-i="1" data-m="4" data-z="1">
+          <button class="imp" type="button" data-m="4">4</button>
+          <span>这只狗戴着一条红色围巾</span>
+          <span><span class="wbar"><i></i></span><span class="wnum"></span></span>
+          <button class="vbtn" type="button" data-v="1">满足</button>
+        </div>
+        <div class="row" data-i="2" data-m="4" data-z="1">
+          <button class="imp" type="button" data-m="4">4</button>
+          <span>场景是被雪覆盖的海滩</span>
+          <span><span class="wbar"><i></i></span><span class="wnum"></span></span>
+          <button class="vbtn" type="button" data-v="1">满足</button>
+        </div>
+        <div class="row" data-i="3" data-m="3" data-z="1">
+          <button class="imp" type="button" data-m="3">3</button>
+          <span>光照呈现日落时分的氛围</span>
+          <span><span class="wbar"><i></i></span><span class="wnum"></span></span>
+          <button class="vbtn" type="button" data-v="1">满足</button>
+        </div>
+        <div class="row" data-i="4" data-m="5" data-z="1">
+          <button class="imp" type="button" data-m="5">5</button>
+          <span>狗沿着海滩奔跑</span>
+          <span><span class="wbar"><i></i></span><span class="wnum"></span></span>
+          <button class="vbtn" type="button" data-v="1">满足</button>
+        </div>
+        <div class="row" data-i="5" data-m="4" data-z="0">
+          <button class="imp" type="button" data-m="4">4</button>
+          <span>奔跑之后停下，并抖掉毛上的雪（含先后顺序）</span>
+          <span><span class="wbar"><i></i></span><span class="wnum"></span></span>
+          <button class="vbtn" type="button" data-v="0">未满足</button>
+        </div>
+        <div class="row" data-i="6" data-m="3" data-z="0">
+          <button class="imp" type="button" data-m="3">3</button>
+          <span>镜头缓慢向右平移</span>
+          <span><span class="wbar"><i></i></span><span class="wnum"></span></span>
+          <button class="vbtn" type="button" data-v="0">未满足</button>
+        </div>
+      </div>
+
+      <div class="readout">
+        <div class="ro"><div class="k math">Σ m<sub>i</sub></div><div class="v" id="ifSumM">28</div><div class="s">重要度总和，用来归一化</div></div>
+        <div class="ro"><div class="k">已满足权重</div><div class="v" id="ifSat">0.75</div><div class="s">Σ w<span class="sub">i</span> z<span class="sub">i</span></div></div>
+        <div class="ro hero-ro"><div class="k math">s<span class="sub">IF</span></div><div class="v f-ifi" id="ifScore" style="color:var(--if-ink)">0.7500</div><div class="s">保留四位小数</div></div>
+        <div class="ro hero-ro"><div class="k">五分制评分</div><div class="v" id="ifRate">3</div><div class="s" id="ifRateWhy">0.70 ≤ s &lt; 0.85</div></div>
+      </div>
+
+      <div class="svgscroll" style="margin-top:18px">
+        <svg viewBox="0 0 700 104" id="ifRuler" role="img" aria-label="IF 评分映射尺：0 到 0.35 记 1 分，0.35 到 0.70 记 2 分，0.70 到 0.85 记 3 分，0.85 到 1.00 记 4 分，只有恰好等于 1.00 才记 5 分">
+          <text x="40" y="16" class="lbl mx">R_IF(s)　评分映射</text>
+          <rect x="40" y="30" width="217" height="26" class="f-surf2 s-rule" stroke-width="1"/>
+          <rect x="257" y="30" width="217" height="26" class="f-surf2 s-rule" stroke-width="1"/>
+          <rect x="474" y="30" width="93" height="26" class="f-surf3 s-rule" stroke-width="1"/>
+          <rect x="567" y="30" width="90" height="26" class="f-ifs s-if" stroke-width="1"/>
+          <rect x="657" y="30" width="4" height="26" class="f-if"/>
+          <text x="148" y="47" text-anchor="middle" class="num">1</text>
+          <text x="365" y="47" text-anchor="middle" class="num">2</text>
+          <text x="520" y="47" text-anchor="middle" class="num">3</text>
+          <text x="612" y="47" text-anchor="middle" class="num">4</text>
+          <text x="659" y="24" text-anchor="middle" class="num f-ifi">5</text>
+          <text x="40" y="72" class="tiny">0</text>
+          <text x="257" y="72" text-anchor="middle" class="tiny">0.35</text>
+          <text x="474" y="72" text-anchor="middle" class="tiny">0.70</text>
+          <text x="567" y="72" text-anchor="middle" class="tiny">0.85</text>
+          <text x="661" y="72" text-anchor="end" class="tiny">1.00</text>
+          <text x="659" y="92" text-anchor="end" class="tiny f-ifi">5 分是一条刀锋：所有正权重要求必须全部满足</text>
+          <g id="ifMark">
+            <line x1="505" y1="24" x2="505" y2="60" class="s-ink2" stroke-width="1.6"/>
+            <polygon points="505,24 500,14 510,14" class="f-ink"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+    <p class="figcap">试试把第 7 条（镜头平移，w = 0.11）也点成「满足」：s 从 0.75 升到 0.86，评分进 4 分区间；换成放过第 6 条（w = 0.14，即「只差镜头运动」那个预设）则是 0.89。但只要还剩任何一条没过，评分就永远上不了 5。
+    4 分那一档只有 0.15 宽，意味着「未满足项的权重之和必须 ≤ 0.15」——漏掉任何一条重要度 4–5 的要求都会直接掉进 3 分。<b>我猜这能解释 90K 里一个反常现象：IF 的 4 分（13.0%）反而比 5 分（20.4%）还少。</b>这是我的推测，论文没有讨论映射阈值与分布的关系。</p>
+  </figure>
+
+  <div class="call mine">
+    <h5>我的读法：共用清单是把双刃剑</h5>
+    <p>同一提示词的约 10 个视频共用一份清单，好处是横向可比、成本摊薄；代价是<b>清单本身的偏差会被系统性地放大 10 倍</b>。
+    如果 Qwen3-32B 把某个要求拆错了（比如把「camera slowly pans right」误拆成两条），这个错误会同时污染这一组的全部样本，
+    而且因为它们分数一起偏，训练时看起来还很「自洽」。论文没有报告清单质量的人工抽检结果，这是我最想看到的那个缺失数字。</p>
+  </div>
+
+  <div class="call">
+    <h5>消融：IF 上重要度加权几乎不起作用</h5>
+    <p>附录表 4 把「均匀平均」和「重要度加权」放在一起比（清单、核验结果、映射全部固定）：IF 上 MAE 两者都是 <b>0.68</b>，SRCC 都是 0.69，
+    只有 STD 从 0.70 降到 0.68、宽松准确率从 0.88 升到 0.90，严格准确率反而从 0.44 掉到 0.43。
+    也就是说，<b>IF 的收益几乎全部来自「把提示词拆开逐条查」这件事本身，而不是来自权重</b>。权重真正发挥作用的地方在 WC。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 04 WC -->
+<section class="sec" id="s-wc">
+  <div class="eyebrow"><span class="n">04</span><span class="t">World Coherence</span><span class="line"></span></div>
+  <h2>WC：清单必须从视频里长出来</h2>
+  <p class="lead">WC 评的是「生成内容是否符合日常知识、常识与基本物理规律」——时序不一致、不自然或断裂的运动、物理上不可能的交互、
+  物体与人物的结构畸变或形变。它<strong>不能</strong>沿用 IF 的做法，原因很直接：
+  <strong>违背常常发生在提示词根本没提的东西上。</strong></p>
+
+  <div class="prose">
+    <p>论文还给了第二个理由：即使改成「直接对着视频出题」，也会<b>漏掉边缘实体和短暂动作</b>——
+    模型会自然地围绕画面主体出题，而穿模的路人甲、只出现半秒的手部动作正是违背高发区。
+    所以 WC 用了三个阶段，把「先把画面里有什么清点出来」单独拎成一步。</p>
+
+    <h4>阶段一 · 视频 grounding（不给提示词）</h4>
+    <p>多模态 grounding 模型（<b>Qwen3-VL-235B-A22B-Instruct</b>）在<b>看不到提示词</b>的条件下分析视频，产出三样东西：
+    结构化的场景摘要、<b>实体清单</b>、<b>动作与交互清单</b>。每个 grounded 目标 t 配一个重要度
+    <span class="mono">m<span class="sub">t</span> ∈ {1,…,5}</span>。论文对这一步的解释是：显式 grounding 既提高了目标覆盖率，又<b>减少了提示词带来的偏置</b>。</p>
+
+    <h4>阶段二 · 清单构造（提示词只做解释）</h4>
+    <p>文本规划器（<b>Qwen3-32B</b>）把每个目标转成一组核验问题：<b>实体</b>查时序一致性与结构合理性，<b>动作</b>查运动质量与物理合理性。
+    每个问题继承所属目标的重要度。论文提到有一道自动检查：<b>目标覆盖不全会被检出并重新生成</b>。
+    提示词只在这一步进场，用途单一——把「有意的奇幻设定、风格化、非常规运动」和真正的违背区分开。</p>
+
+    <h4>阶段三 · 盲验（既不给提示词，也不给重要度）</h4>
+    <p>闭源多模态评测器只拿到视频和问题。注意<b>极性和 IF 是反的</b>：这里回答「yes」表示<b>检出了违背</b>，「no」表示没看到违背。</p>
+  </div>
+
+  <div class="eqwrap">
+    <div class="eqrow">
+      <div class="eqn">c<span class="sub">t</span> = 1 − (1/|Q<span class="sub">t</span>|) <span style="font-size:1.15em">Σ</span><span class="sub">j∈Q<span class="sub">t</span></span> b<span class="sub">j</span>　　　　s<span class="sub">WC</span> = <span style="font-size:1.15em">Σ</span><span class="sub">t</span> α(m<span class="sub">t</span>) c<span class="sub">t</span> &nbsp;/&nbsp; <span style="font-size:1.15em">Σ</span><span class="sub">t</span> α(m<span class="sub">t</span>)</div>
+      <div class="eqno">Eq. 2 / A.3–A.5</div>
+    </div>
+    <p class="eqcap"><b>c<span class="sub">t</span></b> 是目标 t 的「干净率」：这个目标下的问题里，有多少比例没查出违背。
+    分数是所有目标干净率的<b>重要度加权平均</b>。这个式子做了两件事：
+    ① 目标只被部分影响时给<b>部分分</b>；② 聚合发生在<b>目标层面</b>而不是问题层面，所以内容丰富的视频不会因为「问题多」而被额外惩罚。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 5</span><span class="ti">重要度权重 α(m)：不是线性的</span></div>
+    <div class="figbody svgscroll">
+      <svg viewBox="0 0 640 236" role="img" aria-label="α(m) 权重条形图：m 从 1 到 5 对应 1.0、1.5、2.5、3.5、5.0，相邻档差分别是 0.5、1.0、1.0、1.5，最高一档被单独拔高">
+        <line x1="64" y1="24" x2="64" y2="176" class="s-rule2" stroke-width="1.2"/>
+        <line x1="64" y1="176" x2="600" y2="176" class="s-rule2" stroke-width="1.2"/>
+        <text x="64" y="16" class="lbl mx">α(m)</text>
+        <line x1="60" y1="176" x2="600" y2="176" class="s-rule dash2" stroke-width="1"/>
+        <line x1="60" y1="146" x2="600" y2="146" class="s-rule dash2" stroke-width="1"/>
+        <text x="54" y="150" text-anchor="end" class="num">1.0</text>
+        <line x1="60" y1="116" x2="600" y2="116" class="s-rule dash2" stroke-width="1"/>
+        <text x="54" y="120" text-anchor="end" class="num">2.0</text>
+        <line x1="60" y1="86" x2="600" y2="86" class="s-rule dash2" stroke-width="1"/>
+        <text x="54" y="90" text-anchor="end" class="num">3.0</text>
+        <line x1="60" y1="56" x2="600" y2="56" class="s-rule dash2" stroke-width="1"/>
+        <text x="54" y="60" text-anchor="end" class="num">4.0</text>
+        <line x1="60" y1="26" x2="600" y2="26" class="s-rule dash2" stroke-width="1"/>
+        <text x="54" y="30" text-anchor="end" class="num">5.0</text>
+
+        <rect x="96" y="146" width="56" height="30" rx="3" class="f-wcs s-wc" stroke-width="1.3"/>
+        <text x="124" y="194" text-anchor="middle" class="num">m=1</text>
+        <text x="124" y="140" text-anchor="middle" class="num f-wci">1.0</text>
+        <rect x="196" y="131" width="56" height="45" rx="3" class="f-wcs s-wc" stroke-width="1.3"/>
+        <text x="224" y="194" text-anchor="middle" class="num">m=2</text>
+        <text x="224" y="125" text-anchor="middle" class="num f-wci">1.5</text>
+        <rect x="296" y="101" width="56" height="75" rx="3" class="f-wcs s-wc" stroke-width="1.3"/>
+        <text x="324" y="194" text-anchor="middle" class="num">m=3</text>
+        <text x="324" y="95" text-anchor="middle" class="num f-wci">2.5</text>
+        <rect x="396" y="71" width="56" height="105" rx="3" class="f-wcs s-wc" stroke-width="1.3"/>
+        <text x="424" y="194" text-anchor="middle" class="num">m=4</text>
+        <text x="424" y="65" text-anchor="middle" class="num f-wci">3.5</text>
+        <rect x="496" y="26" width="56" height="150" rx="3" class="f-wc"/>
+        <text x="524" y="194" text-anchor="middle" class="num">m=5</text>
+        <text x="524" y="20" text-anchor="middle" class="num f-wci">5.0</text>
+
+        <polyline points="124,146 224,116 324,86 424,56 524,26" class="nofill s-ink3 dash" stroke-width="1.4"/>
+        <text x="560" y="30" class="tiny">线性 α=m</text>
+
+        <text x="174" y="216" text-anchor="middle" class="tiny">+0.5</text>
+        <text x="274" y="216" text-anchor="middle" class="tiny">+1.0</text>
+        <text x="374" y="216" text-anchor="middle" class="tiny">+1.0</text>
+        <text x="474" y="216" text-anchor="middle" class="tiny f-wci">+1.5</text>
+        <text x="64" y="216" class="tiny">相邻档差：</text>
+      </svg>
+    </div>
+    <p class="figcap">α 的端点比值和线性权重一样是 5:1，但中间三档整体<b>压低了</b>（虚线是 α=m）。
+    相邻档差 0.5 / 1.0 / 1.0 / 1.5 说明了它真正的意图：把 m=1 和 m=2 压得很近（边角目标之间不必细分），
+    把 m=5 单独拔高一档（关键目标说了算）。<b>这是论文给的预设值，没有做过敏感性分析。</b></p>
+  </figure>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 6</span><span class="ti">WC 打分器：目标级干净率，以及三种聚合方式的分歧</span></div>
+    <div class="figbody">
+      <p class="sml" style="margin-top:0">目标、重要度和问题同样是<b>我构造的示意例子</b>，公式与 α 取值按论文实现。
+      点问题右侧的按钮切换「<span class="rNO">检出违背</span> / <span class="rOK">未见违背</span>」，点目标行上的数字循环调重要度。
+      切到<b>「热闹街景」</b>那个预设，可以看到论文那句「避免对内容丰富的视频过度惩罚」到底在说什么。</p>
+
+      <div class="ctl" role="group" aria-label="场景预设">
+        <button class="pill on" type="button" data-wcp="beach">场景 A · 雪滩金毛（6 个目标）</button>
+        <button class="pill" type="button" data-wcp="street">场景 B · 热闹街景（7 个目标，主体干净）</button>
+      </div>
+
+      <div class="sheet" id="wcSheet"><div class="row"><span class="sml">正在加载交互式清单…</span></div></div>
+
+      <div class="readout">
+        <div class="ro"><div class="k math">目标数 T</div><div class="v" id="wcT">6</div><div class="s">grounding 清点出的实体 + 动作</div></div>
+        <div class="ro"><div class="k math">Σ α(m<span class="sub">t</span>)</div><div class="v" id="wcSumA">16.5</div><div class="s">加权分母</div></div>
+        <div class="ro hero-ro"><div class="k math">s<span class="sub">WC</span>（论文口径）</div><div class="v" id="wcScore" style="color:var(--wc-ink)">0.7172</div><div class="s">重要度加权的目标级干净率</div></div>
+        <div class="ro hero-ro"><div class="k">五分制评分</div><div class="v" id="wcRate">3</div><div class="s" id="wcRateWhy">0.58 ≤ s &lt; 0.78</div></div>
+      </div>
+
+      <h4 style="margin-top:26px">同一批核验结果，三种算法</h4>
+      <div class="svgscroll">
+      <svg viewBox="0 0 700 176" id="aggChart" role="img" aria-label="三种聚合方式在同一批核验结果上的分数对比：论文的重要度加权目标级、消融里的目标级均匀平均、以及问题级直接计数">
+        <line x1="230" y1="18" x2="230" y2="158" class="s-rule2" stroke-width="1.2"/>
+        <line x1="230" y1="158" x2="668" y2="158" class="s-rule2" stroke-width="1.2"/>
+        <line x1="230" y1="18" x2="230" y2="158" class="s-rule dash2" stroke-width="1"/>
+        <line x1="340" y1="18" x2="340" y2="158" class="s-rule dash2" stroke-width="1"/>
+        <line x1="449" y1="18" x2="449" y2="158" class="s-rule dash2" stroke-width="1"/>
+        <line x1="559" y1="18" x2="559" y2="158" class="s-rule dash2" stroke-width="1"/>
+        <line x1="668" y1="18" x2="668" y2="158" class="s-rule dash2" stroke-width="1"/>
+        <text x="230" y="172" text-anchor="middle" class="tiny">0</text>
+        <text x="340" y="172" text-anchor="middle" class="tiny">0.25</text>
+        <text x="449" y="172" text-anchor="middle" class="tiny">0.50</text>
+        <text x="559" y="172" text-anchor="middle" class="tiny">0.75</text>
+        <text x="668" y="172" text-anchor="middle" class="tiny">1.00</text>
+
+        <text x="220" y="38" text-anchor="end" font-size="12.5">重要度加权 · 目标级</text>
+        <text x="220" y="53" text-anchor="end" class="tiny f-wci">论文采用（Eq. 2）</text>
+        <rect x="230" y="26" width="314" height="26" rx="3" class="f-wc" id="agg1"/>
+        <text x="556" y="45" class="num f-wci" id="agg1t">0.7172 → 3 分</text>
+
+        <text x="220" y="88" text-anchor="end" font-size="12.5">均匀平均 · 目标级</text>
+        <text x="220" y="103" text-anchor="end" class="tiny">论文消融基线（Eq. A.7）</text>
+        <rect x="230" y="76" width="341" height="26" rx="3" class="f-surf3 s-rule2" stroke-width="1.2" id="agg2"/>
+        <text x="583" y="95" class="num" id="agg2t">0.7778 → 3 分</text>
+
+        <text x="220" y="138" text-anchor="end" font-size="12.5">直接数问题</text>
+        <text x="220" y="153" text-anchor="end" class="tiny">对照组（论文未做此消融）</text>
+        <rect x="230" y="126" width="337" height="26" rx="3" class="f-surf3 s-rule2 dash" stroke-width="1.2" id="agg3"/>
+        <text x="579" y="145" class="num" id="agg3t">0.7692 → 3 分</text>
+      </svg>
+      </div>
+
+      <div class="svgscroll" style="margin-top:14px">
+        <svg viewBox="0 0 700 96" id="wcRuler" role="img" aria-label="WC 评分映射尺：0 到 0.20 记 1 分，0.20 到 0.58 记 2 分，0.58 到 0.78 记 3 分，0.78 到 0.89 记 4 分，0.89 到 1.00 记 5 分">
+          <text x="40" y="16" class="lbl mx">R_WC(s)　评分映射</text>
+          <rect x="40" y="30" width="124" height="26" class="f-surf2 s-rule" stroke-width="1"/>
+          <rect x="164" y="30" width="236" height="26" class="f-surf2 s-rule" stroke-width="1"/>
+          <rect x="400" y="30" width="124" height="26" class="f-surf3 s-rule" stroke-width="1"/>
+          <rect x="524" y="30" width="68" height="26" class="f-wcs s-wc" stroke-width="1"/>
+          <rect x="592" y="30" width="68" height="26" class="f-wc"/>
+          <text x="102" y="47" text-anchor="middle" class="num">1</text>
+          <text x="282" y="47" text-anchor="middle" class="num">2</text>
+          <text x="462" y="47" text-anchor="middle" class="num">3</text>
+          <text x="558" y="47" text-anchor="middle" class="num">4</text>
+          <text x="626" y="47" text-anchor="middle" class="num" style="fill:#fff">5</text>
+          <text x="40" y="72" class="tiny">0</text>
+          <text x="164" y="72" text-anchor="middle" class="tiny">0.20</text>
+          <text x="400" y="72" text-anchor="middle" class="tiny">0.58</text>
+          <text x="524" y="72" text-anchor="middle" class="tiny">0.78</text>
+          <text x="592" y="72" text-anchor="middle" class="tiny">0.89</text>
+          <text x="661" y="72" text-anchor="end" class="tiny">1.00</text>
+          <text x="661" y="90" text-anchor="end" class="tiny f-wci">和 IF 不同：WC 拿 5 分只要 ≥ 0.89，允许少量误检</text>
+          <g id="wcMark">
+            <line x1="485" y1="24" x2="485" y2="60" class="s-ink2" stroke-width="1.6"/>
+            <polygon points="485,24 480,14 490,14" class="f-ink"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+    <p class="figcap">在场景 B 里三种算法会明确分道扬镳：主角全程干净，六个边角目标各有一处小毛病——
+    直接数问题和目标级均匀平均都把它压到 <b>2 分</b>，只有论文的重要度加权还给到 <b>3 分</b>。
+    这就是「内容越丰富、问题越多、越容易被冤枉」这条陷阱，以及 α 权重存在的理由。</p>
+  </figure>
+
+  <div class="call key">
+    <h5>消融证据：WC 上加权是真的有用</h5>
+    <p>附录表 4：目标级均匀平均 → 重要度加权，MAE <b>0.86 → 0.80</b>，严格准确率 0.37 → 0.41，宽松准确率 0.82 → 0.84，SRCC 0.61 → 0.63。
+    对比 §03 里 IF 上「加权几乎无差别」，可以得到一个干净的结论：
+    <b>当清单来自提示词时，条目本来就都是用户要的，重要度差异小；当清单来自视频时，画面里什么都有，重要度才成为必需品。</b></p>
+  </div>
+
+  <div class="call warn">
+    <h5>一个论文没写的细节</h5>
+    <p>IF 明确规定「无法从视频确认的要求记为未满足」（偏严）。WC 这一侧，如果核验器对某个问题给不出判断，论文<b>没有说</b>默认记成什么。
+    按公式，b<span class="sub">j</span> 只有 0/1 两种取值，缺省成 0 意味着「没看到违背 = 干净」（偏松）。
+    两个维度的默认方向是相反的，而这会系统性地把 IF 的分数往下拉、把 WC 的分数往上抬。
+    结合 90K 里 IF 和 WC 的分布都偏低（2 分分别占 30.3% 和 37.9%），这个不对称值得复现时确认一下。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 05 PQ -->
+<section class="sec" id="s-pq">
+  <div class="eyebrow"><span class="n">05</span><span class="t">Perceptual Quality</span><span class="line"></span></div>
+  <h2>PQ：唯一一条不需要现造清单的链</h2>
+  <p class="lead">PQ 评的是渲染出来的画面本身有多好看、多干净：分辨率、整体与局部清晰度、锐利或模糊、亮度与色彩稳定性、闪烁、压缩伪影，
+  以及其他影响观感的低层失真。这些缺陷<strong>与具体拍了什么无关</strong>，所以清单可以是固定的——论文用了一张<strong>人工整理的通用缺陷分类表</strong>。</p>
+
+  <div class="prose">
+    <p>流程只有一步：闭源多模态评测器按这张表分析视频，<b>直接产出清单式的自然语言理由和一个 1–5 分</b>。
+    提示词提供，但用途被严格限定——只用来认出「这是提示词要求的风格化打光」而不是「渲染错了」，<b>不参与语义对齐判断</b>。</p>
+    <p>论文没有公开这张分类表的完整条目；能确定的是维度定义与附录 D 推理提示词里列举的那几类。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 7</span><span class="ti">三条链上，有多少环节是人能核对的</span></div>
+    <div class="figbody svgscroll">
+      <svg viewBox="0 0 760 244" role="img" aria-label="三条链的可核验环节对比：IF 有清单、核验结果、公式三个可核对产物，WC 有 grounding 目标、清单、核验结果、公式四个，PQ 只有一次调用直接出分，中间没有可核对产物">
+        <text x="16" y="34" class="lbl">IF</text>
+        <rect x="52" y="18" width="96" height="30" rx="6" class="f-surf2 s-rule" stroke-width="1"/>
+        <text x="100" y="38" text-anchor="middle" font-size="11.5">提示词</text>
+        <line x1="148" y1="33" x2="170" y2="33" class="s-if" stroke-width="1.3" marker-end="url(#a-if)"/>
+        <rect x="174" y="18" width="96" height="30" rx="6" class="f-ifs s-if" stroke-width="1.5"/>
+        <text x="222" y="38" text-anchor="middle" font-size="11.5" class="f-ifi">清单</text>
+        <line x1="270" y1="33" x2="292" y2="33" class="s-if" stroke-width="1.3" marker-end="url(#a-if)"/>
+        <rect x="296" y="18" width="112" height="30" rx="6" class="f-ifs s-if" stroke-width="1.5"/>
+        <text x="352" y="38" text-anchor="middle" font-size="11.5" class="f-ifi">逐条判定 + 证据</text>
+        <line x1="408" y1="33" x2="430" y2="33" class="s-if" stroke-width="1.3" marker-end="url(#a-if)"/>
+        <rect x="434" y="18" width="96" height="30" rx="6" class="f-ifs s-if" stroke-width="1.5"/>
+        <text x="482" y="38" text-anchor="middle" font-size="11.5" class="f-ifi">聚合公式</text>
+        <line x1="530" y1="33" x2="552" y2="33" class="s-if" stroke-width="1.3" marker-end="url(#a-if)"/>
+        <rect x="556" y="18" width="72" height="30" rx="6" class="f-surf3 s-rule2" stroke-width="1.2"/>
+        <text x="592" y="38" text-anchor="middle" font-size="11.5">分数</text>
+        <text x="644" y="38" class="tiny f-ifi">3 个可核对产物</text>
+
+        <text x="16" y="102" class="lbl">WC</text>
+        <rect x="52" y="86" width="70" height="30" rx="6" class="f-surf2 s-rule" stroke-width="1"/>
+        <text x="87" y="106" text-anchor="middle" font-size="11.5">视频</text>
+        <line x1="122" y1="101" x2="140" y2="101" class="s-wc" stroke-width="1.3" marker-end="url(#a-wc)"/>
+        <rect x="144" y="86" width="96" height="30" rx="6" class="f-wcs s-wc" stroke-width="1.5"/>
+        <text x="192" y="106" text-anchor="middle" font-size="11.5" class="f-wci">grounding 目标</text>
+        <line x1="240" y1="101" x2="258" y2="101" class="s-wc" stroke-width="1.3" marker-end="url(#a-wc)"/>
+        <rect x="262" y="86" width="76" height="30" rx="6" class="f-wcs s-wc" stroke-width="1.5"/>
+        <text x="300" y="106" text-anchor="middle" font-size="11.5" class="f-wci">清单</text>
+        <line x1="338" y1="101" x2="356" y2="101" class="s-wc" stroke-width="1.3" marker-end="url(#a-wc)"/>
+        <rect x="360" y="86" width="94" height="30" rx="6" class="f-wcs s-wc" stroke-width="1.5"/>
+        <text x="407" y="106" text-anchor="middle" font-size="11.5" class="f-wci">逐条判定</text>
+        <line x1="454" y1="101" x2="472" y2="101" class="s-wc" stroke-width="1.3" marker-end="url(#a-wc)"/>
+        <rect x="476" y="86" width="80" height="30" rx="6" class="f-wcs s-wc" stroke-width="1.5"/>
+        <text x="516" y="106" text-anchor="middle" font-size="11.5" class="f-wci">聚合公式</text>
+        <line x1="556" y1="101" x2="574" y2="101" class="s-wc" stroke-width="1.3" marker-end="url(#a-wc)"/>
+        <rect x="578" y="86" width="56" height="30" rx="6" class="f-surf3 s-rule2" stroke-width="1.2"/>
+        <text x="606" y="106" text-anchor="middle" font-size="11.5">分数</text>
+        <text x="644" y="106" class="tiny f-wci">4 个可核对产物</text>
+
+        <text x="16" y="170" class="lbl">PQ</text>
+        <rect x="52" y="154" width="140" height="30" rx="6" class="f-surf2 s-rule" stroke-width="1"/>
+        <text x="122" y="174" text-anchor="middle" font-size="11.5">视频 + 固定缺陷表</text>
+        <line x1="192" y1="169" x2="216" y2="169" class="s-pq" stroke-width="1.3" marker-end="url(#a-pq)"/>
+        <rect x="220" y="150" width="230" height="38" rx="6" class="nofill s-pq dash" stroke-width="1.5"/>
+        <text x="335" y="167" text-anchor="middle" font-size="11.5" class="f-pqi">评测器单次调用</text>
+        <text x="335" y="182" text-anchor="middle" class="tiny">理由与分数同时生成</text>
+        <line x1="450" y1="169" x2="474" y2="169" class="s-pq" stroke-width="1.3" marker-end="url(#a-pq)"/>
+        <rect x="478" y="154" width="150" height="30" rx="6" class="f-surf3 s-rule2" stroke-width="1.2"/>
+        <text x="553" y="174" text-anchor="middle" font-size="11.5">分数 + 理由</text>
+        <text x="644" y="174" class="tiny f-noi">0 个可核对产物</text>
+
+        <line x1="16" y1="208" x2="744" y2="208" class="s-rule" stroke-width="1"/>
+        <text x="16" y="230" class="tiny">实心框 = 流程会落地成可以被人逐条检查的中间结果；虚线框 = 一次调用内部完成，看不见也查不了</text>
+      </svg>
+    </div>
+    <p class="figcap">这张图是我按论文 §3.2 的三段描述画出来的。它说明了一个论文自己没有点破的事实：
+    <b>「check-before-score」这条原则在 PQ 上其实没有真正兑现</b>——理由和分数仍然是同一次生成的产物，也没有聚合公式把它们分开。</p>
+  </figure>
+
+  <div class="call mine">
+    <h5>我的读法：PQ 是三条里最弱的一环，而数据也这么说</h5>
+    <p>三个证据放在一起看：<b>①</b> 结构上 PQ 没有可核验的中间产物（上图）；
+    <b>②</b> 结果上 PQ 的 MAE 0.82 没能拿到全表最优（Doubao-Seed-2.0-Lite 是 0.80），SRCC 0.51 也低于自己的老师 0.61；
+    <b>③</b> 数据上 90K 里 PQ 的 4 分占了 <b>62.5%</b>，分布严重右偏——论文的解释是「现在的生成模型普遍能产出观感可接受的视频」，
+    这解释成立，但它同时意味着 PQ 这一维的训练信号<b>方差很小</b>，模型只要照着 4 分猜就能拿到不错的 MAE。
+    我倾向于认为，PQ 的做法更像是「为了三个维度对称而补上的一格」，而不是这套方法真正的贡献所在。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 06 DATA -->
+<section class="sec" id="s-data">
+  <div class="eyebrow"><span class="n">06</span><span class="t">Data Synthesis</span><span class="line"></span></div>
+  <h2>从核验结果到 88,044 条监督</h2>
+  <p class="lead">显式的 check-before-score 流水线能给出可靠的监督，但<strong>每条视频都跑一遍多阶段、多模型的链条太贵了</strong>。
+  论文的处理很直接：把这条链<strong>离线跑完</strong>，把结果做成训练数据，然后让一个 8B 模型学会一步到位。</p>
+
+  <div class="prose">
+    <h4>把结构化判定「念」成自然语言</h4>
+    <p>三条链产出的东西互补：IF 给出<b>满足与未满足的提示词要求</b>，WC 给出<b>场景 grounding 与目标级违背</b>，PQ 给出<b>按通用清单的画质评估</b>。
+    IF 和 WC 由 <b>Qwen3-32B</b> 转写成简短的、分维度的自然语言分析：</p>
+    <ul>
+      <li><b>IF 分析</b>：先总结满足了哪些提示词要求，再解释哪些没做到或做错了。</li>
+      <li><b>WC 分析</b>：先给一句场景摘要，再按<b>目标</b>和<b>评估方面</b>组织主要违背。</li>
+      <li><b>PQ 分析</b>：评测器本来就产出了连贯的清单式理由，直接用。</li>
+    </ul>
+    <p>论文在这里写了一句必须划重点的话：<b>「分数在生成理由之前就已确定，确保自然语言分析只是把已核验的判定说出来，而不会改变最终判断。」</b>
+    这就是第 ② 种失效方式（不忠实的理由）的解药——不是让模型「说得更真诚」，而是<b>让它没有机会说谎</b>：分数已经算完了。</p>
+
+    <h4>训练样本长什么样</h4>
+  </div>
+
+  <div class="code"><span class="c">// 输入：原始提示词 + 均匀采样的 8 帧 + 该维度的评测指令</span>
+<span class="c">// 目标：一个结构化 JSON</span>
+{
+  <span class="k">"reasoning"</span>: <span class="v">"&lt;由已核验条目转写而来的分析&gt;"</span>,
+  <span class="k">"score"</span>: <span class="v">&lt;1–5 的整数&gt;</span>
+}</div>
+
+  <div class="prose">
+    <p>只保留 IF / WC / PQ <b>三个维度都评测有效</b>的视频，每条视频每个维度产生一条训练样本：
+    <b>29,348 × 3 = 88,044</b>。数据来源是两个人类偏好数据集——Rapidata 的 Text2Video-Human Preferences（过滤后约 3K）和 VideoFeedback2（约 27K），
+    覆盖 20 多个生成模型（Sora2、Veo3、HunyuanVideo、Pika2.2、Wan2.1 等），每个提示词通常从约 10 个随机选中的模型各采一条视频。
+    提示词中位长度 27 个词，视频中位时长 3.3 秒，多数在 1–6 秒之间。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 8</span><span class="ti">评分分布：训练集偏斜，测试集刻意配平</span></div>
+    <div class="figbody svgscroll">
+      <svg viewBox="0 0 700 348" role="img" aria-label="FIRM-Video-90K 与 FIRM-Video-Bench 的评分分布堆叠条形图：90K 中 PQ 的 4 分占 62.5% 严重右偏，而 Bench 三个维度都被配平，任一档不超过 30.4%">
+        <text x="16" y="18" class="lbl">FIRM-Video-90K　29,348 × 3</text>
+        <text x="16" y="54" class="num">IF</text>
+        <rect x="110" y="34" width="90.5" height="30" class="f-if" opacity=".28"/>
+        <rect x="200.5" y="34" width="157.6" height="30" class="f-if" opacity=".46"/>
+        <rect x="358.1" y="34" width="98.3" height="30" class="f-if" opacity=".64"/>
+        <rect x="456.4" y="34" width="67.6" height="30" class="f-if" opacity=".82"/>
+        <rect x="524" y="34" width="106" height="30" class="f-if"/>
+        <text x="255" y="54" text-anchor="middle" class="num" style="fill:#fff">30.3%</text>
+        <text x="638" y="54" class="num">29,348</text>
+
+        <text x="16" y="94" class="num">WC</text>
+        <rect x="110" y="74" width="84.8" height="30" class="f-wc" opacity=".28"/>
+        <rect x="194.8" y="74" width="197.1" height="30" class="f-wc" opacity=".46"/>
+        <rect x="391.9" y="74" width="99.8" height="30" class="f-wc" opacity=".64"/>
+        <rect x="491.7" y="74" width="44.7" height="30" class="f-wc" opacity=".82"/>
+        <rect x="536.4" y="74" width="93.6" height="30" class="f-wc"/>
+        <text x="293" y="94" text-anchor="middle" class="num" style="fill:#fff">37.9%</text>
+        <text x="638" y="94" class="num">29,348</text>
+
+        <text x="16" y="134" class="num">PQ</text>
+        <rect x="110" y="114" width="15.6" height="30" class="f-pq" opacity=".28"/>
+        <rect x="125.6" y="114" width="66.6" height="30" class="f-pq" opacity=".46"/>
+        <rect x="192.2" y="114" width="75.4" height="30" class="f-pq" opacity=".64"/>
+        <rect x="267.6" y="114" width="325" height="30" class="f-pq" opacity=".82"/>
+        <rect x="592.6" y="114" width="37.4" height="30" class="f-pq"/>
+        <text x="430" y="134" text-anchor="middle" class="num" style="fill:#fff">62.5% 都是 4 分</text>
+        <text x="638" y="134" class="num">29,348</text>
+
+        <line x1="16" y1="160" x2="684" y2="160" class="s-rule" stroke-width="1"/>
+        <text x="16" y="184" class="lbl">FIRM-Video-Bench　250 × 3，任一档 ≤ 30.4%</text>
+
+        <text x="16" y="220" class="num">IF</text>
+        <rect x="110" y="200" width="58.2" height="30" class="f-if" opacity=".28"/>
+        <rect x="168.2" y="200" width="151.8" height="30" class="f-if" opacity=".46"/>
+        <rect x="320" y="200" width="131" height="30" class="f-if" opacity=".64"/>
+        <rect x="451" y="200" width="122.7" height="30" class="f-if" opacity=".82"/>
+        <rect x="573.7" y="200" width="56.3" height="30" class="f-if"/>
+        <text x="638" y="220" class="num">250</text>
+
+        <text x="16" y="260" class="num">WC</text>
+        <rect x="110" y="240" width="99.8" height="30" class="f-wc" opacity=".28"/>
+        <rect x="209.8" y="240" width="158.1" height="30" class="f-wc" opacity=".46"/>
+        <rect x="367.9" y="240" width="99.8" height="30" class="f-wc" opacity=".64"/>
+        <rect x="467.7" y="240" width="91.5" height="30" class="f-wc" opacity=".82"/>
+        <rect x="559.2" y="240" width="70.8" height="30" class="f-wc"/>
+        <text x="638" y="260" class="num">250</text>
+
+        <text x="16" y="300" class="num">PQ</text>
+        <rect x="110" y="280" width="22.9" height="30" class="f-pq" opacity=".28"/>
+        <rect x="132.9" y="280" width="112.3" height="30" class="f-pq" opacity=".46"/>
+        <rect x="245.2" y="280" width="143.5" height="30" class="f-pq" opacity=".64"/>
+        <rect x="388.7" y="280" width="122.7" height="30" class="f-pq" opacity=".82"/>
+        <rect x="511.4" y="280" width="118.6" height="30" class="f-pq"/>
+        <text x="638" y="300" class="num">250</text>
+
+        <text x="16" y="336" class="tiny">从左到右依次是 1 / 2 / 3 / 4 / 5 分，颜色由浅到深；每行总宽度 = 100%</text>
+      </svg>
+    </div>
+    <p class="figcap">数据来自附录表 5。左半边（1–2 分）在 IF 上占 47.7%，在 WC 上超过一半（54.2%），说明这批生成视频里语义和物理问题相当普遍；
+    PQ 那条 62.5% 的深色长条则是另一回事——它意味着 PQ 维度的监督几乎是个常数。
+    Bench 的配平是刻意做的：论文说没有任何一档超过 30.4%，为的是防止模型靠「猜众数」拿分。</p>
+  </figure>
+</section>
+
+<!-- ============================================================ 07 TRAIN -->
+<section class="sec" id="s-train">
+  <div class="eyebrow"><span class="n">07</span><span class="t">Training</span><span class="line"></span></div>
+  <h2>把一条七次调用的链，压进三次前向</h2>
+  <p class="lead">训练本身没有花招：从 <strong>Qwen3-VL-8B</strong> 和 <strong>InternVL3-8B</strong> 出发，在 FIRM-Video-90K 上<strong>全参微调</strong>。
+  真正的设计发生在数据侧，训练只是把它接收下来。</p>
+
+  <div class="tblwrap">
+  <table>
+    <caption>训练配置（论文 §4.1）。注意「8 帧」在训练和推理时是一致的，Bench 的人类标注者也看到同样的 8 帧。</caption>
+    <thead><tr><th>项</th><th style="text-align:left">设置</th></tr></thead>
+    <tbody>
+      <tr><td>初始化</td><td style="text-align:left">Qwen3-VL-8B / InternVL3-8B，全参微调（非 LoRA）</td></tr>
+      <tr><td>视觉输入</td><td style="text-align:left">每条视频均匀采样 <b>8 帧</b>，训练与推理一致</td></tr>
+      <tr><td>批大小</td><td style="text-align:left">2 × 梯度累积 32（论文未说明卡数，按单卡计等效 64）</td></tr>
+      <tr><td>学习率</td><td style="text-align:left">5 × 10<span class="sup">−6</span>，cosine 衰减，warm-up 比例 0.05</td></tr>
+      <tr><td>轮数 / 框架</td><td style="text-align:left">2 epochs · LLaMA-Factory</td></tr>
+      <tr><td>推理</td><td style="text-align:left">每个维度一次前向，输出 {reasoning, score}，不再构造清单</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 9</span><span class="ti">开销账本：昂贵的部分被挪到了离线</span></div>
+    <div class="figbody svgscroll">
+      <svg viewBox="0 0 760 306" role="img" aria-label="开销账本：数据构造阶段每条视频约七次模型调用，包含一次 235B grounding 和三次闭源评测器调用；推理阶段只有三次 8B 前向">
+        <rect x="16" y="14" width="352" height="278" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+        <text x="32" y="38" class="big">离线 · 只跑一次</text>
+        <text x="32" y="56" class="tiny">每条视频约 7 次模型调用</text>
+
+        <rect x="32" y="68" width="320" height="26" rx="5" class="f-surf3 s-rule2 dash" stroke-width="1"/>
+        <text x="44" y="85" font-size="11.5">Qwen3-32B · 提示词分解</text>
+        <text x="340" y="85" text-anchor="end" class="tiny">≈0.1 ×</text>
+        <rect x="32" y="98" width="320" height="26" rx="5" class="f-pqs s-pq" stroke-width="1.2"/>
+        <text x="44" y="115" font-size="11.5" class="f-pqi">闭源评测器 · IF 逐条核验</text>
+        <text x="340" y="115" text-anchor="end" class="tiny">1 ×</text>
+        <rect x="32" y="128" width="320" height="26" rx="5" class="f-wcs s-wc" stroke-width="1.2"/>
+        <text x="44" y="145" font-size="11.5" class="f-wci">Qwen3-VL-235B-A22B · 视频 grounding</text>
+        <text x="340" y="145" text-anchor="end" class="tiny">1 ×</text>
+        <rect x="32" y="158" width="320" height="26" rx="5" class="f-surf3 s-rule2" stroke-width="1"/>
+        <text x="44" y="175" font-size="11.5">Qwen3-32B · WC 出题</text>
+        <text x="340" y="175" text-anchor="end" class="tiny">1 ×</text>
+        <rect x="32" y="188" width="320" height="26" rx="5" class="f-pqs s-pq" stroke-width="1.2"/>
+        <text x="44" y="205" font-size="11.5" class="f-pqi">闭源评测器 · WC 盲验</text>
+        <text x="340" y="205" text-anchor="end" class="tiny">1 ×</text>
+        <rect x="32" y="218" width="320" height="26" rx="5" class="f-pqs s-pq" stroke-width="1.2"/>
+        <text x="44" y="235" font-size="11.5" class="f-pqi">闭源评测器 · PQ 评测</text>
+        <text x="340" y="235" text-anchor="end" class="tiny">1 ×</text>
+        <rect x="32" y="248" width="320" height="26" rx="5" class="f-surf3 s-rule2" stroke-width="1"/>
+        <text x="44" y="265" font-size="11.5">Qwen3-32B · IF / WC 分析转写</text>
+        <text x="340" y="265" text-anchor="end" class="tiny">2 ×</text>
+
+        <path d="M368 152 L392 152" class="nofill s-if" stroke-width="1.8" marker-end="url(#a-if)"/>
+        <text x="380" y="140" text-anchor="middle" class="tiny f-ifi">蒸馏</text>
+
+        <rect x="400" y="14" width="344" height="278" rx="10" class="f-ifs s-if" stroke-width="1.3"/>
+        <text x="416" y="38" class="big">在线 · 每次评测</text>
+        <text x="416" y="56" class="tiny">3 次 8B 前向，仅此而已</text>
+
+        <rect x="416" y="76" width="312" height="30" rx="5" class="f-surf s-if" stroke-width="1.2"/>
+        <text x="428" y="96" font-size="11.5">FIRM-Video-8B → IF 的 {reasoning, score}</text>
+        <rect x="416" y="112" width="312" height="30" rx="5" class="f-surf s-if" stroke-width="1.2"/>
+        <text x="428" y="132" font-size="11.5">FIRM-Video-8B → WC 的 {reasoning, score}</text>
+        <rect x="416" y="148" width="312" height="30" rx="5" class="f-surf s-if" stroke-width="1.2"/>
+        <text x="428" y="168" font-size="11.5">FIRM-Video-8B → PQ 的 {reasoning, score}</text>
+
+        <line x1="416" y1="196" x2="728" y2="196" class="s-rule2 dash" stroke-width="1"/>
+        <text x="416" y="220" class="tiny">✕ 不再构造清单</text>
+        <text x="416" y="240" class="tiny">✕ 不再调用文本规划器</text>
+        <text x="416" y="260" class="tiny">✕ 不再调用 235B grounding 模型</text>
+        <text x="416" y="280" class="tiny">✕ 不再调用闭源评测器</text>
+      </svg>
+    </div>
+    <p class="figcap"><b>这份账本是我按论文 §3.2–3.3 的流程数出来的，论文没有给调用次数或耗时。</b>
+    提示词分解那一格标 ≈0.1 ×，是因为同一提示词的约 10 条视频共用一份 IF 清单。
+    值得注意的是那三次<b>闭源评测器</b>调用——整套监督的质量上限，实际上落在一个论文没有具名的商用模型身上。</p>
+  </figure>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 10</span><span class="ti">蒸馏还回来了多少：总体 MAE 阶梯</span></div>
+    <div class="figbody svgscroll">
+      <svg viewBox="0 0 700 254" role="img" aria-label="总体 MAE 阶梯：InternVL3-8B 基座 1.56、Qwen3-VL-8B 基座 1.33、最强基线 Doubao-Seed-2.0-Lite 1.05、FIRM-Video-8B InternVL 版 0.85、Qwen 版 0.78、数据构造流水线 0.73">
+        <line x1="200" y1="16" x2="200" y2="212" class="s-rule2" stroke-width="1.2"/>
+        <line x1="343.75" y1="16" x2="343.75" y2="212" class="s-rule dash2" stroke-width="1"/>
+        <line x1="487.5" y1="16" x2="487.5" y2="212" class="s-rule dash2" stroke-width="1"/>
+        <line x1="631.25" y1="16" x2="631.25" y2="212" class="s-rule dash2" stroke-width="1"/>
+        <text x="200" y="228" text-anchor="middle" class="tiny">0</text>
+        <text x="343.75" y="228" text-anchor="middle" class="tiny">0.5</text>
+        <text x="487.5" y="228" text-anchor="middle" class="tiny">1.0</text>
+        <text x="631.25" y="228" text-anchor="middle" class="tiny">1.5</text>
+        <text x="631" y="246" text-anchor="end" class="lbl">总体 MAE（越短越好）</text>
+
+        <text x="190" y="42" text-anchor="end" font-size="12.5">InternVL3-8B　基座</text>
+        <rect x="200" y="28" width="448.5" height="22" rx="3" class="f-surf3 s-rule2" stroke-width="1"/>
+        <text x="656" y="44" class="num">1.56</text>
+
+        <text x="190" y="74" text-anchor="end" font-size="12.5">Qwen3-VL-8B　基座</text>
+        <rect x="200" y="60" width="382.4" height="22" rx="3" class="f-surf3 s-rule2" stroke-width="1"/>
+        <text x="590" y="76" class="num">1.33</text>
+
+        <text x="190" y="106" text-anchor="end" font-size="12.5">Doubao-Seed-2.0-Lite（最强基线）</text>
+        <rect x="200" y="92" width="301.9" height="22" rx="3" class="f-surf3 s-rule2" stroke-width="1"/>
+        <text x="510" y="108" class="num">1.05</text>
+
+        <text x="190" y="138" text-anchor="end" font-size="12.5">FIRM-Video-8B (InternVL3)</text>
+        <rect x="200" y="124" width="244.4" height="22" rx="3" class="f-if" opacity=".55"/>
+        <text x="452" y="140" class="num">0.85</text>
+
+        <text x="190" y="170" text-anchor="end" font-size="12.5">FIRM-Video-8B (Qwen3-VL)</text>
+        <rect x="200" y="156" width="224.25" height="22" rx="3" class="f-if"/>
+        <text x="432" y="172" class="num f-ifi">0.78</text>
+
+        <text x="190" y="202" text-anchor="end" font-size="12.5">FIRM 数据构造流水线 †</text>
+        <rect x="200" y="188" width="209.9" height="22" rx="3" class="f-pq"/>
+        <text x="418" y="204" class="num f-pqi">0.73</text>
+
+        <path d="M424 178 L424 184 L410 184 L410 188" class="nofill s-ok" stroke-width="1.3"/>
+        <text x="470" y="188" class="tiny f-oki">学生 0.78 与老师 0.73 只差 0.05</text>
+      </svg>
+    </div>
+    <p class="figcap">带 † 的那一行是论文自己的<b>数据构造流水线直接打分</b>的成绩（表 1，不参与排名）——它就是这个学生的老师。
+    以 Qwen3-VL-8B 为例：基座 1.33，老师 0.73，学生 0.78，
+    也就是说蒸馏<b>补回了师生可达差距的 (1.33−0.78) / (1.33−0.73) ≈ 92%</b>（这个百分比是我算的，论文没写）。
+    InternVL3 那一支是 (1.56−0.85)/(1.56−0.73) ≈ 86%。图中作为参照的是总体 MAE 最低的基线 Doubao-Seed-2.0-Lite（1.05）；GPT-5 是 1.08，Gemini-3.1-Pro 1.16。</p>
+  </figure>
+
+  <div class="call key">
+    <h5>这才是这篇论文的形状</h5>
+    <p>它表面上是个奖励模型论文，实际上是一篇<b>数据构造</b>论文。方法的全部重量都在「怎么造出可核验的监督」，
+    训练那一节短到只有一段超参。判断这套方法好不好，正确的问法不是「8B 够不够强」，而是
+    <b>「那条离线链条产出的分数，本身有多可信」</b>——表 1 里那个 0.73 就是这个问题的答案，
+    它也顺便给整套方法划出了天花板。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 08 BENCH -->
+<section class="sec" id="s-bench">
+  <div class="eyebrow"><span class="n">08</span><span class="t">Benchmark</span><span class="line"></span></div>
+  <h2>FIRM-Video-Bench：先把尺子重做一遍</h2>
+  <p class="lead">论文没有直接拿现成标注来评。它从 VideoFeedback2 和 VideoPhy2 里挑了 <strong>250 对提示词–视频</strong>，
+  <strong>把原标注全部丢掉</strong>（理由是采集口径不同、且含噪声），按自己的统一定义重新标一遍，得到 <strong>750 条</strong>逐维度标注。
+  与 FIRM-Video-90K <strong>没有任何视频重叠</strong>。</p>
+
+  <div class="prose">
+    <p>标注流程：每条样本由<b>多位人类专家独立打 1–5 的整数分</b>，分歧通过讨论解决。
+    标注者拿到的材料是<b>提示词 + 完整视频 + 模型看到的那 8 帧</b>——完整视频用来做整体判断，
+    那 8 帧则是为了让人的判断和模型可用的视觉证据<b>对齐</b>。</p>
+    <p>这个细节比看上去重要：如果只让人看完整视频、只让模型看 8 帧，那么测出来的差距里会混进一大块「采样损失」，而不是纯粹的判断力差距。
+    论文选择把评测放在<b>同样的证据条件</b>下。代价是——这套 Bench 衡量的是「在 8 帧预算下与人对齐得多好」，而不是「视频真实质量判断得多准」（见 §10）。</p>
+    <p>配平也是刻意的：每个维度的每一档都有样本，<b>任何一档都不超过 30.4%</b>，为的是压掉「一律猜众数」的取巧空间。
+    论文列的主要指标是四个：<b>MAE</b>、严格准确率、<b>宽松准确率</b>（允许差 1 档）和 <b>SRCC</b>（排序一致性）；表 1 里另外报了绝对误差的<b>标准差 STD</b>。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 11</span><span class="ti">主结果（论文表 1）· 切换维度查看</span></div>
+    <div class="figbody">
+      <div class="ctl" role="group" aria-label="选择评测维度">
+        <button class="pill" type="button" data-dim="if">指令遵循 IF</button>
+        <button class="pill on" type="button" data-dim="wc">世界一致性 WC</button>
+        <button class="pill" type="button" data-dim="pq">画质 PQ</button>
+        <button class="pill" type="button" data-dim="all">总体</button>
+        <span class="hint">绿色 = 该列最优（不含 † 行）</span>
+      </div>
+      <div class="tblwrap" style="margin-top:12px">
+        <table id="benchTbl">
+          <thead><tr>
+            <th>模型</th><th>MAE ↓</th><th style="width:24%">　</th><th>STD ↓</th><th>严格 Acc ↑</th><th>宽松 Acc ↑</th><th id="thSrcc">SRCC ↑</th>
+          </tr></thead>
+          <tbody id="benchBody"><tr><td colspan="7" class="sml">正在加载…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <p class="figcap">带 † 的 FIRM 数据构造流水线是<b>直接用离线链条打分</b>的成绩，论文明确它不参与排名——它是老师，不是选手。
+    切到 WC 看那一列：所有基线的 MAE 都在 1.27 以上，而 FIRM-Video-8B 是 0.86。</p>
+  </figure>
+
+  <div class="grid2">
+    <div class="card">
+      <h5><span class="dot" style="background:var(--wc)"></span>WC 上，把模型放大没用</h5>
+      <p>开源模型在 WC 的 MAE：InternVL3-8B <b>2.10</b>、InternVL3-38B <b>2.11</b>、Qwen3-VL-8B 1.79、30B-A3B 1.90、235B-A22B 1.63。
+      参数量涨了近 30 倍，误差几乎没动。SRCC 更刺眼：0.15–0.31，排序能力接近于无。
+      <b>这不是容量问题，是没人告诉过它「按什么标准看物理合理性」。</b></p>
+    </div>
+    <div class="card">
+      <h5><span class="dot" style="background:var(--if)"></span>IF 上，闭源模型本来就不差</h5>
+      <p>GPT-5 的 IF MAE 是 <b>0.62</b>，仍然是全表最低，FIRM-Video-8B 的 0.65 只是接近它。
+      道理也直白：「视频有没有照着提示词做」是个描述性任务，强通用模型本来就会。
+      <b>清单方法真正撬动的是那些没有现成标准可依的维度。</b></p>
+    </div>
+    <div class="card">
+      <h5><span class="dot" style="background:var(--pq)"></span>PQ 上，它没赢</h5>
+      <p>Doubao-Seed-2.0-Lite 的 PQ MAE 是 <b>0.80</b>，FIRM-Video-8B 是 0.82。SRCC 上 FIRM 是 0.51，
+      不及自己的老师 0.61，也不及 Doubao 的 0.55。这与 §05 的结构分析吻合：<b>PQ 这条链缺少可核验的中间产物。</b></p>
+    </div>
+    <div class="card">
+      <h5><span class="dot" style="background:var(--ok)"></span>两个基座都被显著抬起来</h5>
+      <p>Qwen3-VL-8B：1.33 → <b>0.78</b>；InternVL3-8B：1.56 → <b>0.85</b>。
+      两个不同家族的基座都得到大幅改善，说明收益来自<b>数据</b>而不是某个基座碰巧和 grounding 模型同源
+      （grounding 用的是 Qwen3-VL-235B，与其中一个基座同族，这个混淆因素靠 InternVL3 那一支排除了）。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 09 BON -->
+<section class="sec" id="s-bon">
+  <div class="eyebrow"><span class="n">09</span><span class="t">Generalization &amp; Best-of-N</span><span class="line"></span></div>
+  <h2>换个场子还能不能用</h2>
+  <p class="lead">Bench 是自己造的，所以论文补了两组外部验证：<strong>MJ-Bench-Video</strong> 上的成对偏好（域外泛化），
+  和 <strong>VBench</strong> 上的 Best-of-N 采样（当选择器用，看它挑出来的视频到底好不好）。</p>
+
+  <h3>MJ-Bench-Video：域外偏好判断</h3>
+  <div class="prose">
+    <p>MJ-Bench-Video 有 2,170 条人工标注视频、五个维度。论文取与自己分类法对齐的三个——Alignment、Consistency &amp; Coherence（C&amp;C）、Fitness——
+    再用三者均分算一个 Overall。判定方式是<b>带平局的成对偏好准确率</b>：Overall 上平均分差 ≤ 0.5 记为平局；判对的偏好对得 1 分，平局对得 0.5 分。</p>
+  </div>
+
+  <div class="tblwrap">
+  <table>
+    <caption>表 2：MJ-Bench-Video 成对偏好准确率。<b>注意绝对值：全表都在 19–36% 之间，远低于二选一随机的 50%。论文给了记分规则（判对的偏好对得 1 分、平局对得 0.5 分，Overall 上平均分差 ≤ 0.5 记为平局），但没有说明分母是怎么归一化的，因此无法解释这个量级。这一组数字适合横向比较，不适合按字面解读。</b></caption>
+    <thead><tr><th>模型</th><th>Alignment ↑</th><th>C&amp;C ↑</th><th>Fitness ↑</th><th>Overall ↑</th></tr></thead>
+    <tbody>
+      <tr class="grp"><td colspan="5">闭源</td></tr>
+      <tr><td>GPT-5</td><td>29.52</td><td>24.54</td><td>19.29</td><td>26.09</td></tr>
+      <tr><td>Gemini-3.1-Pro</td><td class="sec2">31.53</td><td>28.72</td><td>28.24</td><td class="best">33.06</td></tr>
+      <tr><td>Doubao-Seed-2.0-Lite</td><td>30.43</td><td>26.69</td><td>24.70</td><td>26.21</td></tr>
+      <tr class="grp"><td colspan="5">开源</td></tr>
+      <tr><td>InternVL3-8B</td><td>28.41</td><td>24.58</td><td>22.96</td><td>27.21</td></tr>
+      <tr><td>InternVL3-38B</td><td>28.17</td><td>22.04</td><td>23.70</td><td>26.93</td></tr>
+      <tr><td>Qwen3-VL-8B</td><td>29.80</td><td>22.37</td><td>27.32</td><td>21.17</td></tr>
+      <tr><td>Qwen3-VL-30B-A3B</td><td>28.96</td><td>25.60</td><td class="best">35.06</td><td>22.24</td></tr>
+      <tr><td>Qwen3-VL-235B-A22B</td><td>30.03</td><td>21.86</td><td>29.17</td><td>23.40</td></tr>
+      <tr class="grp"><td colspan="5">本文</td></tr>
+      <tr class="ours"><td>FIRM-Video-8B (Qwen3-VL-8B)</td><td>31.09</td><td class="sec2">30.41</td><td class="sec2">32.10</td><td>27.81</td></tr>
+      <tr class="ours"><td>FIRM-Video-8B (InternVL3-8B)</td><td class="best">31.93</td><td class="best">35.35</td><td>29.41</td><td class="sec2">31.06</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="call">
+    <h5>有意思的翻转</h5>
+    <p>在自家 Bench 上更强的是 Qwen3-VL 那一支（总体 MAE 0.78 vs 0.85），到了 MJ-Bench-Video 上却是
+    <b>InternVL3 那一支</b>拿下 Alignment 和 C&amp;C 双料第一。两个学生学的是同一批数据，域外表现却换了位次——
+    说明基座自身的先验在域外仍然占相当权重，「谁更好」这个问题在这里没有唯一答案。</p>
+  </div>
+
+  <h3>VBench Best-of-8：当选择器用</h3>
+  <div class="prose">
+    <p>在三个能力档位不同的生成器上各生成 8 个候选，由不同的打分器挑一个，再交给 VBench 评。
+    比较对象是随机采样、Qwen3-VL-8B、InternVL3-8B 和 VideoScore2。</p>
+    <p>一个必须注意的协议细节：论文采用<b>维度感知采样</b>——VBench 的 16 个子维度各自独立评测，
+    所以论文<b>没有</b>把三个 FIRM 分数合成一个总分，而是让每个 VBench 维度<b>各自用最相关的那个 FIRM 分数</b>来排序
+    （映射规则见下方展开的表 6）。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 12</span><span class="ti">Best-of-8 相对随机采样的增益（论文表 3）</span></div>
+    <div class="figbody">
+      <div class="ctl" role="group" aria-label="选择指标">
+        <button class="pill on" type="button" data-bon="total">Total Score</button>
+        <button class="pill" type="button" data-bon="quality">Quality Score</button>
+        <button class="pill" type="button" data-bon="semantic">Semantic Score</button>
+      </div>
+      <div class="svgscroll">
+        <svg viewBox="0 0 700 300" id="bonSvg" role="img" aria-label="Best-of-8 相对随机采样的增益条形图，可切换 Total、Quality、Semantic 三个指标"></svg>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--m6)"></i>Qwen3-VL-8B</span>
+        <span><i style="background:var(--m5)"></i>InternVL3-8B</span>
+        <span><i style="background:var(--m4)"></i>VideoScore2</span>
+        <span><i style="background:var(--if)"></i>FIRM-Video-8B</span>
+      </div>
+    </div>
+    <p class="figcap">纵向零线就是随机采样。三个生成器、三个指标，FIRM-Video-8B 全部第一。
+    切到 Quality 会看到 CogVideoX-2B 上另外三个选择器都是<b>负增益</b>——挑出来的还不如随便拿一个。
+    Semantic 上的差距最大：+3.29 / +5.03 / +6.70。</p>
+  </figure>
+
+  <div class="grid2">
+    <div class="card">
+      <h5><span class="dot" style="background:var(--if)"></span>Total Score 的净胜幅</h5>
+      <p>相对<b>最强的那个竞争者</b>（不是随机）：LaVie-Base <b>+0.27</b>（80.72 vs InternVL3 的 80.45）、
+      CogVideoX-2B <b>+1.01</b>（79.68 vs VideoScore2 的 78.67）、Wan2.1-T2V-1.3B <b>+0.66</b>（82.36 vs InternVL3 的 81.70）。
+      Semantic Score 的净胜幅是 <b>+1.24 ~ +2.11</b>。</p>
+    </div>
+    <div class="card">
+      <h5><span class="dot" style="background:var(--ok)"></span>候选池越大越稳</h5>
+      <p>在 LaVie-Base 上扫 N ∈ {2,4,8,12,16}：<b>N=2 时 FIRM 略输给 Qwen3-VL-8B</b>，
+      但 N ≥ 4 全部第一，分数从 80.36 一路升到 80.97。N=16 时领先随机 1.03 分、领先 Qwen3-VL-8B 0.33 分。
+      候选越多，排序质量的差距越显形——这正是奖励模型该有的性质。</p>
+    </div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 13</span><span class="ti">Best-of-N 随 N 的变化（LaVie-Base · VBench Total）</span></div>
+    <div class="figbody svgscroll">
+      <svg viewBox="0 0 700 268" role="img" aria-label="Best-of-N 扩展曲线：FIRM-Video-8B 在 N 大于等于 4 时始终领先，N=16 时达到 80.97，随机采样 79.94，Qwen3-VL-8B 80.64">
+        <line x1="90" y1="34" x2="90" y2="200" class="s-rule2" stroke-width="1.2"/>
+        <line x1="90" y1="200" x2="640" y2="200" class="s-rule2" stroke-width="1.2"/>
+        <line x1="86" y1="200" x2="640" y2="200" class="s-rule dash2" stroke-width="1"/>
+        <line x1="86" y1="160" x2="640" y2="160" class="s-rule dash2" stroke-width="1"/>
+        <line x1="86" y1="120" x2="640" y2="120" class="s-rule dash2" stroke-width="1"/>
+        <line x1="86" y1="80" x2="640" y2="80" class="s-rule dash2" stroke-width="1"/>
+        <line x1="86" y1="40" x2="640" y2="40" class="s-rule dash2" stroke-width="1"/>
+        <text x="80" y="204" text-anchor="end" class="num">79.0</text>
+        <text x="80" y="164" text-anchor="end" class="num">79.5</text>
+        <text x="80" y="124" text-anchor="end" class="num">80.0</text>
+        <text x="80" y="84" text-anchor="end" class="num">80.5</text>
+        <text x="80" y="44" text-anchor="end" class="num">81.0</text>
+        <text x="90" y="24" class="lbl">VBench Total Score</text>
+        <text x="120" y="220" text-anchor="middle" class="num">N=2</text>
+        <text x="240" y="220" text-anchor="middle" class="num">4</text>
+        <text x="360" y="220" text-anchor="middle" class="num">8</text>
+        <text x="480" y="220" text-anchor="middle" class="num">12</text>
+        <text x="600" y="220" text-anchor="middle" class="num">16</text>
+
+        <polyline points="360,166.4 600,124.8" class="nofill s-ink3 dash" stroke-width="1.6"/>
+        <circle cx="360" cy="166.4" r="4" class="f-ink3"/>
+        <circle cx="600" cy="124.8" r="4" class="f-ink3"/>
+        <text x="612" y="128" class="tiny">随机 79.94</text>
+
+        <polyline points="360,117.6 600,68.8" class="nofill s-wc dash" stroke-width="1.6"/>
+        <circle cx="360" cy="117.6" r="4" class="f-wc"/>
+        <circle cx="600" cy="68.8" r="4" class="f-wc"/>
+        <text x="612" y="72" class="tiny f-wci">Qwen3-VL-8B 80.64</text>
+
+        <polyline points="240,91.2 360,62.4 600,42.4" class="nofill s-if dash" stroke-width="2"/>
+        <circle cx="240" cy="91.2" r="5" class="f-if"/>
+        <circle cx="360" cy="62.4" r="5" class="f-if"/>
+        <circle cx="600" cy="42.4" r="5" class="f-if"/>
+        <text x="228" y="86" text-anchor="end" class="tiny f-ifi">80.36</text>
+        <text x="612" y="46" class="tiny f-ifi">FIRM-Video-8B 80.97</text>
+
+        <text x="120" y="120" text-anchor="middle" class="tiny">N=2：论文只说</text>
+        <text x="120" y="136" text-anchor="middle" class="tiny">FIRM 略低于</text>
+        <text x="120" y="152" text-anchor="middle" class="tiny">Qwen3-VL-8B</text>
+        <line x1="120" y1="60" x2="120" y2="108" class="s-rule2 dash" stroke-width="1"/>
+        <line x1="480" y1="40" x2="480" y2="200" class="s-rule2 dash2" stroke-width="1"/>
+        <text x="486" y="192" class="tiny">N=12 未给数值</text>
+
+        <text x="90" y="248" class="tiny">实心圆点 = 论文给出或可由正文差值直接反推的数值（N=16 的 79.94 与 80.64 由 80.97 减去正文的 1.03 / 0.33 得到）；虚线段仅示意趋势，不代表实测点</text>
+      </svg>
+    </div>
+    <p class="figcap">论文原图（Fig. 4）画的是完整的五点曲线，但正文只给出 N=4 的 80.36、N=16 的 80.97 和两个差值（1.03 / 0.33），
+    表 3 提供 N=8 的三个值。<b>我只画能核实的点</b>，其余用虚线连接并标注。</p>
+  </figure>
+
+  <div class="call warn">
+    <h5>被主文跳过的一格：动态程度</h5>
+    <p>附录表 7 里有一列 <b>Dynamic Degree</b>（画面运动量，映射给 IF 维度）。把随机采样当基准看：</p>
+    <p class="mono sml">LaVie-Base：随机 55.56 → FIRM <b>56.94</b>（↑）　CogVideoX-2B：随机 73.61 → FIRM <b>65.28</b>（↓ 8.3）　Wan2.1：随机 62.50 → FIRM <b>59.72</b>（↓ 2.8，且是五种策略里最低）</p>
+    <p>也就是说，<b>三个生成器里有两个，被 FIRM 挑出来的视频比随便拿一个更「不动」</b>。
+    这是奖励模型的经典张力：静止的画面更容易「看起来什么都没错」——没有滑步、没有穿模、没有闪烁。
+    公平地说，CogVideoX 上所有选择器都掉（FIRM 还是其中最好的），但 Wan2.1 上 FIRM 是唯一低于随机的那个。
+    主文只报了「多数代表性维度第一」，这一格没有出现在正文里。<b>如果之后真的拿它去做 RL 对齐，这会是第一个要盯的 reward hacking 面。</b></p>
+  </div>
+
+  <details>
+    <summary>展开：VBench 维度 → FIRM 奖励维度的映射规则（论文表 6）</summary>
+    <div class="dbody">
+      <div class="tblwrap" style="margin-top:8px">
+      <table>
+        <thead><tr><th>FIRM 奖励维度</th><th style="text-align:left">VBench 子维度</th><th>所属组</th></tr></thead>
+        <tbody>
+          <tr><td class="f-ifi" style="color:var(--if-ink)">IF</td><td style="text-align:left">Dynamic Degree</td><td>Quality</td></tr>
+          <tr><td></td><td style="text-align:left">Overall Consistency / Object Class / Multiple Objects / Human Action / Color / Spatial Relationship / Scene / Appearance Style / Temporal Style</td><td>Cond. Consist.</td></tr>
+          <tr><td style="color:var(--wc-ink)">WC</td><td style="text-align:left">Subject Consistency / Background Consistency / Motion Smoothness</td><td>Quality</td></tr>
+          <tr><td style="color:var(--pq-ink)">PQ</td><td style="text-align:left">Temporal Flickering / Aesthetic Quality / Imaging Quality</td><td>Quality</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p class="sml">这个映射本身是有信息量的：IF 承包了全部 9 个「视频–条件一致性」维度加上 Dynamic Degree，
+      WC 管跨帧稳定性，PQ 管低层画质。<b>论文正文没有说明基线（Qwen3-VL-8B / InternVL3-8B / VideoScore2）是否也享有同样的维度路由</b>，
+      如果基线只用单一总分排序，这个比较会对 FIRM 有利。复现时值得确认。</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>展开：Best-of-8 完整数值（论文表 3）</summary>
+    <div class="dbody">
+      <div class="tblwrap" style="margin-top:8px">
+      <table>
+        <thead><tr><th>策略</th><th>Total</th><th>Quality</th><th>Semantic</th><th>Subject Consist.</th><th>Backgr. Consist.</th><th>Temp. Flicker</th><th>Imaging Q.</th><th>Multi Objects</th><th>Color</th><th>Spatial Rel.</th><th>Appear. Style</th></tr></thead>
+        <tbody>
+          <tr class="grp"><td colspan="12">LaVie-Base</td></tr>
+          <tr><td>随机</td><td>79.42</td><td>81.34</td><td>71.77</td><td>92.09</td><td>97.64</td><td>97.63</td><td>65.92</td><td>37.73</td><td class="best">89.65</td><td>43.30</td><td>23.94</td></tr>
+          <tr><td>Qwen3-VL-8B</td><td>80.03</td><td>81.61</td><td>73.73</td><td>92.64</td><td>97.56</td><td>97.60</td><td>66.88</td><td>50.91</td><td>83.11</td><td>47.32</td><td>24.27</td></tr>
+          <tr><td>InternVL3-8B</td><td>80.45</td><td>82.10</td><td>73.82</td><td>92.94</td><td>97.56</td><td>97.56</td><td>67.02</td><td>50.30</td><td>85.85</td><td>45.81</td><td>24.10</td></tr>
+          <tr><td>VideoScore2</td><td>79.95</td><td>81.61</td><td>73.33</td><td>92.95</td><td>97.80</td><td>97.76</td><td>66.54</td><td>53.73</td><td>86.86</td><td>45.70</td><td>23.87</td></tr>
+          <tr class="ours"><td>FIRM-Video-8B</td><td class="best">80.72</td><td class="best">82.14</td><td class="best">75.06</td><td class="best">93.66</td><td class="best">97.91</td><td class="best">98.12</td><td class="best">67.46</td><td class="best">58.99</td><td>88.20</td><td class="best">51.20</td><td class="best">24.40</td></tr>
+          <tr class="grp"><td colspan="12">CogVideoX-2B</td></tr>
+          <tr><td>随机</td><td>78.57</td><td>80.90</td><td>69.25</td><td>93.47</td><td>96.66</td><td>96.90</td><td>59.72</td><td>49.16</td><td>88.43</td><td>61.30</td><td>22.95</td></tr>
+          <tr><td>Qwen3-VL-8B</td><td>78.49</td><td>80.22</td><td>71.59</td><td>94.48</td><td>96.84</td><td>96.90</td><td>59.20</td><td>55.56</td><td>88.40</td><td>65.80</td><td class="best">23.30</td></tr>
+          <tr><td>InternVL3-8B</td><td>78.35</td><td>80.27</td><td>70.65</td><td>94.53</td><td>96.89</td><td>97.04</td><td>59.90</td><td>51.30</td><td>89.49</td><td>61.09</td><td>23.24</td></tr>
+          <tr><td>VideoScore2</td><td>78.67</td><td>80.30</td><td>72.17</td><td>94.63</td><td>96.78</td><td>96.98</td><td class="best">60.08</td><td>61.05</td><td>87.59</td><td>63.82</td><td>22.54</td></tr>
+          <tr class="ours"><td>FIRM-Video-8B</td><td class="best">79.68</td><td class="best">81.03</td><td class="best">74.28</td><td class="best">94.92</td><td class="best">97.28</td><td class="best">97.33</td><td>60.00</td><td class="best">62.88</td><td class="best">92.37</td><td class="best">66.86</td><td>23.02</td></tr>
+          <tr class="grp"><td colspan="12">Wan2.1-T2V-1.3B</td></tr>
+          <tr><td>随机</td><td>80.40</td><td>84.13</td><td>65.49</td><td>94.57</td><td>98.08</td><td>98.98</td><td>68.18</td><td>57.01</td><td>85.63</td><td>76.13</td><td>19.73</td></tr>
+          <tr><td>Qwen3-VL-8B</td><td>81.43</td><td>84.30</td><td>69.96</td><td>94.57</td><td>97.90</td><td>98.87</td><td>67.57</td><td>67.91</td><td>85.94</td><td>74.39</td><td class="best">20.67</td></tr>
+          <tr><td>InternVL3-8B</td><td>81.70</td><td>84.43</td><td>70.78</td><td>95.46</td><td>98.32</td><td>98.84</td><td>67.71</td><td>67.61</td><td>86.15</td><td>77.08</td><td>20.30</td></tr>
+          <tr><td>VideoScore2</td><td>81.64</td><td>84.86</td><td>68.74</td><td>95.45</td><td>98.13</td><td>98.99</td><td>67.57</td><td>72.26</td><td>83.91</td><td>74.56</td><td>19.98</td></tr>
+          <tr class="ours"><td>FIRM-Video-8B</td><td class="best">82.36</td><td class="best">84.91</td><td class="best">72.19</td><td class="best">96.54</td><td class="best">98.68</td><td class="best">99.22</td><td class="best">68.62</td><td class="best">73.40</td><td class="best">92.23</td><td class="best">81.10</td><td>20.64</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </details>
+</section>
+
+<!-- ============================================================ 10 CRIT -->
+<section class="sec" id="s-crit">
+  <div class="eyebrow"><span class="n">10</span><span class="t">Limitations</span><span class="line"></span></div>
+  <h2>局限，以及我读下来的保留意见</h2>
+  <p class="lead">论文自己写的局限只有一条，很坦率：<strong>目前只验证了「与人对齐」和「Best-of-N 选择」，还没有真的拿它去优化生成器。</strong>
+  下面是我读完之后另外记下来的几点——都标明了哪些是论文事实、哪些是我的判断。</p>
+
+  <div class="call warn">
+    <h5>① 整套监督的天花板，压在一个没有具名的闭源模型上</h5>
+    <p><b>论文事实：</b>IF 核验、WC 盲验、PQ 评测这三步都由「a proprietary multimodal evaluator」执行，论文自始至终<b>没有说是哪个模型</b>。
+    Qwen3-32B（规划）和 Qwen3-VL-235B-A22B（grounding）都点了名，唯独核验器没有。</p>
+    <p><b>我的判断：</b>这是复现路上最硬的一道坎。清单方法的价值主张是「把评测拆成简单的是非题，让核验变容易」，
+    这个主张成立的前提是核验器足够可靠——而表 1 里那个 0.73 就是核验器加上这套聚合规则能达到的上限。
+    换一个更弱的核验器，整条链会退化到什么程度，论文没有做这个消融。对想复现的人来说，这个数字比 0.78 更重要。</p>
+  </div>
+
+  <div class="call warn">
+    <h5>② 8 帧的证据预算，和 WC / PQ 的定义打架</h5>
+    <p><b>论文事实：</b>训练与推理都是均匀采样 8 帧；视频中位时长 3.3 秒，即约 2.4 fps。
+    而 WC 的定义里包含「时序不一致、不自然或断裂的运动」，PQ 的定义里包含「闪烁 flickering」。</p>
+    <p><b>我的判断：</b>2.4 fps 基本看不出闪烁，也很难判断运动是否连贯——8 帧之间的插值全靠模型脑补。
+    论文的处理是让 Bench 的人类标注者<b>也</b>看到同样的 8 帧，把评测放在同样的证据条件下，这在方法上是干净的；
+    但副作用是<b>这套 Bench 结构上就无法暴露采样带来的损失</b>。换句话说，0.78 这个 MAE 衡量的是
+    「在 8 帧预算下与人对齐得多好」，而不是「视频的时间性质量判断得多准」。
+    有意思的是 VBench 上 Temporal Flickering 反而拿了第一（98.12 / 97.33 / 99.22 均为最优），这说明 8 帧仍能捕捉到一部分统计线索，
+    但这和「真的看见了闪烁」不是一回事。</p>
+  </div>
+
+  <div class="call warn">
+    <h5>③ 所有的阈值都是「经验确定」的，且不对称</h5>
+    <p><b>论文事实：</b>评分映射阈值论文原话是 "empirically determined thresholds"，没有说明确定过程。
+    α(m) 是「预定义的递增权重」，也没有敏感性分析。IF 拿 5 分要求 s 恰好 = 1.00，WC 拿 5 分只要 s ≥ 0.89。</p>
+    <p><b>我的判断：</b>这个不对称本身是合理的——IF 的每一条都是用户白纸黑字要的，漏一条就不该满分；
+    WC 的核验器会误报，留 0.11 的余量是对噪声的让步。但既然两条尺子的形状差这么多，
+    读者就有权知道它们是怎么定出来的。<b>整篇论文里，这是可调旋钮最多、说明最少的一块。</b>
+    尤其 IF 那条刀锋直接决定了 90K 中 5 分样本的比例（20.4%），而它只是四个数字里的一个。</p>
+  </div>
+
+  <div class="call warn">
+    <h5>④ 训练集和测试集共享一个上游来源</h5>
+    <p><b>论文事实：</b>FIRM-Video-90K 的约 27K 来自 VideoFeedback2；FIRM-Video-Bench 的 250 条来自 VideoFeedback2 和 VideoPhy2。
+    论文明确保证「两者<b>没有重叠的视频</b>」。</p>
+    <p><b>我的判断：</b>视频不重叠不等于<b>提示词分布</b>不重叠，也不等于<b>生成模型构成</b>不重叠。
+    Bench 里有相当一部分样本，很可能来自训练集见过的同一批提示词和同一批生成器。
+    这不影响「比基座强」这个结论（基座也没见过），但会让 0.78 相对于最强基线 Doubao-Seed-2.0-Lite 的 1.05 显得更好看一些。
+    MJ-Bench-Video 那组域外结果就温和得多——FIRM 在 Overall 上只排第二——这个对比本身就是提示。</p>
+  </div>
+
+  <div class="call mine">
+    <h5>⑤ 「efficient」这个词，全篇没有一个数字支撑</h5>
+    <p>论文反复强调端到端奖励模型「far more efficient」、「substantially reducing inference cost」，
+    但<b>没有报告任何时延、吞吐或 FLOPs 对比</b>，也没给出数据构造阶段的总开销。
+    定性上这当然对（3 次 8B 前向 vs 7 次多模型调用，其中还有 235B 和闭源 API），
+    但一篇把「准确度—效率权衡」写进摘要第二句的论文，我期待看到那张表。</p>
+  </div>
+
+  <div class="call key">
+    <h5>值得肯定的地方，也说清楚</h5>
+    <p>抛开上面这些，这套方法有两个我认为很扎实的设计：<b>一是把「清单出处」作为区分三个维度的第一原理</b>，
+    而不是像多数工作那样把三个维度当成同一个 prompt 模板的三次调用——出处不同，归因才真的解耦；
+    <b>二是把「分数先于理由」写死在数据构造里</b>，用流程约束取代了对模型「说实话」的祈祷。
+    这两条都是可以直接搬到别的评测任务上的、与视频无关的一般性做法。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 11 REPO -->
+<section class="sec" id="s-repo">
+  <div class="eyebrow"><span class="n">11</span><span class="t">Relevance</span><span class="line"></span></div>
+  <h2>它和「交互式视频世界模型」有什么关系</h2>
+  <div class="prose">
+    <p>先把话说清楚：<b>按本仓库的收录标准，这篇论文并不在范围内。</b>
+    它既不做逐步动作条件，也不做因果 / 流式生成，更没有持久世界状态；
+    按宽口径的三条轴（动作控制、实时与流式生成、长时程一致性与记忆）来看，它也都不直接沾边。
+    它是<b>评测与对齐侧的基础设施</b>，不是世界模型本身。</p>
+    <p>但有两处关联值得记下来：</p>
+    <ul>
+      <li><b>WC 维度评的就是「这个世界讲不讲道理」。</b>结构畸变、穿模、滑步、物理上不可能的交互——
+      这些正是交互式世界模型最难过的关。这篇论文的贡献是给出了一种把这个模糊判断
+      <b>拆成可逐条核验的问题</b>的做法：先 ground 出画面里有什么，再针对每个目标问「它在时间上一致吗 / 它的运动符合物理吗」。
+      这个拆法本身与视频是不是可交互无关，可以直接搬过来。</li>
+      <li><b>Best-of-N 和未来的 RL 对齐，是把生成器往「物理更靠谱」推的现成钩子。</b>
+      论文自己把 RL 列为未来工作；但 §09 里那个 Dynamic Degree 下降的信号提醒我们，
+      在把 WC 分数当 reward 之前，需要先解决「静止画面天然更容易通过一致性检查」这个漏洞。</li>
+    </ul>
+    <p>最后一个必须点明的边界：这套清单是在<b>中位 3.3 秒、8 帧</b>的片段上构造的。
+    交互式世界模型真正关心的长时程一致性——走开再回来，房间还是不是那个房间——
+    完全超出它的评测预算。<b>把这套方法用到长时程场景，需要的不只是加帧，而是清单本身要有跨片段的目标身份。</b></p>
+  </div>
+</section>
+
+<!-- ============================================================ 12 APPENDIX -->
+<section class="sec" id="s-appx">
+  <div class="eyebrow"><span class="n">12</span><span class="t">Reference</span><span class="line"></span></div>
+  <h2>附录速查</h2>
+
+  <h3>公式与常数</h3>
+  <div class="tblwrap">
+  <table>
+    <caption>全部取自论文正文与附录 A。α 与两组阈值都是论文给定的预设值。</caption>
+    <thead><tr><th>项</th><th style="text-align:left">定义 / 取值</th><th>出处</th></tr></thead>
+    <tbody>
+      <tr><td>s<span class="sub">IF</span></td><td style="text-align:left">Σ w<span class="sub">i</span> z<span class="sub">i</span>，w<span class="sub">i</span> = m<span class="sub">i</span> / Σ m<span class="sub">j</span>；z=1 表示该要求被满足</td><td>Eq. 1 / A.2</td></tr>
+      <tr><td>权重序列化</td><td style="text-align:left">四舍五入到两位小数；正权重被舍成 0 时设为 0.01；余量补给最大权重，使 Σw = 1</td><td>A.1</td></tr>
+      <tr><td>c<span class="sub">t</span></td><td style="text-align:left">1 − (Σ<span class="sub">j∈Q<span class="sub">t</span></span> b<span class="sub">j</span>) / |Q<span class="sub">t</span>|；b=1 表示该问题检出违背</td><td>Eq. 2 / A.3</td></tr>
+      <tr><td>α(m)</td><td style="text-align:left">m=1→1.0，2→1.5，3→2.5，4→3.5，5→5.0</td><td>A.4</td></tr>
+      <tr><td>s<span class="sub">WC</span></td><td style="text-align:left">Σ α(m<span class="sub">t</span>) c<span class="sub">t</span> / Σ α(m<span class="sub">t</span>)</td><td>Eq. 2 / A.5</td></tr>
+      <tr><td>R<span class="sub">IF</span>(s)</td><td style="text-align:left">1: [0, 0.35)　2: [0.35, 0.70)　3: [0.70, 0.85)　4: [0.85, 1.00)　<b>5: s = 1.00</b></td><td>A.3</td></tr>
+      <tr><td>R<span class="sub">WC</span>(s)</td><td style="text-align:left">1: [0, 0.20)　2: [0.20, 0.58)　3: [0.58, 0.78)　4: [0.78, 0.89)　<b>5: [0.89, 1.00]</b></td><td>A.3</td></tr>
+      <tr><td>分数精度</td><td style="text-align:left">连续分数保留四位小数后再做映射</td><td>A.1 / A.2</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>关键数字</h3>
+  <div class="tblwrap">
+  <table>
+    <thead><tr><th>项</th><th style="text-align:left">值</th></tr></thead>
+    <tbody>
+      <tr><td>FIRM-Video-90K</td><td style="text-align:left">88,044 条样本 = 29,348 条视频 × 3 维度；3,012 个提示词</td></tr>
+      <tr><td>数据来源</td><td style="text-align:left">Rapidata Text2Video-Human-Preferences（约 3K）+ VideoFeedback2（约 27K）</td></tr>
+      <tr><td>生成器覆盖</td><td style="text-align:left">20+ 个模型（Sora2 / Veo3 / HunyuanVideo / Pika2.2 / Wan2.1 等），每个提示词约取 10 个模型</td></tr>
+      <tr><td>视频规格</td><td style="text-align:left">分辨率 256×256 ~ 1980×982，帧率 8–30 fps，中位时长 3.3 秒</td></tr>
+      <tr><td>提示词长度</td><td style="text-align:left">中位 27 个词</td></tr>
+      <tr><td>FIRM-Video-Bench</td><td style="text-align:left">250 条视频 × 3 维度 = 750 条专家标注；任一评分档 ≤ 30.4%</td></tr>
+      <tr><td>模型</td><td style="text-align:left">FIRM-Video-8B，基座 Qwen3-VL-8B / InternVL3-8B，全参微调 2 epochs</td></tr>
+      <tr><td>总体 MAE</td><td style="text-align:left">0.78（Qwen3-VL 支）/ 0.85（InternVL3 支）/ 0.73（数据构造流水线，不参与排名）</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>推理提示词（论文附录 D，原文照录）</h3>
+  <p class="sml">这三段是 <b>FIRM-Video-8B 与全部基线在评测时使用的提示词</b>，三个维度各一段，用来保证比较公平。
+  注意：<b>数据构造阶段</b>用到的规划器、grounding 与核验器提示词，论文<b>没有公开</b>。</p>
+
+  <details>
+    <summary>Instruction Following · 推理提示词</summary>
+    <div class="dbody"><div class="code">You are an expert for evaluating how well an AI-generated video follows its text prompt.
+The video is given as ${n_frames} frames uniformly sampled in temporal order
+(frame 1 = earliest, frame ${n_frames} = latest). Judge only from these
+${n_frames} frames.
+
+We evaluate the dimension 'instruction_following': how accurately and completely
+the video follows the text prompt, including requested subjects, attributes,
+actions, scene, style, camera/viewpoint, and temporal event order.
+
+Text prompt:
+${t2v_prompt}
+
+Based on the video content, the text prompt, and the dimension definition, please
+evaluate the video's instruction_following and give the score. The score must be
+an integer in the range of 1 - 5. FIRST give a brief reasoning, THEN give the
+score.
+
+Your output must be a valid JSON object and nothing else, in exactly the
+following format:
+{
+  "reasoning": "&lt;reasoning&gt;",
+  "score": &lt;score&gt;
+}
+DO NOT include anything before or after the JSON object.</div></div>
+  </details>
+
+  <details>
+    <summary>Perceptual Quality · 推理提示词</summary>
+    <div class="dbody"><div class="code">You are an expert for evaluating the perceptual quality of AI-generated videos.
+The video is given as ${n_frames} frames uniformly sampled in temporal order
+(frame 1 = earliest, frame ${n_frames} = latest). Judge only from these
+${n_frames} frames.
+
+We evaluate the dimension 'visual_quality': the perceptual and technical quality
+of the rendered video, including resolution, overall and local clarity, sharpness
+or blurriness, brightness and color stability, flicker, compression artifacts,
+and low-level visual distortions that affect the viewing experience.
+
+Text prompt (context only):
+${t2v_prompt}
+
+The text prompt is provided so that you can recognize intentional creative
+choices it requests (e.g. a stylized look, a non-realistic scene, an unusual
+camera) and NOT penalize them on this dimension. DO NOT judge how faithfully the
+video follows the prompt here -- that is covered by a separate dimension.
+
+Based on the video content and the dimension definition, please evaluate the
+video's visual_quality and give the score. The score must be an integer in the
+range of 1 - 5. FIRST give a brief reasoning, THEN give the score.
+
+Your output must be a valid JSON object and nothing else, in exactly the
+following format:
+{
+  "reasoning": "&lt;reasoning&gt;",
+  "score": &lt;score&gt;
+}
+DO NOT include anything before or after the JSON object.</div></div>
+  </details>
+
+  <details>
+    <summary>World Coherence · 推理提示词</summary>
+    <div class="dbody"><div class="code">You are an expert for evaluating whether an AI-generated video is coherent with
+the real world.
+The video is given as ${n_frames} frames uniformly sampled in temporal order
+(frame 1 = earliest, frame ${n_frames} = latest). Judge only from these
+${n_frames} frames.
+
+We evaluate the dimension 'world_consistency': whether the video contains any
+violations of everyday knowledge, common sense, or basic physical laws, including
+temporal inconsistencies, unnatural or incoherent motion, physically implausible
+interactions, and structural abnormalities or deformities in objects or
+characters.
+
+Text prompt (context only):
+${t2v_prompt}
+
+The text prompt is provided so that you can recognize intentional creative
+choices it requests (e.g. a non-realistic scene or a deliberately fantastical
+setup) and NOT penalize them on this dimension. DO NOT judge how faithfully the
+video follows the prompt here -- that is covered by a separate dimension.
+
+Based on the video content and the dimension definition, please evaluate the
+video's world_consistency and give the score. The score must be an integer in
+the range of 1 - 5. FIRST give a brief reasoning, THEN give the score.
+
+Your output must be a valid JSON object and nothing else, in exactly the
+following format:
+{
+  "reasoning": "&lt;reasoning&gt;",
+  "score": &lt;score&gt;
+}
+DO NOT include anything before or after the JSON object.</div></div>
+  </details>
+
+  <p class="sml">读这三段提示词能发现一个细节：<b>推理提示词里没有任何清单。</b>
+  模型被要求「先给简短推理，再给分数」，格式与开放式推理判官完全一样——
+  差别全部藏在训练数据里。这也正是这套方法的主张：<b>清单不需要出现在推理时，它只需要出现在监督里。</b></p>
+
+  <h3>术语对照</h3>
+  <div class="tblwrap">
+  <table>
+    <thead><tr><th>英文</th><th style="text-align:left">本页译法</th><th style="text-align:left">含义</th></tr></thead>
+    <tbody>
+      <tr><td>check-before-score</td><td style="text-align:left">先核验，再打分</td><td style="text-align:left">全篇的组织原则：构造清单 → 逐条核验 → 只聚合已核验的判定</td></tr>
+      <tr><td>Instruction Following (IF)</td><td style="text-align:left">指令遵循</td><td style="text-align:left">视频有多准确、多完整地照做了提示词</td></tr>
+      <tr><td>World Coherence (WC)</td><td style="text-align:left">世界一致性</td><td style="text-align:left">是否符合日常知识、常识与基本物理规律</td></tr>
+      <tr><td>Perceptual Quality (PQ)</td><td style="text-align:left">画质</td><td style="text-align:left">渲染层面的观感与技术质量</td></tr>
+      <tr><td>grounding</td><td style="text-align:left">（视频）清点 / 落地</td><td style="text-align:left">从画面中抽出实体与动作，作为核验目标</td></tr>
+      <tr><td>target / clean ratio</td><td style="text-align:left">目标 / 干净率</td><td style="text-align:left">一个实体或动作，及其名下未检出违背的问题比例</td></tr>
+      <tr><td>relaxed accuracy</td><td style="text-align:left">宽松准确率</td><td style="text-align:left">预测与人工标注相差 ≤ 1 档即算对</td></tr>
+      <tr><td>SRCC</td><td style="text-align:left">斯皮尔曼秩相关</td><td style="text-align:left">排序一致性，与绝对分值无关</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<footer>
+  <p><b>FIRM-Video: Check Before You Score for Reliable Text-to-Video Reward Modeling</b><br>
+  Peiyuan Zhang, Xiangyu Zhao, Hongbo Liu, Xiaoxing Hu, Mingxin Liu, Shuran Ma, Yunhang Shen, Jian Hu, Haihan Gao, Haoyu Cao, Xue Yang<br>
+  上海交通大学 · 腾讯优图实验室 · 同济大学　·　arXiv:2608.21839v1 [cs.CV]　·　2026-08-22</p>
+  <p><a href="https://arxiv.org/abs/2608.21839" target="_blank" rel="noopener">arXiv</a> ·
+     <a href="https://arxiv.org/pdf/2608.21839" target="_blank" rel="noopener">PDF</a> ·
+     <a href="https://github.com/VisionXLab/FIRM-Reward" target="_blank" rel="noopener">GitHub</a> ·
+     <a href="https://huggingface.co/collections/VisionXLab/firm-reward" target="_blank" rel="noopener">Hugging Face</a></p>
+  <p class="op">本页是一份方法精读，不是论文的替代品。所有数值取自论文正文、表 1–8 与附录 A–D；
+  凡是标注「我的读法 / 我的判断 / 我算的」的段落均为读者评注，与论文主张区分开；
+  §03 与 §04 的交互示例是为讲解构造的示意数据，其中的公式、权重与阈值按论文实现。图 7、图 9 与表 A 是我按论文描述归纳绘制的，论文中没有对应原图。</p>
+</footer>
+
+</main>
+</div>
+
+<button class="toTop" id="toTop" type="button" aria-label="回到顶部">↑</button>
+
+<script>
+(function(){
+"use strict";
+var $=function(s,r){return (r||document).querySelector(s)};
+var $$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
+var fx=function(v,n){return v.toFixed(n)};
+
+/* ---------------------------------------------------------- theme */
+var root=document.documentElement;
+$('#themeBtn').addEventListener('click',function(){
+  var cur=root.getAttribute('data-theme');
+  if(!cur){ cur = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light':'dark'; }
+  root.setAttribute('data-theme', cur==='dark'?'light':'dark');
+});
+
+/* ---------------------------------------------------------- progress / toc / toTop */
+var prog=$('#prog'), toTop=$('#toTop');
+function onScroll(){
+  var h=document.documentElement.scrollHeight-window.innerHeight;
+  prog.style.width=(h>0?(window.scrollY/h*100):0)+'%';
+  toTop.classList.toggle('show', window.scrollY>700);
+}
+window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+toTop.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'})});
+
+var links=$$('#toc a');
+var secs=links.map(function(a){return document.getElementById(a.getAttribute('href').slice(1))}).filter(Boolean);
+if('IntersectionObserver' in window){
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting){
+        links.forEach(function(a){a.classList.remove('on')});
+        var m=links.filter(function(a){return a.getAttribute('href')==='#'+e.target.id})[0];
+        if(m)m.classList.add('on');
+      }
+    });
+  },{rootMargin:'-84px 0px -70% 0px',threshold:0});
+  secs.forEach(function(s){io.observe(s)});
+}
+
+/* ---------------------------------------------------------- Fig.1 tabs */
+var tabs=$$('.tabs [role=tab]');
+tabs.forEach(function(t){
+  t.addEventListener('click',function(){
+    tabs.forEach(function(o){
+      o.setAttribute('aria-selected', String(o===t));
+      var p=document.getElementById(o.getAttribute('aria-controls'));
+      if(p) p.hidden = (o!==t);
+    });
+  });
+});
+
+/* ---------------------------------------------------------- Fig.3 lanes */
+var LANE={
+  all:{h:'三条链共用一个骨架，出处各不相同',
+    p:'纵向读是统一的四步：清单出处 → 构造清单 → 核验 → 聚合。横向读才看得出差别——IF 的清单来自提示词，WC 的清单来自视频 grounding，PQ 的清单是一张固定的缺陷分类表。<b>正是这个「出处不同」，让同一处毛病不会被三个维度各扣一次。</b>点上面的按钮可以单看一条。'},
+  if:{h:'IF · 两个阶段，清单来自提示词',
+    p:'<b>① 提示词分解。</b>Qwen3-32B 只看提示词，拆成一组原子的是非题，每条配重要度 m ∈ {1…5}，剔除音频类要求。同一提示词生成的所有视频共用同一份清单。<br><b>② 清单核验。</b>闭源多模态评测器拿到「提示词 + 按时间排序的帧 + 清单」，逐条给出 yes/no 和一句画面证据。<b>无法从视频确认的要求，一律记为未满足。</b><br><b>③ 聚合。</b>s = Σ wᵢzᵢ，w 是重要度归一化后的权重。'},
+  wc:{h:'WC · 三个阶段，清单来自视频',
+    p:'<b>① 视频 grounding。</b>Qwen3-VL-235B-A22B-Instruct 在<b>看不到提示词</b>的条件下分析视频，产出场景摘要、实体清单、动作/交互清单，每个目标配重要度 m_t。这样做既提高目标覆盖率，又避免被提示词带偏。<br><b>② 清单构造。</b>Qwen3-32B 把每个目标转成核验问题：实体查时序一致性与结构合理性，动作查运动质量与物理合理性；问题继承目标重要度；覆盖不全会被自动检出并重新生成。提示词<b>只在这一步</b>进场，用来区分「有意的奇幻/风格化」与真正的违背。<br><b>③ 盲验。</b>评测器只拿到视频和问题，<b>看不到提示词，也看不到重要度</b>；回答 yes 表示检出违背。'},
+  pq:{h:'PQ · 只有一步，清单是现成的',
+    p:'人工整理的通用视觉缺陷分类表（分辨率、整体与局部清晰度、锐度与模糊、亮度与色彩稳定性、闪烁、压缩伪影等）对所有视频通用，不需要逐样本构造。闭源评测器据此<b>直接产出清单式理由和 1–5 分</b>。提示词只用来把「有意的风格化打光」和「渲染错误」分开。<br><b>注意这一列的两个空格：</b>没有构造步骤，也没有聚合公式——理由和分数仍然是同一次调用的产物。'}
+};
+var laneInfo=$('#laneInfo'), lanePills=$$('[data-lane]').filter(function(e){return e.classList.contains('pill')});
+var laneGs=$$('#archSvg .lane');
+function setLane(k){
+  lanePills.forEach(function(b){b.classList.toggle('on', b.dataset.lane===k)});
+  laneGs.forEach(function(g){
+    g.classList.remove('dim','lit');
+    if(k!=='all' && g.dataset.lane!==k) g.classList.add('dim'); else g.classList.add('lit');
+  });
+  laneInfo.innerHTML='<div class="k">'+LANE[k].h+'</div><p style="margin:6px 0 0;font-size:13.6px;line-height:1.75;color:var(--ink2)">'+LANE[k].p+'</p>';
+}
+lanePills.forEach(function(b){b.addEventListener('click',function(){setLane(b.dataset.lane)})});
+setLane('all');
+
+/* ---------------------------------------------------------- IF calculator */
+var IF_DEF_M=[5,4,4,3,5,4,3];
+var IF_PRESETS={
+  all:['1','1','1','1','1','1','1'],
+  typ:['1','1','1','1','1','0','0'],
+  one:['1','1','1','1','1','1','0'],
+  bad:['0','1','1','1','0','0','1']
+};
+var ifRows=$$('#ifSheet .row');
+function ifWeights(ms){
+  var sum=ms.reduce(function(a,b){return a+b},0), w=ms.map(function(m){
+    var raw=m/sum, r=Math.round(raw*100)/100;
+    if(raw>0 && r===0) r=0.01;
+    return r;
+  });
+  var acc=w.reduce(function(a,b){return a+b},0);
+  var resid=Math.round((1-acc)*100)/100;
+  var mx=0; for(var i=1;i<ms.length;i++){ if(ms[i]>ms[mx]) mx=i; }
+  w[mx]=Math.round((w[mx]+resid)*100)/100;
+  return {w:w, sum:sum};
+}
+function ifRate(s){
+  if(s>=1) return [5,'s = 1.00　全部满足'];
+  if(s>=0.85) return [4,'0.85 ≤ s &lt; 1.00'];
+  if(s>=0.70) return [3,'0.70 ≤ s &lt; 0.85'];
+  if(s>=0.35) return [2,'0.35 ≤ s &lt; 0.70'];
+  return [1,'0 ≤ s &lt; 0.35'];
+}
+function ifRender(){
+  var ms=ifRows.map(function(r){return parseInt(r.dataset.m,10)});
+  var zs=ifRows.map(function(r){return r.dataset.z});
+  var W=ifWeights(ms), mxw=Math.max.apply(null,W.w);
+  var s=0;
+  ifRows.forEach(function(r,i){
+    var w=W.w[i], z=zs[i];
+    r.querySelector('.imp').textContent=ms[i];
+    r.querySelector('.imp').dataset.m=ms[i];
+    r.querySelector('.wbar i').style.width=(w/mxw*100)+'%';
+    r.querySelector('.wbar i').style.background = z==='1' ? 'var(--ok)' : (z==='0'?'var(--no)':'var(--rule2)');
+    r.querySelector('.wnum').textContent=fx(w,2);
+    var b=r.querySelector('.vbtn');
+    b.dataset.v=z;
+    b.textContent = z==='1'?'满足':(z==='0'?'未满足':'无法确认');
+    r.classList.toggle('off', z==='u');
+    if(z==='1') s+=w;
+  });
+  s=Math.round(s*10000)/10000;
+  var R=ifRate(s);
+  $('#ifSumM').textContent=W.sum;
+  $('#ifSat').textContent=fx(s,2);
+  $('#ifScore').textContent=fx(s,4);
+  $('#ifRate').textContent=R[0];
+  $('#ifRateWhy').innerHTML=R[1];
+  var dx=(40+s*620)-505;
+  $('#ifMark').setAttribute('transform','translate('+fx(dx,1)+',0)');
+}
+ifRows.forEach(function(r){
+  r.querySelector('.vbtn').addEventListener('click',function(){
+    var z=r.dataset.z; r.dataset.z = z==='1'?'0':(z==='0'?'u':'1'); ifRender();
+  });
+  r.querySelector('.imp').addEventListener('click',function(){
+    var m=parseInt(r.dataset.m,10); r.dataset.m = (m%5)+1; ifRender();
+  });
+});
+$$('[data-ifp]').forEach(function(b){
+  b.addEventListener('click',function(){
+    $$('[data-ifp]').forEach(function(o){o.classList.toggle('on',o===b)});
+    var p=IF_PRESETS[b.dataset.ifp];
+    ifRows.forEach(function(r,i){ r.dataset.m=IF_DEF_M[i]; r.dataset.z=p[i]; });
+    ifRender();
+  });
+});
+ifRender();
+
+/* ---------------------------------------------------------- WC calculator */
+var ALPHA={1:1.0,2:1.5,3:2.5,4:3.5,5:5.0};
+var WC_PRESETS={
+  beach:[
+    {n:'金毛犬',k:'实体',m:5,q:[['外观与身份是否全程一致',0],['四肢与躯干结构是否正常',0],['毛发边缘是否出现融化或穿模',1]]},
+    {n:'沿海滩奔跑',k:'动作',m:5,q:[['步态是否符合犬类运动规律',0],['足部与地面接触是否稳定（无滑步或穿地）',1]]},
+    {n:'红色围巾',k:'实体',m:3,q:[['是否始终附着在颈部',0],['形变是否符合布料物理',0]]},
+    {n:'海浪拍岸',k:'动作',m:2,q:[['波浪的推进与回落是否连贯',0],['浪花与雪面的交界是否稳定',0]]},
+    {n:'雪地与海滩背景',k:'实体',m:2,q:[['雪面纹理是否随时间稳定',0],['远处地平线是否发生漂移',0]]},
+    {n:'远处的两个人影',k:'实体',m:1,q:[['人形结构是否完整',0],['行走姿态是否自然',1]]}
+  ],
+  street:[
+    {n:'主角行人',k:'实体',m:5,q:[['外观与身份是否全程一致',0],['步态是否自然',0]]},
+    {n:'街边行人甲',k:'实体',m:1,q:[['人形结构是否完整',1],['行走姿态是否自然',0]]},
+    {n:'街边行人乙',k:'实体',m:1,q:[['人形结构是否完整',1],['行走姿态是否自然',0]]},
+    {n:'骑车经过的人',k:'动作',m:1,q:[['车轮转动与位移是否匹配',1],['骑行姿态是否稳定',0]]},
+    {n:'路边摊招牌',k:'实体',m:1,q:[['文字是否稳定不闪变',1],['结构是否保持一致',0]]},
+    {n:'远处车流',k:'动作',m:1,q:[['车辆行驶方向是否一致',1],['是否出现车辆穿模',0]]},
+    {n:'树叶与阴影',k:'实体',m:1,q:[['叶片运动是否自然',1],['阴影方向是否稳定',0]]}
+  ]
+};
+var wcData=JSON.parse(JSON.stringify(WC_PRESETS.beach));
+function wcRate(s){
+  if(s>=0.89) return [5,'0.89 ≤ s ≤ 1.00'];
+  if(s>=0.78) return [4,'0.78 ≤ s &lt; 0.89'];
+  if(s>=0.58) return [3,'0.58 ≤ s &lt; 0.78'];
+  if(s>=0.20) return [2,'0.20 ≤ s &lt; 0.58'];
+  return [1,'0 ≤ s &lt; 0.20'];
+}
+function wcBuild(){
+  var h='';
+  wcData.forEach(function(t,ti){
+    var viol=t.q.reduce(function(a,q){return a+q[1]},0), c=1-viol/t.q.length;
+    h+='<div class="rowgrp" data-t="'+ti+'">'
+      +'<div class="grphd">'
+      +'<button class="imp" type="button" style="width:34px;flex:none" data-ti="'+ti+'" data-m="'+t.m+'" aria-label="调整重要度">'+t.m+'</button>'
+      +'<span class="gname">'+t.n+'</span><span class="gkind">'+t.k+'</span>'
+      +'<span class="gc">α = '+fx(ALPHA[t.m],1)+'　c<sub>t</sub> = '+fx(c,3)+'</span></div>';
+    t.q.forEach(function(q,qi){
+      h+='<div class="qrow"><span>'+q[0]+'</span>'
+        +'<button class="vbtn" type="button" data-ti="'+ti+'" data-qi="'+qi+'" data-v="'+(q[1]?'0':'1')+'">'
+        +(q[1]?'检出违背':'未见违背')+'</button></div>';
+    });
+    h+='</div>';
+  });
+  $('#wcSheet').innerHTML=h;
+  $$('#wcSheet .vbtn').forEach(function(b){
+    b.addEventListener('click',function(){
+      var t=wcData[+b.dataset.ti]; t.q[+b.dataset.qi][1]= t.q[+b.dataset.qi][1]?0:1; wcBuild();
+    });
+  });
+  $$('#wcSheet .imp').forEach(function(b){
+    b.addEventListener('click',function(){
+      var t=wcData[+b.dataset.ti]; t.m=(t.m%5)+1; wcBuild();
+    });
+  });
+  wcCompute();
+}
+function wcCompute(){
+  var sa=0, sac=0, sc=0, tq=0, tb=0;
+  wcData.forEach(function(t){
+    var viol=t.q.reduce(function(a,q){return a+q[1]},0), c=1-viol/t.q.length, a=ALPHA[t.m];
+    sa+=a; sac+=a*c; sc+=c; tq+=t.q.length; tb+=viol;
+  });
+  var s1=Math.round((sac/sa)*10000)/10000;
+  var s2=Math.round((sc/wcData.length)*10000)/10000;
+  var s3=Math.round((1-tb/tq)*10000)/10000;
+  var R=wcRate(s1);
+  $('#wcT').textContent=wcData.length;
+  $('#wcSumA').textContent=fx(sa,1);
+  $('#wcScore').textContent=fx(s1,4);
+  $('#wcRate').textContent=R[0];
+  $('#wcRateWhy').innerHTML=R[1];
+  var set=function(id,tid,s){
+    var w=s*438;
+    $(id).setAttribute('width',fx(Math.max(w,0),1));
+    var t=$(tid); t.setAttribute('x', fx(230+Math.max(w,0)+12,1));
+    t.textContent=fx(s,4)+' → '+wcRate(s)[0]+' 分';
+  };
+  set('#agg1','#agg1t',s1); set('#agg2','#agg2t',s2); set('#agg3','#agg3t',s3);
+  var dx=(40+s1*620)-485;
+  $('#wcMark').setAttribute('transform','translate('+fx(dx,1)+',0)');
+}
+$$('[data-wcp]').forEach(function(b){
+  b.addEventListener('click',function(){
+    $$('[data-wcp]').forEach(function(o){o.classList.toggle('on',o===b)});
+    wcData=JSON.parse(JSON.stringify(WC_PRESETS[b.dataset.wcp]));
+    wcBuild();
+  });
+});
+wcBuild();
+
+/* ---------------------------------------------------------- bench table */
+var BENCH=[
+  {g:'闭源'},
+  {n:'GPT-5',        if:[.62,.71,.50,.88,.74], wc:[1.66,1.19,.20,.48,.49], pq:[.95,.86,.34,.76,.51], all:[1.08,1.03,.35,.71,null]},
+  {n:'Gemini-3.1-Pro',if:[.77,.76,.40,.86,.71], wc:[1.27,1.08,.28,.62,.54], pq:[1.44,1.12,.21,.59,.41], all:[1.16,1.04,.30,.69,null]},
+  {n:'Doubao-Seed-2.0-Lite',if:[.80,.83,.41,.84,.67], wc:[1.56,1.24,.24,.53,.44], pq:[.80,.75,.38,.84,.55], all:[1.05,1.03,.35,.73,null]},
+  {g:'开源'},
+  {n:'InternVL3-8B', if:[1.26,.95,.24,.60,.57], wc:[2.10,1.32,.15,.36,.22], pq:[1.29,1.00,.24,.61,.22], all:[1.56,1.17,.21,.52,null]},
+  {n:'InternVL3-38B',if:[.82,.83,.40,.82,.65], wc:[2.11,1.32,.15,.35,.15], pq:[1.33,1.08,.27,.58,.20], all:[1.42,1.21,.27,.58,null]},
+  {n:'Qwen3-VL-8B',  if:[.93,.89,.34,.80,.60], wc:[1.79,1.35,.22,.46,.29], pq:[1.28,1.04,.28,.60,.34], all:[1.33,1.16,.28,.62,null]},
+  {n:'Qwen3-VL-30B-A3B',if:[.95,.87,.32,.80,.62], wc:[1.90,1.31,.19,.40,.22], pq:[1.36,1.09,.28,.55,.37], all:[1.40,1.17,.27,.58,null]},
+  {n:'Qwen3-VL-235B-A22B',if:[.93,.87,.33,.80,.65], wc:[1.63,1.30,.24,.52,.31], pq:[1.27,1.04,.28,.60,.40], all:[1.27,1.12,.29,.64,null]},
+  {g:'本文'},
+  {n:'FIRM-Video 数据构造流水线 †',pipe:1, if:[.68,.68,.43,.90,.69], wc:[.80,.83,.41,.84,.63], pq:[.74,.70,.40,.86,.61], all:[.73,.74,.41,.87,null]},
+  {n:'FIRM-Video-8B (InternVL3-8B)',ours:1, if:[.69,.73,.45,.87,.67], wc:[.96,.95,.37,.76,.49], pq:[.90,.77,.32,.80,.35], all:[.85,.83,.38,.81,null]},
+  {n:'FIRM-Video-8B (Qwen3-VL-8B)',ours:1, if:[.65,.77,.50,.88,.69], wc:[.86,.88,.40,.80,.53], pq:[.82,.74,.36,.83,.51], all:[.78,.80,.42,.84,null]}
+];
+function renderBench(dim){
+  var rows=BENCH.filter(function(r){return r.n && !r.pipe});
+  var best=[0,1,2,3,4].map(function(ci){
+    var vals=rows.map(function(r){return r[dim][ci]}).filter(function(v){return v!==null});
+    if(!vals.length) return null;
+    return (ci<2)? Math.min.apply(null,vals) : Math.max.apply(null,vals);
+  });
+  var h='';
+  BENCH.forEach(function(r){
+    if(r.g){ h+='<tr class="grp"><td colspan="7">'+r.g+'</td></tr>'; return; }
+    var d=r[dim];
+    var cls = r.ours?'ours':(r.pipe?'pipe':'');
+    var cell=function(ci,dec){
+      var v=d[ci];
+      if(v===null) return '<td class="op">—</td>';
+      var isBest = !r.pipe && best[ci]!==null && Math.abs(v-best[ci])<1e-9;
+      return '<td'+(isBest?' class="best"':'')+'>'+fx(v,dec)+'</td>';
+    };
+    var bw=Math.min(100, d[0]/2.2*100);
+    h+='<tr class="'+cls+'"><td>'+r.n+'</td>'
+      +cell(0,2)
+      +'<td><span class="wbar" style="height:9px"><i style="width:'+fx(bw,1)+'%;background:'+(r.ours?'var(--if)':(r.pipe?'var(--pq)':'var(--rule2)'))+'"></i></span></td>'
+      +cell(1,2)+cell(2,2)+cell(3,2)+cell(4,2)+'</tr>';
+  });
+  $('#benchBody').innerHTML=h;
+  $('#thSrcc').innerHTML = dim==='all' ? 'SRCC ↑<br><span class="op">（未报告）</span>' : 'SRCC ↑';
+}
+$$('[data-dim]').forEach(function(b){
+  b.addEventListener('click',function(){
+    $$('[data-dim]').forEach(function(o){o.classList.toggle('on',o===b)});
+    renderBench(b.dataset.dim);
+  });
+});
+renderBench('wc');
+
+/* ---------------------------------------------------------- Best-of-N chart */
+var BON={
+  total:{lavie:[79.42,80.03,80.45,79.95,80.72],cog:[78.57,78.49,78.35,78.67,79.68],wan:[80.40,81.43,81.70,81.64,82.36]},
+  quality:{lavie:[81.34,81.61,82.10,81.61,82.14],cog:[80.90,80.22,80.27,80.30,81.03],wan:[84.13,84.30,84.43,84.86,84.91]},
+  semantic:{lavie:[71.77,73.73,73.82,73.33,75.06],cog:[69.25,71.59,70.65,72.17,74.28],wan:[65.49,69.96,70.78,68.74,72.19]}
+};
+var GENS=[{k:'lavie',n:'LaVie-Base'},{k:'cog',n:'CogVideoX-2B'},{k:'wan',n:'Wan2.1-T2V-1.3B'}];
+var STRAT=[{n:'Qwen3-VL-8B',c:'var(--m6)'},{n:'InternVL3-8B',c:'var(--m5)'},{n:'VideoScore2',c:'var(--m4)'},{n:'FIRM-Video-8B',c:'var(--if)'}];
+function renderBon(metric){
+  var D=BON[metric], all=[];
+  GENS.forEach(function(g){ for(var i=1;i<5;i++) all.push(D[g.k][i]-D[g.k][0]); });
+  var lo=Math.min(0,Math.min.apply(null,all))*1.25, hi=Math.max.apply(null,all)*1.18;
+  var X0=196, X1=650, sc=(X1-X0)/(hi-lo);
+  var zx=X0+(0-lo)*sc;
+  var h='';
+  h+='<line x1="'+fx(zx,1)+'" y1="24" x2="'+fx(zx,1)+'" y2="286" class="s-rule2" stroke-width="1.4"/>';
+  h+='<text x="'+fx(zx,1)+'" y="16" text-anchor="middle" class="lbl">随机采样基准</text>';
+  var y=40;
+  GENS.forEach(function(g,gi){
+    var base=D[g.k][0];
+    h+='<text x="186" y="'+(y+30)+'" text-anchor="end" font-size="12.5" class="f-ink">'+g.n+'</text>';
+    h+='<text x="186" y="'+(y+46)+'" text-anchor="end" class="tiny">随机 '+fx(base,2)+'</text>';
+    for(var i=1;i<5;i++){
+      var d=D[g.k][i]-base, by=y+(i-1)*17;
+      var w=Math.abs(d)*sc, bx = d>=0 ? zx : zx-w;
+      h+='<rect x="'+fx(bx,1)+'" y="'+by+'" width="'+fx(w,1)+'" height="13" rx="2" fill="'+STRAT[i-1].c+'"'+(i===4?'':' opacity=".8"')+'/>';
+      var tx = d>=0 ? bx+w+6 : zx+8;
+      h+='<text x="'+fx(tx,1)+'" y="'+(by+11)+'" text-anchor="start" class="num"'+(i===4?' style="fill:var(--if-ink)"':(d<0?' style="fill:var(--no-ink)"':''))+'>'+(d>=0?'+':'')+fx(d,2)+'</text>';
+    }
+    y+=86;
+    if(gi<2) h+='<line x1="16" y1="'+(y-14)+'" x2="684" y2="'+(y-14)+'" class="s-rule dash2" stroke-width="1"/>';
+  });
+  var sv=$('#bonSvg');
+  sv.innerHTML=h;
+  sv.setAttribute('aria-label','Best-of-8 相对随机采样的 '+metric+' 增益，FIRM-Video-8B 在三个生成器上均为最高');
+}
+$$('[data-bon]').forEach(function(b){
+  b.addEventListener('click',function(){
+    $$('[data-bon]').forEach(function(o){o.classList.toggle('on',o===b)});
+    renderBon(b.dataset.bon);
+  });
+});
+renderBon('total');
+
+})();
+</script>
+</body>
+</html>
