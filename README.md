@@ -89,6 +89,10 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`DreamX-Creator`**, Democratizing Native Audio-Video Generation at 2K Resolution. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.31106)] · ⚡`realtime`
+* Can Video World Models Track Unobserved World States?. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.30692)] · 🕹️`control`
+* **`Matrix-Game 3.5`**, Enhancing Real-Time Streaming Interactive World Models with Patch Memory. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.29910)] · 🌍`systems` ⚡`realtime` 🧠`memory`
+* **`Off-Manifold Refinement`**, Guiding Video Generators with a Frozen World Model. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.29904)] · 🧠`memory`
 * **`LayerRecall`**, A State-Conditioned Memory Router for Long-Horizon Consistency in Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.28460)] · 🧠`memory`
 * How Far Can 5,500 Hours of Driving Take You? A Scaling Law Analysis of Video Diffusion Models. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.28404)] · 🧠`memory`
 * **`DensityKV`**, Density-Guided KV Cache Compression for Long Video Generation. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.27922)] · ⚡`realtime`
