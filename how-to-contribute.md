@@ -113,6 +113,11 @@ It can carry a written explainer the same way — see
 `explainers/<paper-id>.html` and the next build publishes it and badges the
 row. Neither needs registering anywhere; the filename is the whole of it.
 
+A report that spans the index rather than a single paper has no row to hang
+off, so it goes to [`notes/`](notes/README.md) instead and is published under
+`/notes/` behind a listing of its own. A note names itself in its `<head>`;
+see that README.
+
 ## Maintainers
 
 The [candidate pipeline](docs/candidate-pipeline.md) opens a review inbox every day.

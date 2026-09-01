@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>从 DMD 到 Data-Forcing：三代分布匹配蒸馏方法对比</title>
+<meta name="description" content="DMD、DMD2、Data-Forcing Distillation 共享同一条反向 KL 骨架，差别只在拿什么信号防住模式坍缩：教师合成配对的回归损失、判别器的 GAN 损失，还是让真实数据直接进入分布匹配梯度。">
+<style>
+  :root { color-scheme: light dark; }
+  html[data-theme="light"] { color-scheme: light; }
+  html[data-theme="dark"]  { color-scheme: dark; }
+
+  body {
+    color-scheme: light;
+    --page:      #f9f9f7;
+    --surface:   #fcfcfb;
+    --ink:       #0b0b0b;
+    --ink2:      #52514e;
+    --muted:     #898781;
+    --grid:      #e1e0d9;
+    --axis:      #c3c2b7;
+    --hairline:  rgba(11,11,11,0.10);
+    --c-gen:     #2a78d6;  /* 生成器（学生） */
+    --c-teacher: #eb6834;  /* 教师 / 真实分数 */
+    --c-fake:    #1baf7a;  /* 假分数网络 */
+    --c-pair:    #eda100;  /* 配对数据 / 回归 */
+    --c-gan:     #e87ba4;  /* GAN 判别器 */
+    --c-data:    #008300;  /* 真实数据 */
+    --c-grad:    #e34948;  /* 分布匹配梯度 */
+    --bar-dim:   #9ec5f4;  /* 非重点柱 */
+    --bar-acc:   #1c5cab;  /* 重点柱 */
+    --diff-add:  #006300;
+    --diff-del:  #d03b3b;
+    --code-bg:   #f4f3f0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) body {
+      color-scheme: dark;
+      --page:      #0d0d0d;
+      --surface:   #1a1a19;
+      --ink:       #ffffff;
+      --ink2:      #c3c2b7;
+      --muted:     #898781;
+      --grid:      #2c2c2a;
+      --axis:      #383835;
+      --hairline:  rgba(255,255,255,0.10);
+      --c-gen:     #3987e5;
+      --c-teacher: #d95926;
+      --c-fake:    #199e70;
+      --c-pair:    #c98500;
+      --c-gan:     #d55181;
+      --c-data:    #0ca30c;
+      --c-grad:    #e66767;
+      --bar-dim:   #1c5cab;
+      --bar-acc:   #6da7ec;
+      --diff-add:  #0ca30c;
+      --diff-del:  #e66767;
+      --code-bg:   #232322;
+    }
+  }
+  html[data-theme="dark"] body {
+    color-scheme: dark;
+    --page:      #0d0d0d;
+    --surface:   #1a1a19;
+    --ink:       #ffffff;
+    --ink2:      #c3c2b7;
+    --muted:     #898781;
+    --grid:      #2c2c2a;
+    --axis:      #383835;
+    --hairline:  rgba(255,255,255,0.10);
+    --c-gen:     #3987e5;
+    --c-teacher: #d95926;
+    --c-fake:    #199e70;
+    --c-pair:    #c98500;
+    --c-gan:     #d55181;
+    --c-data:    #0ca30c;
+    --c-grad:    #e66767;
+    --bar-dim:   #1c5cab;
+    --bar-acc:   #6da7ec;
+    --diff-add:  #0ca30c;
+    --diff-del:  #e66767;
+    --code-bg:   #232322;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 16px 64px;
+    background: var(--page); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-size: 15px; line-height: 1.8;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+
+  /* ---------- header ---------- */
+  header { padding: 44px 4px 10px; position: relative; }
+  .kicker { font-size: 12.5px; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; }
+  h1 { font-size: 27px; line-height: 1.4; margin: 0 0 10px; font-weight: 700; }
+  .sub { color: var(--ink2); max-width: 46em; margin: 0 0 18px; }
+  .paperchips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pchip {
+    display: inline-flex; align-items: baseline; gap: 8px;
+    border: 1px solid var(--hairline); background: var(--surface);
+    border-radius: 999px; padding: 5px 14px; font-size: 12.5px; color: var(--ink2);
+    text-decoration: none;
+  }
+  .pchip b { color: var(--ink); font-weight: 600; }
+  .pchip .id { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #themeBtn {
+    position: absolute; top: 44px; right: 4px;
+    border: 1px solid var(--hairline); background: var(--surface); color: var(--ink2);
+    border-radius: 999px; padding: 5px 13px; font-size: 12.5px; cursor: pointer;
+  }
+  #themeBtn:hover { color: var(--ink); }
+
+  /* ---------- sections ---------- */
+  section.card {
+    background: var(--surface); border: 1px solid var(--hairline);
+    border-radius: 14px; padding: 26px 28px 24px; margin: 18px 0;
+  }
+  .sechead { display: flex; align-items: baseline; gap: 12px; margin: 0 0 6px; }
+  .secnum {
+    font-size: 12px; font-weight: 700; color: var(--muted);
+    letter-spacing: .08em; font-variant-numeric: tabular-nums;
+  }
+  h2 { font-size: 19.5px; margin: 0; font-weight: 700; }
+  h3 { font-size: 16px; margin: 26px 0 8px; font-weight: 700; }
+  p  { margin: 8px 0; color: var(--ink2); }
+  p strong, li strong { color: var(--ink); font-weight: 600; }
+  .lead { color: var(--ink2); }
+  ul.pts { margin: 6px 0 4px; padding-left: 1.3em; color: var(--ink2); }
+  ul.pts li { margin: 5px 0; }
+  ul.pts li::marker { color: var(--muted); }
+
+  /* ---------- math ---------- */
+  .formula {
+    background: color-mix(in srgb, var(--ink) 3%, var(--surface));
+    border: 1px solid var(--hairline); border-radius: 10px;
+    padding: 13px 18px; margin: 12px 0; overflow-x: auto;
+    font-size: 15.5px; white-space: nowrap; color: var(--ink);
+  }
+  .formula .tag { float: right; color: var(--muted); font-size: 12px; margin-left: 18px; }
+  .m, .formula i { font-family: Georgia, "Times New Roman", "STIX Two Math", serif; font-style: italic; }
+  .formula sub, .formula sup, .m sub { font-size: 11px; }
+  .op { font-family: Georgia, serif; font-style: normal; padding: 0 1px; }
+  .hl-grad { color: var(--c-grad); font-weight: 600; }
+  .hl-data { color: var(--c-data); font-weight: 600; }
+  .hl-pair { color: color-mix(in srgb, var(--c-pair) 78%, var(--ink)); font-weight: 600; }
+  .hl-gan  { color: var(--c-gan); font-weight: 600; }
+
+  /* ---------- 演进主线 ---------- */
+  .evo { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 10px; align-items: stretch; margin-top: 14px; }
+  .evo-card {
+    border: 1px solid var(--hairline); border-radius: 12px; padding: 14px 16px;
+    background: color-mix(in srgb, var(--ink) 2%, var(--surface));
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .evo-date { font-size: 11.5px; color: var(--muted); letter-spacing: .05em; font-variant-numeric: tabular-nums; }
+  .evo-name { font-size: 16.5px; font-weight: 700; }
+  .evo-en   { font-size: 11.5px; color: var(--muted); margin-bottom: 4px; line-height: 1.5; }
+  .evo-line { font-size: 12.5px; color: var(--ink2); line-height: 1.65; }
+  .evo-arrow { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; min-width: 118px; }
+  .evo-arrow .glyph { color: var(--muted); font-size: 17px; line-height: 1; }
+  .delta { font-size: 11.5px; line-height: 1.5; border-radius: 7px; padding: 1px 8px; white-space: nowrap; }
+  .delta.add { color: var(--diff-add); background: color-mix(in srgb, var(--diff-add) 9%, var(--surface)); }
+  .delta.del { color: var(--diff-del); background: color-mix(in srgb, var(--diff-del) 9%, var(--surface)); }
+  @media (max-width: 780px) {
+    .evo { grid-template-columns: 1fr; }
+    .evo-arrow { flex-direction: row; min-width: 0; flex-wrap: wrap; }
+    .evo-arrow .glyph { transform: rotate(90deg); }
+  }
+
+  /* ---------- figures ---------- */
+  .fig { margin: 14px 0 6px; }
+  .fig svg { width: 100%; height: auto; display: block; }
+  .figcap { font-size: 12.5px; color: var(--muted); margin: 6px 2px 0; line-height: 1.65; }
+  .svgtxt   { font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+
+  /* 图例 */
+  .legendrow { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 12px 0 4px; align-items: center; }
+  .lg { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink2); }
+  .lg .sw { width: 13px; height: 13px; border-radius: 4px; border: 1.6px solid; display: inline-block; }
+  .lg .ln { width: 22px; height: 0; border-top: 2px solid var(--muted); display: inline-block; }
+  .lg .ln.dash { border-top-style: dashed; }
+
+  /* 方法小节 */
+  .mhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 30px 0 4px; }
+  .mnum {
+    width: 26px; height: 26px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--ink) 6%, var(--surface)); border: 1px solid var(--hairline);
+    font-size: 13px; font-weight: 700; color: var(--ink2);
+  }
+  .mtitle { font-size: 17px; font-weight: 700; }
+  .mmeta { font-size: 12px; color: var(--muted); }
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+  .bdg {
+    font-size: 11.5px; color: var(--ink2); border: 1px solid var(--hairline);
+    background: color-mix(in srgb, var(--ink) 3%, var(--surface));
+    border-radius: 999px; padding: 2px 10px;
+  }
+
+  /* ---------- 代码 diff ---------- */
+  .codeblock {
+    background: var(--code-bg); border: 1px solid var(--hairline); border-radius: 10px;
+    padding: 14px 16px; margin: 12px 0; overflow-x: auto; white-space: pre;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12.8px; line-height: 1.75; color: var(--ink2);
+  }
+  .codeblock .cm { color: var(--muted); }
+  .codeblock .ln-add { color: var(--diff-add); background: color-mix(in srgb, var(--diff-add) 8%, transparent); display: block; border-radius: 4px; padding: 0 6px; margin: 0 -6px; }
+  .codeblock .ln-del { color: var(--diff-del); background: color-mix(in srgb, var(--diff-del) 8%, transparent); display: block; border-radius: 4px; padding: 0 6px; margin: 0 -6px; text-decoration: line-through; text-decoration-thickness: 1px; }
+  .codeblock .kw { font-weight: 600; }
+
+  /* ---------- 对比表 ---------- */
+  .cmp { width: 100%; border-collapse: collapse; margin: 14px 0 4px; font-size: 13.5px; }
+  .cmp th, .cmp td { text-align: left; vertical-align: top; padding: 10px 12px; border-top: 1px solid var(--grid); line-height: 1.65; }
+  .cmp thead th { border-top: none; font-size: 13px; color: var(--ink); padding-top: 4px; }
+  .cmp thead .en { display: block; font-weight: 400; font-size: 11px; color: var(--muted); }
+  .cmp td:first-child { color: var(--muted); font-size: 12.5px; white-space: nowrap; padding-right: 6px; width: 92px; }
+  .cmp td { color: var(--ink2); }
+  .cmp td b { color: var(--ink); font-weight: 600; }
+  .cmp .good { color: var(--diff-add); font-weight: 600; }
+  .cmp .bad  { color: var(--diff-del); }
+
+  /* ---------- 图表 ---------- */
+  .charts2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  @media (max-width: 780px) { .charts2 { grid-template-columns: 1fr; } }
+  .chart-title { font-size: 13.5px; font-weight: 600; color: var(--ink); margin: 14px 0 2px; }
+  .chart-sub { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .bar { cursor: default; }
+  .bar:hover rect.b, .dotrow:hover circle { filter: brightness(1.08); }
+  details.dtable { margin: 6px 0 0; }
+  details.dtable summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+  details.dtable table { border-collapse: collapse; margin: 8px 0 4px; font-size: 12.5px; }
+  details.dtable th, details.dtable td { border: 1px solid var(--grid); padding: 4px 10px; color: var(--ink2); font-variant-numeric: tabular-nums; }
+  details.dtable th { color: var(--ink); font-weight: 600; }
+
+  #tip {
+    position: fixed; z-index: 50; pointer-events: none; display: none;
+    background: var(--ink); color: var(--page);
+    font-size: 12px; line-height: 1.5; padding: 6px 10px; border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.18); max-width: 260px;
+  }
+  #tip b { font-weight: 600; }
+
+  /* ---------- 评注 ---------- */
+  .insight {
+    border-left: 3px solid var(--c-gen); border-radius: 4px;
+    background: color-mix(in srgb, var(--c-gen) 5%, var(--surface));
+    padding: 10px 16px; margin: 12px 0; color: var(--ink2); font-size: 14px;
+  }
+  .insight .t { font-weight: 700; color: var(--ink); display: block; margin-bottom: 2px; font-size: 13.5px; }
+
+  footer { color: var(--muted); font-size: 12.5px; padding: 22px 6px 0; line-height: 2; }
+  footer a { color: var(--ink2); }
+</style>
+</head>
+<body>
+<div id="tip"></div>
+
+<!-- 全局箭头 marker 定义 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="mk-ink"  markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0.4 L8,4 L0,7.6 Z" fill="var(--muted)"/></marker>
+  <marker id="mk-blue" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0.4 L8,4 L0,7.6 Z" fill="var(--c-gen)"/></marker>
+  <marker id="mk-grad" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0.4 L8,4 L0,7.6 Z" fill="var(--c-grad)"/></marker>
+  <marker id="mk-data" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0.4 L8,4 L0,7.6 Z" fill="var(--c-data)"/></marker>
+  <marker id="mk-gan"  markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0.4 L8,4 L0,7.6 Z" fill="var(--c-gan)"/></marker>
+  <marker id="mk-pair" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0.4 L8,4 L0,7.6 Z" fill="var(--c-pair)"/></marker>
+  <marker id="mk-aqua" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0.4 L8,4 L0,7.6 Z" fill="var(--c-fake)"/></marker>
+</defs></svg>
+
+<div class="wrap">
+
+<header>
+  <div class="kicker">Diffusion Distillation · 方法解读</div>
+  <h1>从 DMD 到 Data-Forcing：<br>三代「分布匹配蒸馏」的方法演进</h1>
+  <p class="sub">同一条反向 KL 骨架，三种给学生"补课"的方式——教师合成配对（回归损失）→ 判别器（GAN 损失）→ 真实数据直接进入分布匹配梯度。</p>
+  <div class="paperchips">
+    <a class="pchip" href="https://arxiv.org/abs/2311.18828" target="_blank"><b>DMD</b> One-step Diffusion with Distribution Matching Distillation <span class="id">arXiv 2311.18828</span></a>
+    <a class="pchip" href="https://arxiv.org/abs/2405.14867" target="_blank"><b>DMD2</b> Improved Distribution Matching Distillation <span class="id">arXiv 2405.14867</span></a>
+    <a class="pchip" href="https://arxiv.org/abs/2606.18478" target="_blank"><b>DFD</b> Data-Forcing Distillation <span class="id">arXiv 2606.18478</span></a>
+  </div>
+  <button id="themeBtn" type="button">☾ 深色</button>
+</header>
+
+<!-- ═══════════════ 01 演进主线 ═══════════════ -->
+<section class="card">
+  <div class="sechead"><span class="secnum">01</span><h2>一条主线：拿什么信号防住反向 KL 的"模式坍缩"</h2></div>
+  <p class="lead">三篇论文共享同一个训练骨架——用 <b>反向 KL 的分数差梯度</b> 把学生的输出分布对齐到教师分布。真正的分歧只有一个：反向 KL 天然"认高密度模式"（mode-seeking），会丢模式、丢多样性，<b>用什么辅助信号把丢掉的东西补回来</b>，就是三代方法的分界线。</p>
+  <div class="evo">
+    <div class="evo-card">
+      <div class="evo-date">2023.11 · CVPR 2024 · 图像</div>
+      <div class="evo-name">DMD</div>
+      <div class="evo-en">One-step Diffusion with Distribution Matching Distillation</div>
+      <div class="evo-line">反向 KL 分数差梯度 <b>+ LPIPS 回归损失</b>：用教师 ODE 离线采样的"噪声→图像"配对钉住所有模式。单步生成，FID 追平教师量级。</div>
+    </div>
+    <div class="evo-arrow">
+      <span class="delta del">− 回归损失 · 配对数据集</span>
+      <span class="glyph">⟶</span>
+      <span class="delta add">+ TTUR（假分数 5:1 更新）</span>
+      <span class="delta add">+ GAN 判别器（真实图像）</span>
+      <span class="delta add">+ 多步生成 · 反向模拟</span>
+    </div>
+    <div class="evo-card">
+      <div class="evo-date">2024.05 · NeurIPS 2024 · 图像</div>
+      <div class="evo-name">DMD2</div>
+      <div class="evo-en">Improved Distribution Matching Distillation for Fast Image Synthesis</div>
+      <div class="evo-line">扔掉昂贵且"绑死教师上限"的回归损失，稳定性交给 <b>TTUR</b>，真实数据经 <b>判别器</b> 隐式注入。学生首次超越教师（ImageNet FID 1.28 &lt; 2.32）。</div>
+    </div>
+    <div class="evo-arrow">
+      <span class="delta del">− GAN 判别器 · 对抗训练</span>
+      <span class="glyph">⟶</span>
+      <span class="delta add">+ 教师直接给真实样本打分</span>
+      <span class="delta add">+ 一行代码 · 百步级后训练</span>
+    </div>
+    <div class="evo-card">
+      <div class="evo-date">2026.06 · arXiv · 视频</div>
+      <div class="evo-name">DFD</div>
+      <div class="evo-en">Data-Forcing Distillation: Restoring Diversity and Fidelity in Few-Step Video Generation</div>
+      <div class="evo-line">诊断视频蒸馏的多样性坍缩与过饱和都源于反向 KL；让 <b>真实数据显式进入分布匹配梯度</b>（教师以概率 p 给真实视频打分），在 DMD2 之上后训练 100–300 步即恢复多样性与保真度。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ 02 共同骨架 ═══════════════ -->
+<section class="card">
+  <div class="sechead"><span class="secnum">02</span><h2>共同骨架：反向 KL 的"分数差"梯度</h2></div>
+  <p>三篇论文的学生 <span class="m">G<sub>θ</sub></span> 都不去模仿教师的采样轨迹，而是最小化学生分布与数据分布之间的反向 KL 散度。密度本身算不出来，但它对 <span class="m">θ</span> 的梯度可以写成 <b>两个分数函数之差</b>——而分数恰好能用扩散去噪器来近似：</p>
+  <div class="formula">
+    <span class="tag">DMD Eq.(2)(7) / DMD2 Eq.(2) / DFD Eq.(1)</span>
+    ∇<sub><i>θ</i></sub><i>D</i><sub>KL</sub>(<i>p</i><sub>fake</sub> ∥ <i>p</i><sub>real</sub>) ≈ 𝔼<sub><i>t</i>,<i>z</i>,<i>ε</i></sub>[ <i>w</i><sub><i>t</i></sub> ( <span class="hl-grad"><i>s</i><sub>fake</sub>(<i>x</i><sub><i>t</i></sub>, <i>t</i>) − <i>s</i><sub>real</sub>(<i>x</i><sub><i>t</i></sub>, <i>t</i>)</span> ) ∇<sub><i>θ</i></sub><i>G</i><sub><i>θ</i></sub>(<i>z</i>) ],&nbsp;&nbsp;<i>x</i><sub><i>t</i></sub> = <i>α</i><sub><i>t</i></sub><i>G</i><sub><i>θ</i></sub>(<i>z</i>) + <i>σ</i><sub><i>t</i></sub><i>ε</i>
+  </div>
+  <ul class="pts">
+    <li><b>真实分数 <span class="m">s</span><sub>real</sub></b>：由冻结的预训练教师给出——它是数据分布（加噪后）的分数场，指向"更真实"的方向。</li>
+    <li><b>假分数 <span class="m">s</span><sub>fake</sub></b>：由一个<b>在线训练</b>的第二个扩散模型给出（教师权重初始化），持续用去噪损失拟合学生当前的输出分布，指向"更像学生自己"的方向。二者之差即"去伪存真"的更新方向。</li>
+    <li><b>为什么要加噪</b>：未加噪时 <span class="m">p</span><sub>real</sub> 与 <span class="m">p</span><sub>fake</sub> 支撑集可能不重叠、分数无定义；对样本注入不同强度的高斯噪声后两个分布处处重叠，梯度对任意 <span class="m">t</span> 良定义（Score-SDE 视角）。</li>
+    <li><b>致命弱点</b>：期望在 <b>学生自己的样本</b> 上取——学生没覆盖到的真实模式贡献零梯度，反向 KL 因此"看不见"缺失的模式（§05 图解）。三代方法的全部分歧都围绕这一点展开。</li>
+  </ul>
+</section>
+
+<style>
+  /* SVG 图内样式 */
+  .fig svg text { font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .fig .tm { font-family: Georgia, "Times New Roman", serif; font-style: italic; }
+  .fig .sb { font-size: 8.5px; }
+  .fig .t1 { font-size: 13.5px; font-weight: 600; fill: var(--ink); text-anchor: middle; }
+  .fig .t2 { font-size: 10.5px; fill: var(--muted); text-anchor: middle; }
+  .fig .el { font-size: 11px; fill: var(--ink2); text-anchor: middle; }
+  .fig .bx { stroke-width: 1.6; }
+  .fig .bx-gen     { fill: color-mix(in srgb, var(--c-gen) 9%, var(--surface));     stroke: var(--c-gen); }
+  .fig .bx-teacher { fill: color-mix(in srgb, var(--c-teacher) 9%, var(--surface)); stroke: var(--c-teacher); }
+  .fig .bx-fake    { fill: color-mix(in srgb, var(--c-fake) 9%, var(--surface));    stroke: var(--c-fake); }
+  .fig .bx-pair    { fill: color-mix(in srgb, var(--c-pair) 10%, var(--surface));   stroke: var(--c-pair); }
+  .fig .bx-gan     { fill: color-mix(in srgb, var(--c-gan) 10%, var(--surface));    stroke: var(--c-gan); }
+  .fig .bx-data    { fill: color-mix(in srgb, var(--c-data) 8%, var(--surface));    stroke: var(--c-data); }
+  .fig .bx-note    { fill: color-mix(in srgb, var(--ink) 3%, var(--surface));       stroke: var(--grid); }
+  .fig .flow { fill: none; stroke-width: 2; }
+  .fig .dash { stroke-dasharray: 6 4; }
+</style>
+
+<!-- ═══════════════ 03 三代架构 ═══════════════ -->
+<section class="card">
+  <div class="sechead"><span class="secnum">03</span><h2>三代架构逐一拆解</h2></div>
+  <p>三张图使用同一套视觉词汇、同一个版面网格：上半部分是完全相同的分布匹配骨架，<b>下半部分是每代方法各自的"辅助信号"</b>——把三张图竖着扫一遍，方法的演进一目了然。</p>
+  <div class="legendrow">
+    <span class="lg"><span class="sw" style="border-color:var(--c-gen);background:color-mix(in srgb,var(--c-gen) 9%,var(--surface))"></span>生成器（学生）</span>
+    <span class="lg"><span class="sw" style="border-color:var(--c-teacher);background:color-mix(in srgb,var(--c-teacher) 9%,var(--surface))"></span>教师 / 真实分数 ❄</span>
+    <span class="lg"><span class="sw" style="border-color:var(--c-fake);background:color-mix(in srgb,var(--c-fake) 9%,var(--surface))"></span>假分数 ⟳在线</span>
+    <span class="lg"><span class="sw" style="border-color:var(--c-pair);background:color-mix(in srgb,var(--c-pair) 10%,var(--surface))"></span>教师合成配对</span>
+    <span class="lg"><span class="sw" style="border-color:var(--c-gan);background:color-mix(in srgb,var(--c-gan) 10%,var(--surface))"></span>GAN 判别器</span>
+    <span class="lg"><span class="sw" style="border-color:var(--c-data);background:color-mix(in srgb,var(--c-data) 8%,var(--surface))"></span>真实数据</span>
+    <span class="lg"><span class="ln"></span>数据前向</span>
+    <span class="lg"><span class="ln dash"></span>损失 / 梯度</span>
+  </div>
+
+  <!-- ── ① DMD ── -->
+  <div class="mhead"><span class="mnum">①</span><span class="mtitle">DMD — 分布匹配 + 教师配对回归</span><span class="mmeta">arXiv 2311.18828 · CVPR 2024</span></div>
+  <div class="badges"><span class="bdg">单步生成</span><span class="bdg">图像（EDM / SD v1.5）</span><span class="bdg">两个损失、两条数据流</span></div>
+  <div class="fig">
+  <svg viewBox="0 0 960 432" role="img" aria-label="DMD 架构图">
+    <!-- 分布匹配梯度回传 -->
+    <path class="flow dash" d="M 780,113 C 780,20 320,14 212,92" stroke="var(--c-grad)" marker-end="url(#mk-grad)"/>
+    <text x="500" y="26" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--c-grad)">分布匹配梯度 ∇<tspan class="sb" dy="3.5">θ</tspan><tspan dy="-3.5"> </tspan><tspan class="tm">D</tspan><tspan class="sb" dy="3.5">KL</tspan><tspan dy="-3.5"> ∝ </tspan><tspan class="tm">s</tspan><tspan class="sb" dy="3.5">fake</tspan><tspan dy="-3.5"> − </tspan><tspan class="tm">s</tspan><tspan class="sb" dy="3.5">real</tspan><tspan dy="-3.5">（w</tspan><tspan class="sb" dy="3.5">t</tspan><tspan dy="-3.5"> 归一化梯度幅值）</tspan></text>
+
+    <!-- z → G → x → 加噪 -->
+    <circle cx="68" cy="130" r="23" fill="color-mix(in srgb, var(--ink) 4%, var(--surface))" stroke="var(--axis)" stroke-width="1.4"/>
+    <text x="68" y="135" text-anchor="middle" class="tm" font-size="15" fill="var(--ink)">z</text>
+    <text x="68" y="172" class="t2">~ 𝒩(0, I)</text>
+    <line x1="91" y1="130" x2="122" y2="130" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <rect x="128" y="96" width="158" height="68" rx="10" class="bx bx-gen"/>
+    <text x="207" y="124" class="t1">单步生成器 <tspan class="tm">G</tspan><tspan class="sb" dy="3.5">θ</tspan></text>
+    <text x="207" y="147" class="t2">无时间条件 · 教师权重初始化</text>
+    <line x1="286" y1="130" x2="314" y2="130" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <rect x="320" y="104" width="86" height="52" rx="8" class="bx bx-gen" stroke-dasharray="4 3" stroke-width="1.2"/>
+    <text x="363" y="126" text-anchor="middle" font-size="12" fill="var(--ink)">假样本</text>
+    <text x="363" y="144" text-anchor="middle" class="tm" font-size="11" fill="var(--ink2)">x = G<tspan class="sb" dy="3">θ</tspan><tspan dy="-3">(z)</tspan></text>
+    <line x1="406" y1="130" x2="434" y2="130" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <circle cx="460" cy="130" r="22" fill="color-mix(in srgb, var(--ink) 4%, var(--surface))" stroke="var(--axis)" stroke-width="1.4" stroke-dasharray="3 3"/>
+    <text x="460" y="135" text-anchor="middle" class="tm" font-size="12" fill="var(--ink)">+σ<tspan class="sb" dy="3">t</tspan><tspan dy="-3">ε</tspan></text>
+    <text x="460" y="170" class="t2"><tspan class="tm">t</tspan> ~ U(0.02T, 0.98T)</text>
+
+    <!-- 两个分数网络 -->
+    <line x1="477" y1="117" x2="514" y2="90" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <line x1="477" y1="143" x2="514" y2="182" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <rect x="520" y="48" width="196" height="62" rx="10" class="bx bx-teacher"/>
+    <text x="618" y="74" class="t1">教师 · 真实分数 <tspan class="tm">μ</tspan><tspan class="sb" dy="3.5">real</tspan></text>
+    <text x="618" y="96" class="t2">❄ 冻结（按固定 CFG 引导）</text>
+    <rect x="520" y="186" width="196" height="62" rx="10" class="bx bx-fake"/>
+    <text x="618" y="212" class="t1">假分数 <tspan class="tm">μ</tspan><tspan class="sb" dy="3.5">fake</tspan></text>
+    <text x="618" y="234" class="t2">⟳ 在线训练 · 追踪学生分布</text>
+    <text x="710" y="285" text-anchor="middle" font-size="10.5" fill="var(--c-fake)">去噪损失 ‖μ<tspan class="sb" dy="3">fake</tspan><tspan dy="-3">(x</tspan><tspan class="sb" dy="3">t</tspan><tspan dy="-3">, t) − x‖² · 与 G 1:1 交替更新</tspan></text>
+
+    <!-- 分数差 junction -->
+    <line x1="716" y1="82" x2="763" y2="119" class="flow" stroke="var(--c-teacher)" marker-end="url(#mk-ink)"/>
+    <text x="746" y="86" class="el tm">s<tspan class="sb" dy="3">real</tspan></text>
+    <line x1="716" y1="214" x2="763" y2="142" class="flow" stroke="var(--c-fake)" marker-end="url(#mk-ink)"/>
+    <text x="746" y="224" class="el tm">s<tspan class="sb" dy="3">fake</tspan></text>
+    <circle cx="780" cy="130" r="17" fill="var(--surface)" stroke="var(--c-grad)" stroke-width="1.6"/>
+    <text x="780" y="136" text-anchor="middle" font-size="17" fill="var(--c-grad)">−</text>
+
+    <!-- 回归分支 -->
+    <rect x="128" y="298" width="262" height="76" rx="10" class="bx bx-pair"/>
+    <text x="259" y="322" class="t1" font-size="13">离线配对数据集 𝒟 = {(<tspan class="tm">z</tspan><tspan class="sb" dy="3.5">ref</tspan><tspan dy="-3.5">, </tspan><tspan class="tm">y</tspan><tspan class="sb" dy="3.5">ref</tspan><tspan dy="-3.5">)}</tspan></text>
+    <text x="259" y="343" class="t2">教师 + 确定性 ODE 采样器离线生成</text>
+    <text x="259" y="361" class="t2">ImageNet：2.5 万对 × 256 步/对</text>
+    <line x1="180" y1="296" x2="180" y2="170" class="flow" stroke="var(--c-pair)" marker-end="url(#mk-pair)"/>
+    <text x="163" y="236" class="el tm" text-anchor="end">z<tspan class="sb" dy="3">ref</tspan></text>
+    <path class="flow" d="M 250,166 C 250,252 378,302 444,318" stroke="var(--c-pair)" marker-end="url(#mk-pair)"/>
+    <text x="308" y="246" class="el tm">G<tspan class="sb" dy="3">θ</tspan><tspan dy="-3">(z</tspan><tspan class="sb" dy="3">ref</tspan><tspan dy="-3">)</tspan></text>
+    <line x1="390" y1="336" x2="446" y2="336" class="flow" stroke="var(--c-pair)" marker-end="url(#mk-pair)"/>
+    <text x="418" y="327" class="el tm">y<tspan class="sb" dy="3">ref</tspan></text>
+    <rect x="452" y="306" width="190" height="60" rx="10" class="bx bx-pair"/>
+    <text x="547" y="331" class="t1" font-size="13">LPIPS 回归损失</text>
+    <text x="547" y="352" text-anchor="middle" class="tm" font-size="11" fill="var(--ink2)">ℓ(G<tspan class="sb" dy="3">θ</tspan><tspan dy="-3">(z</tspan><tspan class="sb" dy="3">ref</tspan><tspan dy="-3">), y</tspan><tspan class="sb" dy="3">ref</tspan><tspan dy="-3">)</tspan></text>
+    <path class="flow dash" d="M 547,304 C 560,222 420,182 292,154" stroke="var(--c-pair)" marker-end="url(#mk-pair)"/>
+    <text x="430" y="218" class="el" style="fill:var(--c-pair)"><tspan class="tm">λ</tspan><tspan class="sb" dy="3">reg</tspan><tspan dy="-3"> = 0.25</tspan></text>
+
+    <!-- 注释卡 -->
+    <rect x="668" y="298" width="268" height="118" rx="10" class="bx bx-note" stroke-width="1"/>
+    <text x="684" y="323" font-size="12" font-weight="600" fill="var(--ink)">回归损失的两面</text>
+    <text x="684" y="346" font-size="11" fill="var(--diff-add)">✓ 钉住全部模式：防坍缩、稳训练</text>
+    <text x="684" y="366" font-size="11" fill="var(--diff-del)">✗ 配对数据离线合成昂贵</text>
+    <text x="684" y="386" font-size="11" fill="var(--diff-del)">✗ 学生被绑在教师 ODE 路径上，</text>
+    <text x="700" y="404" font-size="11" fill="var(--diff-del)">质量上限 = 教师</text>
+  </svg>
+  </div>
+  <div class="formula">
+    <span class="tag">生成器总损失</span>
+    <i>L</i><sub>G</sub> = <span class="hl-grad"><i>D</i><sub>KL</sub>(<i>p</i><sub>fake</sub>∥<i>p</i><sub>real</sub>)</span> + <span class="hl-pair"><i>λ</i><sub>reg</sub>·𝔼<sub>(z,y)∼𝒟</sub>[ LPIPS(<i>G</i><sub><i>θ</i></sub>(<i>z</i><sub>ref</sub>), <i>y</i><sub>ref</sub>) ]</span>
+  </div>
+  <ul class="pts">
+    <li><b>定位</b>：把 ProlificDreamer 的变分分数蒸馏（VSD）从"优化单个 3D 粒子"改造成"训练一个生成网络"，首次把分布匹配做成图像蒸馏的主损失。</li>
+    <li><b>回归损失是刚需</b>：消融显示去掉它 FID 从 2.62 恶化到 5.61（ImageNet），出现明显模式坍缩（同一灰车反复出现）；去掉分布匹配则结构崩坏（9.21）。两条腿缺一不可。</li>
+    <li><b>成绩</b>：ImageNet-64 FID <b>2.62</b>（教师 EDM 512 步为 2.32）；zero-shot COCO FID <b>11.49</b>（教师 SD v1.5 为 8.78），推理提速约 30×、20 FPS。</li>
+    <li><b>遗留问题</b>：配对数据离线生成开销大（放到 SDXL 规模约需 700 A100·天）；回归目标与"只匹配分布"的初衷相悖——学生被教师 ODE 路径上界锁死。</li>
+  </ul>
+
+  <!-- ── ② DMD2 ── -->
+  <div class="mhead"><span class="mnum">②</span><span class="mtitle">DMD2 — 扔掉回归，换 TTUR + GAN，扩展多步</span><span class="mmeta">arXiv 2405.14867 · NeurIPS 2024</span></div>
+  <div class="badges"><span class="bdg">1 步 / 4 步</span><span class="bdg">图像（EDM / SD v1.5 / SDXL）</span><span class="bdg">学生首次超越教师</span></div>
+  <div class="fig">
+  <svg viewBox="0 0 960 432" role="img" aria-label="DMD2 架构图">
+    <path class="flow dash" d="M 780,113 C 780,20 320,14 212,92" stroke="var(--c-grad)" marker-end="url(#mk-grad)"/>
+    <text x="500" y="26" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--c-grad)">分布匹配梯度（与 DMD 完全相同）</text>
+
+    <circle cx="68" cy="130" r="23" fill="color-mix(in srgb, var(--ink) 4%, var(--surface))" stroke="var(--axis)" stroke-width="1.4"/>
+    <text x="68" y="135" text-anchor="middle" class="tm" font-size="15" fill="var(--ink)">z</text>
+    <text x="68" y="172" class="t2">~ 𝒩(0, I)</text>
+    <line x1="91" y1="130" x2="122" y2="130" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <rect x="128" y="96" width="158" height="68" rx="10" class="bx bx-gen"/>
+    <text x="207" y="124" class="t1">生成器 <tspan class="tm">G</tspan><tspan class="sb" dy="3.5">θ</tspan><tspan dy="-3.5">（1 或 4 步）</tspan></text>
+    <text x="207" y="147" class="t2">教师权重初始化</text>
+    <line x1="286" y1="130" x2="314" y2="130" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <rect x="320" y="104" width="86" height="52" rx="8" class="bx bx-gen" stroke-dasharray="4 3" stroke-width="1.2"/>
+    <text x="363" y="126" text-anchor="middle" font-size="12" fill="var(--ink)">假样本</text>
+    <text x="363" y="144" text-anchor="middle" class="tm" font-size="11" fill="var(--ink2)">x = G<tspan class="sb" dy="3">θ</tspan><tspan dy="-3">(z)</tspan></text>
+    <line x1="406" y1="130" x2="434" y2="130" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <circle cx="460" cy="130" r="22" fill="color-mix(in srgb, var(--ink) 4%, var(--surface))" stroke="var(--axis)" stroke-width="1.4" stroke-dasharray="3 3"/>
+    <text x="460" y="135" text-anchor="middle" class="tm" font-size="12" fill="var(--ink)">+σ<tspan class="sb" dy="3">t</tspan><tspan dy="-3">ε</tspan></text>
+
+    <!-- 反向模拟 chip -->
+    <path class="flow dash" d="M 168,234 C 150,220 148,194 156,168" stroke="var(--c-gen)" stroke-width="1.4" marker-end="url(#mk-blue)"/>
+    <rect x="128" y="236" width="238" height="56" rx="8" fill="color-mix(in srgb, var(--c-gen) 5%, var(--surface))" stroke="var(--c-gen)" stroke-width="1.1" stroke-dasharray="4 3"/>
+    <text x="247" y="255" text-anchor="middle" font-size="11" font-weight="600" fill="var(--c-gen)">反向模拟 backward simulation</text>
+    <text x="247" y="271" text-anchor="middle" font-size="10.5" fill="var(--ink2)">训练时中间步输入由学生自己滚动生成</text>
+    <text x="247" y="286" text-anchor="middle" font-size="10.5" fill="var(--muted)">4 步表：t = 999 → 749 → 499 → 249</text>
+
+    <rect x="520" y="48" width="196" height="62" rx="10" class="bx bx-teacher"/>
+    <text x="618" y="74" class="t1">教师 · 真实分数 <tspan class="tm">μ</tspan><tspan class="sb" dy="3.5">real</tspan></text>
+    <text x="618" y="96" class="t2">❄ 冻结（按固定 CFG 引导）</text>
+    <line x1="477" y1="117" x2="514" y2="90" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <line x1="477" y1="143" x2="514" y2="182" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <rect x="520" y="186" width="196" height="62" rx="10" class="bx bx-fake"/>
+    <text x="618" y="212" class="t1">假分数 <tspan class="tm">μ</tspan><tspan class="sb" dy="3.5">fake</tspan></text>
+    <text x="618" y="234" class="t2">⟳ TTUR：每 1 次 G 更新 → 5 次</text>
+
+    <line x1="716" y1="82" x2="763" y2="119" class="flow" stroke="var(--c-teacher)" marker-end="url(#mk-ink)"/>
+    <text x="746" y="86" class="el tm">s<tspan class="sb" dy="3">real</tspan></text>
+    <line x1="716" y1="214" x2="763" y2="142" class="flow" stroke="var(--c-fake)" marker-end="url(#mk-ink)"/>
+    <text x="748" y="228" class="el tm">s<tspan class="sb" dy="3">fake</tspan></text>
+    <circle cx="780" cy="130" r="17" fill="var(--surface)" stroke="var(--c-grad)" stroke-width="1.6"/>
+    <text x="780" y="136" text-anchor="middle" font-size="17" fill="var(--c-grad)">−</text>
+
+    <!-- GAN 判别头 -->
+    <line x1="618" y1="248" x2="618" y2="268" stroke="var(--c-gan)" stroke-width="2"/>
+    <rect x="520" y="268" width="196" height="50" rx="10" class="bx bx-gan"/>
+    <text x="618" y="289" class="t1" font-size="13">判别器头 <tspan class="tm">D</tspan></text>
+    <text x="618" y="308" class="t2">挂在 μ<tspan class="sb" dy="3">fake</tspan><tspan dy="-3"> UNet 瓶颈层 · ⟳ 5:1</tspan></text>
+    <path class="flow dash" d="M 520,298 C 400,300 330,240 280,168" stroke="var(--c-gan)" marker-end="url(#mk-gan)"/>
+    <text x="452" y="264" class="el" style="fill:var(--c-gan)">L<tspan class="sb" dy="3">GAN</tspan><tspan dy="-3"> → 更新 G</tspan></text>
+
+    <!-- 已移除的回归 -->
+    <rect x="128" y="302" width="238" height="36" rx="8" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 3" opacity="0.75"/>
+    <text x="247" y="325" text-anchor="middle" font-size="11" fill="var(--muted)"><tspan text-decoration="line-through">回归损失 · 配对数据集</tspan>　✕ 已移除</text>
+
+    <!-- 真实数据 → 判别器 -->
+    <rect x="128" y="352" width="210" height="62" rx="10" class="bx bx-data"/>
+    <text x="233" y="378" class="t1" font-size="13">真实图像 <tspan class="tm">x</tspan> ~ <tspan class="tm">p</tspan><tspan class="sb" dy="3.5">real</tspan></text>
+    <text x="233" y="398" class="t2">SDXL 蒸馏用 50 万张 LAION</text>
+    <line x1="338" y1="383" x2="378" y2="383" class="flow" stroke="var(--c-data)" marker-end="url(#mk-data)"/>
+    <circle cx="398" cy="383" r="17" fill="color-mix(in srgb, var(--ink) 4%, var(--surface))" stroke="var(--axis)" stroke-width="1.4" stroke-dasharray="3 3"/>
+    <text x="398" y="388" text-anchor="middle" class="tm" font-size="10.5" fill="var(--ink)">+σ<tspan class="sb" dy="3">t</tspan><tspan dy="-3">ε</tspan></text>
+    <path class="flow" d="M 415,377 C 460,360 490,336 514,314" stroke="var(--c-data)" marker-end="url(#mk-data)"/>
+    <text x="446" y="345" class="el" style="fill:var(--c-data)">真 / 假分类</text>
+
+    <!-- 注释卡 -->
+    <rect x="520" y="340" width="416" height="76" rx="10" class="bx bx-note" stroke-width="1"/>
+    <text x="536" y="363" font-size="12" font-weight="600" fill="var(--ink)">真实数据首次进入训练——但只走判别器（隐式）</text>
+    <text x="536" y="384" font-size="11" fill="var(--diff-add)">✓ 修正教师分数误差 → 学生可超越教师；无需配对数据</text>
+    <text x="536" y="403" font-size="11" fill="var(--diff-del)">✗ 信号经 D 转手、对抗训练欠稳；多样性仍有损失（0.61 vs 教师 0.64）</text>
+  </svg>
+  </div>
+  <div class="formula">
+    <span class="tag">生成器总损失（无回归项）</span>
+    <i>L</i><sub>G</sub> = <span class="hl-grad"><i>D</i><sub>KL</sub>(<i>p</i><sub>fake</sub>∥<i>p</i><sub>real</sub>)</span> + <span class="hl-gan"><i>L</i><sub>GAN</sub></span>&nbsp;;&nbsp;&nbsp;<i>μ</i><sub>fake</sub> / <i>D</i>：<i>L</i><sub>denoise</sub> + <i>L</i><sub>GAN</sub><sup>D</sup>，每个 G 步更新 <b>5</b> 次（TTUR）
+  </div>
+  <ul class="pts">
+    <li><b>诊断</b>：直接去掉回归损失会训练不稳（整图亮度周期性震荡、FID 2.62→3.48）。根因是 <span class="m">μ</span><sub>fake</sub> 追不上非平稳的学生分布，假分数失准 → 梯度有偏。<b>TTUR</b>（假分数 5:1 高频更新）即可救回（FID 2.61），且比原版 DMD 收敛更快。</li>
+    <li><b>GAN 的角色</b>：教师的分数估计本身有误差，纯 DMD 学生永远见不到真实数据、无从纠错。判别器用真实图像训练，把 <b>真实数据信号隐式注入</b>，FID 再降至 1.51 / 1.28，首次超越教师（ODE 2.32）。设计极简：分类分支直接挂在 <span class="m">μ</span><sub>fake</sub> 瓶颈层，真假样本都先加噪再判别。</li>
+    <li><b>多步 + 反向模拟</b>：4 步生成按 999/749/499/249 交替"去噪→再加噪"。关键改动：训练时中间步输入不再用"加噪真图"（与推理不一致），而是让学生 <b>自己滚动生成</b>——消除 train/inference 失配。</li>
+    <li><b>成绩</b>：ImageNet-64 FID <b>1.28</b>；SD v1.5 单步 COCO FID <b>8.35</b>（DMD 为 11.49）；SDXL 4 步 FID 19.32 / Patch-FID 20.86，与 100 步教师打平甚至更优。</li>
+    <li><b>遗留问题</b>：论文自述多样性仍轻微下降（LPIPS 多样性 0.61 vs 教师 0.64）；对抗项带来调参与稳定性负担——这正是 DFD 的切入点。</li>
+  </ul>
+
+  <!-- ── ③ DFD ── -->
+  <div class="mhead"><span class="mnum">③</span><span class="mtitle">DFD — 数据强制：真实数据直接进入分布匹配梯度</span><span class="mmeta">arXiv 2606.18478 · 2026.06</span></div>
+  <div class="badges"><span class="bdg">视频 · 4 步（Wan2.1-1.3B / Cosmos-Predict2.5-2B）</span><span class="bdg">DMD2 之上后训练 100–300 步</span><span class="bdg">一行代码改动</span><span class="bdg">无对抗训练</span></div>
+  <div class="fig">
+  <svg viewBox="0 0 960 432" role="img" aria-label="DFD 架构图">
+    <text x="700" y="22" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--c-data)">唯一改动：<tspan class="tm">s</tspan><tspan class="sb" dy="3.5">real</tspan><tspan dy="-3.5"> 的取值点从学生样本 → 真实视频</tspan></text>
+
+    <!-- 真实视频 → 概率开关 -->
+    <rect x="44" y="34" width="216" height="66" rx="10" class="bx bx-data"/>
+    <text x="152" y="60" class="t1" font-size="13">精选真实视频 <tspan class="tm">x</tspan> ~ <tspan class="tm">p</tspan><tspan class="sb" dy="3.5">real</tspan><tspan dy="-3.5">(·|c)</tspan></text>
+    <text x="152" y="82" class="t2">ViPE-Wild-1M · 聚类 + 人工精选</text>
+    <line x1="260" y1="67" x2="292" y2="67" class="flow" stroke="var(--c-data)" marker-end="url(#mk-data)"/>
+    <text x="276" y="27" class="el" style="fill:var(--c-data)" font-size="10.5">概率 <tspan class="tm">p</tspan></text>
+    <polygon points="330,39 362,67 330,95 298,67" fill="color-mix(in srgb, var(--ink) 4%, var(--surface))" stroke="var(--ink2)" stroke-width="1.6"/>
+    <text x="330" y="72" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)"><tspan class="tm">p</tspan> ?</text>
+    <text x="330" y="26" class="t2">概率开关</text>
+    <text x="152" y="122" text-anchor="middle" font-size="11" font-weight="600" fill="var(--c-data)">以概率 p，教师的打分对象</text>
+    <text x="152" y="138" text-anchor="middle" font-size="11" font-weight="600" fill="var(--c-data)">换成真实视频（唯一改动）</text>
+
+    <!-- 开关 → 加噪 → 教师 -->
+    <line x1="362" y1="67" x2="394" y2="67" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <circle cx="420" cy="67" r="20" fill="color-mix(in srgb, var(--ink) 4%, var(--surface))" stroke="var(--axis)" stroke-width="1.4" stroke-dasharray="3 3"/>
+    <text x="420" y="72" text-anchor="middle" class="tm" font-size="11.5" fill="var(--ink)">+σ<tspan class="sb" dy="3">t</tspan><tspan dy="-3">ε</tspan></text>
+    <line x1="440" y1="67" x2="474" y2="67" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <rect x="478" y="36" width="196" height="62" rx="10" class="bx bx-teacher"/>
+    <text x="576" y="62" class="t1">教师 · 真实分数 <tspan class="tm">μ</tspan><tspan class="sb" dy="3.5">real</tspan></text>
+    <text x="576" y="84" class="t2">❄ 冻结</text>
+
+    <!-- z → G → x_fake -->
+    <circle cx="68" cy="196" r="23" fill="color-mix(in srgb, var(--ink) 4%, var(--surface))" stroke="var(--axis)" stroke-width="1.4"/>
+    <text x="68" y="201" text-anchor="middle" class="tm" font-size="15" fill="var(--ink)">z</text>
+    <text x="68" y="238" class="t2">~ 𝒩(0, I)</text>
+    <line x1="91" y1="196" x2="122" y2="196" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <rect x="128" y="162" width="176" height="68" rx="10" class="bx bx-gen"/>
+    <text x="216" y="190" class="t1">少步生成器 <tspan class="tm">G</tspan><tspan class="sb" dy="3.5">θ</tspan><tspan dy="-3.5">（4 步）</tspan></text>
+    <text x="216" y="213" class="t2">DMD2 蒸馏产物 · 暖启动</text>
+    <line x1="304" y1="196" x2="330" y2="196" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <rect x="336" y="170" width="86" height="52" rx="8" class="bx bx-gen" stroke-dasharray="4 3" stroke-width="1.2"/>
+    <text x="379" y="192" text-anchor="middle" font-size="12" fill="var(--ink)">假样本</text>
+    <text x="379" y="210" text-anchor="middle" class="tm" font-size="11" fill="var(--ink2)">G<tspan class="sb" dy="3">θ</tspan><tspan dy="-3">(z, c)</tspan></text>
+    <line x1="379" y1="168" x2="333" y2="102" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <text x="372" y="128" class="el" font-size="10.5" style="fill:var(--muted)">1 − <tspan class="tm">p</tspan></text>
+
+    <!-- x_fake → 加噪 → 假分数 -->
+    <line x1="408" y1="224" x2="429" y2="240" class="flow" stroke="var(--muted)" marker-end="url(#mk-ink)"/>
+    <circle cx="445" cy="253" r="20" fill="color-mix(in srgb, var(--ink) 4%, var(--surface))" stroke="var(--axis)" stroke-width="1.4" stroke-dasharray="3 3"/>
+    <text x="445" y="258" text-anchor="middle" class="tm" font-size="11.5" fill="var(--ink)">+σ<tspan class="sb" dy="3">t</tspan><tspan dy="-3">ε</tspan></text>
+    <line x1="465" y1="253" x2="478" y2="253" stroke="var(--axis)" stroke-width="2"/>
+    <rect x="478" y="222" width="196" height="62" rx="10" class="bx bx-fake"/>
+    <text x="576" y="248" class="t1">假分数 <tspan class="tm">μ</tspan><tspan class="sb" dy="3.5">fake</tspan></text>
+    <text x="576" y="270" class="t2">⟳ 在线 · 沿用 DMD2 机制</text>
+    <line x1="426" y1="86" x2="442" y2="230" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="2 3"/>
+    <text x="452" y="162" font-size="10" fill="var(--muted)">共享同一 ε、t</text>
+
+    <!-- 分数差 -->
+    <line x1="674" y1="72" x2="762" y2="138" class="flow" stroke="var(--c-teacher)" marker-end="url(#mk-ink)"/>
+    <text x="734" y="92" class="el tm">s<tspan class="sb" dy="3">real</tspan><tspan dy="-3">(x̃</tspan><tspan class="sb" dy="3">t</tspan><tspan dy="-3">)</tspan></text>
+    <line x1="674" y1="253" x2="762" y2="162" class="flow" stroke="var(--c-fake)" marker-end="url(#mk-ink)"/>
+    <text x="740" y="226" class="el tm">s<tspan class="sb" dy="3">fake</tspan></text>
+    <circle cx="780" cy="150" r="17" fill="var(--surface)" stroke="var(--c-grad)" stroke-width="1.6"/>
+    <text x="780" y="156" text-anchor="middle" font-size="17" fill="var(--c-grad)">−</text>
+    <path class="flow dash" d="M 780,167 C 800,340 420,352 236,236" stroke="var(--c-grad)" marker-end="url(#mk-grad)"/>
+    <text x="500" y="330" text-anchor="middle" font-size="11.5" fill="var(--c-grad)">∇<tspan class="sb" dy="3.5">θ</tspan><tspan dy="-3.5"> 更新（公式与 DMD 相同，仅 </tspan><tspan class="tm">s</tspan><tspan class="sb" dy="3.5">real</tspan><tspan dy="-3.5"> 的取值点不同）</tspan></text>
+
+    <!-- 移除项 -->
+    <rect x="52" y="306" width="250" height="36" rx="8" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 3" opacity="0.75"/>
+    <text x="177" y="329" text-anchor="middle" font-size="11" fill="var(--muted)"><tspan text-decoration="line-through">GAN 判别器 · 对抗训练</tspan>　✕ 移除</text>
+    <rect x="52" y="352" width="250" height="36" rx="8" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 3" opacity="0.75"/>
+    <text x="177" y="375" text-anchor="middle" font-size="11" fill="var(--muted)"><tspan text-decoration="line-through">离线配对数据 · 回归损失</tspan>　✕ 无需</text>
+
+    <!-- 注释卡 -->
+    <rect x="560" y="338" width="376" height="86" rx="10" class="bx bx-note" stroke-width="1"/>
+    <text x="576" y="360" font-size="12" font-weight="600" fill="var(--ink)">有效性条件：为什么必须 DMD2 暖启动</text>
+    <text x="576" y="380" font-size="11" fill="var(--ink2)">正则项方差 ∝ 𝔼‖x − G<tspan class="sb" dy="3">θ</tspan><tspan dy="-3">(z,c)‖² × 教师分数 Lipschitz²</tspan></text>
+    <text x="576" y="398" font-size="11" fill="var(--ink2)">→ 学生须已接近真实数据，该项才是低噪声的修正信号</text>
+    <text x="576" y="416" font-size="11" fill="var(--diff-del)">→ 消融：从教师直接初始化，训 1400 步仍不收敛</text>
+  </svg>
+  </div>
+  <div class="formula">
+    <span class="tag">DFD 更新（化简后，Eq. 8–10）</span>
+    <i>g</i>(<i>θ</i>) = (1−<i>w</i>)·<i>g</i><sub>DMD</sub> + <i>w</i>·<i>g</i><sub>DFD</sub>,&nbsp; <i>w</i> = ½ ;&nbsp;&nbsp;
+    <i>g</i><sub>DFD</sub> = 𝔼<sub><i>x</i>∼<i>p</i><sub>real</sub>(·|c), <i>z</i></sub>[ ( <i>s</i><sub>fake</sub>(<i>x̃</i><sub>t</sub><sup>gen</sup>) − <span class="hl-data"><i>s</i><sub>real</sub>(<i>x̃</i><sub>t</sub><sup>data</sup>)</span> ) ∇<sub><i>θ</i></sub><i>G</i><sub><i>θ</i></sub>(<i>z</i>, c) ]
+  </div>
+  <ul class="pts">
+    <li><b>诊断</b>：视频蒸馏中 DMD2 的两大顽疾——<b>多样性坍缩</b>（相机轨迹多样性只剩教师的 1/6）与 <b>过饱和</b>（偏离真实视频观感）——同源于反向 KL 的 mode-seeking：期望取在学生样本上，学生丢掉的模式产生零梯度、永远找不回来。</li>
+    <li><b>推导逻辑</b>：在 DMD 梯度上加一个"教师分数差异"正则 <span class="m">Δ</span> = <span class="m">s</span><sub>real</sub>(<span class="m">x</span>) − <span class="m">s</span><sub>real</sub>(<span class="m">G</span><sub><span class="m">θ</span></sub>(<span class="m">z</span>))（当 <span class="m">p</span><sub>fake</sub>=<span class="m">p</span><sub>real</sub> 时期望为零）。它与原梯度中的 <span class="m">s</span><sub>real</sub>(<span class="m">G</span>(<span class="m">z</span>))项恰好相消——化简后就是<b>教师改给真实样本打分</b>，因此只需一行代码。附录进一步证明 <span class="m">g</span><sub>DFD</sub> 与真实反向 KL 梯度的 MSE 有界。</li>
+    <li><b>与 DMD2 的本质区别</b>：同样是"用真实数据纠偏"，DMD2 走判别器（隐式、对抗、不稳），DFD 直接写进分布匹配梯度（显式、非对抗）。消融显示在 DFD 之上再加回 GAN 无增益、动态度反而变差——判别器可以整个删掉。</li>
+    <li><b>代价是一个前提</b>：正则项方差受学生-数据间隙控制（有效性条件），所以 DFD 只能作为 <b>DMD2 之上的后训练</b>（100–300 步），不能从头训——这也是它与前两代"完整蒸馏框架"定位上的不同：它是修复层，不是替代者。</li>
+    <li><b>数据成为一等公民</b>：真实数据的质量与多样性直接决定学生上限，论文为此做了聚类 + 人工在环的精选管线（100 万条 → 1000 簇 → 2 万条动画集 / 3 万条混合集）。注意一个细节：所用 ViPE-Wild-1M 本身是 Wan2.1-14B 生成的公开数据集，"真实数据"在实践中是"高质量参考分布"。</li>
+    <li><b>成绩</b>：Wan2.1-1.3B T2V 4 步：VBench 均分 <b>0.906</b>（教师 0.899、DMD2 0.901）；相机轨迹多样性从 DMD2 的 4.28 恢复至 <b>19.26</b>（教师 26.65）。Cosmos-Predict2.5-2B I2V：均分 <b>0.9303</b> 超教师 0.9285。自回归（Self Forcing）设定下同样改善时序一致性与物理合理性。</li>
+    <li><b>局限</b>：≤2 步的极限步数下仍会模糊、丢细节、动态变弱。</li>
+  </ul>
+</section>
+
+<!-- ═══════════════ 04 模式坍缩图解 ═══════════════ -->
+<section class="card">
+  <div class="sechead"><span class="secnum">04</span><h2>病灶图解：反向 KL 为什么丢多样性，DFD 怎么拉回来</h2></div>
+  <div class="fig">
+  <svg viewBox="0 0 960 336" role="img" aria-label="反向KL模式坍缩示意图">
+    <line x1="480" y1="30" x2="480" y2="296" stroke="var(--grid)" stroke-width="1"/>
+    <!-- 左：病灶 -->
+    <text x="40" y="34" font-size="13" font-weight="600" fill="var(--ink)">反向 KL 在优化什么</text>
+    <path d="M 55,240 C 92,240 98,132 130,132 C 162,132 170,240 205,240 L 240,240 C 272,240 275,157 302,157 C 329,157 334,240 365,240 L 430,240"
+          fill="color-mix(in srgb, var(--ink) 9%, var(--surface))" stroke="var(--axis)" stroke-width="1.2"/>
+    <text x="302" y="140" font-size="11" fill="var(--ink2)" text-anchor="middle">真实分布 <tspan class="tm">p</tspan><tspan class="sb" dy="3">real</tspan><tspan dy="-3">（双模式）</tspan></text>
+    <path d="M 85,240 C 108,240 110,105 138,105 C 166,105 168,240 190,240" fill="none" stroke="var(--c-gen)" stroke-width="2.5"/>
+    <text x="146" y="92" font-size="11" font-weight="600" fill="var(--c-gen)">学生分布 <tspan class="tm">p</tspan><tspan class="sb" dy="3">fake</tspan></text>
+    <path d="M 370,240 C 382,240 384,196 398,196 C 412,196 414,240 426,240" fill="none" stroke="var(--c-grad)" stroke-width="2" stroke-dasharray="5 3"/>
+    <text x="398" y="182" font-size="11" font-weight="600" fill="var(--c-grad)" text-anchor="middle">过饱和｜离流形</text>
+    <line x1="40" y1="240" x2="440" y2="240" stroke="var(--axis)" stroke-width="1.5"/>
+    <line x1="302" y1="262" x2="302" y2="246" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#mk-ink)"/>
+    <text x="302" y="280" font-size="11" fill="var(--ink2)" text-anchor="middle">缺失模式：学生采不到 → 零梯度</text>
+    <text x="240" y="310" font-size="11" fill="var(--muted)" text-anchor="middle">期望取在 p<tspan class="sb" dy="3">fake</tspan><tspan dy="-3"> 上：没覆盖的区域贡献不了梯度，KL 却可以很小</tspan></text>
+    <!-- 右：DFD 修正 -->
+    <text x="530" y="34" font-size="13" font-weight="600" fill="var(--ink)">DFD 的两股修正力</text>
+    <path d="M 545,240 C 582,240 588,132 620,132 C 652,132 660,240 695,240 L 730,240 C 762,240 765,157 792,157 C 819,157 824,240 855,240 L 920,240"
+          fill="color-mix(in srgb, var(--ink) 9%, var(--surface))" stroke="var(--axis)" stroke-width="1.2"/>
+    <path d="M 575,240 C 598,240 600,105 628,105 C 656,105 658,240 680,240" fill="none" stroke="var(--c-gen)" stroke-width="2.5"/>
+    <path d="M 860,240 C 872,240 874,196 888,196 C 902,196 904,240 916,240" fill="none" stroke="var(--c-grad)" stroke-width="2" stroke-dasharray="5 3"/>
+    <circle cx="605" cy="152" r="4" fill="var(--c-data)"/><circle cx="620" cy="128" r="4" fill="var(--c-data)"/><circle cx="638" cy="148" r="4" fill="var(--c-data)"/>
+    <circle cx="780" cy="177" r="4" fill="var(--c-data)"/><circle cx="792" cy="153" r="4" fill="var(--c-data)"/><circle cx="806" cy="172" r="4" fill="var(--c-data)"/>
+    <text x="700" y="90" font-size="11" font-weight="600" fill="var(--c-data)" text-anchor="middle">真实样本 <tspan class="tm">x</tspan> 直接进入梯度</text>
+    <path d="M 660,130 C 700,110 740,130 766,152" fill="none" stroke="var(--c-data)" stroke-width="2.5" marker-end="url(#mk-data)"/>
+    <text x="716" y="188" font-size="11" font-weight="600" fill="var(--c-data)" text-anchor="middle">拉向缺失模式 → 恢复多样性</text>
+    <line x1="888" y1="200" x2="888" y2="230" stroke="var(--c-grad)" stroke-width="2.2" marker-end="url(#mk-grad)"/>
+    <line x1="530" y1="240" x2="930" y2="240" stroke="var(--axis)" stroke-width="1.5"/>
+    <text x="838" y="280" font-size="11" fill="var(--c-grad)" text-anchor="middle">压掉数据中不存在的模式 → 消除过饱和</text>
+    <text x="730" y="310" font-size="11" fill="var(--muted)" text-anchor="middle">一半更新仍是原 DMD 梯度（w = ½），保留其收敛速度</text>
+  </svg>
+  </div>
+  <div class="fixrow">
+    <div class="fixcard"><span class="fixtag" style="color:color-mix(in srgb,var(--c-pair) 78%,var(--ink))">DMD 的解法 · 回归锚点</span>用教师 ODE 配对 (z<sub>ref</sub>→y<sub>ref</sub>) 把学生钉在各模式上。有效，但锚点是<b>教师的输出</b>而非真实数据，且离线合成昂贵、上限锁死。</div>
+    <div class="fixcard"><span class="fixtag" style="color:var(--c-gan)">DMD2 的解法 · 判别器</span>判别器见过真实数据，学生缺的、多的模式都会被打分惩罚——但信号<b>隔着一层网络</b>转手，对抗训练不稳，多样性仍有损失。</div>
+    <div class="fixcard"><span class="fixtag" style="color:var(--c-data)">DFD 的解法 · 教师分数差异</span>真实样本<b>直接出现</b>在分布匹配梯度里：显式、非对抗、一行代码；代价是需要学生已接近数据（暖启动）。</div>
+  </div>
+</section>
+
+<style>
+  .fixrow { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 14px; }
+  @media (max-width: 780px) { .fixrow { grid-template-columns: 1fr; } }
+  .fixcard {
+    border: 1px solid var(--hairline); border-radius: 10px; padding: 12px 14px;
+    font-size: 12.5px; line-height: 1.7; color: var(--ink2);
+    background: color-mix(in srgb, var(--ink) 2%, var(--surface));
+  }
+  .fixcard b { color: var(--ink); }
+  .fixtag { display: block; font-weight: 700; font-size: 12px; margin-bottom: 4px; }
+</style>
+
+<!-- ═══════════════ 05 一行代码 ═══════════════ -->
+<section class="card">
+  <div class="sechead"><span class="secnum">05</span><h2>DFD 的全部实现：一行代码的 diff</h2></div>
+  <p>DFD 论文 Algorithm 1（PyTorch 风格伪代码）给出了学生更新步。与 DMD2 相比，<b>唯一的改动</b>是决定"教师给谁打分"的那一行——注意两条前向加噪共用同一组 <code>eps, t</code>：</p>
+  <div class="codeblock"><span class="cm"># 学生更新步（DFD 论文 Alg.1，有删节）</span>
+gen_data = student_network(input_student, t_student, condition)
+
+<span class="ln-del">teacher_data = gen_data.detach()                                  <span class="cm"># DMD / DMD2：教师给学生样本打分</span></span><span class="ln-add">teacher_data = data.detach() <span class="kw">if</span> rand() &lt; p <span class="kw">else</span> gen_data.detach()  <span class="cm"># DFD：以概率 p 换成真实样本</span></span>
+perturbed_data         = forward_diffusion(gen_data,     eps, t)   <span class="cm"># 同一 eps、同一 t</span>
+perturbed_teacher_data = forward_diffusion(teacher_data, eps, t)
+
+fake_score    = fake_score_network(perturbed_data,         t, condition)
+teacher_score = teacher_network(perturbed_teacher_data,    t, condition)
+
+vsd_grad      = fake_score - teacher_score
+pseudo_target = gen_data - vsd_grad
+gen_loss      = 0.5 * mse_loss(gen_data, pseudo_target.detach())</div>
+  <p style="font-size:13px">随机切换在期望意义下等价于混合梯度 <span class="m">g</span> = (1−<span class="m">w</span>)<span class="m">g</span><sub>DMD</sub> + <span class="m">w·g</span><sub>DFD</sub>（取 <span class="m">p</span> = <span class="m">w</span> = ½）；消融显示结果对 <span class="m">w</span> 不敏感（<span class="m">w</span>=1 也可行），取 ½ 是为了更好满足有效性条件并保留 DMD 的收敛速度。</p>
+</section>
+
+<!-- ═══════════════ 06 全维度对比 ═══════════════ -->
+<section class="card">
+  <div class="sechead"><span class="secnum">06</span><h2>全维度对比</h2></div>
+  <table class="cmp">
+    <thead>
+      <tr>
+        <th></th>
+        <th>① DMD<span class="en">2311.18828 · CVPR 2024</span></th>
+        <th>② DMD2<span class="en">2405.14867 · NeurIPS 2024</span></th>
+        <th>③ DFD<span class="en">2606.18478 · 2026</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>任务与教师</td><td>图像：EDM（CIFAR / ImageNet）、SD v1.5</td><td>图像：EDM、SD v1.5、SDXL（百万像素）</td><td><b>视频</b>：Wan2.1-1.3B（T2V）、Cosmos-Predict2.5-2B（I2V）、Self Forcing 自回归</td></tr>
+      <tr><td>学生形态</td><td>单步生成器（去掉时间条件）</td><td>1 步或 4 步（999/749/499/249，去噪↔加噪交替）</td><td>4 步少步生成器（直接沿用 DMD2 学生）</td></tr>
+      <tr><td>定位</td><td>完整蒸馏框架（从教师权重训起）</td><td>完整蒸馏框架（从教师权重训起）</td><td><b>后训练修复层</b>：在 DMD2 产物上再训 100–300 步</td></tr>
+      <tr><td>分布匹配骨架</td><td colspan="3" style="text-align:center">三者相同：反向 KL，∇<sub>θ</sub><i>D</i><sub>KL</sub> ∝ (<i>s</i><sub>fake</sub> − <i>s</i><sub>real</sub>)，双去噪器估计分数，对噪声级取期望</td></tr>
+      <tr><td>辅助信号</td><td><b class="hl-pair">LPIPS 回归损失</b>：教师 ODE 离线配对 (z<sub>ref</sub>, y<sub>ref</sub>)</td><td><b class="hl-gan">GAN 损失</b>：判别头挂在 μ<sub>fake</sub> 瓶颈，真假样本加噪后判别</td><td><b class="hl-data">教师分数差异</b>：s<sub>real</sub> 以概率 p 在真实样本处取值</td></tr>
+      <tr><td>真实数据的用法</td><td><b>不用</b>真实数据（锚点是教师合成输出）</td><td><b>隐式</b>：只喂给判别器，经 D 转手传给学生</td><td><b>显式</b>：直接写进分布匹配梯度本身</td></tr>
+      <tr><td>稳定性机制</td><td>回归损失本身（去掉即坍缩：FID 5.61）</td><td>TTUR：μ<sub>fake</sub>/D 每 G 步更新 5 次</td><td>有效性条件：须 DMD2 暖启动 + w=½ 混合，否则不收敛</td></tr>
+      <tr><td>数据准备</td><td class="bad">重：数万~数十万配对离线合成（SDXL 规模约 700 A100·天）</td><td>中：判别器需真实图像（50 万张 LAION）</td><td>轻但讲究：2–3 万条<b>精选</b>真实视频（聚类 + 人工在环）</td></tr>
+      <tr><td>额外网络</td><td>无（两个分数网络为骨架自带）</td><td>判别头（共享 μ<sub>fake</sub> 骨干）</td><td class="good">无新增；且删掉 GAN 头</td></tr>
+      <tr><td>能否超越教师</td><td class="bad">否——回归把上限锁在教师 ODE 路径</td><td class="good">能：ImageNet FID 1.28 &lt; 教师 2.32</td><td class="good">能：I2V VBench 0.9303 &gt; 教师 0.9285</td></tr>
+      <tr><td>代表性结果</td><td>ImageNet-64 FID 2.62；COCO FID 11.49（30× 提速）</td><td>ImageNet-64 FID 1.28；SD1.5 单步 8.35；SDXL 4 步匹敌 100 步教师</td><td>VBench 0.906 &gt; 教师 0.899；相机多样性 4.28 → 19.26（教师 26.65）</td></tr>
+      <tr><td>遗留问题</td><td>配对昂贵；上限锁死；仍略逊教师</td><td>多样性下降（0.61 vs 0.64）；对抗不稳；视频上过饱和</td><td>≤2 步仍困难；效果依赖数据筛选质量；须先有 DMD2 底座</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ═══════════════ 07 数字说话 ═══════════════ -->
+<section class="card">
+  <div class="sechead"><span class="secnum">07</span><h2>数字说话：每一代解决了什么</h2></div>
+  <div class="charts2">
+    <div>
+      <div class="chart-title">图像：单步学生追平并反超多步教师</div>
+      <div class="chart-sub">ImageNet-64×64 · FID ↓（1 步 vs 教师 511 步）</div>
+      <div class="fig"><svg viewBox="0 0 460 214" role="img" aria-label="ImageNet FID 对比">
+        <line x1="227" y1="18" x2="227" y2="182" stroke="var(--grid)"/><line x1="333" y1="18" x2="333" y2="182" stroke="var(--grid)"/><line x1="440" y1="18" x2="440" y2="182" stroke="var(--grid)"/>
+        <line x1="120" y1="18" x2="120" y2="182" stroke="var(--axis)" stroke-width="1.5"/>
+        <g class="bar" data-tip="<b>DMD</b>（1 步）<br>FID 2.62 — 教师 2.32 的 0.3 以内"><path d="M120,26 h275 a4 4 0 0 1 4 4 v10 a4 4 0 0 1 -4 4 h-275 z" fill="var(--bar-dim)" class="b"/><text x="112" y="39" text-anchor="end" font-size="12" fill="var(--ink2)">DMD</text><text x="407" y="39" font-size="12" fill="var(--ink)" font-variant-numeric="tabular-nums">2.62</text></g>
+        <g class="bar" data-tip="<b>DMD2</b>（1 步）<br>FID 1.51 — 去回归 + TTUR + GAN"><path d="M120,56 h157 a4 4 0 0 1 4 4 v10 a4 4 0 0 1 -4 4 h-157 z" fill="var(--bar-dim)" class="b"/><text x="112" y="69" text-anchor="end" font-size="12" fill="var(--ink2)">DMD2</text><text x="289" y="69" font-size="12" fill="var(--ink)" font-variant-numeric="tabular-nums">1.51</text></g>
+        <g class="bar" data-tip="<b>DMD2 + 更长训练</b>（1 步）<br>FID 1.28 — 超越 ODE 教师"><path d="M120,86 h133 a4 4 0 0 1 4 4 v10 a4 4 0 0 1 -4 4 h-133 z" fill="var(--bar-acc)" class="b"/><text x="112" y="99" text-anchor="end" font-size="12" fill="var(--ink)" font-weight="600">DMD2·长训</text><text x="265" y="99" font-size="12" font-weight="600" fill="var(--ink)" font-variant-numeric="tabular-nums">1.28</text></g>
+        <line x1="16" y1="114" x2="444" y2="114" stroke="var(--grid)" stroke-dasharray="4 4"/>
+        <text x="120" y="124" font-size="10" fill="var(--muted)">教师 EDM（511 步，参考）</text>
+        <g class="bar" data-tip="<b>教师 EDM · ODE 采样</b>（511 步）<br>FID 2.32"><path d="M120,130 h243 a4 4 0 0 1 4 4 v10 a4 4 0 0 1 -4 4 h-243 z" fill="color-mix(in srgb, var(--ink) 13%, var(--surface))" stroke="var(--axis)" stroke-width="1" class="b"/><text x="112" y="143" text-anchor="end" font-size="12" fill="var(--muted)">ODE</text><text x="375" y="143" font-size="12" fill="var(--muted)" font-variant-numeric="tabular-nums">2.32</text></g>
+        <g class="bar" data-tip="<b>教师 EDM · SDE 采样</b>（511 步）<br>FID 1.36"><path d="M120,160 h141 a4 4 0 0 1 4 4 v10 a4 4 0 0 1 -4 4 h-141 z" fill="color-mix(in srgb, var(--ink) 13%, var(--surface))" stroke="var(--axis)" stroke-width="1" class="b"/><text x="112" y="173" text-anchor="end" font-size="12" fill="var(--muted)">SDE</text><text x="273" y="173" font-size="12" fill="var(--muted)" font-variant-numeric="tabular-nums">1.36</text></g>
+        <text x="120" y="197" font-size="10" fill="var(--muted)" text-anchor="middle">0</text><text x="227" y="197" font-size="10" fill="var(--muted)" text-anchor="middle">1</text><text x="333" y="197" font-size="10" fill="var(--muted)" text-anchor="middle">2</text><text x="440" y="197" font-size="10" fill="var(--muted)" text-anchor="middle">3</text>
+      </svg></div>
+      <details class="dtable"><summary>数据表（DMD Table 1 / DMD2 Table 1）</summary>
+        <table><tr><th>方法</th><th>前向次数</th><th>FID ↓</th></tr>
+        <tr><td>DMD</td><td>1</td><td>2.62</td></tr><tr><td>DMD2</td><td>1</td><td>1.51</td></tr><tr><td>DMD2 + 长训</td><td>1</td><td>1.28</td></tr><tr><td>教师 EDM（ODE）</td><td>511</td><td>2.32</td></tr><tr><td>教师 EDM（SDE）</td><td>511</td><td>1.36</td></tr></table>
+      </details>
+    </div>
+    <div>
+      <div class="chart-title">视频：DFD 把坍缩的多样性拉回来</div>
+      <div class="chart-sub">Wan2.1-1.3B T2V · 4 步 · 相机轨迹多样性 Trajectory Distance ↑</div>
+      <div class="fig"><svg viewBox="0 0 460 214" role="img" aria-label="相机轨迹多样性对比">
+        <line x1="227" y1="18" x2="227" y2="182" stroke="var(--grid)"/><line x1="333" y1="18" x2="333" y2="182" stroke="var(--grid)"/><line x1="440" y1="18" x2="440" y2="182" stroke="var(--grid)"/>
+        <line x1="120" y1="18" x2="120" y2="182" stroke="var(--axis)" stroke-width="1.5"/>
+        <g class="bar" data-tip="<b>教师 Wan2.1-1.3B</b>（多步）<br>轨迹多样性 26.65（参考上限）"><path d="M120,30 h280 a4 4 0 0 1 4 4 v10 a4 4 0 0 1 -4 4 h-280 z" fill="color-mix(in srgb, var(--ink) 13%, var(--surface))" stroke="var(--axis)" stroke-width="1" class="b"/><text x="112" y="43" text-anchor="end" font-size="12" fill="var(--muted)">教师</text><text x="412" y="43" font-size="12" fill="var(--muted)" font-variant-numeric="tabular-nums">26.65</text></g>
+        <line x1="16" y1="58" x2="444" y2="58" stroke="var(--grid)" stroke-dasharray="4 4"/>
+        <g class="bar" data-tip="<b>DMD2</b>（4 步）<br>轨迹多样性 4.28 — 只剩教师的 16%"><path d="M120,68 h42 a4 4 0 0 1 4 4 v10 a4 4 0 0 1 -4 4 h-42 z" fill="var(--bar-dim)" class="b"/><text x="112" y="81" text-anchor="end" font-size="12" fill="var(--ink2)">DMD2</text><text x="174" y="81" font-size="12" fill="var(--ink)" font-variant-numeric="tabular-nums">4.28</text></g>
+        <g class="bar" data-tip="<b>DP-DMD</b>（4 步）<br>轨迹多样性 3.47（多样性保持基线）"><path d="M120,100 h33 a4 4 0 0 1 4 4 v10 a4 4 0 0 1 -4 4 h-33 z" fill="var(--bar-dim)" class="b"/><text x="112" y="113" text-anchor="end" font-size="12" fill="var(--ink2)">DP-DMD</text><text x="165" y="113" font-size="12" fill="var(--ink)" font-variant-numeric="tabular-nums">3.47</text></g>
+        <g class="bar" data-tip="<b>DFD</b>（4 步，后训练 100–300 步）<br>轨迹多样性 19.26 — 恢复到教师的 72%"><path d="M120,132 h201 a4 4 0 0 1 4 4 v10 a4 4 0 0 1 -4 4 h-201 z" fill="var(--bar-acc)" class="b"/><text x="112" y="145" text-anchor="end" font-size="12" fill="var(--ink)" font-weight="600">DFD</text><text x="333" y="145" font-size="12" font-weight="600" fill="var(--ink)" font-variant-numeric="tabular-nums">19.26</text></g>
+        <text x="120" y="197" font-size="10" fill="var(--muted)" text-anchor="middle">0</text><text x="227" y="197" font-size="10" fill="var(--muted)" text-anchor="middle">10</text><text x="333" y="197" font-size="10" fill="var(--muted)" text-anchor="middle">20</text><text x="440" y="197" font-size="10" fill="var(--muted)" text-anchor="middle">30</text>
+      </svg></div>
+      <details class="dtable"><summary>数据表（DFD Table 1，多样性均 ↑）</summary>
+        <table><tr><th>方法</th><th>轨迹距离</th><th>端点距离</th><th>DINO 多样性</th><th>VBench 均分</th></tr>
+        <tr><td>教师</td><td>26.65</td><td>30.57</td><td>0.301</td><td>0.899</td></tr>
+        <tr><td>DMD2</td><td>4.28</td><td>9.15</td><td>0.190</td><td>0.901</td></tr>
+        <tr><td>DP-DMD</td><td>3.47</td><td>7.21</td><td>0.197</td><td>0.903</td></tr>
+        <tr><td>DFD</td><td>19.26</td><td>18.51</td><td>0.205</td><td><b>0.906</b></td></tr></table>
+      </details>
+    </div>
+  </div>
+
+  <div class="chart-title" style="margin-top:22px">图生视频：后训练之后，学生反超教师</div>
+  <div class="chart-sub">Cosmos-Predict2.5-2B I2V · VBench 均分 ↑（点图，横轴 0.88–0.94 非零起点）</div>
+  <div class="fig"><svg viewBox="0 0 940 190" role="img" aria-label="I2V VBench 均分对比">
+    <text x="756" y="18" font-size="10" fill="var(--muted)" text-anchor="middle">教师水平</text>
+    <line x1="756" y1="24" x2="756" y2="142" stroke="var(--axis)" stroke-dasharray="4 3"/>
+    <line x1="150" y1="36" x2="900" y2="36" stroke="var(--grid)"/><line x1="150" y1="66" x2="900" y2="66" stroke="var(--grid)"/><line x1="150" y1="96" x2="900" y2="96" stroke="var(--grid)"/><line x1="150" y1="126" x2="900" y2="126" stroke="var(--grid)"/>
+    <g class="dotrow bar" data-tip="<b>教师 Cosmos-Predict2.5-2B</b>（多步）<br>VBench 均分 0.9285"><text x="140" y="40" text-anchor="end" font-size="12" fill="var(--muted)">教师</text><circle cx="756" cy="36" r="5.5" fill="var(--surface)" stroke="var(--ink2)" stroke-width="2"/><text x="770" y="28" font-size="11.5" fill="var(--muted)" font-variant-numeric="tabular-nums">0.9285</text></g>
+    <g class="dotrow bar" data-tip="<b>DMD2</b>（4 步）<br>VBench 均分 0.9245"><text x="140" y="70" text-anchor="end" font-size="12" fill="var(--ink2)">DMD2</text><circle cx="706" cy="66" r="5.5" fill="var(--bar-dim)"/><text x="662" y="59" font-size="11.5" fill="var(--ink2)" font-variant-numeric="tabular-nums">0.9245</text></g>
+    <g class="dotrow bar" data-tip="<b>DP-DMD</b>（4 步）<br>VBench 均分 0.8843 — 常破坏首帧约束"><text x="140" y="100" text-anchor="end" font-size="12" fill="var(--ink2)">DP-DMD</text><circle cx="204" cy="96" r="5.5" fill="var(--bar-dim)"/><text x="218" y="100" font-size="11.5" fill="var(--ink2)" font-variant-numeric="tabular-nums">0.8843</text></g>
+    <g class="dotrow bar" data-tip="<b>DFD</b>（4 步）<br>VBench 均分 0.9303 — 超过教师"><text x="140" y="130" text-anchor="end" font-size="12" fill="var(--ink)" font-weight="600">DFD</text><circle cx="779" cy="126" r="5.5" fill="var(--bar-acc)"/><text x="793" y="130" font-size="11.5" font-weight="600" fill="var(--ink)" font-variant-numeric="tabular-nums">0.9303</text></g>
+    <text x="150" y="166" font-size="10" fill="var(--muted)" text-anchor="middle">0.88</text><text x="400" y="166" font-size="10" fill="var(--muted)" text-anchor="middle">0.90</text><text x="650" y="166" font-size="10" fill="var(--muted)" text-anchor="middle">0.92</text><text x="900" y="166" font-size="10" fill="var(--muted)" text-anchor="middle">0.94</text>
+  </svg></div>
+  <details class="dtable"><summary>数据表（DFD Table 2，VBench I2V 测试集）</summary>
+    <table><tr><th>方法</th><th>均分 ↑</th><th>美学质量</th><th>运动平滑</th><th>I2V 主体一致</th></tr>
+    <tr><td>教师</td><td>0.9285</td><td>0.6320</td><td>0.9905</td><td>0.9867</td></tr>
+    <tr><td>DMD2</td><td>0.9245</td><td>0.6301</td><td>0.9886</td><td>0.9850</td></tr>
+    <tr><td>DP-DMD</td><td>0.8843</td><td>0.5850</td><td>0.9832</td><td>0.9570</td></tr>
+    <tr><td>DFD</td><td><b>0.9303</b></td><td><b>0.6371</b></td><td>0.9900</td><td>0.9859</td></tr></table>
+  </details>
+</section>
+
+<!-- ═══════════════ 08 评注 ═══════════════ -->
+<section class="card">
+  <div class="sechead"><span class="secnum">08</span><h2>脉络与评注</h2></div>
+  <div class="insight"><span class="t">主线：真实数据信号的"三级跳"</span>
+  反向 KL 骨架三代未变，变的是"数据"进入训练的方式：DMD <b>完全不用</b>真实数据（锚点是教师合成的配对）；DMD2 让真实数据<b>隐式</b>进入（隔着一个判别器）；DFD 让真实数据<b>显式</b>进入分布匹配梯度本身。信号越直接，需要的附加机器越少——从"配对数据集 + 回归损失"到"判别头 + 对抗训练"再到"一行代码"。</div>
+  <div class="insight"><span class="t">一个耐人寻味的轮回（解读性观点，非论文原文）</span>
+  展开 DFD 的伪目标可以看到：当教师给真实样本打分时，<span class="m">teacher_score</span> 近似为去噪后的真实样本，于是 <span class="m">pseudo_target ≈ x</span>——学生在分数空间里被"回归"向一个同条件、同噪声的真实样本。换句话说，DMD 当年被 DMD2 扔掉的"回归锚点"在 DFD 中换了一种形态回来了：锚点从<b>教师 ODE 输出</b>换成了<b>真实数据</b>，从像素空间 LPIPS 换成了分数空间，从离线配对换成了免配对（共享噪声即隐式配对）。这也解释了两者共同的作用（钉住模式、稳住训练）与关键差异（DFD 的锚不再受教师上限约束）。</div>
+  <div class="insight"><span class="t">教师角色的退化与数据角色的升格</span>
+  DMD 里教师既是分数场又是配对数据源；DMD2 里教师只剩分数场，数据质量由判别器把关；到 DFD，教师进一步退化为"评估真实样本的一个分数场"，而<b>数据的质量与多样性直接成为学生的上限</b>——所以论文把相当多篇幅花在数据精选管线上。一个值得注意的开放问题：DFD 所用的"真实"视频集 ViPE-Wild-1M 本身由 Wan2.1-14B 生成，蒸馏链路里存在"以大模型生成物为目标分布"的自举成分。</div>
+  <div class="insight"><span class="t">实践视角怎么选</span>
+  图像单步/少步蒸馏：DMD2 配方（TTUR + GAN + 反向模拟）仍是标准答案。视频少步蒸馏：先 DMD2 蒸出可用学生，再叠 DFD 后训练 100–300 步恢复多样性与保真度，顺手删掉 GAN；自回归视频（Self Forcing 一线）同样适用。若步数压到 ≤2，三代方法都还没有满意答案。</div>
+</section>
+
+<footer>
+  <div><b>论文来源</b>：
+    ① Yin et al., <a href="https://arxiv.org/abs/2311.18828" target="_blank">One-step Diffusion with Distribution Matching Distillation</a>, arXiv:2311.18828 ·
+    ② Yin et al., <a href="https://arxiv.org/abs/2405.14867" target="_blank">Improved Distribution Matching Distillation for Fast Image Synthesis</a>, arXiv:2405.14867 ·
+    ③ Chen et al., <a href="https://arxiv.org/abs/2606.18478" target="_blank">Data-Forcing Distillation: Restoring Diversity and Fidelity in Few-Step Video Generation</a>, arXiv:2606.18478</div>
+  <div>图中全部数字取自论文正文表格（DMD Table 1/2/3；DMD2 Table 1/2/3/6；DFD Table 1/2 及消融）。架构图为按论文方法重绘的示意。整理于 2026-07-31。</div>
+</footer>
+
+</div>
+
+<script>
+(function () {
+  // 主题切换
+  var btn = document.getElementById('themeBtn');
+  function effective() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t) return t;
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  function label() { btn.textContent = effective() === 'dark' ? '☀ 浅色' : '☾ 深色'; }
+  btn.addEventListener('click', function () {
+    document.documentElement.setAttribute('data-theme', effective() === 'dark' ? 'light' : 'dark');
+    label();
+  });
+  label();
+
+  // 悬停提示
+  var tip = document.getElementById('tip');
+  document.querySelectorAll('[data-tip]').forEach(function (el) {
+    el.addEventListener('mousemove', function (e) {
+      tip.innerHTML = el.getAttribute('data-tip');
+      tip.style.display = 'block';
+      var x = Math.min(e.clientX + 14, innerWidth - 280), y = e.clientY + 16;
+      tip.style.left = x + 'px'; tip.style.top = y + 'px';
+    });
+    el.addEventListener('mouseleave', function () { tip.style.display = 'none'; });
+  });
+})();
+</script>
+</body>
+</html>

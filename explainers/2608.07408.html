@@ -1,0 +1,1890 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorldTrace 方法详解：为什么世界模型「记得住却读不到」，以及怎么给记忆重新编上门牌号</title>
+<style>
+  :root { color-scheme: light dark; }
+  html[data-theme="light"] { color-scheme: light; }
+  html[data-theme="dark"]  { color-scheme: dark; }
+
+  body {
+    color-scheme: light;
+    --page:      #f9f9f7;
+    --surface:   #fcfcfb;
+    --ink:       #0b0b0b;
+    --ink2:      #52514e;
+    --muted:     #898781;
+    --grid:      #e1e0d9;
+    --axis:      #c3c2b7;
+    --hairline:  rgba(11,11,11,0.10);
+    --c-addr:    #2a78d6;  /* 可寻址 / 位置 / slot indexing */
+    --c-field:   #1baf7a;  /* WorldTrace-Field */
+    --c-land:    #eb6834;  /* WorldTrace-Landmark */
+    --c-recent:  #4a3aa7;  /* recent window / verbatim */
+    --c-anchor:  #eda100;  /* anchoring / sink */
+    --c-warn:    #e34948;  /* 失效 / 基线 */
+    --bd0:       #a8e0c8;  /* 相位 < π/8：语义载体 */
+    --bd1:       #a9cbf0;  /* π/8–π：位置信号正常 */
+    --bd2:       #f5cd7a;  /* π–3π：出分布 */
+    --bd3:       #eda3a2;  /* > 3π：随机噪声 */
+    --bar-dim:   #b9c8d8;
+    --code-bg:   #f4f3f0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) body {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink2: #c3c2b7;
+      --muted: #898781; --grid: #2c2c2a; --axis: #383835;
+      --hairline: rgba(255,255,255,0.10);
+      --c-addr: #3987e5; --c-field: #199e70; --c-land: #d95926;
+      --c-recent: #9085e9; --c-anchor: #c98500; --c-warn: #e66767;
+      --bd0: #1d5e45; --bd1: #1d3f66; --bd2: #6b5218; --bd3: #6e2b2b;
+      --bar-dim: #33465c; --code-bg: #232322;
+    }
+  }
+  html[data-theme="dark"] body {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink2: #c3c2b7;
+    --muted: #898781; --grid: #2c2c2a; --axis: #383835;
+    --hairline: rgba(255,255,255,0.10);
+    --c-addr: #3987e5; --c-field: #199e70; --c-land: #d95926;
+    --c-recent: #9085e9; --c-anchor: #c98500; --c-warn: #e66767;
+    --bd0: #1d5e45; --bd1: #1d3f66; --bd2: #6b5218; --bd3: #6e2b2b;
+    --bar-dim: #33465c; --code-bg: #232322;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 16px 64px;
+    background: var(--page); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-size: 15px; line-height: 1.8;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+
+  header { padding: 44px 4px 10px; position: relative; }
+  .kicker { font-size: 12.5px; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; }
+  h1 { font-size: 27px; line-height: 1.45; margin: 0 0 10px; font-weight: 700; }
+  .sub { color: var(--ink2); max-width: 50em; margin: 0 0 18px; }
+  .paperchips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pchip {
+    display: inline-flex; align-items: baseline; gap: 8px;
+    border: 1px solid var(--hairline); background: var(--surface);
+    border-radius: 999px; padding: 5px 14px; font-size: 12.5px; color: var(--ink2); text-decoration: none;
+  }
+  .pchip b { color: var(--ink); font-weight: 600; }
+  .pchip .id { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #themeBtn {
+    position: absolute; top: 44px; right: 4px;
+    border: 1px solid var(--hairline); background: var(--surface); color: var(--ink2);
+    border-radius: 999px; padding: 5px 13px; font-size: 12.5px; cursor: pointer;
+  }
+  #themeBtn:hover { color: var(--ink); }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+  nav.toc a {
+    font-size: 12px; color: var(--ink2); text-decoration: none;
+    border: 1px solid var(--hairline); background: var(--surface);
+    border-radius: 8px; padding: 3px 10px;
+  }
+  nav.toc a:hover { color: var(--ink); border-color: var(--axis); }
+  nav.toc a .n { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 4px; }
+
+  section.card {
+    background: var(--surface); border: 1px solid var(--hairline);
+    border-radius: 14px; padding: 26px 28px 24px; margin: 18px 0; scroll-margin-top: 16px;
+  }
+  .sechead { display: flex; align-items: baseline; gap: 12px; margin: 0 0 6px; }
+  .secnum { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .08em; font-variant-numeric: tabular-nums; }
+  h2 { font-size: 19.5px; margin: 0; font-weight: 700; line-height: 1.5; }
+  h3 { font-size: 16px; margin: 26px 0 8px; font-weight: 700; }
+  p  { margin: 8px 0; color: var(--ink2); }
+  p strong, li strong, td strong { color: var(--ink); font-weight: 600; }
+  ul.pts, ol.pts { margin: 6px 0 4px; padding-left: 1.3em; color: var(--ink2); }
+  ul.pts li, ol.pts li { margin: 7px 0; }
+  ul.pts li::marker { color: var(--muted); }
+  ol.pts li::marker { color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  .formula {
+    background: color-mix(in srgb, var(--ink) 3%, var(--surface));
+    border: 1px solid var(--hairline); border-radius: 10px;
+    padding: 13px 18px; margin: 12px 0; overflow-x: auto;
+    font-size: 15.5px; white-space: nowrap; color: var(--ink);
+  }
+  .formula .tag { float: right; color: var(--muted); font-size: 12px; margin-left: 18px; }
+  .formula .note { display: block; white-space: normal; font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  .m, .formula i { font-family: Georgia, "Times New Roman", "STIX Two Math", serif; font-style: italic; }
+  .formula sub, .formula sup, .m sub, .m sup { font-size: 11px; font-style: normal; }
+  .op { font-family: Georgia, serif; font-style: normal; padding: 0 1px; }
+  .hl-addr   { color: var(--c-addr); font-weight: 600; }
+  .hl-field  { color: color-mix(in srgb, var(--c-field) 84%, var(--ink)); font-weight: 600; }
+  .hl-land   { color: var(--c-land); font-weight: 600; }
+  .hl-recent { color: color-mix(in srgb, var(--c-recent) 86%, var(--ink)); font-weight: 600; }
+  .hl-warn   { color: var(--c-warn); font-weight: 600; }
+
+  .fig { margin: 16px 0 6px; }
+  .fig svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .figcap { font-size: 12.5px; color: var(--muted); margin: 8px 2px 0; line-height: 1.65; }
+  .svgtxt { font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+
+  .legendrow { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0 4px; align-items: center; }
+  .lg { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink2); }
+  .lg .sw { width: 13px; height: 13px; border-radius: 4px; display: inline-block; border: 1px solid var(--hairline); }
+  .lg .ln { width: 22px; height: 0; border-top: 2px solid var(--muted); display: inline-block; }
+  .lg .ln.d { border-top-style: dashed; }
+
+  .codeblock {
+    background: var(--code-bg); border: 1px solid var(--hairline); border-radius: 10px;
+    padding: 14px 16px; margin: 12px 0; overflow-x: auto; white-space: pre;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12.6px; line-height: 1.75; color: var(--ink2);
+  }
+  .codeblock .cm { color: var(--muted); }
+  .codeblock .kw { font-weight: 600; color: var(--ink); }
+  .codeblock .fd { color: color-mix(in srgb, var(--c-field) 84%, var(--ink)); font-weight: 600; }
+  .codeblock .ld { color: var(--c-land); font-weight: 600; }
+  .codeblock .ad { color: var(--c-addr); font-weight: 600; }
+
+  .cmp { width: 100%; border-collapse: collapse; margin: 14px 0 4px; font-size: 13.2px; }
+  .cmp th, .cmp td { text-align: left; vertical-align: top; padding: 8px 10px; border-top: 1px solid var(--grid); line-height: 1.6; }
+  .cmp thead th { border-top: none; border-bottom: 1.5px solid var(--axis); color: var(--ink); font-weight: 700; font-size: 12.5px; }
+  .cmp td { color: var(--ink2); }
+  .cmp .num { font-variant-numeric: tabular-nums; text-align: right; }
+  .cmp tbody tr:hover { background: color-mix(in srgb, var(--ink) 3%, transparent); }
+  .cmp .best { color: var(--ink); font-weight: 700; }
+  .cmp .rowlab { color: var(--ink); font-weight: 600; }
+  .cmp .grp td { background: color-mix(in srgb, var(--ink) 4%, transparent); color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+  .tblwrap { overflow-x: auto; }
+  .cmp.tight th, .cmp.tight td { padding: 7px 6px; line-height: 1.5; }
+  .cmp.tight td:first-child, .cmp.tight th:first-child { padding-left: 2px; }
+
+  .callout {
+    border: 1px solid var(--hairline); border-left: 3px solid var(--c-addr);
+    background: color-mix(in srgb, var(--c-addr) 5%, var(--surface));
+    border-radius: 0 10px 10px 0; padding: 12px 16px; margin: 14px 0; font-size: 14px;
+  }
+  .callout.warn { border-left-color: var(--c-warn); background: color-mix(in srgb, var(--c-warn) 5%, var(--surface)); }
+  .callout.ok { border-left-color: var(--c-field); background: color-mix(in srgb, var(--c-field) 5%, var(--surface)); }
+  .callout.land { border-left-color: var(--c-land); background: color-mix(in srgb, var(--c-land) 5%, var(--surface)); }
+  .callout .lab { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; display: block; margin-bottom: 4px; }
+  .callout p { margin: 4px 0; }
+
+  .statrow { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 6px; }
+  .stat {
+    flex: 1 1 150px; border: 1px solid var(--hairline); border-radius: 10px;
+    background: color-mix(in srgb, var(--ink) 2.5%, var(--surface)); padding: 12px 14px;
+  }
+  .stat .v { font-size: 22px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.25; }
+  .stat .k { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+  .stat.f .v { color: color-mix(in srgb, var(--c-field) 84%, var(--ink)); }
+  .stat.l .v { color: var(--c-land); }
+  .stat.w .v { color: var(--c-warn); }
+
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0 4px; }
+  @media (max-width: 720px) { .twocol { grid-template-columns: 1fr; } }
+  .box { border: 1px solid var(--hairline); border-radius: 11px; padding: 14px 16px; background: color-mix(in srgb, var(--ink) 2%, var(--surface)); }
+  .box .bt { font-size: 13.5px; font-weight: 700; color: var(--ink); margin-bottom: 4px; }
+  .box.f { border-top: 3px solid var(--c-field); }
+  .box.l { border-top: 3px solid var(--c-land); }
+  .box p { margin: 5px 0; font-size: 13.4px; }
+
+  .tip {
+    position: fixed; pointer-events: none; opacity: 0; transition: opacity .1s;
+    background: var(--ink); color: var(--page); border-radius: 8px; padding: 7px 11px;
+    font-size: 12.2px; line-height: 1.55; z-index: 50; max-width: 260px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.22);
+  }
+  .tip b { font-weight: 700; }
+  rect.ph, rect.bar, circle.bar { cursor: pointer; }
+
+  footer { color: var(--muted); font-size: 12.5px; padding: 20px 4px 0; line-height: 1.75; }
+  a { color: var(--c-addr); }
+  code.inl { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.8px; background: var(--code-bg); border: 1px solid var(--hairline); border-radius: 5px; padding: 1px 5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <button id="themeBtn">切换主题</button>
+  <div class="kicker">Addressable Memory for Video World Models · NVIDIA + Princeton · arXiv 2608.07408v1</div>
+  <h1>WorldTrace：旧帧其实还在缓存里<br><span style="font-weight:600;color:var(--ink2);font-size:22px">——只是模型已经不知道该按哪个门牌号去敲门了</span></h1>
+  <p class="sub">
+    这篇论文最有价值的一句话不是「我们提出了一个新的记忆模块」，而是：<b>长程失忆不是「没存下来」，是「存下来了但读不到」。</b>
+    读不到的原因非常具体 —— 时间维 RoPE 的相对偏移跑出了训练见过的范围。全文不训练任何参数，只改 KV cache 的读写。
+  </p>
+  <div class="paperchips">
+    <a class="pchip" href="https://arxiv.org/abs/2608.07408" target="_blank"><b>WorldTrace</b><span class="id">2608.07408v1</span><span>2026-08-07</span></a>
+    <a class="pchip" href="https://research.nvidia.com/labs/sil/projects/WorldTrace/" target="_blank"><b>项目页</b><span class="id">research.nvidia.com</span></a>
+    <span class="pchip"><b>基座</b><span class="id">Matrix-Game-2 1.3B</span></span>
+    <span class="pchip"><b>训练窗口</b><span class="id">Δt_train = 5</span></span>
+    <span class="pchip"><b>是否重训</b><span class="id">不需要</span></span>
+  </div>
+  <nav class="toc">
+    <a href="#s0"><span class="n">00</span>一页读懂</a>
+    <a href="#s1"><span class="n">01</span>病因 A：读不到</a>
+    <a href="#s2"><span class="n">02</span>病因 B：压坏了</a>
+    <a href="#s3"><span class="n">03</span>骨架：槽位 + 虚拟位置</a>
+    <a href="#s4"><span class="n">04</span>为什么必须存 canonical</a>
+    <a href="#s5"><span class="n">05</span>Field：均值</a>
+    <a href="#s6"><span class="n">06</span>Landmark：冻结</a>
+    <a href="#s7"><span class="n">07</span>统一视角：投影矩阵 P</a>
+    <a href="#s8"><span class="n">08</span>LoopBench</a>
+    <a href="#s9"><span class="n">09</span>结果三张图</a>
+    <a href="#s10"><span class="n">10</span>成本账</a>
+    <a href="#s11"><span class="n">11</span>八条打折读法</a>
+    <a href="#s12"><span class="n">12</span>放回坐标系</a>
+  </nav>
+</header>
+
+<!-- ══════════════════ 00 ══════════════════ -->
+<section class="card" id="s0">
+  <div class="sechead"><span class="secnum">00</span><h2>一页读懂</h2></div>
+
+  <p><b>一个比喻先把全文说完。</b>把 KV cache 当成一间图书馆：自回归视频世界模型每生成一段画面，就把这段的 Key/Value 上架，
+  以后再生成时靠 attention 去「查书」。问题出在<b>索书号</b>上 —— 这个模型只学过「距今 0 到 5 格」这几个索书号怎么读。
+  rollout 一长，老书的索书号变成了 30、100、300，<span class="hl-warn">书还在架子上，但目录里没有这些号，查不到</span>。</p>
+
+  <p>WorldTrace 做的两件事，也可以用这个比喻讲：</p>
+
+  <div class="twocol">
+    <div class="box" style="border-top:3px solid var(--c-addr)">
+      <div class="bt"><span class="hl-addr">① 重新编号（Slot Indexing）</span></div>
+      <p>把远处的历史压成固定的 <span class="hl-addr">N<sub>s</sub></span> 个「摘要槽位」，
+      每个槽位<b>永久占用一个目录里有的号</b>：第 s 号槽永远挂在「距今 L<sub>attn</sub>−1−s 格」。
+      rollout 多长都不变，而且槽和槽之间号不重复。</p>
+    </div>
+    <div class="box" style="border-top:3px solid var(--c-field)">
+      <div class="bt"><span class="hl-field">② 换个空间写摘要（canonical 域）</span></div>
+      <p>要把几本书合订成一本摘要，不能直接把「已经盖了不同邮戳的页面」叠在一起 —— 邮戳（RoPE 旋转）方向不同会互相抵消。
+      得<b>先把每页的邮戳撕掉、对齐、再合订，读的时候才盖上新邮戳</b>。</p>
+    </div>
+  </div>
+
+  <p>「写什么进槽位」有两种选择，对应两种需求：</p>
+
+  <div class="twocol">
+    <div class="box f">
+      <div class="bt">WorldTrace-<span class="hl-field">Field</span> ｜ 要<b>连贯</b></div>
+      <p>把离开近期窗口的历史按时间切成 N<sub>s</sub> 段，每段在 canonical 空间取<b>均值</b>写进一个槽。
+      画面不会突然变成另一个世界。<span style="color:var(--muted)">代价：细节被抹平。</span></p>
+    </div>
+    <div class="box l">
+      <div class="bt">WorldTrace-<span class="hl-land">Landmark</span> ｜ 要<b>认得回来</b></div>
+      <p>检测「场景切换」的那一帧，把它的 canonical Key <b>原封不动冻结</b>进一个槽。
+      绕一大圈回到原地时能还原原来的样子。<span style="color:var(--muted)">代价：最多只能记住 N<sub>s</sub> 个地方。</span></p>
+    </div>
+  </div>
+
+  <div class="statrow">
+    <div class="stat f"><div class="v">+15.5%</div><div class="k">TempSSIM 相对提升<br>（N=48，Field vs 滑动窗口，Tab.2）</div></div>
+    <div class="stat l"><div class="v">+19.5%</div><div class="k">PAC 相对提升<br>（LoopBench ABA N=16，Tab.3）</div></div>
+    <div class="stat l"><div class="v">0.989</div><div class="k">N=256 时 Landmark 的 PAC<br>基线 0.631，锚定方案掉到 0.610</div></div>
+    <div class="stat"><div class="v">≤ 6%</div><div class="k">相对滑动窗口的额外耗时<br>0.95 → 1.00 s / chunk</div></div>
+  </div>
+
+  <div class="callout ok">
+    <span class="lab">这篇论文真正立住的论点</span>
+    <p><b>位置，而不是内容，是长程记忆的瓶颈。</b>证据是 Tab.1 那组控制实验：<b>压缩方式完全固定不变</b>，只换位置分配方案，
+    TempSSIM 就从 0.377 / 0.390 变到 0.413（N=8）。更狠的是 Tab.4 里那一行 ——
+    「canonical 均值 + Block-relative 位置」的四个 PAC 数字和滑动窗口<b>一模一样</b>（0.540 / 0.412 / 0.504 / 0.631），
+    因为位置被截断后摘要槽拿到的 softmax 权重是 0，<span class="hl-warn">压缩等于白做</span>。</p>
+  </div>
+
+  <div class="callout warn">
+    <span class="lab">而这几句话不能按字面读（详见 §11）</span>
+    <p><b>① 两个头条数字都是相对增益</b>，绝对值分别是 0.472→0.545 和 0.723→0.864。<br>
+    <b>② 同一个「滑动窗口在 ABA / N=16 上的 PAC」，全文出现了三个不同的数</b>：0.723（Tab.3）、0.540（Tab.10）、0.837（Tab.8）。协议不同，<b>不能跨表比</b>。<br>
+    <b>③ WorldTrace-Field 对「召回」几乎没有帮助</b>：Tab.10 里它 0.555，滑动窗口 0.540，而 naive 平均是 0.570 —— 比它还高。Field 的价值只在连贯性。<br>
+    <b>④ TempSSIM 衡量的是「相邻帧有多像」</b>，画面越静、越糊越容易得高分，它不锚定到真实场景。<br>
+    <b>⑤ 最难的 360° 全景 pan 上，增益几乎消失</b>（0.559 → 0.577）。</p>
+  </div>
+</section>
+
+<!-- ══════════════════ 01 ══════════════════ -->
+<section class="card" id="s1">
+  <div class="sechead"><span class="secnum">01</span><h2>病因 A：位置决定「读不读得到」</h2></div>
+
+  <p>自回归视频世界模型（Matrix-Game-2、Oasis、Genie 这一类）是<b>一段一段（chunk）</b>生成的：每生成一段，
+  就把这段的 Key/Value 追加进 KV cache；下一段去 attend 这个 cache。所以「记忆」在物理上就是 cache 里那些 K/V。</p>
+
+  <p>关键是训练时模型只见过<b>有界</b>的相对偏移。设 <i class="m">q</i> 是当前 query 帧的绝对位置、<i class="m">k</i> 是某个 cache 里 key 帧的位置：</p>
+
+  <div class="formula">
+    0 <span class="op">≤</span> <i class="m">δ<sub>q,k</sub></i> <span class="op">=</span> <i class="m">q</i> <span class="op">−</span> <i class="m">k</i> <span class="op">≤</span> <i class="m">Δt</i><sub>train</sub>
+    <span class="tag">MG2：Δt_train = 5，L_attn = 6 latent frame</span>
+  </div>
+
+  <p>时间维 RoPE 对注意力分数的贡献是一个<b>旋转</b>：</p>
+
+  <div class="formula">
+    <i class="m">a<sup>f</sup><sub>q,k</sub></i> <span class="op">=</span> Re<span class="op">(</span> <i class="m">A<sup>f</sup><sub>q,k</sub></i> · <i class="m">e</i><sup> <i class="m">i θ<sub>f</sub> δ<sub>q,k</sub></i></sup> <span class="op">)</span>
+    <span class="tag">A 是「内容」，e^{iθδ} 是「位置」</span>
+    <span class="note">内容项 <i class="m">A<sup>f</sup><sub>q,k</sub></i> 是 query 与 key 在 canonical 坐标下的内积，与位置无关；位置全部藏在那个旋转角 <i class="m">θ<sub>f</sub> δ<sub>q,k</sub></i> 里。</span>
+  </div>
+
+  <p>推理时 <i class="m">δ<sub>q,k</sub></i> 无界地涨。旋转角一旦超出训练见过的范围，这个频率分量就开始<b>胡说</b>。
+  而且这件事是<b>分频率发生</b>的 —— MG2 继承 Wan 2.1 的 3D RoPE，每个头 128 维里 <b>2c<sub>t</sub>=44 维给时间</b>（22 个复数对）、
+  高和宽各 42 维，base <i class="m">θ</i>=10000，第 <i class="m">f</i> 个时间频率是 <i class="m">θ<sub>f</sub></i> = 10000<sup>−f/22</sup>，
+  从 <i class="m">θ</i><sub>0</sub>=1.0（转最快）一路降到 <i class="m">θ</i><sub>21</sub>≈1.5×10<sup>−4</sup>（几乎不转）。</p>
+
+  <p><b>下面这张图是全文的病理切片</b>，横轴是频率序号，纵轴是推理时的 query–key 距离，颜色是相位 <i class="m">θ<sub>f</sub></i>|<i class="m">δ</i>| 落在哪个区间（鼠标悬停看具体弧度）：</p>
+
+  <div class="fig" id="fig-b"><svg viewBox="0 0 884 402" role="img" aria-label="RoPE 相位热力图">
+<g class="svgtxt">
+<text x="134" y="34" text-anchor="middle" font-size="10.5" fill="var(--muted)">0</text>
+<text x="200" y="34" text-anchor="middle" font-size="10.5" fill="var(--muted)">2</text>
+<text x="266" y="34" text-anchor="middle" font-size="10.5" fill="var(--muted)">4</text>
+<text x="332" y="34" text-anchor="middle" font-size="10.5" fill="var(--muted)">6</text>
+<text x="398" y="34" text-anchor="middle" font-size="10.5" fill="var(--muted)">8</text>
+<text x="464" y="34" text-anchor="middle" font-size="10.5" fill="var(--muted)">10</text>
+<text x="530" y="34" text-anchor="middle" font-size="10.5" fill="var(--muted)">12</text>
+<text x="596" y="34" text-anchor="middle" font-size="10.5" fill="var(--muted)">14</text>
+<text x="662" y="34" text-anchor="middle" font-size="10.5" fill="var(--muted)">16</text>
+<text x="728" y="34" text-anchor="middle" font-size="10.5" fill="var(--muted)">18</text>
+<text x="794" y="34" text-anchor="middle" font-size="10.5" fill="var(--muted)">20</text>
+<text x="481" y="17" text-anchor="middle" font-size="11.5" fill="var(--ink2)">时间维 RoPE 频率序号 f　（左＝转得最快 θ₀=1.0 ⋯⋯ 右＝转得最慢 θ₂₁≈1.5×10⁻⁴）</text>
+<text x="106" y="60" text-anchor="end" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">1</text>
+<rect x="118" y="44" width="97.5" height="23.5" rx="2.5" fill="var(--bd1)" class="ph" data-d="1" data-f0="0" data-f1="2"/>
+<rect x="217" y="44" width="625.5" height="23.5" rx="2.5" fill="var(--bd0)" class="ph" data-d="1" data-f0="3" data-f1="21"/>
+<text x="106" y="86" text-anchor="end" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">2</text>
+<rect x="118" y="69" width="130.5" height="23.5" rx="2.5" fill="var(--bd1)" class="ph" data-d="2" data-f0="0" data-f1="3"/>
+<rect x="250" y="69" width="592.5" height="23.5" rx="2.5" fill="var(--bd0)" class="ph" data-d="2" data-f0="4" data-f1="21"/>
+<text x="106" y="110" text-anchor="end" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">3</text>
+<rect x="118" y="94" width="163.5" height="23.5" rx="2.5" fill="var(--bd1)" class="ph" data-d="3" data-f0="0" data-f1="4"/>
+<rect x="283" y="94" width="559.5" height="23.5" rx="2.5" fill="var(--bd0)" class="ph" data-d="3" data-f0="5" data-f1="21"/>
+<text x="106" y="136" text-anchor="end" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">5</text>
+<rect x="118" y="119" width="64.5" height="23.5" rx="2.5" fill="var(--bd2)" class="ph" data-d="5" data-f0="0" data-f1="1"/>
+<rect x="184" y="119" width="163.5" height="23.5" rx="2.5" fill="var(--bd1)" class="ph" data-d="5" data-f0="2" data-f1="6"/>
+<rect x="349" y="119" width="493.5" height="23.5" rx="2.5" fill="var(--bd0)" class="ph" data-d="5" data-f0="7" data-f1="21"/>
+<text x="106" y="160" text-anchor="end" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">8</text>
+<rect x="118" y="144" width="97.5" height="23.5" rx="2.5" fill="var(--bd2)" class="ph" data-d="8" data-f0="0" data-f1="2"/>
+<rect x="217" y="144" width="163.5" height="23.5" rx="2.5" fill="var(--bd1)" class="ph" data-d="8" data-f0="3" data-f1="7"/>
+<rect x="382" y="144" width="460.5" height="23.5" rx="2.5" fill="var(--bd0)" class="ph" data-d="8" data-f0="8" data-f1="21"/>
+<text x="106" y="186" text-anchor="end" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">12</text>
+<rect x="118" y="169" width="31.5" height="23.5" rx="2.5" fill="var(--bd3)" class="ph" data-d="12" data-f0="0" data-f1="0"/>
+<rect x="151" y="169" width="97.5" height="23.5" rx="2.5" fill="var(--bd2)" class="ph" data-d="12" data-f0="1" data-f1="3"/>
+<rect x="250" y="169" width="163.5" height="23.5" rx="2.5" fill="var(--bd1)" class="ph" data-d="12" data-f0="4" data-f1="8"/>
+<rect x="415" y="169" width="427.5" height="23.5" rx="2.5" fill="var(--bd0)" class="ph" data-d="12" data-f0="9" data-f1="21"/>
+<text x="106" y="210" text-anchor="end" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">16</text>
+<rect x="118" y="194" width="64.5" height="23.5" rx="2.5" fill="var(--bd3)" class="ph" data-d="16" data-f0="0" data-f1="1"/>
+<rect x="184" y="194" width="64.5" height="23.5" rx="2.5" fill="var(--bd2)" class="ph" data-d="16" data-f0="2" data-f1="3"/>
+<rect x="250" y="194" width="163.5" height="23.5" rx="2.5" fill="var(--bd1)" class="ph" data-d="16" data-f0="4" data-f1="8"/>
+<rect x="415" y="194" width="427.5" height="23.5" rx="2.5" fill="var(--bd0)" class="ph" data-d="16" data-f0="9" data-f1="21"/>
+<text x="106" y="236" text-anchor="end" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">20</text>
+<rect x="118" y="219" width="64.5" height="23.5" rx="2.5" fill="var(--bd3)" class="ph" data-d="20" data-f0="0" data-f1="1"/>
+<rect x="184" y="219" width="97.5" height="23.5" rx="2.5" fill="var(--bd2)" class="ph" data-d="20" data-f0="2" data-f1="4"/>
+<rect x="283" y="219" width="163.5" height="23.5" rx="2.5" fill="var(--bd1)" class="ph" data-d="20" data-f0="5" data-f1="9"/>
+<rect x="448" y="219" width="394.5" height="23.5" rx="2.5" fill="var(--bd0)" class="ph" data-d="20" data-f0="10" data-f1="21"/>
+<text x="106" y="260" text-anchor="end" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">25</text>
+<rect x="118" y="244" width="97.5" height="23.5" rx="2.5" fill="var(--bd3)" class="ph" data-d="25" data-f0="0" data-f1="2"/>
+<rect x="217" y="244" width="64.5" height="23.5" rx="2.5" fill="var(--bd2)" class="ph" data-d="25" data-f0="3" data-f1="4"/>
+<rect x="283" y="244" width="163.5" height="23.5" rx="2.5" fill="var(--bd1)" class="ph" data-d="25" data-f0="5" data-f1="9"/>
+<rect x="448" y="244" width="394.5" height="23.5" rx="2.5" fill="var(--bd0)" class="ph" data-d="25" data-f0="10" data-f1="21"/>
+<text x="106" y="286" text-anchor="end" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">30</text>
+<rect x="118" y="269" width="97.5" height="23.5" rx="2.5" fill="var(--bd3)" class="ph" data-d="30" data-f0="0" data-f1="2"/>
+<rect x="217" y="269" width="97.5" height="23.5" rx="2.5" fill="var(--bd2)" class="ph" data-d="30" data-f0="3" data-f1="5"/>
+<rect x="316" y="269" width="163.5" height="23.5" rx="2.5" fill="var(--bd1)" class="ph" data-d="30" data-f0="6" data-f1="10"/>
+<rect x="481" y="269" width="361.5" height="23.5" rx="2.5" fill="var(--bd0)" class="ph" data-d="30" data-f0="11" data-f1="21"/>
+<text x="106" y="310" text-anchor="end" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">40</text>
+<rect x="118" y="294" width="130.5" height="23.5" rx="2.5" fill="var(--bd3)" class="ph" data-d="40" data-f0="0" data-f1="3"/>
+<rect x="250" y="294" width="97.5" height="23.5" rx="2.5" fill="var(--bd2)" class="ph" data-d="40" data-f0="4" data-f1="6"/>
+<rect x="349" y="294" width="163.5" height="23.5" rx="2.5" fill="var(--bd1)" class="ph" data-d="40" data-f0="7" data-f1="11"/>
+<rect x="514" y="294" width="328.5" height="23.5" rx="2.5" fill="var(--bd0)" class="ph" data-d="40" data-f0="12" data-f1="21"/>
+<text x="106" y="336" text-anchor="end" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">60</text>
+<rect x="118" y="319" width="163.5" height="23.5" rx="2.5" fill="var(--bd3)" class="ph" data-d="60" data-f0="0" data-f1="4"/>
+<rect x="283" y="319" width="97.5" height="23.5" rx="2.5" fill="var(--bd2)" class="ph" data-d="60" data-f0="5" data-f1="7"/>
+<rect x="382" y="319" width="163.5" height="23.5" rx="2.5" fill="var(--bd1)" class="ph" data-d="60" data-f0="8" data-f1="12"/>
+<rect x="547" y="319" width="295.5" height="23.5" rx="2.5" fill="var(--bd0)" class="ph" data-d="60" data-f0="13" data-f1="21"/>
+<line x1="112" y1="143.2" x2="842" y2="143.2" stroke="var(--ink)" stroke-width="1.8" stroke-dasharray="6 4"/>
+<text x="842" y="136.2" text-anchor="end" font-size="11" fill="var(--ink)" font-weight="600">训练时见过的最大偏移 Δt_train = 5</text>
+<text x="20" y="194" font-size="11.5" fill="var(--ink2)" transform="rotate(-90 20 194)" text-anchor="middle">推理时 query–key 距离 |δ|</text>
+<text x="118" y="374" font-size="11.5" fill="var(--muted)">rollout 越长 |δ| 只会越大 → 左上那片「噪声区」只会越宽。而这一片正是 KV cache 里的旧帧所在的位置。</text>
+</g></svg></div>
+  <div class="legendrow">
+    <span class="lg"><span class="sw" style="background:var(--bd0)"></span>&lt; π/8：几乎不受位置影响，是纯语义载体</span>
+    <span class="lg"><span class="sw" style="background:var(--bd1)"></span>π/8 – π：位置信号正常</span>
+    <span class="lg"><span class="sw" style="background:var(--bd2)"></span>π – 3π：出分布，模型没学过</span>
+    <span class="lg"><span class="sw" style="background:var(--bd3)"></span>&gt; 3π：相位绕了多圈，等于随机噪声</span>
+  </div>
+  <div class="figcap">按论文 Fig.7 的口径重算（θ_f = 10000^(−f/22)）。虚线是训练见过的最大偏移 Δt_train=5。
+  论文原文给的两个校验点：δ=5 时 f≥10 的相位 &lt; 0.08 rad（本图算得 0.076）；δ=30 时 f≤2 全部超过 3π，f=3 为 8.5 rad、f=5 为 3.7 rad —— 与本图一致。</div>
+
+  <p>这张图说明了三件事，都很重要：</p>
+
+  <ol class="pts">
+    <li><b>坏的只有「转得快」的那几个频率。</b>右侧一大片（f≥10）在任何距离下相位都极小，它们本来就不编码位置，是语义载体，长程下依然可靠。</li>
+    <li><b>坏得很快。</b>δ 从 5 涨到 12，f=0 就已经进了噪声区；δ=30 时前 3 个频率全废。而 rollout 到 N=48 chunk（每 chunk 3 latent frame）时，最老的帧距今超过 140 格。</li>
+    <li><b>不稳定性是「相邻偏移之间跳变」。</b>f=0 的 θ=1.0，key 往后挪<b>一格</b>相位就变 1 弧度，贡献可以直接变号。所以不是「缓慢衰减」，是「读数抖动」。</li>
+  </ol>
+
+  <div class="callout warn">
+    <span class="lab">这条推理链里有一个隐含假设，值得记住</span>
+    <p>「相位 &gt; 3π 就等于随机噪声」是一个<b>启发式阈值</b>，论文没有直接测量「这些分量对 attention 的实际破坏量」，
+    只是从波长与上下文长度的关系（沿用 YaRN 的 NTK-by-parts 框架）推出来的。真正的实验证据是间接的 —— 把位置换掉，指标就变好。</p>
+  </div>
+</section>
+
+<!-- ══════════════════ 02 ══════════════════ -->
+<section class="card" id="s2">
+  <div class="sechead"><span class="secnum">02</span><h2>病因 B：压缩方式决定「读到的东西还在不在」</h2></div>
+
+  <p>既然 cache 不能无限长，自然想法是<b>把远处的历史压成固定几个槽</b>。最常见的压法是求平均。
+  但 cache 里存的 Key <b>已经被 RoPE 转过了</b>，直接平均的是一堆「已旋转」的向量：</p>
+
+  <div class="formula">
+    <span style="text-decoration:overline">K</span><sup> <i class="m">f</i></sup><sub>naive</sub> <span class="op">=</span>
+    (1/<i class="m">M</i>) <span class="op">Σ</span><sub><i class="m">m</i>=1..<i class="m">M</i></sub>
+    <i class="m">R</i>(<i class="m">θ<sub>f</sub> t<sub>m</sub></i>) <i class="m">K<sup>f</sup><sub>m</sub></i>
+    <span class="tag">每一项被转了不同的角度</span>
+  </div>
+
+  <p>每个源帧的时间戳 <i class="m">t<sub>m</sub></i> 不同，旋转角 <i class="m">θ<sub>f</sub> t<sub>m</sub></i> 就不同。
+  <b>时间戳挨得近</b>时角度接近，平均没什么损失；<b>时间戳差得远</b>时角度可能几乎相反，相加互相抵消 ——
+  <span class="hl-warn">这个频率的信息被抹掉，跟它原本编码了什么无关</span>。这就是「相位相消（phase cancellation）」。</p>
+
+  <div class="fig"><svg viewBox="0 0 940 250" role="img" aria-label="RoPE 相位相消 vs canonical 平均">
+<defs><marker id="ahk" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto"><path d="M0,1 L8,5 L0,9 z" fill="var(--ink)"/></marker><marker id="ahf" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto"><path d="M0,1 L8,5 L0,9 z" fill="var(--c-field)"/></marker></defs>
+<g class="svgtxt">
+<text x="24" y="24" font-size="12.5" fill="var(--ink)" font-weight="700">① 直接平均「已经旋转过」的 Key（naive）</text>
+<text x="24" y="42" font-size="11.3" fill="var(--muted)">4 个源帧 t=2/9/17/25，在 f=1 上被转了 75°/339°/281°/222° —— 方向乱指</text>
+<circle cx="118" cy="142" r="54" fill="none" stroke="var(--grid)" stroke-width="1.2"/>
+<line x1="56" y1="142" x2="180" y2="142" stroke="var(--grid)"/>
+<line x1="118" y1="80" x2="118" y2="204" stroke="var(--grid)"/>
+<line x1="118" y1="142" x2="131.6" y2="89.7" stroke="var(--c-warn)" stroke-width="1.9" opacity=".7"/>
+<circle cx="131.6" cy="89.7" r="2.7" fill="var(--c-warn)"/>
+<text x="134.6" y="82.2" text-anchor="middle" font-size="9.5" fill="var(--muted)">t=2</text>
+<line x1="118" y1="142" x2="168.5" y2="161.1" stroke="var(--c-warn)" stroke-width="1.9" opacity=".7"/>
+<circle cx="168.5" cy="161.1" r="2.7" fill="var(--c-warn)"/>
+<text x="179.6" y="169.3" text-anchor="middle" font-size="9.5" fill="var(--muted)">t=9</text>
+<line x1="118" y1="142" x2="128.2" y2="195.0" stroke="var(--c-warn)" stroke-width="1.9" opacity=".7"/>
+<circle cx="128.2" cy="195.0" r="2.7" fill="var(--c-warn)"/>
+<text x="130.4" y="210.7" text-anchor="middle" font-size="9.5" fill="var(--muted)">t=17</text>
+<line x1="118" y1="142" x2="78.1" y2="178.4" stroke="var(--c-warn)" stroke-width="1.9" opacity=".7"/>
+<circle cx="78.1" cy="178.4" r="2.7" fill="var(--c-warn)"/>
+<text x="69.4" y="190.4" text-anchor="middle" font-size="9.5" fill="var(--muted)">t=25</text>
+<line x1="118" y1="142" x2="126.6" y2="156.1" stroke="var(--ink)" stroke-width="3.6" marker-end="url(#ahk)"/>
+<text x="118" y="228" text-anchor="middle" font-size="11.5" fill="var(--c-warn)" font-weight="700">平均后只剩 0.31 倍长度 → 这个频率的信息被抹掉</text>
+<text x="430" y="24" font-size="12.5" fill="var(--ink)" font-weight="700">② 先转回 canonical 再平均（WorldTrace 的做法）</text>
+<text x="430" y="42" font-size="11.3" fill="var(--muted)">每个 Key 先各自减掉自己的旋转 R(−θ_f t_m) → 相位对齐 → 再平均</text>
+<circle cx="524" cy="142" r="54" fill="none" stroke="var(--grid)" stroke-width="1.2"/>
+<line x1="462" y1="142" x2="586" y2="142" stroke="var(--grid)"/>
+<line x1="524" y1="80" x2="524" y2="204" stroke="var(--grid)"/>
+<line x1="524" y1="142" x2="577.5" y2="149.5" stroke="var(--c-field)" stroke-width="1.9" opacity=".7"/>
+<circle cx="577.5" cy="149.5" r="2.7" fill="var(--c-field)"/>
+<line x1="524" y1="142" x2="577.9" y2="144.7" stroke="var(--c-field)" stroke-width="1.9" opacity=".7"/>
+<circle cx="577.9" cy="144.7" r="2.7" fill="var(--c-field)"/>
+<line x1="524" y1="142" x2="577.9" y2="139.3" stroke="var(--c-field)" stroke-width="1.9" opacity=".7"/>
+<circle cx="577.9" cy="139.3" r="2.7" fill="var(--c-field)"/>
+<line x1="524" y1="142" x2="577.5" y2="134.5" stroke="var(--c-field)" stroke-width="1.9" opacity=".7"/>
+<circle cx="577.5" cy="134.5" r="2.7" fill="var(--c-field)"/>
+<line x1="524" y1="142" x2="577.2" y2="142.0" stroke="var(--c-field)" stroke-width="3.6" marker-end="url(#ahf)"/>
+<text x="524" y="228" text-anchor="middle" font-size="11.5" fill="var(--c-field)" font-weight="700">平均后长度 ≈1.00 → 内容完整保留</text>
+<text x="640" y="120" font-size="11.5" fill="var(--ink2)">最后统一旋一次</text>
+<text x="640" y="138" font-size="11.5" fill="var(--ink2)">到槽位的虚拟位置 t_v</text>
+<line x1="640" y1="150" x2="740" y2="150" stroke="var(--c-field)" stroke-width="2" marker-end="url(#ahf)"/>
+<circle cx="836" cy="142" r="42" fill="none" stroke="var(--grid)" stroke-width="1.2"/>
+<line x1="794" y1="142" x2="878" y2="142" stroke="var(--grid)"/><line x1="836" y1="100" x2="836" y2="184" stroke="var(--grid)"/>
+<line x1="836" y1="142" x2="856.9" y2="105.6" stroke="var(--c-field)" stroke-width="3.6" marker-end="url(#ahf)"/>
+<text x="836" y="204" text-anchor="middle" font-size="11" fill="var(--muted)">读的时候才带上位置</text>
+</g></svg></div>
+  <div class="figcap">用论文的真实参数算的一个具体例子：f=1（θ₁≈0.658），4 个源帧取 t=2 / 9 / 17 / 25。
+  假设它们的 canonical 内容方向一致（只看旋转造成的损失），左边直接平均后模长只剩 <b>0.31</b>；右边先回 canonical 再平均，模长保住 ≈1.00，位置在读的时候才补上。</div>
+
+  <p>论文给的实测证据是 Tab.5：<b>位置方案固定住不动</b>，只换压缩空间，看 LatentDiff（越低越好）：</p>
+
+  <div class="tblwrap">
+  <table class="cmp">
+    <thead><tr><th>摘要槽数 N<sub>s</sub></th><th class="num">naive（旋转域平均）</th><th class="num">canonical（去旋转后平均）</th><th class="num">差距</th></tr></thead>
+    <tbody>
+      <tr><td class="rowlab">1</td><td class="num">0.257</td><td class="num best">0.224</td><td class="num">−12.8%</td></tr>
+      <tr><td class="rowlab">2</td><td class="num">0.261</td><td class="num best">0.257</td><td class="num">−1.5%</td></tr>
+      <tr><td class="rowlab">4</td><td class="num">0.312</td><td class="num best">0.233</td><td class="num">−25.3%</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>注意这里的<b>趋势</b>比绝对值更有说服力：naive 的误差随槽数<b>单调变差</b>（0.257 → 0.312），
+  因为槽越多、每槽跨的时间戳越杂、相位越乱；canonical 那一列没有这个趋势。这正好是相消假说预测的样子。</p>
+
+  <h3>两个病因是耦合的，这是全文的立论方式</h3>
+
+  <p>论文特别强调：以往工作大多只治一个。</p>
+
+  <ul class="pts">
+    <li><b>只管位置</b>：∞-RoPE 的 Block-relative 把每个 cache 帧相对当前 chunk 重新编号，保证 δ 永远在训练范围内 —— 但它的目标是无限长视频，不是压缩。</li>
+    <li><b>只管内容</b>：H₂O / SnapKV / PyramidKV 决定丢谁，Token Merging / Compressive Transformer 决定怎么合，MemRoPE 用双速率 EMA 平滑。</li>
+  </ul>
+
+  <div class="callout">
+    <p><b>耦合点</b>：位置对了但压缩把信号抵消掉了没用；内容对了但槽位落在出分布的偏移上也没用。
+    更微妙的一层是 —— <b>「在什么偏移分布下压的」和「在什么偏移下被查的」必须一致</b>，
+    否则 §04 里那个「均值保持注意力分数」的保证就失效了。</p>
+  </div>
+</section>
+
+<!-- ══════════════════ 03 ══════════════════ -->
+<section class="card" id="s3">
+  <div class="sechead"><span class="secnum">03</span><h2>解法骨架：近期窗口 + 摘要槽位 + 按槽序号定死的虚拟位置</h2></div>
+
+  <p>把本来的局部注意力窗口 <i class="m">L</i><sub>attn</sub> 一切两半：</p>
+
+  <div class="formula">
+    <i class="m">N<sub>s</sub></i> <span class="op">+</span> <i class="m">N<sub>r</sub></i> <span class="op">=</span> <i class="m">L</i><sub>attn</sub>
+    <span class="tag">MG2 上 L_attn = 6，实验用 4+2 或 2+4</span>
+    <span class="note"><span class="hl-recent">ℛ（recent window）</span>：最近 N<sub>r</sub> 个 latent frame，<b>原样</b>存。
+    　<span class="hl-addr">𝒮（summary cache）</span>：N<sub>s</sub> 个槽，每槽占<b>一个 latent frame 的位置</b>，装被压过的远期历史。</span>
+  </div>
+
+  <div class="fig">
+  <svg viewBox="0 0 940 332" role="img" aria-label="WorldTrace 的 cache 结构与虚拟位置分配">
+   <g class="svgtxt">
+    <text x="20" y="14" font-size="11.5" fill="var(--muted)" letter-spacing="1">真实历史：T 个 latent frame，随 rollout 线性增长（图示 T=24）</text>
+    <rect x="40" y="26" width="180" height="26" rx="4" fill="var(--c-field)" opacity="0.20"/>
+    <rect x="224" y="26" width="180" height="26" rx="4" fill="var(--c-field)" opacity="0.32"/>
+    <rect x="408" y="26" width="150" height="26" rx="4" fill="var(--c-field)" opacity="0.44"/>
+    <rect x="562" y="26" width="150" height="26" rx="4" fill="var(--c-field)" opacity="0.56"/>
+    <rect x="716" y="26" width="58" height="26" rx="4" fill="var(--c-recent)" opacity="0.55"/>
+    <rect x="778" y="26" width="58" height="26" rx="4" fill="var(--c-recent)" opacity="0.75"/>
+    <text x="130" y="68" text-anchor="middle" font-size="10.8" fill="var(--muted)">第 0 段（最老）</text>
+    <text x="314" y="68" text-anchor="middle" font-size="10.8" fill="var(--muted)">第 1 段</text>
+    <text x="483" y="68" text-anchor="middle" font-size="10.8" fill="var(--muted)">第 2 段</text>
+    <text x="637" y="68" text-anchor="middle" font-size="10.8" fill="var(--muted)">第 3 段</text>
+    <text x="805" y="68" text-anchor="middle" font-size="10.8" fill="color-mix(in srgb, var(--c-recent) 86%, var(--ink))">原样保留</text>
+    <text x="40" y="90" font-size="11.2" fill="var(--ink2)">← 越老。　离开近期窗口的 T−N_r 帧被按时间顺序均分成 N_s=4 段，每段进一个槽（M ≈ T / N_s，随 rollout 变长）</text>
+
+    <g stroke="var(--axis)" stroke-width="1.3" fill="none">
+      <path d="M130,100 C130,128 190,128 190,156"/>
+      <path d="M314,100 C314,128 330,128 330,156"/>
+      <path d="M483,100 C483,128 470,128 470,156"/>
+      <path d="M637,100 C637,128 610,128 610,156"/>
+      <path d="M745,100 C745,128 750,128 750,156"/>
+      <path d="M807,100 C807,128 870,128 870,156"/>
+    </g>
+
+    <text x="16" y="186" font-size="11" fill="var(--muted)" font-weight="700">KV CACHE</text>
+    <text x="16" y="202" font-size="10.6" fill="var(--muted)">恒定 6 格</text>
+    <rect x="120" y="160" width="140" height="58" rx="9" fill="none" stroke="var(--c-addr)" stroke-width="1.6"/>
+    <text x="190" y="184" text-anchor="middle" font-size="13" fill="var(--ink)" font-weight="700">s<tspan font-size="10" dy="3">0</tspan></text>
+    <text x="190" y="205" text-anchor="middle" font-size="10.6" fill="var(--ink2)">最老的摘要</text>
+    <rect x="260" y="160" width="140" height="58" rx="9" fill="none" stroke="var(--c-addr)" stroke-width="1.6"/>
+    <text x="330" y="190" text-anchor="middle" font-size="13" fill="var(--ink)" font-weight="700">s<tspan font-size="10" dy="3">1</tspan></text>
+    <rect x="400" y="160" width="140" height="58" rx="9" fill="none" stroke="var(--c-addr)" stroke-width="1.6"/>
+    <text x="470" y="190" text-anchor="middle" font-size="13" fill="var(--ink)" font-weight="700">s<tspan font-size="10" dy="3">2</tspan></text>
+    <rect x="540" y="160" width="140" height="58" rx="9" fill="none" stroke="var(--c-addr)" stroke-width="1.6"/>
+    <text x="610" y="190" text-anchor="middle" font-size="13" fill="var(--ink)" font-weight="700">s<tspan font-size="10" dy="3">3</tspan></text>
+    <rect x="680" y="160" width="140" height="58" rx="9" fill="color-mix(in srgb, var(--c-recent) 12%, transparent)" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.6"/>
+    <text x="750" y="190" text-anchor="middle" font-size="13" fill="var(--ink)" font-weight="700">r<tspan font-size="10" dy="3">0</tspan></text>
+    <rect x="820" y="160" width="100" height="58" rx="9" fill="color-mix(in srgb, var(--c-recent) 12%, transparent)" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.6"/>
+    <text x="870" y="190" text-anchor="middle" font-size="13" fill="var(--ink)" font-weight="700">r<tspan font-size="10" dy="3">1</tspan></text>
+
+    <line x1="120" y1="228" x2="680" y2="228" stroke="var(--c-addr)" stroke-width="1.4"/>
+    <line x1="680" y1="228" x2="920" y2="228" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.4"/>
+    <text x="400" y="246" text-anchor="middle" font-size="11.4" fill="var(--c-addr)" font-weight="700">摘要槽 𝒮：N_s = 4，装被压缩的远期历史</text>
+    <text x="800" y="246" text-anchor="middle" font-size="11.4" fill="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" font-weight="700">近期窗口 ℛ：N_r = 2，verbatim</text>
+
+    <text x="16" y="278" font-size="10.8" fill="var(--muted)">虚拟位置</text>
+    <g font-size="13.5" text-anchor="middle" font-weight="700">
+      <text x="190" y="278" fill="var(--c-addr)">q − 5</text>
+      <text x="330" y="278" fill="var(--c-addr)">q − 4</text>
+      <text x="470" y="278" fill="var(--c-addr)">q − 3</text>
+      <text x="610" y="278" fill="var(--c-addr)">q − 2</text>
+      <text x="750" y="278" fill="color-mix(in srgb, var(--c-recent) 86%, var(--ink))">q − 1</text>
+      <text x="870" y="278" fill="color-mix(in srgb, var(--c-recent) 86%, var(--ink))">q</text>
+    </g>
+    <rect x="120" y="292" width="800" height="28" rx="7" fill="var(--c-addr)" opacity="0.09"/>
+    <text x="520" y="310" text-anchor="middle" font-size="11.8" fill="var(--c-addr)" font-weight="600">这六个偏移永远落在 [q − Δt_train , q] 之内 —— 也就是训练时唯一见过的那六个偏移</text>
+   </g>
+  </svg>
+  </div>
+  <div class="figcap">对应论文 Fig.2 上半部分。要点在最后一行：无论 rollout 走到 N=16 还是 N=512，模型读到的偏移集合<b>永远是 {0,1,2,3,4,5}</b>，
+  变的只是「每个槽里装了多长的历史」。</div>
+
+  <h3>一个位置方案必须同时满足四条</h3>
+
+  <p>论文把要求列成了四条，这是理解 Def.1 的最好入口：</p>
+
+  <div class="tblwrap">
+  <table class="cmp">
+    <thead><tr><th style="width:26%">性质</th><th style="width:34%">含义</th><th style="width:40%">谁违反了它</th></tr></thead>
+    <tbody>
+      <tr><td class="rowlab">(i) 线性</td><td>对 q 和 s 都线性，映射可预测</td><td>—</td></tr>
+      <tr><td class="rowlab">(ii) 在分布内</td><td>落在训练见过的偏移范围里</td><td>什么都不做的滑动窗口 / 直接用真实时间戳</td></tr>
+      <tr><td class="rowlab">(iii) 与 horizon 无关</td><td>rollout 多长，落点都不变</td><td><b>Centroid-linear</b>（落点取决于 N）</td></tr>
+      <tr><td class="rowlab">(iv) 各槽互不相同</td><td>注意力能分辨哪个槽是哪个</td><td><b>Block-relative</b>（全撞在下界上）</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="formula">
+    <i class="m">t</i><sup><i class="m">v</i></sup><sub>min</sub> <span class="op">=</span> max(0, <i class="m">q</i> <span class="op">−</span> <i class="m">Δt</i><sub>train</sub>)　，
+    <i class="m">t</i><sup><i class="m">v</i></sup><sub>max</sub> <span class="op">=</span> <i class="m">q</i> <span class="op">−</span> <i class="m">N<sub>r</sub></i>
+    <span class="tag">Eq.1：可用区间</span>
+  </div>
+
+  <div class="formula" style="border-left:3px solid var(--c-addr)">
+    <i class="m">t</i><sup><i class="m">v</i></sup><sub><i class="m">s</i></sub> <span class="op">=</span> <i class="m">q</i> <span class="op">−</span> <span class="op">(</span> <i class="m">L</i><sub>attn</sub> <span class="op">−</span> 1 <span class="op">−</span> <i class="m">s</i> <span class="op">)</span> ，　<i class="m">s</i> = 0, …, <i class="m">N<sub>s</sub></i>−1
+    <span class="tag">Def.1　WorldTrace Slot Indexing</span>
+    <span class="note">整个方法的核心就是这一行。<b>偏移量 (L<sub>attn</sub>−1−s) 只由槽的序号决定</b> ——
+    不看这个槽里装的是哪些帧、不看它们的原始时间戳、不看 rollout 已经跑了多长。</span>
+  </div>
+
+  <h3>它和两个替代方案的区别，一张图就够</h3>
+
+  <div class="fig">
+  <svg viewBox="0 0 940 400" role="img" aria-label="三种虚拟位置分配方案对比">
+   <g class="svgtxt">
+    <!-- column headers -->
+    <text x="260" y="20" text-anchor="middle" font-size="12.5" fill="var(--ink)" font-weight="700">rollout 较短（比如 n = 8 chunk）</text>
+    <text x="710" y="20" text-anchor="middle" font-size="12.5" fill="var(--ink)" font-weight="700">rollout 很长（比如 n = 48 chunk）</text>
+
+    <text x="20" y="40" font-size="13" fill="var(--ink)" font-weight="700">Block-relative（∞-RoPE）</text>
+<text x="20" y="57" font-size="11.3" fill="var(--muted)">所有超过 Δt_train 的偏移都截断到下界 → 四个槽撞在同一个位置</text>
+<rect x="135.7" y="74" width="192.0" height="30" rx="6" fill="var(--c-addr)" opacity="0.10"/>
+<line x1="78" y1="110" x2="446" y2="110" stroke="var(--axis)" stroke-width="1.3"/>
+<line x1="90.0" y1="106" x2="90.0" y2="114" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="90.0" y="128" text-anchor="middle" font-size="10.6" fill="var(--muted)" font-variant-numeric="tabular-nums">q−6</text>
+<line x1="146.7" y1="106" x2="146.7" y2="114" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="146.7" y="128" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−5</text>
+<line x1="203.3" y1="106" x2="203.3" y2="114" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="203.3" y="128" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−4</text>
+<line x1="260.0" y1="106" x2="260.0" y2="114" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="260.0" y="128" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−3</text>
+<line x1="316.7" y1="106" x2="316.7" y2="114" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="316.7" y="128" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−2</text>
+<line x1="373.3" y1="106" x2="373.3" y2="114" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="373.3" y="128" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−1</text>
+<line x1="430.0" y1="106" x2="430.0" y2="114" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="430.0" y="128" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q</text>
+<rect x="364.3" y="80" width="18" height="18" rx="4" fill="color-mix(in srgb, var(--c-recent) 45%, transparent)" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.1"/>
+<text x="373.3" y="93" text-anchor="middle" font-size="9.5" fill="var(--ink)" font-weight="700">r0</text>
+<rect x="421.0" y="80" width="18" height="18" rx="4" fill="color-mix(in srgb, var(--c-recent) 45%, transparent)" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.1"/>
+<text x="430.0" y="93" text-anchor="middle" font-size="9.5" fill="var(--ink)" font-weight="700">r1</text>
+<circle cx="142.5" cy="89.0" r="10" fill="var(--c-warn)" opacity="0.30" stroke="var(--c-warn)" stroke-width="1.2"/>
+<circle cx="145.3" cy="87.4" r="10" fill="var(--c-warn)" opacity="0.30" stroke="var(--c-warn)" stroke-width="1.2"/>
+<circle cx="148.1" cy="85.8" r="10" fill="var(--c-warn)" opacity="0.30" stroke="var(--c-warn)" stroke-width="1.2"/>
+<circle cx="150.9" cy="84.2" r="10" fill="var(--c-warn)" opacity="0.30" stroke="var(--c-warn)" stroke-width="1.2"/>
+<text x="146.7" y="93" text-anchor="middle" font-size="10" fill="var(--ink)" font-weight="700">×4</text>
+<text x="168.7" y="70" font-size="10.8" fill="var(--c-warn)" font-weight="600">s0 s1 s2 s3 全部叠在这里</text>
+<rect x="585.7" y="74" width="192.0" height="30" rx="6" fill="var(--c-addr)" opacity="0.10"/>
+<line x1="528" y1="110" x2="896" y2="110" stroke="var(--axis)" stroke-width="1.3"/>
+<line x1="540.0" y1="106" x2="540.0" y2="114" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="540.0" y="128" text-anchor="middle" font-size="10.6" fill="var(--muted)" font-variant-numeric="tabular-nums">q−6</text>
+<line x1="596.7" y1="106" x2="596.7" y2="114" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="596.7" y="128" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−5</text>
+<line x1="653.3" y1="106" x2="653.3" y2="114" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="653.3" y="128" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−4</text>
+<line x1="710.0" y1="106" x2="710.0" y2="114" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="710.0" y="128" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−3</text>
+<line x1="766.7" y1="106" x2="766.7" y2="114" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="766.7" y="128" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−2</text>
+<line x1="823.3" y1="106" x2="823.3" y2="114" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="823.3" y="128" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−1</text>
+<line x1="880.0" y1="106" x2="880.0" y2="114" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="880.0" y="128" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q</text>
+<rect x="814.3" y="80" width="18" height="18" rx="4" fill="color-mix(in srgb, var(--c-recent) 45%, transparent)" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.1"/>
+<text x="823.3" y="93" text-anchor="middle" font-size="9.5" fill="var(--ink)" font-weight="700">r0</text>
+<rect x="871.0" y="80" width="18" height="18" rx="4" fill="color-mix(in srgb, var(--c-recent) 45%, transparent)" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.1"/>
+<text x="880.0" y="93" text-anchor="middle" font-size="9.5" fill="var(--ink)" font-weight="700">r1</text>
+<circle cx="592.5" cy="89.0" r="10" fill="var(--c-warn)" opacity="0.30" stroke="var(--c-warn)" stroke-width="1.2"/>
+<circle cx="595.3" cy="87.4" r="10" fill="var(--c-warn)" opacity="0.30" stroke="var(--c-warn)" stroke-width="1.2"/>
+<circle cx="598.1" cy="85.8" r="10" fill="var(--c-warn)" opacity="0.30" stroke="var(--c-warn)" stroke-width="1.2"/>
+<circle cx="600.9" cy="84.2" r="10" fill="var(--c-warn)" opacity="0.30" stroke="var(--c-warn)" stroke-width="1.2"/>
+<text x="596.7" y="93" text-anchor="middle" font-size="10" fill="var(--ink)" font-weight="700">×4</text>
+<text x="618.7" y="70" font-size="10.8" fill="var(--c-warn)" font-weight="600">s0 s1 s2 s3 全部叠在这里</text>
+<text x="902" y="95" font-size="17" fill="var(--c-warn)" font-weight="700">✗</text>
+<text x="20" y="158" font-size="13" fill="var(--ink)" font-weight="700">Centroid-linear</text>
+<text x="20" y="175" font-size="11.3" fill="var(--muted)">按槽内帧的平均时间戳线性映射 → 槽是分开的，但落点是 N 的函数，会随 rollout 漂移</text>
+<rect x="135.7" y="192" width="192.0" height="30" rx="6" fill="var(--c-addr)" opacity="0.10"/>
+<line x1="78" y1="228" x2="446" y2="228" stroke="var(--axis)" stroke-width="1.3"/>
+<line x1="90.0" y1="224" x2="90.0" y2="232" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="90.0" y="246" text-anchor="middle" font-size="10.6" fill="var(--muted)" font-variant-numeric="tabular-nums">q−6</text>
+<line x1="146.7" y1="224" x2="146.7" y2="232" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="146.7" y="246" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−5</text>
+<line x1="203.3" y1="224" x2="203.3" y2="232" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="203.3" y="246" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−4</text>
+<line x1="260.0" y1="224" x2="260.0" y2="232" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="260.0" y="246" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−3</text>
+<line x1="316.7" y1="224" x2="316.7" y2="232" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="316.7" y="246" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−2</text>
+<line x1="373.3" y1="224" x2="373.3" y2="232" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="373.3" y="246" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−1</text>
+<line x1="430.0" y1="224" x2="430.0" y2="232" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="430.0" y="246" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q</text>
+<rect x="364.3" y="198" width="18" height="18" rx="4" fill="color-mix(in srgb, var(--c-recent) 45%, transparent)" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.1"/>
+<text x="373.3" y="211" text-anchor="middle" font-size="9.5" fill="var(--ink)" font-weight="700">r0</text>
+<rect x="421.0" y="198" width="18" height="18" rx="4" fill="color-mix(in srgb, var(--c-recent) 45%, transparent)" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.1"/>
+<text x="430.0" y="211" text-anchor="middle" font-size="9.5" fill="var(--ink)" font-weight="700">r1</text>
+<circle cx="160.8" cy="207" r="10.5" fill="var(--c-anchor)" opacity="0.28" stroke="var(--c-anchor)" stroke-width="1.3"/>
+<text x="160.8" y="211" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s0</text>
+<circle cx="200.5" cy="207" r="10.5" fill="var(--c-anchor)" opacity="0.28" stroke="var(--c-anchor)" stroke-width="1.3"/>
+<text x="200.5" y="211" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s1</text>
+<circle cx="240.2" cy="207" r="10.5" fill="var(--c-anchor)" opacity="0.28" stroke="var(--c-anchor)" stroke-width="1.3"/>
+<text x="240.2" y="211" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s2</text>
+<circle cx="282.7" cy="207" r="10.5" fill="var(--c-anchor)" opacity="0.28" stroke="var(--c-anchor)" stroke-width="1.3"/>
+<text x="282.7" y="211" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s3</text>
+<rect x="585.7" y="192" width="192.0" height="30" rx="6" fill="var(--c-addr)" opacity="0.10"/>
+<line x1="528" y1="228" x2="896" y2="228" stroke="var(--axis)" stroke-width="1.3"/>
+<line x1="540.0" y1="224" x2="540.0" y2="232" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="540.0" y="246" text-anchor="middle" font-size="10.6" fill="var(--muted)" font-variant-numeric="tabular-nums">q−6</text>
+<line x1="596.7" y1="224" x2="596.7" y2="232" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="596.7" y="246" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−5</text>
+<line x1="653.3" y1="224" x2="653.3" y2="232" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="653.3" y="246" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−4</text>
+<line x1="710.0" y1="224" x2="710.0" y2="232" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="710.0" y="246" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−3</text>
+<line x1="766.7" y1="224" x2="766.7" y2="232" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="766.7" y="246" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−2</text>
+<line x1="823.3" y1="224" x2="823.3" y2="232" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="823.3" y="246" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−1</text>
+<line x1="880.0" y1="224" x2="880.0" y2="232" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="880.0" y="246" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q</text>
+<rect x="814.3" y="198" width="18" height="18" rx="4" fill="color-mix(in srgb, var(--c-recent) 45%, transparent)" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.1"/>
+<text x="823.3" y="211" text-anchor="middle" font-size="9.5" fill="var(--ink)" font-weight="700">r0</text>
+<rect x="871.0" y="198" width="18" height="18" rx="4" fill="color-mix(in srgb, var(--c-recent) 45%, transparent)" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.1"/>
+<text x="880.0" y="211" text-anchor="middle" font-size="9.5" fill="var(--ink)" font-weight="700">r1</text>
+<circle cx="596.7" cy="207" r="10.5" fill="var(--c-anchor)" opacity="0.28" stroke="var(--c-anchor)" stroke-width="1.3"/>
+<text x="596.7" y="211" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s0</text>
+<circle cx="629.5" cy="207" r="10.5" fill="var(--c-anchor)" opacity="0.28" stroke="var(--c-anchor)" stroke-width="1.3"/>
+<text x="629.5" y="211" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s1</text>
+<circle cx="661.8" cy="207" r="10.5" fill="var(--c-anchor)" opacity="0.28" stroke="var(--c-anchor)" stroke-width="1.3"/>
+<text x="661.8" y="211" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s2</text>
+<circle cx="698.7" cy="207" r="10.5" fill="var(--c-anchor)" opacity="0.28" stroke="var(--c-anchor)" stroke-width="1.3"/>
+<text x="698.7" y="211" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s3</text>
+<text x="902" y="213" font-size="17" fill="var(--c-warn)" font-weight="700">✗</text>
+<text x="20" y="276" font-size="13" fill="var(--ink)" font-weight="700">WorldTrace Slot Indexing（Def.1）</text>
+<text x="20" y="293" font-size="11.3" fill="var(--muted)">只按槽序号 → 两种 rollout 长度下完全相同，且四个槽互不相同</text>
+<rect x="135.7" y="310" width="192.0" height="30" rx="6" fill="var(--c-addr)" opacity="0.10"/>
+<line x1="78" y1="346" x2="446" y2="346" stroke="var(--axis)" stroke-width="1.3"/>
+<line x1="90.0" y1="342" x2="90.0" y2="350" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="90.0" y="364" text-anchor="middle" font-size="10.6" fill="var(--muted)" font-variant-numeric="tabular-nums">q−6</text>
+<line x1="146.7" y1="342" x2="146.7" y2="350" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="146.7" y="364" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−5</text>
+<line x1="203.3" y1="342" x2="203.3" y2="350" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="203.3" y="364" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−4</text>
+<line x1="260.0" y1="342" x2="260.0" y2="350" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="260.0" y="364" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−3</text>
+<line x1="316.7" y1="342" x2="316.7" y2="350" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="316.7" y="364" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−2</text>
+<line x1="373.3" y1="342" x2="373.3" y2="350" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="373.3" y="364" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−1</text>
+<line x1="430.0" y1="342" x2="430.0" y2="350" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="430.0" y="364" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q</text>
+<rect x="364.3" y="316" width="18" height="18" rx="4" fill="color-mix(in srgb, var(--c-recent) 45%, transparent)" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.1"/>
+<text x="373.3" y="329" text-anchor="middle" font-size="9.5" fill="var(--ink)" font-weight="700">r0</text>
+<rect x="421.0" y="316" width="18" height="18" rx="4" fill="color-mix(in srgb, var(--c-recent) 45%, transparent)" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.1"/>
+<text x="430.0" y="329" text-anchor="middle" font-size="9.5" fill="var(--ink)" font-weight="700">r1</text>
+<circle cx="146.7" cy="325" r="10.5" fill="var(--c-addr)" opacity="0.28" stroke="var(--c-addr)" stroke-width="1.3"/>
+<text x="146.7" y="329" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s0</text>
+<circle cx="203.3" cy="325" r="10.5" fill="var(--c-addr)" opacity="0.28" stroke="var(--c-addr)" stroke-width="1.3"/>
+<text x="203.3" y="329" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s1</text>
+<circle cx="260.0" cy="325" r="10.5" fill="var(--c-addr)" opacity="0.28" stroke="var(--c-addr)" stroke-width="1.3"/>
+<text x="260.0" y="329" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s2</text>
+<circle cx="316.7" cy="325" r="10.5" fill="var(--c-addr)" opacity="0.28" stroke="var(--c-addr)" stroke-width="1.3"/>
+<text x="316.7" y="329" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s3</text>
+<rect x="585.7" y="310" width="192.0" height="30" rx="6" fill="var(--c-addr)" opacity="0.10"/>
+<line x1="528" y1="346" x2="896" y2="346" stroke="var(--axis)" stroke-width="1.3"/>
+<line x1="540.0" y1="342" x2="540.0" y2="350" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="540.0" y="364" text-anchor="middle" font-size="10.6" fill="var(--muted)" font-variant-numeric="tabular-nums">q−6</text>
+<line x1="596.7" y1="342" x2="596.7" y2="350" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="596.7" y="364" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−5</text>
+<line x1="653.3" y1="342" x2="653.3" y2="350" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="653.3" y="364" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−4</text>
+<line x1="710.0" y1="342" x2="710.0" y2="350" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="710.0" y="364" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−3</text>
+<line x1="766.7" y1="342" x2="766.7" y2="350" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="766.7" y="364" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−2</text>
+<line x1="823.3" y1="342" x2="823.3" y2="350" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="823.3" y="364" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q−1</text>
+<line x1="880.0" y1="342" x2="880.0" y2="350" stroke="var(--axis)" stroke-width="1.1"/>
+<text x="880.0" y="364" text-anchor="middle" font-size="10.6" fill="var(--ink2)" font-variant-numeric="tabular-nums">q</text>
+<rect x="814.3" y="316" width="18" height="18" rx="4" fill="color-mix(in srgb, var(--c-recent) 45%, transparent)" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.1"/>
+<text x="823.3" y="329" text-anchor="middle" font-size="9.5" fill="var(--ink)" font-weight="700">r0</text>
+<rect x="871.0" y="316" width="18" height="18" rx="4" fill="color-mix(in srgb, var(--c-recent) 45%, transparent)" stroke="color-mix(in srgb, var(--c-recent) 86%, var(--ink))" stroke-width="1.1"/>
+<text x="880.0" y="329" text-anchor="middle" font-size="9.5" fill="var(--ink)" font-weight="700">r1</text>
+<circle cx="596.7" cy="325" r="10.5" fill="var(--c-addr)" opacity="0.28" stroke="var(--c-addr)" stroke-width="1.3"/>
+<text x="596.7" y="329" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s0</text>
+<circle cx="653.3" cy="325" r="10.5" fill="var(--c-addr)" opacity="0.28" stroke="var(--c-addr)" stroke-width="1.3"/>
+<text x="653.3" y="329" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s1</text>
+<circle cx="710.0" cy="325" r="10.5" fill="var(--c-addr)" opacity="0.28" stroke="var(--c-addr)" stroke-width="1.3"/>
+<text x="710.0" y="329" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s2</text>
+<circle cx="766.7" cy="325" r="10.5" fill="var(--c-addr)" opacity="0.28" stroke="var(--c-addr)" stroke-width="1.3"/>
+<text x="766.7" y="329" text-anchor="middle" font-size="9.8" fill="var(--ink)" font-weight="700">s3</text>
+<text x="902" y="331" font-size="17" fill="var(--c-field)" font-weight="700">✓</text>
+   </g>
+  </svg>
+  </div>
+  <div class="figcap">阴影带 = 摘要槽可用的在分布区间 [q−5, q−2]。<b>Block-relative</b> 把所有超过 Δt_train 的偏移截断到下界，
+  于是四个槽全部叠在 q−5 上，attention 无法区分（论文 Rem.1 «Block-relative collapse»）；
+  <b>Centroid-linear</b> 按「槽内帧的平均时间戳」线性映射进区间，槽是分开的，但落点随 N 变；
+  <b>WorldTrace</b> 只按槽序号定位，两种 rollout 长度下完全一样。</div>
+
+  <p>这三者的实测差距（Tab.1，<b>压缩方式都固定为 canonical 均值，只换位置</b>）：</p>
+
+  <div class="tblwrap">
+  <table class="cmp">
+    <thead><tr><th>位置分配</th><th class="num">TempSSIM ↑ (N=8)</th><th class="num">TempSSIM ↑ (N=16)</th><th>违反了哪条性质</th></tr></thead>
+    <tbody>
+      <tr><td class="rowlab">Block-relative</td><td class="num">0.390</td><td class="num">0.530</td><td>(iv) 槽位撞车 → 退化成滑动窗口</td></tr>
+      <tr><td class="rowlab">Centroid-linear</td><td class="num">0.377</td><td class="num">0.479</td><td>(iii) 落点随 N 漂移</td></tr>
+      <tr><td class="rowlab">WorldTrace</td><td class="num best">0.413</td><td class="num best">0.545</td><td>—</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>相对增益：比 Block-relative <b>+5.9% / +2.8%</b>，比 Centroid-linear <b>+9.5% / +13.8%</b>。
+  有意思的是 Centroid-linear 比 Block-relative 还差 —— 论文的解释是，Block-relative 至少让老槽拿到 0 权重（安全地退化成滑动窗口），
+  而 Centroid-linear 把老摘要放进了「模型没被训练过该怎么用」的位置区间，是<b>主动读了一堆噪声</b>。</p>
+</section>
+
+<!-- ══════════════════ 04 ══════════════════ -->
+<section class="card" id="s4">
+  <div class="sechead"><span class="secnum">04</span><h2>为什么槽位里必须存 canonical Key（去旋转的裸内容）</h2></div>
+
+  <p>这是「位置」和「内容」两条线的交汇点，逻辑很干脆：</p>
+
+  <p>槽位的虚拟位置 <i class="m">t<sup>v</sup><sub>s</sub></i> 由<b>槽序号</b>决定，跟槽里那些源帧的原始时间戳 {<i class="m">t<sub>m</sub></i>} <b>没有任何关系</b>。
+  所以想把内容放到 <i class="m">t<sup>v</sup><sub>s</sub></i> 上，就必须先<b>撕掉</b>每个 Key 身上原来的旋转，再<b>补上</b>目标位置的旋转。
+  在旋转域里压缩会同时踩两个坑：</p>
+
+  <ol class="pts">
+    <li><b>相消</b>（§02）：不同旋转的向量相加会互相抵消。</li>
+    <li><b>相位残留</b>：即使不相消，压出来的 Key 身上带的还是「源时间戳的相位」，而不是 <i class="m">t<sup>v</sup><sub>s</sub></i> 的相位 —— 等于贴错了门牌号。</li>
+  </ol>
+
+  <div class="formula">
+    canonical Key：　<i class="m">K<sup>f</sup><sub>m</sub></i> <span class="op">=</span> <i class="m">R</i>(−<i class="m">θ<sub>f</sub> t<sub>m</sub></i>) <i class="m">K<sup>f</sup><sub>t<sub>m</sub></sub></i>
+    <span class="tag">存的是「纯内容」，位置在读的时候才加</span>
+    <span class="note">注意：<b>只有 Key 带 RoPE，Value 不转</b>。所以 Value 侧就是普通的取均值（Field）或原样复制（Landmark）。</span>
+  </div>
+
+  <p>这样一来，「内容」和「位置」在表示上被<b>彻底解耦</b>：槽里存的是与位置无关的内容，槽的时间身份 100% 来自它的虚拟位置。
+  论文用一个命题把这件事的价值说清楚：</p>
+
+  <div class="callout ok">
+    <span class="lab">Prop.2　均值保持注意力分数（mean attention preservation）</span>
+    <div class="formula" style="background:transparent;border:none;padding:6px 0;margin:2px 0">
+      ⟨ <i class="m">Q<sup>f</sup><sub>q</sub></i> , <i class="m">K<sup>f</sup></i><sub>field</sub>(<i class="m">t<sup>v</sup></i>) ⟩
+      <span class="op">=</span> (1/<i class="m">M</i>) <span class="op">Σ</span><sub><i class="m">m</i></sub>
+      ⟨ <i class="m">Q<sup>f</sup><sub>q</sub></i> , <i class="m">R</i>(<i class="m">θ<sub>f</sub> t<sup>v</sup></i>) <i class="m">K<sup>f</sup><sub>m</sub></i> ⟩
+    </div>
+    <p>一个摘要槽代表了 M 个源帧，那么 query 看它得到的分数，应该等于「把这 M 个源帧都搬到 <i class="m">t<sup>v</sup></i> 上、逐个打分再取平均」。
+    canonical 均值<b>精确</b>满足这一点（证明只用了旋转的线性性）；旋转域平均则没有任何这样的保证，相消会把分数<b>压低</b>，
+    让模型系统性地忽略远期历史。</p>
+  </div>
+
+  <div class="callout warn">
+    <span class="lab">但这个保证的边界要看清</span>
+    <p><b>① 它只对 softmax 之前的分数成立。</b>softmax 之后每个权重都依赖其它所有 key，保证不传递过去。<br>
+    <b>② 它的参照是一个反事实</b>：「如果这 M 个源帧都被搬到 <i class="m">t<sup>v</sup></i>」。它<b>不</b>保证等于「这些帧在原本位置上本来会得到的分数」。
+    那个差距被论文单独称为 <b>repositioning error</b>，而且明确说了<b>没有给出解析上界</b>，只用 Tab.1 的位置消融间接测量。<br>
+    <b>③ 有一个副作用被故意留着</b>：M 个互不相关的 canonical Key 取平均，模长约缩到 1/√M，所以摘要槽进 softmax 时 logit 天然偏小。
+    论文说这是<b>好事</b>（相当于自动给被高度压缩的历史打个折，让 verbatim 的近期窗口更响），并且试过乘 √M 补回来，长程下没用。</p>
+  </div>
+</section>
+
+<!-- ══════════════════ 05 ══════════════════ -->
+<section class="card" id="s5">
+  <div class="sechead"><span class="secnum">05</span><h2>写法一：WorldTrace-<span class="hl-field">Field</span> —— canonical 均值，为「连贯」服务</h2></div>
+
+  <p>骨架搭好之后，剩下的唯一自由度是<b>「往槽里写什么」</b>。Field 的选择是：把离开近期窗口的 <i class="m">T</i>−<i class="m">N<sub>r</sub></i> 帧
+  <b>按时间顺序均分成 N<sub>s</sub> 段</b>（最老的一段进 s0），每段在 canonical 空间取平均。</p>
+
+  <div class="formula" style="border-left:3px solid var(--c-field)">
+    <i class="m">K<sup>f</sup></i><sub>field</sub>(<i class="m">t<sup>v</sup></i>) <span class="op">=</span>
+    <i class="m">R</i>(<i class="m">θ<sub>f</sub> t<sup>v</sup></i>) · (1/<i class="m">M</i>) <span class="op">Σ</span><sub><i class="m">m</i>=1..<i class="m">M</i></sub>
+    <i class="m">R</i>(−<i class="m">θ<sub>f</sub> t<sub>m</sub></i>) <i class="m">K<sup>f</sup><sub>t<sub>m</sub></sub></i>
+    <span class="tag">Def.2　Eq.3</span>
+    <span class="note">读法：<b>先撕（内层 R(−θt<sub>m</sub>)）→ 再平均 → 再贴（外层 R(θt<sup>v</sup>)）</b>。
+    M 不是超参，它由分段决定：M ≈ T / N<sub>s</sub>，<b>随 rollout 线性变长</b>。</span>
+  </div>
+
+  <div class="fig">
+  <svg viewBox="0 0 940 216" role="img" aria-label="Field 写入流程">
+   <g class="svgtxt">
+    <!-- step 1 -->
+    <text x="14" y="16" font-size="11.4" fill="var(--muted)">① M 个源帧 Key（已旋转）</text>
+    <g>
+      <rect x="14" y="30" width="150" height="72" rx="9" fill="none" stroke="var(--grid)" stroke-width="1.4"/>
+      <g stroke="var(--c-warn)" stroke-width="2">
+        <line x1="42" y1="66" x2="58" y2="50"/><line x1="76" y1="66" x2="92" y2="76"/>
+        <line x1="110" y1="66" x2="98" y2="52"/><line x1="140" y1="66" x2="128" y2="78"/>
+      </g>
+      <g fill="var(--c-warn)"><circle cx="42" cy="66" r="2.4"/><circle cx="76" cy="66" r="2.4"/><circle cx="110" cy="66" r="2.4"/><circle cx="140" cy="66" r="2.4"/></g>
+      <text x="89" y="94" text-anchor="middle" font-size="10.6" fill="var(--muted)">方向乱指</text>
+    </g>
+    <!-- arrow 1 -->
+    <path d="M172,66 L212,66" stroke="var(--ink2)" stroke-width="1.6" marker-end="url(#ar)"/>
+    <text x="192" y="52" text-anchor="middle" font-size="10.6" fill="var(--ink2)">撕旋转</text>
+    <text x="192" y="86" text-anchor="middle" font-size="11" fill="var(--c-field)" font-weight="600">R(−θ<tspan font-size="8.5" dy="3">f</tspan><tspan dy="-3">t</tspan><tspan font-size="8.5" dy="3">m</tspan><tspan dy="-3">)</tspan></text>
+    <!-- step 2 -->
+    <text x="222" y="16" font-size="11.4" fill="var(--muted)">② canonical 域：相位对齐</text>
+    <g>
+      <rect x="222" y="30" width="150" height="72" rx="9" fill="color-mix(in srgb, var(--c-field) 7%, transparent)" stroke="var(--c-field)" stroke-width="1.4"/>
+      <g stroke="var(--c-field)" stroke-width="2">
+        <line x1="250" y1="66" x2="268" y2="60"/><line x1="284" y1="66" x2="302" y2="64"/>
+        <line x1="316" y1="66" x2="334" y2="68"/><line x1="344" y1="66" x2="362" y2="72"/>
+      </g>
+      <text x="297" y="94" text-anchor="middle" font-size="10.6" fill="var(--muted)">方向基本一致</text>
+    </g>
+    <!-- arrow 2 -->
+    <path d="M380,66 L420,66" stroke="var(--ink2)" stroke-width="1.6" marker-end="url(#ar)"/>
+    <text x="400" y="52" text-anchor="middle" font-size="10.6" fill="var(--ink2)">取均值</text>
+    <!-- step 3 -->
+    <text x="430" y="16" font-size="11.4" fill="var(--muted)">③ 一个向量</text>
+    <g>
+      <rect x="430" y="30" width="120" height="72" rx="9" fill="color-mix(in srgb, var(--c-field) 12%, transparent)" stroke="var(--c-field)" stroke-width="1.4"/>
+      <line x1="452" y1="66" x2="528" y2="62" stroke="var(--c-field)" stroke-width="3.4"/>
+      <text x="490" y="94" text-anchor="middle" font-size="11" fill="var(--c-field)" font-weight="700">K̄<tspan font-size="8.5" dy="3">f</tspan></text>
+    </g>
+    <!-- arrow 3 -->
+    <path d="M558,66 L598,66" stroke="var(--ink2)" stroke-width="1.6" marker-end="url(#ar)"/>
+    <text x="578" y="52" text-anchor="middle" font-size="10.6" fill="var(--ink2)">贴门牌</text>
+    <text x="578" y="86" text-anchor="middle" font-size="11" fill="var(--c-addr)" font-weight="600">R(θ<tspan font-size="8.5" dy="3">f</tspan><tspan dy="-3">t</tspan><tspan font-size="8.5" dy="3">v</tspan><tspan font-size="8.5">s</tspan><tspan dy="-3">)</tspan></text>
+    <!-- step 4 -->
+    <text x="608" y="16" font-size="11.4" fill="var(--muted)">④ 槽 s 的 Key</text>
+    <g>
+      <rect x="608" y="30" width="130" height="72" rx="9" fill="color-mix(in srgb, var(--c-addr) 10%, transparent)" stroke="var(--c-addr)" stroke-width="1.6"/>
+      <line x1="628" y1="80" x2="700" y2="44" stroke="var(--c-addr)" stroke-width="3.4"/>
+      <text x="673" y="94" text-anchor="middle" font-size="10.8" fill="var(--c-addr)" font-weight="700">可寻址</text>
+    </g>
+    <!-- value side -->
+    <text x="784" y="16" font-size="11.4" fill="var(--muted)">Value 侧</text>
+    <rect x="768" y="30" width="158" height="72" rx="9" fill="none" stroke="var(--grid)" stroke-width="1.4" stroke-dasharray="4 3"/>
+    <text x="847" y="58" text-anchor="middle" font-size="11.6" fill="var(--ink2)">V 不带 RoPE</text>
+    <text x="847" y="78" text-anchor="middle" font-size="11.6" fill="var(--ink2)">→ 直接取均值即可</text>
+
+    <!-- bottom note: moving boundary -->
+    <rect x="14" y="126" width="912" height="76" rx="10" fill="color-mix(in srgb, var(--ink) 3%, transparent)" stroke="var(--hairline)"/>
+    <text x="30" y="148" font-size="12" fill="var(--ink)" font-weight="700">一个容易忽略但很关键的实现细节：分段边界是会动的</text>
+    <text x="30" y="168" font-size="11.6" fill="var(--ink2)">每生成一个 chunk 就有一帧被挤出近期窗口，每一段覆盖的帧就变了。如果直接「把新帧折进已有的均值」，就是在对已经平均过的量再平均，误差会累积。</text>
+    <text x="30" y="188" font-size="11.6" fill="var(--ink2)">论文的 recompute writer 把每个被挤出帧的 canonical Key <tspan font-weight="700" fill="var(--ink)">留在 host 内存</tspan>里，每步都从原始源帧集合<tspan font-weight="700" fill="var(--ink)">重算</tspan>槽均值 —— 所以永远只对源帧做一次平均。</text>
+    <defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto"><path d="M0,1 L8,5 L0,9 z" fill="var(--ink2)"/></marker></defs>
+   </g>
+  </svg>
+  </div>
+
+  <h3>两种 writer：recompute 和 streaming</h3>
+
+  <div class="twocol">
+    <div class="box">
+      <div class="bt">recompute writer（论文主实验）</div>
+      <p>保留所有被挤出帧的 canonical Key（在 <b>host 内存</b>，不占显存，每 latent frame +5.4 MB），
+      边界一动就重算受影响的槽均值。</p>
+      <p style="color:var(--muted)"><b>代价</b>：host 侧状态是 O(N) 的。显存峰值和滑动窗口<b>完全相同</b>。</p>
+    </div>
+    <div class="box">
+      <div class="bt">streaming writer（附录 E.7）</div>
+      <p>每槽只维护一个<b>running sum + count</b>，帧折进去一次就丢掉；边界移动时把相邻 bucket 精确合并。
+      writer 状态是 O(N<sub>s</sub>)，<b>与 rollout 长度无关</b>。</p>
+      <p style="color:var(--muted)"><b>代价</b>：TempSSIM 略降（N=32：0.613→0.606；N=48：0.545→0.538），但 N=32 的 Scene Drift 反而最低（0.0223）。</p>
+    </div>
+  </div>
+
+  <p>这两个 writer 的对比其实还有一层方法论意义：streaming writer<b>不在 cache 外保留任何历史</b>，
+  它仍然显著好于滑动窗口 —— 这就把「槽序号位置的贡献」和「recompute 顺手多留了统计量的贡献」<b>分离</b>开了。</p>
+
+  <h3>连贯性结果（Tab.2，开放式轨迹，不是回环）</h3>
+
+  <div class="fig"><svg viewBox="0 0 940 210" role="img" aria-label="TempSSIM 对比">
+<g class="svgtxt">
+<text x="150" y="18" font-size="12" fill="var(--ink)" font-weight="700">N = 32</text>
+<line x1="200.0" y1="26" x2="200.0" y2="186" stroke="var(--grid)" stroke-width="1"/>
+<text x="200.0" y="200" text-anchor="middle" font-size="10" fill="var(--muted)">0.4</text>
+<line x1="300.0" y1="26" x2="300.0" y2="186" stroke="var(--grid)" stroke-width="1"/>
+<text x="300.0" y="200" text-anchor="middle" font-size="10" fill="var(--muted)">0.5</text>
+<line x1="400.0" y1="26" x2="400.0" y2="186" stroke="var(--grid)" stroke-width="1"/>
+<text x="400.0" y="200" text-anchor="middle" font-size="10" fill="var(--muted)">0.6</text>
+<text x="560" y="18" font-size="12" fill="var(--ink)" font-weight="700">N = 48</text>
+<line x1="610.0" y1="26" x2="610.0" y2="186" stroke="var(--grid)" stroke-width="1"/>
+<text x="610.0" y="200" text-anchor="middle" font-size="10" fill="var(--muted)">0.4</text>
+<line x1="710.0" y1="26" x2="710.0" y2="186" stroke="var(--grid)" stroke-width="1"/>
+<text x="710.0" y="200" text-anchor="middle" font-size="10" fill="var(--muted)">0.5</text>
+<line x1="810.0" y1="26" x2="810.0" y2="186" stroke="var(--grid)" stroke-width="1"/>
+<text x="810.0" y="200" text-anchor="middle" font-size="10" fill="var(--muted)">0.6</text>
+<text x="140" y="49" text-anchor="end" font-size="11.5" fill="var(--ink2)" font-weight="400">Sliding window</text>
+<rect x="150" y="34" width="221.0" height="22" rx="3" fill="var(--bar-dim)" class="bar" data-t="Sliding window<br>TempSSIM <b>0.571</b> &nbsp;/&nbsp; Scene Drift <b>0.0229</b>"/>
+<text x="378.0" y="50" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">0.571</text>
+<rect x="560" y="34" width="122.0" height="22" rx="3" fill="var(--bar-dim)" class="bar" data-t="Sliding window<br>TempSSIM <b>0.472</b> &nbsp;/&nbsp; Scene Drift <b>0.0305</b>"/>
+<text x="689.0" y="50" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">0.472</text>
+<text x="140" y="87" text-anchor="end" font-size="11.5" fill="var(--ink2)" font-weight="400">canonical avg + Block-rel</text>
+<rect x="150" y="72" width="235.0" height="22" rx="3" fill="var(--bar-dim)" class="bar" data-t="canonical avg + Block-rel<br>TempSSIM <b>0.585</b> &nbsp;/&nbsp; Scene Drift <b>0.0215</b>"/>
+<text x="392.0" y="88" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">0.585</text>
+<rect x="560" y="72" width="180.0" height="22" rx="3" fill="var(--bar-dim)" class="bar" data-t="canonical avg + Block-rel<br>TempSSIM <b>0.530</b> &nbsp;/&nbsp; Scene Drift <b>0.0339</b>"/>
+<text x="747.0" y="88" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">0.530</text>
+<text x="140" y="125" text-anchor="end" font-size="11.5" fill="var(--ink2)" font-weight="400">canonical avg + Centroid</text>
+<rect x="150" y="110" width="223.0" height="22" rx="3" fill="var(--bar-dim)" class="bar" data-t="canonical avg + Centroid<br>TempSSIM <b>0.573</b> &nbsp;/&nbsp; Scene Drift <b>0.0211</b>"/>
+<text x="380.0" y="126" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">0.573</text>
+<rect x="560" y="110" width="129.0" height="22" rx="3" fill="var(--bar-dim)" class="bar" data-t="canonical avg + Centroid<br>TempSSIM <b>0.479</b> &nbsp;/&nbsp; Scene Drift <b>0.0297</b>"/>
+<text x="696.0" y="126" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">0.479</text>
+<text x="140" y="163" text-anchor="end" font-size="11.5" fill="var(--ink)" font-weight="600">WorldTrace-Field</text>
+<rect x="150" y="148" width="263.0" height="22" rx="3" fill="var(--c-field)" class="bar" data-t="WorldTrace-Field<br>TempSSIM <b>0.613</b> &nbsp;/&nbsp; Scene Drift <b>0.0250</b>"/>
+<text x="420.0" y="164" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">0.613</text>
+<rect x="560" y="148" width="195.0" height="22" rx="3" fill="var(--c-field)" class="bar" data-t="WorldTrace-Field<br>TempSSIM <b>0.545</b> &nbsp;/&nbsp; Scene Drift <b>0.0295</b>"/>
+<text x="762.0" y="164" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">0.545</text>
+</g></svg></div>
+  <div class="legendrow">
+    <span class="lg"><span class="sw" style="background:var(--c-field)"></span>WorldTrace-Field</span>
+    <span class="lg"><span class="sw" style="background:var(--bar-dim)"></span>基线与对照</span>
+    <span class="lg" style="color:var(--muted)">柱长 = TempSSIM（↑）；悬停可看对应的 Scene Drift（↓）</span>
+  </div>
+  <div class="figcap">N=32 时 Field 的 TempSSIM 最高（0.613 vs 0.571），但 Scene Drift 反而是四者里最差的（0.0250）；
+  N=48 时两项都最好（0.545 / 0.0295）。论文自己也点出 Centroid-linear「在不同 horizon 上排名不一致」。</div>
+
+  <div class="callout warn">
+    <span class="lab">对 Field 要有的现实预期</span>
+    <p>Field 的作用是<b>「让画面不要漂走」</b>，不是「让你能认出回到了哪」。Tab.10 的召回测试里它几乎没有优势：
+    N=16 时 PAC 0.555，滑动窗口 0.540，而 naive 平均是 <b>0.570</b> —— 比它高。
+    论文对此的解释是，naive 那一栏用的是 Block-relative 位置，本身就不反映可寻址性，两者都处在 0.4–0.6 的「压缩档」，
+    距离锚定档和 verbatim 档（0.95+）差一个量级。<b>换句话说：Field 解决的是连贯，Landmark 解决的是召回，两者不能互相替代。</b></p>
+  </div>
+</section>
+
+<!-- ══════════════════ 06 ══════════════════ -->
+<section class="card" id="s6">
+  <div class="sechead"><span class="secnum">06</span><h2>写法二：WorldTrace-<span class="hl-land">Landmark</span> —— 冻结的场景入口，为「召回」服务</h2></div>
+
+  <p>如果 query 想要的不是「一段历史的大致氛围」，而是<b>「某个具体地点长什么样」</b>，取均值就是错的方向。
+  Landmark 的选择是：<b>把 N<sub>s</sub> 个槽拿来原样存几帧高价值的过去帧</b>。</p>
+
+  <h3>怎么挑那几帧：场景入口检测</h3>
+
+  <p>检测器极其轻量 —— 就是在 <b>canonical Key</b> 表示上算相邻帧的余弦距离，超过阈值 <i class="m">τ</i> 就判为一次「场景入口事件」：</p>
+
+  <div class="fig">
+  <svg viewBox="0 0 940 300" role="img" aria-label="Landmark 的场景入口检测与槽位更新">
+   <g class="svgtxt">
+    <text x="16" y="16" font-size="11.5" fill="var(--muted)">相邻帧 canonical Key 的余弦距离（示意）</text>
+    <!-- axis -->
+    <line x1="60" y1="118" x2="880" y2="118" stroke="var(--axis)" stroke-width="1.2"/>
+    <line x1="60" y1="28" x2="60" y2="118" stroke="var(--axis)" stroke-width="1.2"/>
+    <!-- threshold -->
+    <line x1="60" y1="62" x2="880" y2="62" stroke="var(--c-land)" stroke-width="1.5" stroke-dasharray="6 4"/>
+    <text x="886" y="66" font-size="11.5" fill="var(--c-land)" font-weight="700">τ</text>
+    <!-- curve with spikes -->
+    <polyline fill="none" stroke="var(--ink2)" stroke-width="1.8" points="60,108 78,106 96,110 114,105 132,109 150,40 168,102 186,107 204,104 222,109 240,106 258,103 276,108 294,44 312,101 330,106 348,109 366,104 384,107 402,110 420,105 438,36 456,100 474,108 492,105 510,109 528,103 546,107 564,110 582,106 600,48 618,102 636,107 654,104 672,109 690,105 708,108 726,103 744,110 762,106 780,104 798,109 816,106 834,107 852,110 870,105"/>
+    <!-- spike markers -->
+    <g>
+      <circle cx="150" cy="40" r="5" fill="var(--c-land)"/><circle cx="294" cy="44" r="5" fill="var(--c-land)"/>
+      <circle cx="438" cy="36" r="5" fill="var(--c-land)"/><circle cx="600" cy="48" r="5" fill="var(--c-land)"/>
+      <text x="150" y="28" text-anchor="middle" font-size="10.6" fill="var(--c-land)" font-weight="700">进入 A</text>
+      <text x="294" y="32" text-anchor="middle" font-size="10.6" fill="var(--c-land)" font-weight="700">进入 B</text>
+      <text x="438" y="24" text-anchor="middle" font-size="10.6" fill="var(--c-land)" font-weight="700">进入 C</text>
+      <text x="600" y="36" text-anchor="middle" font-size="10.6" fill="var(--c-land)" font-weight="700">进入 D</text>
+    </g>
+    <text x="470" y="136" text-anchor="middle" font-size="11.2" fill="var(--muted)">AR chunk 序号 n →　（平缓段 = 同一场景内的连续运动，尖峰 = 场景切换）</text>
+
+    <!-- slots -->
+    <text x="16" y="170" font-size="11.5" fill="var(--muted)">摘要槽 𝒮（N_s = 4）：每检测到一个新入口，整排左移一格，最老的被挤掉</text>
+    <g font-size="12" text-anchor="middle">
+      <g>
+        <text x="150" y="192" font-size="10.8" fill="var(--muted)">检测到 A 之后</text>
+        <rect x="72" y="200" width="38" height="30" rx="6" fill="var(--c-land)" opacity=".2" stroke="var(--c-land)"/><text x="91" y="220" fill="var(--ink)" font-weight="700">A</text>
+        <rect x="114" y="200" width="38" height="30" rx="6" fill="var(--c-land)" opacity=".2" stroke="var(--c-land)"/><text x="133" y="220" fill="var(--ink)" font-weight="700">A</text>
+        <rect x="156" y="200" width="38" height="30" rx="6" fill="var(--c-land)" opacity=".2" stroke="var(--c-land)"/><text x="175" y="220" fill="var(--ink)" font-weight="700">A</text>
+        <rect x="198" y="200" width="38" height="30" rx="6" fill="var(--c-land)" opacity=".2" stroke="var(--c-land)"/><text x="217" y="220" fill="var(--ink)" font-weight="700">A</text>
+        <text x="154" y="248" font-size="10.4" fill="var(--muted)">不足 N_s 个时，空槽重复最老的</text>
+      </g>
+      <g>
+        <text x="392" y="192" font-size="10.8" fill="var(--muted)">…检测到 B、C 之后</text>
+        <rect x="314" y="200" width="38" height="30" rx="6" fill="var(--c-land)" opacity=".2" stroke="var(--c-land)"/><text x="333" y="220" fill="var(--ink)" font-weight="700">A</text>
+        <rect x="356" y="200" width="38" height="30" rx="6" fill="var(--c-land)" opacity=".2" stroke="var(--c-land)"/><text x="375" y="220" fill="var(--ink)" font-weight="700">A</text>
+        <rect x="398" y="200" width="38" height="30" rx="6" fill="var(--c-land)" opacity=".2" stroke="var(--c-land)"/><text x="417" y="220" fill="var(--ink)" font-weight="700">B</text>
+        <rect x="440" y="200" width="38" height="30" rx="6" fill="var(--c-land)" opacity=".2" stroke="var(--c-land)"/><text x="459" y="220" fill="var(--ink)" font-weight="700">C</text>
+      </g>
+      <g>
+        <text x="636" y="192" font-size="10.8" fill="var(--muted)">…检测到 D 之后（槽满了）</text>
+        <rect x="558" y="200" width="38" height="30" rx="6" fill="var(--c-land)" opacity=".2" stroke="var(--c-land)"/><text x="577" y="220" fill="var(--ink)" font-weight="700">A</text>
+        <rect x="600" y="200" width="38" height="30" rx="6" fill="var(--c-land)" opacity=".2" stroke="var(--c-land)"/><text x="619" y="220" fill="var(--ink)" font-weight="700">B</text>
+        <rect x="642" y="200" width="38" height="30" rx="6" fill="var(--c-land)" opacity=".2" stroke="var(--c-land)"/><text x="661" y="220" fill="var(--ink)" font-weight="700">C</text>
+        <rect x="684" y="200" width="38" height="30" rx="6" fill="var(--c-land)" opacity=".2" stroke="var(--c-land)"/><text x="703" y="220" fill="var(--ink)" font-weight="700">D</text>
+      </g>
+      <g>
+        <text x="836" y="192" font-size="10.8" fill="var(--c-warn)">再来第 5 个入口</text>
+        <rect x="768" y="200" width="38" height="30" rx="6" fill="none" stroke="var(--c-warn)" stroke-dasharray="3 3"/><text x="787" y="220" fill="var(--c-warn)" font-weight="700">A</text>
+        <text x="787" y="248" font-size="10.4" fill="var(--c-warn)">被挤掉</text>
+        <rect x="812" y="200" width="38" height="30" rx="6" fill="var(--c-land)" opacity=".2" stroke="var(--c-land)"/><text x="831" y="220" fill="var(--ink)" font-weight="700">B</text>
+        <rect x="854" y="200" width="38" height="30" rx="6" fill="var(--c-land)" opacity=".2" stroke="var(--c-land)"/><text x="873" y="220" fill="var(--ink)" font-weight="700">C</text>
+      </g>
+    </g>
+    <text x="16" y="278" font-size="11.6" fill="var(--ink2)">槽的位置永远由 Def.1 决定：landmark 帧<tspan font-weight="700" fill="var(--ink)">继承的是所在槽的序号位置</tspan>，而不是它自己的绝对时间戳。所以每次左移，它读到的偏移就变小一格。</text>
+   </g>
+  </svg>
+  </div>
+  <div class="figcap">曲线为示意；检测规则来自论文 §3.4 与 Alg.1。这里也暴露了方法最硬的一个上限：<b>一次 rollout 最多可靠重访 N<sub>s</sub> 个不同地点</b>。</div>
+
+  <h3>为什么要「冻结」：躲开反复转来转去的数值漂移</h3>
+
+  <p>槽是从老到新排的（s=0 最老），所以每来一个 chunk，每个缓存条目都<b>往老的那头挪一格</b>。
+  如果按常规摘要更新方式，每挪一格就要「撕掉旧旋转 → 贴上新旋转」一次。挪几十次之后，
+  这些 unrotate/rerotate 循环<b>累积浮点误差</b> —— 在 bfloat16 下尤其明显（Wang et al. 2025 专门论证过 bf16 会破坏长上下文的 RoPE）。</p>
+
+  <div class="formula" style="border-left:3px solid var(--c-land)">
+    <i class="m">K<sup>f</sup></i><sub>land</sub>(<i class="m">t<sup>v</sup><sub>s</sub></i>) <span class="op">=</span>
+    <i class="m">R</i>(<i class="m">θ<sub>f</sub> t<sup>v</sup><sub>s</sub></i>) · <span style="border-bottom:2px solid var(--c-land)"><i class="m">R</i>(−<i class="m">θ<sub>f</sub> t<sub>ℓ*</sub></i>) <i class="m">K<sup>f</sup><sub>t<sub>ℓ*</sub></sub></i></span>
+    <span class="tag">Eq.4</span>
+    <span class="note">下划线部分 = <b>在成为 landmark 的那一刻算一次，之后永久复用</b>。
+    每次槽位左移只施加<b>一次全新的</b>外层旋转，不做第二次撕贴。形式上它就是 Eq.3 在 <i class="m">M</i>=1、不做平均时的特例。</span>
+  </div>
+
+  <p>和相关工作的界线论文划得挺清楚：canonical 缓存这个机制 MemRoPE 也用（存 pre-RoPE 的 Key，读的时候再转）；
+  Landmark Attention 也叫 landmark。<b>WorldTrace-Landmark 的差别在于三点叠加</b>：
+  ① 只在<b>检测到的场景入口</b>上用，不是对每个 cache Key 都用；
+  ② 存的是 <b>verbatim 帧级</b> Key（不是训练出来的代表 token，也不是 EMA 平滑值）；
+  ③ 配上<b>槽序号位置</b>，所以任意 horizon 下每个 landmark 都占一个不同的在分布位置。</p>
+
+  <h3>召回结果：四个难度层（Tab.3，PAC / TempSSIM，n=100 个不同初始场景）</h3>
+
+  <div class="tblwrap">
+  <table class="cmp tight">
+    <thead><tr><th>难度轴</th><th>配置</th><th class="num">Sliding window</th><th class="num">WorldTrace-Landmark</th><th class="num">PAC 相对增益</th></tr></thead>
+    <tbody>
+      <tr class="grp"><td colspan="5">Tier 1｜改拓扑（绕的弯越多越难）</td></tr>
+      <tr><td></td><td class="rowlab">ABA (K=1, N=16)</td><td class="num">0.723</td><td class="num best">0.864</td><td class="num" style="color:var(--c-land)">+19.5%</td></tr>
+      <tr><td></td><td class="rowlab">ABCA (K=2, N=17)</td><td class="num">0.673</td><td class="num best">0.792</td><td class="num" style="color:var(--c-land)">+17.7%</td></tr>
+      <tr><td></td><td class="rowlab">ABCDA (K=3, N=16)</td><td class="num">0.666</td><td class="num best">0.799</td><td class="num" style="color:var(--c-land)">+20.0%</td></tr>
+      <tr class="grp"><td colspan="5">Tier 2｜改 rollout 长度（离得越远越难）</td></tr>
+      <tr><td></td><td class="rowlab">ABA 短 (N=8)</td><td class="num">0.859</td><td class="num best">0.922</td><td class="num">+7.3%</td></tr>
+      <tr><td></td><td class="rowlab">ABA 中 (N=16)</td><td class="num">0.723</td><td class="num best">0.864</td><td class="num" style="color:var(--c-land)">+19.5%</td></tr>
+      <tr><td></td><td class="rowlab">ABA 长 (N=32)</td><td class="num">0.627</td><td class="num best">0.825</td><td class="num" style="color:var(--c-land)">+31.6%</td></tr>
+      <tr class="grp"><td colspan="5">Tier 3｜只转相机不移动（最难，agent 一直待在 A）</td></tr>
+      <tr><td></td><td class="rowlab">Pan 90° (N=4)</td><td class="num">0.829</td><td class="num best">0.861</td><td class="num">+3.9%</td></tr>
+      <tr><td></td><td class="rowlab">Pan 180° (N=8)</td><td class="num">0.671</td><td class="num best">0.781</td><td class="num">+16.4%</td></tr>
+      <tr><td></td><td class="rowlab">Pan 360° (N=8)</td><td class="num">0.559</td><td class="num best">0.577</td><td class="num" style="color:var(--c-warn)">+3.2%</td></tr>
+      <tr class="grp"><td colspan="5">Tier 4｜多次重访（回程会先路过 B）</td></tr>
+      <tr><td></td><td class="rowlab">ABABA (N=32)</td><td class="num">0.892</td><td class="num best">0.941</td><td class="num">+5.5%</td></tr>
+      <tr><td></td><td class="rowlab">ABCBA (N=20)</td><td class="num">0.825</td><td class="num best">0.863</td><td class="num">+4.6%</td></tr>
+      <tr><td></td><td class="rowlab">ABCDBA (N=20)</td><td class="num">0.842</td><td class="num best">0.876</td><td class="num">+4.1%</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>规律很清楚，而且<b>符合「位置是瓶颈」这个假说的预测</b>：<span class="hl-land">离 scene A 的 KV 距离越远，增益越大</span>
+  （Tier 2 里 N=8 只 +7.3%，N=32 到 +31.6%）。反过来，最难的 360° 全景 pan 上增益缩到 +3.2% ——
+  那种情况下画面几乎完全换过一轮，一个冻结的入口帧也救不回来。</p>
+
+  <h3>槽位数有个「悬崖」，这个消融很有信息量</h3>
+
+  <div class="fig"><svg viewBox="0 0 850 288" role="img" aria-label="summary 槽位数量与召回">
+<g class="svgtxt">
+<line x1="80" y1="216.6" x2="620" y2="216.6" stroke="var(--grid)"/>
+<text x="71" y="220.6" text-anchor="end" font-size="10.5" fill="var(--muted)">0.4</text>
+<line x1="80" y1="155.1" x2="620" y2="155.1" stroke="var(--grid)"/>
+<text x="71" y="159.1" text-anchor="end" font-size="10.5" fill="var(--muted)">0.6</text>
+<line x1="80" y1="93.6" x2="620" y2="93.6" stroke="var(--grid)"/>
+<text x="71" y="97.6" text-anchor="end" font-size="10.5" fill="var(--muted)">0.8</text>
+<line x1="80" y1="32.1" x2="620" y2="32.1" stroke="var(--grid)"/>
+<text x="71" y="36.1" text-anchor="end" font-size="10.5" fill="var(--muted)">1.0</text>
+<rect x="358" y="26" width="119" height="206" fill="var(--c-land)" opacity="0.07"/>
+<text x="418" y="41" text-anchor="middle" font-size="11" fill="var(--c-land)" font-weight="600">悬崖</text>
+<line x1="80" y1="216.3" x2="620" y2="216.3" stroke="var(--c-warn)" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="628" y="220.3" font-size="10.8" fill="var(--c-warn)">Sliding window 0.401 (N=32)</text>
+<polyline points="80.0,212.6 215.0,210.8 350.0,139.1 485.0,43.2 620.0,40.5" fill="none" stroke="var(--c-land)" stroke-width="2.4"/>
+<circle cx="80.0" cy="212.6" r="4" fill="var(--c-land)" class="bar" data-t="N_s=1 / N_r=5<br>N = 32 &nbsp; PAC <b>0.413</b>"/>
+<circle cx="215.0" cy="210.8" r="4" fill="var(--c-land)" class="bar" data-t="N_s=2 / N_r=4<br>N = 32 &nbsp; PAC <b>0.419</b>"/>
+<circle cx="350.0" cy="139.1" r="4" fill="var(--c-land)" class="bar" data-t="N_s=3 / N_r=3<br>N = 32 &nbsp; PAC <b>0.652</b>"/>
+<circle cx="485.0" cy="43.2" r="4" fill="var(--c-land)" class="bar" data-t="N_s=4 / N_r=2<br>N = 32 &nbsp; PAC <b>0.964</b>"/>
+<circle cx="620.0" cy="40.5" r="4" fill="var(--c-land)" class="bar" data-t="N_s=5 / N_r=1<br>N = 32 &nbsp; PAC <b>0.973</b>"/>
+<line x1="624.0" y1="40.5" x2="634.0" y2="32.5" stroke="var(--c-land)" stroke-width="1"/>
+<text x="638.0" y="36.5" font-size="11" fill="var(--c-land)" font-weight="600">N = 32</text>
+<polyline points="80.0,205.3 215.0,208.6 350.0,126.5 485.0,39.5 620.0,38.0" fill="none" stroke="var(--c-addr)" stroke-width="2.4"/>
+<circle cx="80.0" cy="205.3" r="4" fill="var(--c-addr)" class="bar" data-t="N_s=1 / N_r=5<br>N = 64 &nbsp; PAC <b>0.437</b>"/>
+<circle cx="215.0" cy="208.6" r="4" fill="var(--c-addr)" class="bar" data-t="N_s=2 / N_r=4<br>N = 64 &nbsp; PAC <b>0.426</b>"/>
+<circle cx="350.0" cy="126.5" r="4" fill="var(--c-addr)" class="bar" data-t="N_s=3 / N_r=3<br>N = 64 &nbsp; PAC <b>0.693</b>"/>
+<circle cx="485.0" cy="39.5" r="4" fill="var(--c-addr)" class="bar" data-t="N_s=4 / N_r=2<br>N = 64 &nbsp; PAC <b>0.976</b>"/>
+<circle cx="620.0" cy="38.0" r="4" fill="var(--c-addr)" class="bar" data-t="N_s=5 / N_r=1<br>N = 64 &nbsp; PAC <b>0.981</b>"/>
+<line x1="624.0" y1="38.0" x2="634.0" y2="48.0" stroke="var(--c-addr)" stroke-width="1"/>
+<text x="638.0" y="52.0" font-size="11" fill="var(--c-addr)" font-weight="600">N = 64</text>
+<text x="80" y="252" text-anchor="middle" font-size="11.5" fill="var(--ink2)">N_s = 1</text>
+<text x="80" y="269" text-anchor="middle" font-size="10.5" fill="var(--muted)">N_r = 5</text>
+<text x="215" y="252" text-anchor="middle" font-size="11.5" fill="var(--ink2)">N_s = 2</text>
+<text x="215" y="269" text-anchor="middle" font-size="10.5" fill="var(--muted)">N_r = 4</text>
+<text x="350" y="252" text-anchor="middle" font-size="11.5" fill="var(--ink2)">N_s = 3</text>
+<text x="350" y="269" text-anchor="middle" font-size="10.5" fill="var(--muted)">N_r = 3</text>
+<text x="485" y="252" text-anchor="middle" font-size="11.5" fill="var(--ink2)">N_s = 4</text>
+<text x="485" y="269" text-anchor="middle" font-size="10.5" fill="var(--muted)">N_r = 2</text>
+<text x="620" y="252" text-anchor="middle" font-size="11.5" fill="var(--ink2)">N_s = 5</text>
+<text x="620" y="269" text-anchor="middle" font-size="10.5" fill="var(--muted)">N_r = 1</text>
+</g></svg></div>
+  <div class="figcap">总预算固定 N<sub>s</sub>+N<sub>r</sub>=6（Tab.12，ABA 回环）。N<sub>s</sub>≤2 基本等于滑动窗口 ——
+  <b>1 个槽时 B→A 的入口检测会把 scene A 的 landmark 直接覆盖掉；2 个槽时 B 侧的行进过程会在回程之前把它挤出去</b>。
+  3 个槽是过渡（0.652 / 0.693），仍然会被挤掉。4 个槽刚好能撑到回程，5 个槽只再多 +0.009 / +0.005。</div>
+  <div class="callout land">
+    <p>这条曲线值得单独看一眼：它说明 Landmark 的性能<b>不是连续地随容量提升</b>，而是取决于「关键那一帧有没有活到被查询的时刻」。
+    这是一个<b>离散的、有没有</b>的问题，也解释了为什么论文在局限性里把「按预测重访概率决定淘汰谁」列为未来方向。</p>
+  </div>
+</section>
+
+<!-- ══════════════════ 07 ══════════════════ -->
+<section class="card" id="s7">
+  <div class="sechead"><span class="secnum">07</span><h2>统一视角：把 cache 压缩看成一个投影矩阵 <i class="m">P</i></h2></div>
+
+  <p>这一节是论文的理论骨架，也是把两个 variant 收进一个框架的地方。想法是：<b>用固定 L 个槽去逼近对全部 T 帧的完整注意力</b>。
+  定义 <i class="m">P</i> ∈ ℝ<sup><i class="m">L</i>×<i class="m">T</i></sup>（行随机，每行是历史帧上的一个分布），第 <i class="m">i</i> 个槽的压缩 Key 就是 <i class="m">P<sub>i</sub>K</i>：</p>
+
+  <div class="formula">
+    Â(<i class="m">q</i>, <i class="m">K</i>, <i class="m">V</i>; <i class="m">P</i>) <span class="op">=</span> softmax<span class="op">(</span> <i class="m">q</i> (<i class="m">PK</i>)<sup>⊤</sup> <span class="op">)</span> <i class="m">PV</i>
+    <span class="tag">Eq.5　投影注意力</span>
+    <span class="note"><i class="m">P</i> 作用在 <b>canonical Key</b> 上；槽序号旋转是在算注意力分数时才加的。</span>
+  </div>
+
+  <p><b>四种 cache 结构，其实只是 P 的四种行结构：</b></p>
+
+  <div class="fig"><svg viewBox="0 0 940 172" role="img" aria-label="四种 cache 结构对应的投影矩阵 P">
+<g class="svgtxt">
+<text x="14.0" y="26" font-size="11.6" fill="var(--ink)" font-weight="700">(a) Sliding window</text>
+<text x="14.0" y="42" font-size="10.6" fill="var(--muted)">只留最近 6 帧，其余全丢</text>
+<rect x="14.0" y="52" width="176.6" height="77" fill="var(--grid)" opacity=".5" rx="2"/>
+<rect x="147.2" y="52" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<rect x="154.6" y="65" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<rect x="162.0" y="78" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<rect x="169.4" y="91" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<rect x="176.8" y="104" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<rect x="184.2" y="117" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<text x="103" y="147" text-anchor="middle" font-size="10.4" fill="var(--muted)">T = 24 个历史帧 →</text>
+<text x="235.60000000000002" y="26" font-size="11.6" fill="var(--ink)" font-weight="700">(b) + attention sink</text>
+<text x="235.60000000000002" y="42" font-size="10.6" fill="var(--muted)">再钉住第 0 帧</text>
+<rect x="235.60000000000002" y="52" width="176.6" height="77" fill="var(--grid)" opacity=".5" rx="2"/>
+<rect x="235.6" y="52" width="6.4" height="12" fill="var(--c-anchor)" opacity="0.95" rx="1.5"/>
+<rect x="376.2" y="65" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<rect x="383.6" y="78" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<rect x="391.0" y="91" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<rect x="398.4" y="104" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<rect x="405.8" y="117" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<text x="324" y="147" text-anchor="middle" font-size="10.4" fill="var(--muted)">T = 24 个历史帧 →</text>
+<text x="457.20000000000005" y="26" font-size="11.6" fill="var(--ink)" font-weight="700">(c) WorldTrace-Field</text>
+<text x="457.20000000000005" y="42" font-size="10.6" fill="var(--muted)">每槽 = 一段历史的均值</text>
+<rect x="457.20000000000005" y="52" width="176.6" height="77" fill="var(--grid)" opacity=".5" rx="2"/>
+<rect x="457.2" y="52" width="36.0" height="12" fill="var(--c-field)" opacity="0.5" rx="1.5"/>
+<rect x="494.2" y="65" width="36.0" height="12" fill="var(--c-field)" opacity="0.5" rx="1.5"/>
+<rect x="531.2" y="78" width="36.0" height="12" fill="var(--c-field)" opacity="0.5" rx="1.5"/>
+<rect x="568.2" y="91" width="50.8" height="12" fill="var(--c-field)" opacity="0.5" rx="1.5"/>
+<rect x="620.0" y="104" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<rect x="627.4" y="117" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<text x="546" y="147" text-anchor="middle" font-size="10.4" fill="var(--muted)">T = 24 个历史帧 →</text>
+<text x="678.8000000000001" y="26" font-size="11.6" fill="var(--ink)" font-weight="700">(d) WorldTrace-Landmark</text>
+<text x="678.8000000000001" y="42" font-size="10.6" fill="var(--muted)">每槽 = 一个场景入口帧</text>
+<rect x="678.8000000000001" y="52" width="176.6" height="77" fill="var(--grid)" opacity=".5" rx="2"/>
+<rect x="686.2" y="52" width="6.4" height="12" fill="var(--c-land)" opacity="0.95" rx="1.5"/>
+<rect x="723.2" y="65" width="6.4" height="12" fill="var(--c-land)" opacity="0.95" rx="1.5"/>
+<rect x="760.2" y="78" width="6.4" height="12" fill="var(--c-land)" opacity="0.95" rx="1.5"/>
+<rect x="804.6" y="91" width="6.4" height="12" fill="var(--c-land)" opacity="0.95" rx="1.5"/>
+<rect x="841.6" y="104" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<rect x="849.0" y="117" width="6.4" height="12" fill="var(--c-recent)" opacity="0.95" rx="1.5"/>
+<text x="768" y="147" text-anchor="middle" font-size="10.4" fill="var(--muted)">T = 24 个历史帧 →</text>
+<text x="8" y="88" font-size="10.4" fill="var(--muted)" transform="rotate(-90 8 88)" text-anchor="middle">6 个槽位</text>
+</g></svg></div>
+  <div class="legendrow">
+    <span class="lg"><span class="sw" style="background:var(--grid)"></span>0（这一帧对这个槽没贡献）</span>
+    <span class="lg"><span class="sw" style="background:color-mix(in srgb, var(--c-recent) 90%, transparent)"></span>1（verbatim 复制，one-hot 行）</span>
+    <span class="lg"><span class="sw" style="background:var(--c-field)"></span>1/M（均匀平均行）</span>
+    <span class="lg"><span class="sw" style="background:var(--c-land)"></span>1（选中的场景入口帧）</span>
+    <span class="lg"><span class="sw" style="background:var(--c-anchor)"></span>attention sink</span>
+  </div>
+  <div class="figcap">对应论文 Fig.6。一眼能看出的谱系：从<b>最稀疏</b>（one-hot 选择）到<b>最稠密</b>（均匀平均）。
+  Field 和 Landmark <b>只差在 P 的行结构</b>，其它一切（canonical 存储、槽序号位置）完全共享。</div>
+
+  <h3>误差怎么拆</h3>
+
+  <p>压缩后的 cache 和「无限长 cache」的差距被拆成两块：</p>
+
+  <div class="formula">
+    ‖ Â <span class="op">−</span> 𝒜<sub>orig</sub> ‖ <span class="op">≤</span>
+    <span style="color:var(--c-addr)">‖ 𝒜 <span class="op">−</span> 𝒜<sub>orig</sub> ‖</span>
+    <span class="op">+</span>
+    <span style="color:var(--c-field)">‖ Â <span class="op">−</span> 𝒜 ‖</span>
+    <span class="note"><span style="color:var(--c-addr)">前者 = repositioning（换位置带来的）</span>；
+    <span style="color:var(--c-field)">后者 = compression（压内容带来的）</span>。
+    论文对 repositioning 项<b>不给解析界</b>，理由是：超出训练 horizon 之后原始偏移本身就是坏的，
+    所以这一项是「用一个<b>有界的、在分布内的</b>位置偏移，去换掉一个<b>失控的</b> OOD 失效」，只能实测（Tab.1）。</span>
+  </div>
+
+  <div class="formula">
+    ‖ <i class="m">r<sub>q</sub></i>(<i class="m">P</i>) ‖<sub>2</sub> <span class="op">≤</span>
+    <span style="border-bottom:1px dotted var(--muted)">‖ α̂<sub><i class="m">q</i></sub><i class="m">P</i> <span class="op">−</span> α<sub><i class="m">q</i></sub> ‖<sub>1</sub></span>
+    <span class="op">·</span> ‖<i class="m">V</i>‖<sub>∞,row</sub>
+    <span class="tag">Prop.1</span>
+    <span class="note">证明只用了结合律 Â = α̂(PV) = (α̂P)V 加 Hölder 不等式。结论：<b>设计目标就是把「分布错配」压小</b>，
+    与 Value 的几何无关。</span>
+  </div>
+
+  <h3>放松之后就是 NMF，而两个 variant 分别对应 k-means 和 k-medoids</h3>
+
+  <p>把 α̂ 从 softmax 里解耦成自由变量，目标变成 min<sub>B,P≥0</sub> ‖B<i class="m">P</i> − A‖<sub>1</sub> ——
+  这是带 ℓ₁ 保真项的<b>非负矩阵分解</b>。在这个视角下：</p>
+
+  <ul class="pts">
+    <li><b>Field</b> 的均匀分段行 = 用簇均值做原型的 <b>k-means</b> 的 ℓ₁ 版本，只是「时间顺序分段」替代了学出来的分配步骤。</li>
+    <li><b>Landmark</b> 的 0/1 行 = 在注意力分布上做 <b>k-medoids</b>，而 canonical Key 余弦距离规则是它的一个 O(1) 单遍近似。</li>
+  </ul>
+
+  <div class="callout">
+    <span class="lab">一个很干净的不可能性结果，值得单独记住</span>
+    <p><i class="m">L</i> 行、每行是 T 帧上的分布 → 总权重 <i class="m">L</i> 摊到 T 列上 → 某一帧至多拿到
+    max<sub>i</sub> <i class="m">P<sub>i,t</sub></i> ≤ <i class="m">L</i>/<i class="m">T</i>。
+    于是<b>任何</b>一个「只想看某一帧」的 query，错配都不小于 2(1 − <i class="m">L</i>/<i class="m">T</i>)。<br>
+    <b>推论：压缩比一旦拉大，就不存在「通用最优」的压缩方式，只能选择保留什么。</b>
+    这就是为什么论文不去找一个更好的单一 writer，而是定义了两个<b>目标 query 家族</b>，各配一个 writer：</p>
+    <ul class="pts" style="margin-top:8px">
+      <li><b>ε-coherent（Eq.6）</b>：query 只关心「哪一段历史」，不关心段内是哪一帧 → Field 的误差 ≤ Σ ε<sub>q</sub>，接近最优。</li>
+      <li><b>δ-covered（Eq.8）</b>：query 集中在某一个具体的过去帧上 → Landmark 的误差 ≤ Σ δ<sub>q</sub>，接近最优。</li>
+    </ul>
+    <p style="margin-top:8px"><b>但要注意</b>：这两条是「按定义成立」的条件性刻画，不是无条件最优性。
+    论文明确说<b>没有在预训练模型上测量 ε 或 δ</b> —— 因为要测就得跑超出训练 horizon 的未压缩 rollout，而那时参照物本身就坏了。</p>
+  </div>
+</section>
+
+<!-- ══════════════════ 08 ══════════════════ -->
+<section class="card" id="s8">
+  <div class="sechead"><span class="secnum">08</span><h2>LoopBench：怎么测「绕一圈回来还认得出这是原来那儿」</h2></div>
+
+  <p>论文顺手提出的这个 benchmark 有一个很聪明的设计：<b>不需要任何外部真值视频</b>。
+  路径是「从 A 出发 → 经过若干路点 → 回到 A」，<b>第一次经过 A 时模型自己生成的那些帧就是参照</b>，
+  回程在几何配对的位置上生成的帧就是预测。同一次 rollout 同时产出了 target 和 prediction。</p>
+
+  <div class="fig"><svg viewBox="0 0 940 500" role="img" aria-label="LoopBench 十二种路径配置">
+<defs><marker id="lb" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,1 L8,5 L0,9 z" fill="var(--c-addr)"/></marker><marker id="lb2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,1 L8,5 L0,9 z" fill="var(--c-land)"/></marker></defs>
+<g class="svgtxt">
+<text x="16" y="24" font-size="12" fill="var(--ink)" font-weight="700">Tier 1｜拓扑：中间绕几个点</text>
+<text x="16" y="140" font-size="12" fill="var(--ink)" font-weight="700">Tier 2｜长度：同样的 ABA，走多少 chunk</text>
+<text x="16" y="262" font-size="12" fill="var(--ink)" font-weight="700">Tier 3｜只转相机：agent 一直待在 A</text>
+<text x="16" y="390" font-size="12" fill="var(--ink)" font-weight="700">Tier 4｜多次重访：回程会先路过别的点</text>
+<circle cx="70" cy="62" r="9" fill="color-mix(in srgb, var(--c-land) 22%, transparent)" stroke="var(--c-land)" stroke-width="1.6"/>
+<text x="70" y="66" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">A</text>
+<circle cx="220" cy="62" r="9" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.6"/>
+<text x="220" y="66" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">B</text>
+<path d="M81,56 L209,56" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<text x="145.0" y="49.0" text-anchor="middle" font-size="9.8" fill="var(--muted)">×8</text>
+<path d="M209,70 L81,70" fill="none" stroke="var(--c-addr)" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#lb)"/>
+<text x="145" y="96" text-anchor="middle" font-size="11" fill="var(--ink)" font-weight="600">ABA　N=16</text>
+<circle cx="380" cy="80" r="9" fill="color-mix(in srgb, var(--c-land) 22%, transparent)" stroke="var(--c-land)" stroke-width="1.6"/>
+<text x="380" y="84" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">A</text>
+<circle cx="380" cy="30" r="9" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.6"/>
+<text x="380" y="34" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">B</text>
+<circle cx="500" cy="30" r="9" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.6"/>
+<text x="500" y="34" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">C</text>
+<path d="M380,70 L380,41" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<text x="366.0" y="59.5" text-anchor="middle" font-size="9.8" fill="var(--muted)">×5</text>
+<path d="M391,30 L489,30" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<text x="440.0" y="23.0" text-anchor="middle" font-size="9.8" fill="var(--muted)">×5</text>
+<path d="M492,38 L388,72" fill="none" stroke="var(--c-addr)" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#lb)"/>
+<text x="454.0" y="59.0" text-anchor="middle" font-size="9.8" fill="var(--muted)">×7</text>
+<text x="440" y="104" text-anchor="middle" font-size="11" fill="var(--ink)" font-weight="600">ABCA　N=17</text>
+<circle cx="690" cy="80" r="9" fill="color-mix(in srgb, var(--c-land) 22%, transparent)" stroke="var(--c-land)" stroke-width="1.6"/>
+<text x="690" y="84" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">A</text>
+<circle cx="690" cy="30" r="9" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.6"/>
+<text x="690" y="34" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">B</text>
+<circle cx="800" cy="30" r="9" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.6"/>
+<text x="800" y="34" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">C</text>
+<circle cx="800" cy="80" r="9" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.6"/>
+<text x="800" y="84" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">D</text>
+<path d="M690,70 L690,41" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<text x="676.0" y="59.5" text-anchor="middle" font-size="9.8" fill="var(--muted)">×4</text>
+<path d="M701,30 L789,30" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<text x="745.0" y="23.0" text-anchor="middle" font-size="9.8" fill="var(--muted)">×4</text>
+<path d="M800,41 L800,70" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<text x="814.0" y="59.5" text-anchor="middle" font-size="9.8" fill="var(--muted)">×4</text>
+<path d="M789,80 L701,80" fill="none" stroke="var(--c-addr)" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#lb)"/>
+<text x="745.0" y="73.0" text-anchor="middle" font-size="9.8" fill="var(--muted)">×4</text>
+<text x="745" y="104" text-anchor="middle" font-size="11" fill="var(--ink)" font-weight="600">ABCDA　N=16</text>
+<circle cx="70" cy="178" r="9" fill="color-mix(in srgb, var(--c-land) 22%, transparent)" stroke="var(--c-land)" stroke-width="1.6"/>
+<text x="70" y="182" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">A</text>
+<circle cx="140" cy="178" r="9" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.6"/>
+<text x="140" y="182" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">B</text>
+<path d="M81,172 L129,172" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<text x="105.0" y="165.0" text-anchor="middle" font-size="9.8" fill="var(--muted)">×4</text>
+<path d="M129,186 L81,186" fill="none" stroke="var(--c-addr)" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#lb)"/>
+<text x="105.0" y="212" text-anchor="middle" font-size="11" fill="var(--ink)" font-weight="600">ABA　N=8</text>
+<circle cx="380" cy="178" r="9" fill="color-mix(in srgb, var(--c-land) 22%, transparent)" stroke="var(--c-land)" stroke-width="1.6"/>
+<text x="380" y="182" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">A</text>
+<circle cx="510" cy="178" r="9" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.6"/>
+<text x="510" y="182" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">B</text>
+<path d="M391,172 L499,172" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<text x="445.0" y="165.0" text-anchor="middle" font-size="9.8" fill="var(--muted)">×8</text>
+<path d="M499,186 L391,186" fill="none" stroke="var(--c-addr)" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#lb)"/>
+<text x="445.0" y="212" text-anchor="middle" font-size="11" fill="var(--ink)" font-weight="600">ABA　N=16</text>
+<circle cx="690" cy="178" r="9" fill="color-mix(in srgb, var(--c-land) 22%, transparent)" stroke="var(--c-land)" stroke-width="1.6"/>
+<text x="690" y="182" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">A</text>
+<circle cx="890" cy="178" r="9" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.6"/>
+<text x="890" y="182" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">B</text>
+<path d="M701,172 L879,172" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<text x="790.0" y="165.0" text-anchor="middle" font-size="9.8" fill="var(--muted)">×16</text>
+<path d="M879,186 L701,186" fill="none" stroke="var(--c-addr)" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#lb)"/>
+<text x="790.0" y="212" text-anchor="middle" font-size="11" fill="var(--ink)" font-weight="600">ABA　N=32</text>
+<circle cx="120" cy="304" r="9" fill="color-mix(in srgb, var(--c-land) 22%, transparent)" stroke="var(--c-land)" stroke-width="1.6"/>
+<text x="120" y="308" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">A</text>
+<path d="M120.0,276.0 A28,28 0 0 1 148.0,304.0" fill="none" stroke="var(--c-addr)" stroke-width="1.8" marker-end="url(#lb)"/>
+<path d="M158.0,304.0 A38,38 0 0 0 120.0,266.0" fill="none" stroke="var(--c-addr)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#lb)"/>
+<text x="120" y="360" text-anchor="middle" font-size="11" fill="var(--ink)" font-weight="600">pan 90°　N=4</text>
+<circle cx="430" cy="304" r="9" fill="color-mix(in srgb, var(--c-land) 22%, transparent)" stroke="var(--c-land)" stroke-width="1.6"/>
+<text x="430" y="308" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">A</text>
+<path d="M430.0,276.0 A28,28 0 0 1 430.0,332.0" fill="none" stroke="var(--c-addr)" stroke-width="1.8" marker-end="url(#lb)"/>
+<path d="M430.0,342.0 A38,38 0 0 0 430.0,266.0" fill="none" stroke="var(--c-addr)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#lb)"/>
+<text x="430" y="360" text-anchor="middle" font-size="11" fill="var(--ink)" font-weight="600">pan 180°　N=8</text>
+<circle cx="740" cy="304" r="9" fill="color-mix(in srgb, var(--c-land) 22%, transparent)" stroke="var(--c-land)" stroke-width="1.6"/>
+<text x="740" y="308" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">A</text>
+<circle cx="740" cy="304" r="28" fill="none" stroke="var(--c-addr)" stroke-width="1.8"/>
+<path d="M735,276 L747,276" stroke="var(--c-addr)" stroke-width="1.8" marker-end="url(#lb)"/>
+<text x="740" y="360" text-anchor="middle" font-size="11" fill="var(--ink)" font-weight="600">pan 360°　N=8</text>
+<circle cx="70" cy="428" r="9" fill="color-mix(in srgb, var(--c-land) 22%, transparent)" stroke="var(--c-land)" stroke-width="1.6"/>
+<text x="70" y="432" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">A</text>
+<circle cx="220" cy="428" r="9" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.6"/>
+<text x="220" y="432" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">B</text>
+<path d="M81,420 L209,420" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<path d="M209,430 L81,430" fill="none" stroke="var(--c-addr)" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#lb)"/>
+<path d="M83,411 L207,411" fill="none" stroke="var(--c-land)" stroke-width="1.7" marker-end="url(#lb2)"/>
+<path d="M207,439 L83,439" fill="none" stroke="var(--c-land)" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#lb2)"/>
+<text x="145" y="466" text-anchor="middle" font-size="11" fill="var(--ink)" font-weight="600">ABABA　R=2, N=32</text>
+<circle cx="380" cy="444" r="9" fill="color-mix(in srgb, var(--c-land) 22%, transparent)" stroke="var(--c-land)" stroke-width="1.6"/>
+<text x="380" y="448" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">A</text>
+<circle cx="450" cy="400" r="9" fill="color-mix(in srgb, var(--c-land) 22%, transparent)" stroke="var(--c-land)" stroke-width="1.6"/>
+<text x="450" y="404" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">B</text>
+<circle cx="530" cy="444" r="9" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.6"/>
+<text x="530" y="448" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">C</text>
+<path d="M389,437 L441,406" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<path d="M459,406 L521,437" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<path d="M523,446 L460,408" fill="none" stroke="var(--c-land)" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#lb2)"/>
+<path d="M441,409 L389,441" fill="none" stroke="var(--c-land)" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#lb2)"/>
+<text x="455" y="470" text-anchor="middle" font-size="11" fill="var(--ink)" font-weight="600">ABCBA　R=2, N=20</text>
+<circle cx="690" cy="444" r="9" fill="color-mix(in srgb, var(--c-land) 22%, transparent)" stroke="var(--c-land)" stroke-width="1.6"/>
+<text x="690" y="448" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">A</text>
+<circle cx="748" cy="400" r="9" fill="color-mix(in srgb, var(--c-land) 22%, transparent)" stroke="var(--c-land)" stroke-width="1.6"/>
+<text x="748" y="404" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">B</text>
+<circle cx="818" cy="400" r="9" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.6"/>
+<text x="818" y="404" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">C</text>
+<circle cx="858" cy="444" r="9" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.6"/>
+<text x="858" y="448" text-anchor="middle" font-size="10.5" fill="var(--ink)" font-weight="700">D</text>
+<path d="M699,437 L739,406" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<path d="M759,400 L807,400" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<path d="M826,406 L852,435" fill="none" stroke="var(--c-addr)" stroke-width="1.7" marker-end="url(#lb)"/>
+<path d="M850,438 L758,408" fill="none" stroke="var(--c-land)" stroke-width="1.7" stroke-dasharray="2 3" marker-end="url(#lb2)"/>
+<path d="M739,409 L699,441" fill="none" stroke="var(--c-land)" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#lb2)"/>
+<text x="775" y="470" text-anchor="middle" font-size="11" fill="var(--ink)" font-weight="600">ABCDBA　R=2, N=20</text>
+</g></svg></div>
+  <div class="legendrow">
+    <span class="lg"><span class="ln" style="border-color:var(--c-addr)"></span>去程</span>
+    <span class="lg"><span class="ln d" style="border-color:var(--c-addr)"></span>回程</span>
+    <span class="lg"><span class="ln" style="border-color:var(--c-land)"></span>第二次经过（Tier 4）</span>
+    <span class="lg"><span class="sw" style="background:color-mix(in srgb, var(--c-land) 22%, transparent);border-color:var(--c-land)"></span>被重访的地点</span>
+  </div>
+  <div class="figcap">论文 Fig.3 + Fig.8 的十二种配置，Tab.3 全部评了。四条难度轴各只改一个变量。</div>
+
+  <div class="tblwrap">
+  <table class="cmp">
+    <thead><tr><th style="width:22%">指标</th><th style="width:16%">方向</th><th>怎么算的</th></tr></thead>
+    <tbody>
+      <tr><td class="rowlab">PAC</td><td>↑ 召回</td><td><b>Position-Aligned CLIP</b>：CLIP-ViT-H/14 特征，在几何配对的「去程帧 vs 回程帧」之间算余弦相似度</td></tr>
+      <tr><td class="rowlab">TempSSIM</td><td>↑ 连贯</td><td>相邻两个解码帧之间的 SSIM</td></tr>
+      <tr><td class="rowlab">Local Scene Drift</td><td>↓ 连贯</td><td>每个 chunk 的 CLIP 特征到上一个 chunk 的平均距离</td></tr>
+      <tr><td class="rowlab">LatentDiff</td><td>↓ 消融用</td><td>用于隔离相位相消效应（Tab.5）</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="lab">这个「不需要真值」的设计既是优点也是限制</span>
+    <p>PAC 度量的是<b>自一致性</b>，不是对真实场景的<b>保真度</b>。如果去程那一段本身就生成错了，
+    回程忠实地复现了那个错误，PAC 依然很高。同理 <b>TempSSIM 度量的是「相邻帧有多像」</b> ——
+    一个几乎静止或者偏糊的输出会拿到高分。论文自己在局限性里承认 Field「favors coherence but can blur specific scene details」，
+    而这两个连贯性指标恰好<b>奖励不变化</b>。所以看 §09 的数字时，<b>Field 的连贯性提升要打一点折扣；Landmark 的召回提升相对更硬</b>（因为它是 verbatim 复制，不是让画面变静）。</p>
+  </div>
+</section>
+
+<!-- ══════════════════ 09 ══════════════════ -->
+<section class="card" id="s9">
+  <div class="sechead"><span class="secnum">09</span><h2>结果：一张图基本讲完</h2></div>
+
+  <p>如果只看一张图，就是这张（Tab.10，ABA 回环，N<sub>s</sub>=4 / N<sub>r</sub>=2）。它把所有方法分成<b>三个层级</b>，而且三层的<b>形状</b>完全不同：</p>
+
+  <div class="fig"><svg viewBox="0 0 942 340" role="img" aria-label="PAC 随 rollout 长度的变化">
+<g class="svgtxt">
+<line x1="64" y1="251.6" x2="724" y2="251.6" stroke="var(--grid)" stroke-width="1"/>
+<text x="55" y="255.6" text-anchor="end" font-size="10.5" fill="var(--muted)" font-variant-numeric="tabular-nums">0.4</text>
+<line x1="64" y1="215.2" x2="724" y2="215.2" stroke="var(--grid)" stroke-width="1"/>
+<text x="55" y="219.2" text-anchor="end" font-size="10.5" fill="var(--muted)" font-variant-numeric="tabular-nums">0.5</text>
+<line x1="64" y1="178.8" x2="724" y2="178.8" stroke="var(--grid)" stroke-width="1"/>
+<text x="55" y="182.8" text-anchor="end" font-size="10.5" fill="var(--muted)" font-variant-numeric="tabular-nums">0.6</text>
+<line x1="64" y1="142.4" x2="724" y2="142.4" stroke="var(--grid)" stroke-width="1"/>
+<text x="55" y="146.4" text-anchor="end" font-size="10.5" fill="var(--muted)" font-variant-numeric="tabular-nums">0.7</text>
+<line x1="64" y1="106.1" x2="724" y2="106.1" stroke="var(--grid)" stroke-width="1"/>
+<text x="55" y="110.1" text-anchor="end" font-size="10.5" fill="var(--muted)" font-variant-numeric="tabular-nums">0.8</text>
+<line x1="64" y1="69.7" x2="724" y2="69.7" stroke="var(--grid)" stroke-width="1"/>
+<text x="55" y="73.7" text-anchor="end" font-size="10.5" fill="var(--muted)" font-variant-numeric="tabular-nums">0.9</text>
+<line x1="64" y1="33.3" x2="724" y2="33.3" stroke="var(--grid)" stroke-width="1"/>
+<text x="55" y="37.3" text-anchor="end" font-size="10.5" fill="var(--muted)" font-variant-numeric="tabular-nums">1.0</text>
+<text x="64" y="308" text-anchor="middle" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">16</text>
+<text x="196" y="308" text-anchor="middle" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">32</text>
+<text x="328" y="308" text-anchor="middle" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">48</text>
+<text x="460" y="308" text-anchor="middle" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">64</text>
+<text x="592" y="308" text-anchor="middle" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">128</text>
+<text x="724" y="308" text-anchor="middle" font-size="11" fill="var(--ink2)" font-variant-numeric="tabular-nums">256</text>
+<text x="394" y="330" text-anchor="middle" font-size="11.5" fill="var(--muted)">rollout 长度 N（AR chunk 数，ABA 回环；训练窗口 = 6 latent frame）</text>
+<text x="16" y="157" font-size="11.5" fill="var(--muted)" transform="rotate(-90 16 157)" text-anchor="middle">PAC ↑（回到 A 时和初见 A 的相似度）</text>
+<polyline points="64.0,48.2 196.0,46.4 328.0,43.5 460.0,42.0 592.0,38.4 724.0,37.3" fill="none" stroke="var(--c-land)" stroke-width="2.2" stroke-linejoin="round"/>
+<circle cx="64.0" cy="48.2" r="3.4" fill="var(--c-land)" class="bar" data-t="WorldTrace-Landmark<br>N=16 &nbsp; PAC <b>0.959</b>"/>
+<circle cx="196.0" cy="46.4" r="3.4" fill="var(--c-land)" class="bar" data-t="WorldTrace-Landmark<br>N=32 &nbsp; PAC <b>0.964</b>"/>
+<circle cx="328.0" cy="43.5" r="3.4" fill="var(--c-land)" class="bar" data-t="WorldTrace-Landmark<br>N=48 &nbsp; PAC <b>0.972</b>"/>
+<circle cx="460.0" cy="42.0" r="3.4" fill="var(--c-land)" class="bar" data-t="WorldTrace-Landmark<br>N=64 &nbsp; PAC <b>0.976</b>"/>
+<circle cx="592.0" cy="38.4" r="3.4" fill="var(--c-land)" class="bar" data-t="WorldTrace-Landmark<br>N=128 &nbsp; PAC <b>0.986</b>"/>
+<circle cx="724.0" cy="37.3" r="3.4" fill="var(--c-land)" class="bar" data-t="WorldTrace-Landmark<br>N=256 &nbsp; PAC <b>0.989</b>"/>
+<line x1="727" y1="37.3" x2="737" y2="37.3" stroke="var(--c-land)" stroke-width="1"/>
+<text x="741" y="41.3" font-size="11" fill="var(--c-land)" font-weight="600">WorldTrace-Landmark</text>
+<polyline points="64.0,200.7 196.0,251.2 328.0,256.0 460.0,247.2 592.0,213.8 724.0,167.6" fill="none" stroke="var(--c-warn)" stroke-width="2.2" stroke-dasharray="4 3" stroke-linejoin="round"/>
+<circle cx="64.0" cy="200.7" r="3.4" fill="var(--c-warn)" class="bar" data-t="Sliding window<br>N=16 &nbsp; PAC <b>0.540</b>"/>
+<circle cx="196.0" cy="251.2" r="3.4" fill="var(--c-warn)" class="bar" data-t="Sliding window<br>N=32 &nbsp; PAC <b>0.401</b>"/>
+<circle cx="328.0" cy="256.0" r="3.4" fill="var(--c-warn)" class="bar" data-t="Sliding window<br>N=48 &nbsp; PAC <b>0.388</b>"/>
+<circle cx="460.0" cy="247.2" r="3.4" fill="var(--c-warn)" class="bar" data-t="Sliding window<br>N=64 &nbsp; PAC <b>0.412</b>"/>
+<circle cx="592.0" cy="213.8" r="3.4" fill="var(--c-warn)" class="bar" data-t="Sliding window<br>N=128 &nbsp; PAC <b>0.504</b>"/>
+<circle cx="724.0" cy="167.6" r="3.4" fill="var(--c-warn)" class="bar" data-t="Sliding window<br>N=256 &nbsp; PAC <b>0.631</b>"/>
+<line x1="727" y1="167.6" x2="737" y2="167.6" stroke="var(--c-warn)" stroke-width="1"/>
+<text x="741" y="171.6" font-size="11" fill="var(--c-warn)" font-weight="600">Sliding window</text>
+<polyline points="64.0,49.7 196.0,50.7 328.0,55.8 460.0,64.9 592.0,112.6 724.0,175.2" fill="none" stroke="var(--c-anchor)" stroke-width="2.2" stroke-dasharray="6 3" stroke-linejoin="round"/>
+<circle cx="64.0" cy="49.7" r="3.4" fill="var(--c-anchor)" class="bar" data-t="Latent re-anchor<br>N=16 &nbsp; PAC <b>0.955</b>"/>
+<circle cx="196.0" cy="50.7" r="3.4" fill="var(--c-anchor)" class="bar" data-t="Latent re-anchor<br>N=32 &nbsp; PAC <b>0.952</b>"/>
+<circle cx="328.0" cy="55.8" r="3.4" fill="var(--c-anchor)" class="bar" data-t="Latent re-anchor<br>N=48 &nbsp; PAC <b>0.938</b>"/>
+<circle cx="460.0" cy="64.9" r="3.4" fill="var(--c-anchor)" class="bar" data-t="Latent re-anchor<br>N=64 &nbsp; PAC <b>0.913</b>"/>
+<circle cx="592.0" cy="112.6" r="3.4" fill="var(--c-anchor)" class="bar" data-t="Latent re-anchor<br>N=128 &nbsp; PAC <b>0.782</b>"/>
+<circle cx="724.0" cy="175.2" r="3.4" fill="var(--c-anchor)" class="bar" data-t="Latent re-anchor<br>N=256 &nbsp; PAC <b>0.610</b>"/>
+<line x1="727" y1="175.2" x2="737" y2="181.6" stroke="var(--c-anchor)" stroke-width="1"/>
+<text x="741" y="185.6" font-size="11" fill="var(--c-anchor)" font-weight="600">Latent re-anchor</text>
+<polyline points="64.0,195.2 196.0,239.2 328.0,238.5 460.0,236.3 592.0,217.0 724.0,178.1" fill="none" stroke="var(--c-field)" stroke-width="2.2" stroke-linejoin="round"/>
+<circle cx="64.0" cy="195.2" r="3.4" fill="var(--c-field)" class="bar" data-t="WorldTrace-Field<br>N=16 &nbsp; PAC <b>0.555</b>"/>
+<circle cx="196.0" cy="239.2" r="3.4" fill="var(--c-field)" class="bar" data-t="WorldTrace-Field<br>N=32 &nbsp; PAC <b>0.434</b>"/>
+<circle cx="328.0" cy="238.5" r="3.4" fill="var(--c-field)" class="bar" data-t="WorldTrace-Field<br>N=48 &nbsp; PAC <b>0.436</b>"/>
+<circle cx="460.0" cy="236.3" r="3.4" fill="var(--c-field)" class="bar" data-t="WorldTrace-Field<br>N=64 &nbsp; PAC <b>0.442</b>"/>
+<circle cx="592.0" cy="217.0" r="3.4" fill="var(--c-field)" class="bar" data-t="WorldTrace-Field<br>N=128 &nbsp; PAC <b>0.495</b>"/>
+<circle cx="724.0" cy="178.1" r="3.4" fill="var(--c-field)" class="bar" data-t="WorldTrace-Field<br>N=256 &nbsp; PAC <b>0.602</b>"/>
+<line x1="727" y1="178.1" x2="737" y2="195.6" stroke="var(--c-field)" stroke-width="1"/>
+<text x="741" y="199.6" font-size="11" fill="var(--c-field)" font-weight="600">WorldTrace-Field</text>
+<polyline points="64.0,189.8 196.0,239.2 328.0,239.6 460.0,236.0 592.0,220.3 724.0,179.6" fill="none" stroke="var(--muted)" stroke-width="2.2" stroke-dasharray="4 3" stroke-linejoin="round"/>
+<circle cx="64.0" cy="189.8" r="3.4" fill="var(--muted)" class="bar" data-t="Naive avg + Block-rel<br>N=16 &nbsp; PAC <b>0.570</b>"/>
+<circle cx="196.0" cy="239.2" r="3.4" fill="var(--muted)" class="bar" data-t="Naive avg + Block-rel<br>N=32 &nbsp; PAC <b>0.434</b>"/>
+<circle cx="328.0" cy="239.6" r="3.4" fill="var(--muted)" class="bar" data-t="Naive avg + Block-rel<br>N=48 &nbsp; PAC <b>0.433</b>"/>
+<circle cx="460.0" cy="236.0" r="3.4" fill="var(--muted)" class="bar" data-t="Naive avg + Block-rel<br>N=64 &nbsp; PAC <b>0.443</b>"/>
+<circle cx="592.0" cy="220.3" r="3.4" fill="var(--muted)" class="bar" data-t="Naive avg + Block-rel<br>N=128 &nbsp; PAC <b>0.486</b>"/>
+<circle cx="724.0" cy="179.6" r="3.4" fill="var(--muted)" class="bar" data-t="Naive avg + Block-rel<br>N=256 &nbsp; PAC <b>0.598</b>"/>
+<line x1="727" y1="179.6" x2="737" y2="209.6" stroke="var(--muted)" stroke-width="1"/>
+<text x="741" y="213.6" font-size="11" fill="var(--muted)" font-weight="600">Naive avg + Block-rel</text>
+</g></svg></div>
+  <div class="figcap">悬停看具体数值。三层的含义：<b>压缩档</b>（只做压缩，0.4–0.6 徘徊）、
+  <b>canonical-K 锚定档</b>（起点很高但<b>随 horizon 单调衰减</b>，N=256 掉到 0.610）、
+  <b>verbatim 档</b>（唯一<b>随 horizon 还在上升</b>的，N=256 到 0.989，论文说到 N=512 都近乎不变）。</div>
+
+  <p>这张图上有三个观察，比任何一个单点数字都更值得记住：</p>
+
+  <ol class="pts">
+    <li><b>压缩本身救不了召回。</b>Field 和 naive 平均、滑动窗口挤在同一档里，差距在 ±0.03 量级。想召回一个具体地点，<b>必须留 verbatim</b>。</li>
+    <li><b>「锚定」是个陷阱形状。</b>Latent re-anchor 在中等 horizon（N≤64）好得惊人（0.91–0.955），但它的曲线是<b>向下</b>的；
+    到 N=256 已经和滑动窗口差不多了（0.610 vs 0.631）。<b>只测到 N=64 会得出完全相反的结论。</b></li>
+    <li><b>滑动窗口的曲线是 U 形</b>（0.540 → 0.388 → 0.631）。这个反弹很可能不是「记忆变好了」，而是长 rollout 后画面收敛到某种「通用地形」，
+      与初始场景的 CLIP 相似度偶然回升。论文没有讨论这一点，<b>看基线曲线时要留个心</b>。</li>
+  </ol>
+
+  <h3>和两个并发的 training-free 方案比（Tab.9，ABA）</h3>
+
+  <div class="tblwrap">
+  <table class="cmp tight">
+    <thead><tr><th>方法</th><th>位置方案</th><th>内容写法</th><th class="num">PAC N=32</th><th class="num">PAC N=48</th><th>显存</th></tr></thead>
+    <tbody>
+      <tr class="grp"><td colspan="6">O(N) cache</td></tr>
+      <tr><td class="rowlab">Sliding window（基线）</td><td>真实位置</td><td>滑窗</td><td class="num">0.401</td><td class="num">0.388</td><td>O(N)</td></tr>
+      <tr><td class="rowlab">YaRN</td><td>NTK 重缩放</td><td>滑窗</td><td class="num">0.490</td><td class="num">0.412</td><td>O(N)，≈N=100 就 OOM</td></tr>
+      <tr class="grp"><td colspan="6">O(1) cache，Block-relative 位置</td></tr>
+      <tr><td class="rowlab">MemRoPE</td><td>Block-relative</td><td>双速率 EMA</td><td class="num">0.651</td><td class="num">0.706</td><td>O(1)</td></tr>
+      <tr><td class="rowlab">Landmark + Block-relative</td><td>Block-relative</td><td>verbatim</td><td class="num">0.929</td><td class="num">0.934</td><td>O(1)</td></tr>
+      <tr class="grp"><td colspan="6">O(1) cache，WorldTrace 位置</td></tr>
+      <tr><td class="rowlab">MemRoPE + WorldTrace 位置</td><td>WorldTrace</td><td>双速率 EMA</td><td class="num">0.592</td><td class="num">0.662</td><td>O(1)</td></tr>
+      <tr><td class="rowlab">WorldTrace-Landmark</td><td>WorldTrace</td><td>verbatim</td><td class="num best">0.964</td><td class="num best">0.972</td><td>O(1)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>这张表里有两条<b>反向</b>的信息，论文写得很坦诚，值得注意：</p>
+
+  <ul class="pts">
+    <li><b>YaRN 的 +22%（N=32）反而是在替论文的核心论点背书</b>：一个纯位置侧的方法、内容一点没改，就能拿到显著提升 —— 说明位置真的是主要瓶颈。它输在需要 O(N) 显存。</li>
+    <li><b>「WorldTrace 位置」不是万能插件。</b>把 MemRoPE 的 Block-relative 换成 WorldTrace 位置，性能<b>下降</b>（0.651→0.592，p&lt;0.001）。
+    论文的解释是 <b>write 和 read 的偏移不一致</b>了 —— EMA 是在一套偏移分布下写的，却在另一套下被读。
+    这正好印证 §3.5 的耦合论点：<span class="hl-warn">位置方案和内容写法必须配套设计，不能自由组合</span>。</li>
+    <li>另外注意：<b>Landmark + Block-relative 已经有 0.929 / 0.934</b>，WorldTrace 位置把它推到 0.964 / 0.972。
+    也就是说在这个设置下，「改成 verbatim」这一步贡献了绝大部分收益，「换位置方案」是锦上添花的那一层。</li>
+  </ul>
+
+  <h3>跨架构：换到 14B 的 LingBot-World（Tab.11）</h3>
+
+  <div class="tblwrap">
+  <table class="cmp tight">
+    <thead><tr><th>N</th><th>相对训练 horizon</th><th class="num">Sliding window</th><th class="num">WorldTrace-Field</th><th class="num">WorldTrace-Landmark</th></tr></thead>
+    <tbody>
+      <tr><td class="rowlab">14</td><td>2×</td><td class="num">0.657</td><td class="num best">0.668</td><td class="num">0.651</td></tr>
+      <tr><td class="rowlab">28</td><td>4×</td><td class="num">0.624</td><td class="num">0.619</td><td class="num best">0.680</td></tr>
+      <tr><td class="rowlab">42</td><td>6×</td><td class="num">0.591</td><td class="num">0.620</td><td class="num best">0.674</td></tr>
+      <tr><td class="rowlab">56</td><td>8×</td><td class="num">0.632</td><td class="num">0.648</td><td class="num best">0.678</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>结论要按字面读，别放大：<b>Landmark 从 4× 起才有增益</b>（+8.9% / +14.1% / +7.3%），
+  <b>2× 时是 −0.006，p&gt;0.1，即没有差别</b>；<b>Field 基本是平的</b>（4× 时还低 0.005）。
+  论文给的解释很合理：LingBot-World 带 Plücker 相机条件，<b>召回信号已经从相机位姿那条路进来了</b>，
+  KV cache 内容能补的空间就小。换句话说 —— <span class="hl-warn">WorldTrace 的收益大小取决于「基座还缺不缺召回信号」</span>。</p>
+</section>
+
+<!-- ══════════════════ 10 ══════════════════ -->
+<section class="card" id="s10">
+  <div class="sechead"><span class="secnum">10</span><h2>成本账：便宜到几乎可以直接上</h2></div>
+
+  <div class="twocol">
+    <div class="box">
+      <div class="bt">显存峰值（A100 80G，batch 1，Tab.13）</div>
+      <table class="cmp tight" style="margin-top:6px">
+        <thead><tr><th>方法</th><th class="num">N=64</th><th class="num">N=256</th><th class="num">N=512</th></tr></thead>
+        <tbody>
+          <tr><td>Sliding window</td><td class="num">1838</td><td class="num">1903</td><td class="num">1993</td></tr>
+          <tr><td><b>Field</b></td><td class="num">1838</td><td class="num">1903</td><td class="num">1993</td></tr>
+          <tr><td><b>Landmark</b></td><td class="num">2470</td><td class="num">2536</td><td class="num">2626</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:12.6px;margin-top:6px">单位 MB。Field <b>和基线完全相同</b>（多出来的 canonical Key 放在 host 内存，每 latent frame +5.4 MB）。
+      Landmark 有一个 <b>恒定</b> 的 ≈0.6 GB scene-anchor 开销，不随 N 增长。</p>
+    </div>
+    <div class="box">
+      <div class="bt">每 chunk 耗时（Tab.15）</div>
+      <table class="cmp tight" style="margin-top:6px">
+        <thead><tr><th>方法</th><th class="num">s / chunk</th></tr></thead>
+        <tbody>
+          <tr><td>Sliding window</td><td class="num">0.95</td></tr>
+          <tr><td>WorldTrace-Field</td><td class="num">0.99</td></tr>
+          <tr><td>WorldTrace-Landmark</td><td class="num">1.00</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:12.6px;margin-top:6px">含 VAE 解码。都在基线的 6% 以内 —— 因为前向传播本来就占绝对大头，cache 更新只是几次旋转。
+      全套实验约 100 A100 GPU-hour。</p>
+    </div>
+  </div>
+
+  <p>算法本体也很短（Alg.1），大意就是：</p>
+
+  <div class="codeblock"><span class="cm"># 每生成完一个 chunk：</span>
+<span class="kw">append</span> 新 chunk 的 K/V <span class="op">→</span> ℛ            <span class="cm"># 近期窗口，原样</span>
+<span class="kw">if</span> |ℛ| &gt; N_r:
+    evicted <span class="op">=</span> ℛ.pop_oldest()
+    <span class="kw">if</span> mode <span class="op">==</span> <span class="fd">FIELD</span>:
+        找到 evicted 所属的那个槽 s                <span class="cm"># 均匀时间分段</span>
+        𝒮[s] <span class="op">=</span> <span class="fd">该槽所有源帧 canonical Key 的均值</span>   <span class="cm"># Def.2，从源帧重算</span>
+    <span class="kw">elif</span> mode <span class="op">==</span> <span class="ld">LANDMARK</span>:
+        <span class="kw">if</span> evicted 与前一帧的 canonical Key 余弦距离 &gt; τ:   <span class="cm"># 场景入口</span>
+            𝒮 整排左移一格                        <span class="cm"># 挤掉最老的 landmark</span>
+            𝒮[N_s−1] <span class="op">=</span> <span class="ld">evicted 的 canonical Key（冻结）</span>
+        不足 N_s 个 landmark 时，空槽重复最老的那个
+
+<span class="cm"># 算注意力分数时（这一步是两个 variant 共享的）：</span>
+<span class="kw">for</span> s <span class="kw">in</span> 0..N_s−1:
+    给 𝒮[s] 施加 <span class="ad">R(θ_f · t_v_s)</span>，其中 <span class="ad">t_v_s = q − (L_attn − 1 − s)</span>   <span class="cm"># Def.1</span></div>
+
+  <p>注意 <b>𝒮 里存的一直是 canonical（未旋转）Key</b>，旋转是<b>读的时候</b>才施加的 —— 所以 q 一往前走，
+  所有槽位的位置就自动重算了，不需要任何额外维护。</p>
+</section>
+
+<!-- ══════════════════ 11 ══════════════════ -->
+<section class="card" id="s11">
+  <div class="sechead"><span class="secnum">11</span><h2>八条打折读法</h2></div>
+
+  <p>下面这些不是「论文有问题」，而是<b>读这篇论文时容易读多的地方</b>。前四条是我从表格里对出来的，后四条论文自己不同程度地承认了。</p>
+
+  <div class="mnum-list">
+  <div class="callout warn">
+    <span class="lab">① 同一个基线数字，全文出现了三个版本 —— 不要跨表比</span>
+    <p>「滑动窗口在 ABA / N=16 上的 PAC」：<b>Tab.3 是 0.723</b>（n=100 个不同初始场景）、
+    <b>Tab.10 是 0.540</b>、<b>Tab.8 是 0.837</b>（明确写了「固定 seed」）。
+    TempSSIM 同样如此：同一个「滑动窗口 / N=16」在 <b>Tab.3 是 0.761</b>、<b>Tab.8 是 0.754</b>、<b>Tab.4 是 0.9945</b>。
+    这个跨度<b>比论文报告的很多增益还大</b>。<span class="hl-warn">同表内的对比是可信的，跨表拼数字一定会得出错误结论。</span></p>
+  </div>
+
+  <div class="callout warn">
+    <span class="lab">② 两个头条数字都是「相对增益」</span>
+    <p>+15.5% ← TempSSIM 0.472 → 0.545（Tab.2, N=48）；+19.5% ← PAC 0.723 → 0.864（Tab.3, ABA N=16）。
+    绝对提升分别是 0.073 和 0.141。摘要里写「improves temporal consistency by +15.5%」不算错，但读者容易理解成绝对值。</p>
+  </div>
+
+  <div class="callout warn">
+    <span class="lab">③ Tab.4 那个消融表实际上是「反面证据」，而且 Field 在里面几乎没赢</span>
+    <p>「Field 平均 + Block-relative」那一行的四个 PAC 和滑动窗口<b>逐位相同</b>（0.540 / 0.412 / 0.504 / 0.631）——
+    这正是论文想证明的（位置一塌，压缩等于没做）。但同一张表里 <b>naive 平均在 N=16 上 0.570，高于 Field 的 0.555</b>，
+    而 Field 相对滑动窗口只多 +0.015。<b>Field 对召回的贡献接近于零</b>，它的价值只在 §05 的连贯性指标上。</p>
+  </div>
+
+  <div class="callout warn">
+    <span class="lab">④ Tab.8 里 Field 在 N=48 上输给了基线</span>
+    <p>Tab.8（ABA 重访、固定 seed）：4F+0L 的 TempSSIM 在 N=48 是 <b>0.767</b>，滑动窗口 <b>0.776</b>。
+    而 Tab.2（开放式轨迹）里 Field 在 N=48 是 0.545 vs 0.472，大胜。<b>协议不同，方向相反。</b>
+    另外 Tab.8 的中间配比（3F+1L / 2F+2L / 1F+3L）<b>非单调</b>，有几个还低于基线 ——
+    论文自己的结论是「收益来自把槽位专门拿去做 landmark，不来自任何特定混配」，这个说法是诚实的。</p>
+  </div>
+
+  <div class="callout">
+    <span class="lab">⑤ 「O(1) 记忆」说的是显存 cache，不是总状态</span>
+    <p>Field 的 recompute writer 把每个被挤出帧的 canonical Key 留在 <b>host 内存</b>，
+    每 latent frame +5.4 MB —— <b>这一部分是 O(N) 的</b>。N=512、每 chunk 3 帧 → 约 8 GB 主机内存。
+    真正 O(1) 的是附录 E.7 的 streaming writer（代价是 TempSSIM 掉 0.007 左右）。Landmark 本身确实是 O(1)。</p>
+  </div>
+
+  <div class="callout">
+    <span class="lab">⑥ Landmark 有一个硬上限：最多 N<sub>s</sub> 个地点</span>
+    <p>槽满之后<b>淘汰最老的</b>。实验用 N<sub>s</sub>=4，也就是一次 rollout 最多可靠重访 4 个不同场景。
+    而且能不能召回<b>完全取决于检测器有没有在对的那一帧触发</b> —— 阈值 τ 是个超参，论文没给敏感性分析。
+    §06 那个「N<sub>s</sub>=3 → 4 的悬崖」正是这个上限的直接体现。</p>
+  </div>
+
+  <div class="callout">
+    <span class="lab">⑦ 连贯性的两个指标都奖励「不变化」</span>
+    <p>TempSSIM = 相邻解码帧的 SSIM；Scene Drift = 到上一个 chunk 的 CLIP 距离。
+    <b>两者都不锚定到真实场景</b>，越静、越糊分越高。而 Field 的已知副作用恰好是「blur specific scene details」。
+    所以 Field 那 +15.5% 里有多少是「真的更连贯」、多少是「更平滑了」，这两个指标区分不出来。
+    相比之下 Landmark 的 PAC 增益更硬 —— 它靠 verbatim 复制拿分，而不是靠让画面变静。</p>
+  </div>
+
+  <div class="callout">
+    <span class="lab">⑧ 整个故事是在一个训练窗口极短的模型上讲的</span>
+    <p>MG2 的 Δt<sub>train</sub> = <b>5 个 latent frame</b>（局部注意力窗口 6）。这是个非常紧的窗口 ——
+    所以「δ 很快跑出分布」这件事在它身上格外突出。
+    换到窗口长得多的基座上，位置 OOD 是否还是<b>首要</b>瓶颈，论文没有建立。
+    LingBot-World（14B）那组结果是个提示：Field 在那儿基本是平的，Landmark 在 2× 也没有增益。
+    另外，论文<b>没有和 Matrix-Game-3 比</b>（理由充分：MG3 把记忆训进了生成器，没有可改 cache 的固定 checkpoint），
+    也没有和外部记忆库/检索类方法（WorldMem、VMem 这一路）做数值比较。</p>
+  </div>
+  </div>
+</section>
+
+<!-- ══════════════════ 12 ══════════════════ -->
+<section class="card" id="s12">
+  <div class="sechead"><span class="secnum">12</span><h2>放回坐标系：它在这条技术线的什么位置</h2></div>
+
+  <p>把长程记忆的做法排成四象限（论文 Tab.7 的口径 + 我补的一列），WorldTrace 的位置就很清楚了：</p>
+
+  <div class="tblwrap">
+  <table class="cmp tight">
+    <thead><tr><th>方法</th><th>修位置 OOD？</th><th>显存有界？</th><th>保留中间历史？</th><th>免训练？</th></tr></thead>
+    <tbody>
+      <tr><td class="rowlab">Full KV</td><td>否</td><td>否（O(N)）</td><td>是（精确）</td><td>是</td></tr>
+      <tr><td class="rowlab">Sliding window</td><td>不适用（读不到远处）</td><td>是</td><td>只有近期</td><td>是</td></tr>
+      <tr><td class="rowlab">KV Flush + Block-relative（∞-RoPE）</td><td>是</td><td>是</td><td><b>否</b></td><td>是</td></tr>
+      <tr><td class="rowlab">Naive avg + Block-relative</td><td>部分（槽位撞车）</td><td>是</td><td>否（被压坏）</td><td>是</td></tr>
+      <tr><td class="rowlab">MemRoPE</td><td>是</td><td>是</td><td>EMA 稀释</td><td>是</td></tr>
+      <tr><td class="rowlab">Deep Forcing</td><td>部分</td><td>是</td><td>sink + 剪枝后的近期</td><td>是</td></tr>
+      <tr><td class="rowlab">WorldTrace-Field</td><td class="best">是</td><td class="best">是</td><td class="best">是（压缩场）</td><td class="best">是</td></tr>
+      <tr><td class="rowlab">WorldTrace-Landmark</td><td class="best">是</td><td class="best">是</td><td class="best">是（verbatim 地标）</td><td class="best">是</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>论文自己给的定位是：据其所知，还没有工作<b>同时</b>做到「让任意多个压缩槽在任意 horizon 下保持互不相同」
+  ＋「在 canonical（pre-RoPE）域里写摘要」。前者 MemRoPE 做不到（它只有 2 个 EMA 流，所以天然不撞车），
+  后者 Block-relative 一系不做。<b>WorldTrace 的新意主要在这个「配对」上，两个零件各自都不算新。</b></p>
+
+  <h3>三条最有价值的外推</h3>
+
+  <ol class="pts">
+    <li><b>「记忆」这个词在世界模型里应该拆成两个问题。</b>不是「怎么记更多」，而是
+    <b>（a）怎么让存下来的东西保持可寻址；（b）该为将来的什么 query 存什么样的痕迹。</b>
+    这个拆法比任何具体的 writer 都更耐用。</li>
+    <li><b>位置编码的外推问题，在「压缩」场景下变成了一个新问题。</b>
+    所有 RoPE 外推工作（PI / YaRN / LongRoPE / RIFLEx）都是给<b>单独保留</b>的 token 重映射位置。
+    但一个「合并了好几帧」的摘要该占什么位置？<b>token 保持独立身份时这个问题根本不存在。</b>这是论文最原创的一问。</li>
+    <li><b>写入域和读取域必须一致</b>（§3.5，也被 Tab.9 里 MemRoPE+WorldTrace 的退化实测到）。
+    这条对任何做 KV 压缩的人都是硬约束：<span class="hl-warn">别把别人的位置方案和别人的内容写法自由拼装。</span></li>
+  </ol>
+
+  <h3>论文自己列的未来方向里，两条最实在</h3>
+
+  <div class="twocol">
+    <div class="box">
+      <div class="bt">几何感知的 canonical Key</div>
+      <p>把「撕旋转 / 贴旋转」这个原语和<b>相机位姿 warping</b>（MosaicMem 的 Plücker、UCM 的 Warped-RoPE）耦合起来，
+      先把帧对齐到统一场景坐标系再平均 —— 这样一个摘要 token 混的就是<b>同一块场景内容</b>的多次观测，而不是不同地方的画面。</p>
+    </div>
+    <div class="box">
+      <div class="bt">用重访结果反过来训记忆策略</div>
+      <p>「回去时有没有还原出原来的场景」是<b>可直接测量</b>的，所以它天然是免费的监督信号 ——
+      可以做 SFT，也可以直接把 revisit 分数当 reward 做 RL。骨干冻结，只训 cache 上那个轻量策略（存什么、压什么、淘汰谁）。</p>
+    </div>
+  </div>
+
+  <div class="callout ok">
+    <span class="lab">一句话收尾</span>
+    <p>WorldTrace 真正贡献的不是那两个 writer（一个是均值，一个是原样存），而是<b>那个 6 个字的诊断</b>：
+    <b>长程失忆是寻址问题</b>。一旦接受这个诊断，「给每个压缩槽发一个训练分布内的、按序号定死的门牌号」
+    就成了几乎不可避免的解法 —— 而它恰好不需要训练、不需要显存、不需要改架构。
+    从工程角度，这是一个<b>可以在既有 checkpoint 上当天试出来</b>的改动；
+    从研究角度，它把「记忆」这个模糊的词换成了两个可以分别攻的具体问题。</p>
+  </div>
+</section>
+
+<footer>
+  <p>论文：<a href="https://arxiv.org/abs/2608.07408" target="_blank">Addressable Memory for Video World Models</a>（arXiv:2608.07408v1，2026-08-07）·
+  Xindi Wu, Sven Elflein, James Lucas, Olga Russakovsky, Laura Leal-Taixé, Despoina Paschalidou, Jonathan Lorraine, Aljoša Ošep ·
+  NVIDIA / Princeton / U Toronto / Vector Institute ·
+  <a href="https://research.nvidia.com/labs/sil/projects/WorldTrace/" target="_blank">项目页</a></p>
+  <p>本页所有数字取自论文正文与附录（Tab.1–15、Fig.1–11、Def.1–2、Prop.1–2、Alg.1）。
+  §01 的相位热力图与 §02 的相消示例是按论文给出的 RoPE 参数（θ<sub>f</sub> = 10000<sup>−f/22</sup>，2c<sub>t</sub>=44）<b>独立重算</b>的，
+  与论文正文给出的校验点（δ=5 时 f≥10 相位&lt;0.08 rad；δ=30 时 f=3 为 8.5 rad、f=5 为 3.7 rad）一致。
+  §03 中 Centroid-linear 的落点为示意，论文未给出其精确映射式；§06 的余弦距离曲线为示意。
+  §11 的八条为阅读提示，其中 ①–④ 由表格数字比对得出，⑤–⑧ 论文不同程度地自陈。</p>
+</footer>
+
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script>
+(function () {
+  var btn = document.getElementById('themeBtn');
+  var root = document.documentElement;
+  btn.addEventListener('click', function () {
+    var cur = root.getAttribute('data-theme');
+    if (!cur) cur = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+
+  var tip = document.getElementById('tip');
+  function show(e, html) {
+    tip.innerHTML = html;
+    tip.style.opacity = '1';
+    var x = e.clientX + 14, y = e.clientY - 10;
+    var r = tip.getBoundingClientRect();
+    if (x + r.width > window.innerWidth - 8) x = e.clientX - r.width - 14;
+    if (y + r.height > window.innerHeight - 8) y = window.innerHeight - r.height - 8;
+    if (y < 8) y = 8;
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  function hide() { tip.style.opacity = '0'; }
+
+  document.querySelectorAll('rect.bar, circle.bar').forEach(function (el) {
+    el.addEventListener('mousemove', function (e) { show(e, el.getAttribute('data-t')); });
+    el.addEventListener('mouseleave', hide);
+  });
+
+  // RoPE phase heatmap: compute exact phase on hover
+  var CT = 22, BASE = 10000, PI = Math.PI;
+  function bandName(p) {
+    if (p < PI / 8) return '语义载体（几乎不含位置信息）';
+    if (p < PI) return '位置信号正常';
+    if (p < 3 * PI) return '出分布：模型没学过这个角度';
+    return '相位绕多圈 → 等于随机噪声';
+  }
+  document.querySelectorAll('rect.ph').forEach(function (el) {
+    var d = +el.getAttribute('data-d'), f0 = +el.getAttribute('data-f0'), f1 = +el.getAttribute('data-f1');
+    el.addEventListener('mousemove', function (e) {
+      var w = el.getBoundingClientRect(), frac = (e.clientX - w.left) / w.width;
+      var f = Math.min(f1, f0 + Math.floor(frac * (f1 - f0 + 1)));
+      var th = Math.pow(BASE, -f / CT), p = th * d;
+      show(e, 'f = ' + f + '　|&delta;| = ' + d + '<br>&theta;<sub>f</sub> = ' + th.toPrecision(3) +
+        '<br>相位 = <b>' + p.toFixed(2) + ' rad</b> (' + (p / PI).toFixed(2) + '&pi;)<br>' + bandName(p));
+    });
+    el.addEventListener('mouseleave', hide);
+  });
+})();
+</script>
+</body>
+</html>

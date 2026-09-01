@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SAGA 论文图解 · 自回归视频生成的稳定加速度引导</title>
+<style>
+:root{
+  color-scheme: light;
+  --surface-1:#fcfcfb; --plane:#f9f9f7;
+  --text-primary:#0b0b0b; --text-secondary:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.10);
+  --series-1:#2a78d6; --series-2:#eb6834; --series-3:#1baf7a;
+  --critical:#d03b3b; --d-good:#006300;
+  --ord-1:#86b6ef; --ord-2:#5598e7; --ord-3:#2a78d6; --ord-4:#1c5cab;
+  --chip:rgba(11,11,11,0.045);
+}
+@media (prefers-color-scheme: dark){
+  :root:where(:not([data-theme="light"])){
+    color-scheme: dark;
+    --surface-1:#1a1a19; --plane:#0d0d0d;
+    --text-primary:#ffffff; --text-secondary:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+    --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70;
+    --critical:#d03b3b; --d-good:#0ca30c;
+    --ord-1:#104281; --ord-2:#1c5cab; --ord-3:#2a78d6; --ord-4:#5598e7;
+    --chip:rgba(255,255,255,0.06);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --surface-1:#1a1a19; --plane:#0d0d0d;
+  --text-primary:#ffffff; --text-secondary:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+  --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70;
+  --critical:#d03b3b; --d-good:#0ca30c;
+  --ord-1:#104281; --ord-2:#1c5cab; --ord-3:#2a78d6; --ord-4:#5598e7;
+  --chip:rgba(255,255,255,0.06);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--plane);color:var(--text-primary);
+  font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:14px;line-height:1.75}
+.wrap{max-width:1180px;margin:0 auto;padding:30px 20px 80px}
+header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.kicker{font-size:12px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin:0 0 6px}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.01em;line-height:1.3}
+.sub{color:var(--text-secondary);font-size:13px;margin:0;max-width:760px}
+.hbtns{display:flex;gap:8px;flex-wrap:wrap}
+button,select,input{font-family:inherit;font-size:13px;color:var(--text-primary)}
+.tbtn{background:var(--surface-1);border:1px solid var(--border);border-radius:8px;padding:7px 13px;cursor:pointer;text-decoration:none;color:var(--text-primary);font-size:13px;display:inline-block}
+.tbtn:hover{background:var(--chip);text-decoration:none}
+a{color:var(--series-1);text-decoration:none}
+a:hover{text-decoration:underline}
+section{background:var(--surface-1);border:1px solid var(--border);border-radius:14px;padding:24px 26px;margin-top:22px}
+h2{font-size:17.5px;margin:0 0 4px;letter-spacing:-.005em}
+h3{font-size:14.5px;margin:22px 0 8px}
+.secnum{color:var(--series-1);font-weight:700;margin-right:8px;font-variant-numeric:tabular-nums}
+.note{color:var(--text-secondary);font-size:12.5px;margin:0 0 14px}
+p{margin:10px 0}
+.lead{font-size:14.5px}
+.quote{border-left:3px solid var(--series-1);padding:10px 0 10px 16px;margin:16px 0;color:var(--text-secondary);font-size:13.5px}
+.quote b{color:var(--text-primary)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(225px,1fr));gap:14px;margin-top:22px}
+.tile{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:16px 18px}
+.tile .v{font-size:25px;font-weight:650;letter-spacing:-.02em;line-height:1.25}
+.tile .v small{font-size:14px;color:var(--muted);font-weight:500}
+.tile .k{font-size:12.5px;color:var(--text-secondary);margin-top:5px}
+.tile .s{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.55}
+.toc{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
+.toc a{font-size:12px;padding:5px 11px;border:1px solid var(--border);border-radius:999px;background:var(--surface-1);color:var(--text-secondary);white-space:nowrap}
+.toc a:hover{color:var(--text-primary);background:var(--chip);text-decoration:none}
+.toc a b{color:var(--series-1);margin-right:4px}
+.chip{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;background:var(--chip);color:var(--text-secondary);white-space:nowrap}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.tag.san{background:color-mix(in srgb,var(--series-3) 14%,transparent);color:var(--series-3)}
+.tag.sg{background:color-mix(in srgb,var(--series-2) 14%,transparent);color:var(--series-2)}
+.tag.frz{background:var(--chip);color:var(--text-secondary)}
+.figbox{border:1px solid var(--border);border-radius:12px;padding:16px 14px 10px;margin:14px 0 6px;overflow-x:auto;background:var(--surface-1)}
+.cap{font-size:12px;color:var(--muted);margin:8px 2px 4px;line-height:1.6}
+.cap b{color:var(--text-secondary)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary);margin:2px 2px 10px}
+.legend .it{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:11px;height:11px;border-radius:3px}
+.ln{display:inline-block;width:16px;height:0;border-top:2.5px solid;border-radius:2px}
+.eq{font-family:"Cambria Math","STIX Two Math",Cambria,Georgia,"Times New Roman",serif;
+  font-size:16px;text-align:center;padding:13px 46px 13px 16px;background:var(--chip);
+  border-radius:9px;margin:12px 0;position:relative;overflow-x:auto;line-height:1.9}
+.eq .no{position:absolute;right:13px;top:50%;transform:translateY(-50%);color:var(--muted);
+  font-size:12px;font-family:system-ui,sans-serif}
+.eq i{font-style:italic}
+sub,sup{font-size:.68em}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media (max-width:900px){.grid2,.grid3{grid-template-columns:1fr}}
+.callout{border:1px solid var(--border);border-left:3px solid var(--series-1);border-radius:10px;padding:12px 16px;margin:14px 0;background:var(--chip);font-size:13px}
+.callout.warn{border-left-color:var(--critical)}
+.callout.good{border-left-color:var(--series-3)}
+.callout.idea{border-left-color:var(--series-2)}
+.callout h4{margin:0 0 5px;font-size:13px}
+.callout p{margin:5px 0;color:var(--text-secondary)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:13px;margin:14px 0}
+.card{border:1px solid var(--border);border-radius:11px;padding:13px 15px}
+.card h4{margin:0 0 6px;font-size:13px;display:flex;align-items:center;gap:7px}
+.card p{margin:0;font-size:12.5px;color:var(--text-secondary)}
+.card .glyph{width:22px;height:22px;flex:none}
+.flow{counter-reset:step;display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:12px;margin:16px 0}
+.fstep{border:1px solid var(--border);border-radius:11px;padding:13px 14px;position:relative}
+.fstep::before{counter-increment:step;content:counter(step);position:absolute;top:-11px;left:12px;
+  width:22px;height:22px;border-radius:50%;background:var(--series-1);color:#fff;font-size:12px;
+  font-weight:700;display:flex;align-items:center;justify-content:center}
+.fstep h4{margin:4px 0 6px;font-size:13px}
+.fstep p{margin:0;font-size:12px;color:var(--text-secondary)}
+.fstep .mini{margin-top:8px}
+.algo{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;
+  line-height:1.95;background:var(--chip);border:1px solid var(--border);border-radius:11px;
+  padding:16px 20px;overflow-x:auto;white-space:pre}
+.algo .kw{color:var(--series-1);font-weight:600}
+.algo .san{color:var(--series-3);font-weight:600}
+.algo .sg{color:var(--series-2);font-weight:600}
+.algo .cm{color:var(--muted)}
+.tbl-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:10px;margin:12px 0 4px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{text-align:left;padding:7.5px 11px;border-bottom:1px solid var(--grid);vertical-align:top}
+th{background:var(--surface-1);font-weight:600;color:var(--text-secondary);font-size:11.5px;white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--chip)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.nm{font-weight:600;white-space:nowrap}
+tr.ours td{background:color-mix(in srgb,var(--series-1) 6%,transparent)}
+tr.ghead td{background:var(--chip);color:var(--muted);font-size:11px;letter-spacing:.05em;font-weight:600;padding:5px 11px}
+.best{font-weight:700}
+.second{text-decoration:underline;text-underline-offset:2px}
+.delta{font-size:11px;font-variant-numeric:tabular-nums;margin-left:5px}
+.delta.up{color:var(--d-good)}
+.delta.dn{color:var(--critical)}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
+.kv .it{border:1px solid var(--border);border-radius:10px;padding:10px 13px}
+.kv .it .a{font-size:16px;font-weight:650}
+.kv .it .b{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.5}
+.minis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:11px;margin:12px 0 4px}
+.mini-p{border:1px solid var(--border);border-radius:10px;padding:9px 10px 5px}
+.mini-p.keep{border-top:3px solid var(--series-1)}
+.mini-p.cut{border-top:3px solid var(--critical)}
+.mini-p .t{font-size:11.5px;color:var(--text-secondary);display:flex;justify-content:space-between;align-items:center;margin-bottom:2px}
+.mini-p .t b{color:var(--text-primary)}
+details.dtable{margin:8px 2px}
+details.dtable summary{cursor:pointer;font-size:12px;color:var(--muted)}
+details.dtable summary:hover{color:var(--text-primary)}
+details.dtable .tbl-scroll{margin-top:8px}
+#tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .1s;background:var(--surface-1);
+  border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:12px;
+  box-shadow:0 6px 22px rgba(0,0,0,.16);max-width:300px;z-index:50;line-height:1.6}
+#tip b{display:block;margin-bottom:3px}
+svg text{font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+.axlab{font-size:11px;fill:var(--muted)}
+.ticklab{font-size:10.5px;fill:var(--muted)}
+.dlab{font-size:11.5px;fill:var(--text-secondary)}
+.dlab.strong{font-weight:600;fill:var(--text-primary)}
+.svgnote{font-size:10.5px;fill:var(--muted)}
+footer{color:var(--muted);font-size:12px;margin-top:28px;line-height:1.9}
+.footrule{border-top:1px solid var(--grid);margin-top:26px;padding-top:14px}
+@media (max-width:640px){h1{font-size:21px}section{padding:18px 16px}.eq{font-size:14px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <p class="kicker">论文精读 · arXiv 2607.08020 · cs.CV · 2026-07-09 提交</p>
+    <h1>SAGA:给自回归视频生成装一只「加速度稳定器」</h1>
+    <p class="sub"><b>SAGA: Stable Acceleration Guidance for Autoregressive Video Generation</b><br>
+    Thanh-Nhan Vo, Trong-Thuan Nguyen, Trung-Hoang Le, Tam V. Nguyen, Minh-Triet Tran ·
+    越南国家大学胡志明市校区(VNU-HCM 科学大学)× 美国代顿大学<br>
+    <span class="chip">训练无关 training-free</span> <span class="chip">纯推理时 · 骨干冻结</span> <span class="chip">加速度域频谱引导</span> <span class="chip">Slepian / DPSS</span> <span class="chip">即插即用于 chunk-wise AR 扩散</span></p>
+  </div>
+  <div class="hbtns">
+    <a class="tbtn" href="https://arxiv.org/abs/2607.08020" target="_blank" rel="noopener">arXiv 原文 ↗</a>
+    <button class="tbtn" id="theme">切换深浅色</button>
+  </div>
+</header>
+
+<div class="quote" style="margin-top:20px">一句话读懂:自回归视频扩散会把小误差滚成闪烁、抖动和漂移。SAGA 把这些伪影翻译成<b>潜空间「加速度」里的高频能量</b>——离散二阶差分天然把高频放大至 16 倍、把低频衰减到 0,是伪影的高信噪比探测器——然后在推理时做两件事:<b>SAN</b> 把初始噪声调成「相邻帧不相关、隔帧仍相关」的运动学中性形态,<b>SG</b> 在去噪中用一步梯度压掉高频加速度能量。不训练、不改架构,三个骨干上时序质量全面上涨,画质不降反升。</div>
+
+<div class="tiles">
+  <div class="tile"><div class="v">97.30 <small>→</small> <span style="color:var(--series-1)">97.91</span></div><div class="k">VBench 时序质量 TQ(Self-Forcing + SAGA)</div><div class="s">同时画质 IQ 69.60 → 70.51:稳定<b>没有</b>以糊化画面为代价(表 1)</div></div>
+  <div class="tile"><div class="v" style="color:var(--d-good)">−25.7%</div><div class="k">全局高频加速度功率(f &gt; 0.375)</div><div class="s">机制验证:100 对匹配视频上,加速度 RMS −16.7%、总功率 −30.2%(图 3)</div></div>
+  <div class="tile"><div class="v">63.0<small>%</small></div><div class="k">去除平局后的人类偏好率(视频级)</div><div class="s">10 名评测者共 500 次盲测判断;视频级多数聚合 58 胜 34 负 8 平(图 4)</div></div>
+  <div class="tile"><div class="v">0 <small>训练</small></div><div class="k">不改权重、不改架构、无额外监督</div><div class="s">4 步去噪 · CFG 3.0 · 单卡 A100;全部超参一套全局配置:η=3, ρ=0.9, NW=1.5, K<sub>c</sub>=3</div></div>
+</div>
+
+<div class="toc">
+  <a href="#s1"><b>1</b>问题:误差滚雪球</a>
+  <a href="#s2"><b>2</b>洞察:去加速度域看伪影</a>
+  <a href="#s3"><b>3</b>方法总览</a>
+  <a href="#s4"><b>4</b>SAN 噪声初始化</a>
+  <a href="#s5"><b>5</b>SG 频谱引导</a>
+  <a href="#s6"><b>6</b>完整推理流程</a>
+  <a href="#s7"><b>7</b>实验与证据</a>
+  <a href="#s8"><b>8</b>解读・局限・定位</a>
+</div>
+
+<section id="s1">
+  <h2><span class="secnum">01</span>问题:自回归 rollout 的「误差滚雪球」</h2>
+  <p class="note">对应原文 §1 Introduction、§3 Problem Formulation</p>
+  <p class="lead">高质量视频扩散模型(Sora、Wan2.1、CogVideoX 等)大多做<b>全序列/双向去噪</b>:一次看整段视频,效果好但算力昂贵,没法流式、没法无限延长。于是出现了 <b>AR-Diffusion 混合范式</b>——Diffusion Forcing、CausVid、Self-Forcing、Causal-Forcing 这些工作把视频按「块(chunk)」顺序生成:每块内部用扩散去噪保画质,块与块之间用因果注意力 + KV cache 串起来,换来流式与长时程能力。</p>
+  <p>代价是一个新失效模式。第 <i>b</i> 块的去噪要以之前生成的所有潜变量 <i>z</i><sub>&lt;b</sub> 为条件(式 1):</p>
+  <div class="eq"><i>ẑ</i><sub>b,0</sub> = D<sub>θ</sub>(<i>z</i><sub>b,τ</sub>, τ, <i>y</i>, <i>z</i><sub>&lt;b</sub>)<span class="no">式 (1)</span></div>
+  <p>生成的潜变量被<b>递归地喂回去当上下文</b>。一旦某块混进一点小扰动,后续每一块都在被污染的条件下去噪,误差不是被稀释而是被放大——表现为三类肉眼可见的伪影:<b>闪烁</b>(flickering)、<b>运动抖动</b>(motion jitter)、<b>背景/结构漂移</b>(drift)。</p>
+
+  <div class="figbox">
+    <svg id="figA" width="100%" viewBox="0 0 980 250" role="img" aria-label="自回归rollout误差累积示意图:chunk逐块生成,扰动经KV上下文逐级放大"></svg>
+  </div>
+  <p class="cap"><b>图解 A · 误差滚雪球。</b>每个 chunk(3 个潜帧)由冻结的因果 DiT 去噪生成,再作为 KV 上下文喂给下一块。第 <i>b</i> 块里的小扰动 ε 被下一块「当真」,逐块放大成可见伪影。按原文 §1/§3 绘制。</p>
+
+  <div class="cards">
+    <div class="card"><h4><svg class="glyph" viewBox="0 0 22 22"><rect x="1" y="4" width="6" height="14" rx="1.5" style="fill:var(--series-1);opacity:.85"/><rect x="8" y="4" width="6" height="14" rx="1.5" style="fill:var(--series-1);opacity:.25"/><rect x="15" y="4" width="6" height="14" rx="1.5" style="fill:var(--series-1);opacity:.85"/></svg>闪烁 Flickering</h4><p>相邻帧外观/亮度突变,帧间绝对差呈锯齿状。VBench 用 TF 指标度量。</p></div>
+    <div class="card"><h4><svg class="glyph" viewBox="0 0 22 22"><path d="M2 15 L6 8 L10 14 L14 6 L20 12" style="stroke:var(--series-2);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></svg>运动抖动 Motion jitter</h4><p>物体轨迹不再惯性平滑,速度方向高频来回摆。对应 MS(运动平滑度)下降。</p></div>
+    <div class="card"><h4><svg class="glyph" viewBox="0 0 22 22"><rect x="3" y="5" width="10" height="10" rx="1.5" style="fill:none;stroke:var(--series-3);stroke-width:1.8"/><rect x="8" y="8" width="10" height="10" rx="1.5" style="fill:none;stroke:var(--critical);stroke-width:1.8"/></svg>结构漂移 Structural drift</h4><p>主体几何、背景边界随时间缓慢走样,DINO/CLIP 跨帧相似度(SC/BC)掉分。</p></div>
+  </div>
+
+  <div class="callout">
+    <h4>已有方案为什么不够?</h4>
+    <p>改架构、训练期对齐、VLM 运动规划(VLIPP)、潜轨迹频谱操纵(Motion-aware)等方法,要么<b>需要重训</b>,要么<b>为纯扩散模型设计</b>、搬不到流式 AR 上;更关键的是,它们没有回答「小扰动为什么会在 AR-扩散 rollout 里失稳放大」。此外流式生成只暴露<b>很短的时间窗</b>,直接做频谱截断会遭遇严重泄漏(§5 详述)。这两条 gap 正是 SAGA 的切入点。</p>
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="secnum">02</span>核心洞察:换到「加速度域」,伪影自己亮起来</h2>
+  <p class="note">对应原文 §3、§4.1 High-Frequency Amplification of Discrete Acceleration</p>
+  <p class="lead">这是全文最重要的一步认知转换。位置(潜变量本身)里,低频的语义运动能量占绝对主导,微小的高频伪影被淹没;但对时间求<b>二阶差分</b>——离散加速度——之后,情况完全反过来。</p>
+  <p>把历史上下文与当前预测拼成局部潜轨迹 <i>z</i><sup>b</sup><sub>1:N</sub> = [<i>z</i><sub>&lt;b</sub>; <i>ẑ</i><sub>b,0</sub>](窗长 N),对帧 <i>t</i> 定义中心差分加速度:</p>
+  <div class="eq"><i>a</i><sub>t</sub> = Δ²<i>z</i><sup>b</sup><sub>t</sub> = <i>z</i><sup>b</sup><sub>t+1</sub> − 2<i>z</i><sup>b</sup><sub>t</sub> + <i>z</i><sup>b</sup><sub>t−1</sub><span class="no">式 (2)</span></div>
+  <p>代入谐波轨迹 <i>z</i><sub>t</sub> = e<sup>iωt</sup>(ω∈[0,π] 为时间角频率),得到平方增益:</p>
+  <div class="eq">A(ω) = |<i>a</i><sub>t</sub>|² / |<i>z</i><sub>t</sub>|² = 4(1 − cos ω)²<span class="no">式 (4)</span></div>
+
+  <div class="legend"><span class="it"><span class="ln" style="border-color:var(--series-1)"></span>加速度 Δ²:4(1−cos ω)²</span><span class="it"><span class="ln" style="border-color:var(--series-2)"></span>速度 Δ:2(1−cos ω)</span></div>
+  <div class="figbox">
+    <svg id="figAw" width="100%" viewBox="0 0 960 330" role="img" aria-label="离散加速度与速度算子的频率响应曲线:加速度在高频端放大16倍,低频端趋近0"></svg>
+  </div>
+  <p class="cap"><b>图解 B · 二阶差分是天然的「高通放大镜」。</b>按式 (4) 精确绘制。ω→0(慢的惯性运动)增益趋近 0——匀速直线运动速度非零、加速度恰为零,完全不受惩罚;ω=π(逐帧交替的闪烁)被放大 <b>16 倍</b>,而一阶差分(速度)只放大 4 倍。所以「加速度-频率」空间是暴露与惩罚伪影的有原则(principled)的域。</p>
+  <details class="dtable"><summary>查看采样数值表</summary><div class="tbl-scroll"><table><thead><tr><th>ω</th><th class="num">0</th><th class="num">π/4</th><th class="num">π/2</th><th class="num">3π/4</th><th class="num">π</th></tr></thead><tbody>
+    <tr><td class="nm">加速度增益 4(1−cosω)²</td><td class="num">0</td><td class="num">0.34</td><td class="num">4.00</td><td class="num">11.66</td><td class="num">16.00</td></tr>
+    <tr><td class="nm">速度增益 2(1−cosω)</td><td class="num">0</td><td class="num">0.59</td><td class="num">2.00</td><td class="num">3.41</td><td class="num">4.00</td></tr>
+  </tbody></table></div></details>
+
+  <p>据此,论文定义一个<b>物理启发的运动学先验</b>:惩罚加速度频谱中超过截止频率 f<sub>c</sub> 的能量——</p>
+  <div class="eq">E<sub>kin</sub>(<i>z</i>) = ∫<sub>|f|&gt;f<sub>c</sub></sub> |ℱ{<i>a</i>}(f)|² df<span class="no">式 (3)</span></div>
+
+  <div class="grid2">
+    <div class="callout good">
+      <h4>为什么不用位置域或速度域?</h4>
+      <p><b>位置域:</b>低频语义运动能量占主导,伪影信号被淹没;直接平滑位置会把真实运动一起抹掉。<br><b>速度域:</b>增益只有 2(1−cosω),对高频的选择性弱,而且匀速运动速度非零——惩罚速度会误伤正常运动。<br><b>加速度域:</b>惯性运动(自然界的默认状态)加速度≈0 且集中在低频;闪烁抖动是「非惯性突变」,恰好是高频加速度。目标与信号在这个域里天然分离。</p>
+    </div>
+    <div class="callout">
+      <h4>一个直觉类比</h4>
+      <p>坐车时你感觉不到 100 km/h 的匀速(速度),也几乎不在意平缓的加减速(低频加速度),但立刻会被急刹和颠簸(高频加速度)晃醒。人眼看视频同理:掉帧感、闪烁感全是「急刹级」的二阶突变。SAGA 惩罚的正是潜空间里的「颠簸」,而给「平稳开车」完全放行。</p>
+    </div>
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="secnum">03</span>方法总览:SAGA = SAN(管开头)+ SG(管过程)</h2>
+  <p class="note">对应原文 §4、Fig. 1 与 Fig. 2 · 两个组件都只在推理时生效,骨干 DiT 全程冻结</p>
+
+  <div class="figbox">
+    <svg id="figB" width="100%" viewBox="0 0 980 402" role="img" aria-label="SAGA端到端流程:文本经umT5编码,SAN构造结构化初始噪声,因果DiT逐chunk去噪并KV缓存,SG在每次预测干净潜变量后做加速度域频谱引导,最终VAE解码成视频"></svg>
+  </div>
+  <p class="cap"><b>图解 C · SAGA 端到端工作流(按原文 Fig. 1/Fig. 2 重绘)。</b>文本提示经 umT5 编码;<span class="tag san">SAN</span> 替换标准 i.i.d. 高斯初始噪声,给整条噪声轨迹一个「运动学中性」的起点;冻结的因果 DiT 逐 chunk 去噪(每 chunk 3 个潜帧、4 步去噪、KV cache 传递上下文);每当得到干净潜变量预测 <i>ẑ</i><sub>0</sub>,<span class="tag sg">SG</span> 就在加速度-频率域做一步梯度修正;最后 VAE 解码整条潜轨迹。</p>
+
+  <div class="grid2">
+    <div class="card" style="border-top:3px solid var(--series-3)">
+      <h4><span class="tag san">SAN</span> 结构化自回归噪声初始化 <span class="chip">§4.2</span></h4>
+      <p><b>管住起点。</b>初始噪声若带有相邻帧相关性,会被递归 rollout 一路放大。SAN 用两条相反相关系数(±ρ)的 AR(1) 噪声流等权叠加,做到 R(1)=0(相邻帧零相关)同时 R(2)=ρ²(隔帧强相关)——既不给模型塞进虚假的短程时间偏置,又保留长程运动结构。每帧仍是标准高斯,预训练模型毫无察觉。</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--series-2)">
+      <h4><span class="tag sg">SG</span> 加速度域频谱引导 <span class="chip">§4.1 + §4.3</span></h4>
+      <p><b>管住过程。</b>即使起点干净,rollout 中仍会自然积累非物理的高频扰动。SG 把预测的干净潜变量拼进局部轨迹、求二阶差分得到加速度,投影到抗泄漏的 Slepian(DPSS)基上,把高频系数的能量 E<sub>kin</sub> 当作引导目标,对 <i>ẑ</i><sub>0</sub> 做一步梯度下降:ẑ<sub>0</sub> ← ẑ<sub>0</sub> − η∇E<sub>kin</sub>。</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <h4>与「分类器引导 / CFG」同一家族,但目标全新</h4>
+    <p>推理时引导(inference-time guidance)本身是扩散模型的成熟技术——分类器引导、CFG、测量一致性引导都是在采样时加梯度而不动权重。SAGA 的差异在于<b>引导目标</b>:不是语义对齐、不是类别条件、不是空间结构,而是第一次把「潜轨迹的时间动力学(加速度频谱)」作为引导对象,专门治 AR rollout 的时序失稳。</p>
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="secnum">04</span>SAN:把初始噪声调成「运动学中性」</h2>
+  <p class="note">对应原文 §4.2 Structured Autoregressive Noise Initialization · 式 (5a)(5b)</p>
+  <p class="lead">标准做法是给每帧独立采样 i.i.d. 高斯噪声(纯白噪声,任意两帧零相关)。SAN 的观点是:白噪声虽然「无偏」,却也<b>不携带任何长程运动结构</b>;而若像一些一致性方法那样直接用相关噪声(单条 AR(1),相邻帧相关 ρ),短程相关又会被递归 rollout 放大成偏置。SAN 想两者兼得——办法是叠加两条<b>相关系数互为相反数</b>的方差保持 AR(1) 流:</p>
+  <div class="eq"><i>z</i><sub>t</sub> = cos θ · <i>z</i><sup>lf</sup><sub>t</sub> + sin θ · <i>z</i><sup>hf</sup><sub>t</sub><span class="no">式 (5a)</span></div>
+  <div class="eq"><i>z</i><sup>type</sup><sub>t</sub> = ρ<sub>type</sub> <i>z</i><sup>type</sup><sub>t−1</sub> + √(1 − ρ²<sub>type</sub>) · ε<sup>type</sup><sub>t</sub>,&nbsp;&nbsp; ε ~ 𝒩(0, I)<span class="no">式 (5b)</span></div>
+  <p>两条流的自相关按权重线性叠加:R(k) = cos²θ·ρ<sup>k</sup><sub>lf</sub> + sin²θ·ρ<sup>k</sup><sub>hf</sub>。取 <b>θ = π/4</b>(等权)且 <b>ρ<sub>lf</sub> = −ρ<sub>hf</sub> = ρ</b>,奇数阶的正负项恰好抵消:</p>
+  <div class="eq">R(1) = ½ρ − ½ρ = <b>0</b>,&nbsp;&nbsp;&nbsp; R(2) = ½ρ² + ½ρ² = <b>ρ²</b>(= 0.81,当 ρ=0.9)</div>
+
+  <div class="figbox">
+    <svg id="figSAN" width="100%" viewBox="0 0 980 300" role="img" aria-label="SAN构造图解:低频AR(1)流与高频交替AR(1)流按等权叠加,得到相邻帧不相关但隔帧相关的混合噪声"></svg>
+  </div>
+  <p class="cap"><b>图解 D · 两条「性格相反」的噪声流。</b>ρ<sub>lf</sub>=+0.9 的流平滑蜿蜒(低频),ρ<sub>hf</sub>=−0.9 的流逐帧翻转(高频);各乘 1/√2 相加后,相邻帧相关性精确归零、隔帧相关性保留为 ρ²。波形为固定种子的真实 AR(1) 采样(示意)。</p>
+
+  <div class="grid2">
+    <div>
+      <div class="legend"><span class="it"><span class="sw" style="background:var(--series-3)"></span>SAN 混合噪声(本文)</span><span class="it"><span class="sw" style="background:var(--series-2)"></span>单条 AR(1),ρ=0.9(朴素相关噪声)</span></div>
+      <div class="figbox" style="margin-top:0">
+        <svg id="figRk" width="100%" viewBox="0 0 470 300" role="img" aria-label="自相关函数对比柱状图:SAN在k=1处为0、k=2处为0.81;单条AR(1)在k=1处即为0.9"></svg>
+      </div>
+      <p class="cap"><b>图解 E · 自相关函数 R(k) 对比</b>(ρ=0.9,按公式精确计算)。SAN 在奇数滞后全部归零、偶数滞后保留 ρ<sup>k</sup>;i.i.d. 白噪声则是 k≥1 全零(无任何结构,未画出)。SAN 正好卡在两者之间:<b>像白噪声一样无短程偏置,像相关噪声一样有长程结构</b>。</p>
+      <details class="dtable"><summary>查看数值表</summary><div class="tbl-scroll"><table><thead><tr><th>k</th><th class="num">0</th><th class="num">1</th><th class="num">2</th><th class="num">3</th><th class="num">4</th><th class="num">5</th><th class="num">6</th></tr></thead><tbody>
+        <tr><td class="nm">SAN R(k)</td><td class="num">1</td><td class="num">0</td><td class="num">0.810</td><td class="num">0</td><td class="num">0.656</td><td class="num">0</td><td class="num">0.531</td></tr>
+        <tr><td class="nm">AR(1) R(k)</td><td class="num">1</td><td class="num">0.900</td><td class="num">0.810</td><td class="num">0.729</td><td class="num">0.656</td><td class="num">0.590</td><td class="num">0.531</td></tr>
+      </tbody></table></div></details>
+    </div>
+    <div>
+      <div class="callout good" style="margin-top:0">
+        <h4>三条关键性质(原文强调)</h4>
+        <p><b>① 每帧仍是 𝒩(0, I)。</b>两条流都方差保持、混合权重 cos²θ+sin²θ=1,逐帧边缘分布不变——预训练扩散模型期望的噪声统计完全没被破坏,这是「即插即用」的前提。</p>
+        <p><b>② R(1)=0 ≠ 高频主导。</b>论文特别澄清:去掉相邻相关不是把噪声推向高频,而是让能量在低频/高频间<b>平衡</b>——所谓「运动学中性(kinematically neutral)」。</p>
+        <p><b>③ 为后续引导供货。</b>SAN 不直接强制平滑,它只是移除会被 rollout 放大的「虚假局部依赖」,给 SG 一个无偏的起点。</p>
+      </div>
+      <div class="callout idea">
+        <h4>解读:为什么消融里 SAN 单独就能涨画质?</h4>
+        <p>表 2 中 SAN 单独使用即 TQ 97.30→97.50、IQ 69.60→<b>70.03</b>。一个合理解释:R(2)=ρ² 的长程相关让相隔的潜帧共享一部分「低频命运」,模型不必在每块里重新发明背景,自然更稳、细节保得更好;而 SG 单独使用(无中性起点)则要在有偏轨迹上硬拉梯度,画质略降(IQ 68.82)。两者互补的结构在数据里看得非常清楚。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="secnum">05</span>SG:在 Slepian 基上惩罚高频加速度</h2>
+  <p class="note">对应原文 §4.3 Acceleration-Domain Spectral Guidance · 式 (6)(7)(8)</p>
+  <p class="lead">SG 是 SAGA 的主发动机,五步一循环,发生在每次得到干净潜变量预测之后:</p>
+
+  <div class="flow">
+    <div class="fstep"><h4>拼局部轨迹</h4><p>把历史上下文与当前预测拼接:<br><i>z</i><sup>b</sup><sub>1:N</sub> = [<i>z</i><sub>&lt;b</sub>; <i>ẑ</i><sub>b,0</sub>],窗长 N。</p></div>
+    <div class="fstep"><h4>求加速度</h4><p>逐帧中心差分(式 2):<br><i>a</i><sub>t</sub> = <i>z</i><sub>t+1</sub> − 2<i>z</i><sub>t</sub> + <i>z</i><sub>t−1</sub>,得加速度序列 <i>a</i>。</p></div>
+    <div class="fstep"><h4>Slepian 投影</h4><p>投到 DPSS 正交基 {<i>v</i><sub>k</sub>} 上:β<sub>k</sub> = <i>v</i><sub>k</sub><sup>⊤</sup><i>a</i>。低序号模式≈带内低频,高序号≈带外高频。</p></div>
+    <div class="fstep"><h4>算高频能量</h4><p>只惩罚 k ≥ K<sub>c</sub> 的系数(式 7):<br>E<sub>kin</sub> = Σ<sub>k≥K<sub>c</sub></sub> ‖β<sub>k</sub>‖²,K<sub>c</sub>=3。</p></div>
+    <div class="fstep"><h4>一步梯度修正</h4><p>直接改预测(式 8):<br><i>z̃</i><sub>0</sub> = <i>ẑ</i><sub>0</sub> − η∇<sub><i>ẑ</i><sub>0</sub></sub>E<sub>kin</sub>,η=3。</p></div>
+  </div>
+
+  <h3>为什么必须是 Slepian(DPSS),不用普通 FFT?</h3>
+  <p>流式 AR 的时间窗极短(每块只有 3 个潜帧,加上上下文也只有个位数到十几帧)。短窗上做 FFT,能量会「泄漏」到邻近频率——想惩罚高频,却连带误伤合法的低频运动。DPSS(离散扁长球波序列,Slepian 序列)是这样一组正交基:在给定窗长 N 和半带宽 W 下,它<b>最大化频谱能量集中在带内 [−W, W] 的比例</b>(式 6):</p>
+  <div class="eq">max<sub><i>v</i></sub> &nbsp; ∫<sub>−W</sub><sup>W</sup>|V(f)|²df &nbsp;/&nbsp; ∫<sub>−1/2</sub><sup>1/2</sup>|V(f)|²df<span class="no">式 (6)</span></div>
+  <p>时间-带宽积取 NW = 1.5。经典结果是<b>约 2NW 个模式能高度集中在带内</b>——也就是 3 个,于是截止序号顺理成章取 K<sub>c</sub> = 3:前 3 个模式视作「合法低频运动」放行,其余全部进惩罚项。</p>
+
+  <div class="minis" id="dpssStrip"></div>
+  <p class="cap"><b>图解 F · DPSS 基的六个模式</b>(N=8、NW=1.5 实算,λ<sub>k</sub> 为带内能量集中度)。前三个模式 λ≈0.999 / 0.975 / 0.745,之后断崖式跌到 0.254——「约 2NW=3 个良集中模式」不是经验拍脑袋,是数学结构。<span style="color:var(--series-1)">蓝框 k&lt;K<sub>c</sub>:放行</span> · <span style="color:var(--critical)">红框 k≥K<sub>c</sub>:惩罚</span>。窗长 N 取 8 作演示,论文未指定 N 的具体取值(取决于可用上下文长度)。</p>
+
+  <div class="grid2">
+    <div>
+      <div class="legend"><span class="it"><span class="ln" style="border-color:var(--series-2)"></span>矩形窗(直接 FFT)</span><span class="it"><span class="ln" style="border-color:var(--series-1)"></span>DPSS 首模式</span></div>
+      <div class="figbox" style="margin-top:0">
+        <svg id="figLeak" width="100%" viewBox="0 0 470 300" role="img" aria-label="频谱窗对比:矩形窗旁瓣约-16dB,DPSS旁瓣约-34dB,泄漏显著更低"></svg>
+      </div>
+      <p class="cap"><b>图解 G · 谁在泄漏?</b>两种窗的谱窗形状(N=8 实算,dB 归一化)。矩形窗(FFT 隐含假设)最坏旁瓣约 −16 dB,能量大量漏出带外;DPSS 旁瓣压到约 −34 dB。短窗下这决定了「惩罚高频」会不会误伤低频。</p>
+    </div>
+    <div>
+      <div class="callout idea" style="margin-top:0">
+        <h4>解读:一步梯度到底改了什么?</h4>
+        <p>E<sub>kin</sub> 是 <i>ẑ</i><sub>0</sub> 的<b>二次型</b>:加速度 <i>a</i> = D<i>z</i> 是线性算子(二阶差分矩阵 D),投影也是线性的,所以 ∇E<sub>kin</sub> = 2 D<sup>⊤</sup>P<sub>hf</sub>D<i>z</i>,其中 P<sub>hf</sub> = Σ<sub>k≥K<sub>c</sub></sub><i>v</i><sub>k</sub><i>v</i><sub>k</sub><sup>⊤</sup> 是高频子空间投影。式 (8) 因此等价于一次<b>线性频谱整形滤波</b>——计算上只是几个小矩阵乘,与一次 DiT 前向相比可以忽略(此段为本页推导,论文未展开;梯度只对 <i>ẑ</i><sub>0</sub> 所在的当前块生效,历史上下文不回改)。</p>
+      </div>
+      <div class="callout">
+        <h4>消融的诚实结论(表 3)</h4>
+        <p>换成普通 FFT 基,TQ 97.89 vs Slepian 97.91——差距很小。作者也直说:<b>核心增益来自「加速度域引导」这个框架本身</b>,不来自具体频谱基;保留 Slepian 是因为它在短窗下有严格的集中度保证,且不增加计算开销。这种不给自己的数学包装抢功的写法值得点赞。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="secnum">06</span>完整推理流程:两处插桩,其余照旧</h2>
+  <p class="note">按原文 §4 与 Fig. 1/2 整理的伪代码;<span class="tag san">SAN</span> 与 <span class="tag sg">SG</span> 是仅有的两处改动</p>
+<div class="algo"><span class="cm"># 输入:文本 y;冻结的因果 DiT 去噪器 D_θ;VAE 解码器</span>
+<span class="cm"># 超参:η=3, ρ=0.9, NW=1.5, K_c=3(全 prompt、全骨干一套配置)</span>
+
+<span class="san">z_noise[1:T] ← SAN(ρ, θ=π/4)</span>            <span class="cm"># ① 双 AR(1) 流叠加,替代 i.i.d. 高斯</span>
+V ← DPSS(N, NW);  低频模式 k &lt; K_c 放行
+
+<span class="kw">for</span> chunk b = 1 … L:                     <span class="cm"># 每块 3 个潜帧,KV cache 携带 z_&lt;b</span>
+    z ← z_noise[b]
+    <span class="kw">for</span> 去噪步 τ ∈ {τ₄,…,τ₁}:             <span class="cm"># 4 步去噪,CFG 3.0</span>
+        ẑ₀ ← D_θ(z, τ, y, z_&lt;b)          <span class="cm"># 预测干净潜变量(骨干冻结)</span>
+        <span class="sg">a ← Δ²[z_&lt;b ; ẑ₀]</span>                <span class="cm"># ② 局部轨迹二阶差分</span>
+        <span class="sg">E ← Σ_{k≥K_c} ‖V_kᵀ a‖²</span>          <span class="cm">#    Slepian 高频能量</span>
+        <span class="sg">ẑ₀ ← ẑ₀ − η·∇E</span>                   <span class="cm">#    一步梯度修正(式 8)</span>
+        z ← 按调度器混合 ẑ₀ 与噪声,进入下一步
+    z_b ← ẑ₀;  更新 KV cache
+
+video ← VAE_decode(z_{1:T})</div>
+  <p class="cap">论文正文未逐句给出伪代码,此为按 §4 描述的忠实整理;引导施加在「预测的干净潜变量 <i>ẑ</i><sub>0</sub>」上,具体在 4 个去噪步中的施加时机论文未细述。</p>
+
+  <div class="kv">
+    <div class="it"><div class="a">η = 3</div><div class="b">引导强度(式 8)</div></div>
+    <div class="it"><div class="a">ρ = 0.9</div><div class="b">SAN 的 AR 系数,R(2)=0.81</div></div>
+    <div class="it"><div class="a">NW = 1.5</div><div class="b">DPSS 时间-带宽积</div></div>
+    <div class="it"><div class="a">K<sub>c</sub> = 3</div><div class="b">≈2NW 个良集中模式之后截断</div></div>
+    <div class="it"><div class="a">3 帧/块</div><div class="b">chunk-wise rollout,KV cache</div></div>
+    <div class="it"><div class="a">4 步 · CFG 3.0</div><div class="b">480×832 · 81 帧 ≈ 5s@16FPS</div></div>
+    <div class="it"><div class="a">1× A100 80G</div><div class="b">全部实验的硬件配置</div></div>
+    <div class="it"><div class="a">0 参数更新</div><div class="b">骨干、VAE、文本编码器全冻结</div></div>
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="secnum">07</span>实验与证据:四条独立证据链</h2>
+  <p class="note">对应原文 §5–§6 · VBench 326 条 prompt(72 主体 + 86 场景 + 75 闪烁 + 93 通用);消融与人评用 MovieGenBench 100 条固定子集;所有对比同 prompt、同种子、同调度</p>
+
+  <h3>证据一 · 三个骨干上时序质量全面提升(表 1)</h3>
+  <div class="legend"><span class="it"><span class="sw" style="background:var(--series-2)"></span>基线</span><span class="it"><span class="sw" style="background:var(--series-1)"></span>+ SAGA</span></div>
+  <div class="figbox">
+    <svg id="figDumb" width="100%" viewBox="0 0 960 240" role="img" aria-label="三个自回归骨干加SAGA前后的时序质量哑铃图:CausVid 97.30到97.58,Self-Forcing 97.30到97.91,Causal-Forcing 96.77到97.33"></svg>
+  </div>
+  <p class="cap"><b>图解 H · VBench 时序质量 TQ:加 SAGA 前后。</b>三个 1.3B Wan2.1 系自回归骨干(CausVid / Self-Forcing / Causal-Forcing)全部提升,其中 Self-Forcing+SAGA 的 97.91 同时超过了表内所有纯扩散模型(Sora 97.55、Wan2.1 97.64)。完整七项指标见下表。</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>模型</th><th>参数量</th><th class="num">SC 主体一致</th><th class="num">BC 背景一致</th><th class="num">TF 抗闪烁</th><th class="num">MS 运动平滑</th><th class="num">TQ 时序质量</th><th class="num">AQ 美学</th><th class="num">IQ 画质</th></tr></thead>
+      <tbody>
+        <tr class="ghead"><td colspan="9">纯扩散模型(全序列/双向去噪)</td></tr>
+        <tr><td class="nm">VideoCrafter-1.0</td><td>1.7B</td><td class="num">95.10</td><td class="num second">98.04</td><td class="num">98.93</td><td class="num">95.67</td><td class="num">96.94</td><td class="num">62.67</td><td class="num">65.46</td></tr>
+        <tr><td class="nm">CogVideoX <span class="chip">ICLR'25</span></td><td>5.0B</td><td class="num">96.45</td><td class="num">96.71</td><td class="num">98.97</td><td class="num">97.20</td><td class="num">97.33</td><td class="num">61.88</td><td class="num">63.33</td></tr>
+        <tr><td class="nm">Sora</td><td>–</td><td class="num">96.23</td><td class="num">96.35</td><td class="num">98.87</td><td class="num second">98.74</td><td class="num">97.55</td><td class="num">63.46</td><td class="num">68.28</td></tr>
+        <tr><td class="nm">Wan2.1</td><td>1.3B</td><td class="num">94.24</td><td class="num best">98.05</td><td class="num best">99.25</td><td class="num">98.15</td><td class="num second">97.64</td><td class="num">62.43</td><td class="num">66.51</td></tr>
+        <tr class="ghead"><td colspan="9">自回归-扩散混合模型(基线)</td></tr>
+        <tr><td class="nm">CausVid <span class="chip">CVPR'25</span></td><td>1.3B</td><td class="num">95.91</td><td class="num">96.46</td><td class="num">99.02</td><td class="num">97.81</td><td class="num">97.30</td><td class="num">64.18</td><td class="num">67.23</td></tr>
+        <tr><td class="nm">Self-Forcing <span class="chip">NeurIPS'25</span></td><td>1.3B</td><td class="num">95.60</td><td class="num">96.20</td><td class="num">99.00</td><td class="num">98.38</td><td class="num">97.30</td><td class="num">66.33</td><td class="num">69.60</td></tr>
+        <tr><td class="nm">Causal-Forcing <span class="chip">ICML'26</span></td><td>1.3B</td><td class="num">95.43</td><td class="num">96.15</td><td class="num">97.97</td><td class="num">97.52</td><td class="num">96.77</td><td class="num best">66.82</td><td class="num">70.11</td></tr>
+        <tr class="ghead"><td colspan="9">+ SAGA(本文,推理时即插即用)</td></tr>
+        <tr class="ours"><td class="nm">CausVid + SAGA</td><td>1.3B</td><td class="num best">96.71<span class="delta up">+0.80</span></td><td class="num">96.59<span class="delta up">+0.13</span></td><td class="num">98.96<span class="delta dn">−0.06</span></td><td class="num">98.04<span class="delta up">+0.23</span></td><td class="num">97.58<span class="delta up">+0.28</span></td><td class="num">64.39<span class="delta up">+0.21</span></td><td class="num">67.46<span class="delta up">+0.23</span></td></tr>
+        <tr class="ours"><td class="nm">Self-Forcing + SAGA</td><td>1.3B</td><td class="num second">96.63<span class="delta up">+1.03</span></td><td class="num">96.95<span class="delta up">+0.75</span></td><td class="num second">99.19<span class="delta up">+0.19</span></td><td class="num best">98.85<span class="delta up">+0.47</span></td><td class="num best">97.91<span class="delta up">+0.61</span></td><td class="num second">66.48<span class="delta up">+0.15</span></td><td class="num best">70.51<span class="delta up">+0.91</span></td></tr>
+        <tr class="ours"><td class="nm">Causal-Forcing + SAGA</td><td>1.3B</td><td class="num">96.13<span class="delta up">+0.70</span></td><td class="num">96.57<span class="delta up">+0.42</span></td><td class="num">98.63<span class="delta up">+0.66</span></td><td class="num">97.97<span class="delta up">+0.45</span></td><td class="num">97.33<span class="delta up">+0.56</span></td><td class="num">66.66<span class="delta dn">−0.16</span></td><td class="num second">69.83<span class="delta dn">−0.28</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="cap">表 1 全量复刻(0–100,越高越好;<b>加粗=最优</b>、<u>下划线=次优</u>,与原文一致)。Δ 为相对各自基线的变化。注意两处诚实的负号:CausVid 的 TF 微降 0.06,Causal-Forcing 的 AQ/IQ 微降——SAGA 不是处处免费,但主目标(时序)三家全涨。</p>
+
+  <h3>证据二 · 机制验证:高频加速度能量真的被压下去了(图 3)</h3>
+  <p>光看 VBench 分数无法区分「真按设计原理生效」还是「碰巧变好」。作者对 100 对匹配视频(同 prompt 同种子)直接测量潜空间加速度频谱:</p>
+  <div class="kv">
+    <div class="it"><div class="a" style="color:var(--d-good)">−16.7%</div><div class="b">加速度 RMS</div></div>
+    <div class="it"><div class="a" style="color:var(--d-good)">−30.2%</div><div class="b">加速度总功率</div></div>
+    <div class="it"><div class="a" style="color:var(--d-good)">−25.7%</div><div class="b">全局高频功率(f &gt; 0.375)</div></div>
+    <div class="it"><div class="a" style="color:var(--d-good)">−28.4%</div><div class="b">局部高频功率(滑窗=7)</div></div>
+  </div>
+  <p class="cap">高频带定义为 f &gt; 0.375 周期/潜帧步;误差条为配对 bootstrap 95% 置信区间。降幅恰好集中在 §4.1 预言的高频段,且全局/局部一致——说明抑制作用贯穿整条 rollout,而非只救了个别片段。</p>
+
+  <h3>证据三 · 人能看出来:盲测偏好(图 4)</h3>
+  <div class="legend"><span class="it"><span class="sw" style="background:var(--series-1)"></span>偏好 SAGA</span><span class="it"><span class="sw" style="background:var(--grid);border:1px solid var(--axis)"></span>平局</span><span class="it"><span class="sw" style="background:var(--series-2)"></span>偏好 Self-Forcing</span></div>
+  <div class="figbox">
+    <svg id="figPref" width="100%" viewBox="0 0 960 170" role="img" aria-label="人类偏好堆叠条形图:单票层面SAGA 40.0%对28.4%,平局31.6%;视频级多数聚合SAGA 58%对34%,平局8%"></svg>
+  </div>
+  <p class="cap"><b>图解 I · 盲测两级统计。</b>10 名评测者 × 每人 50 对 = 500 次判断,每条 prompt 至少 3 人评。单票层面 SAGA 200 票 vs 142 票(平局 158);聚合到视频级多数后 58 : 34 : 8。<b>聚合后优势扩大</b>(去平局 58.5%→63.0%)说明改进跨 prompt 一致,而非少数样本拉动。平局占近 1/3 也诚实反映:很多对比在感知上本就接近。</p>
+
+  <h3>证据四 · 消融:两个组件缺一不可,而且分工明确</h3>
+  <div class="grid2">
+    <div>
+      <div class="tbl-scroll" style="margin-top:0">
+        <table>
+          <thead><tr><th>SAN</th><th>SG</th><th class="num">TQ</th><th class="num">AQ</th><th class="num">IQ</th><th>读法</th></tr></thead>
+          <tbody>
+            <tr><td>✗</td><td>✗</td><td class="num">97.30</td><td class="num">66.33</td><td class="num">69.60</td><td style="font-size:12px;color:var(--text-secondary)">Self-Forcing 基线</td></tr>
+            <tr><td>✗</td><td>✓</td><td class="num">97.58</td><td class="num">66.15</td><td class="num">68.82</td><td style="font-size:12px;color:var(--text-secondary)">时序涨,<b style="color:var(--critical)">画质掉</b>:无中性起点硬拉梯度有代价</td></tr>
+            <tr><td>✓</td><td>✗</td><td class="num">97.50</td><td class="num">66.59</td><td class="num">70.03</td><td style="font-size:12px;color:var(--text-secondary)">时序、画质<b>双涨</b>:好起点本身就值钱</td></tr>
+            <tr class="ours"><td>✓</td><td>✓</td><td class="num best">97.91</td><td class="num">66.48</td><td class="num best">70.51</td><td style="font-size:12px;color:var(--text-secondary)">互补:SAN 稳起点,SG 压过程</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="cap">表 2(Self-Forcing 上消融,SC/BC/TF/MS 详见原文)。</p>
+    </div>
+    <div>
+      <div class="tbl-scroll" style="margin-top:0">
+        <table>
+          <thead><tr><th>rollout 粒度</th><th class="num">TQ 基线</th><th class="num">TQ +SAGA</th><th>结论</th></tr></thead>
+          <tbody>
+            <tr><td class="nm">块级(3 帧/块)</td><td class="num">96.77</td><td class="num best">97.33<span class="delta up">+0.56</span></td><td style="font-size:12px;color:var(--text-secondary)">显著有效</td></tr>
+            <tr><td class="nm">逐帧(1 帧/步)</td><td class="num">94.12</td><td class="num">94.05<span class="delta dn">−0.07</span></td><td style="font-size:12px;color:var(--text-secondary)"><b style="color:var(--critical)">失效</b>:单帧窗口无法可靠估计加速度</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="cap">表 4(Causal-Forcing 上)。SAGA 明确需要块内多帧时间支撑——这既是边界条件,也反过来佐证了「增益确实来自加速度估计」。基不敏感消融(表 3:FFT 97.89 vs Slepian 97.91)见 §05。</p>
+    </div>
+  </div>
+
+  <h3>长时程:缓解,但不根治(图 6)</h3>
+  <div class="grid2">
+    <div>
+      <div class="legend"><span class="it"><span class="ln" style="border-color:var(--series-1)"></span>Self-Forcing + SAGA</span><span class="it"><span class="ln" style="border-color:var(--series-2)"></span>Self-Forcing 基线</span></div>
+      <div class="figbox" style="margin-top:0">
+        <svg id="figLong" width="100%" viewBox="0 0 470 290" role="img" aria-label="长时程趋势示意:5秒10秒30秒下两条曲线都下降,SAGA始终高于基线"></svg>
+      </div>
+      <p class="cap"><b>图解 J · 5s / 10s / 30s 长时程趋势(示意重绘)。</b>原文 Fig. 6 未标注具体数值,此图仅按其纵轴范围(94.5–97.0)与文字结论复现趋势形状,<b>请以原图为准</b>。</p>
+    </div>
+    <div class="callout" style="margin-top:26px">
+      <h4>作者的措辞很克制</h4>
+      <p>两条曲线都随时长下降——误差累积并未消失;SAGA 在所有时长上保持领先,30s 处优势仍在。结论是「<b>缓解(mitigates)而非消除(does not eliminate)</b>时序不稳定的传播」。这与方法本质一致:SG 是逐块的局部频谱整形,它压低每一步注入的高频扰动,但不能修正已经写进上下文的语义漂移。</p>
+    </div>
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="secnum">08</span>解读:价值、局限与定位</h2>
+  <p class="note">本节为解读者观点,已与原文陈述明确区分;标注「解读」处为本页推断</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>方法</th><th>思路</th><th>免训练?</th><th>适配流式 chunk-wise AR?</th></tr></thead>
+      <tbody>
+        <tr><td class="nm">VLIPP</td><td>VLM 规划粗运动轨迹 + 扩散细化</td><td>两阶段、计算重</td><td>否(原文评价:难以适配流式)</td></tr>
+        <tr><td class="nm">Motion-aware 频谱操纵</td><td>直接操纵潜轨迹频率谱</td><td>面向纯扩散模型</td><td>否(短窗泄漏问题未解决)</td></tr>
+        <tr><td class="nm">经典推理时引导</td><td>分类器 / CFG / 测量一致性</td><td>是</td><td>目标是语义/条件,不治时序失稳</td></tr>
+        <tr class="ours"><td class="nm">SAGA(本文)</td><td>加速度域高频能量引导 + 中性噪声初始化</td><td class="best">是,纯推理时</td><td class="best">是,专为其设计</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="cap">按原文 §2 相关工作梳理。SAGA 占据的生态位:<b>唯一同时满足「免训练、面向流式 AR、直接针对 rollout 失稳机理」的方法</b>。</p>
+
+  <div class="grid2">
+    <div class="callout good">
+      <h4>这篇论文好在哪</h4>
+      <p><b>① 诊断新颖且第一性。</b>「AR 视频失稳 = 加速度域的高频谱不稳定」是一个可计算、可证伪的机理假说,A(ω)=4(1−cosω)² 的推导一行就立住了整个方法。</p>
+      <p><b>② 证据链闭环。</b>不止刷分:图 3 直接测量到高频加速度功率 −25.7%(降幅恰在理论预言的频段),盲测确认人眼可感知,消融确认组件互补——机理→指标→感知三级都有证据。</p>
+      <p><b>③ 工程性价比极高。</b>零训练、零架构改动、一套全局超参跨三个骨干生效,单卡 A100 即可复现。</p>
+      <p><b>④ 写作诚实。</b>FFT 与 Slepian 只差 0.02 也如实报告并承认「核心在框架不在基」;逐帧 rollout 失效、长时程只缓解不根治,都直接写明。</p>
+    </div>
+    <div class="callout warn">
+      <h4>边界与保留意见</h4>
+      <p><b>① 增益绝对值小。</b>TQ 提升 +0.28~+0.61,发生在 97 分附近的高分饱和区;VBench 此区间的分辨力有限——好在人评提供了独立佐证。</p>
+      <p><b>② 只适用块级 rollout。</b>逐帧生成时(单帧窗口)加速度估计失效,TQ 反而 −0.07(表 4)。</p>
+      <p><b>③ 高频 ≠ 全是伪影。</b>碰撞、爆炸等剧烈真实运动本身含高频加速度;固定 η 与 K<sub>c</sub> 理论上可能过度平滑此类内容——论文未讨论这类案例,人评中 31.6% 平局或与此相关(<b>解读</b>)。作者也把「自适应频谱正则」列为未来工作。</p>
+      <p><b>④ 推理开销未量化。</b>论文未报告加 SAGA 后的延迟变化;从结构看是小矩阵线性运算、远小于一次 DiT 前向(<b>解读</b>)。</p>
+      <p><b>⑤ 无超参敏感性扫描。</b>单一全局配置证明了稳健性,但 η、K<sub>c</sub>、NW 的敏感度曲线缺失。</p>
+    </div>
+  </div>
+
+  <div class="callout idea">
+    <h4>如果你在做相关方向,可以带走什么(解读)</h4>
+    <p><b>直接用:</b>基于 CausVid / Self-Forcing / Causal-Forcing 系(Wan2.1 蒸馏)做流式生成的,SAGA 是零成本外挂。<b>当诊断工具用:</b>「潜空间加速度频谱」本身是一把尺子——任何 AR 世界模型 / 交互式视频系统都可以先测一测自己的高频加速度功率,再决定要不要治。<b>往训练侧搬:</b>E<sub>kin</sub> 是可微的,把它做成训练正则或蒸馏辅助损失是自然的下一步(论文未做)。</p>
+  </div>
+
+  <h3>术语速查</h3>
+  <div class="tbl-scroll">
+    <table>
+      <tbody>
+        <tr><td class="nm">chunk-wise AR rollout</td><td>按块(此处 3 潜帧/块)顺序生成:块内扩散去噪,块间因果依赖、KV cache 传递上下文</td></tr>
+        <tr><td class="nm">ẑ<sub>0</sub>(x̂<sub>0</sub>-prediction)</td><td>扩散模型每个去噪步对「完全去噪结果」的当前预测;SAGA 的引导正是加在它上面</td></tr>
+        <tr><td class="nm">DPSS / Slepian 序列</td><td>给定窗长 N 与半带宽 W 下带内能量集中度最优的正交序列族;多锥谱估计(multitaper)的标准工具</td></tr>
+        <tr><td class="nm">频谱泄漏</td><td>有限窗截断让单一频率的能量「漏」到邻近频率;窗越短越严重——正是流式 AR 的处境</td></tr>
+        <tr><td class="nm">AR(1) 过程</td><td>z<sub>t</sub> = ρz<sub>t−1</sub> + √(1−ρ²)ε<sub>t</sub>;|ρ|&lt;1 时平稳且方差保持,自相关 R(k)=ρ<sup>k</sup></td></tr>
+        <tr><td class="nm">VBench</td><td>视频生成标准评测套件;本文取四项时序维度(SC/BC/TF/MS,均值记 TQ)+ 美学 AQ + 画质 IQ</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <div class="footrule">
+    <b>引用:</b>Vo, T.-N., Nguyen, T.-T., Le, T.-H., Nguyen, T. V., &amp; Tran, M.-T. (2026). <i>SAGA: Stable Acceleration Guidance for Autoregressive Video Generation.</i> arXiv:2607.08020 [cs.CV]. <a href="https://arxiv.org/abs/2607.08020" target="_blank" rel="noopener">https://arxiv.org/abs/2607.08020</a><br>
+    <b>用色约定:</b><span style="color:var(--series-1)">蓝 = SAGA / 加速度 / 保留的低频</span> · <span style="color:var(--series-2)">橙 = 基线 / 速度 / 高频流 / FFT</span> · <span style="color:var(--series-3)">青 = SAN</span> · <span style="color:var(--critical)">红 = 伪影 / 被惩罚的高频模式</span><br>
+    本页由 Claude 于 2026-08-05 基于论文 v1 全文整理;所有数据图按原文表格/公式精确重绘,图解 A/C/D 为流程示意,图解 J 为趋势示意(原图未标数值)。深浅色可切换;图表悬停可查看数值。
+  </div>
+</footer>
+
+</div>
+<div id="tip"></div>
+<script>
+(function(){
+"use strict";
+/* ---------- theme ---------- */
+var themeBtn=document.getElementById('theme');
+themeBtn.addEventListener('click',function(){
+  var r=document.documentElement;
+  var dark=r.getAttribute('data-theme')==='dark'||(!r.getAttribute('data-theme')&&matchMedia('(prefers-color-scheme: dark)').matches);
+  r.setAttribute('data-theme',dark?'light':'dark');
+});
+/* ---------- helpers ---------- */
+var NS='http://www.w3.org/2000/svg';
+function S(tag,attrs,parent){var e=document.createElementNS(NS,tag);for(var k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e;}
+function txt(p,x,y,str,cls,anchor,style){var t=S('text',{x:x,y:y,'class':cls||'dlab','text-anchor':anchor||'start'},p);if(style)t.setAttribute('style',style);t.textContent=str;return t;}
+var tip=document.getElementById('tip');
+function showTip(html,ev){tip.innerHTML=html;tip.style.opacity=1;
+  var w=tip.offsetWidth,h=tip.offsetHeight,x=ev.clientX+14,y=ev.clientY+14;
+  if(x+w>innerWidth-8)x=ev.clientX-w-14; if(y+h>innerHeight-8)y=ev.clientY-h-14;
+  tip.style.left=x+'px';tip.style.top=y+'px';}
+function hideTip(){tip.style.opacity=0;}
+function defArrow(svg,id,color){var d=S('defs',{},svg);
+  var m=S('marker',{id:id,viewBox:'0 0 10 10',refX:'9',refY:'5',markerWidth:'7',markerHeight:'7',orient:'auto-start-reverse'},d);
+  S('path',{d:'M0,0 L10,5 L0,10 z',style:'fill:'+(color||'var(--axis)')},m);return d;}
+function line(p,x1,y1,x2,y2,style){return S('line',{x1:x1,y1:y1,x2:x2,y2:y2,style:style},p);}
+function box(p,x,y,w,h,style,rx){return S('rect',{x:x,y:y,width:w,height:h,rx:rx==null?9:rx,style:style},p);}
+function poly(pts){return pts.map(function(p,i){return (i?'L':'M')+p[0].toFixed(2)+' '+p[1].toFixed(2);}).join(' ');}
+function wig(x,y,w,amp,n){var d='M '+x+' '+y,step=w/(n*2);
+  for(var i=0;i<n*2;i++){var cx=x+step*i+step/2,py=y+((i%2===0)?-amp:amp),px=x+step*(i+1);d+=' Q '+cx+' '+py+' '+px+' '+y;}return d;}
+/* seeded gaussian AR(1) streams for SAN illustration */
+function lcg(seed){var s=seed>>>0;return function(){s=(1664525*s+1013904223)>>>0;return s/4294967296;};}
+function mkGauss(rnd){return function(){var u=0,v=0;while(u===0)u=rnd();while(v===0)v=rnd();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);};}
+
+/* ============ 图解 A:误差滚雪球 ============ */
+(function(){
+var svg=document.getElementById('figA');if(!svg)return;
+defArrow(svg,'arrA');
+var names=['chunk b−2','chunk b−1','chunk b','chunk b+1'];
+var xs=[40,270,500,730],y=86,w=190,h=78;
+/* DiT bar */
+box(svg,40,196,880,36,'fill:var(--chip);stroke:var(--border)');
+txt(svg,480,219,'冻结的因果 DiT D_θ(4 步去噪 / 块,KV cache 携带历史)','dlab',{},'');
+svg.lastChild.setAttribute('text-anchor','middle');
+xs.forEach(function(x,i){
+  line(svg,x+w/2,196,x+w/2,y+h+2,'stroke:var(--axis);stroke-width:1.4;marker-end:url(#arrA)');
+});
+txt(svg,918,190,'生成方向 →','svgnote','end');
+/* chunk boxes */
+xs.forEach(function(x,i){
+  box(svg,x,y,w,h,'fill:var(--surface-1);stroke:var(--border)');
+  txt(svg,x+10,y+18,names[i],'dlab strong');
+  for(var f=0;f<3;f++){
+    box(svg,x+12+f*58,y+28,50,40,'fill:var(--series-1);opacity:'+(0.14+0.05*f)+';stroke:none',4);
+    S('rect',{x:x+12+f*58,y:y+28,width:50,height:40,rx:4,style:'fill:none;stroke:var(--series-1);opacity:.5'},svg);
+  }
+  if(i<3){ /* KV arrow */
+    var x1=x+w,x2=xs[i+1];
+    S('path',{d:'M '+(x1+3)+' '+(y+h/2)+' C '+(x1+40)+' '+(y+h/2)+' '+(x2-40)+' '+(y+h/2)+' '+(x2-4)+' '+(y+h/2),
+      style:'fill:none;stroke:var(--axis);stroke-width:1.6;marker-end:url(#arrA)'},svg);
+    txt(svg,(x1+x2)/2,y+h/2-9,'KV','svgnote','middle');
+  }
+});
+txt(svg,(xs[1]+xs[2]+w)/2,y+h+26,'z<b 被递归复用 —— 污染一旦写入,后续每块都在其上去噪','svgnote','middle');
+/* perturbation wiggles */
+var wigs=[{i:1,amp:4,lab:'小扰动 ε 混入'},{i:2,amp:9,lab:'被下一块「当真」→ 放大'},{i:3,amp:15,lab:'可见伪影:闪烁 · 抖动 · 漂移'}];
+wigs.forEach(function(o){
+  var cx=xs[o.i]+w/2;
+  S('path',{d:wig(cx-55,52,110,o.amp,5),style:'fill:none;stroke:var(--critical);stroke-width:2;stroke-linecap:round'},svg);
+  txt(svg,cx,26,o.lab,'dlab','middle','fill:var(--critical)');
+});
+})();
+
+/* ============ 图解 B:A(ω) 频响 ============ */
+(function(){
+var svg=document.getElementById('figAw');if(!svg)return;
+var W=960,H=330,L=58,R=26,T=20,B=46,pw=W-L-R,ph=H-T-B;
+var xmax=Math.PI,ymax=16.8;
+function X(v){return L+v/xmax*pw;} function Y(v){return T+ph-v/ymax*ph;}
+/* high-frequency shade */
+box(svg,X(0.75*Math.PI),T,pw-0.75*Math.PI/xmax*pw,ph,'fill:var(--critical);opacity:.05',0);
+txt(svg,X(0.875*Math.PI),T+ph-12,'高频伪影区(示意)','svgnote','middle');
+/* grid */
+[0,4,8,12,16].forEach(function(g){line(svg,L,Y(g),W-R,Y(g),'stroke:var(--grid);stroke-width:1');txt(svg,L-8,Y(g)+4,g,'ticklab','end');});
+var xt=[[0,'0'],[Math.PI/4,'π/4'],[Math.PI/2,'π/2'],[3*Math.PI/4,'3π/4'],[Math.PI,'π']];
+xt.forEach(function(t){line(svg,X(t[0]),T+ph,X(t[0]),T+ph+4,'stroke:var(--axis)');txt(svg,X(t[0]),T+ph+18,t[1],'ticklab','middle');});
+line(svg,L,T+ph,W-R,T+ph,'stroke:var(--axis);stroke-width:1.2');
+txt(svg,W-R,H-8,'时间角频率 ω →','axlab','end');
+txt(svg,14,T+10,'增益','axlab');
+/* curves */
+var n=240,acc=[],vel=[];
+for(var i=0;i<=n;i++){var w0=i/n*Math.PI;acc.push([X(w0),Y(4*Math.pow(1-Math.cos(w0),2))]);vel.push([X(w0),Y(2*(1-Math.cos(w0)))]);}
+S('path',{d:poly(vel),style:'fill:none;stroke:var(--series-2);stroke-width:2.5;stroke-linecap:round'},svg);
+S('path',{d:poly(acc),style:'fill:none;stroke:var(--series-1);stroke-width:2.5;stroke-linecap:round'},svg);
+S('circle',{cx:X(Math.PI),cy:Y(16),r:5,style:'fill:var(--series-1);stroke:var(--surface-1);stroke-width:2'},svg);
+S('circle',{cx:X(Math.PI),cy:Y(4),r:5,style:'fill:var(--series-2);stroke:var(--surface-1);stroke-width:2'},svg);
+txt(svg,X(Math.PI)-10,Y(16)+4,'加速度:×16','dlab strong','end');
+txt(svg,X(Math.PI)-10,Y(4)+4,'速度:×4','dlab','end');
+txt(svg,X(0.16*Math.PI),Y(0)-12,'惯性运动 → 增益≈0,零惩罚','svgnote');
+/* hover */
+var cross=line(svg,0,T,0,T+ph,'stroke:var(--axis);stroke-width:1;opacity:0');
+var d1=S('circle',{r:4,style:'fill:var(--series-1);opacity:0'},svg),d2=S('circle',{r:4,style:'fill:var(--series-2);opacity:0'},svg);
+var ov=box(svg,L,T,pw,ph,'fill:transparent',0);
+ov.addEventListener('pointermove',function(ev){
+  var r=svg.getBoundingClientRect(),sx=W/r.width;
+  var wv=Math.min(Math.PI,Math.max(0,((ev.clientX-r.left)*sx-L)/pw*xmax));
+  var a=4*Math.pow(1-Math.cos(wv),2),v=2*(1-Math.cos(wv));
+  cross.setAttribute('x1',X(wv));cross.setAttribute('x2',X(wv));cross.setAttribute('opacity',1);
+  d1.setAttribute('cx',X(wv));d1.setAttribute('cy',Y(a));d1.setAttribute('opacity',1);
+  d2.setAttribute('cx',X(wv));d2.setAttribute('cy',Y(v));d2.setAttribute('opacity',1);
+  showTip('<b>ω = '+(wv/Math.PI).toFixed(2)+'π</b>加速度增益 '+a.toFixed(2)+'×<br>速度增益 '+v.toFixed(2)+'×<br>选择比 '+(v>1e-6?(a/v).toFixed(2):'—'),ev);
+});
+ov.addEventListener('pointerleave',function(){cross.setAttribute('opacity',0);d1.setAttribute('opacity',0);d2.setAttribute('opacity',0);hideTip();});
+})();
+
+/* ============ 图解 C:端到端流程 ============ */
+(function(){
+var svg=document.getElementById('figB');if(!svg)return;
+defArrow(svg,'arrB');
+/* prompt + umT5 */
+box(svg,12,20,152,54,'fill:var(--surface-1);stroke:var(--border)');
+txt(svg,88,42,'文本提示 y','dlab strong','middle');
+txt(svg,88,60,'"一位灰发老人的特写…"','svgnote','middle');
+line(svg,88,74,88,88,'stroke:var(--axis);stroke-width:1.4;marker-end:url(#arrB)');
+box(svg,12,90,152,40,'fill:var(--chip);stroke:var(--border)');
+txt(svg,88,114,'umT5 文本编码','dlab','middle');
+/* SAN panel */
+box(svg,250,16,486,106,'fill:var(--surface-1);stroke:var(--series-3);stroke-width:1.6');
+txt(svg,268,40,'SAN · 结构化 AR 噪声初始化','dlab strong','start','fill:var(--series-3)');
+txt(svg,268,60,'z_t = cos45°·z_t^lf + sin45°·z_t^hf   (ρ_lf = −ρ_hf = 0.9)','svgnote');
+txt(svg,268,78,'R(1)=0 相邻帧不相关 · R(2)=ρ² 隔帧仍相关 · 每帧 ~ 𝒩(0,I)','svgnote');
+var rr=lcg(7),g=mkGauss(rr),v1=0,v2=0,k;
+for(k=0;k<60;k++){v1=0.9*v1+Math.sqrt(0.19)*g();v2=-0.9*v2+Math.sqrt(0.19)*g();}
+var pl=[],ph2=[];
+for(k=0;k<30;k++){v1=0.9*v1+Math.sqrt(0.19)*g();v2=-0.9*v2+Math.sqrt(0.19)*g();
+  pl.push([268+k*5.1,104-v1*5]);ph2.push([430+k*5.1,104-v2*5]);}
+S('path',{d:poly(pl),style:'fill:none;stroke:var(--series-1);stroke-width:1.6'},svg);
+S('path',{d:poly(ph2),style:'fill:none;stroke:var(--series-2);stroke-width:1.6'},svg);
+txt(svg,600,100,'→ 替代 i.i.d. 高斯,作为整条轨迹的初始噪声','svgnote');
+/* text-condition bus */
+line(svg,88,130,88,148,'stroke:var(--axis);stroke-width:1.3');
+line(svg,88,148,880,148,'stroke:var(--axis);stroke-width:1.3');
+txt(svg,968,143,'文本条件 y 注入每一块','svgnote','end');
+/* chunks */
+var cx=[210,455,740],cw=200,cy=170,ch=130,names=['Chunk 1','Chunk 2','Chunk L'];
+cx.forEach(function(x,i){
+  line(svg,x+cw/2,148,x+cw/2,cy-2,'stroke:var(--axis);stroke-width:1.3;marker-end:url(#arrB)');
+  /* SAN arrows (chunk L sits right of the SAN panel: elbow from panel edge) */
+  if(i<2){line(svg,x+cw/2+34,122,x+cw/2+34,cy-2,'stroke:var(--series-3);stroke-width:1.4;marker-end:url(#arrB)');}
+  else{S('path',{d:'M 736 69 L '+(x+cw/2+34)+' 69 L '+(x+cw/2+34)+' '+(cy-2),style:'fill:none;stroke:var(--series-3);stroke-width:1.4;marker-end:url(#arrB)'},svg);}
+  box(svg,x,cy,cw,ch,'fill:var(--surface-1);stroke:var(--border)');
+  txt(svg,x+12,cy+20,names[i]+' · 3 潜帧','dlab strong');
+  box(svg,x+12,cy+30,cw-24,34,'fill:var(--chip);stroke:var(--border)',6);
+  txt(svg,x+cw/2,cy+51,'因果 DiT 去噪 ×4 步','dlab','middle');
+  txt(svg,x+cw-16,cy+22,'冻结','svgnote','end');
+  line(svg,x+cw/2-40,cy+64,x+cw/2-40,cy+76,'stroke:var(--axis);stroke-width:1.2;marker-end:url(#arrB)');
+  txt(svg,x+cw/2-32,cy+74,'ẑ₀','svgnote');
+  box(svg,x+12,cy+78,cw-24,36,'fill:var(--surface-1);stroke:var(--series-2);stroke-width:1.5',6);
+  txt(svg,x+cw/2,cy+94,'SG · 频谱引导','dlab','middle','fill:var(--series-2);font-weight:600');
+  txt(svg,x+cw/2,cy+108,'z̃₀ = ẑ₀ − η∇E_kin','svgnote','middle');
+  /* loop back */
+  S('path',{d:'M '+(x+cw/2+40)+' '+(cy+78)+' C '+(x+cw/2+66)+' '+(cy+72)+' '+(x+cw/2+66)+' '+(cy+70)+' '+(x+cw/2+40)+' '+(cy+64),
+    style:'fill:none;stroke:var(--axis);stroke-width:1.2;marker-end:url(#arrB)'},svg);
+  if(i<2){
+    var nx=(i<1?cx[1]:cx[2]);
+    S('path',{d:'M '+(x+cw)+' '+(cy+40)+' C '+(x+cw+26)+' '+(cy+30)+' '+(nx-26)+' '+(cy+30)+' '+(nx-3)+' '+(cy+40),
+      style:'fill:none;stroke:var(--axis);stroke-width:1.6;marker-end:url(#arrB)'},svg);
+    txt(svg,(x+cw+nx)/2,cy+22,'KV cache:z<b','svgnote','middle');
+  }
+});
+txt(svg,695,240,'…','dlab strong','middle','font-size:20px');
+txt(svg,60,196,'AR Rollout','axlab');
+txt(svg,60,212,'× L 块','axlab');
+/* collect + decode (chunk bottoms are at y=300; collector bus at y=318) */
+cx.forEach(function(x){line(svg,x+cw/2,cy+ch,x+cw/2,cy+ch+18,'stroke:var(--axis);stroke-width:1.2');});
+line(svg,cx[0]+cw/2,cy+ch+18,cx[2]+cw/2,cy+ch+18,'stroke:var(--axis);stroke-width:1.2');
+txt(svg,cx[0]+cw/2-8,cy+ch+38,'z₁:T 完整潜轨迹(≈21 潜帧)','svgnote');
+S('path',{d:'M 575 '+(cy+ch+18)+' L 575 '+(cy+ch+52)+' L 614 '+(cy+ch+52),
+  style:'fill:none;stroke:var(--axis);stroke-width:1.2;marker-end:url(#arrB)'},svg);
+box(svg,618,cy+ch+30,100,44,'fill:var(--chip);stroke:var(--border)');
+txt(svg,668,cy+ch+56,'VAE 解码','dlab','middle');
+line(svg,718,cy+ch+52,732,cy+ch+52,'stroke:var(--axis);stroke-width:1.2;marker-end:url(#arrB)');
+for(var f=0;f<3;f++)box(svg,738+f*24,cy+ch+34,19,36,'fill:var(--series-1);opacity:'+(0.25+f*0.14),3);
+txt(svg,816,cy+ch+58,'视频 81 帧 · 480×832','svgnote');
+})();
+
+/* ============ 图解 D:SAN 双流叠加 ============ */
+(function(){
+var svg=document.getElementById('figSAN');if(!svg)return;
+var rr=lcg(20260805),g=mkGauss(rr);
+var T2=26,zl=[],zh=[],v1=0,v2=0,i;
+for(i=0;i<80;i++){v1=0.9*v1+Math.sqrt(0.19)*g();v2=-0.9*v2+Math.sqrt(0.19)*g();}
+for(i=0;i<T2;i++){v1=0.9*v1+Math.sqrt(0.19)*g();v2=-0.9*v2+Math.sqrt(0.19)*g();zl.push(v1);zh.push(v2);}
+var mix=zl.map(function(x,j){return (x+zh[j])*Math.SQRT1_2;});
+function panel(x,title,col,data,sub){
+  box(svg,x,42,270,190,'fill:var(--surface-1);stroke:var(--border)');
+  txt(svg,x+13,66,title,'dlab strong','start','fill:'+col);
+  txt(svg,x+13,84,sub,'svgnote');
+  line(svg,x+16,150,x+254,150,'stroke:var(--grid)');
+  var pts=data.map(function(v,j){var vv=Math.max(-2.9,Math.min(2.9,v));return [x+20+j*(230/(T2-1)),150-vv*21];});
+  S('path',{d:poly(pts),style:'fill:none;stroke:'+col+';stroke-width:2'},svg);
+  pts.forEach(function(p){S('circle',{cx:p[0],cy:p[1],r:2.6,style:'fill:'+col+';stroke:var(--surface-1);stroke-width:1'},svg);});
+  txt(svg,x+13,220,'帧索引 t →','svgnote');
+}
+panel(30,'z^lf · ρ = +0.9','var(--series-1)',zl,'平滑蜿蜒:相邻帧同向 → 低频为主');
+panel(380,'z^hf · ρ = −0.9','var(--series-2)',zh,'逐帧翻转:相邻帧反向 → 高频为主');
+panel(700,'SAN 混合噪声','var(--series-3)',mix,'两条流各乘 1/√2 相加');
+txt(svg,352,140,'+','dlab strong','middle','font-size:26px');
+txt(svg,336,108,'× 1/√2','svgnote','middle');
+txt(svg,676,140,'=','dlab strong','middle','font-size:26px');
+txt(svg,745,258,'R(1) = 0','dlab strong');
+txt(svg,745,276,'R(2) = ρ² = 0.81 · 每帧仍 ~ 𝒩(0,1)','svgnote');
+txt(svg,30,270,'同一组随机种子的真实 AR(1) 采样(幅度示意);两条流相互独立。','svgnote');
+})();
+
+/* ============ 图解 E:R(k) 柱状对比 ============ */
+(function(){
+var svg=document.getElementById('figRk');if(!svg)return;
+var W=470,H=300,L=44,R=12,T=18,B=44,pw=W-L-R,ph=H-T-B;
+function Y(v){return T+ph-v*ph;}
+[0,0.25,0.5,0.75,1].forEach(function(g){line(svg,L,Y(g),W-R,Y(g),'stroke:var(--grid)');txt(svg,L-6,Y(g)+4,g.toFixed(2),'ticklab','end');});
+line(svg,L,Y(0),W-R,Y(0),'stroke:var(--axis);stroke-width:1.2');
+var rho=0.9,ks=[0,1,2,3,4,5,6],bw=20,gap=2,gw=pw/7;
+ks.forEach(function(k0){
+  var ar=Math.pow(rho,k0),san=0.5*Math.pow(rho,k0)+0.5*Math.pow(-rho,k0);
+  var x0=L+gw*k0+gw/2-bw-gap/2;
+  var b1=S('rect',{x:x0,y:Y(ar),width:bw,height:Math.max(0.1,Y(0)-Y(ar)),rx:3,style:'fill:var(--series-2)'},svg);
+  var b2=S('rect',{x:x0+bw+gap+2,y:Y(san),width:bw,height:Math.max(2,Y(0)-Y(san)),rx:3,style:'fill:var(--series-3)'},svg);
+  if(san<0.02)b2.setAttribute('style','fill:var(--series-3);opacity:.9');
+  txt(svg,L+gw*k0+gw/2,H-B+18,'k='+k0,'ticklab','middle');
+  if(k0===1)txt(svg,x0+bw+gap+2+bw/2,Y(0)-6,'0','dlab strong','middle');
+  if(k0===2)txt(svg,x0+bw+gap+2+bw/2,Y(san)-6,'0.81','dlab strong','middle');
+  [[b1,'单条 AR(1)',ar],[b2,'SAN 混合',san]].forEach(function(o){
+    o[0].addEventListener('pointermove',function(ev){showTip('<b>'+o[1]+' · 滞后 k='+k0+'</b>R(k) = '+o[2].toFixed(4),ev);});
+    o[0].addEventListener('pointerleave',hideTip);
+  });
+});
+txt(svg,L,14,'自相关 R(k)','axlab');
+txt(svg,W-R,H-6,'滞后 k(帧)','axlab','end');
+})();
+
+/* ============ 图解 F:DPSS 模式(实算) ============ */
+(function(){
+var host=document.getElementById('dpssStrip');if(!host)return;
+function jacobi(Ain){var n=Ain.length,A=Ain.map(function(r){return r.slice();});
+  var V=[],i,j;for(i=0;i<n;i++){V.push([]);for(j=0;j<n;j++)V[i].push(i===j?1:0);}
+  for(var sw=0;sw<80;sw++){var off=0,p,q;
+    for(p=0;p<n;p++)for(q=p+1;q<n;q++)off+=A[p][q]*A[p][q];
+    if(off<1e-22)break;
+    for(p=0;p<n;p++)for(q=p+1;q<n;q++){
+      if(Math.abs(A[p][q])<1e-15)continue;
+      var th=(A[q][q]-A[p][p])/(2*A[p][q]);
+      var t=(th>=0?1:-1)/(Math.abs(th)+Math.sqrt(th*th+1));
+      var c=1/Math.sqrt(t*t+1),s=t*c,k2;
+      for(k2=0;k2<n;k2++){var akp=A[k2][p],akq=A[k2][q];A[k2][p]=c*akp-s*akq;A[k2][q]=s*akp+c*akq;}
+      for(k2=0;k2<n;k2++){var apk=A[p][k2],aqk=A[q][k2];A[p][k2]=c*apk-s*aqk;A[q][k2]=s*apk+c*aqk;}
+      for(k2=0;k2<n;k2++){var vkp=V[k2][p],vkq=V[k2][q];V[k2][p]=c*vkp-s*vkq;V[k2][q]=s*vkp+c*vkq;}
+    }}
+  var vals=A.map(function(r,i2){return r[i2];});
+  var idx=vals.map(function(_,i2){return i2;}).sort(function(a,b){return vals[b]-vals[a];});
+  return idx.map(function(i2){return V.map(function(row){return row[i2];});});
+}
+var N=8,NW=1.5,Wb=NW/N,M=[],t;
+for(t=0;t<N;t++){M.push(new Array(N).fill(0));M[t][t]=Math.pow((N-1-2*t)/2,2)*Math.cos(2*Math.PI*Wb);}
+for(t=1;t<N;t++){M[t][t-1]=t*(N-t)/2;M[t-1][t]=t*(N-t)/2;}
+var vecs=jacobi(M).map(function(v){
+  var nr=Math.sqrt(v.reduce(function(s,x){return s+x*x;},0));
+  var u=v.map(function(x){return x/nr;});
+  var sm=u.reduce(function(a,b){return a+b;},0);
+  if((Math.abs(sm)>1e-9?sm:u[0])<0)u=u.map(function(x){return -x;});
+  return u;});
+function lam(v){var F=4096,inb=0,tot=0,i;
+  for(i=0;i<F;i++){var f=-0.5+i/F,re=0,im=0;
+    v.forEach(function(x,t2){re+=x*Math.cos(2*Math.PI*f*t2);im-=x*Math.sin(2*Math.PI*f*t2);});
+    var p=re*re+im*im;tot+=p;if(Math.abs(f)<=Wb)inb+=p;}
+  return inb/tot;}
+window.__dpss={vecs:vecs,Wb:Wb,N:N};
+for(var k0=0;k0<6;k0++){
+  var keep=k0<3;
+  var div=document.createElement('div');div.className='mini-p '+(keep?'keep':'cut');
+  var lm=lam(vecs[k0]);
+  div.innerHTML='<div class="t"><span>k = '+k0+' <b>λ='+lm.toFixed(3)+'</b></span><span class="chip" style="color:'+(keep?'var(--series-1)':'var(--critical)')+'">'+(keep?'保留':'惩罚')+'</span></div>';
+  var svg=S('svg',{width:'100%',viewBox:'0 0 150 74'},div);
+  line(svg,6,37,144,37,'stroke:var(--grid)');
+  var col=keep?'var(--series-1)':'var(--critical)';
+  var pts=vecs[k0].map(function(v,i2){return [10+i2*(130/(N-1)),37-v*46];});
+  S('path',{d:poly(pts),style:'fill:none;stroke:'+col+';stroke-width:2'},svg);
+  pts.forEach(function(p){S('circle',{cx:p[0],cy:p[1],r:2.4,style:'fill:'+col},svg);});
+  host.appendChild(div);
+}
+})();
+
+/* ============ 图解 G:谱窗泄漏对比 ============ */
+(function(){
+var svg=document.getElementById('figLeak');if(!svg)return;
+var dp=window.__dpss;if(!dp)return;
+var W=470,H=300,L=46,R=12,T=16,B=44,pw=W-L-R,ph=H-T-B;
+function X(f){return L+f/0.5*pw;} function Y(db){return T+(-db)/60*ph;}
+function spec(w){var F=512,out=[],i;
+  for(i=0;i<=F/2;i++){var f=i/F,re=0,im=0;
+    w.forEach(function(x,t2){re+=x*Math.cos(2*Math.PI*f*t2);im-=x*Math.sin(2*Math.PI*f*t2);});
+    out.push([f,re*re+im*im]);}
+  var pk=Math.max.apply(null,out.map(function(o){return o[1];}));
+  return out.map(function(o){return [o[0],Math.max(-60,10*Math.log10(o[1]/pk+1e-12))];});}
+var rect=new Array(dp.N).fill(1/Math.sqrt(dp.N));
+var s1=spec(rect),s2=spec(dp.vecs[0]);
+box(svg,L,T,X(dp.Wb)-L,ph,'fill:var(--series-3);opacity:.07',0);
+txt(svg,X(dp.Wb)+4,T+12,'← 带内 [0, W]','svgnote');
+[0,-15,-30,-45,-60].forEach(function(g){line(svg,L,Y(g),W-R,Y(g),'stroke:var(--grid)');txt(svg,L-6,Y(g)+4,g,'ticklab','end');});
+line(svg,L,T+ph,W-R,T+ph,'stroke:var(--axis);stroke-width:1.2');
+[0,0.125,0.25,0.375,0.5].forEach(function(f){txt(svg,X(f),T+ph+16,f,'ticklab','middle');});
+S('path',{d:poly(s1.map(function(o){return [X(o[0]),Y(o[1])];})),style:'fill:none;stroke:var(--series-2);stroke-width:2'},svg);
+S('path',{d:poly(s2.map(function(o){return [X(o[0]),Y(o[1])];})),style:'fill:none;stroke:var(--series-1);stroke-width:2.2'},svg);
+txt(svg,X(0.30),Y(-13),'旁瓣 ≈ −16 dB','dlab','start','fill:var(--series-2)');
+txt(svg,X(0.32),Y(-48),'旁瓣 ≈ −34 dB','dlab','start','fill:var(--series-1)');
+txt(svg,L,12,'归一化功率 (dB)','axlab');
+txt(svg,W-R,H-6,'频率 f(周期/帧)','axlab','end');
+var ov=box(svg,L,T,pw,ph,'fill:transparent',0);
+ov.addEventListener('pointermove',function(ev){
+  var r=svg.getBoundingClientRect(),sx=W/r.width;
+  var f=Math.min(0.5,Math.max(0,((ev.clientX-r.left)*sx-L)/pw*0.5));
+  var i=Math.round(f/0.5*(s1.length-1));
+  showTip('<b>f = '+f.toFixed(3)+'</b>矩形窗 '+s1[i][1].toFixed(1)+' dB<br>DPSS '+s2[i][1].toFixed(1)+' dB',ev);
+});
+ov.addEventListener('pointerleave',hideTip);
+})();
+
+/* ============ 图解 H:TQ 哑铃图 ============ */
+(function(){
+var svg=document.getElementById('figDumb');if(!svg)return;
+var W=960,H=240,L=170,R=40,T=18,B=40,pw=W-L-R;
+var x0=96.5,x1=98.1;
+function X(v){return L+(v-x0)/(x1-x0)*pw;}
+var rows=[
+ {n:'CausVid',b:97.30,s:97.58},
+ {n:'Self-Forcing',b:97.30,s:97.91},
+ {n:'Causal-Forcing',b:96.77,s:97.33}];
+var gy=[62,120,178];
+for(var g=96.5;g<=98.0001;g+=0.5){line(svg,X(g),T,X(g),H-B,'stroke:var(--grid)');txt(svg,X(g),H-B+18,g.toFixed(1),'ticklab','middle');}
+txt(svg,W-R,H-6,'VBench 时序质量 TQ →','axlab','end');
+rows.forEach(function(r,i){
+  var y=gy[i];
+  txt(svg,L-14,y+4,r.n,'dlab strong','end');
+  line(svg,X(r.b),y,X(r.s),y,'stroke:var(--axis);stroke-width:2.5');
+  var c1=S('circle',{cx:X(r.b),cy:y,r:6.5,style:'fill:var(--series-2);stroke:var(--surface-1);stroke-width:2'},svg);
+  var c2=S('circle',{cx:X(r.s),cy:y,r:6.5,style:'fill:var(--series-1);stroke:var(--surface-1);stroke-width:2'},svg);
+  txt(svg,X(r.b)-12,y+4,r.b.toFixed(2),'dlab','end');
+  txt(svg,X(r.s)+12,y+4,r.s.toFixed(2),'dlab strong');
+  txt(svg,(X(r.b)+X(r.s))/2,y-12,'+'+(r.s-r.b).toFixed(2),'dlab','middle','fill:var(--d-good);font-weight:600');
+  [[c1,'基线',r.b],[c2,'+ SAGA',r.s]].forEach(function(o){
+    o[0].addEventListener('pointermove',function(ev){showTip('<b>'+r.n+' · '+o[1]+'</b>TQ = '+o[2].toFixed(2),ev);});
+    o[0].addEventListener('pointerleave',hideTip);
+  });
+});
+/* reference: pure diffusion best */
+line(svg,X(97.64),T,X(97.64),H-B,'stroke:var(--axis);stroke-width:1.2');
+txt(svg,X(97.64),T-4,'Wan2.1(纯扩散,97.64)','svgnote','middle');
+})();
+
+/* ============ 图解 I:人类偏好堆叠条 ============ */
+(function(){
+var svg=document.getElementById('figPref');if(!svg)return;
+var W=960,L=150,R=20,bw=W-L-R,bh=42;
+var rows=[
+ {y:26,n:'视频级(多数聚合)',parts:[[58,'58.0% (n=58)'],[8,'8.0%'],[34,'34.0% (n=34)']],note:'去平局:63.0% 偏好 SAGA'},
+ {y:96,n:'单票层面(500 票)',parts:[[40.0,'40.0% (n=200)'],[31.6,'31.6% (n=158)'],[28.4,'28.4% (n=142)']],note:'去平局:58.5%'}];
+var cols=['var(--series-1)','var(--grid)','var(--series-2)'];
+var labc=['#ffffff','var(--text-secondary)','#ffffff'];
+var names=['偏好 SAGA','平局','偏好 Self-Forcing'];
+rows.forEach(function(r){
+  txt(svg,L-12,r.y+bh/2+4,r.n,'dlab strong','end');
+  var x=L;
+  r.parts.forEach(function(p,i){
+    var w=p[0]/100*bw-(i<2?2:0);
+    var rc=S('rect',{x:x,y:r.y,width:Math.max(0,w),height:bh,rx:i===0?6:(i===2?6:0),style:'fill:'+cols[i]},svg);
+    if(w>70)txt(svg,x+10,r.y+bh/2+4,p[1],'dlab','start','fill:'+labc[i]+';font-weight:600');
+    rc.addEventListener('pointermove',function(ev){showTip('<b>'+r.n+'</b>'+names[i]+':'+p[1],ev);});
+    rc.addEventListener('pointerleave',hideTip);
+    x+=p[0]/100*bw;
+  });
+  txt(svg,W-R,r.y-6,r.note,'svgnote','end');
+});
+line(svg,L+bw/2,16,L+bw/2,150,'stroke:var(--axis);stroke-width:1');
+txt(svg,L+bw/2,164,'50%','ticklab','middle');
+[0,25,75,100].forEach(function(p){txt(svg,L+p/100*bw,164,p+'%','ticklab','middle');});
+})();
+
+/* ============ 图解 J:长时程趋势(示意) ============ */
+(function(){
+var svg=document.getElementById('figLong');if(!svg)return;
+var W=470,H=290,L=48,R=16,T=30,B=44,pw=W-L-R,ph=H-T-B;
+var y0=94.5,y1=97.0;
+function Y(v){return T+ph-(v-y0)/(y1-y0)*ph;}
+var xs=[L+pw*0.12,L+pw*0.5,L+pw*0.88],labs=['5s','10s','30s'];
+for(var g2=94.5;g2<=97.01;g2+=0.5){line(svg,L,Y(g2),W-R,Y(g2),'stroke:var(--grid)');txt(svg,L-6,Y(g2)+4,g2.toFixed(1),'ticklab','end');}
+xs.forEach(function(x,i){txt(svg,x,H-B+18,labs[i],'ticklab','middle');});
+line(svg,L,T+ph,W-R,T+ph,'stroke:var(--axis);stroke-width:1.2');
+var ours=[96.9,96.3,95.4],base=[96.5,95.7,94.7];
+S('path',{d:poly(base.map(function(v,i){return [xs[i],Y(v)];})),style:'fill:none;stroke:var(--series-2);stroke-width:2.4'},svg);
+S('path',{d:poly(ours.map(function(v,i){return [xs[i],Y(v)];})),style:'fill:none;stroke:var(--series-1);stroke-width:2.4'},svg);
+ours.forEach(function(v,i){S('circle',{cx:xs[i],cy:Y(v),r:4.5,style:'fill:var(--series-1);stroke:var(--surface-1);stroke-width:2'},svg);});
+base.forEach(function(v,i){S('circle',{cx:xs[i],cy:Y(v),r:4.5,style:'fill:var(--series-2);stroke:var(--surface-1);stroke-width:2'},svg);});
+box(svg,W-R-150,8,150,20,'fill:var(--chip);stroke:none',10);
+txt(svg,W-R-75,22,'趋势示意 · 非精确数值','svgnote','middle');
+txt(svg,L,20,'VBench TQ','axlab');
+txt(svg,W-R,H-6,'视频时长','axlab','end');
+})();
+})();
+</script>
+</body>
+</html>

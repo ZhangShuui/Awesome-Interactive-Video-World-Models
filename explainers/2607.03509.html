@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flex-Forcing 图解 · 统一自回归与双向的视频扩散模型</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --surface-2: #f4f3ef;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --s1: #2a78d6;  /* blue   — Flex-Forcing / 块内双向 */
+    --s2: #eb6834;  /* orange — 基线 / 干净 KV 缓存 */
+    --s3: #1baf7a;  /* aqua   — 第三系列 */
+    --s4: #eda100;  /* yellow — 第四系列 */
+    --s1-wash: rgba(42,120,214,0.10);
+    --s2-wash: rgba(235,104,52,0.12);
+    --s3-wash: rgba(27,175,122,0.12);
+    --seq-150: #b7d3f6;
+    --seq-300: #6da7ec;
+    --seq-450: #2a78d6;
+    --seq-600: #184f95;
+    --shadow: 0 1px 2px rgba(11,11,11,0.04), 0 8px 24px rgba(11,11,11,0.05);
+    --radius: 14px;
+  }
+  [data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232322;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --s4: #c98500;
+    --s1-wash: rgba(57,135,229,0.16);
+    --s2-wash: rgba(217,89,38,0.18);
+    --s3-wash: rgba(25,158,112,0.18);
+    --seq-150: #1c3a63;
+    --seq-300: #2a5ea8;
+    --seq-450: #3987e5;
+    --seq-600: #86b6ef;
+    --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.35);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    font-size: 16px;
+    line-height: 1.85;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px 96px; }
+
+  /* ---------- 顶部导航 ---------- */
+  nav.toc {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--page) 82%, transparent);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 0;
+  }
+  nav.toc .inner {
+    max-width: 1080px; margin: 0 auto; padding: 0 24px;
+    display: flex; align-items: center; gap: 8px; overflow-x: auto; scrollbar-width: none;
+  }
+  nav.toc .inner::-webkit-scrollbar { display: none; }
+  nav.toc .brand { font-weight: 700; font-size: 14px; white-space: nowrap; margin-right: 6px; color: var(--ink); }
+  nav.toc .brand .fx { color: var(--s1); }
+  nav.toc a {
+    color: var(--ink-2); text-decoration: none; font-size: 13px; white-space: nowrap;
+    padding: 4px 10px; border-radius: 999px; transition: background .15s, color .15s;
+  }
+  nav.toc a:hover { background: var(--surface-2); color: var(--ink); }
+  #themeBtn {
+    margin-left: auto; flex: 0 0 auto; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink-2);
+    border-radius: 999px; font-size: 12.5px; padding: 4px 12px;
+  }
+  #themeBtn:hover { color: var(--ink); }
+
+  /* ---------- Hero ---------- */
+  header.hero { padding: 64px 0 8px; }
+  .kicker { font-size: 13px; letter-spacing: .14em; color: var(--s1); font-weight: 700; text-transform: uppercase; }
+  h1.title { font-size: clamp(28px, 4.6vw, 44px); line-height: 1.25; font-weight: 800; margin: 10px 0 6px; letter-spacing: -0.01em; }
+  .subtitle { font-size: clamp(16px, 2.2vw, 20px); color: var(--ink-2); font-weight: 500; margin-bottom: 22px; }
+  .meta-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 26px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12.5px; color: var(--ink-2);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 999px; padding: 5px 12px; text-decoration: none;
+  }
+  a.chip:hover { border-color: var(--s1); color: var(--s1); }
+  .chip b { color: var(--ink); font-weight: 600; }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--s1); flex: 0 0 auto; }
+
+  .tldr {
+    background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--s1);
+    border-radius: var(--radius); padding: 22px 26px; box-shadow: var(--shadow);
+  }
+  .tldr .tag { font-size: 12px; font-weight: 700; letter-spacing: .12em; color: var(--s1); }
+  .tldr p { margin-top: 6px; font-size: 15.5px; }
+
+  .fact-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 18px; }
+  .fact {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
+  }
+  .fact .k { font-size: 11.5px; color: var(--muted); letter-spacing: .04em; }
+  .fact .v { font-size: 14px; font-weight: 650; margin-top: 2px; }
+
+  /* ---------- 章节 ---------- */
+  section { margin-top: 72px; }
+  .secno {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 30px; height: 30px; padding: 0 8px; border-radius: 9px;
+    background: var(--s1); color: #fff; font-size: 15px; font-weight: 800; margin-right: 12px;
+  }
+  h2 { font-size: clamp(22px, 3vw, 28px); font-weight: 800; display: flex; align-items: center; letter-spacing: -0.01em; }
+  h2 .en { font-size: 13px; font-weight: 600; color: var(--muted); margin-left: 12px; letter-spacing: .02em; align-self: flex-end; padding-bottom: 4px;}
+  h3 { font-size: 18.5px; font-weight: 750; margin: 34px 0 10px; }
+  h3::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--s1); margin-right: 9px; vertical-align: 2px; }
+  section > p, section .prose p { margin-top: 12px; color: var(--ink); }
+  .lead { color: var(--ink-2); }
+  em { font-style: normal; color: var(--s1); font-weight: 600; }
+  strong { font-weight: 700; }
+  code.inline {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+    font-size: 0.86em; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1px 6px;
+  }
+
+  /* ---------- 图卡片 ---------- */
+  .figure {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 22px 22px 16px; margin: 22px 0; box-shadow: var(--shadow); overflow: hidden;
+  }
+  .figure svg { display: block; width: 100%; height: auto; }
+  .figcap { font-size: 13px; color: var(--muted); margin-top: 12px; line-height: 1.7; border-top: 1px solid var(--grid); padding-top: 10px; }
+  .figcap b { color: var(--ink-2); }
+
+  /* ---------- 提示框 ---------- */
+  .callout {
+    border-radius: 12px; padding: 16px 20px; margin: 18px 0; font-size: 15px;
+    background: var(--s1-wash); border: 1px solid color-mix(in srgb, var(--s1) 26%, transparent);
+  }
+  .callout .ttl { font-weight: 750; color: var(--s1); font-size: 13.5px; letter-spacing: .04em; margin-bottom: 4px; }
+  .callout.idea { background: var(--s1-wash); }
+  .callout.warn { background: var(--s2-wash); border-color: color-mix(in srgb, var(--s2) 30%, transparent); }
+  .callout.warn .ttl { color: var(--s2); }
+  .callout.good { background: var(--s3-wash); border-color: color-mix(in srgb, var(--s3) 30%, transparent); }
+  .callout.good .ttl { color: var(--s3); }
+
+  /* ---------- 公式 ---------- */
+  .eq {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    margin: 18px 0; padding: 18px 22px; overflow-x: auto;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .eq .body { flex: 1; text-align: center; font-size: 18px; white-space: nowrap; }
+  .eq .no { color: var(--muted); font-size: 13px; flex: 0 0 auto; }
+  .math, .mi { font-family: "STIX Two Math", "Cambria Math", "Times New Roman", Georgia, serif; }
+  .mi { font-style: italic; }
+  .mrm { font-family: "STIX Two Math", "Cambria Math", "Times New Roman", Georgia, serif; font-style: normal; }
+  .math sub, .math sup { font-size: 0.62em; }
+  .math .frac { display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; margin: 0 2px; }
+  .math .frac > span { display: block; padding: 0 4px; }
+  .math .frac > span:first-child { border-bottom: 1px solid currentColor; }
+  .eqnote { font-size: 13.5px; color: var(--muted); margin: -8px 0 14px 4px; }
+
+  /* ---------- 表格 ---------- */
+  .tablewrap { overflow-x: auto; margin: 20px 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+  table.data { border-collapse: collapse; width: 100%; font-size: 13.8px; min-width: 640px; }
+  table.data caption { text-align: left; font-size: 13px; color: var(--muted); padding: 12px 16px 4px; caption-side: top; }
+  table.data th {
+    font-weight: 600; color: var(--muted); font-size: 12.5px; text-align: right;
+    padding: 12px 14px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap;
+  }
+  table.data th:first-child, table.data td:first-child { text-align: left; }
+  table.data td { padding: 8px 14px; border-bottom: 1px solid var(--grid); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.data tr:last-child td { border-bottom: none; }
+  table.data tr.ours td { background: var(--s1-wash); font-weight: 650; }
+  table.data tr.group td { background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+  table.data td.best { color: var(--s1); font-weight: 750; }
+  table.data tbody tr:hover td { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+  table.data tr.ours:hover td { background: var(--s1-wash); }
+
+  /* ---------- 两栏 ---------- */
+  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 20px 0; }
+  @media (max-width: 780px) { .cols2 { grid-template-columns: 1fr; } }
+  .minicard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); }
+  .minicard h4 { font-size: 15.5px; font-weight: 750; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .minicard h4 .sw { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+  .minicard p { font-size: 14px; color: var(--ink-2); margin-top: 6px; }
+  .pill-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--ink-2); background: var(--surface-2); }
+  .pill.plus { color: var(--s3); border-color: color-mix(in srgb, var(--s3) 40%, transparent); background: var(--s3-wash); }
+  .pill.minus { color: var(--s2); border-color: color-mix(in srgb, var(--s2) 40%, transparent); background: var(--s2-wash); }
+
+  /* ---------- 交互控件 ---------- */
+  .ctrl-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .ctrl-row .lbl { font-size: 13px; color: var(--muted); margin-right: 4px; }
+  .cfg-btn {
+    cursor: pointer; font-size: 13px; font-variant-numeric: tabular-nums;
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink-2);
+    padding: 5px 13px; border-radius: 999px; transition: all .15s;
+    font-family: inherit;
+  }
+  .cfg-btn:hover { border-color: var(--s1); color: var(--s1); }
+  .cfg-btn.active { background: var(--s1); border-color: var(--s1); color: #fff; font-weight: 650; }
+  .stat-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  .stat-tile { flex: 1 1 130px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
+  .stat-tile .k { font-size: 11.5px; color: var(--muted); }
+  .stat-tile .v { font-size: 19px; font-weight: 700; margin-top: 1px; }
+  .stat-tile .v small { font-size: 12px; color: var(--muted); font-weight: 500; }
+
+  /* ---------- 图例 ---------- */
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--ink-2); margin: 4px 0 10px; }
+  .legend .item { display: inline-flex; align-items: center; gap: 7px; }
+  .legend .sw { width: 12px; height: 12px; border-radius: 3px; }
+  .legend .ln { width: 16px; height: 2.5px; border-radius: 2px; }
+
+  /* ---------- 提示浮层 ---------- */
+  #tip {
+    position: fixed; z-index: 99; pointer-events: none; display: none;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: var(--shadow); padding: 8px 12px; font-size: 13px; max-width: 280px; line-height: 1.6;
+  }
+  #tip .t-val { font-weight: 750; font-size: 14px; }
+  #tip .t-lbl { color: var(--ink-2); font-size: 12.5px; }
+
+  /* ---------- SVG 通用类 ---------- */
+  .sv-ink   { fill: var(--ink); }
+  .sv-ink2  { fill: var(--ink-2); }
+  .sv-muted { fill: var(--muted); }
+  .sv-grid    { stroke: var(--grid); }
+  .sv-axis    { stroke: var(--axis); }
+  .sv-surface { fill: var(--surface); }
+  .sv-surface2 { fill: var(--surface-2); }
+  .sv-border  { stroke: var(--border); }
+  .sv-s1 { fill: var(--s1); }  .sv-s2 { fill: var(--s2); }
+  .sv-s3 { fill: var(--s3); }  .sv-s4 { fill: var(--s4); }
+  .sv-s1s { stroke: var(--s1); } .sv-s2s { stroke: var(--s2); } .sv-s3s { stroke: var(--s3); }
+  .sv-s1w { fill: var(--s1-wash); } .sv-s2w { fill: var(--s2-wash); } .sv-s3w { fill: var(--s3-wash); }
+  text.sl { font-family: inherit; font-size: 12.5px; }
+  text.sm { font-family: inherit; font-size: 11px; }
+  text.sb { font-family: inherit; font-size: 13px; font-weight: 700; }
+
+  footer { margin-top: 90px; border-top: 1px solid var(--border); padding-top: 24px; font-size: 13px; color: var(--muted); }
+  footer a { color: var(--s1); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  .srclist { margin-top: 8px; line-height: 2; }
+</style>
+</head>
+<body>
+<div id="tip" role="tooltip"></div>
+
+<nav class="toc">
+  <div class="inner">
+    <span class="brand"><span class="fx">Flex</span>-Forcing 图解</span>
+    <a href="#sec1">背景</a>
+    <a href="#sec2">核心思想</a>
+    <a href="#sec3">帧轴分块</a>
+    <a href="#sec4">时间步分块</a>
+    <a href="#sec5">训练</a>
+    <a href="#sec6">K-Projection</a>
+    <a href="#sec7">应用</a>
+    <a href="#sec8">实验</a>
+    <a href="#sec9">总结</a>
+    <button id="themeBtn" type="button">🌗 深色</button>
+  </div>
+</nav>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">论文精读 · ICML 2026 · NVIDIA Research × NUS</div>
+  <h1 class="title">Flex-Forcing：把「双向 vs 自回归」变成一个可调的推理旋钮</h1>
+  <div class="subtitle">Towards a Unified Autoregressive and Bidirectional Video Diffusion Model —— 用一个模型同时覆盖高质量双向生成与实时自回归生成</div>
+
+  <div class="meta-chips">
+    <a class="chip" href="https://arxiv.org/abs/2607.03509" target="_blank" rel="noopener"><span class="dot"></span>arXiv:2607.03509</a>
+    <a class="chip" href="https://research.nvidia.com/labs/genair/flex-forcing/" target="_blank" rel="noopener"><span class="dot"></span>项目主页</a>
+    <span class="chip">Xinyin Ma · Julius Berner · Chao Liu · Arash Vahdat · Weili Nie · Xinchao Wang</span>
+  </div>
+
+  <div class="tldr">
+    <div class="tag">一句话总结 TL;DR</div>
+    <p>视频扩散模型有两大阵营：<strong>双向模型</strong>全局连贯、画质高，但推理慢；<strong>自回归模型</strong>快、能流式生成长视频，但误差累积、缺乏全局规划。Flex-Forcing 提出<em>灵活分块（Flexible Chunking）</em>——在「视频帧」与「去噪时间步」两条正交轴上自由划分块：<strong>块内双向注意力、块间自回归依赖</strong>，且块的粒度可随去噪进程由粗到细。两种范式由此退化为同一公式的两个极端，一个模型即可在测试时按需切换、按算力预算搜索最优配置，同时解锁「任意顺序、任意时间步」的自回归编辑。在 5 秒与 30 秒视频上均以更快的速度取得超过 Self-Forcing 等强基线的质量。</p>
+  </div>
+
+  <div class="fact-grid">
+    <div class="fact"><div class="k">任务</div><div class="v">文生视频（T2V）</div></div>
+    <div class="fact"><div class="k">底座模型</div><div class="v">Wan2.1-T2V-1.3B</div></div>
+    <div class="fact"><div class="k">蒸馏教师</div><div class="v">Wan2.1-T2V-14B</div></div>
+    <div class="fact"><div class="k">代表结果（5s）</div><div class="v">VBench 85.07 · 25.8 FPS</div></div>
+    <div class="fact"><div class="k">长视频（30s）</div><div class="v">动态程度 71.27（基线 50.26）</div></div>
+    <div class="fact"><div class="k">方法关键词</div><div class="v">灵活分块 + K-Projection</div></div>
+  </div>
+</header>
+
+<!-- ==================== SEC 1 背景 ==================== -->
+<section id="sec1">
+  <h2><span class="secno">1</span>背景：两种范式的两难<span class="en">Bidirectional vs. Autoregressive</span></h2>
+  <p class="lead">要理解 Flex-Forcing 解决了什么，先看清视频生成两条主流路线各自「好在哪、卡在哪」。</p>
+
+  <div class="cols2">
+    <div class="minicard">
+      <h4><span class="sw" style="background:var(--s1)"></span>双向扩散（Bidirectional Diffusion）</h4>
+      <p>所有帧作为一个整体<strong>联合去噪</strong>，注意力覆盖全部上下文：每一帧在每个去噪步都能看到过去与未来的所有帧。这正是 Wan2.1、CogVideoX 等预训练视频扩散模型的默认形态。</p>
+      <div class="pill-list">
+        <span class="pill plus">全局时序连贯</span>
+        <span class="pill plus">画质 / 保真度高</span>
+        <span class="pill plus">擅长长程依赖（运镜、转场）</span>
+        <span class="pill minus">推理极慢（全序列 × 多步）</span>
+        <span class="pill minus">难以流式 / 长视频扩展</span>
+      </div>
+    </div>
+    <div class="minicard">
+      <h4><span class="sw" style="background:var(--s2)"></span>自回归生成（Autoregressive）</h4>
+      <p>按时间顺序<strong>逐帧 / 逐块</strong>生成，因果注意力 + <strong>KV 缓存</strong>复用历史，不必重算旧帧。CausVid、Self-Forcing 等把双向模型蒸馏为因果模型，实现实时流式生成。</p>
+      <div class="pill-list">
+        <span class="pill plus">实时推理、可流式</span>
+        <span class="pill plus">天然支持任意长度</span>
+        <span class="pill minus">误差随时间累积（漂移）</span>
+        <span class="pill minus">缺乏全局规划、长程一致性弱</span>
+        <span class="pill minus">暴露偏差（exposure bias）</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="figure">
+    <svg viewBox="0 0 940 330" role="img" aria-label="双向注意力与因果注意力对比示意图">
+      <!-- 左：双向 -->
+      <text x="115" y="24" class="sb sv-ink" text-anchor="start">双向：全上下文注意力</text>
+      <g id="bidiGrid"></g>
+      <!-- 右：自回归 -->
+      <text x="545" y="24" class="sb sv-ink" text-anchor="start">自回归：因果注意力 + KV 缓存</text>
+      <g id="arGrid"></g>
+    </svg>
+    <div class="figcap"><b>图 1 · 两种注意力形态。</b>以 6 帧为例，行为 Query 帧、列为可关注的 Key/Value 帧。左侧双向模式下所有帧互相可见（全上下文，共同去噪）；右侧自回归模式下每帧只能看到自己与已生成的历史帧（历史以干净 KV 缓存形式存在，橙色），未来帧被掩蔽。双向连贯但慢，自回归快但会漂移——本文的目标是让两者共存于一个模型。</div>
+  </div>
+
+  <div class="callout warn">
+    <div class="ttl">现有方法的「刚性」</div>
+    以往工作要么优化其一而牺牲其二，要么（如 CausVid / Self-Forcing）把双向模型<strong>单向地</strong>蒸馏成因果模型——蒸馏完成后，推理调度就被固定死了：块大小固定、生成顺序固定、无法回头利用未来上下文。不同部署场景（云端出片 vs 端侧实时预览）需要的质量-延迟权衡完全不同，却只能各训一个模型。
+  </div>
+</section>
+
+<!-- ==================== SEC 2 核心思想 ==================== -->
+<section id="sec2">
+  <h2><span class="secno">2</span>核心思想：把「分块」变成可调的推理维度<span class="en">Flexible Chunking</span></h2>
+  <p>Flex-Forcing 的出发点极其简洁：<strong>双向与自回归并不是两种模型，而是同一种「分块因式分解」的两个极端。</strong>把视频的 <span class="math"><span class="mi">F</span></span> 个（隐空间）帧切成若干连续的<em>块（chunk）</em>：</p>
+
+  <div class="callout idea">
+    <div class="ttl">一条统一法则</div>
+    <strong>块内（intra-chunk）</strong>：所有帧联合去噪，使用<strong>双向注意力</strong>——负责局部片段内的高质量与一致性；<br>
+    <strong>块间（inter-chunk）</strong>：严格<strong>自回归</strong>——后面的块以前面块的<strong>干净结果（KV 缓存）</strong>为条件——负责高效与流式。<br>
+    于是：块大小 = 1 帧 ⟶ 纯自回归；块大小 = 全视频 ⟶ 纯双向；<strong>介于其间 ⟶ 任意混合模式</strong>。
+  </div>
+
+  <div class="figure">
+    <svg viewBox="0 0 940 300" role="img" aria-label="从自回归到双向的谱系示意图">
+      <g id="spectrum"></g>
+    </svg>
+    <div class="figcap"><b>图 2 · 一个模型，一条谱系。</b>以 16 帧为例：最左侧逐帧生成即自回归（快、易漂移），最右侧整段一块即双向（慢、最连贯），中间任意划分即混合模式。每个色块内部双向去噪，块与块之间通过 KV 缓存保持因果依赖（箭头）。Flex-Forcing 训练一次，推理时可任选谱系上的任意一点，甚至让分块随去噪时间步变化（见 §4）。</div>
+  </div>
+
+  <p>更进一步，论文让分块沿<strong>两条正交轴</strong>灵活变化：</p>
+  <div class="cols2">
+    <div class="minicard">
+      <h4><span class="sw" style="background:var(--s1)"></span>① 视频帧轴（§3）</h4>
+      <p>同一去噪步内，不同时间区域可用不同大小的块：例如 21 个隐帧切成 <code class="inline">15-3-3</code>——开头一大块保证全局结构，后段小块快速推进。块的边界配置记作 <span class="math"><span class="mi">a</span><sub><span class="mi">t</span></sub></span>，可按算力预算任意搜索。</p>
+    </div>
+    <div class="minicard">
+      <h4><span class="sw" style="background:var(--s3)"></span>② 去噪时间步轴（§4）</h4>
+      <p>高噪声的早期步骤决定全局结构 → 用<strong>大块</strong>；低噪声的后期步骤只精修局部细节 → 用<strong>小块</strong>。块随去噪推进不断<strong>嵌套细分</strong>，形成「金字塔」式的层级分块。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SEC 3 帧轴分块 ==================== -->
+<section id="sec3">
+  <h2><span class="secno">3</span>帧轴上的灵活分块：统一公式<span class="en">Chunking over Video Frames</span></h2>
+  <p>把视频记为 <span class="math"><span class="mi">x</span> = (<span class="mi">x</span><sup>(1)</sup>, …, <span class="mi">x</span><sup>(<span class="mi">F</span>)</sup>)</span>，扩散采样共 <span class="math"><span class="mi">T</span></span> 个去噪步。在每个去噪步 <span class="math"><span class="mi">t</span></span>，用一组<strong>块边界索引</strong> <span class="math"><span class="mi">a</span><sub><span class="mi">t</span></sub> = (<span class="mi">a</span><sub><span class="mi">t</span>,0</sub>, <span class="mi">a</span><sub><span class="mi">t</span>,1</sub>, …, <span class="mi">a</span><sub><span class="mi">t</span>,<span class="mi">K</span><sub><span class="mi">t</span></sub></sub>)</span>（其中 <span class="math">1 = <span class="mi">a</span><sub><span class="mi">t</span>,0</sub> &lt; ⋯ &lt; <span class="mi">a</span><sub><span class="mi">t</span>,<span class="mi">K</span><sub><span class="mi">t</span></sub></sub> = <span class="mi">F</span>+1</span>）把帧索引 {1,…,F} 划分为 <span class="math"><span class="mi">K</span><sub><span class="mi">t</span></sub></span> 个连续块，第 <span class="math"><span class="mi">k</span></span> 块覆盖：</p>
+
+  <div class="eq"><div class="body math">
+    <span class="mrm">𝓕</span><sub><span class="mi">t</span>,<span class="mi">k</span></sub> ≜ { <span class="mi">f</span> | <span class="mi">a</span><sub><span class="mi">t</span>,<span class="mi">k</span>−1</sub> ≤ <span class="mi">f</span> &lt; <span class="mi">a</span><sub><span class="mi">t</span>,<span class="mi">k</span></sub> }
+  </div><div class="no">(1)</div></div>
+
+  <p>于是<strong>块级因果采样</strong>定义为——第 <span class="math"><span class="mi">k</span></span> 块从噪声态 <span class="math"><span class="mi">x</span><sub><span class="mi">t</span></sub></span> 去噪到 <span class="math"><span class="mi">x</span><sub><span class="mi">t</span>−1</sub></span> 时，以<strong>之前所有块的干净结果</strong>为条件：</p>
+
+  <div class="eq"><div class="body math">
+    <span class="mi">x</span><sup><span class="mrm">𝓕</span><sub><span class="mi">t</span>,<span class="mi">k</span></sub></sup><sub><span class="mi">t</span>−1</sub> ∼ <span class="mi">q</span><sub><span class="mi">θ</span></sub><span style="font-size:1.3em">(</span> <span class="mi">x</span><sup><span class="mrm">𝓕</span><sub><span class="mi">t</span>,<span class="mi">k</span></sub></sup><sub><span class="mi">t</span>−1</sub> <span style="padding:0 2px">|</span> <span class="mi">x</span><sup><span class="mrm">𝓕</span><sub><span class="mi">t</span>,&lt;<span class="mi">k</span></sub></sup><sub>0</sub>, <span class="mi">x</span><sup><span class="mrm">𝓕</span><sub><span class="mi">t</span>,<span class="mi">k</span></sub></sup><sub><span class="mi">t</span></sub> ; <span class="mi">a</span><sub><span class="mi">t</span></sub> <span style="font-size:1.3em">)</span>
+  </div><div class="no">(2)</div></div>
+  <p class="eqnote">其中 <span class="math"><span class="mrm">𝓕</span><sub><span class="mi">t</span>,&lt;<span class="mi">k</span></sub></span> 是当前块之前的全部帧索引；条件项 <span class="math"><span class="mi">x</span><sup><span class="mrm">𝓕</span><sub><span class="mi">t</span>,&lt;<span class="mi">k</span></sub></sup><sub>0</sub></span> 沿用 Self-Forcing 的做法，以 Diffusion Transformer 中<strong>已生成帧的 KV 缓存</strong>形式存在——这正是推理高效的关键。</p>
+
+  <h3>统一视角：三种模式只是 a<sub>t</sub> 的三种取值</h3>
+  <div class="tablewrap">
+    <table class="data">
+      <thead><tr><th>模式</th><th>边界配置 a<sub>t</sub></th><th>采样分布 q<sub>θ</sub>(x<sub>t−1</sub> | x<sub>t</sub>)</th><th>特点</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>自回归</td><td>(1, 2, 3, …, F, F+1)</td>
+          <td><span class="math">∏<sub><span class="mi">k</span>=1</sub><sup><span class="mi">F</span></sup> <span class="mi">q</span><sub><span class="mi">θ</span></sub>(<span class="mi">x</span><sup><span class="mi">k</span></sup><sub><span class="mi">t</span>−1</sub> | <span class="mi">x</span><sup>&lt;<span class="mi">k</span></sup><sub>0</sub>, <span class="mi">x</span><sup><span class="mi">k</span></sup><sub><span class="mi">t</span></sub>)</span></td>
+          <td>每块恰好 1 帧</td>
+        </tr>
+        <tr>
+          <td>双向</td><td>(1, F+1)</td>
+          <td><span class="math"><span class="mi">q</span><sub><span class="mi">θ</span></sub>(<span class="mi">x</span><sup>1:<span class="mi">F</span></sup><sub><span class="mi">t</span>−1</sub> | <span class="mi">x</span><sup>1:<span class="mi">F</span></sup><sub><span class="mi">t</span></sub>)</span></td>
+          <td>全视频 1 块</td>
+        </tr>
+        <tr class="ours">
+          <td>混合（本文）</td><td>(a<sub>t,0</sub>, a<sub>t,1</sub>, …, a<sub>t,K<sub>t</sub></sub>)</td>
+          <td><span class="math">∏<sub><span class="mi">k</span>=1</sub><sup><span class="mi">K</span><sub><span class="mi">t</span></sub></sup> <span class="mi">q</span><sub><span class="mi">θ</span></sub>(<span class="mi">x</span><sup><span class="mrm">𝓕</span><sub><span class="mi">t</span>,<span class="mi">k</span></sub></sup><sub><span class="mi">t</span>−1</sub> | <span class="mi">x</span><sup><span class="mrm">𝓕</span><sub><span class="mi">t</span>,&lt;<span class="mi">k</span></sub></sup><sub>0</sub>, <span class="mi">x</span><sup><span class="mrm">𝓕</span><sub><span class="mi">t</span>,<span class="mi">k</span></sub></sup><sub><span class="mi">t</span></sub>; <span class="mi">a</span><sub><span class="mi">t</span></sub>)</span></td>
+          <td>任意分块，且可随 t 变化</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>交互演示：分块配置如何改变注意力可达范围</h3>
+  <p class="lead">论文实验用 Wan2.1 的 <strong>21 个隐帧</strong>（对应 81 个像素帧 / 5 秒视频）。点击下方配置，观察单个去噪步内、帧级注意力的可达范围如何随 a<sub>t</sub> 变化——蓝色为同块内的双向注意力（噪声态互看），橙色为对已生成块干净 KV 缓存的因果注意力。</p>
+
+  <div class="figure">
+    <div class="ctrl-row" id="cfgBtns">
+      <span class="lbl">配置 a<sub>t</sub>：</span>
+      <button class="cfg-btn" data-cfg="1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1" type="button">逐帧自回归</button>
+      <button class="cfg-btn" data-cfg="3,3,3,3,3,3,3" type="button">3×7（Self-Forcing 同款）</button>
+      <button class="cfg-btn" data-cfg="7,7,7" type="button">7-7-7</button>
+      <button class="cfg-btn" data-cfg="9,6,6" type="button">9-6-6（帕累托最优）</button>
+      <button class="cfg-btn active" data-cfg="15,3,3" type="button">15-3-3（最佳质量）</button>
+      <button class="cfg-btn" data-cfg="21" type="button">21（纯双向）</button>
+    </div>
+    <div class="legend">
+      <span class="item"><span class="sw" style="background:var(--s1)"></span>块内双向注意力（噪声态 x<sub>t</sub>）</span>
+      <span class="item"><span class="sw" style="background:var(--s2)"></span>关注已生成块的干净 KV 缓存（x<sub>0</sub>）</span>
+      <span class="item"><span class="sw" style="background:var(--surface-2); border:1px solid var(--grid)"></span>被掩蔽（未来帧）</span>
+    </div>
+    <svg id="maskSvg" viewBox="0 0 940 480" role="img" aria-label="21×21 帧级注意力掩码交互图"></svg>
+    <div class="stat-row">
+      <div class="stat-tile"><div class="k">块数 K</div><div class="v" id="stK">3</div></div>
+      <div class="stat-tile"><div class="k">自回归轮数（顺序依赖）</div><div class="v" id="stRounds">3</div></div>
+      <div class="stat-tile"><div class="k">最大块（双向规划范围）</div><div class="v" id="stMax">15 <small>帧</small></div></div>
+      <div class="stat-tile"><div class="k">注意力可达占比</div><div class="v" id="stCov">—</div></div>
+    </div>
+    <div class="figcap"><b>图 3 · 交互式注意力掩码。</b>行为 Query 帧、列为 Key/Value 帧，展示某一去噪步 t 内的可达关系。逐帧配置＝下三角（纯因果）；单块配置＝全满（纯双向）。注意两点：① 橙色区域读取的是<b>干净的</b>历史（x<sub>0</sub> 的 KV 缓存），与蓝色区域的<b>噪声态</b>上下文信噪比不同——这正是 §6 K-Projection 要解决的错配；② 块越大，顺序轮数越少、端到端吞吐越高、暴露偏差越小，画质越接近双向；代价是首帧延迟与流式粒度变粗——这正是可按部署场景调节的旋钮（见 §8 速度分析）。</div>
+  </div>
+</section>
+
+<!-- ==================== SEC 4 时间步轴 ==================== -->
+<section id="sec4">
+  <h2><span class="secno">4</span>时间步轴：由粗到细的「金字塔」分块<span class="en">Chunking over Denoising Timesteps</span></h2>
+  <p>公式 (2) 中的分块 <span class="math"><span class="mi">a</span><sub><span class="mi">t</span></sub></span> 本就带下标 <span class="math"><span class="mi">t</span></span>——它<strong>允许随去噪步变化</strong>。论文的直觉是：</p>
+  <div class="callout idea">
+    <div class="ttl">粗规划、细精修</div>
+    <strong>早期（高噪声）步骤</strong>决定全局结构（构图、运动走向）→ 需要大块、长程双向上下文；<br>
+    <strong>后期（低噪声）步骤</strong>只精修局部细节 → 小块即可胜任，无需长程上下文。<br>
+    因此让块大小随噪声降低而<strong>逐级细分</strong>，形成层级金字塔——既保住全局规划，又把大部分计算放进高效的小块自回归里。
+  </div>
+
+  <p>形式上，这是一种<strong>嵌套细分</strong>：完成 <span class="math"><span class="mi">t</span>+1 → <span class="mi">t</span></span> 的去噪后，在保留原有边界的前提下向分区插入新分割点 <span class="math"><span class="mi">S</span><sub><span class="mi">t</span>,<span class="mi">k</span></sub></span>：</p>
+  <div class="eq"><div class="body math">
+    <span class="mi">a</span>′<sub><span class="mi">t</span>,<span class="mi">k</span></sub> = <span class="mi">a</span><sub><span class="mi">t</span>,<span class="mi">k</span>−1</sub> ∪ <span class="mi">S</span><sub><span class="mi">t</span>,<span class="mi">k</span></sub> ∪ <span class="mi">a</span><sub><span class="mi">t</span>,<span class="mi">k</span></sub>
+  </div><div class="no">(3)</div></div>
+  <p class="eqnote">细分可递归进行：子块在下一去噪步还能继续分裂。旧边界永不消失（嵌套性），保证块间因果关系始终良定义。</p>
+
+  <h3>执行顺序：大块结果先缓冲，小块按因果依赖恢复</h3>
+  <p>分块随时间步变细会带来一个同步问题：大块在步 <span class="math"><span class="mi">t</span></span> 一次算出的结果，其后半段帧在步 <span class="math"><span class="mi">t</span>−1</span> 所属的子块，必须等<strong>更早的子块彻底完成去噪并写入 KV 缓存</strong>之后才能继续。下图用论文消融中的真实配置（21 帧、3 个去噪步：<code class="inline">[21] → [14,7] → [7,7,7]</code>）展示完整调度：</p>
+
+  <div class="figure">
+    <svg viewBox="0 0 940 430" role="img" aria-label="时间步金字塔分块与执行顺序示意图">
+      <g id="pyramid"></g>
+    </svg>
+    <div class="figcap"><b>图 4 · 金字塔分块的执行调度（对应论文附录图 13 的机制）。</b>纵轴自上而下为去噪步（噪声由高到低，最后一行是对干净结果的 KV 缓存前向）；块上的数字是<b>执行顺序</b>。⓪ 最高噪声步整段 21 帧双向去噪，不依赖任何缓存，可立即执行；其输出中帧 15–21 的中间结果被<b>暂存（buffer）</b>。① 帧 1–14 在步 t₂ 去噪 → ②③④⑤ 帧 1–7、8–14 依次完成最后一步去噪并写入干净 KV；⑥ 此时帧 15–21 才拿到全部所需的干净 KV 缓存，从暂存的中间态恢复去噪。即：<b>块内并行、块间因果，跨粒度依赖由「缓冲 + 恢复」机制保证。</b></div>
+  </div>
+
+  <div class="callout good">
+    <div class="ttl">为什么这样计数 NFE</div>
+    每帧的函数评估次数 NFE = 去噪步数 + 1 次<strong>缓存前向</strong>（块完成去噪后，用干净隐变量额外过一次网络，把其 KV 写进缓存供后续块使用）。因此上例为 3+1=4 NFE；论文报告的 NFE=3/4/5 分别对应 2/3/4 个去噪步。帧轴配置与去噪步数是两个独立旋钮，可自由组合。
+  </div>
+</section>
+
+<!-- ==================== SEC 5 训练 ==================== -->
+<section id="sec5">
+  <h2><span class="secno">5</span>训练：在蒸馏中「随机分块」<span class="en">Flexible-chunk Training</span></h2>
+  <p>推理端的灵活性必须由训练端买单：模型得<strong>同时</strong>学会因果与非因果两种能力。Flex-Forcing 沿用 CausVid / Self-Forcing 的两阶段「因果蒸馏」骨架，但在关键处做了改动——<strong>不再把模型推向纯因果，而是让它在训练中见过整条谱系。</strong></p>
+
+  <div class="figure">
+    <svg viewBox="0 0 940 470" role="img" aria-label="训练流程图">
+      <g id="pipeline"></g>
+    </svg>
+    <div class="figcap"><b>图 5 · 训练总览。</b>阶段一（ODE 初始化）给双向底座套上因果注意力掩码，让模型先「学会」因果生成的形式；阶段二（非对称蒸馏）中，学生模型按随机采样的分块配置 a<sub>t</sub> 做<b>自回滚（self-rollout）</b>生成整段视频，再由 DMD/VSD 损失把 14B 双向教师的分布知识蒸馏进来。由于每次 rollout 的分块都不同（块大小在 2–10 间随机），注意力模式在「近乎纯因果 ↔ 近乎全双向」之间反复切换，模型被迫掌握<b>异质混合的依赖结构</b>，而非偏向单一范式。K-Projection（§6）与生成器联合训练。</div>
+  </div>
+
+  <h3>阶段二的目标函数：分布匹配蒸馏（DMD）</h3>
+  <p>整段视频在采样的 <span class="math"><span class="mi">a</span><sub><span class="mi">t</span></sub></span> 下滚出 <span class="math"><span class="mi">x</span><sub>0</sub> = {<span class="mi">x</span><sup><span class="mi">i</span></sup><sub>0</sub>}<sup><span class="mi">F</span></sup><sub><span class="mi">i</span>=1</sub></span> 后，对生成器 <span class="math"><span class="mi">G</span><sub><span class="mi">θ</span></sub></span> 施加 KL 散度梯度：</p>
+  <div class="eq"><div class="body math">
+    ∇<sub><span class="mi">θ</span></sub> <span class="mi">D</span><sub><span class="mrm">KL</span></sub> = 𝔼<sub><span class="mi">z</span>∼𝒩(0,<span class="mrm">I</span>)</sub><span style="font-size:1.4em">[</span> −( <span class="mi">s</span><sub><span class="mrm">real</span></sub>(<span class="mi">x</span><sub><span class="mi">t</span></sub>) − <span class="mi">s</span><sub><span class="mrm">fake</span></sub>(<span class="mi">x</span><sub><span class="mi">t</span></sub>) ) <span class="frac"><span>∂<span class="mi">G</span><sub><span class="mi">θ</span></sub></span><span>∂<span class="mi">θ</span></span></span> <span style="font-size:1.4em">]</span>
+  </div><div class="no">(4)</div></div>
+  <p class="eqnote">其中 <span class="math"><span class="mi">s</span><sub><span class="mrm">real</span></sub></span> / <span class="math"><span class="mi">s</span><sub><span class="mrm">fake</span></sub></span> 为真 / 假分数函数（教师与随学生更新的评论家），<span class="math"><span class="mi">x</span><sub><span class="mi">t</span></sub> = <span class="mrm">I</span>(<span class="mi">G</span><sub><span class="mi">θ</span></sub>(<span class="mi">z</span>), <span class="mi">t</span>)</span> 是对生成结果重新加噪的前向过程。<strong>因为梯度作用在自己滚出的完整视频上</strong>（而非教师给的干净数据），训练与推理的分布一致，可有效缓解暴露偏差——这一点继承自 Self-Forcing，而随机分块把它推广到了任意注意力配置。</p>
+
+  <div class="fact-grid">
+    <div class="fact"><div class="k">学生 / 教师</div><div class="v">Wan2.1-1.3B / 14B</div></div>
+    <div class="fact"><div class="k">训练分块采样</div><div class="v">块大小 ∈ [2, 10] 随机</div></div>
+    <div class="fact"><div class="k">数据</div><div class="v">VidProM 扩写提示词</div></div>
+    <div class="fact"><div class="k">迭代 / 批量</div><div class="v">600 步 · batch 64</div></div>
+    <div class="fact"><div class="k">K-Projection 学习率</div><div class="v">2e-6</div></div>
+    <div class="fact"><div class="k">2 步版时间步</div><div class="v">[1000, 500]</div></div>
+  </div>
+</section>
+
+<!-- ==================== SEC 6 K-Projection ==================== -->
+<section id="sec6">
+  <h2><span class="secno">6</span>K-Projection：对齐两种噪声级的 Key<span class="en">Noise-level Alignment</span></h2>
+  <p>混合注意力带来一个隐蔽但致命的问题。同一个 Query token 要同时关注两类上下文：</p>
+  <div class="cols2">
+    <div class="minicard">
+      <h4><span class="sw" style="background:var(--s2)"></span>因果的「过去」</h4>
+      <p>来自已完成去噪的历史块——KV 由<strong>干净的 x<sub>0</sub></strong> 计算，信噪比高。</p>
+    </div>
+    <div class="minicard">
+      <h4><span class="sw" style="background:var(--s1)"></span>非因果的「现在 / 未来」</h4>
+      <p>同块内的其他帧——KV 由<strong>当前时间步的噪声态 x<sub>t</sub></strong> 计算，信噪比低。</p>
+    </div>
+  </div>
+  <p>标准自注意力对所有 KV 一视同仁，这种<strong>信噪比错配</strong>会在灵活推理时显著劣化性能——尤其当块变大、双向成分增多时。解决方案是给「干净 Key」加一个<strong>随时间步变化的轻量线性投影</strong>，把它映射到当前噪声级的表示空间：</p>
+
+  <div class="eq"><div class="body math">
+    Π<sub><span class="mi">t</span>←0</sub> : ℝ<sup><span class="mi">d</span></sup> → ℝ<sup><span class="mi">d</span></sup>,&nbsp;&nbsp;&nbsp; <span class="mi">K̃</span><sub><span class="mi">t</span></sub> = Π<sub><span class="mi">t</span>←0</sub>(<span class="mi">K</span><sub>0</sub>)
+  </div><div class="no">(5)</div></div>
+
+  <div class="eq"><div class="body math">
+    <span class="mrm">Attn</span>(<span class="mi">Q</span><sub><span class="mi">t</span></sub>, <span class="mi">K̃</span><sub><span class="mi">t</span></sub>, <span class="mi">V</span><sub><span class="mi">t</span></sub>) = <span class="mrm">softmax</span><span style="font-size:1.4em">(</span><span class="frac"><span><span class="mi">Q</span><sub><span class="mi">t</span></sub> <span class="mi">K̃</span><sup>⊤</sup><sub><span class="mi">t</span></sub></span><span>√<span style="border-top:1px solid currentColor"><span class="mi">d</span></span></span></span><span style="font-size:1.4em">)</span><span class="mi">V</span><sub><span class="mi">t</span></sub>,&nbsp;&nbsp; <span class="mi">K̃</span><sub><span class="mi">t</span></sub> = <span class="mrm">concat</span><span style="font-size:1.2em">(</span>Π<sub><span class="mi">t</span>←0</sub>(<span class="mi">K</span><sup>&lt;𝓕<sub><span class="mi">t</span>,<span class="mi">k</span></sub></sup><sub>0</sub>), <span class="mi">K̃</span><sup>𝓕<sub><span class="mi">t</span>,<span class="mi">k</span></sub></sup><sub><span class="mi">t</span></sub><span style="font-size:1.2em">)</span>
+  </div><div class="no">(6)</div></div>
+
+  <div class="figure">
+    <svg viewBox="0 0 940 380" role="img" aria-label="K-Projection 机制示意图">
+      <g id="kproj"></g>
+    </svg>
+    <div class="figcap"><b>图 6 · K-Projection 的工作位置。</b>历史块的干净 KV 缓存只存<b>一份</b>（按 x<sub>0</sub> 计算，永不改写）；每个去噪步 t 计算注意力时，缓存中的 Key「即时（on-the-fly）」经过 Π<sub>t←0</sub> 投影到与当前噪声态一致的空间，再与本块噪声态的 Key 拼接参与 softmax。Value 不投影，梯度也不回传到缓存。投影初始化为恒等映射，随时间步条件化，几乎不增加参数与延迟——KV 缓存的效率红利被完整保留。</div>
+  </div>
+
+  <div class="callout good">
+    <div class="ttl">消融证据（论文图 10 右）</div>
+    K-Projection 在<strong>所有</strong>推理配置下都带来提升，且<strong>块越大、越接近纯双向时收益越大</strong>：不加投影时，性能随最大块尺寸增大而下降；加投影后随块增大平稳上升。它是「一个模型撑起整条谱系」的稳定器。
+  </div>
+</section>
+
+<!-- ==================== SEC 7 应用 ==================== -->
+<section id="sec7">
+  <h2><span class="secno">7</span>解锁的三种玩法<span class="en">Applications</span></h2>
+
+  <h3>7.1 灵活推理：按预算搜索最优分块</h3>
+  <p>推理时分块配置成了<strong>可搜索的超参数</strong>。论文对 5 秒视频（21 隐帧）做了「切成 3 块」的穷举搜索（排除单帧块），发现：</p>
+  <p>① <strong>均匀分块并非最优</strong>——同为 3 块，<code class="inline">[7,7,7]</code> 明显不如非对称划分；② 相同的自回归轮数下，不同布局的性能差距很大——<strong>块的排布本身携带信息，不只是暴露偏差在起作用</strong>；③ <strong>「前大后小」最强</strong>——把大块留给开头（负责定调全局结构）、小块放在后段，如 <code class="inline">[9,6,6]</code> 是帕累托最优点，最优配置偶尔还能超过纯双向推理。搜索空间中 69.9% 的配置同时在速度与质量上优于 Self-Forcing 的固定 <code class="inline">[3×7]</code>。</p>
+
+  <h3>7.2 任意时间步编辑（Any-timestep Editing）</h3>
+  <p>去噪步天然分层：早期步 = 全局规划，后期步 = 细节精修。Flex-Forcing 可以<strong>只在低层精修步注入新的编辑条件、冻结高层规划步</strong>（如 4 步中只改后 3 步），把「结构」与「细节」显式解耦。Self-Forcing 范式下同样的局部小编辑会通过全局耦合的动力学扩散到所有帧，导致结果大幅偏离；Flex-Forcing 则能局部换脸不换景。</p>
+
+  <h3>7.3 任意顺序编辑（Any-order Editing）</h3>
+  <p>由于模型学会了同时利用过去<strong>与未来</strong>的干净 token，编辑某个中间片段时可以<strong>双侧条件</strong>：</p>
+  <div class="eq"><div class="body math">
+    <span class="mi">x</span><sup>𝓕<sub><span class="mi">t</span>,<span class="mi">k</span></sub></sup><sub><span class="mi">t</span>−1</sub> ∼ <span class="mi">q</span><sub><span class="mi">θ</span></sub><span style="font-size:1.3em">(</span> <span class="mi">x</span><sup>𝓕<sub><span class="mi">t</span>,<span class="mi">k</span></sub></sup><sub><span class="mi">t</span>−1</sub> <span style="padding:0 2px">|</span> <span class="mi">x</span><sup>&lt;𝓕<sub><span class="mi">t</span>,<span class="mi">k</span></sub></sup><sub>0</sub>, <span class="mi">x</span><sup>&gt;𝓕<sub><span class="mi">t</span>,<span class="mi">k</span></sub></sup><sub>0</sub>, <span class="mi">x</span><sup>𝓕<sub><span class="mi">t</span>,<span class="mi">k</span></sub></sup><sub><span class="mi">t</span></sub> <span style="font-size:1.3em">)</span>
+  </div><div class="no">(7)</div></div>
+  <p class="eqnote">生成完 81 帧后，可单独重生成第 26–49 帧（换风格、加物体、改动作），同时以两侧未编辑片段为条件——编辑段与后续帧的衔接（如第 49→50 帧过渡）显著优于只能单侧条件的 Self-Forcing，且无需重生成整段视频。这打破了标准自回归「只能向前」的铁律。</p>
+
+  <div class="figure">
+    <svg viewBox="0 0 940 330" role="img" aria-label="两种编辑模式示意图">
+      <g id="editfig"></g>
+    </svg>
+    <div class="figcap"><b>图 7 · 两种编辑的机制。</b>左：任意时间步编辑——仅在精修步（低噪声）替换条件，高噪声的规划步保持不变，全局结构因此被锁定。右：任意顺序编辑——对已生成视频的中间片段重新去噪，同时关注左右两侧的干净 KV（公式 7），保证与未编辑部分无缝衔接。</div>
+  </div>
+</section>
+
+<!-- ==================== SEC 8 实验 ==================== -->
+<section id="sec8">
+  <h2><span class="secno">8</span>实验：更快，同时更好<span class="en">Experiments</span></h2>
+  <p class="lead">设置：底座 Wan2.1-T2V-1.3B，5 秒 832×432 视频（81 帧）；效率以 GB200 上生成 81 帧的 FPS 计；质量用 VBench（5s）与 VBench-Long（30s）。提示词与随机种子与 Self-Forcing 对齐。</p>
+
+  <h3>8.1 五秒视频：质量-效率帕累托前沿整体外移</h3>
+  <div class="figure">
+    <div class="legend">
+      <span class="item"><span class="sw" style="background:var(--s1)"></span>Flex-Forcing（本文，标注为帧轴配置）</span>
+      <span class="item"><span class="sw" style="background:var(--s2)"></span>Self-Forcing 系基线</span>
+      <span class="item"><span class="ln" style="background:var(--axis)"></span>Wan2.1 双向教师底座水平（50 步 ×2，仅 1.3 FPS）</span>
+    </div>
+    <svg id="paretoSvg" viewBox="0 0 940 460" role="img" aria-label="FPS 与 VBench 分数散点图"></svg>
+    <div class="figcap"><b>图 8 · 速度 vs 质量（GB200，数据取自论文表 2）。</b>右上角更优。相同 NFE=5 下，Flex-Forcing (15-3-3) 以 25.8 FPS 拿到 85.07 分，超过 Self-Forcing 全部变体；降到 NFE=3 后（12-6-3），速度提升至 45.6 FPS（约 1.8×），质量仍与基线最好成绩持平。悬停查看各点数值。</div>
+  </div>
+
+  <div class="tablewrap">
+    <table class="data">
+      <caption>表 A · 5 秒视频对比（论文表 2 节选；FPS 于 GB200 测得，NFE = 去噪步数 + 1 缓存步）</caption>
+      <thead><tr><th>模型 / 配置</th><th>参数量</th><th>FPS ↑</th><th>NFE</th><th>VBench 总分 ↑</th><th>质量分</th><th>语义分</th></tr></thead>
+      <tbody>
+        <tr class="group"><td colspan="7">预训练自回归 / 扩散模型</td></tr>
+        <tr><td>SkyReels-V2</td><td>1.3B</td><td>2.2</td><td>30×2</td><td>82.67</td><td>84.70</td><td>74.53</td></tr>
+        <tr><td>MAGI-1</td><td>4.5B</td><td>0.5</td><td>64×3</td><td>79.18</td><td>82.04</td><td>67.74</td></tr>
+        <tr><td>Wan2.1（双向底座）</td><td>1.3B</td><td>1.3</td><td>50×2</td><td>84.26</td><td>85.30</td><td>80.09</td></tr>
+        <tr class="group"><td colspan="7">自双向模型蒸馏的因果模型</td></tr>
+        <tr><td>CausVid</td><td>1.3B</td><td>24.9</td><td>5</td><td>81.20</td><td>84.05</td><td>69.80</td></tr>
+        <tr><td>Self-Forcing（块级）</td><td>1.3B</td><td>24.9</td><td>5</td><td>84.31</td><td>85.07</td><td>81.28</td></tr>
+        <tr><td>Self-Forcing（帧级）</td><td>1.3B</td><td>24.9</td><td>5</td><td>84.26</td><td>85.25</td><td>80.30</td></tr>
+        <tr><td>Self-Forcing++</td><td>1.3B</td><td>24.9</td><td>5</td><td>83.11</td><td>83.79</td><td>80.37</td></tr>
+        <tr class="ours"><td>Flex-Forcing (15-3-3) 最佳质量</td><td>1.3B</td><td>25.8</td><td>5</td><td class="best">85.07</td><td class="best">86.33</td><td>80.02</td></tr>
+        <tr class="ours"><td>Flex-Forcing (7-7-7) 求快</td><td>1.3B</td><td>29.4</td><td>5</td><td>84.63</td><td>85.89</td><td>79.59</td></tr>
+        <tr class="ours"><td>Flex-Forcing (3×7) 对齐基线</td><td>1.3B</td><td>24.9</td><td>5</td><td>84.03</td><td>84.91</td><td>79.95</td></tr>
+        <tr class="ours"><td>Flex-Forcing (12-6-3)</td><td>1.3B</td><td class="best">45.6</td><td>3</td><td>84.29</td><td>85.33</td><td>80.12</td></tr>
+        <tr class="ours"><td>Flex-Forcing (7-7-7)</td><td>1.3B</td><td class="best">48.9</td><td>3</td><td>83.92</td><td>84.96</td><td>79.78</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>8.2 双向模式下：与少步蒸馏方法同台竞技</h3>
+  <p>Flex-Forcing 也能整段一块地跑「纯双向」推理，与专门的少步蒸馏方法直接比较（VBench 总分）：<strong>4 步</strong>下 Flex-Forcing 达 <strong>85.13</strong>（质量分 86.50），高于 DMD-v 84.60、rCM 84.43，也高于 50 步的 Wan2.1 原模型（84.26）；<strong>2 步</strong>下为 84.20，与 rCM 84.09、DMD-v 84.39 相当。说明学会因果能力并没有牺牲双向能力——两者真正共存于一套权重。</p>
+
+  <h3>8.3 三十秒长视频：动态程度大幅领先</h3>
+  <div class="figure">
+    <div class="legend" id="barLegend"></div>
+    <svg id="barSvg" viewBox="0 0 940 400" role="img" aria-label="30 秒视频 VBench-Long 分组柱状图"></svg>
+    <div class="figcap"><b>图 9 · 30 秒视频（VBench-Long，论文表 4）。</b>推理构建在 Infinity-RoPE 之上（sink 3 隐帧 + 21 隐帧注意力窗口）。Flex-Forcing 总分 84.01 居首，且推理更快（24.96 FPS vs 基线 19.10）。最醒目的是<b>动态程度（Dynamic Degree）71.27</b>——比 Infinity-RoPE 高 21 分：基线倾向生成重复性运动，而跨块的双向规划让长视频保持丰富、持续演进的运动。注：LongLive 在长视频上专门训练过，其余方法均为「短训长测」。</div>
+  </div>
+
+  <div class="tablewrap">
+    <table class="data">
+      <caption>表 B · 30 秒视频关键指标（论文表 4 节选）</caption>
+      <thead><tr><th>方法</th><th>总分 ↑</th><th>质量分 ↑</th><th>语义分 ↑</th><th>动态程度 ↑</th><th>美学质量 ↑</th><th>FPS ↑</th></tr></thead>
+      <tbody>
+        <tr><td>LongLive（长视频训练）</td><td>82.80</td><td>83.21</td><td>81.17</td><td>38.89</td><td>63.77</td><td>25.07</td></tr>
+        <tr><td>Self-Forcing</td><td>81.49</td><td>82.67</td><td>76.77</td><td>41.93</td><td>61.72</td><td>19.10</td></tr>
+        <tr><td>Infinity-RoPE</td><td>82.84</td><td>83.77</td><td>79.11</td><td>50.26</td><td>62.33</td><td>19.10</td></tr>
+        <tr class="ours"><td>Flex-Forcing</td><td class="best">84.01</td><td class="best">85.30</td><td>78.86</td><td class="best">71.27</td><td class="best">63.31</td><td>24.96</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>8.4 用户偏好、速度剖析与其他消融</h3>
+  <div class="fact-grid">
+    <div class="fact"><div class="k">用户研究 · 5s 视觉质量胜率</div><div class="v">55.4% vs Self-Forcing</div></div>
+    <div class="fact"><div class="k">用户研究 · 30s 视觉质量胜率</div><div class="v">53.9%</div></div>
+    <div class="fact"><div class="k">用户研究 · 提示词对齐（5s / 30s）</div><div class="v">53.3% / 50.6%</div></div>
+    <div class="fact"><div class="k">3 块穷举中优于基线的配置占比</div><div class="v">69.9%（速度质量双赢）</div></div>
+  </div>
+  <p style="margin-top:16px"><strong>速度剖析（A100）：</strong>小块的<em>单块</em> FPS 更高，但自回归轮数多、总吞吐反而低；大块单块 FPS 稍低，轮数大减，<strong>端到端更快</strong>。<strong>块大小趋势：</strong>固定种子只改分块，平均块越大画质越稳步逼近全双向；块很小时暴露偏差依然明显——说明细粒度因果生成的暴露偏差问题并未被彻底消除，而是被「用大块绕开」。<strong>时间步金字塔消融：</strong>在 [21]、[14,7]、[7,7,7] 间组合的层级配置，比只在帧轴分块获得更优的帕累托前沿；连「第一步整段 21、其余步全用 7」这种次优组合都仍显著超过 Self-Forcing（84.3）。</p>
+</section>
+
+<!-- ==================== SEC 9 总结 ==================== -->
+<section id="sec9">
+  <h2><span class="secno">9</span>脉络、局限与启示<span class="en">Takeaways</span></h2>
+
+  <h3>方法脉络：从 CausVid 到 Flex-Forcing</h3>
+  <div class="figure">
+    <svg viewBox="0 0 940 210" role="img" aria-label="方法演进脉络图">
+      <g id="lineage"></g>
+    </svg>
+    <div class="figcap"><b>图 10 · 因果蒸馏路线的演进。</b>CausVid 首先把双向扩散蒸馏为因果模型（DMD）；Self-Forcing 引入自回滚使训练-推理分布一致，缓解暴露偏差；Flex-Forcing 则不再「二选一」——通过随机分块训练 + K-Projection，让因果与非因果能力共存，把生成范式本身变成推理时的自由度。</div>
+  </div>
+
+  <h3>局限（作者自述）</h3>
+  <p>① 训练-推理失配并未被彻底解决：极长视频生成中误差累积依旧存在；② 方法高度依赖预训练底座的<strong>强双向先验</strong>——迁移到缺乏此类先验的模型上效果存疑；③ 视频生成模型固有的滥用风险需要部署侧防护。</p>
+
+  <h3>为什么值得关注</h3>
+  <p><strong>① 范式即旋钮。</strong>本文最大的观念贡献：双向 / 自回归不是模型属性，而是<em>推理时可调的维度</em>。一套权重覆盖「云端出片 → 端侧实时」全谱系，省去多套专用模型的训练与维护成本。<strong>② 结构-细节解耦是免费的。</strong>「高噪声步管全局、低噪声步管局部」的金字塔分块，几乎不改变总计算量，却同时改善了质量与速度，还顺手带来了结构保持的可控编辑。<strong>③ 对世界模型 / 交互式生成的启发。</strong>跨块双向规划 + 块内高效合成的组合，正是长时程世界模拟需要的形态：既要实时流式，又不能失去全局一致性；任意顺序编辑则为「回滚-改写-续演」式交互提供了原生机制。</p>
+
+  <div class="callout idea">
+    <div class="ttl">一图记住 Flex-Forcing</div>
+    统一公式 (2)：<strong>块内双向、块间因果</strong>；两条轴：<strong>帧轴任意划分、时间步轴嵌套细分</strong>；两个训练要件：<strong>随机分块的自回滚 DMD 蒸馏</strong> + <strong>K-Projection 噪声级对齐</strong>；一个结果：<strong>更快、更稳、可编辑，且一个模型全都要。</strong>
+  </div>
+</section>
+
+<footer>
+  <div><strong>来源与延伸</strong></div>
+  <div class="srclist">
+    论文：<a href="https://arxiv.org/abs/2607.03509" target="_blank" rel="noopener">Flex-Forcing: Towards a Unified Autoregressive and Bidirectional Video Diffusion Model（arXiv:2607.03509，ICML 2026）</a><br>
+    项目主页：<a href="https://research.nvidia.com/labs/genair/flex-forcing/" target="_blank" rel="noopener">research.nvidia.com/labs/genair/flex-forcing</a><br>
+    关键前作：CausVid（Yin et al., CVPR 2025）· Self-Forcing（Huang et al., 2025）· DMD（Yin et al., CVPR 2024）· Wan2.1（Wan et al., 2025）<br>
+    <span style="color:var(--muted)">本页图示为基于论文内容的重绘与示意；全部数值均取自论文表 2 / 表 3 / 表 4 及正文。制作：Claude · 2026-08。</span>
+  </div>
+</footer>
+
+</div><!-- /wrap -->
+
+<style>
+  section { scroll-margin-top: 74px; }
+  text.num { font-variant-numeric: tabular-nums; }
+  .hitring { cursor: pointer; }
+  .hitring:focus { outline: none; }
+  .hitring:focus + circle, .hitring:hover + circle { stroke-width: 3; }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="mk-m" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0.5 L9,5 L0,9.5 z" style="fill:#898781"></path>
+    </marker>
+    <marker id="mk-o" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0.5 L9,5 L0,9.5 z" style="fill:var(--s2)"></path>
+    </marker>
+    <marker id="mk-b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0.5 L9,5 L0,9.5 z" style="fill:var(--s1)"></path>
+    </marker>
+  </defs>
+</svg>
+
+<script>
+"use strict";
+/* ================= 工具 ================= */
+const NS = "http://www.w3.org/2000/svg";
+function el(parent, tag, attrs) {
+  const n = document.createElementNS(NS, tag);
+  if (attrs) for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+function txt(parent, x, y, str, cls, anchor, style) {
+  const t = el(parent, "text", { x, y, class: cls || "sl sv-ink2" });
+  if (anchor) t.setAttribute("text-anchor", anchor);
+  if (style) t.setAttribute("style", style);
+  t.textContent = str;
+  return t;
+}
+function line(parent, x1, y1, x2, y2, stroke, w, extra) {
+  const l = el(parent, "line", { x1, y1, x2, y2, "stroke-width": w || 1 });
+  l.setAttribute("style", "stroke:" + stroke + (extra ? ";" + extra : ""));
+  return l;
+}
+function rrect(parent, x, y, w, h, r, style) {
+  return el(parent, "rect", { x, y, width: w, height: h, rx: r, ry: r, style });
+}
+function arrow(parent, d, color, width, marker, extra) {
+  return el(parent, "path", { d, fill: "none",
+    style: "stroke:" + color + ";stroke-width:" + (width || 1.6) + ";" + (extra || ""),
+    "marker-end": "url(#" + (marker || "mk-m") + ")" });
+}
+/* 顶部圆角柱 */
+function topRoundRect(parent, x, y, w, h, r, style) {
+  r = Math.min(r, w / 2, Math.max(h, 0.01));
+  const d = "M" + x + "," + (y + h) + " L" + x + "," + (y + r) +
+    " Q" + x + "," + y + " " + (x + r) + "," + y +
+    " L" + (x + w - r) + "," + y +
+    " Q" + (x + w) + "," + y + " " + (x + w) + "," + (y + r) +
+    " L" + (x + w) + "," + (y + h) + " Z";
+  return el(parent, "path", { d, style });
+}
+
+/* ================= 提示浮层 ================= */
+const tip = document.getElementById("tip");
+function tipShow(rows, x, y) {
+  tip.replaceChildren();
+  rows.forEach(r => {
+    const d = document.createElement("div");
+    d.className = r[0];
+    d.textContent = r[1];
+    tip.appendChild(d);
+  });
+  tip.style.display = "block";
+  tipMove(x, y);
+}
+function tipMove(x, y) {
+  const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+  let left = x + pad, top = y + pad;
+  if (left + w > innerWidth - 8) left = x - w - pad;
+  if (top + h > innerHeight - 8) top = y - h - pad;
+  tip.style.left = left + "px";
+  tip.style.top = top + "px";
+}
+function tipHide() { tip.style.display = "none"; }
+function bindTip(node, rowsFn) {
+  node.addEventListener("pointerenter", e => tipShow(rowsFn(), e.clientX, e.clientY));
+  node.addEventListener("pointermove", e => tipMove(e.clientX, e.clientY));
+  node.addEventListener("pointerleave", tipHide);
+  node.setAttribute("tabindex", "0");
+  node.addEventListener("focus", () => {
+    const b = node.getBoundingClientRect();
+    tipShow(rowsFn(), b.left + b.width / 2, b.top);
+  });
+  node.addEventListener("blur", tipHide);
+}
+
+/* ================= 主题切换（仅内存，不使用任何存储） ================= */
+(function () {
+  const btn = document.getElementById("themeBtn");
+  let dark = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches;
+  function apply() {
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    btn.textContent = dark ? "☀️ 浅色" : "🌗 深色";
+  }
+  btn.addEventListener("click", () => { dark = !dark; apply(); });
+  apply();
+})();
+
+/* ================= 图 1：双向 vs 自回归注意力 ================= */
+(function () {
+  const cell = 34, n = 6;
+  function grid(g, ox, oy, colorFn, note) {
+    txt(g, ox + n * cell / 2, oy - 26, "Key / Value 帧 →", "sm sv-muted", "middle");
+    for (let f = 0; f < n; f++) txt(g, ox + f * cell + cell / 2, oy - 8, String(f + 1), "sm num sv-muted", "middle");
+    for (let q = 0; q < n; q++) {
+      txt(g, ox - 10, oy + q * cell + cell / 2 + 4, String(q + 1), "sm num sv-muted", "end");
+      for (let f = 0; f < n; f++) {
+        const c = colorFn(q, f);
+        rrect(g, ox + f * cell + 1.5, oy + q * cell + 1.5, cell - 3, cell - 3, 5,
+          c === 0 ? "fill:var(--surface-2);stroke:var(--grid);stroke-width:1"
+            : (c === 1 ? "fill:var(--s1)" : "fill:var(--s2)"));
+      }
+    }
+    const t = txt(g, ox - 34, oy + n * cell / 2, "Query 帧 ↓", "sm sv-muted", "middle");
+    t.setAttribute("transform", "rotate(-90 " + (ox - 34) + " " + (oy + n * cell / 2) + ")");
+    txt(g, ox + n * cell / 2, oy + n * cell + 24, note, "sl sv-ink2", "middle");
+  }
+  const g1 = document.getElementById("bidiGrid");
+  grid(g1, 170, 78, () => 1, "每帧看得到全部帧，整段联合去噪");
+  const g2 = document.getElementById("arGrid");
+  grid(g2, 600, 78, (q, f) => (f === q ? 1 : (f < q ? 2 : 0)), "只看自己（噪声态）+ 历史（干净 KV）");
+  const svg = g1.ownerSVGElement;
+  const lg = el(svg, "g");
+  const items = [["var(--s1)", "噪声态（去噪中）"], ["var(--s2)", "干净 KV 缓存"], ["var(--surface-2)", "被掩蔽"]];
+  let lx = 300;
+  items.forEach(it => {
+    rrect(lg, lx, 314, 12, 12, 3, "fill:" + it[0] + (it[0].includes("surface") ? ";stroke:var(--grid)" : ""));
+    const t = txt(lg, lx + 18, 324, it[1], "sm sv-ink2");
+    lx += 18 + it[1].length * 12.5 + 34;
+  });
+})();
+
+/* ================= 图 2：范式谱系 ================= */
+(function () {
+  const g = document.getElementById("spectrum");
+  const rows = [
+    { y: 40, name: "自回归", sub: "块 = 1 帧", chunks: Array(16).fill(1), tag: "最快 · 可流式 · 易漂移", tc: "var(--s2)" },
+    { y: 132, name: "混合（本文）", sub: "任意划分", chunks: [7, 5, 4], tag: "质量⇄速度按需权衡", tc: "var(--s1)" },
+    { y: 224, name: "双向", sub: "块 = 全部帧", chunks: [16], tag: "最连贯 · 最高质 · 最慢", tc: "var(--s3)" }
+  ];
+  const ox = 195, pitch = 36, ch = 34;
+  rows.forEach(r => {
+    txt(g, 170, r.y + 15, r.name, "sb sv-ink", "end");
+    txt(g, 170, r.y + 32, r.sub, "sm sv-muted", "end");
+    let f = 0;
+    r.chunks.forEach((sz, ci) => {
+      const x = ox + f * pitch, w = sz * pitch - 4;
+      rrect(g, x - 2, r.y - 4, w + 2, ch + 12, 8, "fill:var(--s1-wash);stroke:var(--s1);stroke-width:1.2");
+      for (let i = 0; i < sz; i++)
+        rrect(g, ox + (f + i) * pitch + 3, r.y + 2, pitch - 10, ch - 8, 4, "fill:var(--s1)");
+      if (ci < r.chunks.length - 1) {
+        const ax = ox + (f + sz) * pitch - 5;
+        arrow(g, "M" + (ax - 8) + "," + (r.y + ch / 2 + 2) + " L" + (ax + 5) + "," + (r.y + ch / 2 + 2), "var(--s2)", 2, "mk-o");
+      }
+      f += sz;
+    });
+    txt(g, 790, r.y + 15, r.tag, "sl", "start").setAttribute("style", "fill:" + r.tc + ";font-weight:650");
+    if (r.chunks.length > 1 && r.chunks.length < 16)
+      txt(g, 790, r.y + 33, "块间传干净 KV →", "sm sv-muted", "start");
+  });
+  txt(g, ox, 290, "◀ 效率、流式粒度", "sm sv-muted", "start");
+  txt(g, ox + 16 * pitch - 4, 290, "全局一致性、画质 ▶", "sm sv-muted", "end");
+})();
+
+/* ================= 图 3：交互式注意力掩码 ================= */
+(function () {
+  const svg = document.getElementById("maskSvg");
+  const F = 21, cellPitch = 19, cs = 17, ox = 272, oy = 66;
+  function chunksFrom(cfg) {
+    const bounds = [0]; let s = 0;
+    cfg.forEach(c => { s += c; bounds.push(s); });
+    return bounds;
+  }
+  function chunkOf(bounds, f) {
+    for (let k = 0; k < bounds.length - 1; k++) if (f >= bounds[k] && f < bounds[k + 1]) return k;
+    return -1;
+  }
+  function render(cfg) {
+    svg.replaceChildren();
+    const g = el(svg, "g");
+    const bounds = chunksFrom(cfg);
+    // 顶部块括号
+    cfg.forEach((sz, k) => {
+      const x1 = ox + bounds[k] * cellPitch, x2 = ox + bounds[k + 1] * cellPitch - 2;
+      line(g, x1 + 1, 36, x2 - 1, 36, "var(--s1)", 2.5);
+      line(g, x1 + 1, 36, x1 + 1, 42, "var(--s1)", 2.5);
+      line(g, x2 - 1, 36, x2 - 1, 42, "var(--s1)", 2.5);
+      if (sz > 1 || cfg.length <= 11)
+        txt(g, (x1 + x2) / 2, 28, String(sz), "sm num sv-ink2", "middle", "font-weight:700");
+    });
+    // 轴标签
+    for (let f = 0; f < F; f += 2) {
+      txt(g, ox + f * cellPitch + cs / 2, 58, String(f + 1), "sm num sv-muted", "middle");
+      txt(g, ox - 8, oy + f * cellPitch + cs / 2 + 4, String(f + 1), "sm num sv-muted", "end");
+    }
+    const rl = txt(g, ox - 32, oy + F * cellPitch / 2, "Query 帧 ↓", "sm sv-muted", "middle");
+    rl.setAttribute("transform", "rotate(-90 " + (ox - 32) + " " + (oy + F * cellPitch / 2) + ")");
+    txt(g, ox + F * cellPitch / 2, 14, "Key / Value 帧 →", "sm sv-muted", "middle");
+    // 单元格
+    let covered = 0;
+    for (let q = 0; q < F; q++) {
+      const kq = chunkOf(bounds, q);
+      for (let f = 0; f < F; f++) {
+        const kf = chunkOf(bounds, f);
+        let st;
+        if (kf === kq) { st = "fill:var(--s1)"; covered++; }
+        else if (kf < kq) { st = "fill:var(--s2)"; covered++; }
+        else st = "fill:var(--surface-2);stroke:var(--grid);stroke-width:0.6";
+        rrect(g, ox + f * cellPitch, oy + q * cellPitch, cs, cs, 3, st);
+      }
+    }
+    // 块边界线
+    for (let k = 1; k < bounds.length - 1; k++) {
+      const p = ox + bounds[k] * cellPitch - 1;
+      line(g, p, oy - 2, p, oy + F * cellPitch - 2, "var(--ink-2)", 1.2, "opacity:.55");
+      line(g, ox - 2, oy + bounds[k] * cellPitch - 1, ox + F * cellPitch - 2, oy + bounds[k] * cellPitch - 1, "var(--ink-2)", 1.2, "opacity:.55");
+    }
+    // 统计
+    const pct = (covered / (F * F) * 100).toFixed(1);
+    document.getElementById("stK").textContent = String(cfg.length);
+    document.getElementById("stRounds").textContent = String(cfg.length);
+    document.getElementById("stMax").replaceChildren(document.createTextNode(Math.max.apply(null, cfg) + " "));
+    const sm = document.createElement("small"); sm.textContent = "帧";
+    document.getElementById("stMax").appendChild(sm);
+    document.getElementById("stCov").replaceChildren(document.createTextNode(pct + "%"));
+    const sm2 = document.createElement("small"); sm2.textContent = "（" + covered + "/441）";
+    document.getElementById("stCov").appendChild(sm2);
+  }
+  const btns = document.querySelectorAll("#cfgBtns .cfg-btn");
+  btns.forEach(b => b.addEventListener("click", () => {
+    btns.forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    render(b.dataset.cfg.split(",").map(Number));
+  }));
+  render([15, 3, 3]);
+})();
+
+/* ================= 图 4：时间步金字塔 + 执行顺序 ================= */
+(function () {
+  const g = document.getElementById("pyramid");
+  const ox = 150, fw = 34, H = 58;
+  const rowY = [46, 140, 234, 328];
+  const rowLab = [["步 t₁", "噪声最高 · 全局规划"], ["步 t₂", ""], ["步 t₃", "噪声最低 · 局部精修"], ["KV 缓存前向", "干净 x₀ 写入缓存"]];
+  const rowFill = [
+    "fill:color-mix(in srgb, var(--s1) 13%, var(--surface));stroke:var(--s1);stroke-width:1.2",
+    "fill:color-mix(in srgb, var(--s1) 30%, var(--surface));stroke:var(--s1);stroke-width:1.2",
+    "fill:color-mix(in srgb, var(--s1) 50%, var(--surface));stroke:var(--s1);stroke-width:1.2",
+    "fill:color-mix(in srgb, var(--s2) 26%, var(--surface));stroke:var(--s2);stroke-width:1.2"
+  ];
+  // 帧刻度
+  [1, 4, 7, 10, 13, 16, 19, 21].forEach(f => {
+    txt(g, ox + (f - 1) * fw + fw / 2, 30, String(f), "sm num sv-muted", "middle");
+  });
+  txt(g, ox - 10, 30, "帧 →", "sm sv-muted", "end");
+  // 行标签
+  rowLab.forEach((lab, r) => {
+    txt(g, 138, rowY[r] + H / 2 - 2, lab[0], "sb sv-ink", "end");
+    if (lab[1]) txt(g, 138, rowY[r] + H / 2 + 16, lab[1], "sm sv-muted", "end");
+  });
+  const blocks = [
+    { r: 0, a: 1, b: 21, e: 0, note: "整段双向" },
+    { r: 1, a: 1, b: 14, e: 1 }, { r: 1, a: 15, b: 21, e: 6, note: "从暂存恢复" },
+    { r: 2, a: 1, b: 7, e: 2 }, { r: 2, a: 8, b: 14, e: 4 }, { r: 2, a: 15, b: 21, e: 7 },
+    { r: 3, a: 1, b: 7, e: 3 }, { r: 3, a: 8, b: 14, e: 5 }, { r: 3, a: 15, b: 21, e: 8 }
+  ];
+  blocks.forEach(bl => {
+    const x = ox + (bl.a - 1) * fw + 2, w = (bl.b - bl.a + 1) * fw - 4, y = rowY[bl.r];
+    rrect(g, x, y, w, H, 9, rowFill[bl.r]);
+    const cx = x + w / 2;
+    el(g, "circle", { cx: cx - (w > 150 ? 52 : 0), cy: y + H / 2, r: 12, style: "fill:var(--surface);stroke:var(--ink-2);stroke-width:1.3" });
+    txt(g, cx - (w > 150 ? 52 : 0), y + H / 2 + 4.5, String(bl.e), "sb num sv-ink", "middle");
+    if (w > 150) {
+      txt(g, cx + 12, y + H / 2 - 3, "帧 " + bl.a + "–" + bl.b, "sl sv-ink", "middle", "font-weight:650");
+      txt(g, cx + 12, y + H / 2 + 15, bl.note || (bl.r === 3 ? "写入干净 KV" : "块内双向去噪"), "sm sv-ink2", "middle");
+    }
+  });
+  const M = "var(--muted)";
+  // 垂直推进箭头
+  arrow(g, "M388," + (rowY[0] + H + 2) + " L388," + (rowY[1] - 4), M, 1.6);
+  arrow(g, "M269," + (rowY[1] + H + 2) + " L269," + (rowY[2] - 4), M, 1.6);
+  arrow(g, "M269," + (rowY[2] + H + 2) + " L269," + (rowY[3] - 4), M, 1.6);
+  arrow(g, "M610," + (rowY[2] + H + 2) + " L610," + (rowY[3] - 4), M, 1.6);
+  arrow(g, "M655," + (rowY[1] + H + 2) + " L655," + (rowY[2] - 4), M, 1.6);
+  arrow(g, "M745," + (rowY[2] + H + 2) + " L745," + (rowY[3] - 4), M, 1.6);
+  // 因果依赖（干净 KV）
+  arrow(g, "M390," + (rowY[3] + 20) + " C448," + (rowY[3] + 20) + " 436," + (rowY[2] + H + 26) + " 400," + (rowY[2] + H + 8), "var(--s2)", 1.8, "mk-o");
+  txt(g, 452, rowY[3] - 10, "③ 的干净 KV → ④", "sm", "start", "fill:var(--s2)");
+  txt(g, 676, rowY[1] + H + 24, "⑥ 需先等 ⑤（帧 1–14 干净 KV）", "sm", "start", "fill:var(--s2)");
+  // 暂存虚线
+  el(g, "line", { x1: 790, y1: rowY[0] + H + 2, x2: 790, y2: rowY[1] - 4,
+    style: "stroke:var(--s1);stroke-width:1.6;stroke-dasharray:2 5" });
+  txt(g, 782, rowY[0] + H + 26, "帧 15–21 暂存，等待 ⑥ →", "sm", "end", "fill:var(--s1)");
+})();
+
+/* ================= 图 5：训练流程 ================= */
+(function () {
+  const g = document.getElementById("pipeline");
+  function box(x, y, w, h, title, subs, accent) {
+    rrect(g, x, y, w, h, 10, "fill:var(--surface);stroke:" + (accent ? "var(--s1)" : "var(--border)") + ";stroke-width:" + (accent ? 1.6 : 1.2));
+    txt(g, x + w / 2, y + 24, title, "sb sv-ink", "middle");
+    (subs || []).forEach((s, i) => txt(g, x + w / 2, y + 44 + i * 18, s, "sm sv-ink2", "middle"));
+  }
+  box(30, 36, 230, 78, "Wan2.1-T2V-1.3B", ["双向扩散底座（预训练权重）"]);
+  arrow(g, "M262,75 L296,75", "var(--muted)", 1.8);
+  box(300, 36, 272, 78, "阶段一 · ODE 初始化", ["套用因果注意力掩码", "让模型先适应因果形式"]);
+  arrow(g, "M574,75 L606,75", "var(--muted)", 1.8);
+  box(610, 36, 300, 78, "阶段二 · 非对称蒸馏", ["自回滚 + DMD / VSD", "随机分块（核心改动）↓"], true);
+  // 容器
+  rrect(g, 30, 150, 880, 296, 12, "fill:var(--surface-2);stroke:var(--border);stroke-width:1.2");
+  txt(g, 50, 178, "阶段二 · 每次训练迭代", "sb sv-ink", "start");
+  txt(g, 890, 178, "共 600 次迭代 · batch 64", "sm sv-muted", "end");
+  // A 随机分块
+  box(60, 200, 200, 150, "① 采样随机分块 aₜ", []);
+  const parts = [[3, 4, 3], [2, 3, 5], [6, 4]];
+  parts.forEach((p, ri) => {
+    let f = 0; const yy = 238 + ri * 30;
+    p.forEach(sz => {
+      rrect(g, 78 + f * 16.4, yy, sz * 16.4 - 4, 20, 5, "fill:var(--s1-wash);stroke:var(--s1);stroke-width:1.1");
+      f += sz;
+    });
+  });
+  txt(g, 160, 340, "块大小 ∈ [2, 10] 随机", "sm sv-muted", "middle");
+  arrow(g, "M262,275 L288,275", "var(--muted)", 1.8);
+  // B 自回滚
+  box(292, 200, 252, 150, "② 学生 Gθ 自回滚", ["按 aₜ 生成整段视频 x₀", "块内双向 · 块间 KV 缓存", "K-Projection 参与前向", "（训练与推理同分布）"]);
+  arrow(g, "M546,275 L576,275", "var(--muted)", 1.8);
+  // C 重加噪
+  box(580, 200, 140, 66, "③ 重新加噪", ["xₜ = I(x₀, t)"]);
+  // E/F 评分网络
+  box(560, 300, 178, 60, "冻结教师 14B", ["→ s_real(xₜ)"]);
+  box(748, 300, 158, 60, "假分数网络", ["→ s_fake(xₜ)（同步训练）"]);
+  arrow(g, "M650,268 L650,296", "var(--muted)", 1.6);
+  arrow(g, "M722,240 C790,244 822,268 827,296", "var(--muted)", 1.6);
+  // D 更新
+  box(752, 196, 154, 70, "④ 更新生成器", ["s_real − s_fake", "∇θ D_KL · 式 (4)"], true);
+  arrow(g, "M740,320 C748,300 752,290 776,270", "var(--muted)", 1.6);
+  arrow(g, "M827,296 L829,270", "var(--muted)", 1.6);
+  // 反馈
+  arrow(g, "M752,208 C640,150 480,152 420,196", "var(--s1)", 1.8, "mk-b");
+  txt(g, 588, 166, "梯度更新 θ（作用于整条 rollout）", "sm", "middle", "fill:var(--s1)");
+  txt(g, 470, 432, "每次迭代随机换一种分块 → 注意力模式在「纯因果 ⇄ 全双向」间反复穿梭，两种能力同时被塑造", "sl sv-ink2", "middle");
+})();
+
+/* ================= 图 6：K-Projection ================= */
+(function () {
+  const g = document.getElementById("kproj");
+  // 左：历史块
+  txt(g, 60, 36, "历史块（已生成 · 因果侧）", "sb sv-ink", "start");
+  for (let i = 0; i < 5; i++)
+    rrect(g, 60 + i * 36, 50, 30, 30, 6, "fill:var(--s2)");
+  txt(g, 60, 104, "干净 x₀ → K₀ / V₀ 只计算一次，缓存永不改写", "sm sv-muted", "start");
+  // 右：当前块
+  txt(g, 620, 36, "当前块 𝓕ₜ,ₖ（去噪中 · 双向侧）", "sb sv-ink", "start");
+  for (let i = 0; i < 4; i++) {
+    rrect(g, 620 + i * 36, 50, 30, 30, 6, "fill:var(--s1)");
+    for (let d = 0; d < 4; d++)
+      el(g, "circle", { cx: 626 + i * 36 + (d * 7) % 20, cy: 57 + ((d * 11) % 18), r: 1.6, style: "fill:var(--surface);opacity:.85" });
+  }
+  txt(g, 620, 104, "噪声态 xₜ → Qₜ, K̃ₜ, Vₜ", "sm sv-muted", "start");
+  // 中间警示
+  txt(g, 445, 56, "⚠ 信噪比错配", "sl", "middle", "fill:var(--s2);font-weight:700");
+  txt(g, 445, 76, "干净 vs 噪声态，直接混用会劣化注意力", "sm sv-muted", "middle");
+  // Π 投影盒
+  rrect(g, 96, 168, 216, 68, 10, "fill:var(--surface);stroke:var(--s2);stroke-width:1.6");
+  txt(g, 204, 194, "Π_t←0 · 轻量线性投影", "sb sv-ink", "middle");
+  txt(g, 204, 214, "时间步条件 · 恒等初始化", "sm sv-muted", "middle");
+  arrow(g, "M145,84 L145,164", "var(--s2)", 1.8, "mk-o");
+  txt(g, 152, 136, "K₀（来自缓存）", "sm", "start", "fill:var(--s2)");
+  // 时间步芯片
+  rrect(g, 30, 258, 118, 30, 15, "fill:var(--s1-wash);stroke:var(--s1);stroke-width:1.2");
+  txt(g, 89, 278, "当前去噪步 t", "sm sv-ink", "middle");
+  arrow(g, "M120,256 C130,248 140,244 152,238", "var(--s1)", 1.6, "mk-b");
+  // concat 节点
+  el(g, "circle", { cx: 430, cy: 300, r: 16, style: "fill:var(--surface);stroke:var(--ink-2);stroke-width:1.4" });
+  txt(g, 430, 305, "⧺", "sb sv-ink", "middle");
+  txt(g, 430, 336, "拼接", "sm sv-muted", "middle");
+  arrow(g, "M226,238 C226,300 330,300 410,300", "var(--s2)", 1.8, "mk-o");
+  txt(g, 268, 288, "Π(K₀) 已对齐到噪声空间", "sm", "start", "fill:var(--s2)");
+  arrow(g, "M672,84 C672,282 540,298 450,300", "var(--s1)", 1.8, "mk-b");
+  txt(g, 560, 258, "K̃ₜ（本块噪声态 Key）", "sm", "start", "fill:var(--s1)");
+  // Attn 盒
+  rrect(g, 500, 272, 330, 56, 10, "fill:var(--surface);stroke:var(--s1);stroke-width:1.6");
+  txt(g, 665, 296, "Attn(Qₜ, K̃ₜ, Vₜ) = softmax(QₜK̃ₜᵀ/√d)·Vₜ", "sl sv-ink", "middle", "font-weight:650");
+  txt(g, 665, 316, "所有 Key 处于同一噪声级 → 稳定聚合", "sm sv-muted", "middle");
+  arrow(g, "M446,300 L496,300", "var(--muted)", 1.8);
+  arrow(g, "M760,84 L760,268", "var(--s1)", 1.6, "mk-b");
+  txt(g, 768, 180, "Qₜ", "sm", "start", "fill:var(--s1)");
+  txt(g, 470, 364, "Value 不投影 · 缓存张量不被改写、梯度不回传缓存 · 投影在注意力计算时即时（on-the-fly）应用", "sl sv-ink2", "middle");
+})();
+
+/* ================= 图 7：两种编辑 ================= */
+(function () {
+  const g = document.getElementById("editfig");
+  // 左：任意时间步
+  txt(g, 40, 32, "任意时间步编辑", "sb sv-ink", "start");
+  txt(g, 40, 52, "只改精修步，规划步冻结", "sm sv-muted", "start");
+  const steps = [
+    { y: 70, name: "步 1 · 高噪声 · 全局规划", lock: true },
+    { y: 128, name: "步 2 · 精修", lock: false },
+    { y: 186, name: "步 3 · 精修", lock: false },
+    { y: 244, name: "步 4 · 低噪声 · 精修", lock: false }
+  ];
+  steps.forEach(s => {
+    rrect(g, 40, s.y, 268, 44, 8, s.lock
+      ? "fill:var(--surface-2);stroke:var(--axis);stroke-width:1.3"
+      : "fill:var(--s2-wash);stroke:var(--s2);stroke-width:1.3");
+    txt(g, 56, s.y + 27, s.name, "sl sv-ink", "start");
+    txt(g, 330, s.y + 27, s.lock ? "🔒 保持原条件" : "✎ 注入新条件", "sm", "start",
+      s.lock ? "fill:var(--muted)" : "fill:var(--s2);font-weight:650");
+  });
+  arrow(g, "M174,116 L174,126", "var(--muted)", 1.4);
+  arrow(g, "M174,174 L174,184", "var(--muted)", 1.4);
+  arrow(g, "M174,232 L174,242", "var(--muted)", 1.4);
+  txt(g, 40, 316, "→ 结构由高噪声步锁定，编辑不会扩散成全局漂移", "sl sv-ink2", "start");
+  // 右：任意顺序
+  txt(g, 500, 32, "任意顺序编辑", "sb sv-ink", "start");
+  txt(g, 500, 52, "生成完 81 帧后，单独重生成中段", "sm sv-muted", "start");
+  const bx = 500, bw = 400, by = 108, bh = 46;
+  const seg = [
+    { w: 0.30, label: "帧 1–25 · 冻结", clean: true },
+    { w: 0.30, label: "帧 26–49 · 重新去噪", clean: false },
+    { w: 0.40, label: "帧 50–81 · 冻结", clean: true }
+  ];
+  let sx = bx;
+  seg.forEach(s => {
+    const w = bw * s.w - 3;
+    rrect(g, sx, by, w, bh, 7, s.clean
+      ? "fill:var(--s2-wash);stroke:var(--s2);stroke-width:1.3"
+      : "fill:var(--s1)");
+    txt(g, sx + w / 2, by + bh / 2 + 4, s.label, "sm", "middle",
+      s.clean ? "fill:var(--ink-2)" : "fill:#ffffff;font-weight:650");
+    sx += bw * s.w;
+  });
+  arrow(g, "M570,96 C600,72 626,72 648,100", "var(--s2)", 1.8, "mk-o");
+  txt(g, 560, 78, "过去 x₀ 条件", "sm", "end", "fill:var(--s2)");
+  arrow(g, "M846,96 C816,72 790,72 768,100", "var(--s2)", 1.8, "mk-o");
+  txt(g, 856, 78, "未来 x₀ 条件", "sm", "start", "fill:var(--s2)");
+  txt(g, 500, 196, "式 (7)：双侧干净 token 同时作为条件", "sl sv-ink2", "start");
+  txt(g, 500, 232, "✓ 编辑段与后续帧无缝衔接（第 49→50 帧过渡自然）", "sl", "start", "fill:var(--s3);font-weight:600");
+  txt(g, 500, 262, "✗ 纯因果模型只能向前看：改中段 = 后段全部重生成", "sl sv-muted", "start");
+  txt(g, 500, 292, "可用于：风格化、加新物体、改动作、环境交互等局部重绘", "sm sv-muted", "start");
+})();
+
+/* ================= 图 8：Pareto 散点 ================= */
+(function () {
+  const svg = document.getElementById("paretoSvg");
+  const W = 940, H = 460, L = 74, R = 26, T = 24, B = 64;
+  const pw = W - L - R, ph = H - T - B;
+  const x0 = 20, x1 = 52, y0 = 82.8, y1 = 85.4;
+  const X = v => L + (v - x0) / (x1 - x0) * pw;
+  const Y = v => T + (y1 - v) / (y1 - y0) * ph;
+  const g = el(svg, "g");
+  // 网格 + 轴
+  for (let vy = 83; vy <= 85.4; vy += 0.5) {
+    line(g, L, Y(vy), W - R, Y(vy), "var(--grid)", 1);
+    txt(g, L - 10, Y(vy) + 4, vy.toFixed(1), "sm num sv-muted", "end");
+  }
+  for (let vx = 20; vx <= 50; vx += 5) {
+    line(g, X(vx), H - B, X(vx), H - B + 5, "var(--axis)", 1);
+    txt(g, X(vx), H - B + 22, String(vx), "sm num sv-muted", "middle");
+  }
+  line(g, L, H - B, W - R, H - B, "var(--axis)", 1.2);
+  txt(g, L + pw / 2, H - 14, "FPS（GB200 · 生成 81 帧）→", "sl sv-muted", "middle");
+  const yl = txt(g, 22, T + ph / 2, "VBench 总分 →", "sl sv-muted", "middle");
+  yl.setAttribute("transform", "rotate(-90 22 " + (T + ph / 2) + ")");
+  // Wan2.1 参考线
+  line(g, L, Y(84.26), W - R, Y(84.26), "var(--axis)", 1.2);
+  txt(g, L + 6, Y(84.26) + 16, "Wan2.1 双向底座 84.26（1.3 FPS，超出横轴左侧）", "sm sv-muted", "start");
+  const ours = [
+    { x: 25.8, y: 85.07, l: "15-3-3", nfe: 5 },
+    { x: 29.4, y: 84.63, l: "7-7-7", nfe: 5 },
+    { x: 24.9, y: 84.03, l: "3×7", nfe: 5 },
+    { x: 45.6, y: 84.29, l: "12-6-3", nfe: 3 },
+    { x: 48.9, y: 83.92, l: "7-7-7", nfe: 3 },
+    { x: 41.5, y: 83.91, l: "3×7", nfe: 3 }
+  ];
+  const base = [
+    { x: 24.9, y: 84.31, l: "Self-Forcing（块级）", nfe: 5 },
+    { x: 24.9, y: 84.26, l: "Self-Forcing（帧级）", nfe: 5 },
+    { x: 24.9, y: 83.11, l: "Self-Forcing++", nfe: 5 }
+  ];
+  function dots(arr, color, name) {
+    arr.forEach(p => {
+      const hit = el(g, "circle", { cx: X(p.x), cy: Y(p.y), r: 15, class: "hitring", style: "fill:transparent" });
+      el(g, "circle", { cx: X(p.x), cy: Y(p.y), r: 6.5,
+        style: "fill:" + color + ";stroke:var(--surface);stroke-width:2", "pointer-events": "none" });
+      bindTip(hit, () => [
+        ["t-val", (name === "ours" ? "Flex-Forcing (" + p.l + ")" : p.l)],
+        ["t-lbl", "VBench 总分 " + p.y.toFixed(2)],
+        ["t-lbl", p.x.toFixed(1) + " FPS · NFE=" + p.nfe]
+      ]);
+      hit.setAttribute("aria-label", (name === "ours" ? "Flex-Forcing " + p.l : p.l) + " VBench " + p.y + "，" + p.x + " FPS");
+    });
+  }
+  dots(base, "var(--s2)", "base");
+  dots(ours, "var(--s1)", "ours");
+  // 选择性直接标注
+  txt(g, X(25.8) + 12, Y(85.07) + 1, "15-3-3 · 85.07（最佳质量）", "sm sv-ink", "start", "font-weight:650");
+  txt(g, X(45.6) + 2, Y(84.29) - 14, "12-6-3 · 45.6 FPS（NFE=3）", "sm sv-ink", "middle", "font-weight:650");
+  txt(g, X(24.9) - 12, Y(84.31) - 10, "Self-Forcing 84.31", "sm sv-ink2", "end");
+  txt(g, X(29.4) + 11, Y(84.63) + 4, "7-7-7", "sm sv-muted", "start");
+})();
+
+/* ================= 图 9：30s 分组柱状 ================= */
+(function () {
+  const svg = document.getElementById("barSvg");
+  const W = 940, H = 400, L = 74, R = 26, T = 26, B = 66;
+  const pw = W - L - R, ph = H - T - B;
+  const Y = v => T + (1 - v / 90) * ph;
+  const g = el(svg, "g");
+  const methods = [
+    { n: "Flex-Forcing", c: "var(--s1)" },
+    { n: "Infinity-RoPE", c: "var(--s2)" },
+    { n: "Self-Forcing", c: "var(--s3)" },
+    { n: "LongLive*", c: "var(--s4)" }
+  ];
+  const groups = [
+    { name: "VBench-Long 总分", vals: [84.01, 82.84, 81.49, 82.80] },
+    { name: "动态程度 Dynamic Degree", vals: [71.27, 50.26, 41.93, 38.89] }
+  ];
+  for (let vy = 0; vy <= 90; vy += 20) {
+    line(g, L, Y(vy), W - R, Y(vy), vy === 0 ? "var(--axis)" : "var(--grid)", vy === 0 ? 1.2 : 1);
+    txt(g, L - 10, Y(vy) + 4, String(vy), "sm num sv-muted", "end");
+  }
+  const bw = 22, gap = 8, gwidth = 4 * bw + 3 * gap;
+  const centers = [L + pw * 0.28, L + pw * 0.72];
+  groups.forEach((grp, gi) => {
+    const gx = centers[gi] - gwidth / 2;
+    grp.vals.forEach((v, mi) => {
+      const bx = gx + mi * (bw + gap);
+      const bh = Y(0) - Y(v);
+      topRoundRect(g, bx, Y(v), bw, bh, 4, "fill:" + methods[mi].c);
+      const hit = el(g, "rect", { x: bx - gap / 2, y: T, width: bw + gap, height: ph, class: "hitring", style: "fill:transparent" });
+      bindTip(hit, () => [
+        ["t-val", String(v.toFixed(2))],
+        ["t-lbl", methods[mi].n + " · " + grp.name]
+      ]);
+      hit.setAttribute("aria-label", methods[mi].n + " " + grp.name + " " + v);
+      if (mi === 0) txt(g, bx + bw / 2, Y(v) - 8, v.toFixed(2), "sm num sv-ink", "middle", "font-weight:700");
+    });
+    txt(g, centers[gi], H - 34, grp.name, "sl sv-ink2", "middle");
+  });
+  txt(g, centers[1], H - 12, "*LongLive 专门在长视频上训练；其余方法均为短训长测", "sm sv-muted", "middle");
+  // 图例（HTML）
+  const lg = document.getElementById("barLegend");
+  methods.forEach(m => {
+    const it = document.createElement("span"); it.className = "item";
+    const sw = document.createElement("span"); sw.className = "sw"; sw.style.background = m.c;
+    const tx = document.createElement("span"); tx.textContent = m.n;
+    it.appendChild(sw); it.appendChild(tx); lg.appendChild(it);
+  });
+})();
+
+/* ================= 图 10：脉络 ================= */
+(function () {
+  const g = document.getElementById("lineage");
+  function node(x, title, subs, accent) {
+    rrect(g, x, 36, 262, 138, 12, "fill:var(--surface);stroke:" + (accent ? "var(--s1)" : "var(--border)") + ";stroke-width:" + (accent ? 1.8 : 1.2));
+    txt(g, x + 131, 64, title, "sb sv-ink", "middle");
+    subs.forEach((s, i) => txt(g, x + 131, 92 + i * 22, s, "sm sv-ink2", "middle"));
+  }
+  node(30, "CausVid · CVPR 2025", ["双向 → 因果的 DMD 蒸馏", "因果掩码 + KV 缓存", "调度固定、单向"]);
+  arrow(g, "M296,105 L332,105", "var(--muted)", 2);
+  node(336, "Self-Forcing · 2025", ["自回滚：在自己生成的", "历史上去噪，训推一致", "缓解暴露偏差"]);
+  arrow(g, "M602,105 L638,105", "var(--muted)", 2);
+  node(642, "Flex-Forcing · ICML 2026", ["随机分块蒸馏 + K-Projection", "因果 ⇄ 双向共存一套权重", "范式成为推理时的旋钮"], true);
+})();
+</script>
+</body>
+</html>

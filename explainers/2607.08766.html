@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OPSD-V 方法详解 · 用真实长视频做在线策略自蒸馏</title>
+<style>
+:root{
+  color-scheme: light;
+  --surface-1:#fcfcfb; --plane:#f9f9f7;
+  --text-primary:#0b0b0b; --text-secondary:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.10);
+  --series-1:#2a78d6; --series-2:#eb6834; --series-3:#1baf7a;
+  --good:#0ca30c; --good-text:#006300; --critical:#d03b3b; --warning:#fab219;
+  --chip:rgba(11,11,11,0.045);
+  --s1-wash:rgba(42,120,214,0.10); --s2-wash:rgba(235,104,52,0.10); --s3-wash:rgba(27,175,122,0.12);
+}
+@media (prefers-color-scheme: dark){
+  :root:where(:not([data-theme="light"])){
+    color-scheme: dark;
+    --surface-1:#1a1a19; --plane:#0d0d0d;
+    --text-primary:#ffffff; --text-secondary:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+    --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70;
+    --good:#0ca30c; --good-text:#0ca30c; --critical:#d03b3b; --warning:#fab219;
+    --chip:rgba(255,255,255,0.06);
+    --s1-wash:rgba(57,135,229,0.16); --s2-wash:rgba(217,89,38,0.16); --s3-wash:rgba(25,158,112,0.18);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --surface-1:#1a1a19; --plane:#0d0d0d;
+  --text-primary:#ffffff; --text-secondary:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+  --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70;
+  --good:#0ca30c; --good-text:#0ca30c; --critical:#d03b3b; --warning:#fab219;
+  --chip:rgba(255,255,255,0.06);
+  --s1-wash:rgba(57,135,229,0.16); --s2-wash:rgba(217,89,38,0.16); --s3-wash:rgba(25,158,112,0.18);
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--plane); color:var(--text-primary);
+  font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:14px; line-height:1.7;
+}
+.wrap{max-width:1180px;margin:0 auto;padding:28px 20px 80px}
+header.top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:6px}
+h1{font-size:25px;margin:0 0 6px;letter-spacing:-.01em;line-height:1.3}
+.sub{color:var(--text-secondary);font-size:13px;margin:0;max-width:860px}
+.metachips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.chip{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;background:var(--chip);color:var(--text-secondary);white-space:nowrap}
+.chip a{color:inherit}
+button{font-family:inherit;font-size:13px;color:var(--text-primary)}
+.tbtn{background:var(--surface-1);border:1px solid var(--border);border-radius:8px;padding:7px 13px;cursor:pointer}
+.tbtn:hover{background:var(--chip)}
+section{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:22px;margin-top:20px}
+h2{font-size:17px;margin:0 0 4px}
+h2 .no{color:var(--muted);font-weight:600;margin-right:8px}
+h3{font-size:14px;margin:18px 0 6px}
+p{margin:8px 0}
+.note{color:var(--text-secondary);font-size:12.5px;margin:0 0 12px}
+.small{font-size:12px;color:var(--muted)}
+a{color:var(--series-1);text-decoration:none}
+a:hover{text-decoration:underline}
+b,strong{font-weight:600}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:14px;margin-top:18px}
+.tile{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:16px 18px}
+.tile .v{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.2}
+.tile .k{font-size:12.5px;color:var(--text-secondary);margin-top:4px}
+.tile .s{font-size:11.5px;color:var(--muted);margin-top:7px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:2px 0 10px;font-size:12.5px;color:var(--text-secondary)}
+.legend .li{display:flex;align-items:center;gap:7px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:3px;flex:none}
+.dot.round{border-radius:50%}
+svg{font-family:inherit;display:block}
+svg text{fill:var(--text-secondary)}
+.svgbox{overflow-x:auto}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px;margin-top:12px}
+.card{border:1px solid var(--border);border-left:3px solid var(--series-1);border-radius:10px;padding:14px 16px;background:var(--surface-1)}
+.card.orange{border-left-color:var(--series-2)}
+.card.green{border-left-color:var(--series-3)}
+.card.red{border-left-color:var(--critical)}
+.card.yellow{border-left-color:var(--warning)}
+.card h4{margin:0 0 6px;font-size:13.5px}
+.card p{margin:0 0 4px;font-size:12.8px;color:var(--text-secondary)}
+/* 公式 */
+.eq{background:var(--chip);border-radius:10px;padding:13px 18px;margin:12px 0;overflow-x:auto;
+    font-family:"STIX Two Math","Cambria Math",Georgia,"Times New Roman",serif;font-size:15.5px;color:var(--text-primary);white-space:nowrap}
+.eq .tag{float:right;font-family:system-ui,sans-serif;font-size:11px;color:var(--muted);margin-left:14px;line-height:2}
+.eq i{font-style:italic}
+.eq sub,.eq sup{font-size:70%}
+.eq .sg{border:1px solid var(--axis);border-radius:5px;padding:0 4px;font-size:85%;font-family:system-ui,sans-serif;color:var(--text-secondary);vertical-align:1px}
+em.t{font-style:normal;font-family:Georgia,serif}
+/* 缓存网格 */
+.kvwrap{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:10px}
+@media (max-width:860px){.kvwrap{grid-template-columns:1fr}}
+.kvpanel{border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+.kvpanel h4{margin:0 0 2px;font-size:13px}
+.kvpanel .who{font-size:11.5px;color:var(--muted);margin-bottom:10px}
+.kvrow{display:flex;align-items:center;gap:4px;margin:5px 0}
+.kvrow .ridx{width:54px;flex:none;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.kvc{height:20px;flex:1 1 0;max-width:34px;border-radius:4px;position:relative;cursor:default}
+.kvc.real{background:var(--series-3)}
+.kvc.gen{background:var(--series-1)}
+.kvc.cur{background:transparent;border:1.5px dashed var(--axis)}
+.kvc.warm{background:var(--series-1);opacity:.35}
+.kvc:hover{outline:2px solid var(--text-primary);outline-offset:1px}
+/* 表格 */
+.tbl-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:10px;margin-top:10px}
+table{border-collapse:collapse;width:100%;font-size:12.8px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--grid);vertical-align:top}
+th{background:var(--surface-1);font-weight:600;color:var(--text-secondary);font-size:11.8px;white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--chip)}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.nm{font-weight:600;white-space:nowrap}
+.up{color:var(--good-text);font-weight:600}
+.dn{color:var(--muted)}
+/* 算法伪代码 */
+.algo{border:1px solid var(--border);border-radius:10px;padding:14px 18px;font-size:12.8px;line-height:1.95;margin-top:10px;overflow-x:auto}
+.algo .ln{white-space:nowrap}
+.algo .kw{color:var(--series-1);font-weight:600}
+.algo .cm{color:var(--muted)}
+.algo .ind1{padding-left:22px}.algo .ind2{padding-left:44px}.algo .ind3{padding-left:66px}
+.algo .hl-t{background:var(--s2-wash);border-radius:4px;padding:0 4px}
+.algo .hl-s{background:var(--s1-wash);border-radius:4px;padding:0 4px}
+.algo .hl-g{background:var(--s3-wash);border-radius:4px;padding:0 4px}
+/* 提示框 */
+#tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .1s;background:var(--surface-1);border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:12px;box-shadow:0 6px 22px rgba(0,0,0,.16);max-width:300px;z-index:50}
+#tip b{display:block;margin-bottom:3px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+@media (max-width:860px){.two{grid-template-columns:1fr}}
+footer{color:var(--muted);font-size:12px;margin-top:26px;line-height:1.9}
+.toc{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.toc a{font-size:12px;background:var(--chip);border-radius:999px;padding:3px 11px;color:var(--text-secondary)}
+.toc a:hover{color:var(--text-primary);text-decoration:none}
+.qa{border-left:3px solid var(--series-3);background:var(--s3-wash);border-radius:0 10px 10px 0;padding:12px 16px;margin:14px 0;font-size:13px}
+.qa b{display:block;margin-bottom:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div>
+    <h1>OPSD-V:用「真实长视频当特权上下文」的在线策略自蒸馏<br><span style="font-size:15px;font-weight:500;color:var(--text-secondary)">On-Policy Self-Distillation for Post-Training Few-Step Autoregressive Video Generators</span></h1>
+    <p class="sub">对已经蒸馏好的少步自回归(AR)视频生成器做<b>后训练</b>:学生完全按推理流程自回滚,教师在<b>同样的去噪状态</b>上、换一份「旧历史被真实视频替换」的更干净 KV 缓存来给出修正目标。不改采样器、不加推理开销,专治一分钟级长视频的误差累积与动态减弱。</p>
+    <div class="metachips">
+      <span class="chip"><a href="https://arxiv.org/abs/2607.08766" target="_blank">arXiv 2607.08766</a></span>
+      <span class="chip">2026-07-09 · cs.CV</span>
+      <span class="chip">美团 · 港科大 HKUST · 港城大 CityU</span>
+      <span class="chip">Liu, Wang, Gao, He, Ma, Wan, Zhang, Wei, Chen</span>
+      <span class="chip"><a href="https://meigen-ai.github.io/OPSD-V" target="_blank">项目主页</a></span>
+      <span class="chip"><a href="https://github.com/MeiGen-AI/OPSD-V" target="_blank">代码 MeiGen-AI/OPSD-V</a></span>
+    </div>
+  </div>
+  <button class="tbtn" id="theme">切换深浅色</button>
+</header>
+
+<div class="toc">
+  <a href="#s1">① 背景:少步 AR 视频生成</a>
+  <a href="#s2">② 问题:短片教师的天花板</a>
+  <a href="#s3">③ 关键诊断实验</a>
+  <a href="#s4">④ OPSD 思想谱系</a>
+  <a href="#s5">⑤ 方法总览</a>
+  <a href="#s6">⑥ 教师缓存构造</a>
+  <a href="#s7">⑦ 损失与监督调度</a>
+  <a href="#s8">⑧ 训练算法与显存</a>
+  <a href="#s9">⑨ 实验与结果</a>
+  <a href="#s10">⑩ 消融</a>
+  <a href="#s11">⑪ 定位与讨论</a>
+</div>
+
+<div class="tiles">
+  <div class="tile"><div class="v" style="color:var(--good-text)">+17.5%</div><div class="k">LongLive 动态程度(Dynamic Degree)相对提升</div><div class="s">0.5012 → 0.5890(VBenchLong,一分钟生成)</div></div>
+  <div class="tile"><div class="v">0 额外开销</div><div class="k">推理路径完全不变</div><div class="s">仍是 4 步采样(NFE=4)、同一 attention-sink KV 缓存机制</div></div>
+  <div class="tile"><div class="v">82.5%</div><div class="k">用户研究总体偏好率(去除平局)</div><div class="s">10 人 × 20 组对比;含平局时为 66.0%</div></div>
+  <div class="tile"><div class="v">3,800 段</div><div class="k">约 1 分钟长视频即可完成后训练</div><div class="s">480p · LoRA 微调 · 200 迭代 × 24 张 H800</div></div>
+</div>
+
+<section id="s1">
+  <h2><span class="no">①</span>背景:少步自回归视频生成是怎么跑的</h2>
+  <p class="note">读懂 OPSD-V 只需要三个部件:<b>按 chunk 的自回归分解</b>、<b>KV 缓存承载历史</b>、<b>每个 chunk 只做 K=4 步流匹配去噪</b>。Self-Forcing、LongLive 等模型(均基于 Wan2.1-T2V-1.3B)就是这样从双向扩散大模型经 DMD 式蒸馏得来的。</p>
+  <div class="eq"><span class="tag">AR 分解</span><i>p</i><sub><i>θ</i></sub>(<i>x</i><sub>1:N</sub> | <i>c</i>) = ∏<sub><i>i</i>=1..N</sub> <i>p</i><sub><i>θ</i></sub>(<i>x</i><sub><i>i</i></sub> | <i>x</i><sub>&lt;<i>i</i></sub>, <i>c</i>) ,历史 <i>x</i><sub>&lt;<i>i</i></sub> 以 KV 缓存 <i>h</i><sub><i>i</i></sub> 的形式存在</div>
+  <div class="svgbox">
+  <svg viewBox="0 0 1120 300" width="100%" role="img" aria-label="少步AR视频生成流程示意">
+    <!-- cache row -->
+    <text x="10" y="26" font-size="12.5" font-weight="600" fill="var(--text-primary)">KV 缓存 h<tspan font-size="9" dy="3">i</tspan><tspan dy="-3"> :已生成的历史 chunk</tspan></text>
+    <g>
+      <rect x="10" y="40" width="86" height="44" rx="7" fill="var(--series-1)" opacity="0.9"/>
+      <text x="53" y="66" text-anchor="middle" font-size="12" fill="#fff">x̂₁</text>
+      <rect x="104" y="40" width="86" height="44" rx="7" fill="var(--series-1)" opacity="0.9"/>
+      <text x="147" y="66" text-anchor="middle" font-size="12" fill="#fff">x̂₂</text>
+      <rect x="198" y="40" width="86" height="44" rx="7" fill="var(--series-1)" opacity="0.9"/>
+      <text x="241" y="66" text-anchor="middle" font-size="12" fill="#fff">x̂₃</text>
+      <text x="310" y="68" font-size="13" fill="var(--muted)">…</text>
+      <rect x="338" y="40" width="96" height="44" rx="7" fill="var(--series-1)" opacity="0.9"/>
+      <text x="386" y="66" text-anchor="middle" font-size="12" fill="#fff">x̂ᵢ₋₁</text>
+    </g>
+    <rect x="442" y="40" width="46" height="44" rx="7" fill="none" stroke="var(--series-3)" stroke-dasharray="4 3" stroke-width="1.5"/>
+    <text x="465" y="66" text-anchor="middle" font-size="11" fill="var(--series-3)">+x̂ᵢ</text>
+    <text x="10" y="106" font-size="11.5" fill="var(--muted)">每 chunk = 3 潜帧(≈0.75 秒)· 因果注意力只看缓存</text>
+
+    <!-- denoise chain for chunk i -->
+    <text x="530" y="26" font-size="12.5" font-weight="600" fill="var(--text-primary)">当前 chunk i:从噪声出发,固定 K=4 步去噪</text>
+    <g font-size="11.5">
+      <rect x="530" y="40" width="74" height="44" rx="7" fill="none" stroke="var(--axis)" stroke-dasharray="4 3" stroke-width="1.5"/>
+      <text x="567" y="60" text-anchor="middle" fill="var(--text-secondary)">z<tspan font-size="8.5" dy="3">i,4</tspan></text>
+      <text x="567" y="76" text-anchor="middle" font-size="10" fill="var(--muted)">高斯噪声</text>
+      <rect x="666" y="40" width="64" height="44" rx="7" fill="none" stroke="var(--axis)" stroke-width="1.5"/>
+      <text x="698" y="66" text-anchor="middle" fill="var(--text-secondary)">z<tspan font-size="8.5" dy="3">i,3</tspan></text>
+      <rect x="792" y="40" width="64" height="44" rx="7" fill="none" stroke="var(--axis)" stroke-width="1.5"/>
+      <text x="824" y="66" text-anchor="middle" fill="var(--text-secondary)">z<tspan font-size="8.5" dy="3">i,2</tspan></text>
+      <rect x="918" y="40" width="64" height="44" rx="7" fill="none" stroke="var(--axis)" stroke-width="1.5"/>
+      <text x="950" y="66" text-anchor="middle" fill="var(--text-secondary)">z<tspan font-size="8.5" dy="3">i,1</tspan></text>
+      <rect x="1042" y="40" width="70" height="44" rx="7" fill="var(--series-1)"/>
+      <text x="1077" y="60" text-anchor="middle" fill="#fff">z<tspan font-size="8.5" dy="3">i,0</tspan><tspan dy="-3">= x̂ᵢ</tspan></text>
+      <text x="1077" y="76" text-anchor="middle" font-size="10" fill="#fff" opacity="0.85">干净 chunk</text>
+      <g stroke="var(--axis)" stroke-width="1.5" fill="none" marker-end="url(#arr)">
+        <path d="M604 62 L662 62"/><path d="M730 62 L788 62"/><path d="M856 62 L914 62"/><path d="M982 62 L1038 62"/>
+      </g>
+      <text x="633" y="54" text-anchor="middle" font-size="10" fill="var(--muted)">Φ</text>
+      <text x="759" y="54" text-anchor="middle" font-size="10" fill="var(--muted)">Φ</text>
+      <text x="885" y="54" text-anchor="middle" font-size="10" fill="var(--muted)">Φ</text>
+      <text x="1010" y="54" text-anchor="middle" font-size="10" fill="var(--muted)">Φ</text>
+    </g>
+    <!-- f_theta box -->
+    <rect x="640" y="140" width="300" height="52" rx="9" fill="var(--s1-wash)" stroke="var(--series-1)" stroke-width="1.5"/>
+    <text x="790" y="162" text-anchor="middle" font-size="12.5" fill="var(--text-primary)">因果视频 DiT 速度预测器 f<tspan font-size="9" dy="3">θ</tspan></text>
+    <text x="790" y="180" text-anchor="middle" font-size="11" fill="var(--text-secondary)">v̂ᵢ,ₖ = f_θ ( zᵢ,ₖ , tₖ , 文本 c , 缓存 hᵢ )</text>
+    <g stroke="var(--series-1)" stroke-width="1.3" fill="none" opacity="0.7">
+      <path d="M698 138 L698 90" marker-end="url(#arrB)"/>
+      <path d="M824 138 L824 90" marker-end="url(#arrB)"/>
+      <path d="M950 138 L950 90" marker-end="url(#arrB)"/>
+    </g>
+    <text x="700" y="120" font-size="10.5" fill="var(--series-1)" opacity="0.9"> 每步给出速度场 v̂,交给求解器 Φ 前进</text>
+    <!-- cache feeds f -->
+    <path d="M386 90 C 420 150, 540 166, 636 166" stroke="var(--series-1)" stroke-width="1.3" fill="none" opacity="0.7" marker-end="url(#arrB)"/>
+    <text x="420" y="152" font-size="10.5" fill="var(--series-1)" opacity="0.9">历史缓存作为条件</text>
+    <!-- write back -->
+    <path d="M1077 90 C 1077 245, 640 258, 467 92" stroke="var(--series-3)" stroke-width="1.6" fill="none" stroke-dasharray="6 4" marker-end="url(#arrG)"/>
+    <text x="640" y="262" text-anchor="middle" font-size="11.5" fill="var(--series-3)" font-weight="600">写回缓存:hᵢ₊₁ = hᵢ ⊕ KV_θ(x̂ᵢ) —— 未来所有 chunk 都递归依赖这份自生成历史</text>
+    <defs>
+      <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--axis)"/></marker>
+      <marker id="arrB" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--series-1)"/></marker>
+      <marker id="arrG" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--series-3)"/></marker>
+      <marker id="arrO" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--series-2)"/></marker>
+      <marker id="arrR" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--critical)"/></marker>
+      <marker id="arrT" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--text-secondary)"/></marker>
+    </defs>
+  </svg>
+  </div>
+  <p class="small">符号约定(全文一致):z<sub>i,k</sub> 为 chunk i 在第 k 个去噪步的含噪潜变量;t<sub>k</sub> 为时间步;Φ 为数值求解器的一步转移;⊕ 表示向缓存追加 KV 条目。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="no">②</span>问题:长时程退化,根子在「短片教师 + 被污染的缓存」</h2>
+  <p class="note">DMD 式蒸馏保住了 4 步采样的效率,但它的监督目标来自一个<b>双向短片教师</b>——教师本身只见过几秒的短 clip。滚动到一分钟时,自生成缓存里的误差不断被写回、再被条件化,形成正反馈。</p>
+  <div class="svgbox">
+  <svg viewBox="0 0 1120 240" width="100%" role="img" aria-label="长时程退化与短片教师覆盖范围示意">
+    <text x="10" y="22" font-size="12.5" font-weight="600" fill="var(--text-primary)">自回归滚动 60 个 chunk(≈ 一分钟)</text>
+    <g id="degradeStrip"></g>
+    <!-- teacher coverage -->
+    <g>
+      <path d="M12 118 L12 130 L232 130 L232 118" stroke="var(--series-2)" stroke-width="2" fill="none"/>
+      <text x="122" y="150" text-anchor="middle" font-size="12" fill="var(--series-2)" font-weight="600">双向短片教师能「管到」的范围</text>
+      <text x="122" y="167" text-anchor="middle" font-size="11" fill="var(--text-secondary)">DMD 的目标分布只定义在短 clip 上</text>
+      <path d="M250 118 L250 130 L1110 130 L1110 118" stroke="var(--critical)" stroke-width="2" fill="none"/>
+      <text x="680" y="150" text-anchor="middle" font-size="12" fill="var(--critical)" font-weight="600">监督真空区:误差累积 → 动态减弱 · 模糊 · 闪烁 · 语义漂移</text>
+      <text x="680" y="167" text-anchor="middle" font-size="11" fill="var(--text-secondary)">退化的 chunk 被写回 KV 缓存,再作为条件生成下一个 chunk,形成恶性循环</text>
+    </g>
+    <g font-size="12" >
+      <text x="10" y="205" fill="var(--text-primary)" font-weight="600">DMD 的另外两个痛点:</text>
+      <text x="10" y="226" fill="var(--text-secondary)">a. 分布级监督(chunk/clip 层面),不是沿去噪轨迹逐步的稠密修正目标;  b. 蒸馏本身可能带来动态减弱与颜色漂移等副作用。</text>
+    </g>
+  </svg>
+  </div>
+  <div class="qa"><b>论文的中心问题</b>能否把「真实长视频数据」变成更强的训练监督,同时完全保住原有的少步 AR 生成能力?<br>
+  <span class="small">直接答案不是 teacher forcing(把真视频塞进上下文当硬目标会破坏推理时的滚动分布),也不是重建损失(约束不到模型自己滚出来的缓存状态)——而是让真视频只当<b>教师侧的特权上下文</b></span></div>
+</section>
+
+<section id="s3">
+  <h2><span class="no">③</span>关键诊断实验:不训练,只在测试时「换缓存」,长视频就稳了</h2>
+  <p class="note">这是整个方法的动机来源(论文图 2 下半)。取<b>原始 LongLive 模型</b>,参数一动不动、采样器不变,从同一个真实首 chunk 出发,只改变缓存内容:</p>
+  <div class="svgbox">
+  <svg viewBox="0 0 1120 210" width="100%" role="img" aria-label="测试时缓存干预诊断实验">
+    <g font-size="12">
+      <text x="10" y="24" font-weight="600" fill="var(--text-primary)">设置 A · 标准推理</text>
+      <g id="diagRowA"></g>
+      <text x="10" y="100" font-weight="600" fill="var(--text-primary)">设置 B · 仅把「旧历史」的 KV 换成真实视频特征(最近一个 chunk 仍为自生成)</text>
+      <g id="diagRowB"></g>
+    </g>
+    <g font-size="12.5">
+      <text x="880" y="52" fill="var(--critical)" font-weight="600">→ 长滚动明显退化</text>
+      <text x="880" y="128" fill="var(--good-text)" font-weight="600">→ 长滚动明显更稳</text>
+    </g>
+    <text x="10" y="178" font-size="12.5" fill="var(--text-primary)" font-weight="600">结论:自生成 KV 缓存的退化,是长时程崩坏的关键瓶颈。</text>
+    <text x="10" y="198" font-size="12" fill="var(--text-secondary)">既然测试时换上干净上下文就能变稳,那就在训练时让「换了干净缓存的自己」当教师,把这种稳定性蒸馏回学生。</text>
+  </svg>
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="no">④</span>OPSD 思想谱系:从 LLM 到文生图,再到 AR 视频</h2>
+  <p class="note">在线策略自蒸馏(On-Policy Self-Distillation)的通用配方:<b>学生按自己当前策略采样轨迹,教师(自身或其 EMA 副本)在同一轨迹上、凭借额外的特权上下文 r 给出更强的目标分布</b>。三代实例的差别只在「状态」和「特权上下文」是什么。</p>
+  <div class="eq"><span class="tag">LLM 版 OPSD</span>ℒ<sub>OPSD</sub> = 𝔼<sub><i>ô</i>∼π<sub>θ</sub></sub> [ Σ<sub><i>m</i></sub> <i>D</i> ( π<sub>θ̄</sub>(· | <i>q</i>, <b style="color:var(--series-3)">r</b>, <i>ô</i><sub>&lt;m</sub>) ∥ π<sub>θ</sub>(· | <i>q</i>, <i>ô</i><sub>&lt;m</sub>) ) ] ,前缀 <i>ô</i><sub>&lt;m</sub> 永远来自学生自己</div>
+  <div class="tbl-scroll"><table>
+    <thead><tr><th style="width:120px"></th><th>OPSD(LLM)</th><th>D-OPSD(文生图)</th><th style="background:var(--s1-wash)">OPSD-V(AR 视频,本文)</th></tr></thead>
+    <tbody>
+      <tr><td class="nm">学生的在线状态</td><td>自采样的 token 前缀 ô<sub>&lt;m</sub></td><td>自己少步去噪轨迹上的 (z, t)</td><td style="background:var(--s1-wash)">(z<sup>s</sup><sub>i,k</sub>, t<sub>k</sub>) <b>+ 自生成 KV 缓存 h<sup>s</sup><sub>i</sub></b> —— 状态里多了会演化、会被污染的时序缓存</td></tr>
+      <tr><td class="nm">教师的特权上下文 r</td><td>示范样例 / 中间推理等</td><td>文本提示 + 配对真实图像</td><td style="background:var(--s1-wash)">真实长视频 chunk,替换教师缓存里的旧历史</td></tr>
+      <tr><td class="nm">匹配什么</td><td>下一 token 分布(散度 D)</td><td>去噪预测</td><td style="background:var(--s1-wash)">速度场 v̂,逐 (chunk, 步) 的稠密 MSE</td></tr>
+      <tr><td class="nm">保住的能力</td><td>原推理路径</td><td>少步出图</td><td style="background:var(--s1-wash)">4 步 AR 流式生成 + attention-sink 缓存,推理零改动</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small">相关工作定位:Self-Forcing++ 拉长自回滚、Reward-Forcing 加奖励反馈与 EMA sink、LongLive 做 KV recache 与流式长调优——它们的监督仍受限于短片教师;另有并行工作用双头 DiT 引入真实长视频,但面向非因果范式。OPSD-V 的差异点在于:把「真长视频 = 教师特权上下文」用于<b>因果少步 AR 模型的缓存感知(cache-aware)后训练</b>,监督直接落在学生推理时会经过的缓存状态上。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="no">⑤</span>方法总览:一次前向里的「双分支、同状态、异缓存」</h2>
+  <p class="note">以生成第 7 个 chunk 为例(对应论文式 13)。<b>学生分支</b>严格复刻推理:从噪声 4 步去噪,把生成结果写回自己的缓存;<b>教师分支不采样自己的轨迹</b>,而是在学生访问过的每个去噪状态 (z<sup>s</sup><sub>7,k</sub>, t<sub>k</sub>) 上被评估一次,只是手里那份 KV 缓存更干净。</p>
+  <div class="legend">
+    <div class="li"><span class="dot" style="background:var(--series-3)"></span>真实视频 chunk(特权上下文)</div>
+    <div class="li"><span class="dot" style="background:var(--series-1)"></span>学生自生成 chunk</div>
+    <div class="li"><span class="dot" style="background:var(--series-2)"></span>教师分支(EMA LoRA)</div>
+    <div class="li"><span class="dot round" style="background:var(--critical)"></span>梯度流(只进学生 LoRA)</div>
+  </div>
+  <div class="svgbox">
+  <svg viewBox="0 0 1120 650" width="100%" role="img" aria-label="OPSD-V 双分支方法总览图">
+    <!-- panels -->
+    <rect x="8" y="8" width="540" height="400" rx="12" fill="var(--s1-wash)" stroke="var(--series-1)" stroke-width="1.5"/>
+    <rect x="572" y="8" width="540" height="400" rx="12" fill="var(--s2-wash)" stroke="var(--series-2)" stroke-width="1.5"/>
+    <text x="28" y="36" font-size="14" font-weight="700" fill="var(--text-primary)">学生分支 f_θ(可训练 LoRA)</text>
+    <text x="28" y="55" font-size="11.5" fill="var(--text-secondary)">= 部署时的真实滚动:on-policy 状态由它定义</text>
+    <text x="592" y="36" font-size="14" font-weight="700" fill="var(--text-primary)">教师分支 f_θ̄(学生 LoRA 的 EMA 副本,衰减 0.9999)</text>
+    <text x="592" y="55" font-size="11.5" fill="var(--text-secondary)">只在训练期存在,只产出 stop-gradient 目标</text>
+
+    <!-- student cache -->
+    <text x="28" y="86" font-size="12" font-weight="600" fill="var(--text-primary)">学生缓存 h</text>
+    <text x="106" y="86" font-size="12" fill="var(--text-secondary)">(式 11):首块真实 + 其余全是自己生成</text>
+    <g font-size="11.5">
+      <rect x="28" y="96" width="72" height="40" rx="6" fill="var(--series-3)"/><text x="64" y="120" text-anchor="middle" fill="#fff">x₁ᵈᵃᵗᵃ</text>
+      <rect x="106" y="96" width="72" height="40" rx="6" fill="var(--series-1)"/><text x="142" y="120" text-anchor="middle" fill="#fff">x̂₂ˢ</text>
+      <rect x="184" y="96" width="72" height="40" rx="6" fill="var(--series-1)"/><text x="220" y="120" text-anchor="middle" fill="#fff">x̂₃ˢ</text>
+      <rect x="262" y="96" width="72" height="40" rx="6" fill="var(--series-1)"/><text x="298" y="120" text-anchor="middle" fill="#fff">x̂₄ˢ</text>
+      <rect x="340" y="96" width="72" height="40" rx="6" fill="var(--series-1)"/><text x="376" y="120" text-anchor="middle" fill="#fff">x̂₅ˢ</text>
+      <rect x="418" y="96" width="72" height="40" rx="6" fill="var(--series-1)"/><text x="454" y="120" text-anchor="middle" fill="#fff">x̂₆ˢ</text>
+    </g>
+    <!-- teacher cache -->
+    <text x="592" y="86" font-size="12" font-weight="600" fill="var(--text-primary)">教师缓存 h</text>
+    <text x="670" y="86" font-size="12" fill="var(--text-secondary)">(式 12):旧历史换成真实视频,最近一块保留学生的</text>
+    <g font-size="11.5">
+      <rect x="592" y="96" width="72" height="40" rx="6" fill="var(--series-3)"/><text x="628" y="120" text-anchor="middle" fill="#fff">x₁ᵈᵃᵗᵃ</text>
+      <rect x="670" y="96" width="72" height="40" rx="6" fill="var(--series-3)"/><text x="706" y="120" text-anchor="middle" fill="#fff">x₂ᵈᵃᵗᵃ</text>
+      <rect x="748" y="96" width="72" height="40" rx="6" fill="var(--series-3)"/><text x="784" y="120" text-anchor="middle" fill="#fff">x₃ᵈᵃᵗᵃ</text>
+      <rect x="826" y="96" width="72" height="40" rx="6" fill="var(--series-3)"/><text x="862" y="120" text-anchor="middle" fill="#fff">x₄ᵈᵃᵗᵃ</text>
+      <rect x="904" y="96" width="72" height="40" rx="6" fill="var(--series-3)"/><text x="940" y="120" text-anchor="middle" fill="#fff">x₅ᵈᵃᵗᵃ</text>
+      <rect x="982" y="96" width="72" height="40" rx="6" fill="var(--series-1)"/><text x="1018" y="120" text-anchor="middle" fill="#fff">x̂₆ˢ</text>
+    </g>
+    <text x="592" y="156" font-size="11" fill="var(--text-secondary)">↑ 干净的长程上下文,免疫累积误差污染</text>
+    <text x="982" y="156" font-size="11" fill="var(--series-1)">↑ AR 连续性锚点</text>
+
+    <!-- student denoise chain -->
+    <text x="28" y="188" font-size="12" font-weight="600" fill="var(--text-primary)">chunk 7 的 4 步去噪(与推理逐位一致,求解器转移带 sg)</text>
+    <g font-size="11.5">
+      <rect x="28" y="200" width="88 " height="38" rx="6" fill="none" stroke="var(--axis)" stroke-dasharray="4 3" stroke-width="1.5"/><text x="72" y="223" text-anchor="middle" font-size="10.5" fill="var(--text-secondary)">z⁷,₄ ∼ N(0,I)</text>
+      <rect x="146" y="200" width="64" height="38" rx="6" fill="none" stroke="var(--axis)" stroke-width="1.4"/><text x="178" y="223" text-anchor="middle" fill="var(--text-secondary)">z⁷,₃</text>
+      <rect x="240" y="200" width="64" height="38" rx="6" fill="none" stroke="var(--axis)" stroke-width="1.4"/><text x="272" y="223" text-anchor="middle" fill="var(--text-secondary)">z⁷,₂</text>
+      <rect x="334" y="200" width="64" height="38" rx="6" fill="none" stroke="var(--axis)" stroke-width="1.4"/><text x="366" y="223" text-anchor="middle" fill="var(--text-secondary)">z⁷,₁</text>
+      <rect x="428" y="200" width="92" height="38" rx="6" fill="var(--series-1)"/><text x="474" y="223" text-anchor="middle" fill="#fff">z⁷,₀ = x̂₇ˢ</text>
+      <g stroke="var(--axis)" stroke-width="1.4" fill="none" marker-end="url(#arr)">
+        <path d="M116 219 L142 219"/><path d="M210 219 L236 219"/><path d="M304 219 L330 219"/><path d="M398 219 L424 219"/>
+      </g>
+      <text x="129" y="212" text-anchor="middle" font-size="9.5" fill="var(--muted)">sg·Φ</text>
+      <text x="223" y="212" text-anchor="middle" font-size="9.5" fill="var(--muted)">sg·Φ</text>
+      <text x="317" y="212" text-anchor="middle" font-size="9.5" fill="var(--muted)">sg·Φ</text>
+      <text x="411" y="212" text-anchor="middle" font-size="9.5" fill="var(--muted)">sg·Φ</text>
+    </g>
+    <!-- student model box -->
+    <rect x="70" y="286" width="410" height="56" rx="9" fill="var(--surface-1)" stroke="var(--series-1)" stroke-width="1.8"/>
+    <text x="275" y="309" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--text-primary)">学生前向:v̂ˢ₇,ₖ = f_θ ( zˢ₇,ₖ , tₖ , c , hˢ₇ )</text>
+    <text x="275" y="328" text-anchor="middle" font-size="11" fill="var(--text-secondary)">条件是自己的缓存(带梯度,式 5)</text>
+    <path d="M259 240 L269 282" stroke="var(--series-1)" stroke-width="1.4" fill="none" marker-end="url(#arrB)"/>
+    <path d="M259 140 C 240 200, 200 250, 190 282" stroke="var(--series-1)" stroke-width="1.4" fill="none" opacity="0.65" marker-end="url(#arrB)"/>
+    <!-- cache write-back loop -->
+    <path d="M474 198 C 480 176, 470 156, 458 144" stroke="var(--series-1)" stroke-width="1.5" stroke-dasharray="5 4" fill="none" marker-end="url(#arrB)"/>
+    <text x="450" y="166" text-anchor="end" font-size="10.5" fill="var(--series-1)">写回缓存(无梯度)</text>
+
+    <!-- teacher model box -->
+    <rect x="642" y="286" width="410" height="56" rx="9" fill="var(--surface-1)" stroke="var(--series-2)" stroke-width="1.8"/>
+    <text x="847" y="309" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--text-primary)">教师前向:v̂ᵗ₇,ₖ = f_θ̄ ( zˢ₇,ₖ , tₖ , c , hᵗ₇ )</text>
+    <text x="847" y="328" text-anchor="middle" font-size="11" fill="var(--text-secondary)">同一个学生状态,只是缓存更干净(无梯度,式 10)</text>
+    <path d="M847 140 L847 282" stroke="var(--series-2)" stroke-width="1.4" fill="none" opacity="0.75" marker-end="url(#arrO)"/>
+    <!-- shared state arrow -->
+    <path d="M366 240 L366 254" stroke="var(--text-secondary)" stroke-width="1.3" fill="none" stroke-dasharray="2 3"/>
+    <text x="28" y="266" font-size="11.5" fill="var(--text-primary)" font-weight="600">同一批 (zˢ₇,ₖ , tₖ) 原样喂给教师 —— 监督位置由学生决定</text>
+    <path d="M382 262 C 500 256, 610 260, 700 286" stroke="var(--text-secondary)" stroke-width="1.6" fill="none" stroke-dasharray="2 3" marker-end="url(#arrT)"/>
+    <text x="980" y="364" text-anchor="middle" font-size="10.5" fill="var(--text-secondary)">教师不采样自己的轨迹:只在学生的状态上被评估</text>
+
+    <!-- EMA arrow -->
+    <path d="M480 314 L638 314" stroke="var(--series-2)" stroke-width="1.4" stroke-dasharray="6 4" fill="none" marker-end="url(#arrO)"/>
+    <text x="559" y="306" text-anchor="middle" font-size="10.5" fill="var(--series-2)">EMA 0.9999</text>
+
+    <!-- loss -->
+    <rect x="330" y="440" width="460" height="64" rx="10" fill="var(--surface-1)" stroke="var(--critical)" stroke-width="1.8"/>
+    <text x="560" y="466" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--text-primary)">ℒ = ‖ v̂ˢ₇,ₖ − sg( v̂ᵗ₇,ₖ ) ‖²₂</text>
+    <text x="560" y="488" text-anchor="middle" font-size="11" fill="var(--text-secondary)">纯速度匹配,K=4 步全部监督 —— 稠密的去噪级修正目标(式 14)</text>
+    <path d="M275 346 C 285 400, 340 430, 400 444" stroke="var(--series-1)" stroke-width="1.6" fill="none" marker-end="url(#arrB)"/>
+    <text x="300" y="404" font-size="11" fill="var(--series-1)">v̂ˢ(带梯度)</text>
+    <path d="M847 346 C 837 400, 780 430, 720 444" stroke="var(--series-2)" stroke-width="1.6" fill="none" marker-end="url(#arrO)"/>
+    <text x="778" y="404" text-anchor="end" font-size="11" fill="var(--series-2)">v̂ᵗ + sg(停止梯度)</text>
+    <!-- gradient back -->
+    <path d="M330 480 C 120 480, 60 420, 68 346" stroke="var(--critical)" stroke-width="1.6" stroke-dasharray="5 4" fill="none" marker-end="url(#arrR)"/>
+    <text x="120" y="466" font-size="11" fill="var(--critical)" font-weight="600">∇θ 只更新学生 LoRA(基座冻结)</text>
+
+    <!-- bottom notes -->
+    <g font-size="11.5">
+      <rect x="8" y="540" width="1104" height="94" rx="10" fill="var(--chip)"/>
+      <text x="28" y="566" fill="var(--text-primary)" font-weight="600">三个不变量,保证「训练里学的就是部署时用的」:</text>
+      <text x="28" y="588" fill="var(--text-secondary)">1. 状态 on-policy:z、t、学生缓存全部来自学生按推理流程的真实滚动;教师只改缓存内容,不改状态位置。</text>
+      <text x="28" y="608" fill="var(--text-secondary)">2. 位置编码一致:双分支共用同一 attention-sink 缓存机制与滚动相对 RoPE,sink 位置同步更新 —— 师生差异纯粹来自缓存内容。</text>
+      <text x="28" y="628" fill="var(--text-secondary)">3. 推理零改动:训练结束后教师分支与真视频缓存整体拆除,采样器、步数 K=4、缓存机制原样保留。</text>
+    </g>
+  </svg>
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="no">⑥</span>教师缓存构造:逐 chunk 看两份缓存长什么样</h2>
+  <p class="note">把式 11/12 沿滚动展开(悬停单元格可看身份)。规律:生成 chunk i 时,学生缓存 = [真①, 学② … 学(i−1)];教师缓存 = [真① … 真(i−2), <b>学(i−1)</b>]。两份缓存<b>长度相同</b>、位置编码相同,只有内容不同。</p>
+  <div class="legend">
+    <div class="li"><span class="dot" style="background:var(--series-3)"></span>真实视频 chunk</div>
+    <div class="li"><span class="dot" style="background:var(--series-1)"></span>学生生成 chunk</div>
+    <div class="li"><span class="dot" style="border:1.5px dashed var(--axis);background:transparent"></span>正在生成的 chunk</div>
+    <div class="li"><span class="dot round" style="background:var(--critical)"></span>行尾「ℒ×4」= 该 chunk 的 4 个去噪步全部计损失</div>
+  </div>
+  <div class="kvwrap">
+    <div class="kvpanel"><h4>学生缓存 hˢᵢ</h4><div class="who">条件 = 部署时会遇到的自生成状态</div><div id="kvS"></div></div>
+    <div class="kvpanel"><h4>教师缓存 hᵗᵢ</h4><div class="who">预热期(i ≤ M=7)不构造教师缓存、不计损失;i &gt; 7 起按式 12 拼装</div><div id="kvT"></div></div>
+  </div>
+  <div class="cards" style="margin-top:16px">
+    <div class="card green"><h4>为什么旧历史要换成真视频?</h4><p>累积误差主要藏在「越滚越脏」的旧缓存里。换成真实 chunk 后,教师的长程上下文不再被污染,给出的速度目标更接近干净数据流形 —— 这正是 ③ 中测试时干预有效的原因。</p></div>
+    <div class="card"><h4>为什么最近一块必须保留学生的?</h4><p>若全换成真视频,教师就退化成 teacher-forced 的「先知」:它预测的是「从真视频状态怎么继续」,与学生「从自己的最新状态怎么继续」语义错位。保留 x̂ˢᵢ₋₁ 让教师做的事恰好是学生需要学的事:<b>从学生当前状态出发的最优延续</b>。</p></div>
+    <div class="card orange"><h4>为什么教师用 EMA 而不是固定模型?</h4><p>教师 LoRA 是学生 LoRA 的指数滑动平均(0.9999),随学生缓慢进化:既比学生平滑稳定,又不会像固定教师那样与学生策略渐行渐远。基座 DiT 全程冻结,教师推理期删除。</p></div>
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="no">⑦</span>损失与监督调度:稠密速度匹配 + 7 块预热</h2>
+  <div class="eq"><span class="tag">式 14 · 总损失</span>ℒ<sub>OPSD-V</sub> = (1/|S|) Σ<sub>(i,k)∈S</sub> ‖ v̂ˢ<sub>i,k</sub> − <span class="sg">sg</span>( v̂ᵗ<sub>i,k</sub> ) ‖²₂</div>
+  <div class="eq"><span class="tag">式 15 · 监督集合</span>S = { (i,k) | i &gt; M, k = 1,…,K } ,  M = 7 , K = 4</div>
+  <p>与 DMD 的分布级监督不同,这里的监督是<b>逐 (chunk, 去噪步) 的稠密修正</b>:60 块的滚动中,每段视频产生 (60−7)×4 = <b>212 个监督对</b>(按论文设置折算)。预热 M=7 的依据:Wan 系 AR 模型原生训练窗口就是 7 个 chunk(3×7=21 潜帧)——出了这个「舒适区」,缓存退化才真正开始,监督火力应集中在那里。预热块照常生成、照常写入缓存,只是不计损失。</p>
+  <div class="svgbox"><svg id="schedSvg" viewBox="0 0 1120 130" width="100%" role="img" aria-label="60个chunk的监督调度时间轴"></svg></div>
+</section>
+
+<section id="s8">
+  <h2><span class="no">⑧</span>训练算法与显存技巧:算完一步、立刻回传、马上放掉</h2>
+  <p class="note">长滚动训练的天敌是激活显存:朴素实现要攒着全部 212 个监督对的计算图直到滚动结束。OPSD-V 的损失天然可分解(求解器转移带 sg、缓存写入无梯度),于是可以<b>逐 (i,k) 立即反传、只累积参数梯度 g</b>,任何时刻只保留一张学生前向图。</p>
+  <div class="eq"><span class="tag">式 16 · 梯度分解</span>∇<sub>θ</sub> ℒ = Σ<sub>(i,k)∈S</sub> ∇<sub>θ</sub> ℓ<sub>i,k</sub> / |S| ,  ℓ<sub>i,k</sub> = ‖ v̂ˢ<sub>i,k</sub> − <span class="sg">sg</span>( v̂ᵗ<sub>i,k</sub> ) ‖²₂</div>
+  <div class="two">
+  <div>
+  <div class="algo">
+    <div class="ln"><span class="kw">算法 1</span> · OPSD-V 显存高效训练(每段长视频)</div>
+    <div class="ln">1 采样长视频与条件 (x<sup>data</sup><sub>1:N</sub>, c);首块 x<sup>data</sup>₁ 初始化<b>脱离梯度</b>的学生缓存;g ← 0</div>
+    <div class="ln">2 <span class="kw">for</span> i = 2 … N:</div>
+    <div class="ln ind1">3 采样初始噪声 zˢ<sub>i,K</sub> ∼ N(0, I)</div>
+    <div class="ln ind1">4 <span class="kw">if</span> i &gt; M: <span class="hl-t">按式 12 构造教师缓存 hᵗᵢ(真旧史 + 最近学生块)</span></div>
+    <div class="ln ind1">5 <span class="kw">for</span> k = K … 1:</div>
+    <div class="ln ind2">6 <span class="kw">if</span> i &gt; M:</div>
+    <div class="ln ind3"><span class="hl-t">教师预测(无梯度):v̂ᵗ ← f_θ̄(zˢ, tₖ, c, hᵗᵢ)</span></div>
+    <div class="ln ind3"><span class="hl-s">学生预测(带梯度):v̂ˢ ← f_θ(zˢ, tₖ, c, hˢᵢ)</span></div>
+    <div class="ln ind3"><span class="hl-g">ℓ ← ‖v̂ˢ − sg(v̂ᵗ)‖²₂;立即反传 g ← g + ∇θ(ℓ/|S|);释放激活图、detach 缓存</span></div>
+    <div class="ln ind2">7 <span class="kw">else</span>: 学生预测(无梯度,纯预热滚动)</div>
+    <div class="ln ind2">8 求解器前进(无梯度):z ← sg(Φ(z, tₖ, tₖ₋₁, v̂ˢ))</div>
+    <div class="ln ind1">9 x̂ˢᵢ ← zˢ<sub>i,0</sub>,追加进脱离梯度的学生缓存</div>
+    <div class="ln">10 裁剪 g,<b>整段滚动只做一次</b>优化器更新学生 LoRA;再对教师 LoRA 做 EMA 更新</div>
+  </div>
+  </div>
+  <div>
+  <div class="svgbox"><svg viewBox="0 0 520 300" width="100%" role="img" aria-label="朴素实现与逐步反传的显存对比示意">
+    <text x="10" y="22" font-size="12.5" font-weight="600" fill="var(--text-primary)">激活显存占用(示意)</text>
+    <text x="10" y="48" font-size="11.5" fill="var(--critical)" font-weight="600">朴素:攒着所有监督对的计算图 → 随滚动线性增长</text>
+    <g id="memNaive"></g>
+    <text x="10" y="158" font-size="11.5" fill="var(--good-text)" font-weight="600">OPSD-V:每对立即反传+释放 → 恒定占用</text>
+    <g id="memOurs"></g>
+    <text x="10" y="262" font-size="11" fill="var(--text-secondary)">数学上与整段求和后统一反传严格等价(式 16);</text>
+    <text x="10" y="280" font-size="11" fill="var(--text-secondary)">跨滚动只保留 detach 的 KV 缓存与梯度累积器 g。</text>
+  </svg></div>
+  <p class="small" style="margin-top:8px">工程配置:BF16 混合精度 + 激活检查点 + FSDP 全分片;24 张 H800、每卡 batch=1、仅 200 次迭代;不叠加任何 DMD / 奖励 / 对抗损失。</p>
+  </div>
+  </div>
+</section>
+
+<section id="s9">
+  <h2><span class="no">⑨</span>实验与结果</h2>
+  <h3>设置速览</h3>
+  <div class="metachips" style="margin:4px 0 6px">
+    <span class="chip">数据:3,800 段 ≈1 分钟长视频 · 480p · 光流等质量过滤 · Wan2.1 VAE 编码</span>
+    <span class="chip">滚动:180 潜帧 = 60 chunk × 3 潜帧(≈45 秒 @16FPS,按 VAE 4× 时间压缩折算)</span>
+    <span class="chip">基座 ①:Self-Forcing 官方基础权重 + 新训 LoRA(长视频评测统一补 attention-sink)</span>
+    <span class="chip">基座 ②:LongLive 官方基础模型 + 官方 LoRA 继续后训练</span>
+    <span class="chip">评测:一分钟生成 @16FPS · 240 条提示词(120 MovieGenBench + 120 MeiBench)· VBenchLong</span>
+    <span class="chip">成对可比:同提示词 · 同随机种子 · 同采样器 · 同 sink 设置</span>
+  </div>
+  <p class="small">论文未披露 LoRA 秩、学习率、时间步取值等更细的超参;以上为正文给出的全部设置。</p>
+
+  <h3>VBenchLong:质量与动态双升,语义基本持平</h3>
+  <div class="legend">
+    <div class="li"><span class="dot round" style="background:var(--muted)"></span>基础模型</div>
+    <div class="li"><span class="dot round" style="background:var(--series-1)"></span>+ OPSD-V 后训练</div>
+    <div class="li"><span class="small">点图非零起点,Δ 为绝对变化;两者 NFE 均为 4</span></div>
+  </div>
+  <div class="svgbox"><svg id="vbench" viewBox="0 0 1120 240" width="100%" role="img" aria-label="VBenchLong指标点图"></svg></div>
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>方法</th><th>参数量</th><th>NFE</th><th>Quality Score ↑</th><th>Dynamic Degree ↑</th><th>Semantic Score ↑</th></tr></thead>
+    <tbody>
+      <tr><td class="nm">LongLive</td><td class="num">1.3B</td><td class="num">4</td><td class="num">0.8138</td><td class="num">0.5012</td><td class="num">0.4911</td></tr>
+      <tr><td class="nm">LongLive + OPSD-V</td><td class="num">1.3B</td><td class="num">4</td><td class="num">0.8242 <span class="up">(+0.0104)</span></td><td class="num">0.5890 <span class="up">(+0.0878)</span></td><td class="num">0.4904 <span class="dn">(−0.0007)</span></td></tr>
+      <tr><td class="nm">Self-Forcing</td><td class="num">1.3B</td><td class="num">4</td><td class="num">0.8259</td><td class="num">0.6218</td><td class="num">0.4897</td></tr>
+      <tr><td class="nm">Self-Forcing + OPSD-V</td><td class="num">1.3B</td><td class="num">4</td><td class="num">0.8389 <span class="up">(+0.0130)</span></td><td class="num">0.6570 <span class="up">(+0.0352)</span></td><td class="num">0.4864 <span class="dn">(−0.0033)</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="small">语义分的轻微下降,作者解读为「更活跃的运动生成」与「偏保守的语义匹配指标」之间的温和取舍。定性上:LongLive 侧背景更锐、镜头演化更稳;Self-Forcing 侧物体运动更连贯、后段主体/背景伪影被抑制。</p>
+
+  <h3>用户研究:10 人 × 20 组同提示词对比(每项 100 次判断)</h3>
+  <div class="legend">
+    <div class="li"><span class="dot" style="background:var(--series-1)"></span>偏好 OPSD-V</div>
+    <div class="li"><span class="dot" style="background:var(--axis)"></span>无差别</div>
+    <div class="li"><span class="dot" style="background:var(--series-2)"></span>偏好基础模型</div>
+  </div>
+  <div class="svgbox"><svg id="ustudy" viewBox="0 0 1120 270" width="100%" role="img" aria-label="用户研究偏好堆叠条形图"></svg></div>
+  <p class="small">两骨干合计:总体偏好 66.0%(去平局 82.5%)· 运动质量 57.5%(去平局 82.7%)· 视觉质量 60.5%(去平局 78.1%)。LongLive 侧视觉质量平局与偏基座的比例更高;Self-Forcing 侧三项均强烈偏好 OPSD-V。</p>
+</section>
+
+<section id="s10">
+  <h2><span class="no">⑩</span>消融:两个「差之毫厘、谬以千里」的设计选择</h2>
+  <div class="two">
+    <div class="card" style="border-left-color:var(--series-1)">
+      <h4>A. 在速度空间匹配,而不是 x₀ 空间</h4>
+      <p>备选方案:每步把师生预测都换算成干净潜变量估计再做 MSE(ℒ<sub>x₀</sub>,式 17)。在流参数化下,速度→x₀ 的换算带一个<b>随时间步变化的尺度</b>(x̂₀ = z − t·v̂,误差被放大 t 倍),等效于把损失权重不成比例地压在高噪声步上。</p>
+      <p><b>后果:</b>一分钟滚动中细节被逐步抹平——桥架结构、树叶边界出现几何退化;速度匹配在模型的原生预测空间监督,高频结构保得更好。</p>
+      <div class="svgbox"><svg id="abl1" viewBox="0 0 500 190" width="100%" role="img" aria-label="x0匹配与速度匹配的等效步权重示意"></svg></div>
+      <p class="small">权重曲线为按 t² 折算的示意(论文给出定性结论与图 6 视觉对比,未给数值)。</p>
+    </div>
+    <div class="card red">
+      <h4>B. 状态必须取自学生轨迹,而不是教师轨迹</h4>
+      <p>备选方案:让教师自己走一条去噪轨迹 z<sup>t</sup><sub>i,k</sub>,在教师状态上取蒸馏对。教师状态看起来「更干净」,却<b>不是学生推理时会到达的状态</b>:学生得不到任何「如何从自己的错误里恢复」的监督,失配随每次缓存写回被反复放大。</p>
+      <p><b>后果(论文图 7):</b>教师自己的滚动保持清晰,学生的自回滚却迅速丢失空间细节、被模糊主导——彻底失败。这反向确认了分工:<b>教师给修正方向,学生定监督位置</b>。</p>
+      <div class="svgbox"><svg id="abl2" viewBox="0 0 500 190" width="100%" role="img" aria-label="on-policy与off-policy监督对比示意"></svg></div>
+      <p class="small">on-policy(实线蓝)= 在学生状态上修正;off-policy(虚线)= 修正打在学生永远到不了的状态上。</p>
+    </div>
+  </div>
+</section>
+
+<section id="s11">
+  <h2><span class="no">⑪</span>定位:和相邻方案到底差在哪</h2>
+  <div class="tbl-scroll"><table>
+    <thead><tr><th style="min-width:150px">方案</th><th>监督信号来自</th><th>监督落在谁的状态上</th><th>粒度</th><th>长时程覆盖</th><th>是否改推理</th></tr></thead>
+    <tbody>
+      <tr><td class="nm">DMD 短片教师蒸馏<br><span class="small">CausVid 等</span></td><td>双向短 clip 扩散教师</td><td>学生分布(分布级)</td><td>chunk / clip 分布</td><td class="dn">受限于教师时域</td><td>否</td></tr>
+      <tr><td class="nm">Self-Forcing / ++ 系</td><td>短片教师 + 自回滚对齐</td><td>学生自回滚状态</td><td>rollout 级目标</td><td class="dn">监督上限仍是短片教师</td><td>否</td></tr>
+      <tr><td class="nm">朴素 teacher forcing 真视频</td><td>真实视频硬目标</td><td class="dn">真视频状态(≠ 学生滚动分布)</td><td>逐帧重建</td><td>名义覆盖</td><td class="dn">破坏推理滚动分布</td></tr>
+      <tr><td class="nm">真视频重建损失</td><td>真实视频</td><td class="dn">与学生缓存状态脱钩</td><td>重建</td><td>名义覆盖</td><td>否</td></tr>
+      <tr style="background:var(--s1-wash)"><td class="nm">OPSD-V(本文)</td><td>自身 EMA + 真长视频<b>特权上下文</b></td><td class="up">学生自回滚的每个 (z, t, 缓存) 状态</td><td class="up">逐 (chunk, 去噪步) 稠密速度匹配</td><td class="up">一分钟级真长视频直接供上下文</td><td class="up">零改动(4 步 + sink 缓存原样)</td></tr>
+    </tbody>
+  </table></div>
+  <h3>作者的分析与边界</h3>
+  <div class="cards">
+    <div class="card green"><h4>换目标分布,而不是换采样器</h4><p>本文回答的问题是「后训练少步 AR 模型时,目标分布该是什么」:短片教师有天花板,真长视频有干净的长程动态——OPSD 恰好提供了把后者以「特权上下文」而非「硬目标」接进来的接口。</p></div>
+    <div class="card yellow"><h4>当前局限</h4><p>语义分有轻微回落;缓存策略(全部旧史替换 + 保留 1 块)与纯速度 MSE 只是该思想的<b>一种实例化</b>;数据仅 3,800 段、训练仅 200 迭代,更大规模的行为尚未验证。LoRA 秩、学习率等细节论文未披露。</p></div>
+    <div class="card"><h4>可预见的延伸</h4><p>扩大长视频的数量/多样性/质量与算力;自适应上下文长度、混合缓存策略等更精细的教师缓存政策;引入更强的上下文增强教师。这些都不动「学生定状态、教师给方向」的骨架。</p></div>
+  </div>
+</section>
+
+<footer>
+  <div><b>论文</b>:Hongyu Liu et al. <i>OPSD-V: On-Policy Self-Distillation for Post-Training Few-Step Autoregressive Video Generators.</i> arXiv:2607.08766v1 [cs.CV], 2026-07-09 · <a href="https://arxiv.org/abs/2607.08766" target="_blank">arXiv</a> · <a href="https://meigen-ai.github.io/OPSD-V" target="_blank">项目主页</a> · <a href="https://github.com/MeiGen-AI/OPSD-V" target="_blank">代码</a></div>
+  <div>本页依论文 v1 正文整理;示意图为重绘,非论文原图。个别换算(chunk 时长、监督对数、t² 权重)为按论文设置的推算,已在文中标注。整理时间 2026-08-05。</div>
+</footer>
+
+
+
+
+</div>
+<div id="tip"></div>
+<script>
+(function(){
+"use strict";
+/* ---------- 工具 ---------- */
+const NS="http://www.w3.org/2000/svg";
+function S(tag,attrs,parent,text){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(text!=null)e.textContent=text;if(parent)parent.appendChild(e);return e;}
+function H(tag,cls,parent,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;if(parent)parent.appendChild(e);return e;}
+
+/* ---------- 主题切换(仅内存,不用任何存储) ---------- */
+const btn=document.getElementById('theme');
+btn.addEventListener('click',()=>{
+  const root=document.documentElement;
+  const cur=root.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+  root.setAttribute('data-theme',cur==='dark'?'light':'dark');
+});
+
+/* ---------- ② 退化条带 ---------- */
+(function(){
+  const g=document.getElementById('degradeStrip');if(!g)return;
+  const n=30,w=34,gap=2.8,x0=10,y=36,h=56;
+  for(let i=0;i<n;i++){
+    const op=(0.95-0.67*i/(n-1)).toFixed(2);
+    const r=S('rect',{x:x0+i*(w+gap),y:y,width:w,height:h,rx:6,fill:'var(--series-1)',opacity:op},g);
+    if(i>=20)S('rect',{x:x0+i*(w+gap),y:y,width:w,height:h,rx:6,fill:'none',stroke:'var(--critical)','stroke-dasharray':'3 3','stroke-width':1.2},g);
+    r.setAttribute('data-tip','<b>chunk '+(i<15?(i*2+1):'…')+'</b>示意:颜色越淡 = 累积误差越多');
+  }
+  S('text',{x:x0,y:y+h+18,'font-size':11,fill:'var(--muted)'},g,'chunk 1(清晰)');
+  S('text',{x:x0+n*(w+gap)-4,y:y+h+18,'font-size':11,fill:'var(--muted)','text-anchor':'end'},g,'chunk 60(退化)');
+  S('text',{x:x0+24.5*(w+gap),y:y-8,'font-size':11,fill:'var(--critical)','text-anchor':'middle'},g,'后段:模糊 · 伪影 · 漂移');
+})();
+
+/* ---------- ③ 诊断实验两行 ---------- */
+(function(){
+  const A=document.getElementById('diagRowA'),B=document.getElementById('diagRowB');if(!A||!B)return;
+  const n=14,w=52,gap=5,x0=10,h=34;
+  for(let i=0;i<n;i++){
+    const x=x0+i*(w+gap);
+    if(i===0){S('rect',{x:x,y:34,width:w,height:h,rx:6,fill:'var(--series-3)'},A).setAttribute('data-tip','<b>真实首块</b>仅用于初始化缓存');}
+    else{const op=(0.95-0.6*(i-1)/(n-2)).toFixed(2);S('rect',{x:x,y:34,width:w,height:h,rx:6,fill:'var(--series-1)',opacity:op},A).setAttribute('data-tip','<b>自生成 KV</b>误差逐块累积');}
+    if(i===0){S('rect',{x:x,y:110,width:w,height:h,rx:6,fill:'var(--series-3)'},B);}
+    else if(i<n-1){S('rect',{x:x,y:110,width:w,height:h,rx:6,fill:'var(--series-3)',opacity:0.92},B).setAttribute('data-tip','<b>旧历史 KV ← 真实视频特征</b>(测试时替换,不训练)');}
+    else{S('rect',{x:x,y:110,width:w,height:h,rx:6,fill:'var(--series-1)'},B).setAttribute('data-tip','<b>最近一块仍为自生成</b>保持 AR 连续性');}
+  }
+  const bx1=x0+(w+gap),bx2=x0+(n-1)*(w+gap)-gap;
+  S('path',{d:'M'+bx1+' 152 L'+bx1+' 160 L'+bx2+' 160 L'+bx2+' 152',stroke:'var(--series-3)','stroke-width':1.6,fill:'none'},B);
+  S('text',{x:(bx1+bx2)/2,y:172,'font-size':10.5,fill:'var(--series-3)','text-anchor':'middle'},B,'旧历史 KV 替换为真实视频特征');
+})();
+
+/* ---------- ⑥ 缓存构造网格 ---------- */
+(function(){
+  const PS=document.getElementById('kvS'),PT=document.getElementById('kvT');if(!PS||!PT)return;
+  const M=7,LAST=12;
+  function cell(row,cls,tip){const c=H('div','kvc '+cls,row);c.setAttribute('data-tip',tip);return c;}
+  function chip(row,txt,hot){const s=H('span',null,row,txt);s.style.cssText='font-size:10px;white-space:nowrap;margin-left:6px;'+(hot?'color:var(--critical);font-weight:700':'color:var(--muted)');}
+  for(let i=2;i<=LAST;i++){
+    const r=H('div','kvrow',PS);H('div','ridx',r,'i = '+i);
+    cell(r,'real','<b>x₁ᵈᵃᵗᵃ</b>共享真实前缀(不生成、不计损失)');
+    for(let j=2;j<i;j++)cell(r,'gen','<b>x̂'+j+'ˢ</b>学生第 '+j+' 块生成结果,写回缓存(无梯度)');
+    cell(r,'cur','正在生成 chunk '+i+':4 步去噪');
+    chip(r,i<=M?'预热·不计损失':'ℒ×4',i>M);
+  }
+  H('div','small',PS,'⋮ 依此类推到 i = 60').style.marginTop='6px';
+  for(let i=2;i<=LAST;i++){
+    const r=H('div','kvrow',PT);H('div','ridx',r,'i = '+i);
+    if(i<=M){const t=H('div',null,r,'—— 预热期:不构造教师缓存,不产生监督 ——');t.style.cssText='font-size:11px;color:var(--muted);font-style:italic';continue;}
+    for(let j=1;j<=i-2;j++)cell(r,'real','<b>x'+j+'ᵈᵃᵗᵃ</b>真实视频第 '+j+' 块:特权上下文,替换退化旧史');
+    cell(r,'gen','<b>x̂'+(i-1)+'ˢ</b>保留学生最新生成块 → 教师预测「如何从学生当前状态继续」');
+    cell(r,'cur','教师在学生的 (z,t) 上被评估,给出 v̂ᵗ');
+    chip(r,'ℒ×4',true);
+  }
+  H('div','small',PT,'⋮ 依此类推到 i = 60').style.marginTop='6px';
+})();
+
+/* ---------- ⑦ 监督调度时间轴 ---------- */
+(function(){
+  const svg=document.getElementById('schedSvg');if(!svg)return;
+  const N=60,x0=20,w=17,gap=1,y=42,h=26;
+  for(let i=1;i<=N;i++){
+    const x=x0+(i-1)*(w+gap);let f='var(--series-1)',op=0.9,tip;
+    if(i===1){f='var(--series-3)';op=1;tip='<b>chunk 1</b>真实前缀:初始化双方缓存,不生成不计损失';}
+    else if(i<=7){op=0.32;tip='<b>chunk '+i+'</b>预热:照常生成并写入缓存,不计损失';}
+    else{tip='<b>chunk '+i+'</b>4 个去噪步全部计入速度匹配损失';}
+    S('rect',{x:x,y:y,width:w,height:h,rx:3,fill:f,opacity:op},svg).setAttribute('data-tip',tip);
+  }
+  S('text',{x:x0-2,y:y+h+18,'font-size':10,fill:'var(--series-3)'},svg,'①真实前缀');
+  const wx1=x0+(w+gap),wx2=x0+7*(w+gap)-gap;
+  S('path',{d:'M'+wx1+' '+(y-10)+' L'+wx1+' '+(y-4)+' L'+wx2+' '+(y-4)+' L'+wx2+' '+(y-10),stroke:'var(--axis)','stroke-width':1.4,fill:'none'},svg);
+  S('text',{x:(wx1+wx2)/2,y:y-16,'font-size':10.5,fill:'var(--muted)','text-anchor':'middle'},svg,'② – ⑦ 预热(M=7)');
+  const sx1=x0+7*(w+gap),sx2=x0+N*(w+gap)-gap;
+  S('path',{d:'M'+sx1+' '+(y+h+6)+' L'+sx1+' '+(y+h+12)+' L'+sx2+' '+(y+h+12)+' L'+sx2+' '+(y+h+6),stroke:'var(--critical)','stroke-width':1.6,fill:'none'},svg);
+  S('text',{x:(sx1+sx2)/2,y:y+h+30,'font-size':11.5,fill:'var(--critical)','text-anchor':'middle','font-weight':600},svg,'chunk 8 – 60 稠密监督:53 chunk × 4 步 = 212 个 (i,k) 对 / 段视频');
+  S('text',{x:(sx1+sx2)/2,y:y+h+50,'font-size':10.5,fill:'var(--muted)','text-anchor':'middle'},svg,'监督刻意集中在超出原生 7-chunk 训练窗口、缓存退化开始显现的区域');
+})();
+
+/* ---------- ⑧ 显存示意 ---------- */
+(function(){
+  const gn=document.getElementById('memNaive'),go=document.getElementById('memOurs');if(!gn||!go)return;
+  for(let j=0;j<8;j++){
+    const x=14+j*60;
+    for(let s=0;s<=j;s++)S('rect',{x:x,y:132-s*11,width:44,height:9,rx:2,fill:'var(--critical)',opacity:0.55},gn);
+  }
+  S('text',{x:500,y:138,'font-size':10,fill:'var(--muted)','text-anchor':'end'},gn,'滚动 →');
+  for(let j=0;j<8;j++){
+    const x=14+j*60;
+    S('rect',{x:x,y:222,width:44,height:9,rx:2,fill:'var(--good)',opacity:0.75},go);
+    S('rect',{x:x,y:236,width:44,height:5,rx:2,fill:'var(--series-1)',opacity:0.5},go);
+  }
+  S('text',{x:14,y:214,'font-size':10,fill:'var(--muted)'},go,'绿 = 当前唯一一张激活图 · 蓝 = 只增参数梯度 g(可忽略)');
+})();
+
+/* ---------- ⑨ VBenchLong 点图 ---------- */
+(function(){
+  const svg=document.getElementById('vbench');if(!svg)return;
+  const panels=[
+    {t:'Quality Score 质量 ↑',dom:[0.80,0.85],ticks:[0.80,0.82,0.84],rows:[['LongLive',0.8138,0.8242,'+0.0104'],['Self-Forcing',0.8259,0.8389,'+0.0130']]},
+    {t:'Dynamic Degree 动态程度 ↑',dom:[0.45,0.70],ticks:[0.45,0.55,0.65],rows:[['LongLive',0.5012,0.5890,'+0.0878'],['Self-Forcing',0.6218,0.6570,'+0.0352']]},
+    {t:'Semantic Score 语义 ↑(基本持平)',dom:[0.48,0.50],ticks:[0.48,0.49,0.50],rows:[['LongLive',0.4911,0.4904,'−0.0007'],['Self-Forcing',0.4897,0.4864,'−0.0033']]}
+  ];
+  panels.forEach((p,pi)=>{
+    const px=10+pi*375,pw=350,L=px+92,R=px+pw-64,ys=[86,150];
+    S('text',{x:px,y:26,'font-size':12.5,'font-weight':600,fill:'var(--text-primary)'},svg,p.t);
+    const sc=v=>L+(v-p.dom[0])/(p.dom[1]-p.dom[0])*(R-L);
+    S('line',{x1:L,y1:196,x2:R,y2:196,stroke:'var(--axis)','stroke-width':1},svg);
+    p.ticks.forEach(t=>{
+      S('line',{x1:sc(t),y1:193,x2:sc(t),y2:199,stroke:'var(--axis)','stroke-width':1},svg);
+      S('text',{x:sc(t),y:214,'font-size':10.5,fill:'var(--muted)','text-anchor':'middle','font-variant-numeric':'tabular-nums'},svg,t.toFixed(2));
+    });
+    p.rows.forEach((r,ri)=>{
+      const y=ys[ri],xa=sc(r[1]),xb=sc(r[2]);
+      S('text',{x:px,y:y+4,'font-size':11.5,fill:'var(--text-secondary)'},svg,r[0]);
+      S('line',{x1:xa,y1:y,x2:xb,y2:y,stroke:'var(--series-1)','stroke-width':2,opacity:0.45},svg);
+      const da=S('circle',{cx:xa,cy:y,r:5,fill:'var(--muted)',stroke:'var(--surface-1)','stroke-width':2},svg);
+      da.setAttribute('data-tip','<b>'+r[0]+' 基础模型</b>'+p.t.split(' ')[0]+' = '+r[1].toFixed(4));
+      const db=S('circle',{cx:xb,cy:y,r:5.5,fill:'var(--series-1)',stroke:'var(--surface-1)','stroke-width':2},svg);
+      db.setAttribute('data-tip','<b>'+r[0]+' + OPSD-V</b>'+p.t.split(' ')[0]+' = '+r[2].toFixed(4));
+      S('text',{x:xa,y:y+22,'font-size':10.5,fill:'var(--muted)','text-anchor':'middle','font-variant-numeric':'tabular-nums'},svg,r[1].toFixed(4));
+      S('text',{x:xb,y:y-12,'font-size':11,'font-weight':600,fill:'var(--text-primary)','text-anchor':'middle','font-variant-numeric':'tabular-nums'},svg,r[2].toFixed(4));
+      S('text',{x:R+54,y:y+4,'font-size':11,'font-weight':600,fill:r[3][0]==='+'?'var(--good-text)':'var(--muted)','text-anchor':'end'},svg,r[3]);
+    });
+  });
+})();
+
+/* ---------- ⑨ 用户研究堆叠条 ---------- */
+(function(){
+  const svg=document.getElementById('ustudy');if(!svg)return;
+  const groups=[
+    {t:'LongLive 骨干',y:46,rows:[['总体偏好',54,28,18],['运动质量',49,36,15],['视觉质量',42,33,25]]},
+    {t:'Self-Forcing 骨干',y:160,rows:[['总体偏好',78,12,10],['运动质量',66,25,9],['视觉质量',79,12,9]]}
+  ];
+  const L=150,W=690,H=22,names=['偏好 OPSD-V','无差别','偏好基础模型'],fills=['var(--series-1)','var(--axis)','var(--series-2)'],inks=['#fff','var(--text-primary)','#0b0b0b'];
+  groups.forEach(g=>{
+    S('text',{x:10,y:g.y-14,'font-size':12.5,'font-weight':600,fill:'var(--text-primary)'},svg,g.t);
+    g.rows.forEach((r,ri)=>{
+      const y=g.y+ri*32;
+      S('text',{x:L-8,y:y+15,'font-size':11.5,fill:'var(--text-secondary)','text-anchor':'end'},svg,r[0]);
+      let x=L;
+      for(let s=0;s<3;s++){
+        const w=r[s+1]/100*W-(s<2?2:0);
+        const rect=S('rect',{x:x,y:y,width:Math.max(w,0),height:H,rx:3,fill:fills[s]},svg);
+        rect.setAttribute('data-tip','<b>'+g.t+' · '+r[0]+'</b>'+names[s]+':'+r[s+1]+'%(100 次判断)');
+        if(w>=30)S('text',{x:x+w/2,y:y+15,'font-size':10.5,fill:inks[s],'text-anchor':'middle','font-variant-numeric':'tabular-nums'},svg,r[s+1]+'%');
+        x+=r[s+1]/100*W;
+      }
+    });
+  });
+  [0,25,50,75,100].forEach(p=>{
+    S('text',{x:L+p/100*W,y:258,'font-size':10.5,fill:'var(--muted)','text-anchor':'middle'},svg,p+'%');
+  });
+})();
+
+/* ---------- ⑩ 消融 A:等效步权重示意 ---------- */
+(function(){
+  const svg=document.getElementById('abl1');if(!svg)return;
+  const ts=[1.0,0.75,0.5,0.25],labels=['t₄ 高噪','t₃','t₂','t₁ 低噪'];
+  const x0=70,bw=64,gapx=40,base=140,maxH=92;
+  S('text',{x:14,y:20,'font-size':11,fill:'var(--text-secondary)'},svg,'等效损失权重(归一,示意)');
+  ts.forEach((t,i)=>{
+    const h=t*t*maxH,x=x0+i*(bw+gapx);
+    const r=S('rect',{x:x,y:base-h,width:bw,height:h,rx:4,fill:'var(--series-2)',opacity:0.85},svg);
+    r.setAttribute('data-tip','<b>x₀ 空间匹配</b>该步等效权重 ∝ t² ≈ '+(t*t).toFixed(2));
+    S('text',{x:x+bw/2,y:base+18,'font-size':11,fill:'var(--muted)','text-anchor':'middle'},svg,labels[i]);
+  });
+  S('line',{x1:x0-18,y1:base-maxH*0.5,x2:x0+3*(bw+gapx)+bw+8,y2:base-maxH*0.5,stroke:'var(--series-1)','stroke-width':2,'stroke-dasharray':'7 5'},svg);
+  S('text',{x:x0+3*(bw+gapx)+bw+6,y:base-maxH*0.5-8,'font-size':10.5,fill:'var(--series-1)','text-anchor':'end','font-weight':600},svg,'速度匹配:各步权重一致(本文默认)');
+  S('line',{x1:x0-18,y1:base,x2:x0+3*(bw+gapx)+bw+8,y2:base,stroke:'var(--axis)','stroke-width':1},svg);
+  S('text',{x:x0+150,y:base+38,'font-size':10.5,fill:'var(--series-2)'},svg,'x₀ 匹配:高噪声步被放大 → 长滚动细节被抹平');
+})();
+
+/* ---------- ⑩ 消融 B:on/off-policy 轨迹 ---------- */
+(function(){
+  const svg=document.getElementById('abl2');if(!svg)return;
+  S('path',{d:'M40 80 C 160 60, 320 55, 460 52',stroke:'var(--series-2)','stroke-width':2,fill:'none'},svg);
+  S('text',{x:458,y:40,'font-size':10.5,fill:'var(--series-2)','text-anchor':'end','font-weight':600},svg,'教师自采轨迹:自己保持清晰');
+  S('path',{d:'M40 80 C 160 100, 300 130, 440 158',stroke:'var(--series-1)','stroke-width':2,fill:'none'},svg);
+  S('text',{x:452,y:178,'font-size':10.5,fill:'var(--series-1)','text-anchor':'end','font-weight':600},svg,'学生实际轨迹:无人纠正 → 越滚越糊');
+  [130,230,330].forEach(x=>{
+    const yT=66-(x-130)*0.012,yS=95+(x-130)*0.20;
+    S('circle',{cx:x,cy:yT,r:4.5,fill:'var(--series-2)',stroke:'var(--surface-1)','stroke-width':2},svg);
+    S('line',{x1:x,y1:yT+7,x2:x,y2:yS-7,stroke:'var(--muted)','stroke-width':1.2,'stroke-dasharray':'3 3'},svg);
+    S('text',{x:x+6,y:(yT+yS)/2,'font-size':9.5,fill:'var(--muted)'},svg,'状态失配');
+  });
+  ;[[150,101],[260,122],[370,144]].forEach((p,i)=>{
+    S('circle',{cx:p[0],cy:p[1],r:6+i*3,fill:'var(--series-1)',opacity:0.25},svg);
+  });
+  S('circle',{cx:40,cy:80,r:5,fill:'var(--series-3)',stroke:'var(--surface-1)','stroke-width':2},svg);
+  S('text',{x:40,y:64,'font-size':10,fill:'var(--series-3)','text-anchor':'middle'},svg,'共享首块');
+  S('text',{x:14,y:20,'font-size':11,fill:'var(--text-secondary)'},svg,'把监督对建在教师状态上(橙点)= off-policy:');
+  S('text',{x:14,y:36,'font-size':11,fill:'var(--text-secondary)'},svg,'修正从未落在学生会到达的状态(蓝线)上');
+})();
+
+/* ---------- 悬停提示 ---------- */
+(function(){
+  const tip=document.getElementById('tip');if(!tip)return;
+  document.addEventListener('mouseover',e=>{
+    const t=e.target.closest&&e.target.closest('[data-tip]');
+    if(!t){tip.style.opacity=0;return;}
+    tip.innerHTML=t.getAttribute('data-tip');tip.style.opacity=1;
+  });
+  document.addEventListener('mousemove',e=>{
+    if(tip.style.opacity==='1'){
+      const vw=innerWidth,r=tip.getBoundingClientRect();
+      let x=e.clientX+14,y=e.clientY+14;
+      if(x+r.width>vw-8)x=e.clientX-r.width-10;
+      if(y+r.height>innerHeight-8)y=e.clientY-r.height-10;
+      tip.style.left=x+'px';tip.style.top=y+'px';
+    }
+  });
+  document.addEventListener('mouseout',e=>{if(!e.relatedTarget||!e.relatedTarget.closest||!e.relatedTarget.closest('[data-tip]'))tip.style.opacity=0;});
+})();
+})();
+</script>
+</body>
+</html>

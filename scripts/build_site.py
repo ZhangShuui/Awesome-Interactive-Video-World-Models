@@ -24,6 +24,12 @@ explainers/<paper-id>.html. They are published as themselves rather than
 wrapped, and the row grows an EXPLAINER badge. Same registration rule: the
 filename is the whole of it.
 
+Notes are the same kind of page written across the index instead of down one
+paper -- a comparison table, a taxonomy, a timeline. They belong to no row, so
+notes/<slug>.html is published under /notes/ behind a listing page of its own.
+A note names itself: the listing reads its <title> and its <meta description>,
+so there is still no register to keep.
+
 Usage:
   python3 scripts/build_site.py                # build into site/
   python3 scripts/build_site.py --out /tmp/x   # build somewhere else
@@ -45,6 +51,7 @@ DATA = ROOT / "data"
 WEB = ROOT / "web"
 DEMOS = ROOT / "demos"
 EXPLAINERS = ROOT / "explainers"
+NOTES = ROOT / "notes"
 
 # The row's id is already a link to the paper, so listing PAPER again on all
 # 451 rows labels nothing -- 381 of them have no other link at all. Only the
@@ -83,7 +90,7 @@ DEMO_ENTRIES = ("index.html", "demo.html", "main.html")
 # the one thing a page reached by a shared link cannot supply for itself: the
 # way back. Bottom left, because every explainer written so far already keeps a
 # back-to-top control at bottom right.
-BACK_LINK = """<a id="site-back" href="../index.html#p-{pid}">&larr; INDEX</a>
+BACK_LINK = """<a id="site-back" href="{href}">&larr; {label}</a>
 <style>
 #site-back{{position:fixed;left:14px;bottom:14px;z-index:190;padding:7px 12px;
   border-radius:999px;text-decoration:none;letter-spacing:.14em;
@@ -163,6 +170,43 @@ def find_demos(demos_dir, known_ids):
             orphans.append(f"demos/{child.name}/: no paper with that id")
             continue
         found[child.name] = entry
+    return found, orphans
+
+
+def read_meta(text, name):
+    """Whatever a page says about itself in <head>, or ""."""
+    pattern = re.compile(
+        rf'<meta\s+name="{name}"\s+content="([^"]*)"', re.I | re.S)
+    m = pattern.search(text)
+    return html.unescape(m.group(1)).strip() if m else ""
+
+
+def read_title(text):
+    m = re.search(r"<title>(.*?)</title>", text, re.S | re.I)
+    return html.unescape(re.sub(r"\s+", " ", m.group(1))).strip() if m else ""
+
+
+def find_notes(notes_dir):
+    """Every note, in the order the listing shows them.
+
+    A note carries no paper id to be checked against, so the only thing that
+    can be wrong with one is that it does not say what it is. A page with no
+    <title> would list as a blank line, which is worth a word rather than a
+    shrug.
+    """
+    found, orphans = [], []
+    if not notes_dir.is_dir():
+        return found, orphans
+    for child in sorted(notes_dir.glob("*.html")):
+        if child.name.startswith("_") or child.name.startswith("."):
+            continue
+        text = child.read_text(encoding="utf-8")
+        title = read_title(text)
+        if not title:
+            orphans.append(f"notes/{child.name}: no <title> to list it under")
+            continue
+        found.append({"slug": child.stem, "path": child, "title": title,
+                      "blurb": read_meta(text, "description")})
     return found, orphans
 
 
@@ -247,6 +291,22 @@ def render_chips(tags, counts):
         f' title="{esc(t["blurb"])}">{esc(t["code"])}'
         f' <span style="opacity:.55">{counts.get(t["key"], 0)}</span></button>'
         for t in tags)
+
+
+def render_note_cards(notes):
+    """The title is the link. A note's title is a sentence, not a code, so
+    unlike a paper row there is no id in the margin to point at instead."""
+    out = []
+    for i, note in enumerate(notes):
+        blurb = (f'\n        <p class="note-card__blurb">{esc(note["blurb"])}</p>'
+                 if note["blurb"] else "")
+        out.append(
+            f'    <li class="note-card" style="--i:{i}">'
+            f'\n      <a class="note-card__link" href="{esc(note["slug"])}.html">'
+            f'\n        <h2 class="note-card__title">{esc(note["title"])}</h2>'
+            f'{blurb}'
+            f'\n      </a>\n    </li>')
+    return "\n".join(out)
 
 
 def render_flags(has_demo, has_explainer, n_code, n_profiled):
@@ -400,7 +460,7 @@ def fill_slot(text, name, value):
 # -------------------------------------------------------------------- build --
 
 def build(out_dir, papers_path=None, tags_path=None, demos_dir=None,
-          explainers_dir=None):
+          explainers_dir=None, notes_dir=None):
     papers = load_papers(papers_path or DATA / "papers.jsonl")
     tags = load_tags(tags_path or DATA / "tags.json")
     by_key = {t["key"]: t for t in tags}
@@ -408,7 +468,8 @@ def build(out_dir, papers_path=None, tags_path=None, demos_dir=None,
 
     demos, orphans = find_demos(demos_dir or DEMOS, known_ids)
     explainers, more = find_explainers(explainers_dir or EXPLAINERS, known_ids)
-    for problem in orphans + more:
+    notes, unnamed = find_notes(notes_dir or NOTES)
+    for problem in orphans + more + unnamed:
         print(f"[site] warning: {problem}", file=sys.stderr)
 
     records = sorted(papers, key=lambda r: (r.get("date") or "", r["id"]), reverse=True)
@@ -440,6 +501,11 @@ def build(out_dir, papers_path=None, tags_path=None, demos_dir=None,
     page = fill_slot(page, "COUNT", len(records))
     page = fill_slot(page, "PROFILED", profiled)
     page = fill_slot(page, "BUILT", dt.date.today().isoformat())
+    page = fill_block(page, "NOTELINK", render_note_link(notes))
+    # Both entrances are conditional on the same thing. A hard-coded one in the
+    # footer would be a dead link on any checkout with an empty notes/.
+    page = fill_block(page, "NOTEFOOT",
+                      ' ·\n    <a href="notes/">Notes</a>' if notes else "")
 
     out_dir = Path(out_dir)
     if out_dir.exists():
@@ -462,8 +528,11 @@ def build(out_dir, papers_path=None, tags_path=None, demos_dir=None,
     for pid, source in explainers.items():
         build_explainer_page(out_dir, pid, source)
 
+    if notes:
+        build_notes(out_dir, notes)
+
     return {"papers": len(records), "profiled": profiled, "demos": len(demos),
-            "explainers": len(explainers), "out": out_dir}
+            "explainers": len(explainers), "notes": len(notes), "out": out_dir}
 
 
 def build_demo_page(out_dir, rec, entry, by_key, demos_dir):
@@ -486,7 +555,41 @@ def build_demo_page(out_dir, rec, entry, by_key, demos_dir):
 
 
 def build_explainer_page(out_dir, pid, source):
-    """Copy the explainer verbatim but for one addition: the link home.
+    """An explainer belongs to one paper, so it goes back to that paper's row
+    rather than to the top of a 458-row list."""
+    write_with_back_link(source, out_dir / "explainers" / f"{pid}.html",
+                         href=f"../index.html#p-{pid}", label="INDEX")
+
+
+def render_note_link(notes):
+    """The index only advertises the notes once there are some. An empty
+    section behind a nav item is worse than no nav item."""
+    if not notes:
+        return ""
+    plural = "" if len(notes) == 1 else "s"
+    return ('    <p class="masthead__nav"><a href="notes/">'
+            f'{len(notes)} cross-paper note{plural} &rarr;</a></p>')
+
+
+def build_notes(out_dir, notes):
+    """The listing, then every note behind it, each pointing back at the
+    listing rather than at the paper index -- a note belongs to no row, so
+    there is no row to return to."""
+    dest = out_dir / "notes"
+    dest.mkdir(parents=True, exist_ok=True)
+
+    page = (WEB / "notes.template.html").read_text(encoding="utf-8")
+    page = fill_block(page, "NOTES", render_note_cards(notes))
+    page = fill_slot(page, "COUNT", len(notes))
+    (dest / "index.html").write_text(page, encoding="utf-8")
+
+    for note in notes:
+        write_with_back_link(note["path"], dest / f'{note["slug"]}.html',
+                             href="index.html", label="NOTES")
+
+
+def write_with_back_link(source, target, href, label):
+    """Copy the page verbatim but for one addition: the link home.
 
     Verbatim matters more here than anywhere else in the build. These pages
     are hand-written, self-contained and already themed; anything this script
@@ -495,12 +598,12 @@ def build_explainer_page(out_dir, pid, source):
     position it, inserted after <body> where it cannot land inside <head>.
     """
     text = source.read_text(encoding="utf-8")
-    back = BACK_LINK.format(pid=esc(pid))
+    back = BACK_LINK.format(href=esc(href), label=label)
     page, n = BODY_TAG.subn(lambda m: f"{m.group(0)}\n{back}", text, count=1)
     if not n:
-        print(f"[site] warning: explainers/{source.name} has no <body>; "
-              "published with no way back to the index", file=sys.stderr)
-    (out_dir / "explainers" / f"{pid}.html").write_text(page, encoding="utf-8")
+        print(f"[site] warning: {source.parent.name}/{source.name} has no "
+              "<body>; published with no way back", file=sys.stderr)
+    target.write_text(page, encoding="utf-8")
 
 
 def main():
@@ -516,13 +619,13 @@ def main():
             stats = build(Path(tmp) / "site")
             print(f"[site] builds clean: {stats['papers']} papers, "
                   f"{stats['profiled']} profiled, {stats['demos']} demo(s), "
-                  f"{stats['explainers']} explainer(s)")
+                  f"{stats['explainers']} explainer(s), {stats['notes']} note(s)")
         return
 
     stats = build(args.out)
     print(f"[site] {stats['papers']} papers, {stats['profiled']} profiled, "
-          f"{stats['demos']} demo(s), {stats['explainers']} explainer(s) "
-          f"-> {stats['out']}")
+          f"{stats['demos']} demo(s), {stats['explainers']} explainer(s), "
+          f"{stats['notes']} note(s) -> {stats['out']}")
 
 
 if __name__ == "__main__":

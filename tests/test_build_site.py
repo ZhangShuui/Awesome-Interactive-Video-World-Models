@@ -37,6 +37,8 @@ class SiteCase(unittest.TestCase):
         self.demos.mkdir()
         self.explainers = self.tmp / "explainers"
         self.explainers.mkdir()
+        self.notes = self.tmp / "notes"
+        self.notes.mkdir()
         self.out = self.tmp / "site"
 
     def write(self, records):
@@ -47,7 +49,8 @@ class SiteCase(unittest.TestCase):
         return bs.build(self.out, papers_path=self.papers,
                         tags_path=ROOT / "data" / "tags.json",
                         demos_dir=self.demos,
-                        explainers_dir=self.explainers)
+                        explainers_dir=self.explainers,
+                        notes_dir=self.notes)
 
     def index(self):
         return (self.out / "index.html").read_text(encoding="utf-8")
@@ -57,6 +60,18 @@ class SiteCase(unittest.TestCase):
         d.mkdir(parents=True)
         (d / entry).write_text(body, encoding="utf-8")
         return d
+
+    def add_note(self, slug, title="A note", blurb="What it covers.", body=""):
+        head = f"<title>{title}</title>" if title is not None else ""
+        if blurb is not None:
+            head += f'\n<meta name="description" content="{blurb}">'
+        f = self.notes / f"{slug}.html"
+        f.write_text(f"<!DOCTYPE html>\n<html><head>{head}</head>"
+                     f"<body>\n{body}</body></html>", encoding="utf-8")
+        return f
+
+    def notes_index(self):
+        return (self.out / "notes" / "index.html").read_text(encoding="utf-8")
 
     def add_explainer(self, name, body=None):
         f = self.explainers / f"{name}.html"
@@ -325,6 +340,93 @@ class TestExplainers(SiteCase):
         page = self.index()
         self.assertIn("demo-badge", page)
         self.assertIn("explainer-badge", page)
+
+
+class TestNotes(SiteCase):
+    def test_a_note_becomes_a_page_and_a_listing_entry(self):
+        self.write([record("2608.00001")])
+        self.add_note("rope-in-retrieval-kv", title="RoPE in retrieval KV")
+        stats = self.build()
+        self.assertEqual(stats["notes"], 1)
+        self.assertTrue((self.out / "notes" / "rope-in-retrieval-kv.html").is_file())
+        listing = self.notes_index()
+        self.assertIn("RoPE in retrieval KV", listing)
+        self.assertIn('href="rope-in-retrieval-kv.html"', listing)
+
+    def test_a_note_names_itself(self):
+        """There is no register to keep: the listing reads the title and the
+        blurb out of the page, so adding a note stays a single `cp`."""
+        self.write([record("2608.00001")])
+        self.add_note("x", title="\u4e16\u754c\u6a21\u578b\u5373\u5185\u6838",
+                      blurb="39 systems, one table.")
+        self.build()
+        listing = self.notes_index()
+        self.assertIn("\u4e16\u754c\u6a21\u578b\u5373\u5185\u6838", listing)
+        self.assertIn("39 systems, one table.", listing)
+
+    def test_a_note_with_no_blurb_still_lists(self):
+        self.write([record("2608.00001")])
+        self.add_note("x", title="Bare", blurb=None)
+        self.build()
+        listing = self.notes_index()
+        self.assertIn("Bare", listing)
+        self.assertNotIn("note-card__blurb", listing)
+
+    def test_a_note_with_no_title_is_reported_not_listed(self):
+        """It would otherwise list as a blank line, which is the one failure
+        a reader cannot tell from a styling bug."""
+        self.add_note("x", title=None)
+        found, orphans = bs.find_notes(self.notes)
+        self.assertEqual(found, [])
+        self.assertTrue(any("no <title>" in o for o in orphans))
+
+    def test_the_title_and_blurb_are_escaped(self):
+        self.write([record("2608.00001")])
+        self.add_note("x", title="A <script>alert(1)</script> note")
+        self.build()
+        self.assertNotIn("<script>alert(1)</script>", self.notes_index())
+
+    def test_a_note_goes_back_to_the_listing_not_to_a_paper_row(self):
+        """A note belongs to no row, so there is no row to return to."""
+        self.write([record("2608.00001")])
+        self.add_note("x")
+        self.build()
+        built = (self.out / "notes" / "x.html").read_text(encoding="utf-8")
+        self.assertIn('id="site-back" href="index.html"', built)
+        self.assertIn("NOTES", built)
+
+    def test_the_note_is_published_as_itself(self):
+        self.write([record("2608.00001")])
+        self.add_note("x", body="<h1>\u7cbe\u8bfb</h1>")
+        self.build()
+        built = (self.out / "notes" / "x.html").read_text(encoding="utf-8")
+        self.assertNotIn("<iframe", built)
+        self.assertIn("\u7cbe\u8bfb", built)
+
+    def test_the_index_only_advertises_notes_once_there_are_some(self):
+        """An empty section behind a nav item is worse than no nav item."""
+        self.write([record("2608.00001")])
+        self.build()
+        self.assertNotIn('href="notes/"', self.index())
+        self.assertFalse((self.out / "notes").exists())
+
+        self.add_note("x")
+        self.build()
+        self.assertIn('href="notes/"', self.index())
+
+    def test_the_nav_line_counts_in_english(self):
+        self.write([record("2608.00001")])
+        self.add_note("a")
+        self.build()
+        self.assertIn("1 cross-paper note ", self.index())
+        self.add_note("b")
+        self.build()
+        self.assertIn("2 cross-paper notes ", self.index())
+
+    def test_underscore_files_are_not_notes(self):
+        self.add_note("_template")
+        found, orphans = bs.find_notes(self.notes)
+        self.assertEqual((found, orphans), ([], []))
 
 
 class TestRealData(unittest.TestCase):
