@@ -89,6 +89,10 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`Atlas`**, A World Model for Spatial Intelligence. **`World Labs`** [[Blog](https://www.worldlabs.ai/blog/atlas)] · 📰`reports`
+* **`H3-World`**, Turning Language Understanding into World Control. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.01560)] · 🕹️`control`
+* **`MeRoPE`**, Metric Rotary Position Embedding for Camera-Controlled Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.01252)] · 📊`benchmarks`
+* **`Solaris`**, Towards Interfaces That Are Generated, Not Coded. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.00776)] · ⚡`realtime`
 * **`DreamX-Creator`**, Democratizing Native Audio-Video Generation at 2K Resolution. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.31106)] · ⚡`realtime`
 * Can Video World Models Track Unobserved World States?. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.30692)] · 🕹️`control`
 * **`Matrix-Game 3.5`**, Enhancing Real-Time Streaming Interactive World Models with Patch Memory. **`arXiv 2026.08`** [[Paper](https://arxiv.org/abs/2608.29910)] · 🌍`systems` ⚡`realtime` 🧠`memory`
