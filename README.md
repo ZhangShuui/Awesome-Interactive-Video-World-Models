@@ -89,6 +89,7 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`SolarWM`**, Open Data and Scalable Training for Long-Horizon Video World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.02886)] · 🧠`memory`
 * **`Atlas`**, A World Model for Spatial Intelligence. **`World Labs`** [[Blog](https://www.worldlabs.ai/blog/atlas)] · 📰`reports`
 * **`H3-World`**, Turning Language Understanding into World Control. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.01560)] · 🕹️`control`
 * **`MeRoPE`**, Metric Rotary Position Embedding for Camera-Controlled Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.01252)] · 📊`benchmarks`
