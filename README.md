@@ -89,6 +89,15 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`Principia`**, Relational Physics Tests for Video Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04200)] · 🧠`memory`
+* **`DSAQuant`**, Denoising-Stage-Aligned Quantization-Aware Training for Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04031)] · ⚡`realtime`
+* **`WorldReward`**, Reward Modeling for Camera-Conditioned World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.03952)] · 🧠`memory`
+* **`OctWorld`**, Long-Range World-Consistent Video Generation with Octree-Based 3D Mapping. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.03919)] · 🌍`systems` 🧠`memory`
+* Do Video Generators Track the World Across Segments? A Benchmark and Method for World-State Reasoning in Video Continuation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.03673)] · 📊`benchmarks`
+* The Attention Triangle in Audio-Video Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.03586)] · 🧠`memory`
+* Building Pretraining Data for World Models: An Unreal Engine-Based Pipeline for Action-Conditioned Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.03557)] · 🕹️`control`
+* **`LeanGRPO`**, Eliminating Redundant Recomputation in Diffusion RL. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.03528)] · 🧠`memory`
+* **`VeriPhy`**, Agentic Physical Reasoning for World Model Evaluation and Refinement. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.03153)] · 📊`benchmarks`
 * **`SolarWM`**, Open Data and Scalable Training for Long-Horizon Video World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.02886)] · 🧠`memory`
 * **`Atlas`**, A World Model for Spatial Intelligence. **`World Labs`** [[Blog](https://www.worldlabs.ai/blog/atlas)] · 📰`reports`
 * **`H3-World`**, Turning Language Understanding into World Control. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.01560)] · 🕹️`control`
