@@ -89,6 +89,9 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`TourPhysics`**, Bringing Physics to World Models for Exploration and Manipulation from a Single Image. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04911)] · 🧠`memory`
+* **`PRISM-Bench`**, An Audio-Centric Diagnostic Benchmark for Text-to-Audio-Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04867)] · 📊`benchmarks`
+* Joint Alignment and Distillation for Video Generation via Sample-Guided Distribution Matching. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04283)] · ⚡`realtime`
 * **`Principia`**, Relational Physics Tests for Video Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04200)] · 🧠`memory`
 * **`DSAQuant`**, Denoising-Stage-Aligned Quantization-Aware Training for Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04031)] · ⚡`realtime`
 * **`WorldReward`**, Reward Modeling for Camera-Conditioned World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.03952)] · 🧠`memory`
