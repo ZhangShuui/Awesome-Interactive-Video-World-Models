@@ -89,6 +89,13 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* Mask Forcing: Improving Autoregressive Video Diffusion Distillation via Dual-Noise Masking Rollout. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.09123)] · ⚡`realtime`
+* Temporal State Transport in Video Generation: Diagnosing and Correcting Spectral Imbalance. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.08505)] · 🧠`memory`
+* **`ActionSplice`**, In-Flight Action Editing for Interactive World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.08230)] · ⚡`realtime`
+* **`PhysFlow`**, Physics-Aware Optical Flow for Motion Controllable Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.08215)] · 🕹️`control`
+* Zero-Shot Sim-to-Real Contact-Rich Assembly via Proprioception-Anchored Cross-Modal Pretraining. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.07534)] · 🧠`memory`
+* **`RoLA`**, Rotary-Positioned Low-Rank Linear Attention for Efficient Diffusion Transformers. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.06712)] · ⚡`realtime`
+* **`PhysWeep`**, Does a Video Generator Realize the Physics You Ask For?. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.06207)] · 🧠`memory`
 * **`TourPhysics`**, Bringing Physics to World Models for Exploration and Manipulation from a Single Image. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04911)] · 🧠`memory`
 * **`PRISM-Bench`**, An Audio-Centric Diagnostic Benchmark for Text-to-Audio-Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04867)] · 📊`benchmarks`
 * Joint Alignment and Distillation for Video Generation via Sample-Guided Distribution Matching. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04283)] · ⚡`realtime`
