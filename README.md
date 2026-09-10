@@ -89,6 +89,8 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* Programmable World Model. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.10540)] · 🧠`memory`
+* **`Valerant`**, An Automatic Navigable Game Map Generator via Action-Conditioned World Model Exploration. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.09418)] · 🕹️`control`
 * Mask Forcing: Improving Autoregressive Video Diffusion Distillation via Dual-Noise Masking Rollout. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.09123)] · ⚡`realtime`
 * Temporal State Transport in Video Generation: Diagnosing and Correcting Spectral Imbalance. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.08505)] · 🧠`memory`
 * **`ActionSplice`**, In-Flight Action Editing for Interactive World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.08230)] · ⚡`realtime`
