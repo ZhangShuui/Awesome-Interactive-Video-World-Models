@@ -89,6 +89,11 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`Vidu S2`**, Real-Time Interactive, Editable, and Spatial Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.11638)] · ⚡`realtime`
+* World in World: Explore the World with World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.11548)] · 🧠`memory`
+* **`Uncertainty DMD`**, Restoring Diversity in Few-Step Autoregressive Video Distillation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.11265)] · ⚡`realtime`
+* From Evaluation to Enhancement: Benchmarking and Improving Think-with-Video Reasoning for Video Generative Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.11242)] · 📊`benchmarks`
+* Beyond Visual Quality: Evaluating Physical Consistency under Ego-Motion with EgoGenEval. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.11172)] · 🧠`memory` 📊`benchmarks`
 * Programmable World Model. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.10540)] · 🧠`memory`
 * **`Valerant`**, An Automatic Navigable Game Map Generator via Action-Conditioned World Model Exploration. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.09418)] · 🕹️`control`
 * Mask Forcing: Improving Autoregressive Video Diffusion Distillation via Dual-Noise Masking Rollout. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.09123)] · ⚡`realtime`
