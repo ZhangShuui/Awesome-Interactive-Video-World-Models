@@ -69,6 +69,19 @@ def parse_selections(issue_body, valid_tags, tag_order):
         # about -- "NeurIPS 2025 poster" -- which is exactly the field a
         # hand-added record would have had to be looked up by hand.
         link_key = "blog" if source_of(pid) == "blog" else "paper"
+        # `links` stays ordered paper-or-blog first: write_summary renders
+        # `next(iter(links.values()))` as the paper's one link, and a repository
+        # is not what that line is for.
+        links = {link_key: url}
+        # A proceedings sweep can arrive knowing the repository -- the abstract
+        # printed it, or someone looked it up -- and that knowledge is lost for
+        # good if it does not survive the tick. It is not re-derivable from the
+        # record: nothing in `links.paper` says where the code lives.
+        code = (payload.get("code") or "").strip()
+        if code.startswith(("http://", "https://")):
+            links["code"] = code
+        elif code:
+            warnings.append(f"{pid}: `{code}` is not a usable code link, dropped")
         records.append({
             "id": pid,
             "name": payload.get("name"),
@@ -78,7 +91,7 @@ def parse_selections(issue_body, valid_tags, tag_order):
             "tags": tags,
             # Every tag on a ticked line was seen by the person who ticked it.
             "tags_source": {t: "curated" for t in tags},
-            "links": {link_key: url},
+            "links": links,
             "attrs": {},
         })
     return records, warnings

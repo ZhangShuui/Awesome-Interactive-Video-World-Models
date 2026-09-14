@@ -352,7 +352,11 @@ CRITERIA_RE = re.compile(
 REJECT_RE = re.compile(
     r"^\s+- \[(?P<checked>[ xX])\].*?<!-- reject:(?P<id>[^\s>]+) -->", re.M)
 
-PAYLOAD_FIELDS = ("id", "name", "title", "date", "tags", "url", "origin")
+# `code` is carried but never guessed. A proceedings page does not publish a
+# repository link, so whatever fills this came from the abstract itself or from
+# a lookup someone ran by hand -- and re-running that lookup after the fact is
+# the expensive half. Only a source that actually knows a repository sets it.
+PAYLOAD_FIELDS = ("id", "name", "title", "date", "tags", "url", "origin", "code")
 
 
 def parse_tags(raw):

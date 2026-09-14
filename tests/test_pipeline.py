@@ -318,6 +318,45 @@ class TestRoundTrip(unittest.TestCase):
         self.assertTrue(set(records[0]["tags"]) <= TAGS)
         self.assertTrue(warnings)
 
+    # --- links.code ------------------------------------------------------
+    #
+    # A proceedings sweep is the one source that can arrive already knowing
+    # where the code lives, and that knowledge is not recoverable later: no
+    # field of a finished record says which repository a CVF page belonged to.
+    # So the tick has to carry it, or the lookup gets run twice.
+
+    def _one_candidate(self, **extra):
+        cand = {"id": "proc:cvpr2026-deadbeef", "name": "OctWorld",
+                "title": "OctWorld: Long-Range World-Consistent Video Generation",
+                "tags": ["memory"], "met": 2, "evidence": {},
+                "url": "https://openaccess.thecvf.com/content/CVPR2026/html/x.html",
+                "origin": "CVPR 2026"}
+        cand.update(extra)
+        body = "\n".join(sources.render_candidates([cand])).replace("- [ ]", "- [x]", 1)
+        return self._select(body)
+
+    def test_a_code_link_survives_the_tick(self):
+        records, warnings = self._one_candidate(code="https://github.com/x/OctWorld")
+        self.assertFalse(warnings)
+        self.assertEqual(records[0]["links"]["code"], "https://github.com/x/OctWorld")
+
+    def test_the_paper_link_still_comes_first(self):
+        """write_summary renders links.values()[0] as *the* link for the row."""
+        records, _ = self._one_candidate(code="https://github.com/x/OctWorld")
+        first = next(iter(records[0]["links"].values()))
+        self.assertIn("openaccess.thecvf.com", first)
+
+    def test_no_code_link_leaves_links_alone(self):
+        records, warnings = self._one_candidate()
+        self.assertEqual(list(records[0]["links"]), ["paper"])
+        self.assertFalse(warnings)
+
+    def test_a_junk_code_link_is_dropped_without_taking_the_paper_with_it(self):
+        records, warnings = self._one_candidate(code="github.com/x/OctWorld")
+        self.assertEqual(len(records), 1)
+        self.assertNotIn("code", records[0]["links"])
+        self.assertTrue(any("not a usable code link" in w for w in warnings))
+
     def test_refresh_preserves_ticks(self):
         run_candidates("--papers", str(self.papers), output=self.report)
         self._tick_first()
