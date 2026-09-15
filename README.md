@@ -105,11 +105,11 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * **`PhysWeep`**, Does a Video Generator Realize the Physics You Ask For?. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.06207)] · 🧠`memory`
 * **`TourPhysics`**, Bringing Physics to World Models for Exploration and Manipulation from a Single Image. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04911)] · 🧠`memory`
 * **`PRISM-Bench`**, An Audio-Centric Diagnostic Benchmark for Text-to-Audio-Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04867)] · 📊`benchmarks`
-* Joint Alignment and Distillation for Video Generation via Sample-Guided Distribution Matching. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04283)] · ⚡`realtime`
+* Joint Alignment and Distillation for Video Generation via Sample-Guided Distribution Matching. **`ECCV 2026`** [[Paper](https://arxiv.org/abs/2609.04283)] · ⚡`realtime`
 * **`Principia`**, Relational Physics Tests for Video Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04200)] · 🧠`memory`
 * **`DSAQuant`**, Denoising-Stage-Aligned Quantization-Aware Training for Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.04031)] · ⚡`realtime`
 * **`WorldReward`**, Reward Modeling for Camera-Conditioned World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.03952)] · 🧠`memory`
-* **`OctWorld`**, Long-Range World-Consistent Video Generation with Octree-Based 3D Mapping. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.03919)] · 🌍`systems` 🧠`memory`
+* **`OctWorld`**, Long-Range World-Consistent Video Generation with Octree-Based 3D Mapping. **`ECCV 2026`** [[Paper](https://arxiv.org/abs/2609.03919)] · 🌍`systems` 🧠`memory`
 * Do Video Generators Track the World Across Segments? A Benchmark and Method for World-State Reasoning in Video Continuation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.03673)] · 📊`benchmarks`
 * The Attention Triangle in Audio-Video Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.03586)] · 🧠`memory`
 * Building Pretraining Data for World Models: An Unreal Engine-Based Pipeline for Action-Conditioned Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.03557)] · 🕹️`control`
@@ -230,7 +230,7 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * World Action Models: A Survey. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.20781)] · 📚`surveys`
 * Current World Models Lack a Persistent State Core. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.20545)] · 🧠`memory` 📊`benchmarks`
 * **`TurboServe`**, Serving Streaming Video Generation Efficiently and Economically. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.19271)] · ⚡`realtime`
-* **`UniTemp`**, Unlocking Video Generation in Any Temporal Order via Bidirectional Distillation. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.18702)] · ⚡`realtime`
+* **`UniTemp`**, Unlocking Video Generation in Any Temporal Order via Bidirectional Distillation. **`ECCV 2026`** [[Paper](https://arxiv.org/abs/2606.18702)] [[Website](https://lzhangbj.github.io/projects/unitemp/)] [[Code](https://github.com/lzhangbj/UniTemp)] · ⚡`realtime`
 * **`EgoCS-400K`**, An Egocentric Gameplay Dataset for World Models. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.18180)] · 🗂️`datasets`
 * **`MaineCoon`**, Pursuing A Real-Time Audio-Visual Social World Model. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.17800)] · 🌍`systems` 🕹️`control` ⚡`realtime`
 * **`ActWorld`**, From Explorable to Interactive World Model via Action-Aware Memory. **`arXiv 2026.06`** [[Paper](https://arxiv.org/abs/2606.17730)] · 🌍`systems` 🧠`memory`
@@ -333,7 +333,7 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * **`PackForcing`**, Short Video Training Suffices for Long Video Sampling and Long Context Inference. **`ECCV 2026`** [[Paper](https://arxiv.org/abs/2603.25730)] · 🧠`memory`
 * Out of Sight but Not Out of Mind: Hybrid Memory for Dynamic Video World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.25716)] · 🧠`memory`
 * **`DCARL`**, A Divide-and-Conquer Framework for Autoregressive Long-Trajectory Video Generation. **`ECCV 2026`** [[Paper](https://arxiv.org/abs/2603.24835)] · 🕹️`control`
-* **`WildWorld`**, A Large-Scale Dataset for Dynamic World Modeling with Actions and Explicit State toward Generative ARPG. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.23497)] [[Website](https://shandaai.github.io/wildworld-project/)] [[Code](https://github.com/ShandaAI/WildWorld)] · 🗂️`datasets`
+* **`WildWorld`**, A Large-Scale Dataset for Dynamic World Modeling with Actions and Explicit State toward Generative ARPG. **`ECCV 2026`** [[Paper](https://arxiv.org/abs/2603.23497)] [[Website](https://alaya-studio.github.io/wildworld-project/)] [[Code](https://github.com/AlayaLab/WildWorld)] · 🗂️`datasets`
 * **`I3DM`**, Implicit 3D-aware Memory Retrieval and Injection for Consistent Video Scene Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.23413)] · 🧠`memory`
 * **`WorldCache`**, Content-Aware Caching for Accelerated Video World Models. **`ECCV 2026`** [[Paper](https://arxiv.org/abs/2603.22286)] [[Website](https://umair1221.github.io/World-Cache/)] · ⚡`realtime`
 * **`Omni-WorldBench`**, Towards a Comprehensive Interaction-Centric Evaluation for World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.22212)] · 📊`benchmarks`
