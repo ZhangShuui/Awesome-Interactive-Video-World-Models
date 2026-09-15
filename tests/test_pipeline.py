@@ -20,6 +20,7 @@ import sources  # noqa: E402
 import triage  # noqa: E402
 
 FEED = Path(__file__).resolve().parent / "data" / "sample-feed.xml"
+RSS = Path(__file__).resolve().parent / "data" / "sample-rss.xml"
 TAGS = {t["key"] for t in json.loads((ROOT / "data" / "tags.json").read_text())}
 
 
@@ -183,6 +184,158 @@ class TestRateLimit(unittest.TestCase):
         """08-16 was still being refused six minutes in and the run was lost.
         Worst-case jitter, so this is the floor the schedule can count on."""
         self.assertGreaterEqual(sum(self._backoffs(1.0)), 15 * 60)
+
+
+class TestRssFallback(unittest.TestCase):
+    """What the job does when arXiv's API refuses it for a whole run.
+
+    Four consecutive runs died that way over 09-13..09-15 while rss.arxiv.org
+    answered every request. A fallback is only worth having if it degrades
+    honestly: it answers a different question than the window did, and the
+    report has to say which one it answered.
+    """
+
+    def test_a_replacement_is_not_announced_twice(self):
+        """`replace` is a revision of something announced on an earlier day."""
+        ids = {p["id"] for p in ac.parse_rss(RSS.read_bytes())}
+        self.assertNotIn("2601.44444", ids)
+        self.assertEqual(ids, {"2609.11111", "2609.22222", "2609.33333"})
+
+    def test_the_announce_header_is_not_left_in_the_abstract(self):
+        first = next(p for p in ac.parse_rss(RSS.read_bytes())
+                     if p["id"] == "2609.11111")
+        self.assertTrue(first["abstract"].startswith("We present a causal"))
+        self.assertNotIn("Announce Type", first["abstract"])
+
+    def test_cross_listings_keep_every_category(self):
+        """A paper passes on any of its categories, so losing one loses it."""
+        cross = next(p for p in ac.parse_rss(RSS.read_bytes())
+                     if p["id"] == "2609.33333")
+        self.assertEqual(cross["categories"], ["cs.CV", "cs.LG"])
+
+    def _fetch_rss(self, payload=None):
+        payload = payload if payload is not None else RSS.read_bytes()
+        with mock.patch.object(ac, "get", lambda *a, **k: payload), \
+                mock.patch.object(ac.time, "sleep", lambda _s: None):
+            return ac.fetch_rss({"cs.CV"}, 60.0, 2, 5.0)
+
+    def test_the_vocabulary_filter_runs_before_the_scope_gate(self):
+        """sources.proposal assumes phrase-recalled input. Handed a raw day of
+        announcements it admits person re-id, TinyML and channel contention --
+        39 candidates where six were real. The recall layer belongs here."""
+        ids = {p["id"] for p in self._fetch_rss()}
+        self.assertNotIn("2609.22222", ids)
+        self.assertEqual(ids, {"2609.11111", "2609.33333"})
+
+    def test_a_paper_cross_listed_into_two_feeds_arrives_once(self):
+        seen, payload = [], RSS.read_bytes()
+
+        def one_per_category(url, *_a, **_kw):
+            seen.append(url)
+            return payload
+
+        with mock.patch.object(ac, "get", one_per_category), \
+                mock.patch.object(ac.time, "sleep", lambda _s: None):
+            papers = ac.fetch_rss({"cs.CV", "cs.LG"}, 60.0, 2, 5.0)
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(len(papers), len({p["id"] for p in papers}))
+
+    def test_an_exhausted_rate_limit_is_a_different_failure_from_a_dead_socket(self):
+        """Only the first can be answered by asking a different host."""
+        self.assertTrue(issubclass(ac.RateLimited, SystemExit))
+
+    def test_the_window_falls_back_rather_than_losing_the_day(self):
+        def refuse(*_a, **_kw):
+            raise ac.RateLimited("nope")
+
+        with mock.patch.object(ac, "_fetch_window", refuse), \
+                mock.patch.object(ac, "get", lambda *a, **k: RSS.read_bytes()), \
+                mock.patch.object(ac.time, "sleep", lambda _s: None):
+            papers, degraded = ac.fetch_papers(
+                datetime(2026, 9, 8, tzinfo=timezone.utc),
+                datetime(2026, 9, 15, tzinfo=timezone.utc), 400, 60.0, 2, 5.0)
+        self.assertTrue(degraded)
+        self.assertEqual({p["id"] for p in papers}, {"2609.11111", "2609.33333"})
+
+    def test_a_working_api_is_not_degraded(self):
+        with mock.patch.object(ac, "_fetch_window", lambda *a, **k: [{"id": "x"}]):
+            papers, degraded = ac.fetch_papers(
+                datetime(2026, 9, 8, tzinfo=timezone.utc),
+                datetime(2026, 9, 15, tzinfo=timezone.utc), 400, 60.0, 2, 5.0)
+        self.assertFalse(degraded)
+        self.assertEqual(papers, [{"id": "x"}])
+
+    def test_the_report_says_the_window_was_not_searched(self):
+        cand = [{"id": "2609.11111", "name": None, "title": "T", "date": "2026-09-14",
+                 "tags": ["memory"], "met": 1, "evidence": {}}]
+        degraded = ac.render(cand, 7, sorted(TAGS), degraded=True)
+        self.assertIn("date window was not searched", degraded)
+        self.assertIn("today's arXiv announcement", degraded)
+        self.assertNotIn("from the last 7 day(s)", degraded)
+        self.assertNotIn("date window was not searched",
+                         ac.render(cand, 7, sorted(TAGS)))
+
+    def test_a_degraded_report_is_still_an_inbox(self):
+        """Ticking it has to work, or the fallback buys nothing."""
+        cand = [{"id": "2609.11111", "name": None, "title": "T", "date": "2026-09-14",
+                 "tags": ["memory"], "met": 1, "evidence": {}}]
+        body = ac.render(cand, 7, sorted(TAGS), degraded=True)
+        self.assertEqual(len(sources.carried_candidates(body)), 1)
+        self.assertEqual(sources.checked_ids(body.replace("- [ ]", "- [x]", 1)),
+                         {"2609.11111"})
+
+    def test_the_real_submission_date_replaces_the_announcement_date(self):
+        """arXiv announces days after submission, and the announcement date is
+        all RSS carries. A list sorted by date should not wear the difference."""
+        cand = [{"id": "2609.11111", "date": "2026-09-14"}]
+        page = b'<span class="dateline">[Submitted on 10 Sep 2026]</span>'
+        with mock.patch.object(ac, "get", lambda *a, **k: page), \
+                mock.patch.object(ac.time, "sleep", lambda _s: None):
+            ac.fill_submitted_dates(cand, 60.0, 2, 5.0)
+        self.assertEqual(cand[0]["date"], "2026-09-10")
+
+    def test_a_degraded_report_records_the_window_it_could_not_search(self):
+        """--since anchors to the last run that *succeeded*, and a fallback run
+        succeeds. Without this the unsearched window stops being reachable the
+        moment the anchor advances past it -- the exact hole --since exists to
+        close, reopened by the thing meant to help."""
+        missed = datetime(2026, 9, 12, 4, 29, 44, tzinfo=timezone.utc)
+        body = ac.render([], 7, sorted(TAGS), degraded=True, unsearched=missed)
+        self.assertEqual(ac.unsearched_since(body), missed)
+        self.assertIsNone(ac.unsearched_since(ac.render([], 7, sorted(TAGS))))
+
+    def test_a_second_fallback_still_reaches_back_to_the_first_gap(self):
+        """Day two of an outage anchors to day one's unsearched window, not to
+        day one's run -- which succeeded, and searched none of it."""
+        missed = datetime(2026, 9, 12, 4, 29, 44, tzinfo=timezone.utc)
+        yesterday = ac.render([], 7, sorted(TAGS), degraded=True, unsearched=missed)
+        self.assertEqual(
+            ac.effective_since("2026-09-15T04:32:22Z", yesterday), missed)
+
+    def test_a_run_that_searches_its_window_ends_the_chain(self):
+        searched = ac.render([], 7, sorted(TAGS))
+        self.assertEqual(
+            ac.effective_since("2026-09-15T04:32:22Z", searched),
+            datetime(2026, 9, 15, 4, 32, 22, tzinfo=timezone.utc))
+
+    def test_the_anchor_wins_when_it_reaches_further_back(self):
+        """A marker must only ever widen the window, never narrow it."""
+        recent = ac.render([], 7, sorted(TAGS), degraded=True,
+                           unsearched=datetime(2026, 9, 14, tzinfo=timezone.utc))
+        self.assertEqual(
+            ac.effective_since("2026-09-01T00:00:00Z", recent),
+            datetime(2026, 9, 1, tzinfo=timezone.utc))
+
+    def test_an_unreadable_abstract_page_costs_a_date_not_a_paper(self):
+        cand = [{"id": "2609.11111", "date": "2026-09-14"}]
+
+        def dead(*_a, **_kw):
+            raise SystemExit("gone")
+
+        with mock.patch.object(ac, "get", dead), \
+                mock.patch.object(ac.time, "sleep", lambda _s: None):
+            ac.fill_submitted_dates(cand, 60.0, 2, 5.0)
+        self.assertEqual(cand, [{"id": "2609.11111", "date": "2026-09-14"}])
 
 
 class TestSearchWindow(unittest.TestCase):

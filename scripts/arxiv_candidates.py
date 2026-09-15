@@ -35,7 +35,15 @@ import triage  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 API_URL = "https://export.arxiv.org/api/query"
+# The announcement feed, and a different host from the API. The two are
+# throttled separately and visibly so: export.arxiv.org refused this runner's
+# subnet on four consecutive runs across 09-13..09-15 while rss.arxiv.org
+# answered every request in under half a second. That split is the only reason
+# a fallback is worth having -- if one host were down, so would the other be.
+RSS_URL = "https://rss.arxiv.org/rss/{category}"
+ABS_URL = "https://arxiv.org/abs/{paper_id}"
 NS = {"a": "http://www.w3.org/2005/Atom"}
+RSS_NS = {"arxiv": "http://arxiv.org/schemas/atom"}
 PAGE_SIZE = 100
 MIN_DELAY_S = 3.1
 USER_AGENT = "awesome-interactive-video-world-models/1.0 (+https://github.com/)"
@@ -58,6 +66,34 @@ ALLOWED_CATEGORIES = {"cs.CV", "cs.LG", "cs.AI", "cs.MM", "eess.IV"}
 QUERY_PHRASES = sources.QUERY_PHRASES
 
 ARXIV_ID_RE = re.compile(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})", re.I)
+
+# The API applies QUERY_PHRASES *as the query*, so everything reaching
+# `sources.proposal` has already matched the field's vocabulary. RSS hands over
+# the entire day's announcements instead -- 347 papers across five categories --
+# and proposal() is a scope gate, not a topic gate: it was written assuming its
+# input was phrase-recalled. Handed the raw day it admitted person re-identifi-
+# cation, TinyML, 802.11 channel contention and maize leaf segmentation, 39
+# candidates where six were real. So the recall layer is reapplied here, and it
+# has to run before proposal(), not after.
+PHRASE_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(p) for p in QUERY_PHRASES) + r")", re.I)
+
+# "Announce Type: new" and the abstract that follows it, which is the only
+# place the RSS item carries one.
+RSS_ABSTRACT_RE = re.compile(
+    r"^arXiv:\S+\s+Announce Type:\s*\S+\s*(?:Abstract:\s*)?", re.I)
+SUBMITTED_RE = re.compile(r"Submitted on (\d{1,2} \w{3} \d{4})")
+
+# The window a degraded run could not search, carried in its own report.
+#
+# `--since` is anchored to the last run that *succeeded*, and a run that falls
+# back to RSS succeeds: it exits 0 and writes an inbox. That would quietly
+# retire the guarantee the anchor exists for, because the window it never
+# searched would stop being reachable the moment `--since` advanced past it.
+# So the unsearched window start rides along in the report, is read back off
+# the previous inbox on the next run, and only stops being carried when a run
+# actually searches it.
+UNSEARCHED_RE = re.compile(r"<!-- unsearched-since:\s*(\S+)\s*-->")
 
 
 # --- arXiv API ---------------------------------------------------------------
@@ -102,6 +138,17 @@ def parse_feed(payload):
 # ceiling in half the attempts and then sits there, which buys a quarter of an
 # hour from seven. Each wait is jittered down by up to a quarter so that a
 # runner subnet throttled in lockstep does not re-collide on the way back.
+class RateLimited(SystemExit):
+    """arXiv refused every attempt at the API.
+
+    A SystemExit still, so a caller that has nothing better to do keeps dying
+    exactly as it did and with the same message. But it is a different failure
+    from a dead socket -- the service is up and declining to serve *us* -- and
+    only that distinction makes a degraded answer the right response instead of
+    a dishonest one.
+    """
+
+
 RATE_LIMIT_RETRIES = 7
 RATE_LIMIT_BACKOFF_S = 30.0
 RATE_LIMIT_MAX_WAIT_S = 300.0
@@ -140,7 +187,7 @@ def fetch_page(query, start, max_results, timeout, retries, retry_delay):
     })
     request = urllib.request.Request(f"{API_URL}?{params}",
                                      headers={"User-Agent": USER_AGENT})
-    last, failures, throttled = None, 0, 0
+    last, failures, throttled, refused = None, 0, 0, False
     while True:
         try:
             with urllib.request.urlopen(request, timeout=timeout) as resp:
@@ -150,6 +197,7 @@ def fetch_page(query, start, max_results, timeout, retries, retry_delay):
             if exc.code == 429:
                 throttled += 1
                 if throttled > RATE_LIMIT_RETRIES:
+                    refused = True
                     break
                 wait = retry_after(exc) or backoff_for(throttled)
                 print(f"arXiv rate-limited this request; waiting {wait:.0f}s "
@@ -166,8 +214,127 @@ def fetch_page(query, start, max_results, timeout, retries, retry_delay):
             if failures > retries:
                 break
             time.sleep(retry_delay * failures)
-    raise SystemExit(f"arXiv API request failed after {failures + throttled} "
+    attempts = failures + throttled
+    if refused:
+        raise RateLimited(f"arXiv API request failed after {attempts} "
+                          f"attempt(s): {last}")
+    raise SystemExit(f"arXiv API request failed after {attempts} "
                      f"attempt(s): {last}")
+
+
+# --- arXiv RSS, the degraded path ---------------------------------------------
+
+def get(url, timeout, retries, retry_delay):
+    """A plain GET with the ordinary retry budget and no rate-limit handling.
+
+    RSS has never answered this job with a 429. If it starts to, the right
+    response is to fail -- there is no third source to fall back to, and a
+    fallback that silently returns nothing is worse than a run that says so.
+    """
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    last = None
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as resp:
+                return resp.read()
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+            last = exc
+            if attempt < retries:
+                time.sleep(retry_delay * (attempt + 1))
+    raise SystemExit(f"{url} failed after {retries + 1} attempt(s): {last}")
+
+
+def parse_rss(payload):
+    """One category's daily announcement -> the shape parse_feed returns.
+
+    Replacements are skipped. They are revisions of papers announced on some
+    earlier day, so either the list already holds the paper or an earlier window
+    already offered it and it was turned down; either way re-proposing it is
+    noise. `new` and `cross` are the two that have never been seen before.
+
+    The date here is the announcement date, not the submission date -- RSS does
+    not carry the latter. `fill_submitted_dates` corrects it for the handful of
+    papers that survive the gates, which is the only place the difference is
+    ever written down.
+    """
+    root = ET.fromstring(payload)
+    out = []
+    for item in root.findall("./channel/item"):
+        announce = item.findtext("arxiv:announce_type", "", RSS_NS).strip()
+        if announce not in ("new", "cross"):
+            continue
+        link = (item.findtext("link", "") or "").strip()
+        m = re.search(r"abs/(\d{4}\.\d{4,5})", link)
+        if not m:
+            continue
+        description = item.findtext("description", "") or ""
+        announced = item.findtext("pubDate", "") or ""
+        try:
+            date = parsedate_to_datetime(announced).date().isoformat()
+        except (TypeError, ValueError):
+            date = ""
+        out.append({
+            "id": m.group(1),
+            "title": re.sub(r"\s+", " ", item.findtext("title", "") or "").strip(),
+            "abstract": re.sub(
+                r"\s+", " ", RSS_ABSTRACT_RE.sub("", description)).strip(),
+            "date": date,
+            "categories": sorted(
+                {(c.text or "").strip() for c in item.findall("category")} - {""}),
+        })
+    return out
+
+
+def fetch_rss(categories, timeout, retries, retry_delay):
+    """Today's announcements across the categories this list reads.
+
+    Deduplicated by id, because a paper cross-listed into three of them appears
+    in three feeds, and phrase-filtered, because the API's own query did that
+    job on the path this one replaces.
+    """
+    seen, papers = set(), []
+    for category in sorted(categories):
+        payload = get(RSS_URL.format(category=category), timeout, retries, retry_delay)
+        for paper in parse_rss(payload):
+            if paper["id"] in seen:
+                continue
+            seen.add(paper["id"])
+            if not PHRASE_RE.search(f"{paper['title']} {paper['abstract']}"):
+                continue
+            papers.append(paper)
+        time.sleep(MIN_DELAY_S)
+    return papers
+
+
+def fill_submitted_dates(candidates, timeout, retries, retry_delay):
+    """Trade the announcement date for the real one, for candidates only.
+
+    arXiv announces two to four days after submission, so an announcement date
+    recorded as the paper's date is visibly wrong in a list sorted by date. The
+    correct date is on the abstract page, which lives on arxiv.org -- a third
+    host, and not the one refusing us. It is one request per candidate, which
+    is affordable precisely because this runs after the gates rather than
+    before: a day that announces 350 papers yields single digits here.
+
+    Best effort. A candidate whose page will not load or will not parse keeps
+    the announcement date rather than losing one.
+    """
+    for candidate in candidates:
+        try:
+            page = get(ABS_URL.format(paper_id=candidate["id"]),
+                       timeout, retries, retry_delay)
+        except SystemExit:
+            continue
+        found = SUBMITTED_RE.search(page.decode("utf-8", "replace"))
+        if not found:
+            continue
+        try:
+            when = datetime.strptime(found.group(1), "%d %b %Y")
+        except ValueError:
+            continue
+        candidate["date"] = when.date().isoformat()
+        time.sleep(MIN_DELAY_S)
+    return candidates
 
 
 TOTAL_RE = re.compile(r"<opensearch:totalResults[^>]*>(\d+)<")
@@ -217,6 +384,29 @@ def window_start(end, days, since):
 
 
 def fetch_papers(start_at, end, max_results, timeout, retries, retry_delay):
+    """-> (papers, degraded). Degraded means the window was not searched.
+
+    The API is the only source that can be asked about a date range, so when it
+    refuses there is no way to honour `start_at` at all. The fallback answers a
+    different question -- what was announced today -- and the caller has to say
+    so rather than presenting one as the other.
+
+    Nothing is lost by taking it, but not for free: this run exits 0 and so
+    becomes the success `--since` anchors to, which would strand the window it
+    never searched. `start_at` is written into the report and read back by the
+    next run -- see `effective_since` -- so the reach survives a whole outage
+    rather than one day of it.
+    """
+    try:
+        return _fetch_window(start_at, end, max_results, timeout, retries,
+                             retry_delay), False
+    except RateLimited as exc:
+        print(f"{exc}\nfalling back to the RSS announcement feeds, which are "
+              f"served from a different host", file=sys.stderr)
+    return fetch_rss(ALLOWED_CATEGORIES, timeout, retries, retry_delay), True
+
+
+def _fetch_window(start_at, end, max_results, timeout, retries, retry_delay):
     query = build_query(start_at, end)
     papers, start, total = [], 0, None
     while start < max_results:
@@ -268,18 +458,65 @@ def ids_in_text(text):
 
 # --- report ------------------------------------------------------------------
 
-def render(candidates, days, tags, carried=0):
+def unsearched_since(issue_body):
+    """The window start a previous degraded run left unsearched, if any."""
+    found = UNSEARCHED_RE.search(issue_body or "")
+    return parse_since(found.group(1)) if found else None
+
+
+def effective_since(raw, issue_body):
+    """How far back this run has to reach, over both kinds of gap.
+
+    `raw` covers runs that never happened; the marker in `issue_body` covers
+    runs that happened but could not search their window. Whichever reaches
+    further back wins, and a run that searches its window writes no marker, so
+    the chain ends on its own rather than growing forever.
+    """
+    since = parse_since(raw)
+    stale = unsearched_since(issue_body)
+    if stale and (since is None or stale < since):
+        return stale
+    return since
+
+
+def render(candidates, days, tags, carried=0, degraded=False, unsearched=None):
     fresh = len(candidates) - carried
+    if degraded:
+        summary = (
+            f"{len(candidates)} unreviewed paper(s), newest first — {fresh} from "
+            f"today's arXiv announcement, {carried} still open from an earlier "
+            f"window." if carried else
+            f"{len(candidates)} unreviewed paper(s) from today's arXiv "
+            f"announcement, newest first.")
+        marker = (f"\n<!-- unsearched-since: {unsearched:%Y-%m-%dT%H:%M:%SZ} -->\n"
+                  if unsearched else "")
+        return _render(candidates, tags, summary, DEGRADED_NOTE) + marker
     summary = (
         f"{len(candidates)} unreviewed paper(s), newest first — {fresh} from the "
         f"last {days} day(s), {carried} still open from an earlier window."
         if carried else
         f"{len(candidates)} unreviewed paper(s) from the last {days} day(s), newest first.")
+    return _render(candidates, tags, summary, "")
+
+
+DEGRADED_NOTE = (
+    "**The date window was not searched.** arXiv's API refused every attempt "
+    "at it, so this inbox was built from the RSS announcement feeds for "
+    "`cs.CV`, `cs.LG`, `cs.AI`, `cs.MM` and `eess.IV` instead — a different "
+    "host, which was answering. RSS carries one day of announcements rather "
+    "than a `submittedDate` range, so this covers today's batch and nothing "
+    "earlier. Nothing is lost: the window of the next run that succeeds opens "
+    "at the last successful run, so anything missed here comes back, and "
+    "whatever you tick above is kept.")
+
+
+def _render(candidates, tags, summary, note):
     lines = [
         "## Review recent arXiv candidates",
         "",
         summary,
         "",
+    ] + ([note, ""] if note else []) + [
         "Two boxes each. Tick the **top** one to accept a paper; tick the nested "
         "**drop** box to say it should never be proposed again. Leaving both empty "
         "means not looked at yet, and it comes back tomorrow. The tags in "
@@ -337,6 +574,9 @@ def parse_args():
                     help="text whose arXiv links are already proposed (open PR bodies)")
     ap.add_argument("--feed-file", type=Path,
                     help="read a saved Atom feed instead of calling the API")
+    ap.add_argument("--rss-file", type=Path,
+                    help="read a saved RSS announcement feed; exercises the "
+                         "degraded path the API's 429s trigger in production")
     ap.add_argument("--timeout", type=float, default=60.0)
     ap.add_argument("--retries", type=int, default=2)
     ap.add_argument("--retry-delay", type=float, default=5.0)
@@ -347,20 +587,27 @@ def main():
     args = parse_args()
     tags = [t["key"] for t in json.loads(args.tags.read_text(encoding="utf-8"))]
 
-    days = args.days
+    issue_body = (args.existing_issue_body.read_text(encoding="utf-8")
+                  if args.existing_issue_body and args.existing_issue_body.exists() else "")
+
+    days, degraded, unsearched = args.days, False, None
     if args.feed_file:
         papers = parse_feed(args.feed_file.read_bytes())
+    elif args.rss_file:
+        papers = [p for p in parse_rss(args.rss_file.read_bytes())
+                  if PHRASE_RE.search(f"{p['title']} {p['abstract']}")]
+        degraded = True
     else:
         end = datetime.now(timezone.utc)
-        start_at = window_start(end, args.days, parse_since(args.since))
-        papers = fetch_papers(start_at, end, args.max_results, args.timeout,
-                              args.retries, args.retry_delay)
+        start_at = window_start(
+            end, args.days, effective_since(args.since, issue_body))
+        papers, degraded = fetch_papers(start_at, end, args.max_results,
+                                        args.timeout, args.retries,
+                                        args.retry_delay)
         # What the report claims to cover has to be what it covered, or a
         # stretched window reads as a routine one.
         days = max(1, round((end - start_at).total_seconds() / 86400))
-
-    issue_body = (args.existing_issue_body.read_text(encoding="utf-8")
-                  if args.existing_issue_body and args.existing_issue_body.exists() else "")
+        unsearched = start_at if degraded else None
     known = (sources.known_ids(args.papers) | sources.ignored_ids(args.ignore)
              | sources.rejected_ids(args.rejected)
              | sources.rejected_ids(args.maintainer_rejected))
@@ -396,6 +643,13 @@ def main():
             "evidence": evidence,
         })
 
+    # The fallback dated these by announcement because RSS carries nothing
+    # else. Now that the gates have cut a day's 350 papers down to single
+    # digits, the real submission dates are worth one request each.
+    if degraded and candidates and not args.rss_file:
+        fill_submitted_dates(candidates, args.timeout, args.retries,
+                             args.retry_delay)
+
     # Everything above came out of this run's date window. Anything still open
     # from an earlier one has to be put back by hand, or the inbox forgets it
     # the first time the window slides past -- see sources.carried_candidates.
@@ -410,7 +664,8 @@ def main():
 
     candidates.sort(key=lambda c: (c["met"], c["date"], c["id"]), reverse=True)
     report = sources.recross(
-        sources.retick(render(candidates, days, tags, carried), ticked),
+        sources.retick(
+            render(candidates, days, tags, carried, degraded, unsearched), ticked),
         crossed)
 
     if args.output == "-":
