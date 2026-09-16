@@ -593,6 +593,23 @@ class TestRoundTrip(unittest.TestCase):
                        "--known-file", str(pr_bodies), output=refreshed)
         self.assertEqual(self._ids(refreshed), set())
 
+    def test_an_open_pr_also_retires_the_entries_it_crossed_out(self):
+        """That PR carries both halves of one review, and spells them
+        differently: accepted papers as links, crossed-out ones as bare ids in
+        backticks. Reading only the links proposes every rejection again for as
+        long as the PR sits unmerged, and the cross rides back with it."""
+        pid = "2608.06257"
+        self.report.write_text("\n".join(sources.render_candidates([
+            {"id": pid, "title": f"Paper {pid}", "date": "2026-08-13",
+             "tags": ["systems"], "met": 2, "evidence": {}}])) + "\n", encoding="utf-8")
+        pr_bodies = self.tmp / "open-prs.md"
+        pr_bodies.write_text(f"- `{pid}` \u2014 Paper {pid}\n", encoding="utf-8")
+        refreshed = self.tmp / "inbox2.md"
+        run_candidates("--papers", str(self.papers), "--feed-file", str(self._empty_feed()),
+                       "--existing-issue-body", str(self.report),
+                       "--known-file", str(pr_bodies), output=refreshed)
+        self.assertEqual(self._ids(refreshed), set())
+
     def test_a_paper_still_in_the_window_is_not_listed_twice(self):
         run_candidates("--papers", str(self.papers), output=self.report)
         before = self._ids(self.report)
