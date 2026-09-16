@@ -89,6 +89,11 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* A Chosen Future Can Still Be Rewritten: Causal Writability in Video Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.15980)] · ⚡`realtime`
+* **`LynnReal-Omni`**, Native multi-modal Video Generation for Agentic Visual Workflows. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.15863)] · ⚡`realtime`
+* **`VC-Attention`**, Value Smoothing and Softmax Casting for Low-bit Attention. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.15810)] · ⚡`realtime`
+* **`CrossDistill`**, Balancing Quality and Diversity via Trajectory-Level Hybrid Few-Step Distillation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.14725)] · ⚡`realtime`
+* **`AlayaVista`**, Streaming World Modeling from Panoramic States to Perspective Video. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.14462)] · ⚡`realtime`
 * **`Vidu S2`**, Real-Time Interactive, Editable, and Spatial Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.11638)] · ⚡`realtime`
 * World in World: Explore the World with World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.11548)] · 🧠`memory`
 * **`Uncertainty DMD`**, Restoring Diversity in Few-Step Autoregressive Video Distillation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.11265)] · ⚡`realtime`
