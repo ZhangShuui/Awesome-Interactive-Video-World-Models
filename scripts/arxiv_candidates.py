@@ -66,6 +66,11 @@ ALLOWED_CATEGORIES = {"cs.CV", "cs.LG", "cs.AI", "cs.MM", "eess.IV"}
 QUERY_PHRASES = sources.QUERY_PHRASES
 
 ARXIV_ID_RE = re.compile(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})", re.I)
+# The same id with nothing around it, which is how a pull request body spells
+# the papers it crossed out -- only the accepted ones are written as links.
+# The link form still earns its place: it reaches into `abs/2609.15189v2`,
+# where the trailing version stops a bare match.
+BARE_ARXIV_ID_RE = re.compile(r"\b\d{4}\.\d{4,5}\b")
 
 # The API applies QUERY_PHRASES *as the query*, so everything reaching
 # `sources.proposal` has already matched the field's vocabulary. RSS hands over
@@ -453,7 +458,17 @@ def fill_abstracts(candidates, timeout=60.0, retries=2, retry_delay=5.0):
 # --- state -------------------------------------------------------------------
 
 def ids_in_text(text):
-    return set(ARXIV_ID_RE.findall(text or ""))
+    """Every arXiv id a pull request body names, in either spelling.
+
+    What this reads is the open pipeline PRs, and a PR carries the whole
+    review: the papers it accepted and the ones it crossed out. Matching
+    only the links covered the accepted half. The evening #46 sat unmerged,
+    the sweep re-proposed all eleven papers it had just rejected -- and
+    because a cross is carried forward so it survives to the /create-pr that
+    records it, the next morning's inbox handed them back already crossed.
+    """
+    text = text or ""
+    return set(ARXIV_ID_RE.findall(text)) | set(BARE_ARXIV_ID_RE.findall(text))
 
 
 # --- report ------------------------------------------------------------------
