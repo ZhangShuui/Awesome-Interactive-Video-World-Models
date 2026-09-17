@@ -1,0 +1,119 @@
+name: Apply the reviewed candidates
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  apply:
+    # Only on a review inbox, only from someone who can merge.
+    #
+    # Two labels, because the daily job owns `arxiv-candidates`: it edits the
+    # first open Issue carrying that label in place, body and all. A venue
+    # sweep is reviewed over days rather than minutes, so an Issue holding one
+    # has to sit outside that label or the next nightly run overwrites it.
+    # Both are inboxes and both are applied the same way, which is why the
+    # difference stops here.
+    #
+    # The command is still `/create-pr` although this opens no pull request.
+    # It is what four generators print into every inbox body and what the hand
+    # typing it has typed for a month; renaming it would buy honesty in one
+    # place and confusion in five.
+    if: >-
+      !github.event.issue.pull_request &&
+      (contains(github.event.issue.labels.*.name, 'arxiv-candidates') ||
+       contains(github.event.issue.labels.*.name, 'venue-candidates')) &&
+      startsWith(github.event.comment.body, '/create-pr') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Explicitly, and by name: this job commits, so it has to be standing
+          # on a branch rather than on a detached head that resolves to one.
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Fetch Issue selections
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: gh issue view "$ISSUE_NUMBER" --json body --jq '.body' > "$RUNNER_TEMP/issue-body.md"
+
+      - name: Apply checked candidates
+        id: apply
+        run: |
+          count="$(python3 scripts/apply_issue_selections.py \
+            --issue-body "$RUNNER_TEMP/issue-body.md" \
+            --summary-output "$RUNNER_TEMP/summary.md")"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Report empty selection
+        if: steps.apply.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" \
+            --body "Nothing new to apply. Tick a paper to accept it, or tick its \`drop\` box to stop it being proposed again, then comment \`/create-pr\`."
+
+      # Everything `Checks` used to run on the pull request, run here instead.
+      # This commit goes straight to the default branch, and a push made with
+      # GITHUB_TOKEN starts no further workflow, so there is nothing
+      # downstream to catch what these catch.
+      #
+      # A failure fails the job before anything is committed, which leaves the
+      # Issue open with its ticks intact -- the same place a red pull request
+      # used to leave you, reached without opening one.
+      - name: Check
+        if: steps.apply.outputs.count != '0'
+        run: |
+          python3 scripts/validate.py
+          python3 scripts/build_readme.py
+          python3 scripts/build_site.py --check
+          python3 -m unittest discover -s tests
+
+      - name: Record on the default branch
+        if: steps.apply.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Both verdicts travel together: the accepted papers and the crossed-out
+          # ones are one review, and recording half of it would leave the other
+          # half in an Issue body that tomorrow's refresh overwrites.
+          git add data/papers.jsonl data/maintainer-rejected.jsonl \
+                  README.md docs/comparison.md
+          # The summary used to be a pull request body. In the commit message it
+          # travels with the diff it describes, and `git log` keeps it for as
+          # long as the repository exists.
+          {
+            printf 'Apply inbox review #%s\n\n' "$ISSUE_NUMBER"
+            cat "$RUNNER_TEMP/summary.md"
+          } > "$RUNNER_TEMP/commit-message.txt"
+          git commit -F "$RUNNER_TEMP/commit-message.txt"
+          # No rebase, no force: nothing else writes to this branch unattended,
+          # so a rejected push means something did and a human should look. The
+          # work is not lost by failing here -- /create-pr reads the Issue, which
+          # is still there, and applying the same body twice adds nothing the
+          # first run already recorded.
+          git push origin "HEAD:$DEFAULT_BRANCH"
+
+          {
+            printf 'Recorded on `%s` in %s.\n\n' "$DEFAULT_BRANCH" \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$(git rev-parse HEAD)"
+            cat "$RUNNER_TEMP/summary.md"
+            printf '\nAnything left unmarked returns in the next inbox refresh, '
+            printf 'whether or not it is still inside the search window.\n'
+          } > "$RUNNER_TEMP/issue-comment.md"
+          gh issue comment "$ISSUE_NUMBER" --body-file "$RUNNER_TEMP/issue-comment.md"
+          gh issue close "$ISSUE_NUMBER"
