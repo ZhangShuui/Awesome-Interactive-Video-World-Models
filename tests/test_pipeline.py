@@ -166,6 +166,35 @@ class TestRateLimit(unittest.TestCase):
         _, slept = self._fetch([self._http_error(500), b"<feed/>"])
         self.assertEqual(slept, [5.0])
 
+    def test_a_406_reaches_for_the_fallback_rather_than_killing_the_run(self):
+        """2026-09-16: export.arxiv.org answered 406 to every query that missed
+        its cache, and the scheduled run died -- because only a 429 counted as
+        being declined. rss.arxiv.org was answering the whole time."""
+        with self.assertRaises(ac.Refused):
+            self._fetch([self._http_error(406)] * 3)
+
+    def test_being_declined_does_not_spend_the_rate_limit_budget(self):
+        """Waiting fixes a 429. It does not fix a 406, and a quarter of an hour
+        of runner time buys the same fallback that fifteen seconds does."""
+        slept, calls = [], iter([self._http_error(406)] * 3)
+
+        def fake_urlopen(*_a, **_kw):
+            raise next(calls)
+
+        with mock.patch.object(ac.urllib.request, "urlopen", fake_urlopen), \
+                mock.patch.object(ac.time, "sleep", slept.append), \
+                self.assertRaises(ac.Refused):
+            ac.fetch_page("q", 0, 10, 60.0, 2, 5.0)
+        self.assertEqual(slept, [5.0, 10.0])
+
+    def test_a_server_error_is_not_an_excuse_for_a_degraded_report(self):
+        """The fallback answers a different question than the one asked, so it
+        is for a host that will not serve us -- not for every way a request can
+        break. A 500 still fails the run where someone has to look at it."""
+        with self.assertRaises(SystemExit) as caught:
+            self._fetch([self._http_error(500)] * 3)
+        self.assertNotIsInstance(caught.exception, ac.Refused)
+
     def _backoffs(self, rand):
         with mock.patch.object(ac.random, "random", lambda: rand):
             return [ac.backoff_for(n)
@@ -242,11 +271,11 @@ class TestRssFallback(unittest.TestCase):
 
     def test_an_exhausted_rate_limit_is_a_different_failure_from_a_dead_socket(self):
         """Only the first can be answered by asking a different host."""
-        self.assertTrue(issubclass(ac.RateLimited, SystemExit))
+        self.assertTrue(issubclass(ac.Refused, SystemExit))
 
     def test_the_window_falls_back_rather_than_losing_the_day(self):
         def refuse(*_a, **_kw):
-            raise ac.RateLimited("nope")
+            raise ac.Refused("nope")
 
         with mock.patch.object(ac, "_fetch_window", refuse), \
                 mock.patch.object(ac, "get", lambda *a, **k: RSS.read_bytes()), \
