@@ -143,8 +143,8 @@ def parse_feed(payload):
 # ceiling in half the attempts and then sits there, which buys a quarter of an
 # hour from seven. Each wait is jittered down by up to a quarter so that a
 # runner subnet throttled in lockstep does not re-collide on the way back.
-class RateLimited(SystemExit):
-    """arXiv refused every attempt at the API.
+class Refused(SystemExit):
+    """arXiv declined every attempt at the API.
 
     A SystemExit still, so a caller that has nothing better to do keeps dying
     exactly as it did and with the same message. But it is a different failure
@@ -153,6 +153,22 @@ class RateLimited(SystemExit):
     a dishonest one.
     """
 
+
+# A 429 is the service asking for patience, and patience works. These are the
+# service answering and declining, which no amount of patience fixes. On
+# 2026-09-16 export.arxiv.org returned 406 to every query that missed its
+# Varnish cache -- a cached URL still came back 200, which is how the API can
+# look alive from a browser while every real window fails -- and answered a
+# browser User-Agent with a 503; rss.arxiv.org served every request in under
+# half a second throughout. So these take the ordinary transient budget and
+# then reach for the fallback, instead of spending a quarter of an hour of
+# runner time to arrive at the same place.
+#
+# The list is deliberately short. Everything outside it -- a 500, a 400 on a
+# query this script built wrong -- still fails the run loudly, because a
+# fallback that absorbs every kind of breakage is how a pipeline ends up
+# quietly reporting yesterday's announcements forever.
+REFUSED_CODES = frozenset({403, 406, 503})
 
 RATE_LIMIT_RETRIES = 7
 RATE_LIMIT_BACKOFF_S = 30.0
@@ -211,6 +227,7 @@ def fetch_page(query, start, max_results, timeout, retries, retry_delay):
                 continue
             failures += 1
             if failures > retries:
+                refused = exc.code in REFUSED_CODES
                 break
             time.sleep(retry_delay * failures)
         except (urllib.error.URLError, TimeoutError, ET.ParseError) as exc:
@@ -221,7 +238,7 @@ def fetch_page(query, start, max_results, timeout, retries, retry_delay):
             time.sleep(retry_delay * failures)
     attempts = failures + throttled
     if refused:
-        raise RateLimited(f"arXiv API request failed after {attempts} "
+        raise Refused(f"arXiv API request failed after {attempts} "
                           f"attempt(s): {last}")
     raise SystemExit(f"arXiv API request failed after {attempts} "
                      f"attempt(s): {last}")
@@ -405,7 +422,7 @@ def fetch_papers(start_at, end, max_results, timeout, retries, retry_delay):
     try:
         return _fetch_window(start_at, end, max_results, timeout, retries,
                              retry_delay), False
-    except RateLimited as exc:
+    except Refused as exc:
         print(f"{exc}\nfalling back to the RSS announcement feeds, which are "
               f"served from a different host", file=sys.stderr)
     return fetch_rss(ALLOWED_CATEGORIES, timeout, retries, retry_delay), True
