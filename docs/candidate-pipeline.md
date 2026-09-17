@@ -130,19 +130,33 @@ gets expensive again and is the first one to reconsider.
 2. `scripts/arxiv_candidates.py` queries arXiv over the last N days;
    `scripts/blog_candidates.py` polls the watchlist in `data/sources.json`.
 3. Papers already in `data/papers.jsonl`, listed in `data/arxiv-ignore.txt`,
-   already rejected, or sitting in an open pipeline PR are skipped.
+   or already rejected are skipped.
 4. One Issue labeled `arxiv-candidates` is created or updated with both
    reports. Refreshing preserves ticks and tag corrections, so review in
    progress is never lost.
 5. A maintainer comments `/create-pr`.
-6. `.github/workflows/arxiv-candidates-create-pr.yml` runs
+6. `.github/workflows/arxiv-candidates-apply.yml` runs
    `scripts/apply_issue_selections.py`, which appends the ticked papers to
-   `data/papers.jsonl`, then regenerates `README.md` and `docs/comparison.md`
-   and opens a PR.
+   `data/papers.jsonl` and the crossed-out ones to
+   `data/maintainer-rejected.jsonl`, regenerates `README.md` and
+   `docs/comparison.md`, runs the full `Checks` suite, and commits straight to
+   `main`. The Issue is closed carrying the same summary the commit message
+   holds.
+
+There is no pull request in between. Sixteen of them were opened and merged
+unchanged, none ever reviewed, and the gap between opening and merging is what
+the sweep had to be taught to see around — twice, wrongly. Since the checks that
+used to run on the pull request now run before the commit, and a push made with
+`GITHUB_TOKEN` starts no workflow that would run them afterwards, the gate moved
+rather than went away: a red check fails the job and commits nothing, leaving
+the Issue open with its ticks intact.
 
 Because the README is generated, this pipeline never edits markdown. The worst
 a bad parse can do is add a row to a data file — reviewable in a diff, revertible
 in one commit.
+
+The command kept the name `/create-pr`. Four generators print it into every
+inbox body and it is what the hand typing it has typed for a month.
 
 A local [review agent](agent-review.md) can do step 5's reading for you.
 
@@ -196,8 +210,9 @@ summary is not that.
 3. The tags in backticks are a keyword guess, comma-separated. Edit them in
    place if they are wrong — `systems` becomes `systems,control` by typing it;
    your edit wins over the guess.
-4. Comment `/create-pr`.
-5. Review the PR. Unticked candidates return in the next refresh.
+4. Comment `/create-pr`. It lands on `main` within a minute or two, and the
+   Issue closes with a summary of what was recorded.
+5. Unticked candidates return in the next refresh.
 
 Matches that keep coming back and never belong go in `data/arxiv-ignore.txt`,
 one id per line, `#` for comments.

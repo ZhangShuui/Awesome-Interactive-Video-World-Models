@@ -65,13 +65,6 @@ ALLOWED_CATEGORIES = {"cs.CV", "cs.LG", "cs.AI", "cs.MM", "eess.IV"}
 # API call -- only precision, which the gates and the review agent absorb.
 QUERY_PHRASES = sources.QUERY_PHRASES
 
-ARXIV_ID_RE = re.compile(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})", re.I)
-# The same id with nothing around it, which is how a pull request body spells
-# the papers it crossed out -- only the accepted ones are written as links.
-# The link form still earns its place: it reaches into `abs/2609.15189v2`,
-# where the trailing version stops a bare match.
-BARE_ARXIV_ID_RE = re.compile(r"\b\d{4}\.\d{4,5}\b")
-
 # The API applies QUERY_PHRASES *as the query*, so everything reaching
 # `sources.proposal` has already matched the field's vocabulary. RSS hands over
 # the entire day's announcements instead -- 347 papers across five categories --
@@ -474,20 +467,6 @@ def fill_abstracts(candidates, timeout=60.0, retries=2, retry_delay=5.0):
 
 # --- state -------------------------------------------------------------------
 
-def ids_in_text(text):
-    """Every arXiv id a pull request body names, in either spelling.
-
-    What this reads is the open pipeline PRs, and a PR carries the whole
-    review: the papers it accepted and the ones it crossed out. Matching
-    only the links covered the accepted half. The evening #46 sat unmerged,
-    the sweep re-proposed all eleven papers it had just rejected -- and
-    because a cross is carried forward so it survives to the /create-pr that
-    records it, the next morning's inbox handed them back already crossed.
-    """
-    text = text or ""
-    return set(ARXIV_ID_RE.findall(text)) | set(BARE_ARXIV_ID_RE.findall(text))
-
-
 # --- report ------------------------------------------------------------------
 
 def unsearched_since(issue_body):
@@ -602,8 +581,6 @@ def parse_args():
                     help="papers crossed out by hand in the inbox")
     ap.add_argument("--existing-issue-body", type=Path,
                     help="current inbox body; ticks and tag edits are preserved")
-    ap.add_argument("--known-file", type=Path,
-                    help="text whose arXiv links are already proposed (open PR bodies)")
     ap.add_argument("--feed-file", type=Path,
                     help="read a saved Atom feed instead of calling the API")
     ap.add_argument("--rss-file", type=Path,
@@ -643,8 +620,6 @@ def main():
     known = (sources.known_ids(args.papers) | sources.ignored_ids(args.ignore)
              | sources.rejected_ids(args.rejected)
              | sources.rejected_ids(args.maintainer_rejected))
-    if args.known_file and args.known_file.exists():
-        known |= ids_in_text(args.known_file.read_text(encoding="utf-8"))
     ticked = sources.checked_ids(issue_body)
     # Crossed but not yet committed: the entry stays, wearing its cross, so the
     # verdict is not lost between the click and the /create-pr that records it.
