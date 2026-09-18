@@ -89,6 +89,11 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* Video DeltaNet: A Video-Native Hybrid Attention for Livestream Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.20744)] · 🧠`memory`
+* **`DART`**, Distillation-Aware Reparameterization for Training-Free LoRA Reuse in Few-Step Video Diffusion Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.20051)] · ⚡`realtime`
+* **`Astronex-World 1.0`**, Real-Time Interactive World Model Foundation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.20034)] · 🌍`systems` ⚡`realtime`
+* Recency Forcing: Bridging the Long-Horizon Gap in Autoregressive Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.19729)] · 🧠`memory`
+* Can MiniMax-H3 Reason About the Physical World? An Evaluation of Omni-Modal Generative Model. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.18323)] · 📊`benchmarks`
 * A Chosen Future Can Still Be Rewritten: Causal Writability in Video Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.15980)] · ⚡`realtime`
 * **`LynnReal-Omni`**, Native multi-modal Video Generation for Agentic Visual Workflows. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.15863)] · ⚡`realtime`
 * **`VC-Attention`**, Value Smoothing and Softmax Casting for Low-bit Attention. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.15810)] · ⚡`realtime`
