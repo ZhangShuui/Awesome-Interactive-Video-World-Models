@@ -74,10 +74,14 @@ jobs:
           if [ -n "$issue_number" ]; then
             gh issue view "$issue_number" --json body --jq '.body' > "$RUNNER_TEMP/existing-inbox.md"
           else
-            gh issue list \
+            closed="$(gh issue list \
               --label arxiv-candidates --state closed --limit 5 \
-              --json body,updatedAt --jq 'max_by(.updatedAt).body // ""' \
-              > "$RUNNER_TEMP/existing-inbox.md"
+              --json number,body,updatedAt --jq 'max_by(.updatedAt) // {}')"
+            jq -r '.body // ""' <<<"$closed" > "$RUNNER_TEMP/existing-inbox.md"
+            # Where to say "nothing today" when there is no open inbox to put
+            # it in -- see the last branch of `Update review inbox`.
+            echo "closed_issue_number=$(jq -r '.number // ""' <<<"$closed")" \
+              >> "$GITHUB_OUTPUT"
           fi
           # How far back this run has to reach. A window of `now - days` only
           # covers the gap between runs while the runs actually happen: a run
@@ -128,12 +132,28 @@ jobs:
             cat "$RUNNER_TEMP/blog-candidates.md" >> "$RUNNER_TEMP/inbox.md"
           fi
           echo "count=$((arxiv + blog))" >> "$GITHUB_OUTPUT"
+          # A run that reports nothing still has to be readable as a run. The
+          # header of the report is the only place that knows whether the window
+          # was searched or merely stood in for.
+          {
+            printf '### Candidate sweep\n\n'
+            printf -- '- arXiv: **%s**\n' "$arxiv"
+            printf -- '- watchlist: **%s**\n' "$blog"
+            if grep -q "date window was not searched" "$RUNNER_TEMP/inbox.md"; then
+              printf -- '- the date window was **not** searched: this is one '
+              printf -- 'day of announcements, and the window comes back to the '
+              printf -- 'next run that reaches a host\n'
+            else
+              printf -- '- the date window was searched\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Update review inbox
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_COUNT: ${{ steps.candidates.outputs.count }}
           ISSUE_NUMBER: ${{ steps.inbox.outputs.issue_number }}
+          CLOSED_ISSUE_NUMBER: ${{ steps.inbox.outputs.closed_issue_number }}
         run: |
           if [ "$CANDIDATE_COUNT" -gt 0 ]; then
             if [ -n "$ISSUE_NUMBER" ]; then
@@ -149,4 +169,24 @@ jobs:
           elif [ -n "$ISSUE_NUMBER" ]; then
             gh issue close "$ISSUE_NUMBER" \
               --comment "No unreviewed candidates remain in the current search window."
+          elif [ -n "$CLOSED_ISSUE_NUMBER" ]; then
+            # Nothing to review, and no open inbox to close either -- which is
+            # the one path that used to end the run without saying anything
+            # anywhere a maintainer looks. On 09-18 that was reported as a
+            # failure: it was a healthy run whose honest answer was "nothing",
+            # and from the outside silence is indistinguishable from the 406
+            # that really did kill 09-16. So it speaks on the inbox it last
+            # read, where whoever reviewed it is already subscribed.
+            if grep -q "date window was not searched" "$RUNNER_TEMP/inbox.md"; then
+              why="arXiv's API and OAI-PMH both refused the window, so this run"
+              why="$why could only see one day of announcements -- and it held"
+              why="$why nothing that is not already recorded. The window itself"
+              why="$why is still unsearched, and comes back to the next run"
+              why="$why that reaches a host."
+            else
+              why="The window was searched and held nothing this list does not"
+              why="$why already have."
+            fi
+            gh issue comment "$CLOSED_ISSUE_NUMBER" \
+              --body "This sweep found no unreviewed candidates. $why"
           fi

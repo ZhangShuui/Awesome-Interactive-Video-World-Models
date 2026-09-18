@@ -41,9 +41,22 @@ API_URL = "https://export.arxiv.org/api/query"
 # answered every request in under half a second. That split is the only reason
 # a fallback is worth having -- if one host were down, so would the other be.
 RSS_URL = "https://rss.arxiv.org/rss/{category}"
+# The third interface, and the only other one that takes a date range. While
+# the search API refuses, this is the difference between reporting the window
+# and reporting one day of announcements: RSS cannot be asked about a range at
+# all, so a run that reaches for it has not searched the window and has to say
+# so. This one has. It answered 200 with `X-Cache: MISS` throughout the 09-16
+# outage, so it is not the API behind another name.
+OAI_URL = "https://export.arxiv.org/oai2"
+# One set per request, and these two cover ALLOWED_CATEGORIES between them:
+# `cs` carries every cs.*, eess.IV needs its own. Anything the main loop would
+# accept is in one of them, so restricting to sets costs no recall that counts.
+OAI_SETS = ("cs", "eess")
 ABS_URL = "https://arxiv.org/abs/{paper_id}"
 NS = {"a": "http://www.w3.org/2005/Atom"}
 RSS_NS = {"arxiv": "http://arxiv.org/schemas/atom"}
+OAI_NS = {"o": "http://www.openarchives.org/OAI/2.0/",
+          "ax": "http://arxiv.org/OAI/arXiv/"}
 PAGE_SIZE = 100
 MIN_DELAY_S = 3.1
 USER_AGENT = "awesome-interactive-video-world-models/1.0 (+https://github.com/)"
@@ -237,6 +250,139 @@ def fetch_page(query, start, max_results, timeout, retries, retry_delay):
                      f"attempt(s): {last}")
 
 
+# --- arXiv OAI-PMH, the window from another interface -------------------------
+
+# arXiv asks an OAI caller to slow down with `503 Retry-After`. That is the
+# protocol working, and the exact opposite of what 503 means from the search API
+# -- see REFUSED_CODES -- so it is waited out here rather than counted as a
+# refusal. Ten waits covers a week of cs, which arrives in a handful of pages.
+OAI_FLOW_RETRIES = 10
+
+ID_RE = re.compile(r"\d{4}\.\d{4,5}")
+
+
+def oai_page(params, timeout, retries, retry_delay):
+    """One ListRecords page, raw."""
+    url = f"{OAI_URL}?{urllib.parse.urlencode(params)}"
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    last, failures, waits = None, 0, 0
+    while True:
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            last = exc
+            if exc.code == 503 and waits < OAI_FLOW_RETRIES:
+                waits += 1
+                wait = retry_after(exc) or backoff_for(waits)
+                print(f"arXiv OAI asked for {wait:.0f}s "
+                      f"({waits}/{OAI_FLOW_RETRIES})", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            failures += 1
+            if failures > retries:
+                break
+            time.sleep(retry_delay * failures)
+        except (urllib.error.URLError, TimeoutError) as exc:
+            last = exc
+            failures += 1
+            if failures > retries:
+                break
+            time.sleep(retry_delay * failures)
+    raise Refused(f"arXiv OAI-PMH request failed after {failures + waits} "
+                  f"attempt(s): {last}")
+
+
+def parse_oai(payload):
+    """-> ([paper], resumption token). Papers in the shape parse_feed returns."""
+    root = ET.fromstring(payload)
+    out = []
+    for record in root.findall(".//o:record", OAI_NS):
+        header = record.find("o:header", OAI_NS)
+        if header is not None and header.get("status") == "deleted":
+            continue
+        meta = record.find("o:metadata/ax:arXiv", OAI_NS)
+        if meta is None:
+            continue
+        pid = (meta.findtext("ax:id", "", OAI_NS) or "").strip()
+        # Pre-2007 ids -- `math/0503066` -- are not what this list collects and
+        # would not survive url_for anyway.
+        if not ID_RE.fullmatch(pid):
+            continue
+        out.append({
+            "id": pid,
+            "title": re.sub(r"\s+", " ",
+                            meta.findtext("ax:title", "", OAI_NS)).strip(),
+            "abstract": re.sub(r"\s+", " ",
+                               meta.findtext("ax:abstract", "", OAI_NS)).strip(),
+            # `created` is the submission date, which is what the API's
+            # submittedDate window meant. The record's `datestamp` is when arXiv
+            # last touched it -- see fetch_oai_window.
+            "date": (meta.findtext("ax:created", "", OAI_NS) or "").strip(),
+            "categories": sorted(
+                (meta.findtext("ax:categories", "", OAI_NS) or "").split()),
+        })
+    return out, (root.findtext(".//o:resumptionToken", "", OAI_NS) or "").strip()
+
+
+def submitted_before(pid, start_at):
+    """Whether an identifier's own month predates the window.
+
+    The identifier is the only part of an OAI record that dates the submission
+    reliably. It is YYMM.NNNNN and never changes, while `created` is rewritten
+    to the revision: 2508.07769 came back `created 2026-09-10` and its abstract
+    page says `Submitted on 11 Aug 2025` -- thirteen months out, and a date the
+    README would have sorted on.
+
+    Month granularity is all an identifier carries, so this is the cheap filter
+    that keeps a week of revisions out. fill_submitted_dates does the exact one,
+    afterwards, on the handful that survive the gates.
+    """
+    return pid[:4] < f"{start_at:%y%m}"
+
+
+def fetch_oai_window(start_at, end, timeout, retries, retry_delay):
+    """The date window, asked of OAI-PMH instead of the search API.
+
+    Two things differ from the API and both are handled here.
+
+    `from`/`until` filter the *datestamp* -- when arXiv last touched the record
+    -- so every paper revised inside the window arrives with it, however old.
+    Eight days of cs brought back 2508.07769, 2607.16602 and 2606.18960 among
+    others. `created` does not sort them out, because arXiv rewrites it to the
+    revision date for exactly those records; the identifier does, and does it
+    without a request. See submitted_before.
+
+    And OAI takes no query, so it hands over the whole set: a week of cs is
+    thousands of records where the API returned a few hundred of its own
+    choosing. That makes the vocabulary filter as necessary here as it is for
+    RSS -- sources.proposal is a scope gate, not a topic gate, and handed a raw
+    set it admits maize leaf segmentation.
+    """
+    seen, papers = set(), []
+    for oai_set in OAI_SETS:
+        params = {"verb": "ListRecords", "metadataPrefix": "arXiv",
+                  "set": oai_set, "from": start_at.date().isoformat(),
+                  "until": end.date().isoformat()}
+        while True:
+            batch, token = parse_oai(
+                oai_page(params, timeout, retries, retry_delay))
+            for paper in batch:
+                if paper["id"] in seen or submitted_before(paper["id"], start_at):
+                    continue
+                if not PHRASE_RE.search(f"{paper['title']} {paper['abstract']}"):
+                    continue
+                seen.add(paper["id"])
+                papers.append(paper)
+            if not token:
+                break
+            # A resumptionToken replaces every other argument, set and dates
+            # included.
+            params = {"verb": "ListRecords", "resumptionToken": token}
+            time.sleep(MIN_DELAY_S)
+    return papers
+
+
 # --- arXiv RSS, the degraded path ---------------------------------------------
 
 def get(url, timeout, retries, retry_delay):
@@ -399,26 +545,51 @@ def window_start(end, days, since):
 
 
 def fetch_papers(start_at, end, max_results, timeout, retries, retry_delay):
-    """-> (papers, degraded). Degraded means the window was not searched.
+    """-> (papers, "api" | "oai" | "rss"): which interface answered.
 
-    The API is the only source that can be asked about a date range, so when it
-    refuses there is no way to honour `start_at` at all. The fallback answers a
-    different question -- what was announced today -- and the caller has to say
-    so rather than presenting one as the other.
+    Only "rss" is degraded, and the caller derives that. The name is carried
+    rather than a flag because "oai" searched the window and still dates its
+    papers wrongly, which is a third state a boolean cannot hold.
 
-    Nothing is lost by taking it, but not for free: this run exits 0 and so
-    becomes the success `--since` anchors to, which would strand the window it
-    never searched. `start_at` is written into the report and read back by the
-    next run -- see `effective_since` -- so the reach survives a whole outage
-    rather than one day of it.
+    Three interfaces, in descending order of how well they answer the question
+    actually being asked.
+
+    The search API is asked first: it takes the date range and the vocabulary
+    together, and returns a few hundred papers already recalled by phrase.
+
+    OAI-PMH takes the date range but no query, so it costs thousands of records
+    and a client-side vocabulary filter -- but it is still *the window*, and a
+    report built from it is not degraded. It is the difference between missing
+    a week and missing nothing: 09-16 through 09-18 all fell past the API, and
+    every one of those runs could see only the day it ran on.
+
+    RSS cannot be asked about a range at all. It answers a different question
+    -- what was announced today -- and the caller has to say so rather than
+    presenting one as the other.
+
+    Nothing is lost by taking the last one, but not for free: this run exits 0
+    and so becomes the success `--since` anchors to, which would strand the
+    window it never searched. `start_at` is written into the report and read
+    back by the next run -- see `effective_since` -- so the reach survives a
+    whole outage rather than one day of it.
     """
     try:
         return _fetch_window(start_at, end, max_results, timeout, retries,
-                             retry_delay), False
+                             retry_delay), "api"
     except Refused as exc:
+        print(f"{exc}\ntrying OAI-PMH, which takes the same date range from a "
+              f"different interface", file=sys.stderr)
+    try:
+        return fetch_oai_window(start_at, end, timeout, retries,
+                                retry_delay), "oai"
+    # Deliberately wide. This tier is an improvement on the answer that used to
+    # be given here, and if it breaks in a way its own retries do not cover,
+    # the run should still end up with the RSS report it would have had before
+    # this function knew about OAI at all.
+    except SystemExit as exc:
         print(f"{exc}\nfalling back to the RSS announcement feeds, which are "
               f"served from a different host", file=sys.stderr)
-    return fetch_rss(ALLOWED_CATEGORIES, timeout, retries, retry_delay), True
+    return fetch_rss(ALLOWED_CATEGORIES, timeout, retries, retry_delay), "rss"
 
 
 def _fetch_window(start_at, end, max_results, timeout, retries, retry_delay):
@@ -511,14 +682,14 @@ def render(candidates, days, tags, carried=0, degraded=False, unsearched=None):
 
 
 DEGRADED_NOTE = (
-    "**The date window was not searched.** arXiv's API refused every attempt "
-    "at it, so this inbox was built from the RSS announcement feeds for "
-    "`cs.CV`, `cs.LG`, `cs.AI`, `cs.MM` and `eess.IV` instead — a different "
-    "host, which was answering. RSS carries one day of announcements rather "
-    "than a `submittedDate` range, so this covers today's batch and nothing "
-    "earlier. Nothing is lost: the window of the next run that succeeds opens "
-    "at the last successful run, so anything missed here comes back, and "
-    "whatever you tick above is kept.")
+    "**The date window was not searched.** Both interfaces that take a date "
+    "range refused it — the search API and OAI-PMH — so this inbox was built "
+    "from the RSS announcement feeds for `cs.CV`, `cs.LG`, `cs.AI`, `cs.MM` "
+    "and `eess.IV` instead, which were answering. RSS carries one day of "
+    "announcements rather than a `submittedDate` range, so this covers today's "
+    "batch and nothing earlier. Nothing is lost: the window of the next run "
+    "that searches one opens at the last run that did, so anything missed here "
+    "comes back, and whatever you tick above is kept.")
 
 
 def _render(candidates, tags, summary, note):
@@ -586,6 +757,9 @@ def parse_args():
     ap.add_argument("--rss-file", type=Path,
                     help="read a saved RSS announcement feed; exercises the "
                          "degraded path the API's 429s trigger in production")
+    ap.add_argument("--oai-file", type=Path,
+                    help="read a saved OAI-PMH ListRecords page; exercises the "
+                         "windowed fallback without asking for a week of cs")
     ap.add_argument("--timeout", type=float, default=60.0)
     ap.add_argument("--retries", type=int, default=2)
     ap.add_argument("--retry-delay", type=float, default=5.0)
@@ -600,19 +774,34 @@ def main():
                   if args.existing_issue_body and args.existing_issue_body.exists() else "")
 
     days, degraded, unsearched = args.days, False, None
+    source = "api"
     if args.feed_file:
         papers = parse_feed(args.feed_file.read_bytes())
+    elif args.oai_file:
+        # The window, honestly searched -- just from a file rather than a host.
+        # The filters fetch_oai_window applies are applied here too, or the hook
+        # would exercise the parser and nothing else.
+        end = datetime.now(timezone.utc)
+        start_at = window_start(
+            end, args.days, effective_since(args.since, issue_body))
+        parsed, _token = parse_oai(args.oai_file.read_bytes())
+        papers = [paper for paper in parsed
+                  if not submitted_before(paper["id"], start_at)
+                  and PHRASE_RE.search(f"{paper['title']} {paper['abstract']}")]
+        source = "oai"
     elif args.rss_file:
         papers = [p for p in parse_rss(args.rss_file.read_bytes())
                   if PHRASE_RE.search(f"{p['title']} {p['abstract']}")]
         degraded = True
+        source = "rss"
     else:
         end = datetime.now(timezone.utc)
         start_at = window_start(
             end, args.days, effective_since(args.since, issue_body))
-        papers, degraded = fetch_papers(start_at, end, args.max_results,
-                                        args.timeout, args.retries,
-                                        args.retry_delay)
+        papers, source = fetch_papers(start_at, end, args.max_results,
+                                      args.timeout, args.retries,
+                                      args.retry_delay)
+        degraded = source == "rss"
         # What the report claims to cover has to be what it covered, or a
         # stretched window reads as a routine one.
         days = max(1, round((end - start_at).total_seconds() / 86400))
@@ -650,12 +839,21 @@ def main():
             "evidence": evidence,
         })
 
-    # The fallback dated these by announcement because RSS carries nothing
-    # else. Now that the gates have cut a day's 350 papers down to single
-    # digits, the real submission dates are worth one request each.
-    if degraded and candidates and not args.rss_file:
+    # Neither fallback dates a paper by its submission. RSS carries only the
+    # announcement; OAI carries `created`, which arXiv rewrites to the revision
+    # date for anything revised. The abstract page is the one host of the three
+    # that states the submission outright, and asking it is affordable here
+    # because the gates have cut a week's thousands down to a couple of dozen.
+    if source in ("oai", "rss") and candidates and not (args.rss_file
+                                                        or args.oai_file):
         fill_submitted_dates(candidates, args.timeout, args.retries,
                              args.retry_delay)
+    if source == "oai":
+        # Only now are the dates the real ones, so only now can the window be
+        # held to what it claims. submitted_before could not do this: an
+        # identifier carries the month and the window starts on a day.
+        floor = start_at.date().isoformat()
+        candidates = [c for c in candidates if c["date"] >= floor]
 
     # Everything above came out of this run's date window. Anything still open
     # from an earlier one has to be put back by hand, or the inbox forgets it
