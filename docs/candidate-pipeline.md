@@ -129,6 +129,19 @@ gets expensive again and is the first one to reconsider.
 1. `.github/workflows/arxiv-candidates.yml` runs at 01:30 UTC, and on demand.
 2. `scripts/arxiv_candidates.py` queries arXiv over the last N days;
    `scripts/blog_candidates.py` polls the watchlist in `data/sources.json`.
+   Three interfaces answer that window, in descending order of how well:
+   the **search API** (date range and vocabulary in one query), **OAI-PMH**
+   (the same date range, no query, so a whole set and a client-side filter),
+   and the **RSS announcement feeds** (one day, no range — a report built from
+   these says so in its header and leaves an `unsearched-since` marker for the
+   next run to reach back over).
+
+   OAI-PMH dates a paper by `created`, which arXiv rewrites to the revision
+   date: `2508.07769` came back inside a 09-10 window and was submitted
+   2025-08-11. The identifier is the only field that still dates the
+   submission, so it is the coarse filter, and the abstract page — a third
+   host — is asked for the exact date once the gates have cut the week down to
+   a couple of dozen.
 3. Papers already in `data/papers.jsonl`, listed in `data/arxiv-ignore.txt`,
    or already rejected are skipped.
 4. One Issue labeled `arxiv-candidates` is created or updated with both

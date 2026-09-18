@@ -21,6 +21,7 @@ import triage  # noqa: E402
 
 FEED = Path(__file__).resolve().parent / "data" / "sample-feed.xml"
 RSS = Path(__file__).resolve().parent / "data" / "sample-rss.xml"
+OAI = Path(__file__).resolve().parent / "data" / "sample-oai.xml"
 TAGS = {t["key"] for t in json.loads((ROOT / "data" / "tags.json").read_text())}
 
 
@@ -103,6 +104,131 @@ class TestCategoryGate(unittest.TestCase):
         pure_robotics = {"cs.RO", "eess.SY"}
         self.assertTrue(cross_listed & ac.ALLOWED_CATEGORIES)
         self.assertFalse(pure_robotics & ac.ALLOWED_CATEGORIES)
+
+
+class TestOAIWindow(unittest.TestCase):
+    """OAI-PMH hands over a whole set, filtered by datestamp. Neither is what
+    the pipeline wants, and both are corrected in fetch_oai_window."""
+
+    def _window(self, pages, start=datetime(2026, 9, 10, tzinfo=timezone.utc)):
+        calls, served = [], iter(pages)
+
+        def fake_page(params, *_a, **_kw):
+            calls.append(params)
+            return next(served)
+
+        with mock.patch.object(ac, "oai_page", fake_page), \
+                mock.patch.object(ac, "OAI_SETS", ("cs",)), \
+                mock.patch.object(ac.time, "sleep", lambda _s: None):
+            papers = ac.fetch_oai_window(
+                start, datetime(2026, 9, 18, tzinfo=timezone.utc), 60.0, 2, 5.0)
+        return papers, calls
+
+    def test_the_parser_skips_a_deleted_record(self):
+        papers, _token = ac.parse_oai(OAI.read_bytes())
+        self.assertNotIn("2609.44444", {p["id"] for p in papers})
+
+    def test_the_parser_skips_a_pre_2007_identifier(self):
+        """`math/0503066` is on topic and inside the window, and url_for could
+        not build a link for it."""
+        papers, _token = ac.parse_oai(OAI.read_bytes())
+        self.assertTrue(all(ac.ID_RE.fullmatch(p["id"]) for p in papers))
+
+    def test_the_parser_reads_created_rather_than_the_datestamp(self):
+        """Which is the best a record offers, and still not the submission
+        date -- see test_an_identifier_outranks_a_rewritten_created."""
+        papers, _token = ac.parse_oai(OAI.read_bytes())
+        dates = {p["id"]: p["date"] for p in papers}
+        # datestamp 2026-09-17, created 2024-06-16.
+        self.assertEqual(dates["2402.05061"], "2024-06-16")
+
+    def test_an_identifier_outranks_a_rewritten_created(self):
+        """The trap that `created >= floor` walks straight into. 2508.07769
+        came back from the real 09-10..09-18 set with created 2026-09-10 --
+        inside the window -- and its abstract page says 11 Aug 2025. Only the
+        identifier still says 2025-08, and the README sorts on this date."""
+        parsed, _token = ac.parse_oai(OAI.read_bytes())
+        created = {p["id"]: p["date"] for p in parsed}
+        start = datetime(2026, 9, 10, tzinfo=timezone.utc)
+        self.assertGreaterEqual(created["2508.07769"], start.date().isoformat())
+        self.assertTrue(ac.submitted_before("2508.07769", start))
+
+        papers, _calls = self._window([OAI.read_bytes()])
+        self.assertNotIn("2508.07769", {p["id"] for p in papers})
+
+    def test_a_paper_revised_in_the_window_is_not_in_the_window(self):
+        """The one difference that would quietly wreck a date-sorted list: OAI
+        filters on when arXiv last touched the record, and 2402.05061 came back
+        from the real 09-17 set for no reason but a revision."""
+        papers, _calls = self._window([OAI.read_bytes()])
+        self.assertNotIn("2402.05061", {p["id"] for p in papers})
+
+    def test_the_vocabulary_filter_runs_here_too(self):
+        """A whole set, not a query's answer -- so person re-identification
+        arrives unless something stops it, exactly as it does over RSS."""
+        papers, _calls = self._window([OAI.read_bytes()])
+        self.assertEqual({p["id"] for p in papers}, {"2609.11111", "2609.33333"})
+
+    def test_a_resumption_token_is_followed_and_replaces_the_arguments(self):
+        first = OAI.read_bytes().replace(
+            b'<resumptionToken cursor="0" completeListSize="6"/>',
+            b'<resumptionToken cursor="0" completeListSize="7">tok-1</resumptionToken>')
+        second = b"""<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/"><ListRecords>
+  <record><header><identifier>oai:arXiv.org:2609.55555</identifier>
+    <datestamp>2026-09-16</datestamp></header>
+  <metadata><arXiv xmlns="http://arxiv.org/OAI/arXiv/">
+    <id>2609.55555</id><created>2026-09-16</created>
+    <title>A Playable World Simulator On The Second Page</title>
+    <categories>cs.CV</categories>
+    <abstract>An action-conditioned interactive video world model.</abstract>
+  </arXiv></metadata></record>
+  <resumptionToken cursor="6" completeListSize="7"/>
+</ListRecords></OAI-PMH>"""
+        papers, calls = self._window([first, second])
+        self.assertIn("2609.55555", {p["id"] for p in papers})
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1], {"verb": "ListRecords",
+                                    "resumptionToken": "tok-1"})
+        self.assertNotIn("set", calls[1])
+
+    def test_a_503_here_is_flow_control_and_is_waited_out(self):
+        """The same status the search API uses to decline us is how OAI-PMH
+        asks for patience, so it must not fall through to RSS."""
+        headers = email.message.Message()
+        headers["Retry-After"] = "7"
+        responses = iter([
+            urllib.error.HTTPError("http://x", 503, "slow down", headers, None),
+            OAI.read_bytes(),
+        ])
+        slept = []
+
+        def fake_urlopen(*_a, **_kw):
+            outcome = next(responses)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return contextlib.nullcontext(SimpleNamespace(read=lambda: outcome))
+
+        with mock.patch.object(ac.urllib.request, "urlopen", fake_urlopen), \
+                mock.patch.object(ac.time, "sleep", slept.append):
+            payload = ac.oai_page({"verb": "ListRecords"}, 60.0, 2, 5.0)
+        self.assertEqual(slept, [7.0])
+        self.assertTrue(payload)
+
+    def test_a_relentless_503_still_gives_up(self):
+        headers = email.message.Message()
+        headers["Retry-After"] = "1"
+        errors = [urllib.error.HTTPError("http://x", 503, "no", headers, None)
+                  ] * (ac.OAI_FLOW_RETRIES + 3)
+        served = iter(errors)
+
+        def fake_urlopen(*_a, **_kw):
+            raise next(served)
+
+        with mock.patch.object(ac.urllib.request, "urlopen", fake_urlopen), \
+                mock.patch.object(ac.time, "sleep", lambda _s: None), \
+                self.assertRaises(ac.Refused):
+            ac.oai_page({"verb": "ListRecords"}, 60.0, 2, 5.0)
 
 
 class TestRateLimit(unittest.TestCase):
@@ -273,25 +399,48 @@ class TestRssFallback(unittest.TestCase):
         """Only the first can be answered by asking a different host."""
         self.assertTrue(issubclass(ac.Refused, SystemExit))
 
-    def test_the_window_falls_back_rather_than_losing_the_day(self):
+    def test_oai_answers_the_window_and_is_not_degraded(self):
+        """The middle tier exists so that the API refusing costs latency rather
+        than a week. RSS answers a different question and has to say so; this
+        answers the one that was asked."""
         def refuse(*_a, **_kw):
-            raise ac.Refused("nope")
+            raise ac.Refused("406")
 
         with mock.patch.object(ac, "_fetch_window", refuse), \
+                mock.patch.object(ac, "oai_page",
+                                  lambda *a, **k: OAI.read_bytes()), \
+                mock.patch.object(ac.time, "sleep", lambda _s: None):
+            papers, source = ac.fetch_papers(
+                datetime(2026, 9, 10, tzinfo=timezone.utc),
+                datetime(2026, 9, 18, tzinfo=timezone.utc), 400, 60.0, 2, 5.0)
+        self.assertEqual(source, "oai")
+        self.assertEqual({p["id"] for p in papers},
+                         {"2609.11111", "2609.33333"})
+
+    def test_the_last_resort_still_does_not_lose_the_day(self):
+        """Two hosts and two protocols have to be gone before a report stops
+        covering the window it claims -- and when they are, the day is still
+        reported rather than lost. Every tier is mocked on purpose: left to
+        reach the real OAI host this passes for the wrong reason."""
+        def refuse(*_a, **_kw):
+            raise ac.Refused("406")
+
+        with mock.patch.object(ac, "_fetch_window", refuse), \
+                mock.patch.object(ac, "oai_page", refuse), \
                 mock.patch.object(ac, "get", lambda *a, **k: RSS.read_bytes()), \
                 mock.patch.object(ac.time, "sleep", lambda _s: None):
-            papers, degraded = ac.fetch_papers(
+            papers, source = ac.fetch_papers(
                 datetime(2026, 9, 8, tzinfo=timezone.utc),
                 datetime(2026, 9, 15, tzinfo=timezone.utc), 400, 60.0, 2, 5.0)
-        self.assertTrue(degraded)
+        self.assertEqual(source, "rss")
         self.assertEqual({p["id"] for p in papers}, {"2609.11111", "2609.33333"})
 
     def test_a_working_api_is_not_degraded(self):
         with mock.patch.object(ac, "_fetch_window", lambda *a, **k: [{"id": "x"}]):
-            papers, degraded = ac.fetch_papers(
+            papers, source = ac.fetch_papers(
                 datetime(2026, 9, 8, tzinfo=timezone.utc),
                 datetime(2026, 9, 15, tzinfo=timezone.utc), 400, 60.0, 2, 5.0)
-        self.assertFalse(degraded)
+        self.assertEqual(source, "api")
         self.assertEqual(papers, [{"id": "x"}])
 
     def test_the_report_says_the_window_was_not_searched(self):
