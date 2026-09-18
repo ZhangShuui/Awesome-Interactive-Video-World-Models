@@ -52,8 +52,80 @@ class TestOneList(unittest.TestCase):
     def test_nothing_generated_is_a_heading(self):
         """Heading-per-section rendering is what this replaced. If it comes
         back the list is categorised again, whatever the data says."""
-        body = br.render_list([rec(id="1"), rec(id="2")])
+        body = br.render_list([rec(id="1", date="2026-01-01"),
+                               rec(id="2", date="2026-02-01")])
+        self.assertTrue(body.strip(), "an assertion about nothing passes")
         self.assertNotIn("#", body)
+
+
+class TestVenueList(unittest.TestCase):
+    """A second index over the same papers, because recency ranks a
+    peer-reviewed paper by a preprint date a year older than its review."""
+
+    def test_a_published_paper_with_a_date_is_in_both_lists(self):
+        records = [rec(id="2609.03919", date="2026-09-03", venue="ECCV 2026",
+                       title="OctWorld",
+                       links={"paper": "https://arxiv.org/abs/2609.03919"})]
+        self.assertIn("2609.03919", br.render_list(records))
+        self.assertIn("2609.03919", br.render_venue_list(records))
+
+    def test_a_proceedings_entry_with_no_date_is_only_in_the_venue_list(self):
+        """It has no position in a list ordered by date. Left at the end it
+        read as the oldest paper on the list rather than an undated one."""
+        records = [rec(id="proc:eccv2026-f3e88bc2", venue="ECCV 2026",
+                       links={"paper": "https://eccv.ecva.net/virtual/2026/poster/5734"})]
+        self.assertEqual(br.render_list(records), "")
+        self.assertIn("poster/5734", br.render_venue_list(records))
+
+    def test_an_unpublished_preprint_is_only_in_the_chronological_list(self):
+        records = [rec(id="1", date="2026-09-03")]
+        self.assertIn("A Title", br.render_list(records))
+        self.assertEqual(br.render_venue_list(records), "")
+
+    def test_a_posting_month_is_not_a_venue(self):
+        """`arxiv 2026.06` reaches this field from sources with nowhere else to
+        put a date. Grouping by it would invent a venue per month."""
+        for label in ("arxiv 2026.06", "arXiv 2026.06"):
+            records = [rec(id="1", date="2026-06-01", venue=label)]
+            self.assertEqual(br.render_venue_list(records), "", label)
+
+    def test_venues_are_ordered_newest_year_first(self):
+        records = [rec(id="1", date="2024-01-01", venue="NeurIPS 2024"),
+                   rec(id="2", date="2026-01-01", venue="ECCV 2026"),
+                   rec(id="3", date="2025-01-01", venue="CVPR 2025")]
+        body = br.render_venue_list(records)
+        self.assertLess(body.index("ECCV 2026"), body.index("CVPR 2025"))
+        self.assertLess(body.index("CVPR 2025"), body.index("NeurIPS 2024"))
+
+    def test_the_bigger_proceedings_leads_within_a_year(self):
+        records = [rec(id="1", date="2026-01-01", venue="ICML 2026"),
+                   rec(id="2", date="2026-01-01", venue="ECCV 2026"),
+                   rec(id="3", date="2026-02-01", venue="ECCV 2026")]
+        body = br.render_venue_list(records)
+        self.assertLess(body.index("ECCV 2026"), body.index("ICML 2026"))
+
+    def test_a_venue_bullet_still_carries_all_of_its_tags(self):
+        """Grouping by venue is not the sectioning this list refuses. A venue
+        says where a paper was published, never what it is about."""
+        records = [rec(id="1", date="2026-01-01", venue="ECCV 2026",
+                       tags=["systems", "memory", "control"])]
+        line = [l for l in br.render_venue_list(records).splitlines()
+                if l.startswith("* ")][0]
+        self.assertTrue(line.endswith("· `systems` `memory` `control`"), line)
+
+    def test_the_venue_label_is_not_repeated_under_its_own_heading(self):
+        records = [rec(id="1", date="2026-01-01", venue="ECCV 2026")]
+        body = br.render_venue_list(records)
+        self.assertEqual(body.count("ECCV 2026"), 1, body)
+
+    def test_only_venues_are_headings_in_the_venue_list(self):
+        """The one kind of heading this README allows. If a tag ever shows up
+        as one, the list is categorised by subject again."""
+        records = [rec(id="1", date="2026-01-01", venue="ECCV 2026",
+                       tags=["systems", "memory"])]
+        headings = [l for l in br.render_venue_list(records).splitlines()
+                    if l.startswith("#")]
+        self.assertEqual(headings, ["#### ECCV 2026"])
 
 
 class TestEntryLine(unittest.TestCase):
@@ -177,7 +249,8 @@ class TestNoTallies(unittest.TestCase):
         self.assertNotRegex(key, r"\(\d+\)")
 
     def test_the_list_carries_no_entry_count(self):
-        body = br.render_list([rec(id="1")])
+        body = br.render_list([rec(id="1", date="2026-01-01")])
+        self.assertTrue(body.strip(), "an assertion about nothing passes")
         self.assertNotIn("entries", body)
 
     def test_no_stats_banner_is_rendered(self):

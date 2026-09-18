@@ -75,12 +75,25 @@ To read everything on a topic, search the page for its **glyph**. Searching for 
 <!-- BEGIN:TAGKEY -->
 <!-- END:TAGKEY -->
 
-Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
+Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet. Papers that made it into a venue are also indexed under [Published at a Venue](#published-at-a-venue).
 
 ---
 
 <!-- BEGIN:LIST -->
 <!-- END:LIST -->
+
+---
+
+## Published at a Venue
+
+The same papers, indexed by where they were published rather than when they were posted.
+
+A list ordered by recency ranks a paper by its preprint date, and for anything peer-reviewed that is most of a year before the review that vouches for it — an ECCV 2026 paper sits below every preprint posted since. Proceedings entries with no preprint have no date at all, and nowhere to sit in a chronological list.
+
+So this is a second index, not a second list: every paper here that has a date is also in the list above, under the same tags. Only the proceedings-only entries appear here alone.
+
+<!-- BEGIN:VENUES -->
+<!-- END:VENUES -->
 
 ---
 

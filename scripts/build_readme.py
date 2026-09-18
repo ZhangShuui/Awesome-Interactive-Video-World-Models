@@ -23,6 +23,7 @@ Usage:
   python3 scripts/build_readme.py --check     # exit 1 if the files are stale
 """
 import argparse
+import collections
 import json
 import re
 import sys
@@ -109,22 +110,48 @@ def norm_action(value):
     return " + ".join(hits[:3]) if hits else "other"
 
 
-def venue_of(rec):
-    """Real venues win. Inherited 'arxiv 2026.06' tags are not venues -- they
-    are the posting month in someone else's formatting, so re-derive them from
-    the date and get one house style instead of two."""
+VENUE_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+
+
+def published_venue(rec):
+    """Where a paper was actually published, or None if nowhere yet.
+
+    `arxiv 2026.06` arrives in this field from sources that had nowhere else to
+    put a posting month. It is not a venue, and this is the one function that
+    decides so: venue_of turns it into a label, render_venue_list drops it.
+    """
     venue = (rec.get("venue") or "").strip()
     if venue and not re.match(r"^arxiv\b", venue, re.I):
+        return venue
+    return None
+
+
+def venue_of(rec):
+    """The label for a bullet. A real venue wins; otherwise the posting month,
+    re-derived from the date so there is one house style instead of two."""
+    venue = published_venue(rec)
+    if venue:
         return venue
     date = rec.get("date") or ""
     if re.match(r"\d{4}-\d{2}", date):
         return f"arXiv {date[:4]}.{date[5:7]}"
-    return venue or None
+    return (rec.get("venue") or "").strip() or None
 
 
-def entry_line(rec, icons=None):
+def venue_year(venue):
+    """The year in a venue label, for ordering. 0 when it carries none."""
+    found = VENUE_YEAR_RE.search(venue)
+    return int(found.group(0)) if found else 0
+
+
+def entry_line(rec, icons=None, show_venue=True):
     """One bullet, ending in its tags. The tags are the only thing saying what
-    the paper is about, so every one of them is on the line."""
+    the paper is about, so every one of them is on the line -- in both lists,
+    because which list a bullet is in says nothing about its subject.
+
+    `show_venue` is off under a venue heading, where the label would repeat the
+    heading it sits beneath.
+    """
     parts = ["*"]
     title = rec["title"].rstrip(". ")
     name = rec.get("name")
@@ -134,7 +161,7 @@ def entry_line(rec, icons=None):
         if title.lower().startswith(f"{name.lower()}:"):
             title = title[len(name) + 1:].strip()
     parts.append(f"{title}.")
-    venue = venue_of(rec)
+    venue = venue_of(rec) if show_venue else None
     if venue:
         parts.append(f"**`{venue}`**")
     links = rec.get("links") or {}
@@ -150,9 +177,51 @@ def entry_line(rec, icons=None):
 
 
 def render_list(records, icons=None):
-    """Every paper once, newest first."""
-    rows = sorted(records, key=lambda r: (r.get("date") or "", r["id"]), reverse=True)
+    """Every dated paper once, newest first.
+
+    Undated records are not dropped from the README; they are proceedings
+    entries with no preprint, and render_venue_list is where they belong. A
+    list ordered by date has no honest position for a paper that has none, and
+    left at the end -- as twenty-three ECCV entries were -- they read as the
+    oldest papers here rather than the undated ones.
+    """
+    rows = sorted((r for r in records if (r.get("date") or "").strip()),
+                  key=lambda r: (r.get("date") or "", r["id"]), reverse=True)
     return "\n".join(entry_line(r, icons) for r in rows)
+
+
+def render_venue_list(records, icons=None):
+    """The published papers, grouped by venue -- the list a date cannot order.
+
+    Recency ranks a paper by when its preprint went up, which for anything
+    peer-reviewed is most of a year before the review that vouches for it: an
+    ECCV 2026 paper sits below every preprint posted since, and a proceedings
+    entry with no preprint has no date to be ranked by at all.
+
+    So a published paper is listed here *as well*, not instead. Everything with
+    a date stays in the chronological list above, because that is still where
+    someone reading by recency expects to meet it; only the proceedings-only
+    entries live here alone, and they had nowhere else to be.
+
+    Grouping by venue is not the sectioning this list refuses -- see
+    render_tag_key. A venue says where a paper was published, never what it is
+    about, and every bullet here still carries all of its tags.
+    """
+    groups = collections.defaultdict(list)
+    for rec in records:
+        venue = published_venue(rec)
+        if venue:
+            groups[venue].append(rec)
+    out = []
+    # Newest venue first, and the year is the only part of a label that orders
+    # anything; between two of the same year, the bigger proceedings first.
+    for venue in sorted(groups, key=lambda v: (-venue_year(v), -len(groups[v]), v)):
+        rows = sorted(groups[venue],
+                      key=lambda r: (r.get("date") or "", r["id"]), reverse=True)
+        out += [f"#### {venue}", ""]
+        out += [entry_line(r, icons, show_venue=False) for r in rows]
+        out.append("")
+    return "\n".join(out).rstrip()
 
 
 def render_tag_key(tags):
@@ -317,6 +386,7 @@ def main():
     icons = {t["key"]: t["icon"] for t in tags}
     readme = fill(readme, "TAGKEY", render_tag_key(tags))
     readme = fill(readme, "LIST", render_list(records, icons))
+    readme = fill(readme, "VENUES", render_venue_list(records, icons))
     readme = fill(readme, "TABLE", table)
 
     comparison = render_comparison_doc(records, tags)
@@ -334,8 +404,11 @@ def main():
     for path, body in targets:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
-    print(f"[build] {len(records)} entries -> README.md ({shown_rows}/{total_rows} table rows), "
-          f"docs/comparison.md")
+    dated = sum(1 for r in records if (r.get("date") or "").strip())
+    published = sum(1 for r in records if published_venue(r))
+    print(f"[build] {len(records)} entries -> README.md "
+          f"({dated} by date, {published} by venue, "
+          f"{shown_rows}/{total_rows} table rows), docs/comparison.md")
 
 
 if __name__ == "__main__":
