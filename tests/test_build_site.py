@@ -183,6 +183,55 @@ class TestIndex(SiteCase):
         for short in ("18", "19", "20"):
             self.assertIn(f'class="year__k">{short}<', page)
 
+    def test_a_published_paper_is_filterable(self):
+        """The page's version of the README's venue index: one list you narrow,
+        not a second grid."""
+        self.write([record("2608.00001", venue="ECCV 2026")])
+        self.build()
+        html = self.index()
+        self.assertIn('data-published="1"', html)
+        self.assertIn("PUBLISHED 1", html)
+
+    def test_a_posting_month_does_not_count_as_published(self):
+        """`arxiv 2026.06` reaches this field from sources with nowhere else to
+        put a date. Counting it would make every paper published."""
+        for label in ("arxiv 2026.06", "arXiv 2026.06"):
+            self.write([record("2608.00001", venue=label)])
+            self.build()
+            html = self.index()
+            self.assertNotIn("data-published", html, label)
+            self.assertNotIn("PUBLISHED", html, label)
+
+    def test_an_unpublished_preprint_carries_no_published_flag(self):
+        self.write([record("2608.00001")])
+        self.build()
+        self.assertNotIn("data-published", self.index())
+
+    def test_an_undated_row_is_marked_so_it_can_be_held_at_the_end(self):
+        """Sorting here is a reversal of the list, so last in the DOM leads the
+        page in oldest-first. Twenty-three proceedings entries with no preprint
+        were doing exactly that."""
+        self.write([record("2608.00001"),
+                    record("proc:eccv2026-abc", date=None, venue="ECCV 2026",
+                           links={"paper": "https://eccv.ecva.net/x"})])
+        self.build()
+        html = self.index()
+        self.assertEqual(html.count('data-undated="1"'), 1)
+        # On the proceedings row and no other: split the list into its <li>s
+        # and check the one that carries the id.
+        rows = html.split('<li class="row"')
+        mine = [r for r in rows if "proc:eccv2026-abc" in r]
+        self.assertEqual(len(mine), 1)
+        self.assertIn('data-undated="1"', mine[0])
+
+    def test_the_stylesheet_pins_undated_rows_in_both_directions(self):
+        """A rule for one direction only would move the problem, not fix it."""
+        self.write([record("2608.00001")])
+        self.build()
+        css = (self.out / "assets" / "style.css").read_text(encoding="utf-8")
+        self.assertIn(".row[data-undated]", css)
+        self.assertIn(".rows.is-oldest .row[data-undated]", css)
+
     def test_search_blob_carries_the_tag_code(self):
         """Typing SYS should find the systems papers without reaching for a
         chip, so the code has to be in the haystack the filter reads."""
