@@ -125,6 +125,16 @@ def load_tags(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def published_venue(rec):
+    """Where a paper was actually published, or None. build_readme's rule, and
+    the same reason for it: `arxiv 2026.06` in this field is a posting month
+    from a source with nowhere else to put one, not a venue."""
+    venue = (rec.get("venue") or "").strip()
+    if venue and not re.match(r"^arxiv\b", venue, re.I):
+        return venue
+    return None
+
+
 def venue_of(rec):
     """Same rule as the README: a real venue wins, an inherited `arXiv 2026.06`
     is re-derived from the date so the whole page speaks one house style."""
@@ -309,7 +319,14 @@ def render_note_cards(notes):
     return "\n".join(out)
 
 
-def render_flags(has_demo, has_explainer, n_code, n_profiled):
+def render_flags(has_demo, has_explainer, n_code, n_profiled, n_published=0):
+    """The chips beside the tag row.
+
+    `PUBLISHED` is this page's version of the README's venue index. A second
+    grid would fight the one thing this page is -- a single list you narrow --
+    so the venue becomes something to filter by instead, and the venue string
+    is already in the search haystack: PUBLISHED then `eccv` is one venue.
+    """
     flags = []
     if has_demo:
         flags.append(("demo", "DEMO"))
@@ -317,6 +334,8 @@ def render_flags(has_demo, has_explainer, n_code, n_profiled):
         flags.append(("explainer", "EXPLAINER"))
     flags.append(("code", f"CODE {n_code}"))
     flags.append(("profiled", f"PROFILED {n_profiled}"))
+    if n_published:
+        flags.append(("published", f"PUBLISHED {n_published}"))
     return "\n".join(
         f'      <button class="chip chip--flag" type="button" data-flag="{esc(k)}"'
         f' aria-pressed="false">{esc(label)}</button>'
@@ -428,6 +447,13 @@ def render_row(rec, i, by_key, demo_ids, explainer_ids):
             ("explainer", has_explainer),
             ("code", bool(links.get("code"))),
             ("profiled", bool(rec.get("attrs"))),
+            ("published", bool(published_venue(rec))),
+            # Not a chip -- a hook for the stylesheet. A paper with no date
+            # cannot take a position in a date sort, and this page sorts by
+            # reversing the list, so "last in the DOM" is first the moment
+            # someone asks for oldest first. Twenty-three proceedings entries
+            # with no preprint were leading the page in that mode.
+            ("undated", not (rec.get("date") or "").strip()),
         ) if on)
 
     return (
@@ -487,6 +513,7 @@ def build(out_dir, papers_path=None, tags_path=None, demos_dir=None,
 
     profiled = sum(1 for r in records if r.get("attrs"))
     n_code = sum(1 for r in records if (r.get("links") or {}).get("code"))
+    n_published = sum(1 for r in records if published_venue(r))
 
     page = (WEB / "index.template.html").read_text(encoding="utf-8")
     page = fill_block(page, "READOUT",
@@ -495,7 +522,8 @@ def build(out_dir, papers_path=None, tags_path=None, demos_dir=None,
     page = fill_block(page, "YEARS", render_years(by_year))
     page = fill_block(page, "CHIPS", render_chips(tags, counts))
     page = fill_block(page, "FLAGS",
-                      render_flags(bool(demos), bool(explainers), n_code, profiled))
+                      render_flags(bool(demos), bool(explainers), n_code,
+                                   profiled, n_published))
     page = fill_block(page, "ROWS", "\n".join(
         render_row(rec, i, by_key, demos, explainers) for i, rec in enumerate(records)))
     page = fill_slot(page, "COUNT", len(records))
