@@ -1,0 +1,2043 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="arXiv 2609.04911 · TourPhysics: Bringing Physics to World Models for Exploration and Manipulation from a Single Image 方法精读与交互图解">
+<title>TourPhysics 事务化世界模型</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Newsreader:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   TourPhysics 精读 — tokens
+   角色色沿用论文 Fig. 2 自己的图例：
+     phy  = 橙 · Physical transition（模拟器 / 相机 / 轨迹 X, C）
+     obs  = 紫 · Observation branch（视频扩散 / 生成 RGB Y）
+     mem  = 绿 · Epistemic branch（外观记忆 K / 尾部证据 E）
+   本页补充三个角色色：
+     geo  = 钢青 · 只读几何记录 G / D^geo（投影·可见性·对应·评测）
+     ref  = 黄铜 · 永久锚 I0 / B0 / R（不可变）
+     bad  = 绯 · 质量门拒绝 / 回滚 / 被禁止的写入
+   签名纹理：帧标尺（81 帧窗口，步长 80，共享边界加粗）
+   编码约定（全页复用，见图例）：实心=已提交　斜线阴影=暂存私有
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#111014; --surf:#17161b; --surf2:#1d1c23; --surf3:#26252e;
+  --rule:#2a2932; --rule2:#3d3b48;
+  --ink:#efeef2; --ink2:#b2afbd; --ink3:#807d8c;
+  --phy:#d8862f; --phy-ink:#f0a558; --phy-soft:rgba(216,134,47,.17);
+  --obs:#8b6ff0; --obs-ink:#ab93f8; --obs-soft:rgba(139,111,240,.19);
+  --mem:#33a276; --mem-ink:#5cc79b; --mem-soft:rgba(51,162,118,.17);
+  --geo:#3f93b8; --geo-ink:#6cb8d8; --geo-soft:rgba(63,147,184,.17);
+  --ref:#c2a02c; --ref-ink:#ddbe4d; --ref-soft:rgba(194,160,44,.16);
+  --bad:#d9534a; --bad-ink:#ef8078; --bad-soft:rgba(217,83,74,.15);
+  --grid:#22212a; --axis:#3d3b48;
+  --shadow:0 1px 2px rgba(0,0,0,.55), 0 10px 30px rgba(0,0,0,.35);
+  --tint:rgba(255,255,255,.045);
+  --font-display:"Instrument Sans","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"Newsreader",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f1f1f3; --surf:#fbfbfc; --surf2:#eaeaee; --surf3:#dfdfe5;
+    --rule:#dcdce2; --rule2:#c1c1cb;
+    --ink:#141319; --ink2:#4d4b57; --ink3:#767483;
+    --phy:#b06716; --phy-ink:#8c4f0c; --phy-soft:rgba(176,103,22,.13);
+    --obs:#6a4ed6; --obs-ink:#573dbb; --obs-soft:rgba(106,78,214,.13);
+    --mem:#1e8a60; --mem-ink:#146f4b; --mem-soft:rgba(30,138,96,.13);
+    --geo:#22718f; --geo-ink:#185a74; --geo-soft:rgba(34,113,143,.13);
+    --ref:#96780f; --ref-ink:#785f08; --ref-soft:rgba(150,120,15,.14);
+    --bad:#c33a30; --bad-ink:#a32b22; --bad-soft:rgba(195,58,48,.11);
+    --grid:#e4e4ea; --axis:#c1c1cb;
+    --shadow:0 1px 2px rgba(16,16,28,.06), 0 10px 28px rgba(16,16,28,.08);
+    --tint:rgba(16,16,28,.035);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f1f1f3; --surf:#fbfbfc; --surf2:#eaeaee; --surf3:#dfdfe5;
+  --rule:#dcdce2; --rule2:#c1c1cb;
+  --ink:#141319; --ink2:#4d4b57; --ink3:#767483;
+  --phy:#b06716; --phy-ink:#8c4f0c; --phy-soft:rgba(176,103,22,.13);
+  --obs:#6a4ed6; --obs-ink:#573dbb; --obs-soft:rgba(106,78,214,.13);
+  --mem:#1e8a60; --mem-ink:#146f4b; --mem-soft:rgba(30,138,96,.13);
+  --geo:#22718f; --geo-ink:#185a74; --geo-soft:rgba(34,113,143,.13);
+  --ref:#96780f; --ref-ink:#785f08; --ref-soft:rgba(150,120,15,.14);
+  --bad:#c33a30; --bad-ink:#a32b22; --bad-soft:rgba(195,58,48,.11);
+  --grid:#e4e4ea; --axis:#c1c1cb;
+  --shadow:0 1px 2px rgba(16,16,28,.06), 0 10px 28px rgba(16,16,28,.08);
+  --tint:rgba(16,16,28,.035);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+h1,h2,h3,h4{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--obs-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--geo-ink); outline-offset:3px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.84em; background:var(--surf2); border:1px solid var(--rule);
+  padding:.08em .36em; border-radius:5px; white-space:nowrap}
+strong{font-weight:600; color:var(--ink)}
+ul,ol{margin:0; padding-left:1.35em}
+li{margin:.35em 0}
+li::marker{color:var(--ink3)}
+.m{font-family:var(--font-math); font-style:italic}
+.mono{font-family:var(--font-mono)}
+sub,sup{line-height:0; font-size:.7em}
+.rP{color:var(--phy-ink)} .rO{color:var(--obs-ink)} .rM{color:var(--mem-ink)}
+.rG{color:var(--geo-ink)} .rR{color:var(--ref-ink)} .rB{color:var(--bad-ink)}
+b.rP,b.rO,b.rM,b.rG,b.rR,b.rB{font-weight:600}
+
+/* ============================================================ chrome */
+#prog{position:fixed; inset:0 auto auto 0; height:2px; width:0; z-index:200;
+  background:linear-gradient(90deg,var(--phy),var(--obs),var(--mem),var(--geo)); transition:width .08s linear}
+.top{position:fixed; inset:0 0 auto 0; height:60px; z-index:150; display:flex; align-items:center; gap:18px;
+  padding:0 22px; background:color-mix(in srgb, var(--surf) 88%, transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 11px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2)}
+
+.shell{display:grid; grid-template-columns:238px minmax(0,1fr); gap:0; max-width:1250px; margin:0 auto; padding:84px 28px 120px}
+.rail{position:sticky; top:84px; align-self:start; max-height:calc(100vh - 104px); overflow:auto; padding-right:20px}
+.rail .rl{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); margin:0 0 10px}
+.rail ol{list-style:none; padding:0; margin:0}
+.rail li{margin:0}
+.rail a{display:block; padding:5px 10px; border-radius:7px; font-size:13px; line-height:1.45; color:var(--ink3);
+  border-bottom:0; border-left:2px solid transparent; transition:.15s}
+.rail a:hover{color:var(--ink2); background:var(--surf2)}
+.rail a.on{color:var(--ink); background:var(--surf2); border-left-color:var(--phy)}
+main{min-width:0; max-width:900px}
+
+/* ============================================================ hero */
+.hero{position:relative; padding:6px 0 40px; border-bottom:1px solid var(--rule); margin-bottom:8px}
+.ruler{position:absolute; right:-6px; top:-14px; width:min(340px,42%); height:74px; opacity:.5; pointer-events:none}
+.kicker{display:flex; flex-wrap:wrap; gap:7px; margin-bottom:20px; position:relative}
+.tag{font-family:var(--font-mono); font-size:11px; letter-spacing:.02em; padding:3px 9px; border-radius:6px;
+  background:var(--surf2); border:1px solid var(--rule); color:var(--ink3)}
+.tag.hl{background:var(--phy-soft); border-color:var(--phy); color:var(--phy-ink)}
+.hero h1{font-size:clamp(42px,7vw,68px); font-weight:700; letter-spacing:-.035em; line-height:1.02}
+.hero .zh{font-family:var(--font-display); font-size:clamp(17px,2.4vw,22px); font-weight:500; color:var(--ink2); margin-top:12px; line-height:1.5}
+.thesis{margin-top:22px; font-size:16.5px; line-height:1.9; color:var(--ink2); max-width:70ch}
+.thesis b{color:var(--ink)}
+.authors{margin-top:18px; font-size:13.5px; line-height:1.7; color:var(--ink3)}
+.authors b{color:var(--ink2); font-weight:500}
+.links{display:flex; flex-wrap:wrap; gap:8px 16px; margin-top:18px; font-size:13px; font-family:var(--font-mono); color:var(--ink3)}
+.links a{border-bottom:1px solid var(--rule2)}
+
+/* ============================================================ sections */
+.sec{padding:64px 0 8px; scroll-margin-top:80px}
+.sec+.sec{border-top:1px solid var(--rule)}
+.eyebrow{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--ink3); margin-bottom:12px; display:flex; align-items:center; gap:10px}
+.eyebrow .no{color:var(--phy-ink); font-weight:700}
+.sec h2{font-size:clamp(24px,3.4vw,31px); letter-spacing:-.02em; font-weight:600; max-width:24ch}
+.sec h3{font-size:18px; margin:34px 0 0; letter-spacing:-.008em}
+.sec p{margin-top:16px; max-width:70ch}
+.sec>ul,.sec>ol{margin-top:14px; max-width:70ch}
+.lede{font-size:17.5px; color:var(--ink2); line-height:1.85}
+
+/* ============================================================ figure */
+.fig{margin:30px 0 0; background:var(--surf); border:1px solid var(--rule); border-radius:14px; overflow:hidden; box-shadow:var(--shadow)}
+.fh{display:flex; align-items:center; gap:12px; padding:11px 18px; border-bottom:1px solid var(--rule); background:var(--surf2); flex-wrap:wrap}
+.fh .no{font-family:var(--font-mono); font-size:11px; padding:2px 7px; border-radius:5px; background:var(--surf3); color:var(--ink3); white-space:nowrap}
+.fh .ti{font-family:var(--font-display); font-size:13.5px; font-weight:600; color:var(--ink2)}
+.figbody{padding:20px 18px}
+.figbody.tight{padding:12px 10px}
+.figscroll{overflow-x:auto}
+figcaption{padding:12px 18px 15px; font-size:13.5px; line-height:1.68; color:var(--ink3); border-top:1px solid var(--rule)}
+figcaption b{color:var(--ink2); font-weight:500}
+svg.d{display:block; width:100%; height:auto; max-width:100%}
+.ctl{display:flex; flex-wrap:wrap; align-items:center; gap:9px; padding:11px 18px; border-bottom:1px solid var(--rule); background:color-mix(in srgb,var(--surf2) 60%, transparent)}
+.btn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:31px; padding:0 12px; border-radius:8px;
+  cursor:pointer; font-family:var(--font-mono); font-size:12px; transition:.15s; white-space:nowrap}
+.btn:hover:not(:disabled){color:var(--ink); border-color:var(--rule2)}
+.btn:disabled{opacity:.35; cursor:not-allowed}
+.btn.on{background:var(--phy-soft); border-color:var(--phy); color:var(--phy-ink)}
+.btn.primary{background:var(--obs-soft); border-color:var(--obs); color:var(--obs-ink)}
+.btn.danger.on{background:var(--bad-soft); border-color:var(--bad); color:var(--bad-ink)}
+.sl{display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:11.5px; color:var(--ink3)}
+.sl input[type=range]{width:110px; accent-color:var(--obs); height:18px}
+.sl b{color:var(--ink2); font-weight:500; min-width:44px; display:inline-block; font-variant-numeric:tabular-nums}
+.seg{display:inline-flex; border:1px solid var(--rule); border-radius:8px; overflow:hidden}
+.seg button{background:var(--surf2); border:0; border-right:1px solid var(--rule); color:var(--ink3); height:31px; padding:0 11px;
+  cursor:pointer; font-family:var(--font-mono); font-size:11.5px; transition:.15s}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--surf3); color:var(--ink)}
+.seg button:hover:not(.on){color:var(--ink2)}
+
+/* ============================================================ callouts */
+.note{margin-top:24px; padding:15px 18px; border-radius:11px; background:var(--surf); border:1px solid var(--rule);
+  border-left:3px solid var(--ink3); font-size:14.5px; line-height:1.75; color:var(--ink2); max-width:74ch}
+.note b{color:var(--ink)}
+.note .nt{display:block; font-family:var(--font-mono); font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink3); margin-bottom:6px}
+.note.warn{border-left-color:var(--bad); background:color-mix(in srgb,var(--bad-soft) 45%, var(--surf))}
+.note.warn .nt{color:var(--bad-ink)}
+.note.key{border-left-color:var(--phy); background:color-mix(in srgb,var(--phy-soft) 40%, var(--surf))}
+.note.key .nt{color:var(--phy-ink)}
+.note.mine{border-left-color:var(--geo); background:color-mix(in srgb,var(--geo-soft) 34%, var(--surf))}
+.note.mine .nt{color:var(--geo-ink)}
+
+/* ============================================================ equation */
+.eq{margin-top:18px; padding:14px 18px; background:var(--surf); border:1px solid var(--rule); border-radius:11px;
+  font-family:var(--font-math); font-size:17px; line-height:1.7; overflow-x:auto; display:flex; align-items:center; gap:16px}
+.eq .body{flex:1; min-width:0}
+.eq .tagn{font-family:var(--font-mono); font-size:11px; color:var(--ink3); white-space:nowrap; font-style:normal}
+.eq i{font-style:italic}
+.eq .op{font-style:normal; font-family:var(--font-body)}
+.eq sub,.eq sup{font-style:normal; font-family:var(--font-mono); font-size:.62em}
+
+/* ============================================================ table */
+.tw{margin-top:24px; overflow-x:auto; border:1px solid var(--rule); border-radius:12px; background:var(--surf)}
+table{border-collapse:collapse; width:100%; font-size:13px; min-width:600px}
+th,td{padding:8px 11px; text-align:left; border-bottom:1px solid var(--rule); white-space:nowrap}
+thead th{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink3);
+  background:var(--surf2); position:sticky; top:0; font-weight:500}
+tbody tr:last-child td{border-bottom:0}
+tbody tr.me{background:var(--phy-soft)}
+tbody tr.me td{color:var(--ink)}
+td.num{font-family:var(--font-mono); font-variant-numeric:tabular-nums; text-align:right}
+td.best{color:var(--mem-ink); font-weight:600}
+td.worst{color:var(--bad-ink)}
+th.grp{text-align:center; border-left:1px solid var(--rule)}
+td.gl,th.gl{border-left:1px solid var(--rule)}
+.tnote{padding:10px 14px; font-size:12.5px; line-height:1.6; color:var(--ink3); border-top:1px solid var(--rule)}
+
+/* ============================================================ misc blocks */
+.grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; margin-top:22px}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:15px 17px}
+.card h4{font-size:14px; margin-bottom:7px; display:flex; align-items:center; gap:8px}
+.card p{margin-top:0; font-size:14px; line-height:1.7; color:var(--ink2)}
+.dot{width:9px; height:9px; border-radius:3px; display:inline-block; flex:none}
+.legend{display:flex; flex-wrap:wrap; gap:6px 16px; padding:10px 18px; border-top:1px solid var(--rule);
+  font-family:var(--font-mono); font-size:11px; color:var(--ink3); align-items:center}
+.legend span{display:inline-flex; align-items:center; gap:6px}
+.kv{display:grid; grid-template-columns:auto 1fr; gap:4px 14px; margin-top:16px; font-size:13.5px; align-items:baseline}
+.kv dt{font-family:var(--font-mono); font-size:12px; color:var(--ink3); white-space:nowrap}
+.kv dd{margin:0; color:var(--ink2)}
+.pill{display:inline-block; font-family:var(--font-mono); font-size:11px; padding:1px 7px; border-radius:5px;
+  background:var(--surf2); border:1px solid var(--rule); color:var(--ink3); vertical-align:1px}
+.pill.ok{background:var(--mem-soft); border-color:var(--mem); color:var(--mem-ink)}
+.pill.no{background:var(--bad-soft); border-color:var(--bad); color:var(--bad-ink)}
+.stat{display:flex; flex-wrap:wrap; gap:10px; margin-top:18px}
+.stat div{flex:1 1 130px; background:var(--surf); border:1px solid var(--rule); border-radius:11px; padding:12px 14px}
+.stat .v{font-family:var(--font-mono); font-size:22px; font-weight:700; letter-spacing:-.02em; color:var(--ink); font-variant-numeric:tabular-nums; line-height:1.2}
+.stat .v small{font-size:12px; font-weight:400; color:var(--ink3); margin-left:2px}
+.stat .l{font-size:11.5px; color:var(--ink3); margin-top:3px; line-height:1.45}
+
+/* ============================================================ SVG roles */
+.d text{font-family:var(--font-body); font-size:12px; fill:var(--ink2)}
+.d .xs{font-size:11px} .d .xxs{font-size:9.5px} .d .sm{font-size:12.5px}
+.d .mn{font-family:var(--font-mono)}
+.d .mt{font-family:var(--font-math); font-style:italic}
+.nofill{fill:none}
+.f-ink{fill:var(--ink)} .f-ink2{fill:var(--ink2)} .f-ink3{fill:var(--ink3)}
+.f-surf{fill:var(--surf)} .f-surf2{fill:var(--surf2)} .f-surf3{fill:var(--surf3)}
+.s-rule{stroke:var(--rule)} .s-rule2{stroke:var(--rule2)} .s-ink3{stroke:var(--ink3)} .s-ink2{stroke:var(--ink2)}
+.s-grid{stroke:var(--grid)} .s-axis{stroke:var(--axis)}
+.f-P{fill:var(--phy)} .f-Pi{fill:var(--phy-ink)} .fs-P{fill:var(--phy-soft)} .s-P{stroke:var(--phy)} .s-Pi{stroke:var(--phy-ink)}
+.f-O{fill:var(--obs)} .f-Oi{fill:var(--obs-ink)} .fs-O{fill:var(--obs-soft)} .s-O{stroke:var(--obs)} .s-Oi{stroke:var(--obs-ink)}
+.f-M{fill:var(--mem)} .f-Mi{fill:var(--mem-ink)} .fs-M{fill:var(--mem-soft)} .s-M{stroke:var(--mem)} .s-Mi{stroke:var(--mem-ink)}
+.f-G{fill:var(--geo)} .f-Gi{fill:var(--geo-ink)} .fs-G{fill:var(--geo-soft)} .s-G{stroke:var(--geo)} .s-Gi{stroke:var(--geo-ink)}
+.f-R{fill:var(--ref)} .f-Ri{fill:var(--ref-ink)} .fs-R{fill:var(--ref-soft)} .s-R{stroke:var(--ref)} .s-Ri{stroke:var(--ref-ink)}
+.f-B{fill:var(--bad)} .f-Bi{fill:var(--bad-ink)} .fs-B{fill:var(--bad-soft)} .s-B{stroke:var(--bad)} .s-Bi{stroke:var(--bad-ink)}
+.mk-i{fill:var(--ink3)} .mk-P{fill:var(--phy)} .mk-O{fill:var(--obs)} .mk-M{fill:var(--mem)}
+.mk-G{fill:var(--geo)} .mk-R{fill:var(--ref)} .mk-B{fill:var(--bad)}
+.s-hair{stroke:var(--rule2); stroke-width:1}
+.dim{opacity:.28; transition:opacity .25s}
+.d rect,.d circle,.d path,.d line,.d polyline,.d polygon{transition:opacity .25s, stroke-width .2s}
+
+/* ============================================================ responsive */
+@media (max-width:920px){
+  .shell{grid-template-columns:1fr; padding:76px 18px 90px}
+  .rail{position:static; max-height:none; overflow:visible; padding:0 0 18px; margin-bottom:8px; border-bottom:1px solid var(--rule)}
+  .rail ol{display:flex; flex-wrap:wrap; gap:4px}
+  .rail a{border-left:0; border:1px solid var(--rule); font-size:12px; padding:4px 9px}
+  .rail a.on{border-color:var(--phy)}
+  .ruler{display:none}
+  body{font-size:15.5px}
+}
+@media (prefers-reduced-motion: reduce){
+  *{animation-duration:.001ms !important; transition-duration:.001ms !important}
+  html{scroll-behavior:auto}
+}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">TourPhysics<em>事务化世界模型 · 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<!-- shared SVG defs -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <marker id="ar" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8.6" markerHeight="6" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-i"/></marker>
+  <marker id="ar-P" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8.6" markerHeight="6" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-P"/></marker>
+  <marker id="ar-O" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8.6" markerHeight="6" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-O"/></marker>
+  <marker id="ar-M" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8.6" markerHeight="6" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-M"/></marker>
+  <marker id="ar-G" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8.6" markerHeight="6" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-G"/></marker>
+  <marker id="ar-R" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8.6" markerHeight="6" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-R"/></marker>
+  <marker id="ar-B" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8.6" markerHeight="6" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-B"/></marker>
+  <!-- 签名纹理：16 fps 帧标尺，一个窗口 = 81 帧 / 步长 80 -->
+  <pattern id="frames" width="80" height="40" patternUnits="userSpaceOnUse">
+    <line x1="0.5" y1="4" x2="0.5" y2="40" class="s-rule2" stroke-width="1.4"/>
+    <line x1="16" y1="24" x2="16" y2="40" class="s-rule" stroke-width="1"/>
+    <line x1="32" y1="24" x2="32" y2="40" class="s-rule" stroke-width="1"/>
+    <line x1="48" y1="24" x2="48" y2="40" class="s-rule" stroke-width="1"/>
+    <line x1="64" y1="24" x2="64" y2="40" class="s-rule" stroke-width="1"/>
+  </pattern>
+  <!-- 暂存未提交：斜线阴影 -->
+  <pattern id="staged" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="7" class="s-rule2" stroke-width="2.4"/>
+  </pattern>
+  <pattern id="stagedM" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="7" class="s-M" stroke-width="2.2" opacity=".55"/>
+  </pattern>
+  <pattern id="stagedB" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="7" class="s-B" stroke-width="2.2" opacity=".6"/>
+  </pattern>
+</defs></svg>
+
+<div class="shell">
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-tldr">00 · 一图看懂</a></li>
+    <li><a href="#s-thesis">01 · 观察 ≠ 干预</a></li>
+    <li><a href="#s-lift">02 · 场景抬升（一次性）</a></li>
+    <li><a href="#s-decl">03 · 声明式配置与求解器路由</a></li>
+    <li><a href="#s-txn">04 · 事务循环：本文的心脏</a></li>
+    <li><a href="#s-own">05 · 状态所有权：谁能写什么</a></li>
+    <li><a href="#s-depth">06 · 两种深度的分离</a></li>
+    <li><a href="#s-time">07 · 帧索引与窗口拼接</a></li>
+    <li><a href="#s-mem">08 · 参考锚定外观记忆</a></li>
+    <li><a href="#s-gate">09 · 质量门：它到底查了什么</a></li>
+    <li><a href="#s-exp">10 · 实验与指标细读</a></li>
+    <li><a href="#s-crit">11 · 局限与保留意见</a></li>
+    <li><a href="#s-ref">12 · 常数速查与关联</a></li>
+  </ol>
+</nav>
+<main>
+
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <svg class="ruler" viewBox="0 0 400 74" aria-hidden="true"><rect width="400" height="74" fill="url(#frames)"/></svg>
+  <div class="kicker">
+    <span class="tag">arXiv 2609.04911v1</span>
+    <span class="tag">cs.CV · 2026-09-04</span>
+    <span class="tag">PhysOmni（ACM MM 2026）的在线扩展</span>
+    <span class="tag hl">模拟器先行 / 事务化提交 / 几何路由记忆</span>
+  </div>
+  <h1>TourPhysics</h1>
+  <p class="zh">给世界模型装一个事务日志：先算物理，再画图，画完过闸才允许写进世界</p>
+  <p class="thesis">TourPhysics 的问题很具体：从<b>一张图</b>出发，让人既能<b>推着相机四处走</b>，又能<b>动手戳、拉、吹场景里的东西</b>，而且走远了再回来，那面墙还得是原来那面墙。
+  它的答案不是把这两件事都交给视频模型，而是<b>把权限拆开</b>：<span class="rP">模拟器</span>在任何像素被采样之前就把这一步的物理与相机轨迹算死，
+  <span class="rG">由该轨迹渲出的几何记录 G<sub>n</sub></span> 只读地负责投影、可见性、对应与评测，
+  <span class="rO">视频扩散模型</span>只负责在这条已经定死的轨迹上画出好看的观测，
+  而它画出来的东西必须先<b>过一道 fail-closed 的质量门</b>，通过了才连同物理终态一起<b>原子提交</b>——不通过就整窗回滚，<span class="rM">记忆</span>和世界状态都当无事发生。
+  一句话：<b>生成的 RGB 可以扩充「我知道这里长什么样」，但永远不能改写「这里是什么状态」。</b></p>
+  <p class="authors"><b>Xin Zhang</b><sup>*†1,2</sup>, <b>Yabo Chen</b><sup>*2</sup>, Zixuan Duan<sup>2,3</sup>, Haibin Huang<sup>2</sup>, Chi Zhang<sup>2</sup>, Feng Xu<sup>1</sup>, <b>Xuelong Li</b><sup>✉2</sup></p>
+  <p class="authors"><sup>1</sup>复旦大学 · <sup>2</sup>中国电信人工智能研究院 TeleAI · <sup>3</sup>南京大学　　<span style="opacity:.75">* 同等贡献　† TeleAI 实习期间完成　✉ 通讯作者</span></p>
+  <div class="links">
+    <a href="https://arxiv.org/abs/2609.04911" target="_blank" rel="noopener">arXiv 摘要 ↗</a>
+    <a href="https://arxiv.org/pdf/2609.04911" target="_blank" rel="noopener">PDF ↗</a>
+    <span>项目页 / 代码：论文正文与附录中均未给出（2026-09-07 查）</span>
+  </div>
+
+  <figure class="fig" style="margin-top:30px">
+    <div class="fh"><span class="no">Hero</span><span class="ti">提交轨道：窗口一个一个地被接受，被拒的那次什么都没留下</span></div>
+    <div class="ctl">
+      <button class="btn primary" id="hrPlay" type="button">❚❚ 暂停</button>
+      <button class="btn" id="hrStep" type="button">▸ 单步</button>
+      <button class="btn danger on" id="hrFail" type="button">让第 3 次尝试失败</button>
+      <button class="btn" id="hrReset" type="button">↺ 重来</button>
+      <span class="sl" style="margin-left:auto"><b id="hrLab">—</b></span>
+    </div>
+    <div class="figbody tight figscroll">
+      <svg class="d" id="hrSvg" viewBox="0 0 880 278" role="img" aria-label="提交轨道动画：候选窗口经过模拟、生成、质量门后被原子提交或整窗回滚"></svg>
+    </div>
+    <figcaption><b>按论文 Sec. 3.2、Sec. 4.6 与式 (5) 绘制的示意动画，非论文原图。</b>上排是当前<b>候选</b>窗口走过的四步（克隆 → 模拟 → 生成 → 过门），
+    下排是<b>已提交</b>的视频轨道。注意被拒的那一次：候选块变成斜线阴影后整块消失，提交索引 <span class="m">n</span> 不前进，
+    <span class="m">S<sub>n</sub></span> 里的四个分量（<span class="rP">X</span>、<span class="rP">C</span>、<span class="rM">K</span>、<span class="rM">E</span>）一个都没动——论文明确规定重试只允许换采样种子，动作、轨迹、几何记录、生成控制和已提交记忆全部复用。
+    每块 81 帧、步长 80 帧（16 fps ≈ 5 s/窗）是论文给的实际配置。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 00 TLDR -->
+<section class="sec" id="s-tldr">
+  <p class="eyebrow"><span class="no">00</span> 一图看懂</p>
+  <h2>一次动作的完整数据流：三条支路，一个原子提交点</h2>
+  <p class="lede">论文自己的 Fig. 2 把整套系统画成了三段。真正需要看懂的是中间那一段——<b>一个动作对应一次事务</b>。
+  下图把这次事务摊成三条泳道：<span class="rP">物理支路</span>决定「发生了什么」，<span class="rO">观测支路</span>决定「看起来什么样」，<span class="rM">认知支路</span>决定「我记住了什么」。
+  三条支路的读写权限完全不同，这就是整篇论文的全部主张。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 1</span><span class="ti">动作 a<sub>n</sub> = (c<sub>n</sub>, u<sub>n</sub>) 的一次事务（论文 Fig. 2 中段重绘）</span></div>
+    <div class="ctl">
+      <span class="sl">只看：</span>
+      <div class="seg" id="tlSeg">
+        <button class="on" data-l="all" type="button">全部</button>
+        <button data-l="P" type="button">物理</button>
+        <button data-l="G" type="button">只读几何</button>
+        <button data-l="O" type="button">观测</button>
+        <button data-l="M" type="button">记忆</button>
+        <button data-l="X" type="button">被禁止的写入</button>
+      </div>
+    </div>
+    <div class="figbody tight figscroll">
+      <svg class="d" id="tlSvg" viewBox="0 0 900 530" role="img"
+        aria-label="三泳道数据流图：物理支路克隆状态并模拟出固定轨迹与只读几何记录；观测支路用几何记录、生成深度、永久锚图与已提交记忆采样候选视频；认知支路把候选记忆页与尾部证据暂存，经质量门后原子提交或整窗回滚">
+
+        <!-- lane bands -->
+        <g id="lanes">
+          <rect x="96" y="42" width="792" height="112" rx="10" class="fs-P" opacity=".38"/>
+          <rect x="96" y="164" width="792" height="122" rx="10" class="fs-O" opacity=".34"/>
+          <rect x="96" y="296" width="792" height="104" rx="10" class="fs-M" opacity=".34"/>
+          <text x="88" y="98" class="xs mn f-Pi" text-anchor="end" transform="rotate(-90 88 98)">物理 PHYSICAL</text>
+          <text x="88" y="225" class="xs mn f-Oi" text-anchor="end" transform="rotate(-90 88 225)">观测 OBSERVE</text>
+          <text x="88" y="348" class="xs mn f-Mi" text-anchor="end" transform="rotate(-90 88 348)">认知 EPISTEMIC</text>
+        </g>
+
+        <!-- column ticks -->
+        <g class="f-ink3">
+          <text x="168" y="30" class="xxs mn" text-anchor="middle">① 克隆</text>
+          <text x="300" y="30" class="xxs mn" text-anchor="middle">② 模拟</text>
+          <text x="452" y="30" class="xxs mn" text-anchor="middle">③ 记录</text>
+          <text x="604" y="30" class="xxs mn" text-anchor="middle">④ 构造控制</text>
+          <text x="770" y="30" class="xxs mn" text-anchor="middle">⑤ 采样</text>
+        </g>
+
+        <!-- committed state ledger -->
+        <g data-l="P">
+          <rect x="104" y="54" width="86" height="34" rx="6" class="fs-P s-P" stroke-width="1.4"/>
+          <text x="147" y="70" class="xs f-Pi" text-anchor="middle" font-weight="600">X_n 物理态</text>
+          <text x="147" y="82" class="xxs f-ink3" text-anchor="middle">粒子 / 刚体</text>
+          <rect x="104" y="96" width="86" height="34" rx="6" class="fs-P s-P" stroke-width="1.4"/>
+          <text x="147" y="112" class="xs f-Pi" text-anchor="middle" font-weight="600">C_n 相机态</text>
+          <text x="147" y="124" class="xxs f-ink3" text-anchor="middle">位姿 / 内参</text>
+        </g>
+        <g data-l="M">
+          <rect x="104" y="308" width="86" height="34" rx="6" class="fs-M s-M" stroke-width="1.4"/>
+          <text x="147" y="324" class="xs f-Mi" text-anchor="middle" font-weight="600">K_n 记忆页</text>
+          <text x="147" y="336" class="xxs f-ink3" text-anchor="middle">注意力 KV</text>
+          <rect x="104" y="350" width="86" height="34" rx="6" class="fs-M s-M" stroke-width="1.4"/>
+          <text x="147" y="366" class="xs f-Mi" text-anchor="middle" font-weight="600">E_n 尾证据</text>
+          <text x="147" y="378" class="xxs f-ink3" text-anchor="middle">对齐后深度</text>
+        </g>
+        <path d="M100 54 L94 54 L94 384 L100 384" class="nofill s-ink3" stroke-width="1.2"/>
+        <text x="60" y="222" class="xs mn f-ink2" text-anchor="middle">S_n</text>
+        <text x="60" y="236" class="xxs f-ink3" text-anchor="middle">已提交</text>
+
+        <!-- permanent reference -->
+        <g data-l="R">
+          <rect x="104" y="196" width="86" height="52" rx="6" class="fs-R s-R" stroke-width="1.4"/>
+          <text x="147" y="214" class="xs f-Ri" text-anchor="middle" font-weight="600">R 永久参考</text>
+          <text x="147" y="228" class="xxs f-ink3" text-anchor="middle">I₀ 原图 · B₀ 背景板</text>
+          <text x="147" y="240" class="xxs f-ink3" text-anchor="middle">D₀ᵍᵉᵒ · K₀,T₀ 只读</text>
+        </g>
+
+        <!-- (1) clone -->
+        <g data-l="P">
+          <path d="M192 92 L226 92" class="nofill s-P" stroke-width="1.6" marker-end="url(#ar-P)"/>
+          <rect x="228" y="66" width="82" height="52" rx="7" class="f-surf2 s-P" stroke-width="1.4"/>
+          <text x="269" y="86" class="xs f-Pi" text-anchor="middle" font-weight="600">clone</text>
+          <text x="269" y="100" class="xxs f-ink2" text-anchor="middle">X̃_n , C̃_n</text>
+          <text x="269" y="112" class="xxs f-ink3" text-anchor="middle">工作副本</text>
+        </g>
+
+        <!-- (2) F_seq -->
+        <g data-l="P">
+          <path d="M312 92 L344 92" class="nofill s-P" stroke-width="1.6" marker-end="url(#ar-P)"/>
+          <rect x="346" y="58" width="118" height="68" rx="7" class="fs-P s-P" stroke-width="1.8"/>
+          <text x="405" y="78" class="xs f-Pi" text-anchor="middle" font-weight="600">F_seq</text>
+          <text x="405" y="93" class="xxs f-ink2" text-anchor="middle">RBD / MPM / PBD</text>
+          <text x="405" y="106" class="xxs f-ink2" text-anchor="middle">+ 相机控制器</text>
+          <text x="405" y="119" class="xxs f-ink3" text-anchor="middle">Δt = 4 ms</text>
+        </g>
+
+        <!-- (3) trajectory + G_n -->
+        <g data-l="P">
+          <path d="M466 92 L498 92" class="nofill s-P" stroke-width="1.6" marker-end="url(#ar-P)"/>
+          <rect x="500" y="62" width="92" height="60" rx="7" class="f-surf2 s-P" stroke-width="1.4"/>
+          <text x="546" y="80" class="xxs f-Pi" text-anchor="middle" font-weight="600">X_n , C_n</text>
+          <text x="546" y="94" class="xxs f-ink2" text-anchor="middle">t = 0 … T_n</text>
+          <text x="546" y="107" class="xxs f-ink3" text-anchor="middle">采样前已定死</text>
+          <text x="546" y="118" class="xxs f-ink3" text-anchor="middle">重试也不重算</text>
+        </g>
+        <g data-l="G">
+          <path d="M594 92 L622 92" class="nofill s-G" stroke-width="1.6" marker-end="url(#ar-G)"/>
+          <rect x="624" y="52" width="150" height="86" rx="7" class="fs-G s-G" stroke-width="1.8"/>
+          <text x="699" y="70" class="xs f-Gi" text-anchor="middle" font-weight="600">几何记录 G_n（只读）</text>
+          <text x="699" y="86" class="xxs f-ink2" text-anchor="middle">Dᵍᵉᵒ 米制深度 · V 可见 · Q 置信</text>
+          <text x="699" y="99" class="xxs f-ink2" text-anchor="middle">L 标签 · M 掩码 · U 运动</text>
+          <text x="699" y="112" class="xxs f-ink2" text-anchor="middle">K 内参 · T 外参</text>
+          <text x="699" y="128" class="xxs f-Gi" text-anchor="middle">唯一写者：初始化 + 模拟器渲染</text>
+        </g>
+        <g data-l="G">
+          <rect x="786" y="52" width="96" height="86" rx="7" class="f-surf2 s-rule" stroke-width="1.2" stroke-dasharray="4 3"/>
+          <text x="834" y="80" class="xxs f-Gi" text-anchor="middle" font-weight="600">投影 · 可见性</text>
+          <text x="834" y="94" class="xxs f-Gi" text-anchor="middle">跨视对应 · 评测</text>
+          <text x="834" y="112" class="xxs f-ink3" text-anchor="middle">只喂条件，</text>
+          <text x="834" y="124" class="xxs f-ink3" text-anchor="middle">不当替身像素</text>
+        </g>
+
+        <!-- (4) F_ctrl -->
+        <g data-l="G">
+          <path d="M699 140 L699 176" class="nofill s-G" stroke-width="1.6" marker-end="url(#ar-G)"/>
+        </g>
+        <g data-l="M">
+          <path d="M147 348 L147 396 L560 396 L560 214 L588 214" class="nofill s-M" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#ar-M)"/>
+          <text x="360" y="390" class="xxs f-Mi" text-anchor="middle">E_n：只补新暴露、支撑不足的区域</text>
+        </g>
+        <g data-l="O">
+          <rect x="590" y="178" width="118" height="58" rx="7" class="f-surf2 s-Oi" stroke-width="1.4"/>
+          <text x="649" y="197" class="xs f-Oi" text-anchor="middle" font-weight="600">F_ctrl(G_n, E_n)</text>
+          <text x="649" y="212" class="xxs f-ink2" text-anchor="middle">Dᵍᵉⁿ = (1−W)⊙Dᵇᵃˢᵉ</text>
+          <text x="649" y="225" class="xxs f-ink2" text-anchor="middle">+ W⊙D(E_n)</text>
+          <path d="M710 207 L740 207" class="nofill s-O" stroke-width="1.6" marker-end="url(#ar-O)"/>
+        </g>
+
+        <!-- (5) generator -->
+        <g data-l="O">
+          <rect x="742" y="170" width="140" height="76" rx="7" class="fs-O s-O" stroke-width="1.8"/>
+          <text x="812" y="190" class="xs f-Oi" text-anchor="middle" font-weight="600">p_θ 视频扩散</text>
+          <text x="812" y="205" class="xxs f-ink2" text-anchor="middle">81 帧 · 832×480 · 16 fps</text>
+          <text x="812" y="218" class="xxs f-ink2" text-anchor="middle">控制图 640×352</text>
+          <text x="812" y="236" class="xxs f-Oi" text-anchor="middle">→ 候选观测 Y_Wn</text>
+        </g>
+        <g data-l="R">
+          <path d="M192 222 L246 222 L246 258 L806 258 L806 250" class="nofill s-R" stroke-width="1.4" marker-end="url(#ar-R)"/>
+          <text x="470" y="272" class="xxs f-Ri" text-anchor="middle">I₀ 永久锚：不可变，只作条件参考</text>
+        </g>
+        <g data-l="M">
+          <path d="M192 325 L214 325 L214 282 L770 282 L770 250" class="nofill s-M" stroke-width="1.4" marker-end="url(#ar-M)"/>
+          <text x="470" y="294" class="xxs f-Mi" text-anchor="middle">K_n 已提交记忆页：几何路由 + 有界残差</text>
+        </g>
+
+        <!-- staged -->
+        <g data-l="M">
+          <path d="M812 248 L812 306" class="nofill s-M" stroke-width="1.6" marker-end="url(#ar-M)"/>
+          <rect x="736" y="308" width="152" height="66" rx="7" fill="url(#stagedM)" class="s-M" stroke-width="1.6"/>
+          <rect x="736" y="308" width="152" height="66" rx="7" class="f-surf" opacity=".72"/>
+          <rect x="736" y="308" width="152" height="66" rx="7" class="nofill s-M" stroke-width="1.6"/>
+          <text x="812" y="326" class="xs f-Mi" text-anchor="middle" font-weight="600">暂存（私有）</text>
+          <text x="812" y="341" class="xxs f-ink2" text-anchor="middle">K̂_{n+1} = K_n ⊕ Φ_page</text>
+          <text x="812" y="354" class="xxs f-ink2" text-anchor="middle">Ê_{n+1} = Φ_E(Y|T_n)</text>
+          <text x="812" y="368" class="xxs f-ink3" text-anchor="middle">本窗口内自己读不到</text>
+        </g>
+
+        <!-- gate -->
+        <g data-l="M">
+          <path d="M734 341 L688 341" class="nofill s-M" stroke-width="1.6" marker-end="url(#ar-M)"/>
+          <rect x="512" y="312" width="174" height="58" rx="7" class="f-surf2 s-ink2" stroke-width="1.8"/>
+          <text x="599" y="331" class="xs f-ink" text-anchor="middle" font-weight="600">质量门 Q → q_n ∈ {0,1}</text>
+          <text x="599" y="346" class="xxs f-ink2" text-anchor="middle">媒体契约 · e_ov ≤ 4 · r_bd ≤ 3</text>
+          <text x="599" y="359" class="xxs f-ink2" text-anchor="middle">r_black ≤ .10 · r_freeze ≤ .25</text>
+        </g>
+
+        <!-- commit / rollback -->
+        <g data-l="M">
+          <path d="M510 330 L470 330" class="nofill s-M" stroke-width="1.8" marker-end="url(#ar-M)"/>
+          <text x="490" y="322" class="xxs f-Mi" text-anchor="middle">1</text>
+          <rect x="300" y="424" width="240" height="60" rx="8" class="fs-M s-M" stroke-width="1.8"/>
+          <text x="420" y="444" class="xs f-Mi" text-anchor="middle" font-weight="600">原子提交 S_{n+1} = (X⁺_n, C⁺_n, K̂_{n+1}, Ê_{n+1})</text>
+          <text x="420" y="459" class="xxs f-ink2" text-anchor="middle">物理终态与视觉证据一起发布，n ← n+1</text>
+          <text x="420" y="473" class="xxs f-ink3" text-anchor="middle">下一个动作此刻才被释放</text>
+          <path d="M466 330 L420 330 L420 420" class="nofill s-M" stroke-width="1.8" marker-end="url(#ar-M)"/>
+        </g>
+        <g data-l="M">
+          <path d="M599 372 L599 424" class="nofill s-B" stroke-width="1.6" marker-end="url(#ar-B)"/>
+          <text x="612" y="392" class="xxs f-Bi">q_n = 0</text>
+          <rect x="560" y="426" width="322" height="58" rx="8" class="fs-B s-B" stroke-width="1.6"/>
+          <text x="721" y="445" class="xs f-Bi" text-anchor="middle" font-weight="600">整窗回滚：S_n 原样不动</text>
+          <text x="721" y="459" class="xxs f-ink2" text-anchor="middle">丢弃工作副本、候选页、候选证据、候选缓存与随机状态</text>
+          <text x="721" y="473" class="xxs f-ink3" text-anchor="middle">重试保持同一 n、同一动作与控制，只换种子；论文实现不自动重试</text>
+        </g>
+
+        <!-- forbidden writes -->
+        <g data-l="X">
+          <path d="M760 168 L760 148 L566 148 L566 126" class="nofill s-B" stroke-width="1.6" stroke-dasharray="6 4"/>
+          <g transform="translate(566,140)"><circle r="9" class="f-surf s-B" stroke-width="1.6"/><path d="M-4 -4 L4 4 M4 -4 L-4 4" class="s-B" stroke-width="1.8"/></g>
+          <text x="552" y="160" class="xxs f-Bi" text-anchor="end">生成 RGB 不得写回 X, C, Dᵍᵉᵒ</text>
+        </g>
+        <g data-l="X">
+          <path d="M232 470 L232 300 L232 140 L232 128" class="nofill s-B" stroke-width="1.4" stroke-dasharray="6 4"/>
+          <path d="M300 454 L236 454" class="nofill s-B" stroke-width="1.4" stroke-dasharray="6 4"/>
+          <g transform="translate(232,192)"><circle r="9" class="f-surf s-B" stroke-width="1.6"/><path d="M-4 -4 L4 4 M4 -4 L-4 4" class="s-B" stroke-width="1.8"/></g>
+          <text x="232" y="176" class="xxs f-Bi" text-anchor="middle">提交也不改</text>
+          <text x="232" y="212" class="xxs f-Bi" text-anchor="middle">模拟器几何</text>
+        </g>
+        <g data-l="X">
+          <rect x="104" y="424" width="180" height="60" rx="8" class="f-surf2 s-B" stroke-width="1.4" stroke-dasharray="5 3"/>
+          <text x="194" y="444" class="xs f-Bi" text-anchor="middle" font-weight="600">唯一被禁止的方向</text>
+          <text x="194" y="459" class="xxs f-ink2" text-anchor="middle">观测支路只能扩充「知道什么」</text>
+          <text x="194" y="473" class="xxs f-ink2" text-anchor="middle">不能改写「是什么状态」</text>
+        </g>
+      </svg>
+    </div>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--phy)"></span>物理 X, C</span>
+      <span><span class="dot" style="background:var(--geo)"></span>只读几何 G, D<sup>geo</sup></span>
+      <span><span class="dot" style="background:var(--obs)"></span>观测 / 生成 Y</span>
+      <span><span class="dot" style="background:var(--mem)"></span>记忆 K, 证据 E</span>
+      <span><span class="dot" style="background:var(--ref)"></span>永久参考 R</span>
+      <span><span class="dot" style="background:var(--bad)"></span>拒绝 / 禁止写入</span>
+      <span style="margin-left:auto">实心 = 已提交　斜线 = 暂存私有</span>
+    </div>
+    <figcaption><b>按论文 Fig. 2 中段与 Sec. 3.2 / 4.3–4.6 重绘。</b>三条泳道对应论文反复强调的「state ownership」：
+    只有 <span class="m">F<sub>seq</sub></span> 能写 <span class="m">X, C</span>；只有场景初始化与模拟器渲染能写 <span class="m">D<sup>geo</sup></span>；
+    生成器只能读。图中所有阈值、帧数、分辨率都是论文给出的实际配置值，泳道划分与「被禁止的写入」标注是本页为讲清楚而加的。</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <div class="card"><h4><span class="dot" style="background:var(--phy)"></span>它相比 PhysOmni 多了什么</h4>
+      <p>PhysOmni（同组，ACM MM 2026）解决的是「从单图生成一段物理正确的视频并实时交互」。TourPhysics 保留了它的整套物理前端（分割 → 网格 → 重力对齐 → 多物理），
+      加上四样在线的东西：<b>跨动作的持久状态</b>、<b>动作边界处的轨迹模拟</b>、<b>事务化的观测发布</b>、<b>长程外观记忆</b>。</p></div>
+    <div class="card"><h4><span class="dot" style="background:var(--obs)"></span>它不解决什么</h4>
+      <p>它不做「真实场景重建」。论文在 B.1 里写得很直白：基准测的是<b>与声明轨迹的一致性</b>，不测所声明的材料参数是不是这张照片里物体的真实参数。
+      单图给不出尺度、遮挡几何、密度、摩擦——这些都由用户在 <span class="m">Θ<sub>decl</sub></span> 里指定。</p></div>
+  </div>
+</section>
+<!-- ============================================================ 01 THESIS -->
+<section class="sec" id="s-thesis">
+  <p class="eyebrow"><span class="no">01</span> 命题</p>
+  <h2>观察 ≠ 干预：两件事都产出新画面，但只有一件改变世界</h2>
+  <p class="lede">论文第一句话就是这个区分。<b>移动相机</b>会露出之前没看见的表面——世界没变，只是我对世界的<b>知识</b>变多了；
+  <b>施加一个力</b>会改变物体的位置、接触与形变——世界真的变了。当前视频世界模型的问题在于，它们用同一套「学到的外观先验」同时承担这两件事，
+  于是「画得像」被当成了「世界是这样」：回访时场景变了、时序缓存把幻觉一路带下去、规定的交互被模型自己的运动先验忽略掉。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 2</span><span class="ti">同一个已提交边界上，三种动作各自改了什么</span></div>
+    <div class="ctl">
+      <span class="sl">动作 a<sub>n</sub> =</span>
+      <div class="seg" id="acSeg">
+        <button class="on" data-a="cam" type="button">仅相机 (c_n, ∅)</button>
+        <button data-a="int" type="button">相机 + 干预 (c_n, u_n)</button>
+        <button data-a="rej" type="button">被质量门拒绝</button>
+      </div>
+    </div>
+    <div class="figbody">
+      <div id="acGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:10px"></div>
+      <p id="acWhy" style="margin-top:16px;font-size:14px;line-height:1.75;color:var(--ink2);max-width:none"></p>
+    </div>
+    <figcaption><b>按论文 Sec. 3.2、Sec. 4.3 与式 (5) 整理。</b>最容易被忽略的一格是「仅相机」下的 <span class="m">X</span>：
+    论文 Sec. 4.3 明确写着「重力、已排定的力场与正在进行的动力学在 <span class="m">u<sub>n</sub> = ∅</span> 时仍然继续」，
+    所以<b>纯相机动作照样推进物理状态</b>——「观察不改变世界」说的是<b>观察这个操作本身</b>不改变世界，不是说这段时间里世界静止。</figcaption>
+  </figure>
+
+  <div class="note key"><span class="nt">这篇论文真正的技术形状</span>
+  把术语翻译一下就很清楚了：<b>clone / staged / atomic commit / rollback / retry / fail-closed gate</b>——这是一套<b>数据库事务协议</b>，
+  只不过被套在了一个视频扩散模型外面。「世界状态」是数据库，「一次动作」是一个事务，「生成的 81 帧」是事务里的写操作，
+  「质量门」是提交前的约束检查，「记忆页与尾部证据」是只有提交后才对外可见的写集。
+  论文的贡献与其说是某个新模块，不如说是<b>把权限边界画清楚并强制执行</b>。</div>
+</section>
+
+<!-- ============================================================ 02 LIFTING -->
+<section class="sec" id="s-lift">
+  <p class="eyebrow"><span class="no">02</span> 一次性预处理</p>
+  <h2>场景抬升：把一张照片变成一个可以被戳的物理假设</h2>
+  <p class="lede">这一步只做一次，在第一次交互之前。它要从一张欠定的图里造出一个<b>内部自洽</b>的场景假设，
+  并且把原图与它的标定几何<b>永久冻结</b>成只读参考 <span class="m">R</span>。论文特别强调：这些校正属于「初始假设」，
+  <b>不是在线的状态修正</b>——运行起来之后没有任何一步会回头改它们。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 3</span><span class="ti">Scene Lifting 六步流水线（论文 Sec. 4.2 / 附录 A.1）</span></div>
+    <div class="ctl">
+      <button class="btn" id="lfPrev" type="button">◂ 上一步</button>
+      <button class="btn primary" id="lfNext" type="button">下一步 ▸</button>
+      <span class="sl" style="margin-left:auto"><b id="lfLab">第 1 / 6 步</b></span>
+    </div>
+    <div class="figbody tight figscroll">
+      <svg class="d" id="lfSvg" viewBox="0 0 880 130" role="img" aria-label="场景抬升六步流水线：实例分割、网格抬升、背景修补、重力对齐、参考相机精化、仿射深度标定"></svg>
+    </div>
+    <div class="figbody" style="border-top:1px solid var(--rule);padding-top:16px">
+      <h4 id="lfTi" style="font-size:15px;margin-bottom:8px"></h4>
+      <p id="lfTx" style="margin-top:0;font-size:14.5px;line-height:1.78;color:var(--ink2);max-width:none"></p>
+      <p id="lfNo" style="margin-top:10px;font-size:13px;line-height:1.7;color:var(--ink3);max-width:none"></p>
+    </div>
+    <figcaption><b>按论文 Sec. 4.2 与附录 A.1 重绘。</b>整条链路上没有一个可训练的在线组件：分割、三维化、修补、平面拟合、相机精化、仿射拟合
+    全部是一次性的确定性操作，产物写进磁盘缓存（网格、深度、相机、背景板）。这是「模拟器几何只有两个写者」这条规矩能成立的前提。</figcaption>
+  </figure>
+
+  <div class="eq"><div class="body"><i>D</i><sup>geo</sup><sub>0</sub>(<i>p</i>) <span class="op">=</span> α · <i>D̃</i><sub>0</sub>(<i>p</i>) <span class="op">+</span> β<span style="color:var(--ink3);font-size:14px;margin-left:18px">仅在单目与模拟器深度都有效的可见像素上拟合；非有限值剔除</span></div><span class="tagn">式 (7) / (A4)</span></div>
+
+  <div class="note mine"><span class="nt">读到这里值得停一下</span>
+  这个仿射拟合 <span class="m">(α, β)</span> 是整个系统的<b>尺度锚</b>：之后所有的投影、可见性判定、跨视对应、以及 <span class="m">c<sub>s</sub></span> 里的米制深度容差 <span class="m">ε<sub>s</sub></span>，
+  用的都是这一次拟合确定下来的「模拟器米制」。论文在 B.2 里诚实地提醒：ATE 报的是<b>模拟器世界单位</b>，不是真实世界的米。
+  换句话说 <b>0.0233 这个数不能理解成 2.3 厘米</b>。</div>
+</section>
+
+<!-- ============================================================ 03 DECLARATION -->
+<section class="sec" id="s-decl">
+  <p class="eyebrow"><span class="no">03</span> 声明式配置</p>
+  <h2>Θ<sub>decl</sub>：把「这是什么材料、会被怎么推」写成一张冻结的表</h2>
+  <p class="lede">单图定不下来的东西（材料、边界条件、力场、干预时序、相机指令），全部由用户在配置里声明。
+  可以手写，也可以让 <b>Qwen2.5-VL-72B-Instruct</b> 看图与掩码裁片提一个初稿——但初稿必须过<b>白名单校验</b>、补默认值、开放人工编辑，
+  然后在第一次轨迹模拟之前<b>冻结</b>。VLM 只参与初始化，在线阶段一步都不参与。在线动作只是从这张冻结的表里挑一条相机指令和一个干预，<b>不能替换声明</b>。</p>
+
+  <div class="eq"><div class="body">Θ<sub>phys</sub> <span class="op">=</span> ( { <i>m<sub>i</sub></i>, θ<sub>i</sub>, <i>b<sub>i</sub></i>, <i>v</i><sup>0</sup><sub>i</sub> }<sup>N</sup><sub>i=1</sub> , 𝒰 , ℱ )<span style="color:var(--ink3);font-size:14px;margin-left:16px">材料族 · 连续参数 · 边界条件 · 初速；外加速度关键帧 𝒰 与力场 ℱ</span></div><span class="tagn">式 (A6)</span></div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 4</span><span class="ti">材料族 → 求解器路由（论文 Fig. 3 + 附录 A.2 重绘）</span></div>
+    <div class="ctl">
+      <div class="seg" id="mtSeg">
+        <button class="on" data-m="rigid" type="button">刚体 / 铰接</button>
+        <button data-m="elastic" type="button">弹性</button>
+        <button data-m="plastic" type="button">弹塑 / 雪</button>
+        <button data-m="granular" type="button">颗粒</button>
+        <button data-m="cloth" type="button">布 / 薄壳</button>
+        <button data-m="fluid" type="button">液体</button>
+      </div>
+    </div>
+    <div class="figbody tight figscroll">
+      <svg class="d" id="mtSvg" viewBox="0 0 880 200" role="img" aria-label="材料族到刚体动力学、物质点法、位置基动力学三种求解器的路由图"></svg>
+    </div>
+    <div class="figbody" style="border-top:1px solid var(--rule)">
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px" id="mtWrap">
+        <div>
+          <h4 id="mtTi" style="font-size:15px;margin-bottom:8px"></h4>
+          <p id="mtTx" style="margin-top:0;font-size:14.5px;line-height:1.78;color:var(--ink2);max-width:none"></p>
+        </div>
+        <div>
+          <div class="eq" style="margin-top:0"><div class="body" id="mtEq"></div></div>
+          <p id="mtPar" style="margin-top:10px;font-size:13px;line-height:1.7;color:var(--ink3);max-width:none"></p>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>公式取自论文附录 A.2（式 A7–A9），三种求解器由 GPU 物理引擎 Genesis 提供。</b>
+    RBD–MPM 与 RBD–PBD 的接触在<b>同一个场景步</b>内通过引擎耦合器交换响应，并保留各求解器的原生状态给下一个提交窗口。
+    右栏的默认参数是论文给的「除非声明覆盖」的默认值。</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <div class="card"><h4><span class="dot" style="background:var(--phy)"></span>边界条件</h4>
+      <p>固定物体、地面支撑、粒子钉扎。论文举的例子：把一块布网格<b>顶部若干比例的粒子钉住</b>，就得到一面挂着的窗帘——Fig. 7(a) 的「风中被钉住的窗帘」正是这么来的。</p></div>
+    <div class="card"><h4><span class="dot" style="background:var(--phy)"></span>外部力场</h4>
+      <p>常量场、风场、点场、阻力场、涡场、湍流场、噪声场，每个都带<b>激活时间表</b>。这就是为什么「不下干预」的窗口里物理照样在动。</p></div>
+    <div class="card"><h4><span class="dot" style="background:var(--geo)"></span>求解器默认值</h4>
+      <p>步长 4 ms；纯刚体场景 10 个子步，含粒子材料 16 个；重力 (0, 0, −9.8)。MPM 域 [−3,3]³、粒子尺寸 0.02、网格密度 32；PBD 粒子尺寸 0.01。静态支撑是放在对齐后地面上的一个刚性平面。</p></div>
+    <div class="card"><h4><span class="dot" style="background:var(--ref)"></span>为什么必须冻结</h4>
+      <p>因为重试要能<b>逐位复现</b>同一条轨迹。若声明可以在线改，「同一个动作重试一次」就不再是同一个事务，回滚语义随之失效。冻结是事务协议的前提，不是工程偷懒。</p></div>
+  </div>
+</section>
+<!-- ============================================================ 04 TRANSACTION -->
+<section class="sec" id="s-txn">
+  <p class="eyebrow"><span class="no">04</span> 核心机制</p>
+  <h2>事务循环：一个动作 = 一次「要么全发生，要么没发生过」</h2>
+  <p class="lede">这是整篇论文的心脏。把它拆成九个状态走一遍，就会发现每一条看似啰嗦的规定都在堵一个具体的漏洞：
+  为什么要克隆？为什么控制张量必须在采样前构造好？为什么暂存的记忆页在<b>本窗口内自己都读不到</b>？为什么重试只允许换种子？</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 5</span><span class="ti">一次事务的九个状态（可单步）</span></div>
+    <div class="ctl">
+      <button class="btn" id="txPrev" type="button">◂ 上一步</button>
+      <button class="btn primary" id="txNext" type="button">下一步 ▸</button>
+      <button class="btn" id="txAuto" type="button">▶ 自动</button>
+      <button class="btn danger" id="txFail" type="button">让这次过不了门</button>
+      <span class="sl" style="margin-left:auto"><b id="txLab">—</b></span>
+    </div>
+    <div class="figbody tight figscroll">
+      <svg class="d" id="txSvg" viewBox="0 0 880 320" role="img" aria-label="事务九步图：持久区与候选私有区之间的克隆、暂存、提交与回滚"></svg>
+    </div>
+    <div class="figbody" style="border-top:1px solid var(--rule)">
+      <h4 id="txTi" style="font-size:15px;margin-bottom:8px"></h4>
+      <p id="txTx" style="margin-top:0;font-size:14.5px;line-height:1.78;color:var(--ink2);max-width:none"></p>
+      <p id="txWhy" style="margin-top:10px;font-size:13.5px;line-height:1.7;color:var(--ink3);max-width:none"></p>
+    </div>
+    <figcaption><b>按论文 Sec. 3.2、Sec. 4.5–4.6、附录 A.4–A.5 与式 (1)–(5)、(A10)–(A18) 重绘。</b>
+    左侧「持久区」里的四个分量就是 <span class="m">S<sub>n</sub></span>；右侧虚线框内的一切都是<b>候选私有</b>状态，
+    在 <span class="m">q<sub>n</sub> = 1</span> 之前对系统其余部分不可见，在 <span class="m">q<sub>n</sub> = 0</span> 时连同随机状态检查点一起被丢弃。</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <div class="card"><h4><span class="dot" style="background:var(--mem)"></span>因果性：记忆不能自己读自己</h4>
+      <p>论文写得很死：本窗口生成的页<b>不能被同一窗口内的另一帧选中</b>，尾部证据也<b>不能影响已经用来采样本窗的控制张量</b>。
+      它们最早生效的时刻是<b>下一个被接受的窗口</b>。这条保证了记忆是因果的、深度补全分支在重试下是可复现的。</p></div>
+    <div class="card"><h4><span class="dot" style="background:var(--bad)"></span>重试的严格语义</h4>
+      <p>重试保持<b>同一个已提交索引 n</b>、同一动作、同一轨迹、同一几何记录、同一生成控制、同一已提交记忆，<b>只有采样种子可以变</b>。
+      阈值在一次尝试内固定、失败后<b>绝不放宽</b>。而且论文明说：<b>实现不做自动重试</b>，必须由调用方显式发起。</p></div>
+  </div>
+
+  <div class="note warn"><span class="nt">一个论文没有回答的问题</span>
+  既然有一道会拒绝的门，那<b>它到底拒了多少次？</b>全文没有报告任何拒绝率 / 重试次数 / 每序列平均尝试次数。
+  这个数字很重要：如果拒绝率接近 0，那这道门在实验里其实没起作用，Table 2/3/4 的结果与「有没有门」无关；
+  如果拒绝率很高，那么生成成本与「在线」的可用性就要打折扣。两种情况下读者对这套机制的评价会很不一样。</div>
+</section>
+
+<!-- ============================================================ 05 OWNERSHIP -->
+<section class="sec" id="s-own">
+  <p class="eyebrow"><span class="no">05</span> 状态所有权</p>
+  <h2>谁能写什么：一张表读完全部规矩</h2>
+  <p class="lede">论文反复用「ownership」这个词。把它落成一张表，整套设计就没有任何模糊地带了。
+  注意最后一行——<b>生成的 RGB 是唯一一个「什么都不能写」的量</b>，它只能被输出、被评判、被摘要成证据。</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>量</th><th>是什么</th><th>唯一写者</th><th>读者</th><th>采样与重试期间</th></tr></thead>
+      <tbody>
+        <tr><td><span class="m">X<sub>n</sub></span> <span class="pill">物理</span></td><td>刚体 / 粒子状态</td><td class="rP">F<sub>seq</sub>（模拟器）</td><td>渲染器 → G<sub>n</sub></td><td>固定</td></tr>
+        <tr><td><span class="m">C<sub>n</sub></span> <span class="pill">物理</span></td><td>相机位姿与内参序列</td><td class="rP">相机控制器</td><td>渲染器 → G<sub>n</sub></td><td>固定</td></tr>
+        <tr><td><span class="m">D<sup>geo</sup></span> <span class="pill">几何</span></td><td>标定单位下的米制相机空间 z 深度</td><td class="rG">场景初始化 + 模拟器渲染</td><td>投影 / 可见性 / 对应 / 评测</td><td>固定，<b>从不由生成帧更新</b></td></tr>
+        <tr><td><span class="m">G<sub>n</sub></span> <span class="pill">几何</span></td><td>D<sup>geo</sup>, V, Q, L, M<sup>mask</sup>, U<sup>mot</sup>, K, T</td><td class="rG">同上（每窗渲染一次）</td><td>F<sub>ctrl</sub>、生成器、记忆路由、质量门</td><td>只读</td></tr>
+        <tr><td><span class="m">D<sup>base</sup></span> <span class="pill">控制</span></td><td>归一化相对深度条件</td><td class="rG">F<sub>base</sub>(G<sub>n</sub>; R)</td><td>F<sub>ctrl</sub></td><td>固定</td></tr>
+        <tr><td><span class="m">D<sup>gen</sup></span> <span class="pill">控制</span></td><td>真正送进视频模型的深度</td><td class="rO">F<sub>ctrl</sub>(G<sub>n</sub>, E<sub>n</sub>)，采样前构造一次</td><td>生成器</td><td><b>采样中不重算</b></td></tr>
+        <tr><td><span class="m">R</span> = (I₀,B₀,D₀<sup>geo</sup>,…) <span class="pill">参考</span></td><td>原图、背景板、初始几何、参考相机</td><td class="rR">场景抬升（一次性）</td><td>几乎所有算子</td><td>永久只读</td></tr>
+        <tr><td><span class="m">K<sub>n</sub></span> <span class="pill">记忆</span></td><td>clean 注意力值页（按源帧 / 源潜变量 ID）</td><td class="rM">原子提交（先经 Φ<sub>page</sub> 暂存）</td><td>生成器注意力（几何路由后）</td><td>提交前<b>不可读</b></td></tr>
+        <tr><td><span class="m">E<sub>n</sub></span> <span class="pill">记忆</span></td><td>对齐后的生成深度估计 + 支撑 + 置信</td><td class="rM">原子提交（先经 Φ<sub>E</sub> 暂存）</td><td><b>下一窗</b>的 F<sub>ctrl</sub></td><td>最早下一窗生效</td></tr>
+        <tr class="me"><td><span class="m">Y<sub>Wn</sub></span> <span class="pill">生成</span></td><td>解码出的 81 帧 RGB</td><td class="rO">视频扩散模型</td><td>输出视频、质量门、Φ<sub>page</sub> / Φ<sub>E</sub></td><td><b>不得替换模拟器渲染，不得写回任何状态</b></td></tr>
+      </tbody>
+    </table>
+    <p class="tnote">整理自论文 Sec. 3.2、Sec. 4.4–4.6 与附录 A.3–A.6。「相机内参 <span class="m">K<sub>t</sub></span>」与「外观记忆 <span class="m">K<sub>n</sub></span>」是两个不同的量，论文在 Sec. 4.2 末尾特意声明过——本页沿用它的符号，读的时候注意下标。</p>
+  </div>
+
+  <div class="note key"><span class="nt">为什么模拟器渲染不能直接当输出</span>
+  论文在 Sec. 4.5 给了一条很微妙的理由：如果允许「看起来不错的模拟器帧」悄悄变成生成的观测，
+  那么<b>观测支路就获得了物理权威</b>——因为此后没人能分辨这一帧的内容到底来自受约束的物理还是来自生成先验。
+  所以模拟器 RGB 全程只作条件与评测信号；论文甚至把「模拟器 RGB MAE」明确排除在接受判据之外，只当日志诊断。</div>
+</section>
+
+<!-- ============================================================ 06 DEPTH -->
+<section class="sec" id="s-depth">
+  <p class="eyebrow"><span class="no">06</span> 两种深度</p>
+  <h2>D<sup>geo</sup> 与 D<sup>gen</sup>：一个用来算，一个用来画，绝不混用</h2>
+  <p class="lede">这是论文两大「一致性机制」中的第一个，也是最容易被读漏的一个。系统里同时存在三个深度量：
+  <span class="rG">D<sup>geo</sup></span> 是<b>有物理单位</b>的米制深度，只有它能驱动投影、可见性、跨视对应与轨迹评测；
+  <span class="rO">D<sup>base</sup></span> 与 <span class="rO">D<sup>gen</sup></span> 是<b>无量纲</b>的归一化相对深度，只有后者被送进视频模型。
+  论文允许用「已接受的尾部证据」去<b>补</b>生成侧的深度控制，但这条通路<b>只改视觉条件</b>，绝不写 D<sup>geo</sup>、碰撞几何或物理状态。</p>
+
+  <div class="eq"><div class="body"><i>D</i><sup>gen</sup><sub>Wn</sub> <span class="op">=</span> (1 − <i>W<sub>n</sub></i>) ⊙ <i>D</i><sup>base</sup><sub>Wn</sub> <span class="op">+</span> <i>W<sub>n</sub></i> ⊙ <i>D</i><sub>Wn</sub>(<i>E<sub>n</sub></i>)<span style="color:var(--ink3);font-size:14px;margin-left:16px">W<sub>n</sub> 在逐点资格测试之外一律为 0</span></div><span class="tagn">式 (12) / (A13)</span></div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 6</span><span class="ti">fail-closed 资格测试：任何一项不过，W<sub>n</sub> ≡ 0，基础控制被<b>精确</b>保留</span></div>
+    <div class="ctl">
+      <button class="btn" id="dpAll" type="button">全部设为通过</button>
+      <button class="btn danger" id="dpBreak" type="button">让 Spearman 掉到 0.62</button>
+      <span class="sl" style="margin-left:auto"><b id="dpVerdict">—</b></span>
+    </div>
+    <div class="figbody">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(398px,1fr));gap:2px 26px" id="dpGates"></div>
+    </div>
+    <div class="figbody" style="border-top:1px solid var(--rule)">
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px" id="dpPanels"></div>
+      <p style="margin-top:12px;font-size:13px;color:var(--ink3);line-height:1.7;max-width:none">
+        深度色标：<span style="display:inline-block;width:78px;height:9px;border-radius:2px;background:linear-gradient(90deg,#f5e14b,#3fae7a,#2f6fae,#3b2f6e);vertical-align:0"></span> 近 → 远；
+        灰色斜纹 = 基础控制在该处「支撑不足」（新暴露且无米制支撑）。第 2 格是 <span class="m">W<sub>n</sub></span>，白色为 1。</p>
+    </div>
+    <figcaption><b>四联面板按论文 Fig. 5 的构图重绘，深度图为本页合成的示意数据，非论文原图；七项阈值与「至少 2 个尾帧通过」全部是论文附录 A.3 的原值。</b>
+    把任意一项拉到不合格，第 2 格立刻全黑、第 4 格与第 1 格逐点相同——这就是论文说的「a missing overlap, a degenerate affine fit, or a failed agreement test sets the affected weights to zero and preserves the base control exactly」。
+    另外 <span class="m">W<sub>n</sub></span> 是先做<b>时间并集再小幅膨胀</b>得到的，整个 81 帧窗口共用一张稳定的支撑掩码，而不是每帧一个自己乱动的空洞边界。</figcaption>
+  </figure>
+
+  <div class="note mine"><span class="nt">这条通路的实际份量可能不大</span>
+  尾部证据只取 <span class="m">T<sub>n</sub> = {64, 68, 72, 76, 80}</span> 五帧，还要同时满足七项阈值、至少两帧通过、并且只作用于「新暴露且米制支撑不足」的像素。
+  这是个刻意设计得<b>极难触发</b>的分支。论文没有报告它在基准上实际触发了多少比例的窗口，也没有单独消融它——
+  Table 4 消融的是<b>缓存</b>与<b>外观记忆</b>，深度补全分支始终开着。所以「分离深度」这条贡献里，
+  真正被实验支持的是「<b>分离</b>」（不混用），而不是「<b>补全</b>」（用历史补深度）。</div>
+</section>
+<!-- ============================================================ 07 TIME -->
+<section class="sec" id="s-time">
+  <p class="eyebrow"><span class="no">07</span> 时间与索引</p>
+  <h2>60 fps 的模拟器怎么对齐 16 fps 的视频：一条去掉歧义的取整规则</h2>
+  <p class="lede">模拟器控制记录按 <span class="m">f<sub>sim</sub></span> = 60 索引，生成观测按 <span class="m">f<sub>gen</sub></span> = 16。
+  论文用一条<b>取箱中心</b>的规则把两者钉死，并且明确规定：窗口的终态 <span class="m">X⁺, C⁺</span> 取在<b>被采样的端点</b> <span class="m">k<sub>n</sub>(80)</span> 上，
+  而不是原始原点 <span class="m">o<sub>n</sub> + 300</span> 上。这不是学究气——不把这个约定写死，重试就会「不小心把物理多推进一帧」。</p>
+
+  <div class="eq"><div class="body"><i>k<sub>n</sub></i>(<i>j</i>) <span class="op">=</span> <i>o<sub>n</sub></i> <span class="op">+</span> ⌊ (2<i>j</i>+1)·<i>f</i><sub>sim</sub> / (2<i>f</i><sub>gen</sub>) ⌋ ,　<i>o</i><sub>n+1</sub> <span class="op">=</span> <i>o<sub>n</sub></i> <span class="op">+</span> 300　⟹　<i>k<sub>n</sub></i>(80) <span class="op">=</span> <i>k</i><sub>n+1</sub>(0)</div><span class="tagn">式 (10) / (A11)</span></div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 7</span><span class="ti">窗口、共享边界与拼接：81 帧一窗，步长 80 帧</span></div>
+    <div class="ctl">
+      <span class="sl">窗口数 N <input type="range" id="tmN" min="1" max="8" step="1" value="6"><b id="tmNv">6</b></span>
+      <span class="sl">窗口内帧 j <input type="range" id="tmJ" min="0" max="80" step="1" value="80"><b id="tmJv">80</b></span>
+      <span class="sl" style="margin-left:auto"><b id="tmOut">—</b></span>
+    </div>
+    <div class="figbody tight figscroll">
+      <svg class="d" id="tmSvg" viewBox="0 0 880 230" role="img" aria-label="窗口时间轴：多个81帧窗口首尾共享一个边界帧，拼接时去掉重复边界"></svg>
+    </div>
+    <figcaption><b>按论文 Sec. 4.3、Sec. 4.5、式 (6) 与附录 A.4 绘制。</b>
+    每窗 81 帧 = <b>1 个共享条件边界 + 80 个新帧</b>，所以拼接时要去掉后续每个窗口的首帧：<span class="m">concat(Y<sub>W0</sub>, Y<sub>W1</sub>[1:], …)</span>。
+    右上角的时长是本页按 16 fps 换算的：<b>N 个窗口 → 81 + 80(N−1) 帧</b>。N = 5 得 401 帧 ≈ 25.06 s、N = 6 得 481 帧 ≈ 30.06 s，
+    恰好对上论文 Table 1 里 TourPhysics 的「25.1 / 30.1 s」和 Sec. 5.5 里「六个窗口、481 输出帧」——这两处数字互为验证。</figcaption>
+  </figure>
+
+  <div class="note mine"><span class="nt">顺手核对一下论文自己的数</span>
+  Sec. 5.5 说记忆实验每条序列有「六个窗口、481 输出帧、51 个计划目标潜变量、回访块 3–5」。
+  按解码帧索引 <span class="m">4j</span> 的关系，481 帧对应约 121 个潜变量，其中 51 个被记忆计划标为目标——
+  也就是说<b>大约四成的潜变量参与了跨窗回访读取</b>，而且集中在后半程的第 3–5 块。这与「回访」这一动机是自洽的。</div>
+</section>
+
+<!-- ============================================================ 08 MEMORY -->
+<section class="sec" id="s-mem">
+  <p class="eyebrow"><span class="no">08</span> 外观记忆</p>
+  <h2>参考锚定记忆：几何决定「能不能读」，置信决定「读多少」</h2>
+  <p class="lede">这是第二个一致性机制。它要解决的失败模式很具体：相机绕了一大圈之后回到一面墙前，
+  有限的时序缓存早就把那面墙挤出去了。检索式方案会「贴回旧像素」，代价是布局与光照对不上。
+  TourPhysics 的做法是：用<b>模拟器几何</b>决定某个目标像素在哪一张早先视图里有可靠的静态对应，
+  只把那一页<b>注意力特征</b>（不是像素）以<b>有界残差</b>的方式掺进来；一旦对应不成立，输出<b>精确回到</b>原本的参考条件路径。</p>
+
+  <div class="eq"><div class="body">Ω<sub>t</sub> <span class="op">=</span> <i>V<sub>t</sub></i> ∩ <i>M</i><sup>sta</sup><sub>t</sub> ∩ { <i>Q<sub>t</sub></i> ≥ τ<sub>q</sub> } ∩ ¬Γ<sup>edge</sup><sub>t</sub><span style="color:var(--ink3);font-size:14px;margin-left:16px">可见 ∩ 静态 ∩ 高置信 ∩ 非不可靠深度边界　—— 运动与形变物体一律排除在长期记忆之外</span></div><span class="tagn">式 (14) / (A24)</span></div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 8</span><span class="ti">几何路由：目标像素 → 世界点 → 早先已提交视图</span></div>
+    <div class="ctl">
+      <span class="sl">深度一致性 |D<sup>geo</sup><sub>s</sub>(p̂) − ẑ| / ε <input type="range" id="mmD" min="0" max="300" step="1" value="30"><b id="mmDv">0.30</b></span>
+      <span class="sl">Q<sub>t</sub>·Q<sub>s</sub> <input type="range" id="mmQ" min="0" max="100" step="1" value="82"><b id="mmQv">0.82</b></span>
+      <span class="sl">λ<sub>mem</sub> <input type="range" id="mmL" min="0" max="100" step="1" value="100"><b id="mmLv">1.00</b></span>
+      <button class="btn danger" id="mmInv" type="button">让对应失效 (m<sub>s</sub> = 0)</button>
+    </div>
+    <div class="figbody tight figscroll">
+      <svg class="d" id="mmSvg" viewBox="0 0 880 300" role="img" aria-label="几何路由与有界残差门：目标像素反投影到世界再投影到早先视图，通过四项测试后按置信度混合注意力输出"></svg>
+    </div>
+    <figcaption><b>按论文 Sec. 4.5、式 (15)–(17) 与附录 A.6（式 A25–A29）重绘。</b>
+    四项测试（在界内 / 可见 / 静态 / 深度一致）任何一项不过，<span class="m">m<sub>s</sub></span> = 0 ⟹ <span class="m">g<sub>s</sub></span> = 0 ⟹ <span class="m">A = A₀</span>，
+    <b>逐位</b>回到原生的参考条件路径。附录 C.1 专门做过这个验证：把所有有效对应关掉，输出与关掉记忆完全一致——说明记忆不可用时不会引入额外的视觉偏置。
+    在多个候选源页里，<b>按有效覆盖率与平均置信度打分取最高的一页，一个目标最多读一页</b>。</figcaption>
+  </figure>
+
+  <div class="eq"><div class="body"><i>A</i>(<i>p</i>) <span class="op">=</span> <i>A</i><sub>0</sub>(<i>p</i>) <span class="op">+</span> <i>g<sub>s</sub></i>(<i>p</i>) [ <i>A</i><sub>hist</sub>(<i>p</i>) − <i>A</i><sub>0</sub>(<i>p</i>) ] ,　<i>g<sub>s</sub></i>(<i>p</i>) <span class="op">=</span> λ<sub>mem</sub> · <i>m<sub>s</sub></i>(<i>p</i>) · clip(<i>c<sub>s</sub></i>(<i>p</i>), 0, 1)</div><span class="tagn">式 (17) / (A28)</span></div>
+
+  <h3>页里存的是什么，以及那个「持久 sink 缓存」</h3>
+  <p>论文强调存下来的<b>不是解码后的 RGB 帧</b>，而是在<b>干净扩散端点</b>重新编码得到的<b>注意力值张量</b> <span class="m">Z<sup>attn</sup></span>。
+  这个区别很实在：读取时改变的只是注意力特征，不会复制像素、不会改动目标布局、也不会把缓存特征和模拟器可见性场混在一起。
+  Fig. 6 还交代了两件工程上的关键设置。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 9</span><span class="ti">原生 W12 / S8 缓存与读取时的键重定相（论文 Fig. 6 重绘）</span></div>
+    <div class="figbody tight figscroll">
+      <svg class="d" id="ckSvg" viewBox="0 0 880 250" role="img" aria-label="十二片原生缓存中八片为参考sink、四片为最近片；干净页在读取时只重定时间RoPE，空间token不变"></svg>
+    </div>
+    <figcaption><b>按论文 Fig. 6 的标注重绘。</b>原生缓存是 <b>W12 / S8</b>：12 个切片里 <b>8 个是参考 sink 切片</b>、<b>4 个是最近切片</b>——
+    这就是 Table 4 里「持久 sink 缓存」相对「普通时序缓存」的来源。一页记忆是<b>一个潜变量帧、880 个空间 token</b>。
+    读取时做<b>键重定相</b>：只把时间 RoPE 从源位置 <span class="m">s</span> 改到目标位置 <span class="m">t⁻</span>，<b>空间 token 完全不动</b>——
+    所以历史内容会落在它<b>几何上应该在</b>的位置，而不是被平移到旧位置上。</figcaption>
+  </figure>
+
+  <div class="note warn"><span class="nt">论文没说的部分</span>
+  Fig. 6 的这几个数字（W12/S8、8 sink + 4 recent、880 空间 token、键重定相）<b>只出现在图注里</b>，正文与附录都没有展开：
+  没有给出视频扩散骨架是哪一个（只说是「有限窗口扩散模型」）、没有给参数量、没有给训练配置、没有给单窗生成耗时。
+  对一个自称「online」的框架来说，<b>缺少延迟数字</b>是个明显的空缺——论文自己在 C.2 里也承认「有限窗口扩散不是实时的」。</div>
+</section>
+
+<!-- ============================================================ 09 GATE -->
+<section class="sec" id="s-gate">
+  <p class="eyebrow"><span class="no">09</span> 质量门</p>
+  <h2>它到底查了什么：五个像素统计量的合取，仅此而已</h2>
+  <p class="lede">「quality-gated commit」听起来很重，但拆开看，这道门<b>完全建立在解码后的 8 位 RGB 帧上</b>，
+  由五个极其朴素的统计量做合取判断：能不能正常解码、和上一窗的边界接不接得上、边界跳变相对窗内运动幅度是不是异常、黑屏比例、以及冻结比例。
+  <b>没有任何一项检查物理是否正确。</b>把下面的滑块拖一拖，就能看出这道门实际能挡住什么、挡不住什么。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 10</span><span class="ti">交互式质量门：q<sub>n</sub> = 1[媒体]·1[e<sub>ov</sub>≤4]·1[r<sub>bd</sub>≤3]·1[r<sub>black</sub>≤.10]·1[r<sub>freeze</sub>≤.25]·χ<sub>repr</sub></span></div>
+    <div class="ctl">
+      <button class="btn" id="qgGood" type="button">典型通过样本</button>
+      <button class="btn danger" id="qgBad" type="button">典型失败样本</button>
+      <button class="btn" id="qgManifest" type="button">启用 e<sub>repr</sub> 清单</button>
+      <span class="sl" style="margin-left:auto"><b id="qgHead">—</b></span>
+    </div>
+    <div class="figbody">
+      <div id="qgRows" style="display:grid;gap:9px"></div>
+    </div>
+    <div class="figbody" style="border-top:1px solid var(--rule);display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div id="qgVerdict" style="flex:1 1 260px;min-width:0"></div>
+      <svg class="d" id="qgSvg" viewBox="0 0 420 96" style="flex:1 1 300px;max-width:420px" role="img" aria-label="接受与拒绝两条分支的结果对比"></svg>
+    </div>
+    <figcaption><b>阈值、公式与「媒体契约 = 恰好 81 帧 832×480 可解码」全部取自论文式 (20)–(21) 与附录 A.5（式 A19–A23）。</b>
+    <span class="m">δ(A,B)</span> 是全帧平均绝对 RGB 差（0–255 尺度）；<span class="m">r<sub>bd</sub></span> 用的是<b>前八个相邻帧变化的中位数</b>作分母（带 10⁻⁶ 下限）；
+    第一个窗口没有前序边界，<span class="m">e<sub>ov</sub></span> 与 <span class="m">r<sub>bd</sub></span> 都置 0。
+    <span class="m">χ<sub>repr</sub></span> 只在提供了「提交前反馈重投影清单」时才是 <span class="m">1[e<sub>repr</sub> ≤ 24]</span>，
+    而论文明说<b>报告的所有运行都没有提供该清单</b>，该字段记为 0 且不影响任何一次接受决策。</figcaption>
+  </figure>
+
+  <div class="note warn"><span class="nt">最该记住的一句</span>
+  这道门是一个 <b>fail-closed 的「能不能发布」检查，不是物理保真度的评测</b>——论文自己在 Sec. 4.6 第一句就这么写。
+  它挡得住：解码失败、黑屏、卡死、与上一窗接不上的跳变。它<b>挡不住</b>：物体穿模、接触时机错、形变量级不对、材料看起来不像声明的材料。
+  所以「质量门通过」不等于「这一窗物理正确」；真正衡量物理的是 Table 2 / Table 3 那些<b>事后</b>的成对指标，它们并不参与在线循环。
+  换句话说，<b>论文架构图里那条诱人的「retry 闭环」并不是一条物理反馈回路</b>——那条真正的物理反馈通路（<span class="m">e<sub>repr</sub></span> 清单）在实验里从未启用。</div>
+</section>
+<!-- ============================================================ 10 EXPERIMENTS -->
+<section class="sec" id="s-exp">
+  <p class="eyebrow"><span class="no">10</span> 实验</p>
+  <h2>基准怎么搭的，以及每个数字下面站着多少样本</h2>
+  <p class="lede">基准是 <b>108 条模拟器定义的交互序列</b>，来自 <b>61 个源图像身份</b>（身份 = 输入图 SHA-256），覆盖纯相机巡游与刚体 / 布 / 弹性 / 颗粒 / 流体的操控。
+  关键前提论文写在 B.1：<b>基准衡量的是与「所声明的」仿真轨迹的一致性，不检验所声明的材料参数是不是这张照片里物体的真实参数。</b>
+  这决定了后面所有数字的解释边界。</p>
+
+  <h3>先看各方法拿到了什么输入（Table 1）</h3>
+  <p>这是一张<b>输入协议矩阵</b>而不是性能表。八个系统的可控接口差别极大——把它放在成绩单前面读，是这篇论文比较克制的一点。</p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>方法</th><th>图</th><th>文本</th><th>相机</th><th>深度</th><th>轨迹</th><th>掩码</th><th>物理脚本</th><th>原生 / 诊断时长</th></tr></thead>
+      <tbody>
+        <tr class="me"><td><b>TourPhysics</b></td><td>✓</td><td>场景</td><td class="rP">动作 / 位姿</td><td class="rG">内部</td><td class="rG">内部</td><td class="rG">内部</td><td class="rP">声明式</td><td class="num">25.1 / 30.1 s</td></tr>
+        <tr><td>LingBot-Cam</td><td>✓</td><td>冻结</td><td>位姿</td><td>–</td><td>–</td><td>–</td><td>–</td><td class="num">25.1 / 30.1 s</td></tr>
+        <tr><td>LingBot-Act</td><td>✓</td><td>冻结</td><td>离散动作</td><td>–</td><td>–</td><td>–</td><td>–</td><td class="num">25.1 / 30.1 s</td></tr>
+        <tr><td>Wan2.1-I2V</td><td>✓</td><td>冻结</td><td>仅文本</td><td>–</td><td>–</td><td>–</td><td>–</td><td class="num">10.7 s → 拉伸</td></tr>
+        <tr><td>Sora-2</td><td>✓</td><td>冻结</td><td>仅文本</td><td>–</td><td>–</td><td>–</td><td>–</td><td class="num">12.2 s</td></tr>
+        <tr><td>MotionCtrl</td><td>✓</td><td>–</td><td>RT 位姿</td><td>–</td><td>–</td><td>–</td><td>–</td><td class="num">1.4 s → 拉伸</td></tr>
+        <tr><td>Tora-Initiator</td><td>✓</td><td>冻结</td><td>–</td><td>–</td><td class="rB">Oracle 2D</td><td>–</td><td>–</td><td class="num">6.1 s</td></tr>
+        <tr><td>minWM-Wan</td><td>✓</td><td>冻结</td><td>离散动作</td><td>–</td><td>–</td><td>–</td><td>–</td><td class="num">39.8 s</td></tr>
+      </tbody>
+    </table>
+    <p class="tnote">Tora 收到的是<b>模拟器投影出来的起始物轨迹</b>（论文称 oracle 2D track）——这也解释了它为什么在物体运动指标上是唯一逼近 TourPhysics 的基线。
+    Wan 与 MotionCtrl 的原生时长远短于 25–30 s，作者用<b>时间戳均匀拉伸</b>补到全时长（不循环、不补尾），并在表里以「诊断」标注。这类对比只能当参考，不等价于原生在线生成。</p>
+  </div>
+
+  <h3>成绩单（Table 2 / Table 3，可切换指标）</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 11</span><span class="ti">八个系统在同一组模拟器定义目标上的表现</span></div>
+    <div class="ctl">
+      <div class="seg" id="exSeg" style="flex-wrap:wrap"></div>
+    </div>
+    <div class="figbody tight figscroll">
+      <svg class="d" id="exSvg" viewBox="0 0 880 300" role="img" aria-label="八个方法在所选指标上的横向条形对比"></svg>
+    </div>
+    <p id="exNote" style="margin:0;padding:12px 18px;font-size:13.5px;line-height:1.7;color:var(--ink2);border-top:1px solid var(--rule)"></p>
+    <figcaption><b>数据逐格取自论文 Table 2 与 Table 3；括号里的有效样本量取自 Table 5 与 Table 6。</b>
+    必须强调论文自己的表注：<b>加粗标的是「该方法自己有效支撑上的最好值」，而不是同一子集上的最好值</b>。
+    各方法在可见性过滤后保留下来的物体 / 事件数差别很大（碰撞类指标少的只有 1–2 条记录），跨方法比较时要连样本量一起看。</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <div class="card"><h4><span class="dot" style="background:var(--mem)"></span>论文确实站得住的三处</h4>
+      <p><b>相机 ATE 0.0233</b>（次优 Sora-2 0.0560，差 2.4 倍）、<b>平移方向命中 98.26%</b>、<b>旋转方向命中 93.00%</b>——这三项都在 49 条序列 / 40 身份的<b>同一支撑</b>上算的，
+      是全表里最干净的比较。物体 ADE 0.0297 与终点误差 0.0524 也明显优于唯一拿到 oracle 轨迹的 Tora（0.0462 / 0.0865）。</p></div>
+    <div class="card"><h4><span class="dot" style="background:var(--bad)"></span>论文没有赢、也没有声称赢的地方</h4>
+      <p><b>响应准确率 16.67%</b>，低于 Wan2.1-I2V 与 Sora-2 的 33.33%（有效记录分别是 5 / 3 / 7 条）。
+      <b>PLR 1.4301</b>，离理想值 1 比 MotionCtrl 的 0.8517 更远。<b>VideoPhy-2 平均 3.6157</b> 排第四，低于 MotionCtrl 3.8657。
+      <b>联合可见率 75.20%</b> 也不是最高。正文对这几项的措辞是「提供互补信息」，没有主张优势——这点上论文是诚实的。</p></div>
+  </div>
+
+  <div class="note warn"><span class="nt">碰撞类指标的样本量小到需要点名</span>
+  Table 6 的有效支撑：<b>接触误差</b> 14 条记录 / 14 序列 / 6 身份；<b>响应准确率</b> TourPhysics 只有 <b>5 条记录 / 3 身份</b>；<b>重叠超出</b> 9 条 / 5 身份；
+  <b>恢复准确率</b> 8 个事件 / 7 序列 / <b>2 个身份</b>。在 2 个身份上算出来的「64.29% 恢复准确率」，统计意义非常有限。
+  另外「重叠超出 &lt; 10⁻⁴」这一列<b>八个方法全都是</b>——论文自己也提醒「二维投影重叠为零不代表三维没有穿模」，这一列基本不含信息。
+  接触误差 3.3304 s 虽然是最好，但放在 25–30 s 的片长与 8 s 的搜索窗惩罚里看，<b>绝对量依然很大</b>。</div>
+
+  <h3>长程缓存与外观记忆（Table 4）</h3>
+  <p>这是全文<b>唯一的两组消融</b>，也是「持久」这个卖点最直接的证据。两组是分开做的：缓存对比在 72 条成对长视频 / 27 身份上，
+  骨架与生成器固定、只把普通有限时序缓存换成持久 sink 缓存；记忆对比在 4 个开发身份 + <b>14 个身份不相交的留出身份</b>上，
+  物理与相机轨迹、生成侧深度、检查点、提示词、随机种子全部对齐。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 12</span><span class="ti">缓存漂移（0–255 强度级）与记忆带来的相对误差变化</span></div>
+    <div class="figbody tight figscroll">
+      <svg class="d" id="abSvg" viewBox="0 0 880 250" role="img" aria-label="持久sink缓存把端到起与尾到头亮度漂移大约减半；几何路由记忆在开发集与留出集上分别降低历史区误差8.25%和2.39%"></svg>
+    </div>
+    <figcaption><b>数据取自论文 Table 4 与附录 C.1。</b>左侧两组是<b>未归一化的 0–255 平均通道强度差</b>，不是百分比；
+    右侧是<b>成对相对变化</b> <span class="m">Δ = 100(E<sub>mem</sub> − E<sub>off</sub>)/E<sub>off</sub></span>，负值为好。
+    留出集的提升（−2.39% / −0.90%）明显小于开发集（−8.25% / −2.99%），论文把原因归给「相机覆盖与几何对应质量的差异」——
+    这是个<b>诚实但也偏弱</b>的结果：留出集上不到 1% 的已知区改善，很难说是稳健收益。</figcaption>
+  </figure>
+
+  <h3>外观诊断（Sec. 5.4）</h3>
+  <div class="stat">
+    <div><div class="v">0.9743</div><div class="l">输入视频主体一致性</div></div>
+    <div><div class="v">0.9791</div><div class="l">输入视频背景一致性</div></div>
+    <div><div class="v">0.8921</div><div class="l">相机运动分类准确率</div></div>
+    <div><div class="v">108<small>seq</small></div><div class="l">基准序列 / 61 个源图身份</div></div>
+  </div>
+  <p style="font-size:14px;color:var(--ink3)">注意这三个数<b>只报了 TourPhysics 自己</b>，论文没有给任何基线的对应值，因此它们只能读作「绝对水平不错」，
+  不能读作「优于基线」。这与 Table 2/3 那种成对可比的呈现方式不一样。</p>
+</section>
+
+<!-- ============================================================ 11 CRITIQUE -->
+<section class="sec" id="s-crit">
+  <p class="eyebrow"><span class="no">11</span> 局限</p>
+  <h2>论文承认的，与我读下来还想追问的</h2>
+
+  <div class="grid2">
+    <div class="card"><h4><span class="dot" style="background:var(--ink3)"></span>论文自己在 C.2 里写的</h4>
+      <p>① 造的是<b>可控的物理假设</b>，不是唯一的真实重建；符合声明轨迹 ≠ 真实世界物理正确。
+      ② 遮挡区与新暴露区的几何仍不完整。
+      ③ 外观记忆<b>排除运动与形变物体</b>，因此大形变之后物体自身的外观保不住。
+      ④ 相机或深度估计不准会直接减少有效跨视对应。
+      ⑤ 有限窗口扩散<b>不是实时</b>；未压缩的历史页数量随接受视图数<b>无上限增长</b>。</p></div>
+    <div class="card"><h4><span class="dot" style="background:var(--geo)"></span>我读下来的补充追问</h4>
+      <p>① <b>拒绝率缺失</b>：这道门在实验中被触发过几次？没有数据就无法判断事务机制的实际份量。
+      ② <b>骨架与延迟缺失</b>：视频扩散用的是哪个模型、多少参数、单窗多久，全文未给。
+      ③ <b>深度补全分支未被单独消融</b>，「分离深度」的实验支持其实只落在「不混用」上。
+      ④ 碰撞类指标的<b>有效支撑只有个位数记录</b>，几个 &lt;0.01% / &gt;99.99% 的极端值实际上都来自 1–2 个事件。
+      ⑤ <span class="m">e<sub>repr</sub></span> 反馈重投影清单是唯一一条能把<b>几何误差</b>反馈进接受判据的通路，而它<b>在所有报告运行中都没启用</b>。</p></div>
+  </div>
+
+  <div class="note key"><span class="nt">把它放回坐标系里</span>
+  和 PhysGen3D（用户指定初始条件与材料的相机中心微缩世界）、PhysCtrl / PhysMotion（把物理当条件塞进生成）、
+  Physical Simulator In-the-Loop（先生成再重建再模拟再引导）相比，TourPhysics 的差异不在「用了模拟器」，而在<b>因果顺序与写权限</b>：
+  模拟器<b>先</b>把轨迹算死，生成器<b>后</b>在这条固定轨迹上画，并且画出来的东西<b>不能反向修改</b>轨迹或几何。
+  和 CUT3R 那类「边观察边更新共享点图」的持久表示相比，它反过来——<b>拒绝</b>让观测更新几何，几何只由声明与模拟器写。
+  这是一条相当强硬的设计取舍：换来了轨迹跟随与可回滚性，代价是场景几何永远只有初始假设那么好，观测再多也不会让它变准。</div>
+</section>
+
+<!-- ============================================================ 12 REFERENCE -->
+<section class="sec" id="s-ref">
+  <p class="eyebrow"><span class="no">12</span> 速查</p>
+  <h2>常数、组件与符号一览</h2>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>类别</th><th>量</th><th>值</th><th>出处</th></tr></thead>
+      <tbody>
+        <tr><td>观测窗</td><td>解码帧 / 共享边界 / 步长</td><td class="num">81 / 1 / 80</td><td>Sec. 4.3, 4.5</td></tr>
+        <tr><td>观测窗</td><td>解码分辨率 · 帧率</td><td class="num">832×480 · 16 fps</td><td>Sec. 4.5</td></tr>
+        <tr><td>观测窗</td><td>控制图分辨率</td><td class="num">640×352</td><td>Sec. 4.5</td></tr>
+        <tr><td>时间</td><td>f<sub>sim</sub> / f<sub>gen</sub> / o<sub>n+1</sub>−o<sub>n</sub></td><td class="num">60 / 16 / 300</td><td>式 (10)</td></tr>
+        <tr><td>求解器</td><td>步长 · 子步（刚体 / 含粒子）</td><td class="num">4 ms · 10 / 16</td><td>附录 A.2</td></tr>
+        <tr><td>求解器</td><td>重力</td><td class="num">(0, 0, −9.8)</td><td>附录 A.2</td></tr>
+        <tr><td>求解器</td><td>MPM 域 · 粒子 · 网格密度</td><td class="num">[−3,3]³ · 0.02 · 32</td><td>附录 A.2</td></tr>
+        <tr><td>求解器</td><td>PBD 粒子尺寸</td><td class="num">0.01</td><td>附录 A.2</td></tr>
+        <tr><td>场景抬升</td><td>接触锚点分位 η（不足时放宽）</td><td class="num">0.05 → 0.10</td><td>附录 A.1</td></tr>
+        <tr><td>深度补全</td><td>可信静态重叠 / Spearman</td><td class="num">≥ 0.20 / ≥ 0.70</td><td>附录 A.3</td></tr>
+        <tr><td>深度补全</td><td>模型空间 / 米制空间 NRMSE</td><td class="num">≤ 0.08 / ≤ 0.12</td><td>附录 A.3</td></tr>
+        <tr><td>深度补全</td><td>新可见 / 目标空洞 / 源覆盖 分数</td><td class="num">≥ 0.05 / ≥ 0.01 / ≥ 0.20</td><td>附录 A.3</td></tr>
+        <tr><td>深度补全</td><td>尾帧集合 T<sub>n</sub>（须 ≥ 2 帧通过）</td><td class="num">{64, 68, 72, 76, 80}</td><td>Sec. 4.5</td></tr>
+        <tr><td>质量门</td><td>e<sub>ov</sub> / r<sub>bd</sub> / r<sub>black</sub> / r<sub>freeze</sub></td><td class="num">≤ 4 / ≤ 3 / ≤ 0.10 / ≤ 0.25</td><td>式 (21)</td></tr>
+        <tr><td>质量门</td><td>χ<sub>repr</sub> 阈值（本文运行未启用）</td><td class="num">e<sub>repr</sub> ≤ 24</td><td>附录 A.5</td></tr>
+        <tr><td>缓存 / 记忆</td><td>原生缓存 W12 / S8（sink + 最近）</td><td class="num">8 + 4 切片</td><td>Fig. 6</td></tr>
+        <tr><td>缓存 / 记忆</td><td>一页 = 潜变量帧 × 空间 token</td><td class="num">1 × 880</td><td>Fig. 6</td></tr>
+        <tr><td>评测</td><td>成对指标采样 · 分辨率</td><td class="num">8 fps · 682×384</td><td>Sec. 5.2</td></tr>
+        <tr><td>评测</td><td>物体保留条件（联合可见帧 / 比例）</td><td class="num">≥ 8 帧 / ≥ 15%</td><td>附录 B.2</td></tr>
+        <tr><td>基准</td><td>序列数 / 源图身份数</td><td class="num">108 / 61</td><td>附录 B.1</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>外部组件</h3>
+  <div class="kv">
+    <dt>实例分割</dt><dd>SAM 3（按用户给的物体描述抽掩码）</dd>
+    <dt>单图三维化</dt><dd>SAM 3D Objects（每个掩码 → 三角网格 + 物到相机相似变换）</dd>
+    <dt>背景修补</dt><dd>LaMa（前景并集累积移除，得到静态背景板 B₀）</dd>
+    <dt>物理引擎</dt><dd>Genesis（GPU；RBD / MPM / PBD 与耦合器）</dd>
+    <dt>配置初始化</dt><dd>Qwen2.5-VL-72B-Instruct（可选，仅初始化，须过白名单并冻结）</dd>
+    <dt>评测：相机</dt><dd>ViPE 恢复相机中心 + 单次 Umeyama 相似变换对齐（整段一次，不分窗）</dd>
+    <dt>评测：物体</dt><dd>CoTracker3（冻结初始掩码多点跟踪，成对同协议）</dd>
+    <dt>评测：感知</dt><dd>VideoPhy-2 AutoEval（SA 语义遵循 / PC 物理常识，1–5 分，仅作辅助诊断）</dd>
+  </div>
+
+  <h3>与本仓库的关联</h3>
+  <p>这篇属于 <b>interactive / world-model + 显式物理</b> 那一支：和 OctWorld 这类「用显式三维记忆保长程一致」的工作解决的是同一个失败模式（回访不一致），
+  但走的是相反的路径——OctWorld 让<b>观测去更新几何</b>（TSDF 融合生成的 RGB-D），TourPhysics 则<b>禁止</b>观测更新几何，只让它更新「外观知识」。
+  两者放在一起读，正好构成「持久性」这个问题上的一组对照：<b>要不要让生成的内容获得几何权威</b>。</p>
+
+  <div class="note mine"><span class="nt">一句话总结</span>
+  TourPhysics 把一个视频世界模型改造成了<b>带事务日志的系统</b>：模拟器持有物理权威，几何记录只读，生成器只有绘制权，
+  所有视觉证据必须过门才能进入持久状态。它在<b>轨迹跟随</b>上拿到了明确优势，在<b>长程漂移</b>上给出了可复现的消融；
+  代价是场景几何被永久钉在初始假设上，而那道被反复强调的「质量门」在实现里只是五个像素统计量——
+  <b>它保证的是「这段视频能发布」，不是「这段物理是对的」。</b></div>
+</section>
+
+<footer style="margin-top:70px;padding-top:24px;border-top:1px solid var(--rule);font-size:13px;color:var(--ink3);line-height:1.8">
+  <p style="max-width:none">本页为 <a href="https://arxiv.org/abs/2609.04911" target="_blank" rel="noopener">arXiv:2609.04911v1</a> 的方法精读与图解，
+  正文、附录 A / B / C 的公式、阈值与数值均逐条核对。所有图为按论文描述<b>重绘或合成</b>的示意图，不是论文原图；
+  凡本页自行推算或补充的内容（如时长换算、样本量点名、缺失项质疑）均已在对应图注或标注中说明。
+  版权与结论归原作者所有。</p>
+</footer>
+
+</main>
+</div>
+<script>
+(function(){
+"use strict";
+var NS="http://www.w3.org/2000/svg";
+function el(t,a,p){var n=document.createElementNS(NS,t);for(var k in a){if(k==="text"){n.textContent=a[k];}else{n.setAttribute(k,a[k]);}}if(p)p.appendChild(n);return n;}
+function $(s){return document.querySelector(s);}
+function $$(s){return Array.prototype.slice.call(document.querySelectorAll(s));}
+function clr(n){while(n.firstChild)n.removeChild(n.firstChild);}
+var reduced=matchMedia("(prefers-reduced-motion: reduce)").matches;
+var redraws=[];
+
+/* ---------------------------------------------------------- chrome */
+(function(){
+  var prog=$("#prog");
+  function onScroll(){var h=document.documentElement;var d=h.scrollHeight-h.clientHeight;prog.style.width=((d>0?h.scrollTop/d:0)*100).toFixed(2)+"%";}
+  addEventListener("scroll",onScroll,{passive:true});onScroll();
+  var links=$$("#toc a"),secs=links.map(function(a){return $(a.getAttribute("href"));});
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){if(e.isIntersecting){var i=secs.indexOf(e.target);if(i>=0)links.forEach(function(a,j){a.classList.toggle("on",j===i);});}});
+  },{rootMargin:"-80px 0px -70% 0px"});
+  secs.forEach(function(s){if(s)io.observe(s);});
+  $("#themeBtn").addEventListener("click",function(){
+    var r=document.documentElement,cur=r.getAttribute("data-theme");
+    var isDark=cur?cur==="dark":matchMedia("(prefers-color-scheme: dark)").matches;
+    r.setAttribute("data-theme",isDark?"light":"dark");
+    redraws.forEach(function(f){f();});
+  });
+})();
+
+/* ---------------------------------------------------------- HERO commit rail */
+(function(){
+  var svg=$("#hrSvg");if(!svg)return;
+  var PH=[{t:"① 克隆",s:"X̃, C̃ ← clone(X_n, C_n)"},{t:"② 模拟",s:"F_seq → 轨迹 + G_n（定死）"},
+          {t:"③ 生成",s:"p_θ → 候选 81 帧 Y_Wn"},{t:"④ 质量门",s:"q_n = Q(·) ∈ {0,1}"}];
+  var TARGET=6,failOn=true,attempt=1,phase=0,committed=0,verdict=null,timer=null,done=false;
+  function willFail(a){return failOn&&a===3;}
+  function render(){
+    clr(svg);
+    el("text",{x:20,y:18,"class":"xxs mn f-ink3",text:"候选窗口（私有）"},svg);
+    var bw=170,gap=30;
+    PH.forEach(function(p,i){
+      var x=20+i*(bw+gap),act=(!done&&i===phase),past=(!done&&i<phase);
+      var cls=act?(i===3&&verdict==="bad"?"fs-B s-B":"fs-O s-O"):(past?"f-surf2 s-rule2":"f-surf s-rule");
+      el("rect",{x:x,y:28,width:bw,height:56,rx:8,"class":cls,"stroke-width":act?2.2:1.2,opacity:done?.35:1},svg);
+      el("text",{x:x+bw/2,y:50,"class":"xs "+(act?(i===3&&verdict==="bad"?"f-Bi":"f-Oi"):"f-ink2"),"text-anchor":"middle","font-weight":"600",text:p.t},svg);
+      el("text",{x:x+bw/2,y:68,"class":"xxs f-ink3","text-anchor":"middle",text:p.s},svg);
+      if(i<3)el("path",{d:"M"+(x+bw+4)+" 56 L"+(x+bw+gap-6)+" 56","class":"nofill s-ink3","stroke-width":1.4,"marker-end":"url(#ar)"},svg);
+    });
+    /* verdict arrow */
+    if(verdict){
+      var ok=verdict==="ok";
+      el("path",{d:"M615 88 L615 106 L"+(ok?"120":"760")+" 106 L"+(ok?"120":"760")+(ok?" 182":" 114"),"class":"nofill "+(ok?"s-M":"s-B"),"stroke-width":2,"marker-end":ok?"url(#ar-M)":"url(#ar-B)"},svg);
+      el("text",{x:ok?310:706,y:100,"class":"xs "+(ok?"f-Mi":"f-Bi"),"text-anchor":"middle","font-weight":"600",
+        text:ok?"q = 1 → 原子提交：物理终态 + 记忆页 + 尾证据 一起发布":"q = 0 → 整窗回滚"},svg);
+      if(!ok){
+        el("rect",{x:660,y:116,width:200,height:44,rx:8,fill:"url(#stagedB)","class":"s-B","stroke-width":1.6},svg);
+        el("rect",{x:660,y:116,width:200,height:44,rx:8,"class":"f-surf",opacity:".78"},svg);
+        el("rect",{x:660,y:116,width:200,height:44,rx:8,"class":"nofill s-B","stroke-width":1.6},svg);
+        el("text",{x:760,y:134,"class":"xs f-Bi","text-anchor":"middle","font-weight":"600",text:"候选被丢弃"},svg);
+        el("text",{x:760,y:150,"class":"xxs f-ink3","text-anchor":"middle",text:"n 不前进 · 无输出帧"},svg);
+      }
+    }
+    /* committed rail */
+    el("text",{x:20,y:178,"class":"xxs mn f-ink3",text:"已提交视频轨道"},svg);
+    var rx=20,bw2=112,g2=8;
+    for(var i=0;i<TARGET;i++){
+      var x=rx+i*(bw2+g2),has=i<committed;
+      var pend=(!has&&i===committed&&verdict===null&&phase>=2&&!done);
+      if(!has&&!pend){el("rect",{x:x,y:186,width:bw2,height:44,rx:6,"class":"nofill s-rule","stroke-width":1,"stroke-dasharray":"3 4"},svg);continue;}
+      if(pend){
+        el("rect",{x:x,y:186,width:bw2,height:44,rx:6,fill:"url(#staged)","class":"s-Oi","stroke-width":1.6},svg);
+        el("rect",{x:x,y:186,width:bw2,height:44,rx:6,"class":"f-surf",opacity:".74"},svg);
+        el("rect",{x:x,y:186,width:bw2,height:44,rx:6,"class":"nofill s-Oi","stroke-width":1.6},svg);
+        el("text",{x:x+bw2/2,y:207,"class":"xxs f-Oi","text-anchor":"middle",text:"候选 · 未提交"},svg);
+        el("text",{x:x+bw2/2,y:220,"class":"xxs f-ink3","text-anchor":"middle",text:"81 帧"},svg);
+        continue;
+      }
+      el("rect",{x:x,y:186,width:bw2,height:44,rx:6,"class":"fs-M s-M","stroke-width":1.5},svg);
+      el("rect",{x:x+2,y:210,width:bw2-4,height:18,fill:"url(#frames)",opacity:".85"},svg);
+      el("text",{x:x+bw2/2,y:202,"class":"xxs f-Mi","text-anchor":"middle","font-weight":"600",text:"W"+i+" · 已提交"},svg);
+      if(i>0)el("circle",{cx:x-g2/2,cy:208,r:3.4,"class":"f-Ri"},svg);
+    }
+    el("text",{x:rx+TARGET*(bw2+g2)+6,y:202,"class":"xxs f-Ri",text:"● = 共享边界帧"},svg);
+    el("text",{x:rx+TARGET*(bw2+g2)+6,y:216,"class":"xxs f-ink3",text:"拼接时去重"},svg);
+    /* ledger */
+    var fr=committed>0?(81+80*(committed-1)):0;
+    el("rect",{x:20,y:242,width:840,height:26,rx:6,"class":"f-surf2 s-rule","stroke-width":1},svg);
+    el("text",{x:34,y:259,"class":"xxs mn f-Pi",text:"X, C 物理与相机终态：已发布 "+committed+" 次"},svg);
+    el("text",{x:300,y:259,"class":"xxs mn f-Mi",text:"K 记忆页 / E 尾证据：已发布 "+committed+" 批"},svg);
+    el("text",{x:846,y:259,"class":"xxs mn f-ink2","text-anchor":"end",text:"n = "+committed+"　输出 "+fr+" 帧"},svg);
+  }
+  function label(){
+    var s=$("#hrLab");
+    if(done){s.textContent="6 个窗口全部提交 · 481 帧 ≈ 30.06 s";return;}
+    var r=(failOn&&attempt===4)?"（第 3 次被拒后的重试，仅换种子）":"";
+    s.textContent="尝试 #"+attempt+r+" · "+PH[phase].t+" · n = "+committed;
+  }
+  function tick(){
+    if(done)return;
+    if(verdict){
+      if(verdict==="ok")committed++;
+      verdict=null;attempt++;phase=0;
+      if(committed>=TARGET){done=true;stop();}
+      render();label();return;
+    }
+    if(phase<3){phase++;}
+    else{verdict=willFail(attempt)?"bad":"ok";}
+    render();label();
+  }
+  function stop(){if(timer){clearInterval(timer);timer=null;}$("#hrPlay").textContent="▶ 播放";}
+  function play(){if(timer)return;timer=setInterval(tick,reduced?1600:900);$("#hrPlay").textContent="❚❚ 暂停";}
+  function reset(){attempt=1;phase=0;committed=0;verdict=null;done=false;render();label();}
+  $("#hrPlay").addEventListener("click",function(){if(timer)stop();else{if(done)reset();play();}});
+  $("#hrStep").addEventListener("click",function(){stop();if(done)reset();else tick();});
+  $("#hrReset").addEventListener("click",function(){stop();reset();});
+  $("#hrFail").addEventListener("click",function(){failOn=!failOn;this.classList.toggle("on",failOn);stop();reset();});
+  reset();if(!reduced)play();
+})();
+
+/* ---------------------------------------------------------- TL;DR lane filter */
+(function(){
+  var seg=$("#tlSeg");if(!seg)return;
+  seg.addEventListener("click",function(e){
+    var b=e.target.closest("button");if(!b)return;
+    $$("#tlSeg button").forEach(function(x){x.classList.toggle("on",x===b);});
+    var l=b.getAttribute("data-l");
+    $$("#tlSvg g[data-l]").forEach(function(g){g.classList.toggle("dim",l!=="all"&&g.getAttribute("data-l")!==l);});
+  });
+})();
+
+/* ---------------------------------------------------------- 01 action grid */
+(function(){
+  var grid=$("#acGrid");if(!grid)return;
+  var ITEMS=["X 物理态","C 相机态","G / D<sup>geo</sup> 几何","K 记忆页","E 尾证据","输出帧"];
+  var DATA={
+    cam:{v:["变","变","按新轨迹重渲","变","变","+80 帧"],
+         k:["p","p","g","m","m","o"],
+         w:['纯相机动作<b>照样推进物理</b>：论文 Sec. 4.3 写明「重力、已排定的力场与正在进行的动力学在 u<sub>n</sub> = ∅ 时仍然继续」。'+
+            '「观察不改变世界」指的是<b>观察这个操作本身</b>不注入干预，而不是这段时间世界静止。'+
+            '几何记录 G<sub>n</sub> 每窗都会按固定轨迹重新渲染一次，但写它的<b>永远是模拟器渲染器</b>，不是生成的帧。']},
+    int:{v:["变（含接触/形变）","变","按新轨迹重渲","变","变","+80 帧"],
+         k:["p","p","g","m","m","o"],
+         w:['干预 u<sub>n</sub> 在<b>像素被采样之前</b>就被解析成逐帧的物理–相机轨迹。'+
+            '接触响应、形变、力场激活的时刻全部由 F_seq 定死，视频模型只是在这条已经确定的轨迹上作画——'+
+            '这正是 Table 2 里物体 ADE 与终点误差领先的机制来源。']},
+    rej:{v:["不变","不变","候选记录被丢弃","不变","不变","0 帧"],
+         k:["n","n","n","n","n","n"],
+         w:['质量门返回 q<sub>n</sub> = 0：工作副本、候选页、候选证据、候选原生缓存与随机状态检查点<b>一并丢弃</b>，'+
+            '已提交检查点 S<sub>n</sub> 原样保留，提交索引不前进，该次尝试<b>不贡献任何输出帧</b>。'+
+            '重试沿用同一动作、同一轨迹、同一控制与同一已提交记忆，只允许更换采样种子。']}
+  };
+  var CL={p:"var(--phy)",m:"var(--mem)",g:"var(--geo)",o:"var(--obs)",n:"var(--ink3)"};
+  function render(a){
+    var d=DATA[a];clr(grid);
+    ITEMS.forEach(function(t,i){
+      var c=document.createElement("div");
+      c.style.cssText="background:var(--surf2);border:1px solid var(--rule);border-radius:10px;padding:11px 12px;border-left:3px solid "+CL[d.k[i]];
+      c.innerHTML='<div style="font-family:var(--font-mono);font-size:11px;color:var(--ink3);letter-spacing:.04em">'+t+'</div>'+
+        '<div style="font-size:14px;font-weight:600;margin-top:3px;color:'+(d.k[i]==="n"?"var(--ink3)":"var(--ink)")+'">'+d.v[i]+'</div>';
+      grid.appendChild(c);
+    });
+    $("#acWhy").innerHTML=d.w[0];
+  }
+  $("#acSeg").addEventListener("click",function(e){
+    var b=e.target.closest("button");if(!b)return;
+    $$("#acSeg button").forEach(function(x){x.classList.toggle("on",x===b);});
+    render(b.getAttribute("data-a"));
+  });
+  render("cam");
+})();
+
+/* ---------------------------------------------------------- 02 scene lifting */
+(function(){
+  var svg=$("#lfSvg");if(!svg)return;
+  var ST=[
+    {n:"实例分解",s:"SAM 3",t:"按用户给的物体描述抽掩码",
+     x:"给定输入图 I₀ 与用户提供的物体描述，SAM 3 为每个被选中的物体抽出实例掩码 {M_i}。被选中的物体就是之后可以被声明材料、被施加力、被相机跟随的「可控对象」。",
+     no:"注意这一步是<b>用户选的</b>，不是自动全场景分解——TourPhysics 从不假装重建整个场景。"},
+    {n:"显式代理",s:"SAM 3D Objects",t:"掩码 → 三角网格 + 相似变换",
+     x:"每个「图–掩码」对被抬升为一个局部三角网格 S_i^loc 与一个物到相机的相似变换 (s_i, R_i, t_i)，顶点按 v^C = s·R·v^loc + t 放进共同相机系。",
+     no:"论文特别点明：<b>这些显式曲面（而不是 RGB 图像）才是模拟器的接触与碰撞界面</b>。物理是在网格上算的，不是在像素上算的。"},
+    {n:"背景板",s:"LaMa",t:"累积移除前景 → B₀",
+     x:"前景并集被 LaMa 累积修补掉，得到一张干净的静态背景板 B₀ 缓存下来；未经修改的 I₀ 则单独保留为<b>永久外观锚</b>。",
+     no:"B₀ 只在相机移动露出背景支撑时才被使用，而且<b>不被当作一个新的物理对象</b>——它不参与碰撞。"},
+    {n:"重力对齐",s:"RANSAC",t:"统一到重力感知的场景系",
+     x:"各网格是独立重建的，共享相机系但缺一致的重力方向与地面高度。做法：取每个网格沿上方向最低的 η = 5% 顶点作为暂定接触锚（锚点太少时放宽到 10%），汇成 P_base，用 RANSAC 拟合鲁棒地面 (n*, d*)；再用一个刚性变换把 n* 转到世界 z 轴、场景重心归位、最低锚点平移到 z = 0。残余的小幅两两重叠沿「最小重叠包围盒轴」做有界平移修正。",
+     no:"只用低处锚点拟合是为了<b>防止密集的竖直结构主导地面估计</b>（比如一面墙会把平面拉歪）。这些修正属于初始假设，<b>在线阶段从不重做</b>。"},
+    {n:"参考相机",s:"轮廓对齐",t:"渲染并集轮廓与掩码求重叠最大",
+     x:"渲染对齐后网格的并集轮廓，与 ∪M_i 做重叠最大化：先沿前 / 右 / 上三轴同时平移相机与注视点做粗到细坐标搜索，再做一次有界的像面相关精化。",
+     no:"这一步决定了之后所有跨视投影的外参基准；论文 C.2 也承认「相机或深度估计不准会直接减少有效跨视对应」。"},
+    {n:"仿射深度标定",s:"D₀ᵍᵉᵒ = αD̃₀ + β",t:"把单目深度放进模拟器米制",
+     x:"在单目深度与模拟器深度<b>都有效</b>的可见像素上，用一个仿射变换把单目深度放进模拟器的米制约定；非有限与无效样本剔除。这一次拟合固定了之后投影与可见性测试所用的尺度。产物冻结为只读参考 R = (I₀, B₀, D₀ᵍᵉᵒ, V₀, Q₀, L₀, K₀, T₀)，并与初始物理 / 相机状态一起构成 S₀ = (X₀, C₀, K₀, E₀)。",
+     no:"S₀ 里 <b>K₀ 不含任何生成页、E₀ 不含任何尾证据</b>——记忆是空的，只有那张真实的 I₀ 在。论文引单目几何与稀疏深度补全的工作，主张把这个拟合当作<b>一个标定过的几何控制</b>，而不是唯一正确的重建。"}
+  ];
+  var cur=0;
+  function render(){
+    clr(svg);
+    var bw=126,gap=13,x0=25;
+    ST.forEach(function(s,i){
+      var x=x0+i*(bw+gap),on=i===cur,past=i<cur;
+      el("rect",{x:x,y:24,width:bw,height:62,rx:8,"class":on?"fs-R s-R":(past?"f-surf2 s-rule2":"f-surf s-rule"),"stroke-width":on?2.2:1.2},svg);
+      el("text",{x:x+bw/2,y:44,"class":"xs "+(on?"f-Ri":"f-ink2"),"text-anchor":"middle","font-weight":"600",text:s.n},svg);
+      el("text",{x:x+bw/2,y:60,"class":"xxs mn f-ink3","text-anchor":"middle",text:s.s},svg);
+      el("text",{x:x+bw/2,y:75,"class":"xxs f-ink3","text-anchor":"middle",text:s.t},svg);
+      el("text",{x:x+8,y:18,"class":"xxs mn "+(on?"f-Ri":"f-ink3"),text:"0"+(i+1)},svg);
+      if(i<ST.length-1)el("path",{d:"M"+(x+bw+2)+" 55 L"+(x+bw+gap-5)+" 55","class":"nofill s-ink3","stroke-width":1.3,"marker-end":"url(#ar)"},svg);
+    });
+    el("rect",{x:x0,y:96,width:6*(bw+gap)-gap,height:20,rx:5,"class":"fs-R s-R","stroke-width":1,"stroke-dasharray":"4 3"},svg);
+    el("text",{x:x0+(6*(bw+gap)-gap)/2,y:110,"class":"xxs f-Ri","text-anchor":"middle",text:"全部一次性完成，产物写入磁盘缓存（网格 · 深度 · 相机 · 背景板），在线阶段只读"},svg);
+    $("#lfLab").textContent="第 "+(cur+1)+" / 6 步";
+    $("#lfTi").innerHTML=ST[cur].n+' <span class="pill">'+ST[cur].s+'</span>';
+    $("#lfTx").innerHTML=ST[cur].x;
+    $("#lfNo").innerHTML="→ "+ST[cur].no;
+    $("#lfPrev").disabled=cur===0;$("#lfNext").disabled=cur===ST.length-1;
+  }
+  $("#lfPrev").addEventListener("click",function(){if(cur>0)cur--;render();});
+  $("#lfNext").addEventListener("click",function(){if(cur<ST.length-1)cur++;render();});
+  render();
+})();
+
+/* ---------------------------------------------------------- 03 material routing */
+(function(){
+  var svg=$("#mtSvg");if(!svg)return;
+  var SOLV={
+    RBD:{y:26,h:46,n:"RBD 刚体动力学",s:"广义坐标下求解"},
+    MPM:{y:80,h:62,n:"MPM 物质点法",s:"粒子携带状态，网格更新动量"},
+    PBD:{y:150,h:44,n:"PBD 位置基动力学",s:"迭代投影约束"}
+  };
+  var MAT=[
+    {k:"rigid",n:"刚体 / 铰接",s:"RBD",ti:"刚体与铰接代理",
+     tx:"非可变形物体与铰接体走刚体动力学。广义坐标下求解质量矩阵、速度相关与重力项，接触与外力通过雅可比映射进广义坐标。",
+     eq:'<i>M</i>(<i>q</i>)<i>q̈</i> + <i>h</i>(<i>q</i>, <i>q̇</i>) = τ + <i>J</i>(<i>q</i>)<sup>T</sup><i>f</i><sub>ext</sub>',
+     par:"参数：密度、摩擦。默认 10 个子步（纯刚体场景）。RBD 与 MPM / PBD 的接触在同一个场景步内由引擎耦合器交换响应。"},
+    {k:"elastic",n:"弹性",s:"MPM",ti:"弹性体（论文 Fig. 7(b) 的果冻）",
+     tx:"连续介质与大体积形变走物质点法：材料状态由拉格朗日粒子携带，动量在欧拉网格上更新，P2G → 网格动量更新 → G2P 天然支持弹性轨迹。",
+     eq:'<i>f</i><sup>int</sup><sub>j</sub> = − Σ<sub>p</sub> <i>V<sub>p</sub></i> σ<sub>p</sub> ∇<i>w<sub>jp</sub></i>',
+     par:"参数：密度、杨氏模量、泊松比。域 [−3,3]³、粒子尺寸 0.02、网格密度 32、16 个子步。PBD 也支持弹性族，由声明选择。"},
+    {k:"plastic",n:"弹塑 / 雪",s:"MPM",ti:"弹塑性与雪",
+     tx:"在弹性本构上加屈服准则，超过屈服面的部分转为塑性流动，因此形变不会完全回弹——这正是 Table 3 里「恢复准确率」要区分的行为。",
+     eq:'<i>f</i><sup>int</sup><sub>j</sub> = − Σ<sub>p</sub> <i>V<sub>p</sub></i> σ<sub>p</sub> ∇<i>w<sub>jp</sub></i>',
+     par:"参数：密度、杨氏模量、泊松比、屈服应力。完整本构与逐材料参数论文放在附录 A.2，并说明它们「不影响观测事务」。"},
+    {k:"granular",n:"颗粒",s:"MPM",ti:"颗粒介质",
+     tx:"沙、砂砾一类由摩擦主导的介质同样走 MPM，用屈服角（内摩擦角）描述其剪切强度。",
+     eq:'<i>f</i><sup>int</sup><sub>j</sub> = − Σ<sub>p</sub> <i>V<sub>p</sub></i> σ<sub>p</sub> ∇<i>w<sub>jp</sub></i>',
+     par:"参数：密度、摩擦、屈服角。论文 Fig. 3 的示意里颗粒被画在 MPM 一侧。"},
+    {k:"cloth",n:"布 / 薄壳",s:"PBD",ti:"薄壳与约束主导的粒子系统",
+     tx:"薄壳与由约束主导的系统走位置基动力学：对每个约束 C(x) = 0 计算位置修正并迭代投影，强制拉伸、弯曲、体积、密度与附着约束。",
+     eq:'Δ<i>x<sub>i</sub></i> = − <i>w<sub>i</sub></i> <i>C</i>(<i>x</i>) ∇<sub>x<sub>i</sub></sub><i>C</i>(<i>x</i>) / ( Σ<sub>j</sub> <i>w<sub>j</sub></i> ‖∇<sub>x<sub>j</sub></sub><i>C</i>‖² + ε )',
+     par:"参数：柔度 compliance、松弛、空气阻力。边界条件里的「粒子钉扎」在这里用：把布网格顶部若干比例的粒子钉住 = 一面挂着的窗帘（Fig. 7(a)）。PBD 粒子尺寸 0.01。"},
+    {k:"fluid",n:"液体",s:"MPM",ti:"液体",
+     tx:"液体默认走 MPM（P2G/G2P 同一套流程，本构换成近不可压流体）；PBD 侧也提供液体族，由声明选择。",
+     eq:'<i>f</i><sup>int</sup><sub>j</sub> = − Σ<sub>p</sub> <i>V<sub>p</sub></i> σ<sub>p</sub> ∇<i>w<sub>jp</sub></i>',
+     par:"参数：密度、粘性相关项。含粒子材料的场景默认 16 个子步。论文 Fig. 3 把 Fluid 标在 MPM 一侧。"}
+  ];
+  var cur=0;
+  function render(){
+    clr(svg);
+    var m=MAT[cur];
+    Object.keys(SOLV).forEach(function(k){
+      var s=SOLV[k],on=(m.s===k);
+      el("rect",{x:400,y:s.y,width:190,height:s.h,rx:8,"class":on?"fs-P s-P":"f-surf s-rule","stroke-width":on?2.2:1.2},svg);
+      el("text",{x:495,y:s.y+s.h/2-2,"class":"xs "+(on?"f-Pi":"f-ink2"),"text-anchor":"middle","font-weight":"600",text:s.n},svg);
+      el("text",{x:495,y:s.y+s.h/2+13,"class":"xxs f-ink3","text-anchor":"middle",text:s.s},svg);
+    });
+    MAT.forEach(function(x,i){
+      var y=14+i*30,on=i===cur;
+      el("rect",{x:40,y:y,width:160,height:24,rx:6,"class":on?"fs-P s-P":"f-surf2 s-rule","stroke-width":on?2:1},svg);
+      el("text",{x:120,y:y+16,"class":"xs "+(on?"f-Pi":"f-ink3"),"text-anchor":"middle","font-weight":on?"600":"400",text:x.n},svg);
+      var sy=SOLV[x.s].y+SOLV[x.s].h/2;
+      el("path",{d:"M204 "+(y+12)+" C 300 "+(y+12)+", 300 "+sy+", 396 "+sy,"class":"nofill "+(on?"s-P":"s-rule"),"stroke-width":on?2:1,"marker-end":on?"url(#ar-P)":"url(#ar)",opacity:on?1:.45},svg);
+    });
+    el("rect",{x:626,y:26,width:220,height:168,rx:8,"class":"f-surf2 s-rule","stroke-width":1.2},svg);
+    el("text",{x:736,y:48,"class":"xs f-ink2","text-anchor":"middle","font-weight":"600",text:"同一场景步内的耦合"},svg);
+    ["RBD ⟷ MPM 接触","RBD ⟷ PBD 接触","各求解器保留原生状态","交给下一个提交窗口"].forEach(function(t,i){
+      el("text",{x:736,y:70+i*18,"class":"xxs f-ink3","text-anchor":"middle",text:t},svg);
+    });
+    el("text",{x:736,y:156,"class":"xxs f-Pi","text-anchor":"middle",text:"步长 4 ms · 重力 (0,0,−9.8)"},svg);
+    el("text",{x:736,y:174,"class":"xxs f-ink3","text-anchor":"middle",text:"静态支撑 = 对齐地面上的刚性平面"},svg);
+    $("#mtTi").textContent=m.ti;$("#mtTx").innerHTML=m.tx;$("#mtEq").innerHTML=m.eq;$("#mtPar").innerHTML=m.par;
+  }
+  $("#mtSeg").addEventListener("click",function(e){
+    var b=e.target.closest("button");if(!b)return;
+    $$("#mtSeg button").forEach(function(x){x.classList.toggle("on",x===b);});
+    for(var i=0;i<MAT.length;i++)if(MAT[i].k===b.getAttribute("data-m"))cur=i;
+    render();
+  });
+  render();
+})();
+
+/* ---------------------------------------------------------- 04 transaction stepper */
+(function(){
+  var svg=$("#txSvg");if(!svg)return;
+  var C={
+    c1:{x:350,y:76,w:154,h:38,t:"X̃_n , C̃_n",s:"工作副本",c:"P"},
+    c2:{x:520,y:76,w:154,h:38,t:"X_n , C_n , G_n",s:"轨迹与只读几何",c:"G"},
+    c3:{x:690,y:76,w:154,h:38,t:"D^gen_Wn",s:"整窗冻结的控制",c:"O"},
+    c4:{x:350,y:130,w:154,h:38,t:"Y_Wn",s:"候选 81 帧",c:"O"},
+    c5:{x:520,y:130,w:154,h:38,t:"K̂_{n+1} , Ê_{n+1}",s:"暂存私有",c:"M"},
+    c6:{x:690,y:130,w:154,h:38,t:"q_n = Q(·)",s:"质量门判定",c:"M"}
+  };
+  var P=[{k:"X_n",c:"P",d:"刚体 / 粒子状态"},{k:"C_n",c:"P",d:"相机位姿与内参"},{k:"K_n",c:"M",d:"注意力值页"},{k:"E_n",c:"M",d:"对齐深度证据"}];
+  var ST=[
+    {p:[],a:[],ti:"边界：已提交状态",tx:"S_n = (X_n, C_n, K_n, E_n)。这是上一次接受留下的检查点，也是下一个动作的起点。此刻候选区是空的。",
+     why:"论文用 n 计接受窗口数；被拒的尝试用 r 索引且不改变 n，正文为简洁把 r 省略了。"},
+    {p:["c1"],a:["c1"],ti:"① 克隆",tx:"(X̃_n, C̃_n) = clone(X_n, C_n)。模拟器与相机控制器都从已提交检查点的<b>工作副本</b>推进。",
+     why:"为什么必须克隆：这样一次候选尝试<b>不产生任何持久副作用</b>，回滚才可能是「什么都没发生」而不是「需要撤销」。"},
+    {p:["c1","c2"],a:["c2"],ti:"② 物理与相机转移",tx:"(X_n, C_n, G_n) = F_seq(X̃_n, C̃_n, a_n; Θ_decl)。逐帧物理与相机序列一次算完，终态 X⁺, C⁺ 取在<b>被采样的端点</b> k_n(80)，不是原始原点 o_n + 300。渲染器同时导出 G_n（米制深度、可见性、置信、标签、掩码、运动、内外参）。",
+     why:"边界约定写死的理由：不写死，「同一个动作重试一次」就可能<b>把物理多推进一帧</b>，回滚语义随之失效。整段轨迹在采样与重试期间保持固定。"},
+    {p:["c1","c2","c3"],a:["c3"],ti:"③ 构造生成控制",tx:"D^gen_Wn = F_ctrl(G_n, E_n)。基础控制来自 G_n，已接受的尾证据只允许补「新暴露且米制支撑不足」的区域。构造完成后，整窗控制张量<b>在采样过程中不再重算</b>。",
+     why:"「不再重算」很关键：如果控制可以随去噪中间状态变化，同一个种子就不再复现同一段视频，重试也就不再是同一个事务。"},
+    {p:["c1","c2","c3","c4"],a:["c4"],ti:"④ 采样观测",tx:"Y_Wn ~ p_θ(Y | G_n, D^gen_Wn, I₀, K_n)。模型权重、去噪调度、相机与物理控制在这次调用中全部冻结。永久锚 I₀ 定外观，当前轨迹定布局，已提交记忆只提供<b>被接受过的</b>历史外观。",
+     why:"论文特意强调：模拟器渲染只作条件与评测信号，<b>不能直接替换生成像素</b>——否则观测支路就悄悄获得了物理权威。"},
+    {p:["c1","c2","c3","c4","c5"],a:["c5"],ti:"⑤ 暂存写集",tx:"(K̂_{n+1}, Ê_{n+1}) = U_stage(K_n, E_n, Y_Wn, G_n)。记忆页取自 clean 扩散端点重编码的注意力值张量；尾证据只存对齐后的生成深度估计、可信支撑、源索引与置信统计。",
+     why:"本窗口生成的页<b>不能被同一窗口内的另一帧选中</b>，尾证据也<b>不能影响已经用来采样本窗的控制</b>。它们最早生效在下一个被接受的窗口——这就是「因果记忆」的确切含义。"},
+    {p:["c1","c2","c3","c4","c5","c6"],a:["c6"],ti:"⑥ 质量门",tx:"q_n = Q(Y_Wn, G_n, D^gen_Wn, K_n, E_n) ∈ {0,1}。在全部 81 帧解码之后、任何候选状态变持久之前运行；阈值在一次尝试内固定，失败后绝不放宽。",
+     why:"这是一道 fail-closed 的<b>发布检查</b>，不是物理保真度评测。详见第 09 节——它查的是媒体契约、边界连续、黑屏与冻结比例。"},
+    {p:["c1","c2","c3","c4","c5","c6"],a:[],ti:"⑦ 结局",tx:"",why:""},
+    {p:[],a:[],ti:"⑧ 下一步",tx:"",why:""}
+  ];
+  var cur=0,failMode=false,timer=null;
+  function chip(k,on,ghost){
+    var c=C[k];
+    var cls=ghost?"f-surf s-rule":(on?("fs-"+c.c+" s-"+c.c):"f-surf2 s-rule2");
+    el("rect",{x:c.x,y:c.y,width:c.w,height:c.h,rx:7,"class":cls,"stroke-width":on?2.2:1.2},svg);
+    el("text",{x:c.x+c.w/2,y:c.y+17,"class":"xs "+(on?"f-"+c.c+"i":"f-ink2"),"text-anchor":"middle","font-weight":"600",text:c.t},svg);
+    el("text",{x:c.x+c.w/2,y:c.y+31,"class":"xxs f-ink3","text-anchor":"middle",text:c.s},svg);
+  }
+  function render(){
+    clr(svg);
+    var s=ST[cur],committed=(cur>=7&&!failMode),rejected=(cur>=7&&failMode);
+    /* zones */
+    el("rect",{x:18,y:36,width:280,height:250,rx:11,"class":"f-surf s-rule2","stroke-width":1.6},svg);
+    el("text",{x:32,y:28,"class":"xxs mn f-ink2",text:"持久区（已提交）"},svg);
+    el("rect",{x:326,y:36,width:534,height:250,rx:11,"class":"nofill s-rule2","stroke-width":1.4,"stroke-dasharray":"6 4"},svg);
+    el("text",{x:340,y:28,"class":"xxs mn f-ink3",text:"候选区（私有 · 未提交 · 可整体丢弃）"},svg);
+    /* persistent chips */
+    P.forEach(function(p,i){
+      var y=64+i*40,upd=committed;
+      el("rect",{x:38,y:y,width:240,height:32,rx:6,"class":upd?("fs-"+p.c+" s-"+p.c):"f-surf2 s-rule","stroke-width":upd?2:1.2},svg);
+      el("text",{x:52,y:y+20,"class":"xs "+(upd?"f-"+p.c+"i":"f-ink2"),"font-weight":"600",
+        text:upd?(i===0?"X_{n+1} = X⁺_n":i===1?"C_{n+1} = C⁺_n":i===2?"K_{n+1} = K̂_{n+1}":"E_{n+1} = Ê_{n+1}"):p.k},svg);
+      el("text",{x:266,y:y+20,"class":"xxs "+(upd?"f-Mi":"f-ink3"),"text-anchor":"end",text:upd?"已更新":p.d},svg);
+    });
+    el("rect",{x:38,y:230,width:240,height:44,rx:6,"class":(committed?"fs-M s-M":(rejected?"fs-B s-B":"f-surf2 s-rule")),"stroke-width":1.4},svg);
+    el("text",{x:158,y:248,"class":"xs "+(committed?"f-Mi":(rejected?"f-Bi":"f-ink2")),"text-anchor":"middle","font-weight":"600",
+      text:committed?"n ← n + 1，释放下一个动作":(rejected?"n 不前进":"提交索引 n")},svg);
+    el("text",{x:158,y:264,"class":"xxs f-ink3","text-anchor":"middle",
+      text:committed?"物理终态与视觉证据一起发布":(rejected?"S_n 与所有分量原样保留":"等待动作 a_n = (c_n, u_n)")},svg);
+    /* candidate chips */
+    ["c1","c2","c3","c4","c5","c6"].forEach(function(k){
+      if(s.p.indexOf(k)<0){
+        var c=C[k];
+        el("rect",{x:c.x,y:c.y,width:c.w,height:c.h,rx:7,"class":"nofill s-rule","stroke-width":1,"stroke-dasharray":"3 4"},svg);
+        return;
+      }
+      chip(k,s.a.indexOf(k)>=0,false);
+    });
+    /* clone arrow */
+    if(cur>=1)el("path",{d:"M282 95 L344 95","class":"nofill s-P","stroke-width":1.8,"marker-end":"url(#ar-P)"},svg);
+    if(cur>=1)el("text",{x:313,y:88,"class":"xxs f-Pi","text-anchor":"middle",text:"clone"},svg);
+    /* flow arrows */
+    if(cur>=2)el("path",{d:"M506 95 L514 95","class":"nofill s-P","stroke-width":1.6,"marker-end":"url(#ar-P)"},svg);
+    if(cur>=3)el("path",{d:"M676 95 L684 95","class":"nofill s-G","stroke-width":1.6,"marker-end":"url(#ar-G)"},svg);
+    if(cur>=4)el("path",{d:"M767 116 L767 122 L427 122 L427 126","class":"nofill s-O","stroke-width":1.6,"marker-end":"url(#ar-O)"},svg);
+    if(cur>=5)el("path",{d:"M506 149 L514 149","class":"nofill s-M","stroke-width":1.6,"marker-end":"url(#ar-M)"},svg);
+    if(cur>=6)el("path",{d:"M676 149 L684 149","class":"nofill s-M","stroke-width":1.6,"marker-end":"url(#ar-M)"},svg);
+    /* outcome */
+    if(cur<7){
+      el("rect",{x:350,y:190,width:494,height:76,rx:9,"class":"nofill s-rule","stroke-width":1,"stroke-dasharray":"4 5"},svg);
+      el("text",{x:597,y:234,"class":"xs f-ink3","text-anchor":"middle",text:"⑦ 结局在这里揭晓：原子提交，或整窗回滚"},svg);
+    }
+    if(cur>=7){
+      var ok=!failMode;
+      el("rect",{x:350,y:190,width:494,height:76,rx:9,"class":ok?"fs-M s-M":"fs-B s-B","stroke-width":1.8},svg);
+      el("text",{x:597,y:212,"class":"sm "+(ok?"f-Mi":"f-Bi"),"text-anchor":"middle","font-weight":"600",
+        text:ok?"q_n = 1 → 原子提交":"q_n = 0 → 整窗回滚"},svg);
+      el("text",{x:597,y:232,"class":"xs f-ink2","text-anchor":"middle",
+        text:ok?"S_{n+1} = (X⁺_n, C⁺_n, K̂_{n+1}, Ê_{n+1})　终态与证据一起发布":"丢弃工作副本、候选页、候选证据、候选缓存与随机状态检查点"},svg);
+      el("text",{x:597,y:250,"class":"xxs f-ink3","text-anchor":"middle",
+        text:ok?"生成的 RGB 至此只扩充了「知道什么」，没有改写「是什么状态」":"重试：同一 n、同一动作、同一轨迹与控制、同一已提交记忆，只换种子"},svg);
+      el("path",{d:"M"+(ok?"346":"597")+" "+(ok?"228":"188")+" L"+(ok?"290":"597")+" "+(ok?"228":"172")+(ok?"":" L500 172"),
+        "class":"nofill "+(ok?"s-M":"s-B"),"stroke-width":1.8,"marker-end":ok?"url(#ar-M)":"url(#ar-B)"},svg);
+      if(cur>=8){
+        el("rect",{x:326,y:36,width:534,height:250,rx:11,"class":"f-surf",opacity:".62"},svg);
+        el("text",{x:593,y:160,"class":"sm f-ink3","text-anchor":"middle",text:ok?"候选区清空，等待下一个动作":"候选区清空，等待显式重试（论文实现不自动重试）"},svg);
+      }
+    }
+    var lab=cur>=7?(failMode?"⑦–⑧ 拒绝分支":"⑦–⑧ 接受分支"):("第 "+(cur+1)+" / 7 步");
+    $("#txLab").textContent=lab;
+    var ti=s.ti,tx=s.tx,why=s.why;
+    if(cur>=7){
+      if(failMode){ti="⑦ 拒绝：整窗回滚";tx="q_n = 0。工作副本、候选页、候选证据、候选原生缓存与随机状态检查点一并释放，S_n 的四个分量原样保留，提交索引不前进，该次尝试不贡献任何输出帧。";
+        why="重试保持同一个已提交索引与同一套控制，<b>只有采样种子可以变</b>；阈值在一次尝试内固定、失败后绝不放宽。论文明说实现<b>不做自动重试</b>，必须由调用方显式发起——所以架构图里那条 retry 闭环是人 / API 驱动的。";}
+      else{ti="⑦ 接受：原子提交";tx="q_n = 1。物理与相机终态、暂存的记忆页与尾证据<b>一起</b>发布为 S_{n+1}；下一个用户动作此刻才被释放。";
+        why="「原子」在这里是字面意思：不存在「视频提交了但记忆没提交」的中间态。也正因如此，被接受的观测才可以安全地作为后续窗口的条件。";}
+      if(cur>=8){ti+=" → ⑧ 回到边界";}
+    }
+    $("#txTi").textContent=ti;$("#txTx").innerHTML=tx;$("#txWhy").innerHTML=why?("→ "+why):"";
+    $("#txPrev").disabled=cur===0;$("#txNext").disabled=cur>=8;
+  }
+  $("#txPrev").addEventListener("click",function(){if(cur>0)cur--;render();});
+  $("#txNext").addEventListener("click",function(){if(cur<8)cur++;render();});
+  $("#txAuto").addEventListener("click",function(){
+    var b=this;
+    if(timer){clearInterval(timer);timer=null;b.textContent="▶ 自动";return;}
+    if(cur>=8)cur=0;b.textContent="❚❚ 停止";
+    timer=setInterval(function(){if(cur>=8){clearInterval(timer);timer=null;b.textContent="▶ 自动";return;}cur++;render();},reduced?2000:1500);
+  });
+  $("#txFail").addEventListener("click",function(){failMode=!failMode;this.classList.toggle("on",failMode);render();});
+  render();
+})();
+
+})();
+</script>
+<script>
+(function(){
+"use strict";
+var NS="http://www.w3.org/2000/svg";
+function el(t,a,p){var n=document.createElementNS(NS,t);for(var k in a){if(k==="text"){n.textContent=a[k];}else{n.setAttribute(k,a[k]);}}if(p)p.appendChild(n);return n;}
+function $(s){return document.querySelector(s);}
+function $$(s){return Array.prototype.slice.call(document.querySelectorAll(s));}
+function clr(n){while(n.firstChild)n.removeChild(n.firstChild);}
+function cssv(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+var themeHooks=[];
+$("#themeBtn").addEventListener("click",function(){setTimeout(function(){themeHooks.forEach(function(f){f();});},30);});
+
+/* ---------------------------------------------------------- 06 depth gates */
+(function(){
+  var wrap=$("#dpGates");if(!wrap)return;
+  var G=[
+    {n:"可信静态重叠",op:"≥",th:0.20,min:0,max:1,step:0.01,v:0.34,f:2},
+    {n:"Spearman 秩相关",op:"≥",th:0.70,min:0,max:1,step:0.01,v:0.86,f:2},
+    {n:"模型空间 NRMSE",op:"≤",th:0.08,min:0,max:0.2,step:0.002,v:0.052,f:3},
+    {n:"米制空间 NRMSE",op:"≤",th:0.12,min:0,max:0.3,step:0.002,v:0.083,f:3},
+    {n:"新可见比例中位数",op:"≥",th:0.05,min:0,max:0.3,step:0.005,v:0.110,f:3},
+    {n:"目标空洞比例",op:"≥",th:0.01,min:0,max:0.1,step:0.002,v:0.028,f:3},
+    {n:"可信源覆盖",op:"≥",th:0.20,min:0,max:1,step:0.01,v:0.41,f:2},
+    {n:"通过的尾帧数（共 5 帧）",op:"≥",th:2,min:0,max:5,step:1,v:4,f:0}
+  ];
+  var PAN=[{t:"1 · 基础控制 D^base",s:"由 G_n 构造，含支撑不足的空洞"},
+           {t:"2 · 资格掩码 W_n",s:"白 = 1（允许融合）"},
+           {t:"3 · 历史估计 D(E_n)",s:"来自已接受的尾部证据，仿射对齐后"},
+           {t:"4 · 融合控制 D^gen",s:"逐点：(1−W)⊙D^base + W⊙D(E_n)"}];
+  var cvs=[];
+  G.forEach(function(g,i){
+    var row=document.createElement("div");
+    row.style.cssText="display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;padding:5px 0;border-bottom:1px solid var(--rule)";
+    row.innerHTML='<div style="font-size:13px;color:var(--ink2)">'+g.n+' <span style="font-family:var(--font-mono);font-size:11px;color:var(--ink3)">'+g.op+' '+g.th+'</span></div>'+
+      '<div style="display:flex;align-items:center;gap:8px"><input type="range" min="'+g.min+'" max="'+g.max+'" step="'+g.step+'" value="'+g.v+'" style="width:104px;accent-color:var(--obs)">'+
+      '<b style="font-family:var(--font-mono);font-size:12px;min-width:44px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink)"></b>'+
+      '<span class="pill" style="min-width:34px;text-align:center"></span></div>';
+    wrap.appendChild(row);
+    g.input=row.querySelector("input");g.val=row.querySelector("b");g.pill=row.querySelector(".pill");
+    g.input.addEventListener("input",function(){g.v=parseFloat(this.value);render();});
+  });
+  PAN.forEach(function(p){
+    var d=document.createElement("div");
+    d.innerHTML='<div style="font-family:var(--font-mono);font-size:10.5px;color:var(--ink3);margin-bottom:5px;line-height:1.35">'+p.t+'</div>';
+    var c=document.createElement("canvas");c.width=200;c.height=120;
+    c.style.cssText="width:100%;height:auto;display:block;border:1px solid var(--rule);border-radius:6px";
+    d.appendChild(c);
+    var s=document.createElement("div");s.style.cssText="font-size:11px;color:var(--ink3);margin-top:5px;line-height:1.4";s.textContent=p.s;
+    d.appendChild(s);$("#dpPanels").appendChild(d);cvs.push(c);
+  });
+  var RAMP=[[245,225,75],[63,174,122],[47,111,174],[59,47,110]];
+  function ramp(t){t=t<0?0:(t>1?1:t);var s=t*(RAMP.length-1),i=Math.min(RAMP.length-2,Math.floor(s)),f=s-i,a=RAMP[i],b=RAMP[i+1];
+    return "rgb("+Math.round(a[0]+(b[0]-a[0])*f)+","+Math.round(a[1]+(b[1]-a[1])*f)+","+Math.round(a[2]+(b[2]-a[2])*f)+")";}
+  function inObj(x,y){var dx=(x-0.32)/0.155,dy=(y-0.60)/0.24;return dx*dx+dy*dy<1;}
+  function inHole(x,y){return x>0.545&&x<0.735&&y>0.34&&y<0.82&&!inObj(x,y);}
+  function dep(x,y){return inObj(x,y)?(0.26+0.05*y):(0.32+0.56*y);}
+  function nrm(d){return (d-0.24)/0.68;}
+  function paint(pass){
+    var c1=cssv("--surf3")||"#26252e",c2=cssv("--surf2")||"#1d1c23",off=cssv("--surf")||"#17161b";
+    var CS=2;
+    cvs.forEach(function(cv,k){
+      var g=cv.getContext("2d");g.clearRect(0,0,200,120);
+      for(var px=0;px<200;px+=CS)for(var py=0;py<120;py+=CS){
+        var x=px/200,y=py/120,hole=inHole(x,y),col;
+        if(k===0){col=hole?((((px+py)/6)|0)%2?c1:c2):ramp(nrm(dep(x,y)));}
+        else if(k===1){col=(pass&&hole)?"#eeeef2":"#191920";}
+        else if(k===2){col=ramp(nrm(dep(x,y)+0.018*Math.sin(x*11)+0.012*Math.cos(y*9)));}
+        else{col=(hole&&pass)?ramp(nrm(dep(x,y)+0.018*Math.sin(x*11)+0.012*Math.cos(y*9))):(hole?((((px+py)/6)|0)%2?c1:c2):ramp(nrm(dep(x,y))));}
+        g.fillStyle=col;g.fillRect(px,py,CS,CS);
+      }
+      if(k===1){g.strokeStyle=cssv("--rule2")||"#3d3b48";g.lineWidth=1;g.strokeRect(.5,.5,199,119);}
+      if(k===3&&pass){g.strokeStyle="#eeeef2";g.lineWidth=1;g.setLineDash([3,3]);g.strokeRect(109,41,38,58);g.setLineDash([]);}
+    });
+  }
+  var lastPass=true;
+  function render(){
+    var pass=true;
+    G.forEach(function(g){
+      g.val.textContent=g.f===0?String(g.v):g.v.toFixed(g.f);
+      var ok=g.op==="≥"?(g.v>=g.th):(g.v<=g.th);
+      if(!ok)pass=false;
+      g.pill.textContent=ok?"通过":"不过";
+      g.pill.className="pill "+(ok?"ok":"no");
+    });
+    lastPass=pass;
+    var v=$("#dpVerdict");
+    v.textContent=pass?"W_n 在新暴露区生效 → 融合历史深度":"W_n ≡ 0 → D^gen = D^base（逐点精确保留）";
+    v.style.color=pass?"var(--mem-ink)":"var(--bad-ink)";
+    paint(pass);
+  }
+  $("#dpAll").addEventListener("click",function(){
+    var d=[0.34,0.86,0.052,0.083,0.110,0.028,0.41,4];
+    G.forEach(function(g,i){g.v=d[i];g.input.value=d[i];});render();
+  });
+  $("#dpBreak").addEventListener("click",function(){G[1].v=0.62;G[1].input.value=0.62;render();});
+  themeHooks.push(function(){paint(lastPass);});
+  render();
+})();
+
+/* ---------------------------------------------------------- 07 timeline */
+(function(){
+  var svg=$("#tmSvg");if(!svg)return;
+  var N=6,J=80;
+  function k(n,j){return 300*n+Math.floor((2*j+1)*60/32);}
+  function render(){
+    clr(svg);
+    var x0=30,tot=820,gap=6,bw=(tot-(N-1)*gap)/N;
+    el("text",{x:x0,y:24,"class":"xxs mn f-ink3",text:"① 每个已接受窗口：81 帧 = 1 共享边界 + 80 新帧"},svg);
+    for(var i=0;i<N;i++){
+      var x=x0+i*(bw+gap);
+      el("rect",{x:x,y:34,width:bw,height:46,rx:6,"class":i===0?"fs-O s-O":"fs-M s-M","stroke-width":1.5},svg);
+      el("rect",{x:x+3,y:62,width:bw-6,height:15,fill:"url(#frames)",opacity:".8"},svg);
+      el("text",{x:x+bw/2,y:52,"class":"xxs "+(i===0?"f-Oi":"f-Mi"),"text-anchor":"middle","font-weight":"600",text:"W"+i},svg);
+      if(i>0){el("circle",{cx:x-gap/2,cy:57,r:4,"class":"f-Ri"},svg);el("text",{x:x-gap/2,y:28,"class":"xxs f-Ri","text-anchor":"middle",text:"●"},svg);}
+    }
+    el("text",{x:x0,y:100,"class":"xxs mn f-ink3",text:"② 拼接：concat(Y_W0, Y_W1[1:], …, Y_W(N−1)[1:]) —— 去掉重复的边界帧"},svg);
+    var cx=x0,cw=(tot-(N-1)*2)/N;
+    for(var i=0;i<N;i++){
+      var w=cw;
+      el("rect",{x:cx,y:110,width:w,height:26,rx:4,"class":i===0?"fs-O s-O":"f-surf2 s-rule2","stroke-width":1.2},svg);
+      el("text",{x:cx+w/2,y:127,"class":"xxs f-ink2","text-anchor":"middle",text:i===0?"81 帧":"80 帧"},svg);
+      if(i>0)el("text",{x:cx-1,y:150,"class":"xxs f-Bi","text-anchor":"middle",text:"−1"},svg);
+      cx+=w+2;
+    }
+    var frames=81+80*(N-1);
+    el("text",{x:850,y:127,"class":"xxs mn f-ink2","text-anchor":"end",text:frames+" 帧"},svg);
+    /* index panel */
+    el("rect",{x:30,y:164,width:400,height:56,rx:8,"class":"f-surf2 s-rule","stroke-width":1.2},svg);
+    el("text",{x:44,y:182,"class":"xxs mn f-ink3",text:"③ 取箱中心：k_n(j) = o_n + ⌊(2j+1)·60 / 32⌋，o_n = 300n"},svg);
+    el("text",{x:44,y:202,"class":"xs mn f-Pi",text:"k_0("+J+") = "+k(0,J)+"　k_1("+J+") = "+k(1,J)+"　k_2("+J+") = "+k(2,J)},svg);
+    el("text",{x:44,y:216,"class":"xxs f-ink3",text:"（本页取 o_0 = 0；论文只说 o_0 遵循模拟器自身的帧索引约定）"},svg);
+    var ok=k(0,80)===k(1,0);
+    el("rect",{x:446,y:164,width:404,height:56,rx:8,"class":ok?"fs-M s-M":"fs-B s-B","stroke-width":1.4},svg);
+    el("text",{x:460,y:182,"class":"xxs mn f-ink3",text:"④ 共享边界自洽性检查"},svg);
+    el("text",{x:460,y:202,"class":"xs mn "+(ok?"f-Mi":"f-Bi"),text:"k_0(80) = "+k(0,80)+"　=　k_1(0) = "+k(1,0)+"　"+(ok?"✓ 一致":"✗")},svg);
+    el("text",{x:460,y:216,"class":"xxs f-ink3",text:"终态 X⁺, C⁺ 取在此处，而不是原始原点 o_n + 300 = "+(300)},svg);
+    $("#tmNv").textContent=N;$("#tmJv").textContent=J;
+    $("#tmOut").textContent="N = "+N+" → "+frames+" 帧 ≈ "+(frames/16).toFixed(2)+" s";
+  }
+  $("#tmN").addEventListener("input",function(){N=+this.value;render();});
+  $("#tmJ").addEventListener("input",function(){J=+this.value;render();});
+  render();
+})();
+
+/* ---------------------------------------------------------- 08 memory routing */
+(function(){
+  var svg=$("#mmSvg");if(!svg)return;
+  var inv=false;
+  function render(){
+    clr(svg);
+    var ratio=(+$("#mmD").value)/100, Q=(+$("#mmQ").value)/100, lam=(+$("#mmL").value)/100;
+    var depthOK=ratio<=1&&!inv, ms=depthOK?1:0;
+    var cs=Q*Math.exp(-ratio), g=lam*ms*Math.min(1,Math.max(0,cs));
+    $("#mmDv").textContent=ratio.toFixed(2);$("#mmQv").textContent=Q.toFixed(2);$("#mmLv").textContent=lam.toFixed(2);
+    /* target view */
+    el("text",{x:40,y:24,"class":"xxs mn f-Oi",text:"当前目标视图 t"},svg);
+    el("path",{d:"M40 118 L150 60 L150 130 L40 172 Z","class":"fs-O s-O","stroke-width":1.5},svg);
+    el("circle",{cx:100,cy:116,r:5,"class":"f-Oi"},svg);
+    el("text",{x:100,y:190,"class":"xxs f-ink2","text-anchor":"middle",text:"目标像素 p"},svg);
+    /* world point */
+    el("path",{d:"M156 112 C 260 70, 330 70, 424 112","class":"nofill s-Gi","stroke-width":1.8,"marker-end":"url(#ar-G)"},svg);
+    el("text",{x:290,y:50,"class":"xxs f-Gi","text-anchor":"middle",text:"x_w = T_t⁻¹ π⁻¹(p, D^geo_t(p); K_t)"},svg);
+    el("text",{x:290,y:64,"class":"xxs f-ink3","text-anchor":"middle",text:"用米制深度反投影到共享场景系"},svg);
+    el("circle",{cx:440,cy:118,r:7,"class":"f-Gi"},svg);
+    el("text",{x:440,y:142,"class":"xxs f-Gi","text-anchor":"middle",text:"世界点 x_w"},svg);
+    el("path",{d:"M456 112 C 550 70, 620 70, 712 112","class":"nofill s-Mi","stroke-width":1.8,"marker-end":"url(#ar-M)"},svg);
+    el("text",{x:584,y:50,"class":"xxs f-Mi","text-anchor":"middle",text:"(p̂_s, ẑ_s) = π(T_s x_w; K_s)"},svg);
+    el("text",{x:584,y:64,"class":"xxs f-ink3","text-anchor":"middle",text:"投影进一张更早的、已提交的视图"},svg);
+    /* source view */
+    el("text",{x:842,y:24,"class":"xxs mn f-Mi","text-anchor":"end",text:"早先已提交视图 s"},svg);
+    el("path",{d:"M842 118 L732 60 L732 130 L842 172 Z","class":(ms?"fs-M s-M":"fs-B s-B"),"stroke-width":1.5},svg);
+    el("circle",{cx:782,cy:116,r:5,"class":ms?"f-Mi":"f-Bi"},svg);
+    el("text",{x:782,y:190,"class":"xxs f-ink2","text-anchor":"middle",text:"投影点 p̂_s"},svg);
+    /* tests */
+    var T=[{n:"在界内",ok:!inv},{n:"可见 V_s",ok:!inv},{n:"静态 M^sta（排除运动/形变）",ok:!inv},{n:"深度一致 |D^geo_s(p̂)−ẑ| ≤ ε",ok:depthOK}];
+    T.forEach(function(t,i){
+      var x=40+i*208,w=192;
+      el("rect",{x:x,y:206,width:w,height:28,rx:6,"class":t.ok?"fs-M s-M":"fs-B s-B","stroke-width":1.3},svg);
+      el("text",{x:x+w/2,y:224,"class":"xxs "+(t.ok?"f-Mi":"f-Bi"),"text-anchor":"middle",text:(t.ok?"✓ ":"✗ ")+t.n},svg);
+    });
+    /* gate bar */
+    el("text",{x:40,y:256,"class":"xxs mn f-ink3",text:"c_s = Q_t·Q_s·exp(−|ΔD|/ε) = "+cs.toFixed(3)+"　m_s = "+ms+"　g_s = λ_mem·m_s·clip(c_s) = "+g.toFixed(3)},svg);
+    var bx=40,bw=700;
+    el("rect",{x:bx,y:266,width:bw,height:16,rx:8,"class":"f-surf2 s-rule","stroke-width":1},svg);
+    el("rect",{x:bx,y:266,width:bw*g,height:16,rx:8,"class":"fs-M"},svg);
+    el("line",{x1:bx+bw*g,y1:260,x2:bx+bw*g,y2:290,"class":ms?"s-Mi":"s-Bi","stroke-width":2.4},svg);
+    el("text",{x:bx,y:296,"class":"xxs f-Oi",text:"A₀ 原生参考条件路径"},svg);
+    el("text",{x:bx+bw,y:296,"class":"xxs f-Mi","text-anchor":"end",text:"A_hist 完全采信历史页"},svg);
+    el("text",{x:bx+bw+8,y:278,"class":"xxs mn "+(ms?"f-Mi":"f-Bi"),text:g<=0.001?"= A₀（精确回退）":"混合"},svg);
+  }
+  ["#mmD","#mmQ","#mmL"].forEach(function(s){$(s).addEventListener("input",render);});
+  $("#mmInv").addEventListener("click",function(){inv=!inv;this.classList.toggle("on",inv);render();});
+  render();
+})();
+
+/* ---------------------------------------------------------- 08 cache diagram */
+(function(){
+  var svg=$("#ckSvg");if(!svg)return;
+  el("text",{x:30,y:24,"class":"xxs mn f-ink3",text:"原生有限缓存 W12 / S8 —— 12 个切片"},svg);
+  for(var i=0;i<12;i++){
+    var x=30+i*58,sink=i<8;
+    el("rect",{x:x,y:34,width:52,height:56,rx:6,"class":sink?"fs-R s-R":"fs-O s-O","stroke-width":1.4},svg);
+    el("text",{x:x+26,y:58,"class":"xxs "+(sink?"f-Ri":"f-Oi"),"text-anchor":"middle","font-weight":"600",text:String(i+1)},svg);
+    el("text",{x:x+26,y:74,"class":"xxs f-ink3","text-anchor":"middle",text:sink?"sink":"recent"},svg);
+  }
+  el("path",{d:"M30 98 L490 98","class":"nofill s-R","stroke-width":1.4},svg);
+  el("text",{x:260,y:112,"class":"xxs f-Ri","text-anchor":"middle",text:"8 个参考 sink 切片：把最早的上下文钉住不被挤出"},svg);
+  el("path",{d:"M494 98 L722 98","class":"nofill s-O","stroke-width":1.4},svg);
+  el("text",{x:608,y:112,"class":"xxs f-Oi","text-anchor":"middle",text:"4 个最近切片：负责相邻时序连续"},svg);
+  el("text",{x:750,y:56,"class":"xxs f-ink3",text:"Table 4：端到起漂移"},svg);
+  el("text",{x:750,y:70,"class":"xs mn f-Mi",text:"26.33 → 11.17"},svg);
+  el("text",{x:750,y:86,"class":"xxs f-ink3",text:"尾到头漂移"},svg);
+  el("text",{x:750,y:100,"class":"xs mn f-Mi",text:"20.38 → 7.74"},svg);
+  /* page path */
+  el("rect",{x:30,y:142,width:236,height:74,rx:8,"class":"fs-M s-M","stroke-width":1.6},svg);
+  el("text",{x:148,y:162,"class":"xs f-Mi","text-anchor":"middle","font-weight":"600",text:"干净页 Z^attn_s"},svg);
+  el("text",{x:148,y:178,"class":"xxs f-ink2","text-anchor":"middle",text:"1 个潜变量帧 × 880 空间 token"},svg);
+  el("text",{x:148,y:192,"class":"xxs f-ink2","text-anchor":"middle",text:"在干净扩散端点重新编码得到"},svg);
+  el("text",{x:148,y:208,"class":"xxs f-ink3","text-anchor":"middle",text:"存的是注意力值，不是解码 RGB"},svg);
+  el("path",{d:"M270 179 L306 179","class":"nofill s-M","stroke-width":1.6,"marker-end":"url(#ar-M)"},svg);
+  el("rect",{x:308,y:142,width:236,height:74,rx:8,"class":"f-surf2 s-Gi","stroke-width":1.4},svg);
+  el("text",{x:426,y:162,"class":"xs f-Gi","text-anchor":"middle","font-weight":"600",text:"读取时键重定相"},svg);
+  el("text",{x:426,y:178,"class":"xxs f-ink2","text-anchor":"middle",text:"只改时间 RoPE：s → t⁻"},svg);
+  el("text",{x:426,y:192,"class":"xxs f-ink2","text-anchor":"middle",text:"空间 token 完全不动"},svg);
+  el("text",{x:426,y:208,"class":"xxs f-ink3","text-anchor":"middle",text:"历史内容落在几何上应在的位置"},svg);
+  el("path",{d:"M548 179 L584 179","class":"nofill s-M","stroke-width":1.6,"marker-end":"url(#ar-M)"},svg);
+  el("rect",{x:586,y:142,width:264,height:74,rx:8,"class":"fs-O s-O","stroke-width":1.6},svg);
+  el("text",{x:718,y:162,"class":"xs f-Oi","text-anchor":"middle","font-weight":"600",text:"页增强注意力 A_hist"},svg);
+  el("text",{x:718,y:180,"class":"xxs f-ink2","text-anchor":"middle",text:"A = A₀ + g_s (A_hist − A₀)"},svg);
+  el("text",{x:718,y:196,"class":"xxs f-ink2","text-anchor":"middle",text:"一个目标最多读一页"},svg);
+  el("text",{x:718,y:210,"class":"xxs f-ink3","text-anchor":"middle",text:"按有效覆盖率与平均置信度打分选页"},svg);
+})();
+
+/* ---------------------------------------------------------- 09 quality gate */
+(function(){
+  var rows=$("#qgRows");if(!rows)return;
+  var media=true,manifest=false;
+  var S=[
+    {id:"ov",n:"边界误差 e_ov",d:"δ(Y₀, B_n)：与上一窗末帧的全帧平均绝对 RGB 差",op:"≤",th:4,min:0,max:12,step:0.1,v:1.8,f:2},
+    {id:"db",n:"窗内相邻变化中位数",d:"median(d₁ … d₈)，作为 r_bd 的分母（下限 10⁻⁶）",op:"—",th:null,min:0.2,max:6,step:0.1,v:2.4,f:2},
+    {id:"bk",n:"近黑像素比例 r_black",d:"81 帧中 max_c Y ≤ 3 的像素占比",op:"≤",th:0.10,min:0,max:0.4,step:0.005,v:0.012,f:3},
+    {id:"fz",n:"冻结比例 r_freeze",d:"80 个相邻变化里 d_t < 0.2 的比例",op:"≤",th:0.25,min:0,max:0.7,step:0.01,v:0.08,f:2},
+    {id:"rp",n:"重投影误差 e_repr",d:"仅当提供「提交前反馈重投影清单」时才参与判定",op:"≤",th:24,min:0,max:60,step:1,v:12,f:0}
+  ];
+  var map={};
+  S.forEach(function(s){
+    map[s.id]=s;
+    var r=document.createElement("div");
+    r.style.cssText="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:7px 0;border-bottom:1px solid var(--rule)";
+    r.innerHTML='<div><div style="font-size:13.5px;color:var(--ink);font-weight:500">'+s.n+
+      (s.th!==null?' <span style="font-family:var(--font-mono);font-size:11px;color:var(--ink3);font-weight:400">阈值 '+s.op+' '+s.th+'</span>':'')+'</div>'+
+      '<div style="font-size:12px;color:var(--ink3);line-height:1.5">'+s.d+'</div></div>'+
+      '<div style="display:flex;align-items:center;gap:9px"><input type="range" min="'+s.min+'" max="'+s.max+'" step="'+s.step+'" value="'+s.v+'" style="width:120px;accent-color:var(--obs)">'+
+      '<b style="font-family:var(--font-mono);font-size:12.5px;min-width:46px;text-align:right;font-variant-numeric:tabular-nums"></b>'+
+      '<span class="pill" style="min-width:38px;text-align:center"></span></div>';
+    rows.appendChild(r);
+    s.row=r;s.input=r.querySelector("input");s.val=r.querySelector("b");s.pill=r.querySelector(".pill");
+    s.input.addEventListener("input",function(){s.v=parseFloat(this.value);render();});
+  });
+  /* derived r_bd row */
+  var rbdRow=document.createElement("div");
+  rbdRow.style.cssText="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:7px 0;border-bottom:1px solid var(--rule);background:var(--surf2);border-radius:8px;padding-left:10px;padding-right:10px";
+  rbdRow.innerHTML='<div><div style="font-size:13.5px;color:var(--ink);font-weight:500">边界运动比 r_bd <span style="font-family:var(--font-mono);font-size:11px;color:var(--ink3);font-weight:400">阈值 ≤ 3</span></div>'+
+    '<div style="font-size:12px;color:var(--ink3);line-height:1.5">r_bd = e_ov / max{median(d₁…d₈), 10⁻⁶}　—— 由上面两项算出，不能直接拖</div></div>'+
+    '<div style="display:flex;align-items:center;gap:9px"><b style="font-family:var(--font-mono);font-size:12.5px;min-width:46px;text-align:right;font-variant-numeric:tabular-nums"></b>'+
+    '<span class="pill" style="min-width:38px;text-align:center"></span></div>';
+  rows.insertBefore(rbdRow,map.bk.row);
+  var rbdVal=rbdRow.querySelector("b"),rbdPill=rbdRow.querySelector(".pill");
+  /* media row */
+  var medRow=document.createElement("div");
+  medRow.style.cssText="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:7px 0;border-bottom:1px solid var(--rule)";
+  medRow.innerHTML='<div><div style="font-size:13.5px;color:var(--ink);font-weight:500">媒体契约</div>'+
+    '<div style="font-size:12px;color:var(--ink3);line-height:1.5">恰好 81 帧、832×480、全部可解码。违约在任何状态发布之前就直接拒绝</div></div>'+
+    '<div style="display:flex;align-items:center;gap:9px"><button class="btn" type="button">切换</button><span class="pill" style="min-width:38px;text-align:center"></span></div>';
+  rows.insertBefore(medRow,S[0].row);
+  var medPill=medRow.querySelector(".pill");
+  medRow.querySelector("button").addEventListener("click",function(){media=!media;render();});
+  var svg=$("#qgSvg");
+  function render(){
+    map.rp.row.style.opacity=manifest?"1":"0.4";
+    map.rp.input.disabled=!manifest;
+    var fails=[];
+    if(!media)fails.push("媒体契约");
+    S.forEach(function(s){
+      s.val.textContent=s.f===0?String(s.v):s.v.toFixed(s.f);
+      if(s.th===null){s.pill.textContent="输入";s.pill.className="pill";return;}
+      if(s.id==="rp"&&!manifest){s.pill.textContent="未启用";s.pill.className="pill";return;}
+      var ok=s.v<=s.th;if(!ok)fails.push(s.n);
+      s.pill.textContent=ok?"通过":"不过";s.pill.className="pill "+(ok?"ok":"no");
+    });
+    var rbd=map.ov.v/Math.max(map.db.v,1e-6);
+    rbdVal.textContent=rbd.toFixed(2);
+    var rok=rbd<=3;if(!rok)fails.push("边界运动比 r_bd");
+    rbdPill.textContent=rok?"通过":"不过";rbdPill.className="pill "+(rok?"ok":"no");
+    medPill.textContent=media?"通过":"不过";medPill.className="pill "+(media?"ok":"no");
+    var q=fails.length===0;
+    $("#qgHead").textContent="q_n = "+(q?1:0);
+    $("#qgHead").style.color=q?"var(--mem-ink)":"var(--bad-ink)";
+    $("#qgVerdict").innerHTML='<div style="font-family:var(--font-mono);font-size:26px;font-weight:700;color:'+(q?"var(--mem-ink)":"var(--bad-ink)")+'">q_n = '+(q?1:0)+'</div>'+
+      '<div style="font-size:13.5px;color:var(--ink2);line-height:1.7;margin-top:4px">'+
+      (q?"全部合取项为真 → <b>原子提交</b>：物理终态、记忆页与尾证据一起发布，n ← n+1，下一个动作被释放。":
+      "不通过的项：<b style=\"color:var(--bad-ink)\">"+fails.join("、")+"</b>。整窗回滚，S_n 原样不动，该次尝试不贡献输出帧。")+'</div>';
+    clr(svg);
+    var ok=q;
+    el("rect",{x:6,y:8,width:196,height:80,rx:9,"class":ok?"fs-M s-M":"f-surf s-rule","stroke-width":ok?2.2:1.2,opacity:ok?1:.45},svg);
+    el("text",{x:104,y:32,"class":"xs "+(ok?"f-Mi":"f-ink3"),"text-anchor":"middle","font-weight":"600",text:"接受分支"},svg);
+    el("text",{x:104,y:50,"class":"xxs "+(ok?"f-ink2":"f-ink3"),"text-anchor":"middle",text:"S_{n+1} = (X⁺, C⁺, K̂, Ê)"},svg);
+    el("text",{x:104,y:66,"class":"xxs "+(ok?"f-ink2":"f-ink3"),"text-anchor":"middle",text:"+80 输出帧，n ← n+1"},svg);
+    el("text",{x:104,y:80,"class":"xxs f-ink3","text-anchor":"middle",text:"释放下一个动作"},svg);
+    el("rect",{x:218,y:8,width:196,height:80,rx:9,"class":!ok?"fs-B s-B":"f-surf s-rule","stroke-width":!ok?2.2:1.2,opacity:!ok?1:.45},svg);
+    el("text",{x:316,y:32,"class":"xs "+(!ok?"f-Bi":"f-ink3"),"text-anchor":"middle","font-weight":"600",text:"拒绝分支"},svg);
+    el("text",{x:316,y:50,"class":"xxs "+(!ok?"f-ink2":"f-ink3"),"text-anchor":"middle",text:"S_n 不变，n 不前进"},svg);
+    el("text",{x:316,y:66,"class":"xxs "+(!ok?"f-ink2":"f-ink3"),"text-anchor":"middle",text:"0 输出帧"},svg);
+    el("text",{x:316,y:80,"class":"xxs f-ink3","text-anchor":"middle",text:"等待显式重试（只换种子）"},svg);
+  }
+  $("#qgGood").addEventListener("click",function(){media=true;var d={ov:1.8,db:2.4,bk:0.012,fz:0.08,rp:12};S.forEach(function(s){s.v=d[s.id];s.input.value=d[s.id];});render();});
+  $("#qgBad").addEventListener("click",function(){media=true;var d={ov:6.5,db:1.2,bk:0.02,fz:0.31,rp:12};S.forEach(function(s){s.v=d[s.id];s.input.value=d[s.id];});render();});
+  $("#qgManifest").addEventListener("click",function(){manifest=!manifest;this.classList.toggle("on",manifest);render();});
+  render();
+})();
+})();
+</script>
+<script>
+(function(){
+"use strict";
+var NS="http://www.w3.org/2000/svg";
+function el(t,a,p){var n=document.createElementNS(NS,t);for(var k in a){if(k==="text"){n.textContent=a[k];}else{n.setAttribute(k,a[k]);}}if(p)p.appendChild(n);return n;}
+function $(s){return document.querySelector(s);}
+function $$(s){return Array.prototype.slice.call(document.querySelectorAll(s));}
+function clr(n){while(n.firstChild)n.removeChild(n.firstChild);}
+
+/* ---------------------------------------------------------- 10 experiments */
+(function(){
+  var svg=$("#exSvg");if(!svg)return;
+  var M=["LingBot-Cam","LingBot-Act","Wan2.1-I2V","Sora-2","MotionCtrl","Tora-Initiator","minWM-Wan","TourPhysics"];
+  var SUP_CAM=["49/40","49/40","49/40","49/40","49/40","–","49/40","49/40"];
+  var SUP_TD=["70/48/40","70/48/40","70/48/40","57/45/37","70/48/40","–","70/48/40","70/48/40"];
+  var SUP_RD=["52/25/25","52/25/25","52/25/25","1/1/1","52/25/25","–","52/25/25","52/25/25"];
+  var SUP_OBJ=["74/49/27","97/51/29","165/92/49","186/97/53","179/95/51","175/96/52","177/95/51","168/93/49"];
+  var SUP_CT=["14/14/6","14/14/6","14/14/6","14/14/6","14/14/6","14/14/5","14/14/6","14/14/6"];
+  var SUP_RS=["1/1/1","2/2/2","3/3/2","7/7/3","8/8/3","3/3/1","8/8/3","5/5/3"];
+  var SUP_SH=["19/17/8","27/24/12","31/26/14","31/26/14","31/26/14","29/24/13","31/26/14","30/25/13"];
+  var SUP_RC=["6/2/1","3/3/2","11/5/2","4/3/2","–","1/1/1","12/9/3","8/7/2"];
+  var SUP_VP=["108/61","108/61","108/61","108/61","108/61","97/53","108/61","108/61"];
+  var MET=[
+   {t:"相机 ATE",u:"",dir:-1,f:4,v:[.1031,.1235,.1436,.0560,.0783,null,.1092,.0233],sup:SUP_CAM,su:"序列 / 身份",
+    note:"<b>绝对轨迹误差（越低越好）。</b>ViPE 恢复的相机中心与模拟器中心按时间戳匹配，整段拟合<b>一次</b> Umeyama 相似变换后取 RMS 偏差。TourPhysics 的 0.0233 是次优 Sora-2（0.0560）的 43%。注意：单位是<b>模拟器世界单位</b>，属于所声明的场景假设，不是恢复出来的真实米。"},
+   {t:"路径长比 PLR",u:"",dir:0,f:4,v:[4.8434,6.3812,3.8702,2.3898,.8517,null,1.9820,1.4301],sup:SUP_CAM,su:"序列 / 身份",
+    note:"<b>恢复路径长 / 声明路径长，理想值 1（图中虚线）。</b>TourPhysics 的 1.4301 意味着相机实际走过的总距离比声明的多约 43%；MotionCtrl 的 0.8517 离 1 更近。论文<b>没有</b>在这一列主张优势，只说它与 Vis. 一起提供关于总路径缩放与轨迹支撑的互补信息。"},
+   {t:"平移方向命中 T-Dir",u:"%",dir:1,f:2,v:[88.54,68.75,60.42,78.52,50.35,null,89.58,98.26],sup:SUP_TD,su:"片段 / 序列 / 身份",
+    note:"<b>只含平移指令、时长 ≥ 0.5 s 且被完整覆盖的调度片段中，恢复运动落在正确半空间的比例。</b>测的是「方向对不对」，不是「轴恢复得准不准」。98.26% 意味着几乎每一条平移指令的朝向都被执行了。"},
+   {t:"旋转方向命中 R-Dir",u:"%",dir:1,f:2,v:[53.00,61.00,42.00,99.99,38.00,null,46.00,93.00],lbl:[null,null,null,"> 99.99%",null,null,null,null],excl:[3],sup:SUP_RD,su:"片段 / 序列 / 身份",
+    note:"<b>同上，但只看纯旋转片段。</b>Sora-2 的「&gt; 99.99%」建立在<b>仅 1 个合格片段</b>上，论文明确把它排除在最优标记之外——这是全表最需要小心的一格。其余方法都在 52 个片段 / 25 序列上评。"},
+   {t:"物体 ADE",u:"",dir:-1,f:4,v:[.0833,.0834,.0774,.0721,.0871,.0462,.1051,.0297],sup:SUP_OBJ,su:"物体 / 序列 / 身份",
+    note:"<b>与成对模拟器渲染视频的图像空间中心平均误差，按图像对角线归一（越低越好）。</b>唯一逼近的基线是 Tora-Initiator（0.0462），而它拿到的是<b>模拟器投影出来的 oracle 二维轨迹</b>——这是一条被喂了答案的基线。"},
+   {t:"终点误差 End Err.",u:"",dir:-1,f:4,v:[.1605,.1540,.1233,.1419,.1474,.0865,.2213,.0524],sup:SUP_OBJ,su:"物体 / 序列 / 身份",
+    note:"<b>最后一个联合可见帧上的归一化中心误差。</b>它比 ADE 更能反映「漂没漂」：轨迹早期贴合但后期跑偏的方法，ADE 尚可而终点误差会明显变大。"},
+   {t:"S@0.05",u:"%",dir:1,f:2,v:[18.37,27.09,31.61,43.47,19.74,70.05,9.46,81.18],sup:SUP_OBJ,su:"物体 / 序列 / 身份",
+    note:"<b>ADE 落在图像对角线 5% 以内的物体占比（越高越好）。</b>这是「有多少物体基本跟对了」的直接读数。"},
+   {t:"联合可见率 Vis.",u:"%",dir:1,f:2,v:[35.04,50.56,76.43,81.88,88.46,80.10,69.63,75.20],sup:SUP_OBJ,su:"物体 / 序列 / 身份",
+    note:"<b>成对视频中两侧都能稳定跟踪到中心的帧比例。</b>它衡量的是<b>轨迹支撑</b>而不是精度：可见率低意味着可用于评分的帧少。TourPhysics 的 75.20% 不是最高——MotionCtrl 达 88.46%，但它的 ADE 却是全表倒数第二，说明「一直看得见」与「跟得准」是两回事。"},
+   {t:"接触时机误差",u:"s",dir:-1,f:4,v:[6.9196,7.8304,5.1875,4.9107,7.0893,5.8839,4.5639,3.3304],sup:SUP_CT,su:"记录 / 序列 / 身份",
+    note:"<b>生成视频与模拟器视频的接触代理时刻之差（秒，越低越好）。</b>接触代理 = 起始与目标点集最小间距曲线首次跌破「初始到最小值区间的 15%」的时刻，搜索窗为声明起始时刻之后 8 s，找不到则记 8 s 惩罚。TourPhysics 的 3.3304 s 是最好，但放在 25–30 s 片长里看<b>绝对量仍然很大</b>；支撑只有 14 条记录 / 6 个身份。"},
+   {t:"接触响应准确率",u:"%",dir:1,f:2,v:[0.005,0.005,33.33,33.33,0.005,0.005,22.92,16.67],lbl:["< 0.01%","< 0.01%",null,null,"< 0.01%","< 0.01%",null,null],sup:SUP_RS,su:"记录 / 序列 / 身份",
+    note:"<b>接触后表现出规定运动的目标占比（越高越好）。</b>判定方式：在接触前 1.0 s 到 0.125 s 拟合二维线性速度模型，接触后 1–2 s 的中位归一化残差达到 max(0.006, 0.5·r_sim) 才算正确。<b>这一列 TourPhysics 并不领先</b>（16.67% vs Wan / Sora 的 33.33%），而且各方法的有效记录只有 1–8 条，几乎不具备统计效力。"},
+   {t:"形状误差 Shape Err.",u:"",dir:-1,f:4,v:[.0664,.0809,.0866,.1351,.1234,.1081,.1530,.0704],sup:SUP_SH,su:"记录 / 序列 / 身份",
+    note:"<b>可变形物体的归一化 Procrustes 逐点误差（越低越好）。</b>两侧点集各自去中心、除以均方根半径后做最优二维旋转对齐再比。TourPhysics 的 0.0704 是<b>第二</b>，仅次于 LingBot-Cam 的 0.0664——但后者的支撑只有 19 条记录 / 8 身份，而 TourPhysics 是 30 条 / 13 身份，两者并不在同一子集上。"},
+   {t:"面积漂移 Area Drift",u:"",dir:-1,f:4,v:[.5136,.1757,.2763,.3369,.3539,.2249,.5046,.0866],sup:SUP_SH,su:"记录 / 序列 / 身份",
+    note:"<b>跟踪点凸包面积比相对初始比值的平均偏离（越低越好）。</b>0.0866 是全表最好，且优势明显（次优 0.1757）。论文提醒它是<b>投影面积代理，不是质量守恒分数</b>。"},
+   {t:"恢复准确率 Recovery",u:"%",dir:1,f:2,v:[50.00,0.005,30.00,33.33,null,99.99,0.005,64.29],lbl:[null,"< 0.01%",null,null,"N/A","> 99.99%","< 0.01%",null],excl:[5],sup:SUP_RC,su:"事件 / 序列 / 身份",
+    note:"<b>声明的形变事件中同时满足「幅度够」与「事后回弹够」的比例（越高越好）。</b>Tora 的「&gt; 99.99%」只来自 <b>1 个事件</b>，论文已排除其最优标记。TourPhysics 的 64.29% 建立在 <b>8 个事件 / 7 序列 / 仅 2 个身份</b>上——这是全文统计效力最弱的一格，看趋势可以，当结论要谨慎。"},
+   {t:"VideoPhy-2 平均分",u:"",dir:1,f:4,v:[3.6806,3.5833,3.4815,3.6204,3.8657,3.5722,3.5324,3.6157],sup:SUP_VP,su:"序列 / 身份",
+    note:"<b>语义遵循 SA 与物理常识 PC 的算术平均（1–5 分，越高越好）。</b>这是<b>感知诊断</b>，不是轨迹分数，论文自己也这么说。TourPhysics 的 3.6157 排第四，低于 MotionCtrl 的 3.8657——考虑到 MotionCtrl 在几乎所有确定性指标上垫底，这恰好说明<b>感知打分与轨迹一致性是两个不同的量</b>。"}
+  ];
+  var cur=0;
+  var seg=$("#exSeg");
+  MET.forEach(function(m,i){
+    var b=document.createElement("button");b.type="button";
+    b.textContent=m.t+(m.dir===1?" ↑":(m.dir===-1?" ↓":" →1"));
+    if(i===0)b.className="on";
+    b.addEventListener("click",function(){cur=i;$$("#exSeg button").forEach(function(x){x.classList.toggle("on",x===b);});render();});
+    seg.appendChild(b);
+  });
+  function render(){
+    clr(svg);
+    var m=MET[cur],fin=m.v.filter(function(x){return x!==null;});
+    var mx=Math.max.apply(null,fin)*1.06;
+    var x0=150,bwMax=430;
+    var xs=function(v){return x0+v/mx*bwMax;};
+    /* best index */
+    var best=-1,bv=null;
+    m.v.forEach(function(v,i){
+      if(v===null)return;if(m.excl&&m.excl.indexOf(i)>=0)return;
+      var s=m.dir===1?-v:(m.dir===-1?v:Math.abs(v-1));
+      if(bv===null||s<bv){bv=s;best=i;}
+    });
+    el("text",{x:10,y:20,"class":"xs f-ink2","font-weight":"600",text:m.t+(m.u?" ("+m.u+")":"")+"　"+(m.dir===1?"↑ 越高越好":(m.dir===-1?"↓ 越低越好":"→ 越接近 1 越好"))},svg);
+    el("text",{x:872,y:20,"class":"xxs mn f-ink3","text-anchor":"end",text:"有效支撑："+m.su},svg);
+    if(m.dir===0&&1<mx){
+      el("line",{x1:xs(1),y1:30,x2:xs(1),y2:288,"class":"s-Ri","stroke-width":1.4,"stroke-dasharray":"5 4"},svg);
+      el("text",{x:xs(1),y:298,"class":"xxs f-Ri","text-anchor":"middle",text:"理想 = 1"},svg);
+    }
+    M.forEach(function(name,i){
+      var y=38+i*30,v=m.v[i],ours=i===7,isBest=i===best;
+      el("text",{x:142,y:y+13,"class":"xs "+(ours?"f-Pi":"f-ink2"),"text-anchor":"end","font-weight":ours?"600":"400",text:name},svg);
+      if(v===null){
+        el("text",{x:x0+4,y:y+13,"class":"xs f-ink3",text:"N/A（协议不兼容）"},svg);
+        return;
+      }
+      var w=Math.max(2,xs(v)-x0);
+      el("rect",{x:x0,y:y,width:w,height:19,rx:3,"class":ours?"f-P":(isBest?"f-M":"f-surf3"),opacity:ours?.92:(isBest?.85:1)},svg);
+      if(!ours&&!isBest)el("rect",{x:x0,y:y,width:w,height:19,rx:3,"class":"nofill s-rule2","stroke-width":1},svg);
+      var lb=(m.lbl&&m.lbl[i])?m.lbl[i]:(m.f===0?String(v):v.toFixed(m.f))+(m.u==="%"?"%":(m.u==="s"?" s":""));
+      if(isBest)lb+="　★";
+      el("text",{x:x0+w+8,y:y+14,"class":"xs mn "+(ours?"f-Pi":(isBest?"f-Mi":"f-ink2")),"font-weight":(ours||isBest)?"600":"400",text:lb},svg);
+      el("text",{x:872,y:y+14,"class":"xxs mn f-ink3","text-anchor":"end",text:m.sup[i]},svg);
+      if(isBest)el("text",{x:x0+w+8,y:y+14,"class":"xs",fill:"none",text:""},svg);
+    });
+    el("text",{x:10,y:296,"class":"xxs f-ink3",text:"橙 = TourPhysics　★ = 该列最优（按各方法自有支撑，且排除论文标注的不参评项）"},svg);
+    $("#exNote").innerHTML=m.note;
+  }
+  render();
+})();
+
+/* ---------------------------------------------------------- 10 ablation */
+(function(){
+  var svg=$("#abSvg");if(!svg)return;
+  el("text",{x:24,y:20,"class":"xs f-ink2","font-weight":"600",text:"缓存漂移（0–255 平均通道强度差，越低越好）"},svg);
+  el("text",{x:24,y:36,"class":"xxs f-ink3",text:"72 条成对长视频 / 27 个身份；骨架与生成器固定，只换缓存"},svg);
+  var CB=[
+    {g:"端到起 D_end",n:"普通时序缓存",v:26.33,c:"f-surf3",y:56},
+    {g:null,n:"持久 sink 缓存",v:11.17,c:"f-M",y:82},
+    {g:"尾到头 D_tail",n:"普通时序缓存",v:20.38,c:"f-surf3",y:130},
+    {g:null,n:"持久 sink 缓存",v:7.74,c:"f-M",y:156}
+  ];
+  var X0=170,W=210,MX=30;
+  CB.forEach(function(b){
+    if(b.g)el("text",{x:24,y:b.y-8,"class":"xxs mn f-Pi",text:b.g},svg);
+    el("text",{x:X0-8,y:b.y+14,"class":"xs f-ink2","text-anchor":"end",text:b.n},svg);
+    var w=b.v/MX*W;
+    el("rect",{x:X0,y:b.y,width:w,height:19,rx:3,"class":b.c},svg);
+    if(b.c==="f-surf3")el("rect",{x:X0,y:b.y,width:w,height:19,rx:3,"class":"nofill s-rule2","stroke-width":1},svg);
+    el("text",{x:X0+w+7,y:b.y+14,"class":"xs mn "+(b.c==="f-M"?"f-Mi":"f-ink2"),"font-weight":b.c==="f-M"?"600":"400",text:b.v.toFixed(2)},svg);
+  });
+  el("text",{x:24,y:200,"class":"xxs f-ink3",text:"端到起 ↓ 57.6%　尾到头 ↓ 62.0%　（本页换算）"},svg);
+  el("text",{x:24,y:216,"class":"xxs f-ink3",text:"记忆路由器在其中 70 条序列 / 26 个身份上有非空的因果回访目标，"},svg);
+  el("text",{x:24,y:230,"class":"xxs f-ink3",text:"但 72 条全部参与这组仅缓存的漂移对比。"},svg);
+
+  el("line",{x1:452,y1:12,x2:452,y2:238,"class":"s-rule","stroke-width":1},svg);
+  el("text",{x:474,y:20,"class":"xs f-ink2","font-weight":"600",text:"外观记忆的相对误差变化（负值为好）"},svg);
+  el("text",{x:474,y:36,"class":"xxs f-ink3",text:"与「关掉记忆」的同种子成对运行相比；轨迹 / 深度 / 检查点 / 提示词 / 种子全部对齐"},svg);
+  var MB=[
+    {h:"开发集（4 个身份）",n:"历史区误差",v:-8.25,y:60},
+    {h:null,n:"已知区误差（护栏）",v:-2.99,y:98},
+    {h:"留出集（14 个身份，与开发集不相交）",n:"历史区误差",v:-2.39,y:148},
+    {h:null,n:"已知区误差（护栏）",v:-0.90,y:186}
+  ];
+  var RX=846,RW=280,RMX=9;
+  MB.forEach(function(b){
+    if(b.h)el("text",{x:474,y:b.y-20,"class":"xxs mn f-Mi",text:b.h},svg);
+    el("text",{x:474,y:b.y-4,"class":"xxs f-ink2",text:b.n},svg);
+    var w=Math.abs(b.v)/RMX*RW;
+    el("rect",{x:RX-w,y:b.y,width:w,height:18,rx:3,"class":"f-M",opacity:.85},svg);
+    el("text",{x:RX-w-8,y:b.y+13,"class":"xs mn f-Mi","text-anchor":"end","font-weight":"600",text:b.v.toFixed(2)+"%"},svg);
+  });
+  el("line",{x1:RX,y1:52,x2:RX,y2:210,"class":"s-rule2","stroke-width":1.2},svg);
+  el("text",{x:RX,y:224,"class":"xxs f-ink3","text-anchor":"end",text:"0%"},svg);
+  el("text",{x:474,y:224,"class":"xxs f-ink3",text:"留出集的提升明显小于开发集"},svg);
+})();
+})();
+</script>
+</body>
+</html>

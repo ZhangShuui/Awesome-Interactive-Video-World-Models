@@ -1,0 +1,2252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>用 RL 强化世界模型的状态记忆 · 奖励对齐后训练调研</title>
+<meta name="description" content="RL / 奖励对齐类后训练如何强化视频世界模型对世界状态的记忆能力：验证瓶颈、五族奖励来源、机制图解与可筛选对比表">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   RL × 世界状态记忆 调研 — tokens。深色为默认底，浅色是完整的第二主题。
+   角色色 = 奖励信号的来源（本页的主分类轴）：
+     tie  = 族 I  像素 / GT 可验证       （RLVR-World）
+     A    = 族 II 动作反演可验证         （RLIR / WorldCompass）
+     vis  = 族 III 几何 3D 可验证        （GrndCtrl / World-R1）
+     act  = 族 IV 代数闭合自验证         （WorldCycle）← 本页强调色，也是唯一直接奖励"状态记忆"的一族
+     vlm  = 族 V  学习型奖励模型          （WorldReward / ReWorld / RoboAlign-R1）
+     hum  = 优化 / 探索机制层             （DiffusionNFT / CM-GRPO / KVPO / PROWL）
+     bad  = 漂移、reward hacking、缺口
+     ok   = 改善
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0f1114; --surf:#15181c; --surf2:#1b1f25; --surf3:#242a32;
+  --rule:#282d35; --rule2:#3a424d;
+  --ink:#eef1f4; --ink2:#b0b8c3; --ink3:#7f8894;
+  --A:#4a86dd;  --A-ink:#6aa3f2;  --A-soft:rgba(74,134,221,.18);
+  --B:#d9534a;  --B-ink:#f08a80;  --B-soft:rgba(217,83,74,.17);
+  --act:#b8891a; --act-ink:#e0b34a; --act-soft:rgba(184,137,26,.18);
+  --vis:#2fa274; --vis-ink:#5ccb9a; --vis-soft:rgba(47,162,116,.17);
+  --vlm:#8c70e0; --vlm-ink:#b39cf7; --vlm-soft:rgba(140,112,224,.20);
+  --hum:#d4608a; --hum-ink:#ec8ab0; --hum-soft:rgba(212,96,138,.18);
+  --tie:#6b7480; --tie-ink:#9aa3ae; --tie-soft:rgba(107,116,128,.22);
+  --bad:#e06a63; --bad-ink:#ef8a83; --bad-soft:rgba(224,106,99,.15);
+  --ok:#3fb27a;  --ok-ink:#5fc994;  --ok-soft:rgba(63,178,122,.15);
+  --sl1:#d84a4a; --sl2:#43b04a; --sl3:#4f78e0; --sl4:#d9961a;
+  --grid:#232830; --axis:#3a424d;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.35);
+  --tint:rgba(255,255,255,.045);
+  --font-display:"Archivo","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f3f5; --surf:#fbfbfc; --surf2:#eceef1; --surf3:#e2e5ea;
+    --rule:#dde0e6; --rule2:#c4cad3;
+    --ink:#13161b; --ink2:#4c535e; --ink3:#747c89;
+    --A:#2b62cc;  --A-ink:#1f4fa8;  --A-soft:rgba(43,98,204,.13);
+    --B:#c0392b;  --B-ink:#a12c21;  --B-soft:rgba(192,57,43,.12);
+    --act:#ad7a00; --act-ink:#7f5a00; --act-soft:rgba(173,122,0,.14);
+    --vis:#1a8a66; --vis-ink:#136b4f; --vis-soft:rgba(26,138,102,.13);
+    --vlm:#6f52d0; --vlm-ink:#563db0; --vlm-soft:rgba(111,82,208,.13);
+    --hum:#c14a78; --hum-ink:#9c355e; --hum-soft:rgba(193,74,120,.13);
+    --tie:#9aa3ae; --tie-ink:#5f6873; --tie-soft:rgba(154,163,174,.22);
+    --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+    --ok:#0f8a52;  --ok-ink:#0b7043;  --ok-soft:rgba(15,138,82,.12);
+    --sl1:#c93c3c; --sl2:#2e9a36; --sl3:#3b64d0; --sl4:#c48400;
+    --grid:#e3e6eb; --axis:#c4cad3;
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+    --tint:rgba(16,20,28,.035);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f3f5; --surf:#fbfbfc; --surf2:#eceef1; --surf3:#e2e5ea;
+  --rule:#dde0e6; --rule2:#c4cad3;
+  --ink:#13161b; --ink2:#4c535e; --ink3:#747c89;
+  --A:#2b62cc;  --A-ink:#1f4fa8;  --A-soft:rgba(43,98,204,.13);
+  --B:#c0392b;  --B-ink:#a12c21;  --B-soft:rgba(192,57,43,.12);
+  --act:#ad7a00; --act-ink:#7f5a00; --act-soft:rgba(173,122,0,.14);
+  --vis:#1a8a66; --vis-ink:#136b4f; --vis-soft:rgba(26,138,102,.13);
+  --vlm:#6f52d0; --vlm-ink:#563db0; --vlm-soft:rgba(111,82,208,.13);
+  --hum:#c14a78; --hum-ink:#9c355e; --hum-soft:rgba(193,74,120,.13);
+  --tie:#9aa3ae; --tie-ink:#5f6873; --tie-soft:rgba(154,163,174,.22);
+  --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+  --ok:#0f8a52;  --ok-ink:#0b7043;  --ok-soft:rgba(15,138,82,.12);
+  --sl1:#c93c3c; --sl2:#2e9a36; --sl3:#3b64d0; --sl4:#c48400;
+  --grid:#e3e6eb; --axis:#c4cad3;
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  --tint:rgba(16,20,28,.035);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+h1,h2,h3,h4,h5{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--A-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--vlm-ink); outline-offset:3px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); border:1px solid var(--rule);
+  padding:.08em .36em; border-radius:5px; white-space:nowrap}
+pre{font-family:var(--font-mono); font-size:12.5px; line-height:1.6; background:var(--surf2); border:1px solid var(--rule);
+  border-radius:10px; padding:14px 16px; overflow-x:auto; color:var(--ink2); margin:14px 0}
+pre b{color:var(--ink); font-weight:600}
+pre .c{color:var(--ink3)} pre .k{color:var(--act-ink)} pre .a{color:var(--A-ink)} pre .bb{color:var(--B-ink)} pre .g{color:var(--vis-ink)} pre .p{color:var(--vlm-ink)}
+strong{font-weight:600; color:var(--ink)}
+hr{border:0; border-top:1px solid var(--rule); margin:40px 0}
+ul,ol{margin:0; padding-left:1.35em}
+li{margin:.35em 0}
+li::marker{color:var(--ink3)}
+.m{font-family:var(--font-math); font-style:italic}
+.mono{font-family:var(--font-mono)}
+sub,sup{line-height:0; font-size:.72em}
+@media (prefers-reduced-motion: reduce){ *{transition:none !important; animation:none !important} html{scroll-behavior:auto} }
+
+/* ============================================================ chrome */
+#prog{position:fixed; inset:0 auto auto 0; height:2px; width:0; z-index:200;
+  background:linear-gradient(90deg,var(--tie),var(--A),var(--vis),var(--act),var(--vlm)); transition:width .08s linear}
+.top{position:fixed; inset:0 0 auto 0; height:60px; z-index:150; display:flex; align-items:center; gap:18px;
+  padding:0 22px; background:color-mix(in srgb, var(--surf) 86%, transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+@media (max-width:640px){ .brand em{display:none} }
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2)}
+
+.shell{display:grid; grid-template-columns:246px minmax(0,1fr); gap:0; max-width:1260px; margin:0 auto; padding:84px 28px 120px}
+.rail{position:sticky; top:84px; align-self:start; max-height:calc(100vh - 100px); overflow:auto; padding-right:18px}
+.rail .rl{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); margin:0 0 10px}
+.rail ol{list-style:none; margin:0; padding:0; border-left:1px solid var(--rule)}
+.rail li{margin:0}
+.rail a{display:block; padding:5px 0 5px 14px; margin-left:-1px; font-size:12.5px; line-height:1.4; color:var(--ink3);
+  border-left:2px solid transparent; border-bottom:0; transition:.15s}
+.rail a:hover{color:var(--ink)}
+.rail a.on{color:var(--ink); border-left-color:var(--act)}
+main{min-width:0; max-width:880px; padding-left:44px}
+@media (max-width:980px){
+  .shell{grid-template-columns:1fr; padding:76px 16px 90px}
+  .rail{display:none}
+  main{padding-left:0}
+}
+
+/* ============================================================ hero */
+.hero{padding:10px 0 34px; border-bottom:1px solid var(--rule); margin-bottom:56px}
+.kicker{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px}
+.tag{font-family:var(--font-mono); font-size:11.5px; color:var(--ink2); background:var(--surf2); border:1px solid var(--rule);
+  padding:3px 9px; border-radius:6px; letter-spacing:.01em}
+.tag.hl{color:var(--act-ink); border-color:color-mix(in srgb,var(--act) 45%,transparent); background:var(--act-soft)}
+.hero h1{font-size:clamp(34px,5.2vw,52px); font-weight:700; letter-spacing:-.025em; line-height:1.06}
+.hero .zh{font-size:clamp(17px,2.1vw,21px); color:var(--ink2); margin-top:14px; line-height:1.55; max-width:48ch; font-weight:500; text-wrap:balance}
+.hero .thesis{margin-top:22px; font-size:16.5px; color:var(--ink2); max-width:68ch}
+.hero .thesis b{color:var(--ink)}
+.hero .thesis p{margin:0 0 12px}
+.links{display:flex; flex-wrap:wrap; gap:10px; margin-top:16px}
+.links a{font-family:var(--font-mono); font-size:12.5px; padding:6px 12px; border:1px solid var(--rule); border-radius:8px; color:var(--ink2); background:var(--surf)}
+.links a:hover{color:var(--ink); border-color:var(--rule2)}
+.stats{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:28px}
+.stat{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:14px 16px 12px}
+.stat .lb{font-family:var(--font-mono); font-size:11px; color:var(--ink3); letter-spacing:.06em; text-transform:uppercase}
+.stat .vl{font-family:var(--font-display); font-size:26px; font-weight:700; letter-spacing:-.02em; margin-top:6px}
+.stat .dl{font-size:12.5px; color:var(--ink3); margin-top:4px; line-height:1.5}
+.stat .dl b{color:var(--ink2); font-weight:500}
+@media (max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
+
+/* role text */
+.rP{color:var(--tie-ink); font-weight:600}
+.rA{color:var(--A-ink); font-weight:600}
+.rG{color:var(--vis-ink); font-weight:600}
+.rC{color:var(--act-ink); font-weight:600}
+.rM{color:var(--vlm-ink); font-weight:600}
+.rO{color:var(--hum-ink); font-weight:600}
+.rX{color:var(--bad-ink); font-weight:600}
+.rK{color:var(--ok-ink); font-weight:600}
+
+/* ============================================================ sections */
+.sec{margin:0 0 84px; scroll-margin-top:84px}
+.eyebrow{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.eyebrow .n{font-family:var(--font-mono); font-size:12px; color:var(--act-ink); font-weight:600}
+.eyebrow .t{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); letter-spacing:.12em; text-transform:uppercase}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec h2{font-size:clamp(23px,3vw,30px); letter-spacing:-.02em; margin-bottom:16px}
+.sec h3{font-size:19px; margin:38px 0 12px; letter-spacing:-.01em; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap}
+.sec h3 .ix{font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-weight:500}
+.sec h4{font-size:15.5px; margin:22px 0 8px}
+.lead{font-size:17px; color:var(--ink2); max-width:70ch; margin-bottom:22px}
+.lead b{color:var(--ink)}
+.prose{max-width:72ch; color:var(--ink2)}
+.prose p{margin:0 0 14px}
+.prose b,.prose strong{color:var(--ink)}
+.prose ul,.prose ol{margin:0 0 14px}
+.note{font-size:13.5px; color:var(--ink3); max-width:72ch; margin-top:10px}
+
+/* ============================================================ figure */
+.fig{margin:26px 0 30px; background:var(--surf); border:1px solid var(--rule); border-radius:14px; box-shadow:var(--shadow); overflow:hidden}
+.fh{display:flex; align-items:baseline; gap:12px; padding:12px 18px 10px; border-bottom:1px solid var(--rule); flex-wrap:wrap}
+.fh .no{font-family:var(--font-mono); font-size:11.5px; color:var(--act-ink); letter-spacing:.06em; white-space:nowrap}
+.fh .ti{font-family:var(--font-display); font-size:14px; font-weight:600; color:var(--ink)}
+.figbody{padding:16px 18px 12px; background:var(--surf)}
+.figbody svg{display:block; width:100%; height:auto; max-width:100%; font-family:var(--font-body)}
+figcaption{padding:12px 18px 14px; font-size:13.5px; line-height:1.65; color:var(--ink3); border-top:1px solid var(--rule)}
+figcaption b{color:var(--ink2); font-weight:500}
+.scrollx{overflow-x:auto}
+@media (max-width:700px){
+  .figbody{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  .figbody svg{min-width:640px}
+  .figbody.chartwrap::after{content:"← 横向滑动查看完整图 →"; display:block; font-size:11px; color:var(--ink3); text-align:center; padding-top:6px}
+}
+
+/* svg utility classes (theme-aware) */
+.f-ink{fill:var(--ink)} .f-ink2{fill:var(--ink2)} .f-ink3{fill:var(--ink3)}
+.f-surf{fill:var(--surf)} .f-surf2{fill:var(--surf2)} .f-surf3{fill:var(--surf3)} .f-bg{fill:var(--bg)}
+.s-rule{stroke:var(--rule2)} .s-rule1{stroke:var(--rule)} .s-ink3{stroke:var(--ink3)} .s-ink2{stroke:var(--ink2)} .s-ink{stroke:var(--ink)}
+.s-grid{stroke:var(--grid)} .s-axis{stroke:var(--axis)}
+.nofill{fill:none}
+.f-A{fill:var(--A)} .f-Ai{fill:var(--A-ink)} .fs-A{fill:var(--A-soft)} .s-A{stroke:var(--A)}
+.f-B{fill:var(--B)} .f-Bi{fill:var(--B-ink)} .fs-B{fill:var(--B-soft)} .s-B{stroke:var(--B)}
+.f-T{fill:var(--act)} .f-Ti{fill:var(--act-ink)} .fs-T{fill:var(--act-soft)} .s-T{stroke:var(--act)}
+.f-V{fill:var(--vis)} .f-Vi{fill:var(--vis-ink)} .fs-V{fill:var(--vis-soft)} .s-V{stroke:var(--vis)}
+.f-L{fill:var(--vlm)} .f-Li{fill:var(--vlm-ink)} .fs-L{fill:var(--vlm-soft)} .s-L{stroke:var(--vlm)}
+.f-H{fill:var(--hum)} .f-Hi{fill:var(--hum-ink)} .fs-H{fill:var(--hum-soft)} .s-H{stroke:var(--hum)}
+.f-N{fill:var(--tie)} .f-Ni{fill:var(--tie-ink)} .fs-N{fill:var(--tie-soft)} .s-N{stroke:var(--tie)}
+.f-X{fill:var(--bad)} .f-Xi{fill:var(--bad-ink)} .fs-X{fill:var(--bad-soft)} .s-X{stroke:var(--bad)}
+.f-O{fill:var(--ok)} .f-Oi{fill:var(--ok-ink)} .fs-O{fill:var(--ok-soft)} .s-O{stroke:var(--ok)}
+.s-s1{stroke:var(--sl1)} .s-s2{stroke:var(--sl2)} .s-s3{stroke:var(--sl3)} .s-s4{stroke:var(--sl4)}
+.f-s1{fill:var(--sl1)} .f-s2{fill:var(--sl2)} .f-s3{fill:var(--sl3)} .f-s4{fill:var(--sl4)}
+svg text{font-family:var(--font-body)}
+svg .big{font-size:13px; font-weight:600}
+svg .lbl{font-size:12px}
+svg .sml{font-size:10.5px}
+svg .xs{font-size:9.5px}
+svg .mono{font-family:var(--font-mono)}
+svg .math{font-family:var(--font-math); font-style:italic; font-size:13px}
+svg .tab-num{font-variant-numeric:tabular-nums}
+
+/* ============================================================ cards & callouts */
+.grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:22px 0}
+.grid2{display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin:22px 0}
+@media (max-width:760px){.grid3,.grid2{grid-template-columns:1fr}}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:16px 18px; font-size:14px; color:var(--ink2); line-height:1.7}
+.card .mono{font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3); margin-bottom:6px}
+.card h5{font-size:15px; margin-bottom:8px; color:var(--ink)}
+.card b{color:var(--ink)}
+.card.cA{border-top:3px solid var(--A)} .card.cA .mono{color:var(--A-ink)}
+.card.cB{border-top:3px solid var(--B)} .card.cB .mono{color:var(--B-ink)}
+.card.cT{border-top:3px solid var(--act)} .card.cT .mono{color:var(--act-ink)}
+.card.cV{border-top:3px solid var(--vis)} .card.cV .mono{color:var(--vis-ink)}
+.card.cL{border-top:3px solid var(--vlm)} .card.cL .mono{color:var(--vlm-ink)}
+.card.cH{border-top:3px solid var(--hum)} .card.cH .mono{color:var(--hum-ink)}
+.card.cN{border-top:3px solid var(--tie)} .card.cN .mono{color:var(--tie-ink)}
+.call{border:1px solid var(--rule); border-left:3px solid var(--ink3); background:var(--surf); border-radius:10px; padding:14px 18px; margin:22px 0; font-size:14.5px; color:var(--ink2); max-width:80ch}
+.call .hd{font-family:var(--font-display); font-weight:600; font-size:14px; color:var(--ink); margin-bottom:6px}
+.call p{margin:0 0 6px} .call p:last-child{margin:0}
+.call b{color:var(--ink)}
+.call ul{margin:6px 0 0}
+.call.key{border-left-color:var(--act); background:color-mix(in srgb,var(--act-soft) 55%,var(--surf))}
+.call.warn{border-left-color:var(--bad); background:color-mix(in srgb,var(--bad-soft) 60%,var(--surf))}
+.call.mine{border-left-color:var(--vlm); background:color-mix(in srgb,var(--vlm-soft) 45%,var(--surf))}
+.call.ok{border-left-color:var(--ok); background:color-mix(in srgb,var(--ok-soft) 55%,var(--surf))}
+
+.eq{font-family:var(--font-math); font-size:18px; text-align:center; padding:16px 18px; margin:18px 0; background:var(--surf); border:1px solid var(--rule); border-radius:10px; color:var(--ink); overflow-x:auto; line-height:1.7}
+.eq i{font-style:italic}
+.eq .r{font-style:normal}
+.eq .frac{display:inline-flex; flex-direction:column; align-items:center; vertical-align:middle; margin:0 .2em; line-height:1.15}
+.eq .frac > span:first-child{border-bottom:1px solid currentColor; padding:0 .25em}
+.eq .frac > span:last-child{padding:0 .25em}
+.eq small{display:block; font-family:var(--font-body); font-style:normal; font-size:12.5px; color:var(--ink3); margin-top:8px; line-height:1.6}
+.eq .no{float:right; font-family:var(--font-mono); font-style:normal; font-size:12px; color:var(--ink3)}
+
+/* tables */
+table{border-collapse:collapse; width:100%; font-size:13.5px; margin:16px 0}
+th,td{padding:9px 10px; border-bottom:1px solid var(--rule); text-align:left; vertical-align:top; line-height:1.55}
+th{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); font-weight:500; border-bottom:1px solid var(--rule2)}
+td{color:var(--ink2)} td b{color:var(--ink)}
+td.num,th.num{font-family:var(--font-mono); font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right}
+tr.hl td{background:var(--tint)}
+.tbl{overflow-x:auto; border:1px solid var(--rule); border-radius:12px; background:var(--surf); padding:0 14px; margin:18px 0}
+.tbl table{margin:0}
+td.best{color:var(--act-ink); font-weight:600}
+td.second{text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--ink3)}
+
+/* pills */
+.pill{display:inline-block; font-family:var(--font-mono); font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--rule2); color:var(--ink2); background:var(--surf2); white-space:nowrap}
+.pill.a{color:var(--A-ink); border-color:color-mix(in srgb,var(--A) 50%,transparent); background:var(--A-soft)}
+.pill.b{color:var(--B-ink); border-color:color-mix(in srgb,var(--B) 50%,transparent); background:var(--B-soft)}
+.pill.t{color:var(--act-ink); border-color:color-mix(in srgb,var(--act) 50%,transparent); background:var(--act-soft)}
+.pill.v{color:var(--vis-ink); border-color:color-mix(in srgb,var(--vis) 50%,transparent); background:var(--vis-soft)}
+.pill.l{color:var(--vlm-ink); border-color:color-mix(in srgb,var(--vlm) 50%,transparent); background:var(--vlm-soft)}
+.pill.h{color:var(--hum-ink); border-color:color-mix(in srgb,var(--hum) 50%,transparent); background:var(--hum-soft)}
+.pill.n{color:var(--tie-ink); border-color:color-mix(in srgb,var(--tie) 60%,transparent); background:var(--tie-soft)}
+.pill.x{color:var(--bad-ink); border-color:color-mix(in srgb,var(--bad) 50%,transparent); background:var(--bad-soft)}
+.pill.o{color:var(--ok-ink); border-color:color-mix(in srgb,var(--ok) 50%,transparent); background:var(--ok-soft)}
+
+/* ============================================================ interactive widgets */
+.ctl{display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; padding:10px 18px; border-bottom:1px solid var(--rule); background:var(--surf2); font-size:13px; color:var(--ink2)}
+.ctl label{display:inline-flex; align-items:center; gap:8px; white-space:nowrap}
+.ctl input[type=range]{width:140px; accent-color:var(--act)}
+.ctl input[type=checkbox]{accent-color:var(--act)}
+.ctl .val{font-family:var(--font-mono); font-size:12px; color:var(--ink); min-width:4.5ch; font-variant-numeric:tabular-nums}
+.ctl .sep{width:1px; align-self:stretch; background:var(--rule)}
+.seg{display:inline-flex; flex-wrap:wrap; border:1px solid var(--rule2); border-radius:8px; overflow:hidden}
+.seg button{background:var(--surf); border:0; color:var(--ink3); font-family:var(--font-body); font-size:12.5px; padding:5px 11px; cursor:pointer; transition:.15s}
+.seg button + button{border-left:1px solid var(--rule2)}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--surf3); color:var(--ink); font-weight:600}
+.btn{background:var(--surf3); border:1px solid var(--rule2); color:var(--ink); font-family:var(--font-body); font-size:12.5px; padding:5px 12px; border-radius:8px; cursor:pointer}
+.btn:hover{border-color:var(--ink3)}
+.btn[aria-pressed="true"]{background:var(--act-soft); border-color:var(--act); color:var(--ink)}
+.readout{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; padding:12px 18px; border-top:1px solid var(--rule); background:var(--surf)}
+.readout .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3)}
+.readout .v{font-family:var(--font-display); font-size:20px; font-weight:600; margin-top:2px; color:var(--ink)}
+.readout .v small{font-family:var(--font-body); font-size:12px; font-weight:400; color:var(--ink3); margin-left:4px}
+.readout .d{font-size:12px; color:var(--ink3); line-height:1.5; margin-top:2px}
+.exp{padding:12px 18px 14px; border-top:1px solid var(--rule); background:var(--surf); font-size:13.5px; color:var(--ink2); line-height:1.7}
+.exp b{color:var(--ink)}
+.exp .kk{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--act-ink); margin-bottom:4px}
+.exp ul{margin:6px 0 0}
+
+/* family map */
+.famgrid{display:grid; grid-template-columns:190px minmax(0,1fr); gap:16px; align-items:start}
+@media (max-width:760px){.famgrid{grid-template-columns:1fr}}
+.fampick{display:flex; flex-direction:column; gap:6px}
+.fampick button{text-align:left; background:var(--surf2); border:1px solid var(--rule); color:var(--ink2);
+  font-family:var(--font-body); font-size:12.5px; padding:8px 11px; border-radius:8px; cursor:pointer; line-height:1.4;
+  border-left-width:3px; transition:.15s}
+.fampick button b{display:block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; color:var(--ink3); font-weight:500}
+.fampick button:hover{color:var(--ink)}
+.fampick button[aria-pressed="true"]{background:var(--surf3); color:var(--ink)}
+.fampick button.p0{border-left-color:var(--tie)} .fampick button.p0[aria-pressed="true"] b{color:var(--tie-ink)}
+.fampick button.p1{border-left-color:var(--A)}   .fampick button.p1[aria-pressed="true"] b{color:var(--A-ink)}
+.fampick button.p2{border-left-color:var(--vis)} .fampick button.p2[aria-pressed="true"] b{color:var(--vis-ink)}
+.fampick button.p3{border-left-color:var(--act)} .fampick button.p3[aria-pressed="true"] b{color:var(--act-ink)}
+.fampick button.p4{border-left-color:var(--vlm)} .fampick button.p4[aria-pressed="true"] b{color:var(--vlm-ink)}
+.fampick button.p5{border-left-color:var(--hum)} .fampick button.p5[aria-pressed="true"] b{color:var(--hum-ink)}
+.faminfo{padding:12px 18px 14px; border-top:1px solid var(--rule); background:var(--surf); font-size:13.5px; color:var(--ink2); line-height:1.7}
+.faminfo .kk{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; margin-bottom:4px}
+.faminfo b{color:var(--ink)}
+.faminfo .who{margin-top:8px; display:flex; flex-wrap:wrap; gap:6px}
+
+/* filter table */
+.filters{display:flex; flex-wrap:wrap; gap:8px 18px; padding:12px 18px; border-bottom:1px solid var(--rule); background:var(--surf2); font-size:12.5px; align-items:center}
+.filters .fg{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
+.filters .fgl{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); margin-right:2px}
+.chip{background:var(--surf); border:1px solid var(--rule2); color:var(--ink3); font-family:var(--font-body); font-size:12px;
+  padding:3px 10px; border-radius:999px; cursor:pointer; transition:.15s; white-space:nowrap}
+.chip:hover{color:var(--ink)}
+.chip[aria-pressed="true"]{color:var(--ink); background:var(--surf3); border-color:var(--ink3)}
+.chip.c0[aria-pressed="true"]{background:var(--tie-soft); border-color:var(--tie); color:var(--tie-ink)}
+.chip.c1[aria-pressed="true"]{background:var(--A-soft); border-color:var(--A); color:var(--A-ink)}
+.chip.c2[aria-pressed="true"]{background:var(--vis-soft); border-color:var(--vis); color:var(--vis-ink)}
+.chip.c3[aria-pressed="true"]{background:var(--act-soft); border-color:var(--act); color:var(--act-ink)}
+.chip.c4[aria-pressed="true"]{background:var(--vlm-soft); border-color:var(--vlm); color:var(--vlm-ink)}
+.chip.c5[aria-pressed="true"]{background:var(--hum-soft); border-color:var(--hum); color:var(--hum-ink)}
+#papers th{cursor:pointer; user-select:none; white-space:nowrap}
+#papers th:hover{color:var(--ink)}
+#papers th .ar{color:var(--act-ink); font-size:10px}
+#papers td.nm b{display:block}
+#papers td:nth-child(2),#papers td:nth-child(3){white-space:nowrap}
+#papers td.nm span{font-size:12px; color:var(--ink3); line-height:1.4; display:block}
+.famdot{display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:6px; vertical-align:1px}
+.d0{background:var(--tie)} .d1{background:var(--A)} .d2{background:var(--vis)} .d3{background:var(--act)} .d4{background:var(--vlm)} .d5{background:var(--hum)}
+.cnt{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); margin-left:auto}
+
+/* charts */
+.legend{display:flex; flex-wrap:wrap; gap:8px 16px; padding:8px 18px 0; font-size:12.5px; color:var(--ink2)}
+.legend span{display:inline-flex; align-items:center; gap:6px}
+.legend i{width:12px; height:12px; border-radius:3px; display:inline-block}
+.tip{position:absolute; pointer-events:none; background:var(--surf3); color:var(--ink); border:1px solid var(--rule2); border-radius:8px; padding:6px 9px; font-size:12px; line-height:1.45; box-shadow:var(--shadow); z-index:20; white-space:nowrap; opacity:0; transition:opacity .1s}
+.tip b{color:var(--ink); font-weight:600}
+.tip .k{color:var(--ink3); font-family:var(--font-mono); font-size:10.5px}
+.chartwrap{position:relative}
+.bar-hit{fill:transparent}
+.bar-hit:hover + rect, .bar-hit:focus + rect{opacity:.85}
+
+/* decision tree */
+.tree{display:flex; flex-direction:column; gap:0}
+.tnode{border:1px solid var(--rule); border-radius:10px; background:var(--surf); margin:0 0 8px; overflow:hidden}
+.tnode .q{padding:11px 16px; font-size:14px; color:var(--ink); font-weight:600; font-family:var(--font-display); border-bottom:1px solid var(--rule); background:var(--surf2)}
+.tnode .as{display:grid; grid-template-columns:1fr 1fr; gap:0}
+@media (max-width:640px){.tnode .as{grid-template-columns:1fr}}
+.tnode .a{padding:11px 16px; font-size:13.5px; color:var(--ink2); line-height:1.65}
+.tnode .a + .a{border-left:1px solid var(--rule)}
+@media (max-width:640px){.tnode .a + .a{border-left:0; border-top:1px solid var(--rule)}}
+.tnode .a .lb{font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink3); margin-bottom:4px}
+.tnode .a b{color:var(--ink)}
+
+/* glossary & footer */
+.gloss{display:grid; grid-template-columns:210px 1fr; gap:8px 16px; font-size:14px; color:var(--ink2); margin:14px 0}
+.gloss dt{font-weight:600; color:var(--ink); font-family:var(--font-mono); font-size:12.5px; padding-top:2px}
+.gloss dd{margin:0; padding-bottom:8px; border-bottom:1px solid var(--rule)}
+@media (max-width:640px){.gloss{grid-template-columns:1fr} .gloss dt{padding-top:10px}}
+.foot{margin-top:40px; padding-top:18px; border-top:1px solid var(--rule); font-size:12.5px; color:var(--ink3); line-height:1.7}
+.reflist{font-size:13.5px; color:var(--ink2); line-height:1.7}
+.reflist .r{padding:8px 0; border-bottom:1px solid var(--rule); display:grid; grid-template-columns:96px 1fr; gap:12px}
+@media (max-width:640px){.reflist .r{grid-template-columns:1fr; gap:2px}}
+.reflist .r .id{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); padding-top:3px}
+.reflist .r b{color:var(--ink)}
+kbd{font-family:var(--font-mono); font-size:11px; border:1px solid var(--rule2); border-bottom-width:2px; border-radius:5px; padding:1px 6px; background:var(--surf2); color:var(--ink2)}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">RL × 世界状态记忆<em>奖励对齐类后训练调研 · 2025.05 – 2026.09</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ar-i" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--ink3)"/></marker>
+    <marker id="ar-A" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--A)"/></marker>
+    <marker id="ar-B" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--B)"/></marker>
+    <marker id="ar-T" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--act)"/></marker>
+    <marker id="ar-V" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--vis)"/></marker>
+    <marker id="ar-L" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--vlm)"/></marker>
+    <marker id="ar-H" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--hum)"/></marker>
+    <marker id="ar-X" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bad)"/></marker>
+    <marker id="ar-N" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--tie)"/></marker>
+    <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="var(--tie)" stroke-width="1.6"/></pattern>
+    <pattern id="hatchX" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="var(--bad)" stroke-width="1.4"/></pattern>
+  </defs>
+</svg>
+
+<div class="shell">
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-tldr">00 · 一句话结论</a></li>
+    <li><a href="#s-bottleneck">01 · 验证瓶颈</a></li>
+    <li><a href="#s-map">02 · 五族奖励来源图谱</a></li>
+    <li><a href="#s-f1">03 · 族 I 像素 / GT 可验证</a></li>
+    <li><a href="#s-f2">04 · 族 II 动作反演可验证</a></li>
+    <li><a href="#s-f3">05 · 族 III 几何 3D 可验证</a></li>
+    <li><a href="#s-f4">06 · 族 IV 代数闭合自验证</a></li>
+    <li><a href="#s-f5">07 · 族 V 学习型奖励模型</a></li>
+    <li><a href="#s-opt">08 · 优化层：rollout、探索源、算法</a></li>
+    <li><a href="#s-laws">09 · 三条经验定律</a></li>
+    <li><a href="#s-hack">10 · Reward hacking 图鉴</a></li>
+    <li><a href="#s-results">11 · 结果对照</a></li>
+    <li><a href="#s-table">12 · 可筛选论文表</a></li>
+    <li><a href="#s-gap">13 · 缺口与判断</a></li>
+    <li><a href="#s-howto">14 · 自己搭的决策树</a></li>
+    <li><a href="#s-ref">15 · 参考与速查</a></li>
+  </ol>
+</nav>
+<main>
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <div class="kicker">
+    <span class="tag">调研范围 · RL / 奖励对齐后训练</span>
+    <span class="tag">2025.05 – 2026.09</span>
+    <span class="tag">18 篇精读 · 12 篇读到方法级</span>
+    <span class="tag hl">交互式视频世界模型为主</span>
+  </div>
+  <h1>用 RL 强化世界模型的<br>状态记忆</h1>
+  <p class="zh">奖励对齐类后训练做到哪一步了：五族奖励来源、它们各自绕开哪个瓶颈，以及为什么「记忆」到现在还基本不是一个奖励项</p>
+  <div class="thesis">
+    <p><b>问题</b>：有没有专门用 RL / 奖励对齐来强化世界模型「记住世界状态」的后训练架构？</p>
+    <p><b>结论</b>：<b>有，但只有一族真的在做这件事，而且刚起步。</b>
+    2025 年 5 月 RLVR-World 把 RLVR 引进世界模型之后，这条线在一年里长出了完整的工程栈——clip 级 rollout、DiffusionNFT、互补奖励、VLM 偏好奖励模型。
+    但绝大多数方法奖励的是<span class="rA">「这一小段有没有跟上动作」</span>和<span class="rM">「这一帧好不好看」</span>，两者都是<b>短程代理</b>。
+    真正把「转一圈回来，原地还对不对得上」写进奖励函数的，到 2026 年 9 月为止只有 <span class="rC">WorldCycle</span> 一家（代数循环闭合），
+    加上 <span class="rG">GrndCtrl</span> 的位姿 cycle-consistency 算半个。
+    WorldCompass 自己在附录里承认：<b>「缺乏可靠指标来评估视觉漂移与空间记忆保持，因此奖励信号没有直接约束漂移的项」</b>——这就是这条线目前最大的空洞。</p>
+    <p><b>为什么难</b>：对任意开放动作序列，长时程的未来<b>没有 ground truth</b>，所以「记忆对不对」本身不可验证。
+    这道<span class="rX">验证瓶颈</span>是整条线的主轴；五族方法的差别，本质上就是<b>五种绕开它的方式</b>。</p>
+  </div>
+  <div class="links">
+    <a href="#s-map">→ 直接看分类图谱</a>
+    <a href="#s-f4">→ 直接看 WorldCycle 机制</a>
+    <a href="#s-table">→ 直接看可筛选论文表</a>
+    <a href="#s-gap">→ 直接看缺口判断</a>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="lb">直接奖励长程状态</div><div class="vl" style="color:var(--act-ink)">1 / 18</div><div class="dl">只有 <b>WorldCycle</b> 把「状态回归」做成奖励；GrndCtrl 的位姿闭环算半个</div></div>
+    <div class="stat"><div class="lb">最大的单项收益</div><div class="vl" style="color:var(--A-ink)">20% → 55%</div><div class="dl"><b>WorldCompass</b> 在组合动作上的动作跟随准确率（长时程 381 帧）</div></div>
+    <div class="stat"><div class="lb">回环漂移下降</div><div class="vl" style="color:var(--act-ink)">−44%</div><div class="dl"><b>WorldCycle</b> 的 RPS（反向路径对称性），相对已经 RL 过的 WorldCompass</div></div>
+    <div class="stat"><div class="lb">典型后训练成本</div><div class="vl">3 天</div><div class="dl"><b>8×H200</b>（WorldCycle）到 <b>64×H20</b>（WorldCompass）；GRPO 普遍几百步就收敛</div></div>
+  </div>
+</section>
+
+<!-- ============================================================ 00 TL;DR -->
+<section class="sec" id="s-tldr">
+  <div class="eyebrow"><span class="n">00</span><span class="t">TL;DR</span><span class="line"></span></div>
+  <h2>一句话结论，和它的三个限定</h2>
+  <p class="lead">如果你只想要一个答案：<b>存在这样的后训练架构，代表作是 WorldCycle（arXiv 2608.04964）</b>，
+  它用「可逆动作循环必须闭合」这条代数恒等式，造出了不需要任何标注、与场景内容无关的<b>长时程可验证奖励</b>。
+  但下面三个限定决定了你能不能直接用。</p>
+
+  <div class="grid3">
+    <div class="card cT">
+      <p class="mono">限定一 · 可逆性</p>
+      <h5>只覆盖可逆动作</h5>
+      循环闭合的前提是动作构成群：每个 <span class="m">a</span> 有逆 <span class="m">a</span><sup>−1</sup>，且 <span class="m">T</span><sub>γ<sup>−1</sup>∘γ</sub> = <span class="m">I</span>。
+      相机 ego-motion 满足；<b>物体形变、接触交互、持久状态变化（开门、破坏方块、拾取物品）不满足</b>——WorldCycle 论文自陈这是主要局限。
+      而「世界状态记忆」在游戏 / 具身场景里恰恰大量是不可逆的那半边。
+    </div>
+    <div class="card cA">
+      <p class="mono">限定二 · 代理指标</p>
+      <h5>其余方法奖励的是短程代理</h5>
+      RLIR 用 IDM 反推<b>逐帧动作</b>，WorldCompass 用 3D 基础模型估<b>每个 clip 的相机轨迹</b>，
+      WorldReward 用 VLM 判<b>四个动作一块</b>的局部证据。
+      这些确实能间接改善长程（WorldCompass 长时程基本动作 64.28 → 76.56），
+      但它们<b>看不见</b>「刚才那栋楼现在颜色变了」这类漂移。
+    </div>
+    <div class="card cN">
+      <p class="mono">限定三 · 基准断层</p>
+      <h5>记忆基准还没接进 RL 回路</h5>
+      MBench（实体 / 环境 / 因果一致性，12 个子维度）、MIND、STEVOBench、LoopNav 都已经把记忆量化了，
+      但<b>没有一篇 RL 论文把它们当奖励用</b>。
+      唯一自建的是 WorldCycle 的 CycleBench（ESC / RPS / RCS），而它是为自己的奖励量身定做的。
+      「benchmark → reward」这个接口是现在最明显的空位。
+    </div>
+  </div>
+
+  <div class="call key">
+    <div class="hd">读这一页的正确姿势</div>
+    <p>第 <a href="#s-bottleneck">01</a> 节先把「为什么记忆不能被直接奖励」讲清楚——这是理解全部五族的钥匙。
+    第 <a href="#s-map">02</a> 节是分类图谱（可点）。第 <a href="#s-f4">06</a> 节是唯一直接针对记忆的那一族，图解最详细。
+    如果你要动手，第 <a href="#s-laws">09</a> 节的三条经验定律和第 <a href="#s-howto">14</a> 节的决策树是最实用的两页。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 01 BOTTLENECK -->
+<section class="sec" id="s-bottleneck">
+  <div class="eyebrow"><span class="n">01</span><span class="t">The verification bottleneck</span><span class="line"></span></div>
+  <h2>验证瓶颈：为什么「记忆」不能直接被奖励</h2>
+  <p class="lead">RL 后训练需要一个能给 rollout 打分的函数。对语言模型，数学题有标准答案；对世界模型，
+  <b>「按这串动作走 381 帧之后世界应该长什么样」没有标准答案</b>。这不是工程问题，是结构性的。</p>
+
+  <div class="prose">
+    <p>WorldCycle 把这件事形式化得最干净。把交互式世界模型看成一个学到的状态转移系统
+    <span class="m">M</span><sub>θ</sub> = (<span class="m">S</span>, <span class="m">A</span>, <span class="m">f</span><sub>θ</sub>)，
+    真实动作 <span class="m">a</span> 对应变换 <span class="m">T<sub>a</sub></span>，模型实现的是 <span class="m">T̂<sub>a</sub></span>。
+    即使训得很好，每一步也只是差一个残差变换：</p>
+  </div>
+
+  <div class="eq">
+    <span class="no">残差累积</span>
+    <i>T̂<sub>a</sub></i> = <i>T<sub>a</sub></i> ∘ <i>E<sub>a</sub></i>,&nbsp;&nbsp; <i>E<sub>a</sub></i> ≈ <i>I</i>
+    &nbsp;&nbsp;⟹&nbsp;&nbsp;
+    <i>T̂<sub>γ</sub></i> = (<i>T<sub>a<sub>T</sub></sub></i> ∘ <i>E<sub>a<sub>T</sub></sub></i>) ∘ ⋯ ∘ (<i>T<sub>a<sub>1</sub></sub></i> ∘ <i>E<sub>a<sub>1</sub></sub></i>) ≠ <i>T<sub>γ</sub></i>
+    <small>自回归让上一步的输出成为下一步的上下文，所以这些残差<b>不会相互抵消</b>，而是随时程复合。
+    要直接度量偏差就得知道正确的 <i>T<sub>γ</sub></i>——而对任意动作序列它是未知的。这就是<b>验证瓶颈</b>。</small>
+  </div>
+
+  <figure class="fig" id="figDrift">
+    <div class="fh"><span class="no">图 1</span><span class="ti">残差怎么变成漂移：把每步误差调大一点看看</span></div>
+    <div class="ctl">
+      <label>每步残差 <span class="m">ε</span>（旋转 °） <input type="range" id="dRot" min="0" max="3" step="0.1" value="0.9"><span class="val" id="dRotV">0.9</span></label>
+      <label>每步残差（尺度 %） <input type="range" id="dScl" min="0" max="4" step="0.2" value="1.4"><span class="val" id="dSclV">1.4</span></label>
+      <label>半循环长度 <span class="m">m</span> <input type="range" id="dM" min="3" max="14" step="1" value="8"><span class="val" id="dMV">8</span></label>
+      <div class="sep"></div>
+      <div class="seg" id="dAct" role="group" aria-label="动作类型">
+        <button type="button" data-a="0">简单动作 W→S</button>
+        <button type="button" data-a="1" aria-pressed="true">复合动作 W+D</button>
+      </div>
+      <div class="seg" id="dMode" role="group" aria-label="显示模式">
+        <button type="button" data-m="0" aria-pressed="true">单个循环</button>
+        <button type="button" data-m="1">重复 3 次</button>
+      </div>
+    </div>
+    <div class="figbody chartwrap">
+      <svg id="driftSvg" viewBox="0 0 900 330" role="img" aria-label="前进路径与反向路径因每步残差而无法闭合的示意"></svg>
+      <div class="tip" id="tipDrift"></div>
+    </div>
+    <div class="readout" id="driftOut"></div>
+    <figcaption>
+      模型每一步都只差一点点（旋转 <span class="m">ε</span> 度、尺度 1+δ），把前进段走完再执行它的<b>逆程序</b>，理应回到起点。
+      切到<b>复合动作 W+D</b>（前进同时转向）路径会画出一段弧，漂移看得最清楚——这也正是基座最弱的设置（WorldPlay 复合动作准确率仅 0.136）。
+      <span class="rC">琥珀</span>是前进段，<span class="rX">红</span>是反向段，虚线连接的是<b>镜像帧对</b>——它们本该重合。
+      三个读数正是 CycleBench 的三个指标：<b>ESC</b>（终点与首帧的距离）、<b>RPS</b>（镜像对平均距离）、<b>RCS</b>（重复循环之间同相位的距离）。
+      注意 ESC 只在终点看一次、信号稀疏；RPS 在每个中间深度都能看，这就是 WorldCycle 把「端点奖励」改成「稠密镜像奖励」的理由。
+    </figcaption>
+  </figure>
+
+  <div class="prose">
+    <h3><span class="ix">1.1</span>五种绕法，五族方法</h3>
+    <p>既然长程真值拿不到，所有方法都在做同一件事：<b>找一个便宜的、可计算的东西来代替它</b>。这个「代替物」是什么，就决定了它属于哪一族，也决定了它的天花板。</p>
+  </div>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>族</th><th>用什么代替长程真值</th><th>需要 GT 未来？</th><th>能验证长程状态？</th><th>代表</th></tr></thead>
+      <tbody>
+        <tr><td><span class="famdot d0"></span><b>I 像素 / GT</b></td><td>真实未来帧的 L1 + LPIPS / 预测准确率</td><td class="num"><span class="pill x">必须</span></td><td class="num"><span class="pill x">否</span></td><td>RLVR-World</td></tr>
+        <tr><td><span class="famdot d1"></span><b>II 动作反演</b></td><td>把视频反推回低维动作空间再比对</td><td class="num"><span class="pill o">不需要</span></td><td class="num"><span class="pill x">否 · 逐 clip</span></td><td>RLIR、WorldCompass</td></tr>
+        <tr><td><span class="famdot d2"></span><b>III 几何 3D</b></td><td>冻结 3D 基础模型给出的位姿 / 深度不变量</td><td class="num"><span class="pill o">不需要</span></td><td class="num"><span class="pill n">部分 · 位姿闭环</span></td><td>GrndCtrl、World-R1</td></tr>
+        <tr class="hl"><td><span class="famdot d3"></span><b>IV 代数闭合</b></td><td>可逆循环的解析恒等式 <span class="m">T</span><sub>γ<sup>−1</sup>∘γ</sub> = <span class="m">I</span></td><td class="num"><span class="pill o">不需要</span></td><td class="num"><span class="pill o">是 · 唯一</span></td><td>WorldCycle</td></tr>
+        <tr><td><span class="famdot d4"></span><b>V 奖励模型</b></td><td>人类偏好蒸馏出的 VLM 判官</td><td class="num"><span class="pill o">不需要</span></td><td class="num"><span class="pill n">块级窗口</span></td><td>WorldReward、ReWorld</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">「能验证长程状态」= 奖励函数里是否存在一项，其取值取决于<b>相隔很远的两帧之间</b>的一致性。族 I–III、V 的奖励都可以在一个短窗口内算完，族 IV 不行。</p>
+</section>
+
+<!-- ============================================================ 02 MAP -->
+<section class="sec" id="s-map">
+  <div class="eyebrow"><span class="n">02</span><span class="t">Taxonomy</span><span class="line"></span></div>
+  <h2>五族奖励来源 + 一个优化机制层</h2>
+  <p class="lead">这张图按<b>「奖励从哪里来」</b>横切整条线。上面五条是奖励信号的来源（决定天花板），
+  下面一条是优化机制层（决定这个信号能不能有效地传到模型里）。点色块看细节。</p>
+
+  <figure class="fig" id="figMap">
+    <div class="fh"><span class="no">图 2</span><span class="ti">分类图谱：世界模型 RL 后训练的奖励来源</span></div>
+    <div class="figbody">
+      <div class="famgrid">
+        <div class="fampick" id="famPick" role="group" aria-label="选择一族">
+          <button type="button" class="p0" data-f="0"><b>族 I</b>像素 / GT 可验证</button>
+          <button type="button" class="p1" data-f="1"><b>族 II</b>动作反演可验证</button>
+          <button type="button" class="p2" data-f="2"><b>族 III</b>几何 3D 可验证</button>
+          <button type="button" class="p3" data-f="3" aria-pressed="true"><b>族 IV</b>代数闭合自验证</button>
+          <button type="button" class="p4" data-f="4"><b>族 V</b>学习型奖励模型</button>
+          <button type="button" class="p5" data-f="5"><b>机制层</b>rollout / 探索 / 算法</button>
+        </div>
+        <div class="chartwrap">
+          <svg id="mapSvg" viewBox="0 0 660 420" role="img" aria-label="五族奖励来源的结构图"></svg>
+          <div class="tip" id="tipMap"></div>
+        </div>
+      </div>
+    </div>
+    <div class="faminfo" id="famInfo"></div>
+    <figcaption>
+      共同结构：<b>策略 = 预训练世界模型</b>，rollout 一组候选，用某个<b>冻结的验证器</b>打分，组内归一化成 advantage，再更新策略。
+      五族的差别全在中间那个方框——验证器是什么。族 IV 的验证器不是一个模型，而是一条<b>代数恒等式</b>，这是它能突破短程限制的唯一原因。
+    </figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">一个容易混淆的边界</div>
+    <p>有三篇同期工作也用「循环一致性」，但<b>不是 RL</b>，这一页把它们列为对照而不是主线：</p>
+    <ul>
+      <li><b>Cycle-World</b>（2607.11836）——反向预测 cycle consistency 作为<b>可微损失</b>（CCL），外加推理期把冻结反向模型当 runtime corrector 做梯度引导（CGI）。有 Cycle-Bounded Drift 定理。</li>
+      <li><b>World Models as Group Actions</b>（2605.24578）——identity / inverse / composition 一致性作为<b>latent 空间正则</b>，配合合成监督；提出 GAC / GAR 指标。</li>
+      <li>WorldCycle 自己在附录里写了这个区分：同一个循环结构有三种用法——<span class="rP">反向预测正则</span>、<span class="rP">群作用正则</span>、<span class="rC">自验证奖励函数</span>。只有第三种是 RL。</li>
+    </ul>
+  </div>
+</section>
+<!-- ============================================================ 03 FAMILY I -->
+<section class="sec" id="s-f1">
+  <div class="eyebrow"><span class="n">03</span><span class="t">Family I · pixel / GT verifiable</span><span class="line"></span></div>
+  <h2>族 I：像素 / GT 可验证</h2>
+  <p class="lead">这一族只有一篇真正的代表，但它是整条线的起点：<b>RLVR-World</b>（Tsinghua，NeurIPS 2025，arXiv 2505.13934）。
+  它证明了一件事——世界模型的<b>预测指标本身</b>就可以当 verifiable reward 用，而且效率高得离谱。</p>
+
+  <div class="prose">
+    <p>做法很直接：把不同模态的世界模型统一成自回归 token 序列（<span class="m">q</span>(s,a) 当「问题」，<span class="m">o</span>(s′) 当「回答」），
+    rollout 一组，解码回原空间，跟<b>真实的下一个状态</b>算指标，指标就是奖励，GRPO 更新。</p>
+    <ul>
+      <li><b>语言世界模型</b>：文本游戏状态预测用二值准确率当奖励。R1-Distill-Qwen-1.5B 从 SFT 的 32.87% → 57.01%（二值奖励）→ <b>63.24%</b>（任务定制奖励）；7B 版本 65.53%，<b>超过 GPT-4 的 64.76%</b>。网页状态预测 F1 49.94 → 65.11（+30.3%），下游 web agent 成功率 12.06% → 14.29%。</li>
+      <li><b>视频世界模型</b>：奖励 = −Σ[L1 + LPIPS]。RT-1 机械臂上 LPIPS 相对提升 9.2%，<b>只用了几百步梯度</b>——相比之下 MLE 预训练要几十万步。PushT / Rope / Granular 上超过 DINO-WM。</li>
+      <li><b>顺带修好的毛病</b>：多步视频预测里的<b>重复退化</b>（约 20% 的 token 与前一帧相同，模型学会抄近路），重复率 48.6% → 9.9%。</li>
+    </ul>
+    <h3><span class="ix">3.1</span>为什么它到长程就不行了</h3>
+    <p>两条硬约束。第一，<b>必须有 GT 未来</b>——这就把它锁死在 teacher-forcing 式的短程预测上，没法评估任意开放轨迹。
+    第二，后来的 RLIR 做了一次很有说服力的对照实验：把 RLVR-World 的像素奖励（L1+LPIPS）搬到 MineWorld / NFD 上，<b>几乎没有增益</b>（F1 0.70→0.71、0.77→0.77）。RLIR 给了四条解释：</p>
+    <ol>
+      <li><b>与预训练目标高度相关</b>——像素级监督跟交叉熵 / flow matching 损失方向一致，策略初始化就在局部最优附近，RL 没有有效探索空间。</li>
+      <li><b>所有像素等权</b>——L1 和 LPIPS 在整帧上求和，但对动作跟随而言只有<b>智能体运动相关的区域</b>重要。</li>
+      <li><b>与生成目标冲突</b>——世界模型必须合成新内容（探索时揭开的区域），那些区域<b>没有确定的 GT</b>，像素奖励反而惩罚合理的多样性。</li>
+      <li><b>易被 hack</b>——RLVR-World 训出的视频整体偏暗，因为后训练数据里有一部分是暗的，模型可以<b>把整帧调暗</b>来刷分。</li>
+    </ol>
+    <p>RLVR-World 论文自己的 Discussion 也点出了同样的方向：现有视觉指标「仍不能完全捕捉用户意图的质量，纳入<b>物理规则与时间一致性</b>这类约束需要更复杂的奖励设计」。这句话基本预告了后面两年的路线。</p>
+  </div>
+
+  <div class="call warn">
+    <div class="hd">给你的直接结论</div>
+    <p>如果你的目标是<b>状态记忆</b>，不要从像素奖励开始。它在有 GT 的短程任务上很强（几百步就超过几十万步 MLE），但它<b>结构上不可能</b>验证长程状态，而且在动作条件的游戏 / 探索场景里已经被两次实验证明不涨。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 04 FAMILY II -->
+<section class="sec" id="s-f2">
+  <div class="eyebrow"><span class="n">04</span><span class="t">Family II · action-inversion verifiable</span><span class="line"></span></div>
+  <h2>族 II：动作反演可验证 —— 这条线的工程主干</h2>
+  <p class="lead">核心洞察一句话：<b>与其在高维视频空间打分，不如把视频反推回低维动作空间再打分。</b>
+  一个动作序列可以对应很多合法视频，但所有高质量生成都必须<b>忠实地编码了输入动作</b>。这一族贡献了目前最成熟的工程栈。</p>
+
+  <h3><span class="ix">4.1</span>RLIR：用 IDM 当验证器（2509.23958，MSRA）</h3>
+  <div class="prose">
+    <p>第一篇专门为世界模型的<b>动作跟随能力</b>设计的后训练方法。用一个训好的 Inverse Dynamics Model 把生成视频反推成动作序列 <span class="m">â</span><sub>1..n</sub>，
+    与输入动作逐帧比对，命中记 1，奖励 = 平均命中率，GRPO 优化。IDM 用的是 VPT 预训练模型（2000 小时 Minecraft 视频，按键预测 90.6% 准确率）。</p>
+    <p>关键在于 IDM 对<b>细微视觉瑕疵极其敏感</b>：论文手工把树干裂纹 P 掉，IDM 就把 <code>attack</code> 误判成 <code>attack,back</code>，
+    也就是说「视觉退化」会自动转化成「动作不匹配」，一个奖励同时管住了两件事。这解释了为什么 RLIR 在提升 F1 的同时 FVD 和 PSNR 也一起变好。</p>
+  </div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>模型</th><th class="num">参数</th><th class="num">F1 ↑</th><th class="num">FVD ↓</th><th class="num">PSNR ↑</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>MineWorld</td><td class="num">700M</td><td class="num">0.70</td><td class="num">231</td><td class="num">15.32</td><td>自回归 token 基座</td></tr>
+        <tr class="hl"><td>+ RLIR</td><td class="num">700M</td><td class="num best">0.81</td><td class="num best">207</td><td class="num best">15.78</td><td>约 1000 个样本即收敛</td></tr>
+        <tr><td>NFD</td><td class="num">774M</td><td class="num">0.77</td><td class="num">184</td><td class="num">16.95</td><td>Diffusion Forcing 基座</td></tr>
+        <tr class="hl"><td>+ RLIR</td><td class="num">774M</td><td class="num best">0.83</td><td class="num best">180</td><td class="num best">17.48</td><td>ODE→SDE 转换后做 GRPO</td></tr>
+        <tr><td colspan="2"><b>Ground-truth 视频</b></td><td class="num">0.87</td><td class="num">—</td><td class="num">—</td><td>IDM 精度上界 = RLIR 的理论天花板</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">同一张表里的奖励对照（700M MineWorld）：像素奖励 L1+LPIPS 0.71、人类偏好奖励 VideoAlign 0.73、<b>RLIR 0.81</b>。
+  RLIR 由此提出了<b>奖励粒度</b>论点：video-level 太粗、pixel-level 太细，<b>frame-level 的动作对齐刚好</b>。</p>
+
+  <h3><span class="ix">4.2</span>WorldCompass：把 RL 重新为自回归世界模型设计一遍（2602.09022，ICML 2026 / 腾讯混元）</h3>
+  <div class="prose">
+    <p>这是这条线上工程完成度最高的一篇，三个改动全部针对「自回归 + 交互 + 长时程」这三个特性：</p>
+  </div>
+  <div class="grid3">
+    <div class="card cA">
+      <p class="mono">改动一</p>
+      <h5>Clip 级 rollout</h5>
+      不对整段视频采样，而是<b>共享前 n−1 个 clip 的前缀</b>，只在第 n 个 clip 上采 G 个候选。
+      复杂度从 <span class="m">O</span>(N·G) 降到 <span class="m">O</span>(N+G)，同时奖励从「整段一个分」变成「每个 clip 一个分」。
+      目标 clip 索引 n 按 <code>(k mod N)+1</code> 循环，天然形成<b>课程学习</b>。
+    </div>
+    <div class="card cA">
+      <p class="mono">改动二</p>
+      <h5>互补双奖励</h5>
+      <b>动作跟随</b>：3D 基础模型估相机轨迹 → 映射到离散动作空间算准确率（旋转阈值 1°，平移用 5 个阈值 [0.01…0.05] 中任一命中即算对，解决尺度不可比）。
+      <b>视觉质量</b>：HPSv3，每 4 帧采样求均值。两者<b>互为正则</b>。
+    </div>
+    <div class="card cA">
+      <p class="mono">改动三</p>
+      <h5>DiffusionNFT 而非 GRPO</h5>
+      关键发现：<b>SDE 采样在同一初始噪声上只改变视觉场景，几乎不改变相机运动</b>，
+      所以 Flow-GRPO 那套探索不出动作多样性。改成从<b>不同初始噪声</b>采样 + 负样本感知微调，直接用 flow matching 目标训。
+      省掉 KL 项，改用低学习率 + EMA（0.4→0.8 退火）防过优化。
+    </div>
+  </div>
+
+  <div class="eq">
+    <span class="no">DiffusionNFT 的最优性概率</span>
+    <i>r</i><sup>(i)</sup> = <span class="frac"><span>1</span><span>2</span></span> + <span class="frac"><span>1</span><span>2</span></span> clip( <span class="frac"><span>λ<i>a</i><sup>(i)</sup><sub>IF</sub> + (1−λ)<i>a</i><sup>(i)</sup><sub>VQ</sub></span><span>Z</span></span>, −1, 1 )
+    <small>其中 <i>a</i><sub>IF</sub>、<i>a</i><sub>VQ</sub> 是两个奖励维度各自的组内标准化 advantage。
+    损失 <i>L</i> = <i>r</i><sup>(i)</sup>‖<i>v</i><sup>+</sup><sub>θ</sub> − <i>v</i><sup>(i)</sup>‖² + (1−<i>r</i><sup>(i)</sup>)‖<i>v</i><sup>−</sup><sub>θ</sub> − <i>v</i><sup>(i)</sup>‖²，
+    正 / 负速度由 EMA 旧模型与当前模型外插得到。λ = 2/3，Z = 2，β = 1。</small>
+  </div>
+
+  <figure class="fig" id="figRollout">
+    <div class="fh"><span class="no">图 3</span><span class="ti">Clip 级 rollout：为什么它同时省算力又给出更好的奖励</span></div>
+    <div class="ctl">
+      <label>clip 数 <span class="m">N</span> <input type="range" id="rN" min="2" max="16" step="1" value="16"><span class="val" id="rNV">16</span></label>
+      <label>组大小 <span class="m">G</span> <input type="range" id="rG" min="2" max="16" step="1" value="16"><span class="val" id="rGV">16</span></label>
+    </div>
+    <div class="figbody chartwrap">
+      <svg id="rollSvg" viewBox="0 0 900 300" role="img" aria-label="sample 级与 clip 级 rollout 的对比"></svg>
+      <div class="tip" id="tipRoll"></div>
+    </div>
+    <div class="readout" id="rollOut"></div>
+    <figcaption>
+      上排 = sample 级 rollout（G 条完整轨迹，每条一个分）；下排 = clip 级（共享前缀 + G 个候选 clip，每个候选一个分）。
+      WorldCompass 的消融把这件事量化了：长时程组合动作准确率，clip 级 <b>54.82</b> vs sample 级 <b>12.45</b>（基座 19.70）——
+      sample 级不仅没帮上忙，还<b>把基座的动作跟随能力训坏了</b>。原因是动作跟随在 clip 之间基本独立，聚合成一个分之后成功和失败互相抵消，梯度变成噪声。
+      而视觉质量有很强的时序相关性，整段一个分反而够用——这也是为什么 sample 级唯一还在涨的是 HPSv3。
+    </figcaption>
+  </figure>
+
+  <div class="call warn">
+    <div class="hd">WorldCompass 自己承认的局限（附录 A，逐字）</div>
+    <p>「目前<b>缺乏可靠的指标来评估长视频生成中的视觉质量漂移与空间记忆保持</b>。因此我们的奖励信号缺少直接惩罚这类漂移的约束，
+    这导致在长时长自回归视频生成上做大规模 RL 训练时会出现累积性的质量退化。我们目前通过<b>更少的迭代次数和更低的学习率</b>这种保守策略来缓解，
+    但更根本的解决办法需要一个专门评估视觉漂移与空间记忆的稳健奖励函数。」</p>
+    <p style="margin-top:8px">这段话是整份调研的核心证据：<b>这条线上工程最完整的那篇，明确地说自己没有记忆奖励。</b>后面 WorldCycle 和 WorldReward 都是在补这个洞——一个从代数下手，一个从奖励模型下手。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 05 FAMILY III -->
+<section class="sec" id="s-f3">
+  <div class="eyebrow"><span class="n">05</span><span class="t">Family III · geometry verifiable</span><span class="line"></span></div>
+  <h2>族 III：几何 3D 可验证</h2>
+  <p class="lead">把「冻结的 3D 基础模型」当验证器：它从生成视频里恢复位姿和深度，这些量满足的<b>几何不变量</b>就是奖励。
+  与族 II 的差别在于，几何族约束的是<b>结构</b>而不是<b>指令</b>——它问的是「这段视频能不能被重建成一个自洽的三维场景」。</p>
+
+  <h3><span class="ix">5.1</span>GrndCtrl / RLWG：把 RLVR 搬到几何域（2512.01952，CMU + FieldAI）</h3>
+  <div class="prose">
+    <p>论文提出的框架叫 <b>RLWG</b>（Reinforcement Learning with World Grounding），口号很清楚：
+    「RLVR 把语言锚定在逻辑上，RLWG 把世界模型锚定在几何上」。基座是 Cosmos-Predict2-2B-Video2World，先做 SFT 适配 6-DoF 导航动作，再 GRPO 后训练。
+    四个奖励全部来自<b>冻结的评估器</b>（MapAnything 给几何，VideoAlign 给感知）：</p>
+    <ul>
+      <li><b>平移奖励</b> <span class="m">r</span><sub>trans</sub>：轨迹 MSE + 终点误差平方</li>
+      <li><b>旋转奖励</b> <span class="m">r</span><sub>rot</sub>：轴角累积误差</li>
+      <li><b>深度时序重投影内点率</b> <span class="m">r</span><sub>dtr</sub>：用 <span class="m">D<sub>t</sub></span>、(Δ<span class="m">R<sub>t</sub></span>, Δ<span class="m">t<sub>t</sub></span>) 把像素投到 t+1，与 <span class="m">D</span><sub>t+1</sub> 比对，相对误差 &lt; 0.0103 记内点</li>
+      <li><b>视频质量</b> <span class="m">r<sub>v</sub></span>：VideoAlign 的 visual + motion 各占一半</li>
+    </ul>
+    <p>最亮的结果在 <b>counterfactual</b> 评测上——场景见过、但动作被镜像 / 反向。基座在这里退化严重（SCAND 上平移误差比 Seen 高 70%），
+    而 GrndCtrl 在 CityWalk 上把 counterfactual 平移误差从 13.1 m 降到 <b>4.7 m（−64%）</b>。
+    这是最接近「记忆」的证据：<b>沿反向动作走回去，场景不再漂走</b>。可靠性分析同样说明问题：200 步后平移误差均值降 77%、<b>标准差降 75%</b>——rollout 从「有时对有时崩」变成稳定。</p>
+  </div>
+
+  <figure class="fig" id="figGrnd">
+    <div class="fh"><span class="no">图 4</span><span class="ti">GrndCtrl：奖励逐项叠加时发生了什么（CODa / SCAND / CityWalk）</span></div>
+    <div class="ctl">
+      <div class="seg" id="gDs" role="group" aria-label="数据集">
+        <button type="button" data-d="0" aria-pressed="true">CODa</button>
+        <button type="button" data-d="1">SCAND</button>
+        <button type="button" data-d="2">CityWalk</button>
+      </div>
+      <div class="sep"></div>
+      <div class="seg" id="gRg" role="group" aria-label="评测制度">
+        <button type="button" data-r="0">Seen</button>
+        <button type="button" data-r="1" aria-pressed="true">Counterfactual</button>
+        <button type="button" data-r="2">Unseen</button>
+      </div>
+    </div>
+    <div class="figbody chartwrap">
+      <svg id="grndSvg" viewBox="0 0 900 258" role="img" aria-label="GrndCtrl 奖励组合的消融结果"></svg>
+      <div class="tip" id="tipGrnd"></div>
+    </div>
+    <figcaption>
+      平移误差（米，越低越好）。<b>T+R</b> 加位姿奖励、<b>+DTRI</b> 加深度重投影、<b>+V</b> 加感知质量。
+      论文的四条观察：基座在 counterfactual 上退化最严重；T+R 在 counterfactual 上收益最大；
+      <b>DTRI 强化局部一致性但牺牲全局对齐</b>（CODa Seen 上反而从 46.4 涨到 65.7）；<b>全套奖励最均衡</b>。
+      这是「单一奖励必崩、互补奖励互为正则」这条定律在几何域的又一次复现。
+    </figcaption>
+  </figure>
+
+  <h3><span class="ix">5.2</span>World-R1：不改架构，用 RL 把 3D 先验「唤出来」（2604.24764，MSRA + 浙大，ICML 2026）</h3>
+  <div class="prose">
+    <p>另一条路子：不给视频模型加 3D 模块、也不用 3D 数据集，而是相信<b>视频基础模型本身已经隐含编码了 3D 信息</b>，用 RL 把它逼出来。
+    Flow-GRPO 优化 Wan2.1-T2V（1.3B / 14B），奖励是 analysis-by-synthesis：</p>
+    <ul>
+      <li>把生成视频用 Depth Anything 3 提升成 3D Gaussian Splatting；</li>
+      <li><b>S<sub>meta</sub></b>：从一个<b>偏离生成轨迹的新视角</b>（meta-view）渲染，让 Qwen3-VL 当图形学专家打 0–9 分。这一项专治「2D 看着合理、3D 一看是纸板」的幻觉；</li>
+      <li><b>S<sub>recon</sub></b> = 1 − LPIPS(原视频, 重渲染)；<b>S<sub>traj</sub></b> 轨迹对齐；<b>R<sub>gen</sub></b> 通用生成质量。</li>
+      <li>相机条件用 <b>noise wrapping</b> 隐式注入（Go-with-the-Flow），完全不加参数。</li>
+      <li><b>周期性解耦训练</b>：每 100 步暂停 3D 奖励，只在「火焰、流水、人群」这类高熵动态子集上用 R<sub>gen</sub> 训——防止几何约束把非刚性动态压死。</li>
+    </ul>
+    <p>121 帧长视频上：Wan2.1-T2V-14B PSNR 18.32 → <b>26.32</b>，LPIPS 0.534 → <b>0.257</b>。用户研究里几何一致性胜率 92%。
+    消融值得注意：<b>去掉周期性解耦训练，重建类分数反而更好（PSNR 27.89），但 VBench 掉到 82.64</b>——模型学会了「尽量别动」这种退化解。</p>
+  </div>
+
+  <div class="call">
+    <div class="hd">几何族的天花板</div>
+    <p>几何奖励保证的是<b>「这段视频对应一个自洽的三维场景」</b>，不等于<b>「你转一圈回来，那栋楼还是原来那栋楼」</b>。
+    重建一致 ≠ 内容记忆：一个模型完全可以生成几何自洽但内容被悄悄替换掉的场景，几何验证器不会报警。
+    GrndCtrl 的位姿 cycle-consistency 是这一族里唯一带闭环味道的项，也是它 counterfactual 收益最大的原因。</p>
+  </div>
+</section>
+<!-- ============================================================ 06 FAMILY IV -->
+<section class="sec" id="s-f4">
+  <div class="eyebrow"><span class="n">06</span><span class="t">Family IV · algebraic self-verification</span><span class="line"></span></div>
+  <h2>族 IV：代数闭合自验证 —— 唯一直接奖励「状态记忆」的一族</h2>
+  <p class="lead"><b>WorldCycle</b>（arXiv 2608.04964，HKUST + 武大 + 腾讯视频 AI 技术中心）。
+  一句话洞察：<b>验证瓶颈有一个结构性例外——可逆轨迹。</b>
+  <span class="m">T</span><sub>γ<sup>−1</sup>∘γ</sub> = <span class="m">I</span> 这条恒等式由动作的代数结构完全决定，
+  <b>与场景内容、初始状态、中间观测全部无关</b>，因此给出了一个精确的、无需标注的长时程验证器。</p>
+
+  <div class="prose">
+    <p>论文开篇给了一个刺眼的 sanity check：让 WorldPlay（8B，ICML'26 的 SOTA 开源世界模型）和已经 RL 过的 WorldCompass
+    执行「前进 → 后退」，两者<b>都回不到起点</b>；同一个动作在 rollout 的不同位置产生的位移也不一致。
+    前者叫<b>空间闭合失败</b>，后者叫<b>时间一致性失败</b>——两者都随时程放大，而且<b>任何短程奖励都看不见它们</b>。</p>
+    <h3><span class="ix">6.1</span>两个奖励，各治一个失败模式</h3>
+  </div>
+
+  <figure class="fig" id="figCycle">
+    <div class="fh"><span class="no">图 5</span><span class="ti">WorldCycle 的两个奖励：稠密镜像闭合 + 跨循环相位对齐</span></div>
+    <div class="ctl">
+      <label>半循环长度 <span class="m">m</span> <input type="range" id="cM" min="2" max="8" step="1" value="5"><span class="val" id="cMV">5</span></label>
+      <label>重复次数 <span class="m">K</span> <input type="range" id="cK" min="1" max="4" step="1" value="3"><span class="val" id="cKV">3</span></label>
+      <div class="sep"></div>
+      <div class="seg" id="cShow" role="group" aria-label="显示哪个奖励">
+        <button type="button" data-s="0" aria-pressed="true">空间闭合 R<sub>spatial</sub></button>
+        <button type="button" data-s="1">时间一致 R<sub>temporal</sub></button>
+        <button type="button" data-s="2">两者叠加</button>
+      </div>
+    </div>
+    <div class="figbody chartwrap">
+      <svg id="cycSvg" viewBox="0 0 900 300" role="img" aria-label="WorldCycle 的镜像帧对与跨循环相位对齐结构"></svg>
+      <div class="tip" id="tipCyc"></div>
+    </div>
+    <div class="exp" id="cycExp"></div>
+    <figcaption>
+      每个格子是一个 16 帧的 chunk（与基座 WorldPlay 的自回归块对齐）。
+      <b>空间闭合</b>把前 <span class="m">i</span> 步后的状态与反向轨迹第 2<span class="m">m</span>−<span class="m">i</span> 相位的状态配对——
+      不是只看终点，而是<b>每个中间深度都配一对</b>，于是每个 chunk 都成了一个可独立验证的闭合检查，正好匹配自回归后训练的 chunk 结构。
+      <b>时间一致</b>则把重复执行的多个循环<b>按相位对齐</b>比较，直接惩罚「同一个动作在不同 rollout 深度下行为不同」。
+    </figcaption>
+  </figure>
+
+  <div class="eq">
+    <span class="no">R<sub>spatial</sub></span>
+    <i>R</i><sub>spatial</sub> = <span class="frac"><span>1</span><span><i>m</i>+1</span></span> <span class="r">Σ</span><sub><i>i</i>=0</sub><sup><i>m</i></sup> exp[ −α · <i>d</i>(<i>o<sub>i</sub></i>, <i>o</i><sub>2<i>m</i>−<i>i</i></sub>) ]
+    <small>状态差异 <i>d</i>(<i>o<sub>i</sub></i>, <i>o<sub>j</sub></i>) 用<b>稠密点跟踪</b>（训练期 CoTracker）的尺寸归一化平均位移作为可观测代理：
+    <i>d</i> = <span class="frac"><span>1</span><span><i>N</i>(<i>H</i>+<i>W</i>)</span></span> Σ<sub><i>n</i></sub> ‖<i>p<sup>i</sup><sub>n</sub></i> − <i>p<sup>j</sup><sub>n</sub></i>‖₂，低置信匹配剔除。
+    评测时 CycleBench 换用<b>独立</b>的 RoMa 做稠密对应，避免训练奖励与评测指标同源。</small>
+  </div>
+
+  <div class="grid2">
+    <div class="card cT">
+      <p class="mono">超参与调度</p>
+      <h5>warm-up-and-combine 不是可选项</h5>
+      先只用 spatial 跑 <span class="m">t<sub>w</sub></span> = 300 步，之后再<b>叠加</b> temporal（而不是切换）。
+      消融很直白：<b>joint from scratch</b>（一上来就联合）长时程 ESC 0.180、<b>sequential S→T</b>（先空间后只用时间）0.176、
+      <b>warm-up-and-combine</b> 0.163。原因是：单个循环还没大致闭合之前，相位对齐比较<b>没有参照物</b>，梯度只是噪声；
+      而一旦丢掉空间锚点，训练又会重新漂走。
+    </div>
+    <div class="card cT">
+      <p class="mono">训练设置</p>
+      <h5>比想象中便宜</h5>
+      基座 WorldPlay 8B AR checkpoint；<b>约 4000 张真实场景 image–caption</b>；
+      循环与重复<b>在线构造</b>，不需要任何循环相关的标注；rollout 组大小 G=16，每层级最多 K=8 次重复，
+      每步只采一个层级以保持每步 rollout 成本恒定；最大生成长度 16 个 clip；
+      奖励权重 λ<sub>s</sub>=1.0、λ<sub>t</sub>=0.5、λ<sub>v</sub>=1.0、λ<sub>a</sub>=2.0；AdamW lr 1e-5。
+      <b>8×H200，3 天。</b>
+    </div>
+  </div>
+
+  <h3><span class="ix">6.2</span>结果：以及为什么它对 OOD 复合动作特别管用</h3>
+  <figure class="fig" id="figCycAbl">
+    <div class="fh"><span class="no">图 6</span><span class="ti">CycleBench 消融：两个奖励各管什么</span></div>
+    <div class="ctl">
+      <div class="seg" id="caMetric" role="group" aria-label="选择设置">
+        <button type="button" data-k="0" aria-pressed="true">短 125 帧 ESC</button>
+        <button type="button" data-k="1">中 253 帧 ESC</button>
+        <button type="button" data-k="2">长 381 帧 ESC</button>
+        <button type="button" data-k="3">复合动作准确率</button>
+        <button type="button" data-k="4">复合动作 HPSv3</button>
+      </div>
+    </div>
+    <div class="figbody chartwrap">
+      <svg id="caSvg" viewBox="0 0 900 250" role="img" aria-label="WorldCycle 的奖励与调度消融"></svg>
+      <div class="tip" id="tipCa"></div>
+    </div>
+    <figcaption>
+      <b>Spatial only</b> 到处都涨；<b>Temporal only</b> 明显更弱，因为它依赖单个循环大致闭合。
+      去掉 temporal 主要伤<b>长程稳定性</b>（长时程 ESC 0.163 → 0.212）和<b>复合动作泛化</b>。
+      最后一栏是反驳「一致性是拿画质换来的」这个怀疑：完整模型 HPSv3 <b>10.42</b>，比基座 8.98 高 16%，是所有变体里最高的。
+    </figcaption>
+  </figure>
+
+  <div class="call ok">
+    <div class="hd">最值得注意的一个数字</div>
+    <p>复合动作（前进 + 转向同时按）上，基座 WorldPlay 的准确率<b>崩到 0.136</b>——因为预训练数据里几乎没有复合轨迹的 GT 视频，这是分布外。
+    WorldCycle 做到 <b>0.553（4×）</b>。<b>关键在于：循环闭合奖励不需要 GT 视频就能优化这些动作</b>——恒等式对任何可逆动作组合都成立，
+    包括基座根本不会执行的那些。这是「自验证奖励」相对「模仿式监督」最实在的优势：<b>它能训你没有数据的东西。</b></p>
+  </div>
+
+  <div class="call warn">
+    <div class="hd">这一族的边界，说清楚</div>
+    <ul>
+      <li><b>只覆盖可逆动作。</b>论文自陈：对物体形变、接触交互、持久状态变化，动作序列无法靠施加逆控制回到初态，当前的循环构造不适用。
+      而世界模型最需要「记忆」的恰恰是这些——你砸掉的方块、你打开的门、你捡起的物品。</li>
+      <li><b>点跟踪是代理，不是状态。</b>底层物理状态不可观测，用图像空间的稠密对应位移代替。遮挡、大视角变化、纹理贫乏区域都会让这个代理失真。</li>
+      <li><b>长时程 381 帧上绝对值仍然很差。</b>WorldCycle 的动作准确率只有 0.095，基座 0.073，WorldCompass 0.084——三者都接近崩溃。
+      循环奖励缓解了漂移（ESC 0.302 → 0.163），但<b>没有解决</b>长时程动作跟随。</li>
+      <li>论文自己指出的方向：把自验证推广到不可逆过程，需要<b>守恒律、等价终态</b>或其他解析可验证的约束。这是这条线最有价值的开放问题。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================================================ 07 FAMILY V -->
+<section class="sec" id="s-f5">
+  <div class="eyebrow"><span class="n">07</span><span class="t">Family V · learned reward models</span><span class="line"></span></div>
+  <h2>族 V：学习型奖励模型 —— 用 VLM 判官补上「几何看不见的那半」</h2>
+  <p class="lead">前三族的验证器都是<b>规则或几何模型</b>，它们能判「相机转对了没有」，判不了「转对了但纹理在往外漂」。
+  这一族把验证器换成<b>从人类偏好蒸馏出来的 VLM</b>，代价是引入了奖励模型自身的偏差和被 hack 的可能。</p>
+
+  <h3><span class="ix">7.1</span>WorldReward：本调研里最新的一篇（2609.03952，复旦 + 腾讯混元，2026-09-03）</h3>
+  <div class="prose">
+    <p>它明确地把自己定位成 WorldCompass 的<b>奖励替换</b>——基座、训练数据、评测划分、rollout 流程、DiffusionNFT 配置<b>全部不变，只换奖励信号</b>。
+    这个受控设置让它的结论特别干净。三个设计：</p>
+    <ul>
+      <li><b>块级证据而非整段视频</b>：把动作轨迹切成<b>每 4 个连续动作一块</b>（前面补一个 idle 槽对应源帧）。
+      每块给 VLM 六张图：源图（锚定场景身份、检测漂移）、成对帧网格（每个动作的首 / 中 / 末帧）、四张动作级面板（每个动作的首→末帧转变）。
+      理由很物理：<b>相机动作留下方向特异的视觉证据</b>——前进时可见内容应逐渐放大，上仰时已有内容应向下移、新内容从顶部进入。</li>
+      <li><b>一个模型同时输出两个偏好</b>：动作一致性 + 视觉质量，来自<b>同一份证据的同一次推理</b>；块级裁决再<b>投票</b>聚合成视频级偏好。
+      投票防止单个强 / 弱片段主导整段判断。</li>
+      <li><b>数据管线</b>：Gemini 3.1 Pro 块级推理蒸馏 → GPT-5.5 工具型 agent 多轮审计 → 人工定向校准。
+      消融显示 agent 审计贡献了绝大部分增益（平均 68.69 → 75.94），人工校准再加一点（→ 77.33）。
+      结果是<b>蒸馏出来的学生超过了两个老师</b>。</li>
+    </ul>
+    <p>用作 RL 奖励：Pref-GRPO 的成对胜率形式（<span class="m">R<sup>m</sup><sub>i</sub></span> = 组内对其余 G−1 个候选的归一化胜率），
+    两个维度各自标准化后按 WorldCompass 的公式合成最优性概率，再走 DiffusionNFT。</p>
+  </div>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>HY-WorldPlay 1.5 后训练</th><th class="num">组合动作 Acc</th><th class="num">组合 HPSv3</th><th class="num">基本动作 Acc</th><th class="num">基本 HPSv3</th></tr></thead>
+      <tbody>
+        <tr><td colspan="5" style="color:var(--ink3);font-family:var(--font-mono);font-size:11.5px;padding-top:12px">短时程 ~125 帧</td></tr>
+        <tr><td>基座</td><td class="num">21.74</td><td class="num">−1.05</td><td class="num">62.33</td><td class="num">1.96</td></tr>
+        <tr><td>WorldCompass（几何 + HPSv3）</td><td class="num">58.20</td><td class="num">0.42</td><td class="num">68.62</td><td class="num">3.77</td></tr>
+        <tr class="hl"><td>WorldReward-RL（同流程，换奖励）</td><td class="num best">59.96</td><td class="num best">0.68</td><td class="num best">74.43</td><td class="num best">3.92</td></tr>
+        <tr><td colspan="5" style="color:var(--ink3);font-family:var(--font-mono);font-size:11.5px;padding-top:12px">长时程 ~381 帧</td></tr>
+        <tr><td>基座</td><td class="num">19.70</td><td class="num">−0.33</td><td class="num">64.28</td><td class="num">1.90</td></tr>
+        <tr><td>WorldCompass</td><td class="num">54.82</td><td class="num">0.73</td><td class="num">76.56</td><td class="num">3.72</td></tr>
+        <tr class="hl"><td>WorldReward-RL</td><td class="num best">56.40</td><td class="num best">1.02</td><td class="num best">78.84</td><td class="num best">3.94</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">它修好的具体毛病，正是 WorldCompass 承认的那个</div>
+    <p>论文定性对比里写得很明确：WorldCompass 相对基座提升了相机控制精度，但<b>后段帧出现明显的色偏和纹理一致性的逐渐流失</b>。
+    可能的原因是它的图像级奖励<b>独立地给采样帧打分，从不直接评估颜色与纹理在时间上是否保持一致</b>。
+    WorldReward 从动作对齐的<b>视频证据</b>评判视觉质量，因此在整条轨迹上外观更稳。</p>
+    <p style="margin-top:8px">但注意这仍然是<b>块内窗口</b>（4 个动作）的一致性，不是「381 帧后回到起点」的一致性。<b>它把短程窗口拉宽了，没有跨越到长程。</b></p>
+  </div>
+
+  <h3><span class="ix">7.2</span>具身侧的三篇：维度更多，reward hacking 也更严重</h3>
+  <div class="grid3">
+    <div class="card cL">
+      <p class="mono">ReWorld · 2601.12428</p>
+      <h5>层级多维奖励模型</h5>
+      约 <b>235K</b> 视频偏好数据，训一个层级奖励模型覆盖<b>物理真实、任务完成、具身合理、视觉质量</b>四维，
+      再用高效的 PPO 式算法后训练基于 flow 的具身世界模型。定位是「接触密集的操作任务里，视觉质量之外的东西才是瓶颈」。
+    </div>
+    <div class="card cL">
+      <p class="mono">RoboAlign-R1 · 2605.03821</p>
+      <h5>教师判官 → 98M 学生奖励</h5>
+      ROBOTWORLDBENCH（10K 标注视频-指令对，4 个机器人数据源），Qwen3-VL-8B-Thinking 教师做<b>六维</b>细粒度评价
+      （指令跟随、操作成功、动作—结果一致、时序一致、接触真实、物理遵循），Huber 回归蒸馏成 98M 学生（约 50 视频/秒），GRPO 后训练。
+      六维总分 <b>+10.1%</b>。另配一个训练无关的推理策略 <b>SWR</b>（滑窗重编码，周期性刷新生成上下文）压长程漂移：SSIM +2.8%、LPIPS −9.8%，延迟只加约 1%。
+    </div>
+    <div class="card cL">
+      <p class="mono">Reward as an Agent · 2606.19990</p>
+      <h5>奖励从标量函数变成 agent</h5>
+      规划（先做全局质量评估、动态初始化子奖励优先级）→ 课程式评估（视觉质量 → 指令跟随 → 任务完成 → 物理合规，逐级设阈值）→ 投票（把大项拆成细项分别验证）→ 反思（回看轨迹交叉检查、修订结论）。
+      配 <b>DynDiff-GRPO</b>：按帧间时序变化算动态显著性掩码，把随机性<b>重分配到动态显著区域</b>，而不是均匀注噪。
+      论文归纳了四类 reward hacking 模式，见下一节。
+    </div>
+  </div>
+
+  <div class="call warn">
+    <div class="hd">这一族的两个风险</div>
+    <p><b>奖励模型的偏差会被完整继承。</b>RLIR 的对照实验里 VideoAlign（180K 人类偏好）在世界模型上几乎不涨，
+    解释是「人类标注者引入了大量偏差和噪声，视频里细微的运动差异本来就难以辨别」。
+    WorldReward 靠<b>块级结构化证据</b>把这件事变简单了（不要求人 / VLM 看整段视频，只看四个动作），这是它有效的关键。</p>
+    <p style="margin-top:8px"><b>与被优化模型同源。</b>WorldReward 用自己当评测器去评价自己训出来的模型，论文用 GPT-5.5 和人类做了交叉验证
+    （对个案的一致率：动作 70.3% / 视觉 72.9%，与 GPT-5.5 的 69.1 / 72.0 相当），三方排序一致。这是负责任的做法，但相关性依然存在。</p>
+  </div>
+</section>
+<!-- ============================================================ 08 OPT LAYER -->
+<section class="sec" id="s-opt">
+  <div class="eyebrow"><span class="n">08</span><span class="t">Optimization layer</span><span class="line"></span></div>
+  <h2>机制层：rollout 结构、探索源、算法</h2>
+  <p class="lead">这一层不生产奖励，但决定<b>奖励能不能有效地传进模型</b>。
+  对世界模型来说这不是细节——WorldCompass 的消融显示，同样的奖励换个 rollout 结构，结果从 +35 分变成 −7 分。</p>
+
+  <h3><span class="ix">8.1</span>探索源：三代人的三个答案</h3>
+  <div class="prose">
+    <p>GRPO 需要组内多样性。扩散 / 流模型的采样是确定性 ODE，所以「多样性从哪来」是个真问题，这条线上给出了三个不同的答案：</p>
+  </div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>方案</th><th>多样性来自</th><th>问题 / 优点</th><th>代表</th></tr></thead>
+      <tbody>
+        <tr><td><b>ODE→SDE + Euler-Maruyama</b></td><td>同一初始噪声上注入布朗噪声</td><td class="rX">推理时用的是确定性 ODE，训练用的是辅助 SDE，两者不一致；<b>只改外观、不改相机运动</b>（WorldCompass 实测）</td><td>Flow-GRPO、DanceGRPO、RLIR、GrndCtrl</td></tr>
+        <tr><td><b>不同初始噪声 + 负样本感知</b></td><td>独立的初始噪声</td><td class="rK">能探索出不同的运动轨迹；直接用 flow matching 目标训，省掉 KL</td><td>DiffusionNFT → WorldCompass、WorldReward</td></tr>
+        <tr><td><b>一致性核作为策略接口</b></td><td>一致性采样步本身就是高斯转移</td><td class="rK">策略目标定义在<b>推理时真正用的那个更新规则</b>上，不需要辅助随机过程</td><td>CM-GRPO（RAVEN）</td></tr>
+        <tr class="hl"><td><b>历史 KV cache 路由</b></td><td>重新组合历史记忆的构成</td><td class="rK">严格在流形上；变化发生在<b>语义 / 叙事</b>层面而非低层外观；因果结构化</td><td>KVPO（CHR）</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">KVPO：唯一把「记忆结构本身」当成 RL 探索维度的方法</div>
+    <p>KVPO（2605.14278）的 <b>Causal History Routing</b>：sink cache（最早三帧）不动，local cache 固定 9 槽——最后 3 槽永远是最近帧，
+    <b>前 6 槽从更旧的非 sink 历史里随机重填</b>，每个分支填法不同。初始噪声在所有分支间共享，所以分支之间的差异<b>只能</b>归因于「模型对不同历史上下文的确定性响应」。
+    消融很干净：扰动 6/9 槽最好（8.14 VQ），扰动 3/9 太少（6.22）、扰动 9/9 破坏了近程时序锚定（6.97）；
+    surrogate policy 用 Trajectory Velocity Energy 而非 latent ℓ₂ 距离：8.14 vs 6.02。</p>
+    <p style="margin-top:8px">这是一个被低估的方向：<b>如果记忆是 KV cache，那么对记忆做 RL 的最自然方式，就是让策略优化直接作用在 cache 的读取上。</b>
+    KVPO 用它做偏好对齐，没有用来做记忆一致性——但机制是现成的。</p>
+  </div>
+
+  <h3><span class="ix">8.2</span>RAVEN：让历史表征本身进入监督</h3>
+  <div class="prose">
+    <p>RAVEN（2605.15190，Imperial College）指出了一个「历史监督缺口」：
+    Teacher Forcing 用真实历史（分布不匹配）、Diffusion Forcing 给每个 token 独立加噪（同样不匹配）、
+    <b>Self-Forcing</b> 虽然用自己的 rollout 当历史，但那份 KV cache 是 <code>detach</code> 的——<b>历史表征不接收来自后续 chunk 损失的梯度</b>。</p>
+    <p>RAVEN 的做法：把 self rollout <b>重打包</b>成交错序列
+    <span class="mono">[ẑ<sup>(u)</sup><sub>1</sub>, x̂<sub>1</sub>, ẑ<sup>(u)</sup><sub>2</sub>, x̂<sub>2</sub>, …]</span>——
+    干净的 rollout endpoint 提供因果历史，同一 rollout 的带噪状态作为被监督的去噪目标，两者在<b>同一次前向</b>里。
+    于是后面 chunk 的损失可以塑造前面 chunk 的缓存表征，而不必对整条自回归采样轨迹反传。
+    再配一个 chunk 级损失缩放（future participation score，早期 chunk 权重更大）。</p>
+    <p>VBench 上 RAVEN 85.15 → 叠加 CM-GRPO <b>85.46</b>，全部维度都是最高。成本：RAVEN 约 70 H200 GPU-时，CM-GRPO 约 170（LoRA rank 256）。
+    论文在 Discussion 里明确说：这个交错序列构造<b>不限定历史的形式</b>，滑窗、attention sink、memory token 都能塞进去被端到端优化——
+    「把历史处理从固定元素变成<b>可学习</b>元素」。这句话是这一族对记忆研究最直接的接口。</p>
+  </div>
+
+  <h3><span class="ix">8.3</span>PROWL：反过来做——训一个策略去找世界模型的破绽</h3>
+  <div class="prose">
+    <p>PROWL（2605.18803，UCL + Odyssey）不是奖励对齐，而是<b>对抗课程</b>：训一个 KL 锚定的策略去<b>暴露</b>世界模型的高误差轨迹，
+    世界模型再在这些轨迹上微调（只更新 cross-attention + 动作文本适配器，约 280M / 1.3B），PAT buffer 按
+    「潜空间 regret + 光流动作保真 AFS + 学习进展 Δ」优先回放。</p>
+    <p>最有教育意义的是它的失败案例：<b>KL 约束不够强（c<sub>kl</sub>=0.5）时，对抗策略学会了疯狂甩相机</b>——
+    技术上确实可学习，但只是在消耗容量、产生视觉伪影，不产生有用的动力学。论文的结论值得记住：
+    <b>「高预测误差本身不是有用的奖励信号；对抗方必须暴露世界模型能够有效吸收的失败。」</b>
+    长时程（18 chunk、10.8 秒）上，LPIPS 相对基座 −6.5%、SSIM +10.9%；而同算力的非对抗微调基线在长时程上几乎没有改善（LPIPS 0.7447 vs 基座 0.7432）。</p>
+  </div>
+
+  <div class="call">
+    <div class="hd">奖励加权蒸馏 ≠ 在线 RL</div>
+    <p>还有一批方法把奖励塞进蒸馏损失里：<b>Reward Forcing</b>（2512.04678，Re-DMD 按 VLM 评的动态强度给样本加权，配 EMA-Sink）、
+    <b>Stream-R1</b>（2605.03849，按 rollout 可靠性 × 时空困惑度双重加权 DMD 监督）、
+    <b>Reward-Forcing</b>（2601.16933，先用 ODE 轨迹学运动、再用 ImageReward 精修纹理）、
+    <b>Astrolabe</b>（2603.17051，forward-process RL + 滚动 KV cache 的流式训练）。
+    它们便宜、稳定，但<b>没有主动探索</b>——RAVEN 的表格里 Reward Forcing 84.39，明显低于带在线 RL 的 85.46。
+    如果目标是「让模型学会它现在还不会的东西」（比如 WorldCycle 的 OOD 复合动作），加权蒸馏这条路走不通。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 09 LAWS -->
+<section class="sec" id="s-laws">
+  <div class="eyebrow"><span class="n">09</span><span class="t">Three empirical laws</span><span class="line"></span></div>
+  <h2>三条经验定律（每条都有至少两篇独立复现）</h2>
+
+  <h3><span class="ix">定律一</span>奖励粒度必须匹配「误差在哪里独立」</h3>
+  <div class="prose">
+    <p>RLIR 明确提出：人类偏好模型给的是<b>粗到 video 级</b>的奖励，直接套 RLVR 给的是<b>细到 pixel 级</b>的信号，两个极端都次优；
+    IDM 给的是<b>语义对齐的 frame 级</b>奖励，刚好匹配世界模型的训练需求。
+    WorldCompass 从另一个角度说了同一件事：<b>动作跟随在 clip 之间相对独立</b>，聚合成一个分会让成功与失败互相抵消；
+    <b>视觉质量有很强的时序依赖</b>，整体分反而能代表整段保真度。</p>
+  </div>
+
+  <figure class="fig" id="figGran">
+    <div class="fh"><span class="no">图 7</span><span class="ti">奖励粒度：三个数据点，两篇论文，同一个结论</span></div>
+    <div class="figbody chartwrap">
+      <svg id="granSvg" viewBox="0 0 900 240" role="img" aria-label="不同奖励粒度下的效果对比"></svg>
+      <div class="tip" id="tipGran"></div>
+    </div>
+    <figcaption>
+      左：RLIR 在 MineWorld-700M 上的奖励对照（F1）。中：同样在 NFD-774M 上。右：WorldCompass 在长时程组合动作上的 rollout 粒度对照（准确率 %）。
+      两个独立团队、两种基座、两套指标，指向同一条曲线：<b>太粗和太细都不行</b>。
+    </figcaption>
+  </figure>
+
+  <h3><span class="ix">定律二</span>单一奖励必崩，互补奖励互为正则</h3>
+  <div class="prose">
+    <p>这条在四篇论文里独立出现，方向惊人地一致：</p>
+    <ul>
+      <li><b>WorldCompass</b>：只用动作跟随 → 动作准确率 36.39 但 HPSv3 掉到 <span class="rX">−2.67</span>（基座是 −0.33），
+      「视觉保真的退化严重损害训练稳定性，经常导致模型崩溃」；只用视觉质量 → HPSv3 涨到 4.19 但准确率<b>掉到 11.51</b>（基座 64.28），生成<b>静止不动的内容</b>。</li>
+      <li><b>WorldReward</b>（长时程组合动作）：无奖励 19.70/−0.33；只动作 52.73/0.21；只视觉 27.82/0.89；<b>两者 56.40/1.02</b>。</li>
+      <li><b>World-R1</b>：去掉 3D 奖励 → PSNR 崩到 18.93；去掉通用生成奖励 → VBench 掉到 83.44。而且<b>去掉周期性解耦训练，重建分数反而更高但 VBench 更低</b>——模型学会了「尽量别动」。</li>
+      <li><b>GrndCtrl</b>：完整奖励集（T+R+DTRI+V）在三个数据集上都是最均衡的；只加深度奖励会牺牲全局轨迹对齐。</li>
+    </ul>
+  </div>
+
+  <figure class="fig" id="figComp">
+    <div class="fh"><span class="no">图 8</span><span class="ti">互补奖励：拖动权重看两个目标怎么互相拉扯</span></div>
+    <div class="ctl">
+      <label>动作奖励权重 λ <input type="range" id="lamW" min="0" max="100" step="1" value="67"><span class="val" id="lamWV">0.67</span></label>
+      <span class="pill t" id="lamNote">WorldCompass 用的 λ = 2/3</span>
+    </div>
+    <div class="figbody chartwrap">
+      <svg id="compSvg" viewBox="0 0 900 250" role="img" aria-label="动作奖励与视觉奖励的权重权衡"></svg>
+      <div class="tip" id="tipComp"></div>
+    </div>
+    <div class="readout" id="compOut"></div>
+    <figcaption>
+      三个圆点是 WorldReward 消融里的<b>实测点</b>（λ=0 只视觉 27.82/0.89；λ=2/3 动作+视觉 56.40/1.02；λ=1 只动作 52.73/0.21），曲线是过这三点的插值，中间段仅供示意。
+      重点不是曲线的精确形状，而是<b>两端都是坍缩</b>：一端画面美但世界不动，另一端动作准但画面崩。
+      这跟单目标 RLHF 里的现象是同一个：<b>奖励维度不足时，最优策略是退化解。</b>
+    </figcaption>
+  </figure>
+
+  <h3><span class="ix">定律三</span>探索必须在流形上，而且要探到「对的维度」</h3>
+  <div class="prose">
+    <p>WorldCompass 发现 SDE 采样在同一噪声上「只让视觉场景多样化，相机运动几乎不变」，因此换掉整个算法。
+    KVPO 从理论角度讲了同一件事：噪声驱动的探索里，样本差异 Δ<span class="m">x</span><sup>i</sup><sub>0</sub> ≈ ∇<sub>x<sub>T</sub></sub>Φ · (σδ<sup>i</sup>)
+    <b>与随机种子本身耦合</b>——距离大不代表策略概率低，可能只是采到的噪声幅度大，这会污染真正的策略梯度信号。
+    RAVEN 则指出 Euler-Maruyama 的随机转移<b>根本不出现在推理用的 ODE 采样器里</b>。
+    三篇从三个角度指向同一个修法：<b>让探索发生在模型自己的动力学里。</b></p>
+    <p>PROWL 提供了这条定律的反面教材：探索方向不受约束时，策略会去找「误差高但学不到东西」的区域（甩相机）。
+    它的判据借自 Hughes 等人的<b>「新颖性 + 可学习性」</b>标准——无锚定的探索只有新颖性。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 10 HACKING -->
+<section class="sec" id="s-hack">
+  <div class="eyebrow"><span class="n">10</span><span class="t">Reward hacking</span><span class="line"></span></div>
+  <h2>Reward hacking 图鉴：世界模型特有的六种退化解</h2>
+  <p class="lead">自回归 + 长时程让世界模型比图像生成更容易被 hack。把各篇论文<b>实际观察到</b>的退化解汇总在一起（不是推测，每条都有出处）。</p>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>退化解</th><th>被什么奖励诱发</th><th>观察者</th><th>缓解手段</th></tr></thead>
+      <tbody>
+        <tr><td><b>整体调暗</b><br><span style="font-size:12px;color:var(--ink3)">均匀降低亮度来降低 L1 / LPIPS</span></td><td>像素级 L1+LPIPS</td><td>RLIR 复现 RLVR-World 时</td><td>换成对全局亮度不变的动作反演奖励</td></tr>
+        <tr><td><b>静止 / 近乎不动</b><br><span style="font-size:12px;color:var(--ink3)">不动就不会出错，重建也最容易</span></td><td>只用视觉质量；只用 3D 重建分</td><td>WorldCompass（Acc 掉到 11.51）；World-R1</td><td>加轨迹对齐项；<b>周期性解耦</b>在高熵动态子集上放开约束</td></tr>
+        <tr><td><b>相机甩动 / camera thrashing</b><br><span style="font-size:12px;color:var(--ink3)">制造高预测误差但不产生可学习动力学</span></td><td>对抗策略的预测误差奖励，KL 太松</td><td>PROWL（c<sub>kl</sub>=0.5 时相机速度翻倍）</td><td>提高 KL 锚定强度；把「相机动作速度」当 tripwire 监控</td></tr>
+        <tr><td><b>视觉塌缩 / 训练崩溃</b><br><span style="font-size:12px;color:var(--ink3)">动作对了但画面不成形</span></td><td>只用动作跟随奖励</td><td>WorldCompass（HPSv3 −2.67）</td><td>互补奖励；低学习率 + EMA 旧策略</td></tr>
+        <tr><td><b>噪声累积到评估器失效</b><br><span style="font-size:12px;color:var(--ink3)">无像素级监督，视觉噪声缓慢上升，最终超过 3D 评估器的容差，奖励失真，rollout 塌成纯噪声</span></td><td>纯几何奖励</td><td>GrndCtrl 失败模式 1</td><td>KL 正则回预训练模型；严格的 checkpoint 选择</td></tr>
+        <tr><td><b>组内方差不足导致的伪梯度</b><br><span style="font-size:12px;color:var(--ink3)">一组 rollout 全好或全坏时，标准化会把细微差异放大成正负样本，模型学到任意模式</span></td><td>任何 group-relative 方法</td><td>GrndCtrl 失败模式 2（明确写成开放问题）</td><td>先确认基座 checkpoint 能产生<b>可区分的</b>好坏 rollout 再开 GRPO</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">Reward as an Agent 的四类归纳</div>
+    <p>该文把具身世界模型的 hacking 归成四类：<b>视觉遮挡</b>（把出问题的地方挡住）、<b>运动退化</b>、<b>背景简化</b>（把复杂背景生成得更简单以便打高分）、<b>物理失效</b>。
+    它的应对是把奖励从浅层 CV 检测器换成有具身物理逻辑推理能力的前沿 VLM，并用课程 + 投票 + 反思做结构化多维评估，让捷径更难走通。</p>
+  </div>
+</section>
+<!-- ============================================================ 11 RESULTS -->
+<section class="sec" id="s-results">
+  <div class="eyebrow"><span class="n">11</span><span class="t">Results side by side</span><span class="line"></span></div>
+  <h2>结果对照：同一个基座上的三次后训练</h2>
+  <p class="lead">WorldPlay 这条基座上恰好有三次公开的 RL 后训练，构成了这条线上唯一一组可比的纵向证据。
+  但请先读下面这段——<b>它们不在同一个评测集上</b>。</p>
+
+  <div class="call warn">
+    <div class="hd">跨表比较的三个陷阱</div>
+    <ul>
+      <li><b>评测集不同</b>：WorldCycle 报的是自建的 <b>CycleBench</b>（380 个视频，四类循环任务）；WorldCompass 与 WorldReward 报的是 <b>WorldPlay 测试划分</b>（600 个 case）。两张表的「动作准确率」定义不同，<b>不能直接放一起比大小</b>。</li>
+      <li><b>基座版本不同</b>：WorldCycle 写的是「WorldPlay (8B, ICML'26)」，WorldReward 写的是「HY-WorldPlay 1.5」，WorldCompass 同时报了 HunyuanVideo-1.5-8B 和 Wan2.2-5B 两个变体。同源但不保证同一 checkpoint。</li>
+      <li><b>都是论文自报数</b>：本页所有数字来自各篇论文自己的表格，没有独立复现。这也是这个仓库一贯的立场——<b>这些是读论文时记下的笔记，不是测量结果。</b></li>
+    </ul>
+  </div>
+
+  <figure class="fig" id="figCB">
+    <div class="fh"><span class="no">图 9</span><span class="ti">CycleBench：状态回归能力（WorldCycle 自报，380 视频）</span></div>
+    <div class="ctl">
+      <div class="seg" id="cbMet" role="group" aria-label="指标">
+        <button type="button" data-m="0" aria-pressed="true">ESC ↓ 终点闭合</button>
+        <button type="button" data-m="1">RPS ↓ 反向路径对称</button>
+        <button type="button" data-m="2">RCS ↓ 重复循环稳定</button>
+        <button type="button" data-m="3">Acc ↑ 动作准确率</button>
+        <button type="button" data-m="4">HPSv3 ↑ 画质</button>
+      </div>
+    </div>
+    <div class="legend" id="cbLeg"></div>
+    <div class="figbody chartwrap">
+      <svg id="cbSvg" viewBox="0 0 900 260" role="img" aria-label="CycleBench 四个设置下的四个模型对比"></svg>
+      <div class="tip" id="tipCb"></div>
+    </div>
+    <figcaption>
+      四个模型：<b>Lingbot World v2 (14B)</b> 开源基础模型里参数最大的；<b>WorldPlay (8B)</b> 是被后训练的基座；
+      <b>WorldCompass</b> 和 <b>WorldCycle</b> 都从 WorldPlay 初始化，唯一差别是后训练目标。
+      读这张图最重要的一件事：切到 HPSv3，Lingbot 14B <b>画质最高</b>；切回 ESC/RPS/RCS，它比 8B 的 RL 后训练模型<b>差 1.4–8.3 倍</b>。
+      <b>状态回归一致性不是靠 scale 就能解决的。</b>另外注意长 381 帧一栏：所有模型的动作准确率都崩了（0.033–0.095），
+      循环奖励压住了漂移，但没解决长时程的动作跟随。
+    </figcaption>
+  </figure>
+
+  <figure class="fig" id="figWP">
+    <div class="fh"><span class="no">图 10</span><span class="ti">WorldPlay 测试划分：奖励信号换代（WorldCompass → WorldReward）</span></div>
+    <div class="ctl">
+      <div class="seg" id="wpMet" role="group" aria-label="指标">
+        <button type="button" data-m="0" aria-pressed="true">组合动作 Acc ↑</button>
+        <button type="button" data-m="1">基本动作 Acc ↑</button>
+        <button type="button" data-m="2">组合动作 HPSv3 ↑</button>
+        <button type="button" data-m="3">基本动作 HPSv3 ↑</button>
+      </div>
+    </div>
+    <div class="legend" id="wpLeg"></div>
+    <div class="figbody chartwrap">
+      <svg id="wpSvg" viewBox="0 0 900 240" role="img" aria-label="WorldPlay 测试划分上三个模型跨时程的对比"></svg>
+      <div class="tip" id="tipWp"></div>
+    </div>
+    <figcaption>
+      这是本调研里最干净的一组受控对比：<b>WorldReward-RL 与 WorldCompass 只差奖励信号</b>，基座、数据、rollout、DiffusionNFT 配置全部相同。
+      三个时程上组合动作 +1.58 至 +2.78 分、基本动作 +2.28 至 +5.81 分，HPSv3 六个设置全涨。
+      注意基座那条线：<b>组合动作从 21.74 掉到 19.70（时程变长反而变差），基本动作却从 62.33 涨到 64.28</b>——
+      说明基座在长时程上不是「均匀变差」，而是<b>复杂指令先失效</b>。
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 12 TABLE -->
+<section class="sec" id="s-table">
+  <div class="eyebrow"><span class="n">12</span><span class="t">Filterable comparison</span><span class="line"></span></div>
+  <h2>可筛选论文表</h2>
+  <p class="lead">按<b>奖励来源</b>、<b>是否需要 GT 未来</b>、<b>是否直接针对长程状态</b>筛选；点表头排序。
+  <span class="mono">奖励来源</span>这一列就是第 02 节的五族分类；<span class="mono">长程状态</span>那一列是本页的核心判断轴。</p>
+
+  <figure class="fig" id="figTable">
+    <div class="fh"><span class="no">表</span><span class="ti">RL / 奖励对齐类世界模型后训练（2024.07 – 2026.09）</span></div>
+    <div class="filters" id="filters">
+      <div class="fg"><span class="fgl">奖励来源</span>
+        <button class="chip c0" data-k="fam" data-v="0" aria-pressed="false">I 像素/GT</button>
+        <button class="chip c1" data-k="fam" data-v="1" aria-pressed="false">II 动作反演</button>
+        <button class="chip c2" data-k="fam" data-v="2" aria-pressed="false">III 几何</button>
+        <button class="chip c3" data-k="fam" data-v="3" aria-pressed="false">IV 代数闭合</button>
+        <button class="chip c4" data-k="fam" data-v="4" aria-pressed="false">V 奖励模型</button>
+        <button class="chip c5" data-k="fam" data-v="5" aria-pressed="false">机制层</button>
+      </div>
+      <div class="fg"><span class="fgl">长程状态</span>
+        <button class="chip" data-k="mem" data-v="直接" aria-pressed="false">直接奖励</button>
+        <button class="chip" data-k="mem" data-v="部分" aria-pressed="false">部分</button>
+        <button class="chip" data-k="mem" data-v="间接" aria-pressed="false">仅间接</button>
+      </div>
+      <div class="fg"><span class="fgl">GT 未来</span>
+        <button class="chip" data-k="gt" data-v="需要" aria-pressed="false">需要</button>
+        <button class="chip" data-k="gt" data-v="不需要" aria-pressed="false">不需要</button>
+      </div>
+      <div class="fg"><span class="fgl">在线 RL</span>
+        <button class="chip" data-k="on" data-v="是" aria-pressed="false">是</button>
+        <button class="chip" data-k="on" data-v="否" aria-pressed="false">否</button>
+      </div>
+      <button class="btn" id="clearF" type="button">清除筛选</button>
+      <span class="cnt" id="fcount"></span>
+    </div>
+    <div class="scrollx" style="padding:0 14px">
+      <table id="papers">
+        <thead><tr>
+          <th data-s="name">方法 <span class="ar"></span></th>
+          <th data-s="date">时间 <span class="ar"></span></th>
+          <th data-s="fam">奖励来源 <span class="ar"></span></th>
+          <th>奖励信号</th>
+          <th data-s="algo">算法 <span class="ar"></span></th>
+          <th>基座</th>
+          <th data-s="mem">长程状态 <span class="ar"></span></th>
+        </tr></thead>
+        <tbody id="pbody"></tbody>
+      </table>
+    </div>
+    <figcaption id="tblcap">
+      「长程状态」判据：奖励函数里是否存在一项，其取值取决于<b>相隔很远的两帧之间</b>的一致性。
+      <b>直接</b> = 有；<b>部分</b> = 有闭环性质但作用在短窗口或只约束位姿；<b>间接</b> = 全部奖励都能在短窗口内算完，长程改善是副产品。
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 13 GAP -->
+<section class="sec" id="s-gap">
+  <div class="eyebrow"><span class="n">13</span><span class="t">Gaps</span><span class="line"></span></div>
+  <h2>缺口与判断</h2>
+  <p class="lead">读完这 18 篇之后，我认为下面五个空位是这条线上最值得做的。前两个是<b>接口问题</b>——机器都造好了，只是没接上。</p>
+
+  <div class="grid2">
+    <div class="card cT">
+      <p class="mono">缺口 01 · 接口</p>
+      <h5>记忆基准 → 奖励函数，没人接</h5>
+      <b>MBench</b>（2606.00793）把记忆分解成实体一致性 / 环境一致性 / 因果一致性三个层级、12 个可量化子维度，用规则矩阵 + VLM 评估；
+      <b>MIND</b>（2602.08025）、<b>STEVOBench</b>（2603.13215，视野外状态演化）、<b>LoopNav</b>（2505.22976，空间一致性回环）各自也定义了可计算的记忆指标。
+      <b>没有任何一篇 RL 论文把它们当奖励用。</b>
+      而 WorldCompass 缺的正是这个。这是最短路径的工作：把 MBench 的规则型子维度做成可微 / 可采样的奖励，接到 DiffusionNFT 上，
+      在同一个 HY-WorldPlay 基座上跑一遍受控对比。
+    </div>
+    <div class="card cT">
+      <p class="mono">缺口 02 · 接口</p>
+      <h5>KV / 显式记忆模块没被 RL 优化过</h5>
+      RAVEN 在 Discussion 里明说：它的交错序列构造<b>不限定历史的形式</b>，中间噪声态、memory token、滑窗、attention sink 都能放进被监督的前向里，
+      「把历史处理变成 rollout 中<b>可学习</b>而非固定的元素」。KVPO 已经证明了<b>在 KV cache 上做探索</b>是可行且更优的。
+      而仓库里 <a href="https://github.com/ZhangShuui/Awesome-Interactive-Video-World-Models#tags" target="_blank" rel="noopener">Long-Horizon Memory</a> 那一节的一百多篇，
+      全部是<b>用监督 / 免训练方式</b>设计记忆结构的。
+      <b>「用 RL 训练记忆的读写策略」这件事目前是空白。</b>
+    </div>
+    <div class="card cB">
+      <p class="mono">缺口 03 · 理论</p>
+      <h5>不可逆过程的自验证</h5>
+      WorldCycle 自己指出：循环闭合依赖动作有显式逆或解析已知的闭合关系；形变、接触、持久状态变化不适用。
+      而这些恰恰是「世界状态记忆」最重要的部分。可能的方向（论文提到但没做）：<b>守恒律</b>（质量 / 物体计数 / 拓扑不变量）、
+      <b>等价终态</b>（不同路径到同一状态应该一致）、以及交换性约束（互不干涉的动作应可交换）。
+      <b>World Models as Group Actions</b> 的 identity / inverse / composition 三元组是现成的形式化起点，但它是正则不是奖励。
+    </div>
+    <div class="card cB">
+      <p class="mono">缺口 04 · 度量</p>
+      <h5>没人报「后训练之后记忆变好了吗」</h5>
+      这条线的论文报的是 VBench、HPSv3、动作准确率、位姿误差。
+      <b>除了 WorldCycle 的 ESC/RPS/RCS，没有一篇在记忆基准上报数。</b>
+      连 WorldReward 这样明确说自己修好了「时序颜色 / 纹理漂移」的论文，用的证据也是定性对比图 + HPSv3。
+      结果是：<b>我们不知道现有的 RL 后训练到底把记忆改善了多少</b>，只知道它没变差。
+      跑一遍 MBench / MIND 就能回答，成本极低。
+    </div>
+    <div class="card cN">
+      <p class="mono">缺口 05 · 效率</p>
+      <h5>长时程 rollout 的成本墙</h5>
+      WorldCompass 的 clip 级 rollout 把复杂度从 O(N·G) 降到 O(N+G)，这是关键工程突破。
+      但循环闭合奖励需要<b>完整走完前进 + 反向</b>，重复循环还要乘 K——WorldCycle 靠「每步只采一个层级」把成本压平。
+      更长的时程（分钟级）上这套还成不成立，没人验证过。
+      对比一下：GrndCtrl 是 13 帧序列、100–200 步；WorldCycle 是 16 clip；<b>都远短于 Genie 3 那种分钟级交互。</b>
+    </div>
+    <div class="card cN">
+      <p class="mono">缺口 06 · 收敛</p>
+      <h5>「几百步就收敛」是普遍现象</h5>
+      RLVR-World 明确列为开放问题：「RLVR 收益显著，但训练通常在几百步内收敛；要解锁持续改进，需要更深入地分析模型、数据、算法上的瓶颈。」
+      RLIR 约 1000 个样本即收敛；WorldCompass 说「在非常少的训练步数内就取得显著提升」。
+      这可能意味着：<b>当前的奖励很快就被榨干了</b>，而不是模型已经学到头。更丰富的奖励（比如真正的记忆奖励）也许正是打破这个天花板的东西。
+    </div>
+  </div>
+
+  <div class="call key">
+    <div class="hd">如果只做一件事</div>
+    <p>把 <b>MBench 的实体一致性 + 环境一致性</b>子维度做成可采样奖励，用 <b>WorldCompass 的 clip 级 rollout + DiffusionNFT</b> 流程，
+    在 <b>HY-WorldPlay</b> 上跑一次受控替换（正好复现 WorldReward 已经建立的实验协议），
+    然后在 <b>CycleBench + MBench + MIND</b> 上同时报数。
+    这个实验能一次性回答两个问题：记忆能不能被直接奖励，以及现有方法的记忆到底改善了多少。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 14 HOWTO -->
+<section class="sec" id="s-howto">
+  <div class="eyebrow"><span class="n">14</span><span class="t">Decision tree</span><span class="line"></span></div>
+  <h2>如果你要自己搭：一个决策树</h2>
+  <p class="lead">按照上面三条定律 + 各篇的实测失败案例，把选择压缩成五个问题。</p>
+
+  <div class="tree">
+    <div class="tnode">
+      <div class="q">Q1 · 你的动作空间可逆吗？（相机 ego-motion / 导航 = 是；接触、形变、持久状态改变 = 否）</div>
+      <div class="as">
+        <div class="a"><div class="lb">是</div><b>走 WorldCycle 路线。</b>构造 γ∘γ<sup>−1</sup> 闭合循环 + 重复执行，稠密点跟踪做状态代理，spatial 奖励打底、warm-up 300 步后叠加 temporal。这是唯一能直接优化长程状态的路子，而且<b>能训你没有 GT 数据的动作组合</b>。</div>
+        <div class="a"><div class="lb">否</div>目前<b>没有现成方案</b>。退而求其次：族 II（动作反演）拿短程动作跟随，族 V（奖励模型）拿时序外观一致性，两者叠加。同时考虑推理期的补丁（Cycle-World 的 CGI、RoboAlign-R1 的 SWR）——它们不需要重训。</div>
+      </div>
+    </div>
+    <div class="tnode">
+      <div class="q">Q2 · 你有可靠的逆动力学模型 / 3D 基础模型吗？</div>
+      <div class="as">
+        <div class="a"><div class="lb">有 IDM（离散动作，如游戏）</div><b>RLIR</b>：逐帧动作命中率当奖励，GRPO。天花板 = IDM 自身精度（VPT 在 Minecraft 上 0.87 F1）。样本效率极高，约 1000 个样本收敛。</div>
+        <div class="a"><div class="lb">有 3D 基础模型（连续相机）</div><b>WorldCompass / GrndCtrl</b>：估轨迹 → 离散动作准确率，或直接用位姿 / 深度重投影误差。注意平移尺度不可比——WorldCompass 的做法是<b>多阈值任一命中即算对</b>。</div>
+      </div>
+    </div>
+    <div class="tnode">
+      <div class="q">Q3 · 你的基座是自回归 / 长时程的吗？</div>
+      <div class="as">
+        <div class="a"><div class="lb">是</div><b>必须用 clip 级 rollout。</b>共享前缀只采目标 clip，O(N·G)→O(N+G)，且奖励粒度对上「误差在哪里独立」。目标 clip 索引循环推进形成课程。<b>不要用 sample 级</b>——WorldCompass 实测会把动作跟随训坏（54.82 → 12.45）。</div>
+        <div class="a"><div class="lb">是蒸馏过的少步模型</div>用 <b>CM-GRPO</b>（策略目标定义在一致性采样核上）或 <b>KVPO</b>（KV 路由探索 + 速度场 surrogate）。不要套 Flow-GRPO 的 Euler-Maruyama——那个随机转移在推理时根本不存在。</div>
+      </div>
+    </div>
+    <div class="tnode">
+      <div class="q">Q4 · 用几个奖励？</div>
+      <div class="as">
+        <div class="a"><div class="lb">至少两个，且必须互补</div>一个管<b>「世界有没有按指令变化」</b>，一个管<b>「画面成不成立」</b>。单目标一定坍缩，方向已被四篇独立验证。合成方式：各自组内标准化成 advantage，再线性组合 + clip 成最优性概率（WorldCompass 式），或按维度分别做 win-rate（WorldReward 式）。</div>
+        <div class="a"><div class="lb">加第三个之前先想清楚</div>GrndCtrl 的深度重投影奖励<b>强化局部一致但牺牲全局对齐</b>；World-R1 的三个 3D 子项去掉任一个都掉分但方向不同。多奖励的权重方案两篇都列为未解决问题——<b>没有现成的最优配比</b>。</div>
+      </div>
+    </div>
+    <div class="tnode">
+      <div class="q">Q5 · 怎么防崩？</div>
+      <div class="as">
+        <div class="a"><div class="lb">算法侧</div>低学习率（普遍 1e-5）；<b>EMA 旧策略</b>（WorldCompass 用 0.4→0.8 退火，替代 KL）；只在<b>前 60% 去噪步</b>上算似然比（GrndCtrl，省显存也更稳）；<b>时间步子采样 + Best-of-N</b>（WorldCompass 只取 top3 / bottom3，训练开销减半而结果不掉）。</div>
+        <div class="a"><div class="lb">诊断侧</div>开训前确认基座能产生<b>可区分的</b>好坏 rollout（GrndCtrl：组内方差不足时标准化会把噪声放大成信号）；训练中监控一个 <b>tripwire</b> 指标——PROWL 监控相机动作速度，一旦翻倍就是在甩相机刷分。</div>
+      </div>
+    </div>
+  </div>
+</section>
+<!-- ============================================================ 15 REF -->
+<section class="sec" id="s-ref">
+  <div class="eyebrow"><span class="n">15</span><span class="t">References &amp; glossary</span><span class="line"></span></div>
+  <h2>参考文献</h2>
+  <p class="lead">按本页出现的顺序。<b>粗体</b>的十二篇是读到方法级（rollout 结构、奖励公式、消融、失败模式）的；其余是读了摘要与结论。</p>
+
+  <div class="reflist">
+    <div class="r"><div class="id">2505.13934</div><div><b>RLVR-World: Training World Models with Reinforcement Learning</b> · NeurIPS 2025 · Tsinghua ·
+      <a href="https://arxiv.org/abs/2505.13934" target="_blank" rel="noopener">arXiv ↗</a> — 把 RLVR 引入世界模型的起点；语言与视频两种模态；预测指标即 verifiable reward。</div></div>
+    <div class="r"><div class="id">2509.23958</div><div><b>Reinforcement Learning with Inverse Rewards for World Model Post-Training (RLIR)</b> · Microsoft Research ·
+      <a href="https://arxiv.org/abs/2509.23958" target="_blank" rel="noopener">arXiv ↗</a> — IDM 反演成低维动作空间当可验证奖励；奖励粒度论点的出处。</div></div>
+    <div class="r"><div class="id">2602.09022</div><div><b>WorldCompass: Reinforcement Learning for Long-Horizon World Models</b> · ICML 2026 · 腾讯混元 + 浙大 + 港大 ·
+      <a href="https://arxiv.org/abs/2602.09022" target="_blank" rel="noopener">arXiv ↗</a> · <a href="https://3d-models.hunyuan.tencent.com/world/" target="_blank" rel="noopener">项目页 ↗</a>
+      — clip 级 rollout + 互补双奖励 + DiffusionNFT；附录 A 是「没有记忆奖励」这个判断的主要证据。</div></div>
+    <div class="r"><div class="id">2512.01952</div><div><b>GrndCtrl: Grounding World Models via Self-Supervised Reward Alignment</b> · CMU + FieldAI ·
+      <a href="https://arxiv.org/abs/2512.01952" target="_blank" rel="noopener">arXiv ↗</a> · <a href="https://rlwg-grndctrl.github.io/" target="_blank" rel="noopener">项目页 ↗</a>
+      — RLWG 框架；位姿 / 深度重投影 / 感知四路可验证奖励 + GRPO；counterfactual 评测制度。</div></div>
+    <div class="r"><div class="id">2604.24764</div><div><b>World-R1: Reinforcing 3D Constraints for Text-to-Video Generation</b> · ICML 2026 · MSRA + 浙大 ·
+      <a href="https://arxiv.org/abs/2604.24764" target="_blank" rel="noopener">arXiv ↗</a> — 不改架构、纯文本数据集、Flow-GRPO；3DGS meta-view + VLM 批评家；周期性解耦训练。</div></div>
+    <div class="r"><div class="id">2608.04964</div><div><b>WorldCycle: Self-Verifiable Reinforcement Learning for Long-Horizon Video World Models</b> · HKUST + 武大 + 腾讯视频 ·
+      <a href="https://arxiv.org/abs/2608.04964" target="_blank" rel="noopener">arXiv ↗</a> — 本页的主角：可逆动作循环作为解析可验证的长程奖励；CycleBench（ESC / RPS / RCS）。</div></div>
+    <div class="r"><div class="id">2609.03952</div><div><b>WorldReward: Reward Modeling for Camera-Conditioned World Models</b> · 复旦 + 腾讯混元 ·
+      <a href="https://arxiv.org/abs/2609.03952" target="_blank" rel="noopener">arXiv ↗</a> · <a href="https://codegoat24.github.io/WorldReward" target="_blank" rel="noopener">项目页 ↗</a>
+      — 块级 VLM 成对偏好奖励；与 WorldCompass 的受控奖励替换实验。仓库里已有<a href="../explainers/2609.03952.html">单篇精读</a>。</div></div>
+    <div class="r"><div class="id">2605.15190</div><div><b>RAVEN: Real-time Autoregressive Video Extrapolation with Consistency-model GRPO</b> · Imperial College London ·
+      <a href="https://arxiv.org/abs/2605.15190" target="_blank" rel="noopener">arXiv ↗</a> — 历史监督缺口；交错重打包让历史表征进入监督；CM-GRPO 把策略目标定义在一致性核上。</div></div>
+    <div class="r"><div class="id">2605.14278</div><div><b>KVPO: ODE-Native GRPO for Autoregressive Video Alignment via KV Semantic Exploration</b> · 清华 + HKUST + Video Rebirth ·
+      <a href="https://arxiv.org/abs/2605.14278" target="_blank" rel="noopener">arXiv ↗</a> · <a href="https://github.com/Richard-Zhang-AI/KVPO" target="_blank" rel="noopener">代码 ↗</a>
+      — Causal History Routing：把探索源从噪声搬到历史 KV cache；Trajectory Velocity Energy surrogate policy。</div></div>
+    <div class="r"><div class="id">2605.18803</div><div><b>PROWL: Prioritized Regret-Driven Optimization for World Model Learning</b> · UCL + Odyssey ·
+      <a href="https://arxiv.org/abs/2605.18803" target="_blank" rel="noopener">arXiv ↗</a> — KL 锚定的对抗课程；PAT 优先回放；camera-thrashing 这个 reward hacking 案例的出处。</div></div>
+    <div class="r"><div class="id">2607.11836</div><div><b>Cycle-World: Mitigating Error Accumulation via Reverse-Prediction Cycle Consistency</b> · 上交大 + 浙大 + NTU ·
+      <a href="https://arxiv.org/abs/2607.11836" target="_blank" rel="noopener">arXiv ↗</a> — <span class="pill n">非 RL 对照</span> 可微 cycle loss（CCL）+ 推理期梯度引导（CGI）；Cycle-Bounded Drift 定理。</div></div>
+    <div class="r"><div class="id">2601.12428</div><div><b>ReWorld: Multi-Dimensional Reward Modeling for Embodied World Models</b> ·
+      <a href="https://arxiv.org/abs/2601.12428" target="_blank" rel="noopener">arXiv ↗</a> — 约 235K 视频偏好数据；层级奖励模型（物理真实 / 任务完成 / 具身合理 / 视觉质量）+ PPO 式后训练。</div></div>
+    <div class="r"><div class="id">2605.03821</div><div>RoboAlign-R1: Distilled Multimodal Reward Alignment for Robot Video World Models ·
+      <a href="https://arxiv.org/abs/2605.03821" target="_blank" rel="noopener">arXiv ↗</a> — 六维教师判官蒸馏成 98M 学生 + GRPO；SWR 滑窗重编码抗长程漂移。</div></div>
+    <div class="r"><div class="id">2606.19990</div><div>Reward as An Agent for Embodied World Models ·
+      <a href="https://arxiv.org/abs/2606.19990" target="_blank" rel="noopener">arXiv ↗</a> — 规划 / 课程 / 投票 / 反思四阶段的 agent 式奖励；DynDiff-GRPO；四类 reward hacking 的归纳。</div></div>
+    <div class="r"><div class="id">2605.24578</div><div>World Models as Group Actions ·
+      <a href="https://arxiv.org/abs/2605.24578" target="_blank" rel="noopener">arXiv ↗</a> — <span class="pill n">非 RL 对照</span> identity / inverse / composition 一致性的 latent 正则；GAC 与 GAR 指标。</div></div>
+    <div class="r"><div class="id">2512.04678</div><div>Reward Forcing: Efficient Streaming Video Generation with Rewarded Distribution Matching Distillation ·
+      <a href="https://arxiv.org/abs/2512.04678" target="_blank" rel="noopener">arXiv ↗</a> — <span class="pill n">奖励加权蒸馏</span> EMA-Sink + Re-DMD；23.1 FPS 单卡 H100。</div></div>
+    <div class="r"><div class="id">2605.03849</div><div>Stream-R1: Reliability-Perplexity Aware Reward Distillation for Streaming Video Generation ·
+      <a href="https://arxiv.org/abs/2605.03849" target="_blank" rel="noopener">arXiv ↗</a> — <span class="pill n">奖励加权蒸馏</span> rollout 间可靠性 × 时空困惑度双重加权；VBench 84.40 超过多步教师。</div></div>
+    <div class="r"><div class="id">2603.17051</div><div>Astrolabe: Steering Forward-Process Reinforcement Learning for Distilled Autoregressive Video Models ·
+      <a href="https://arxiv.org/abs/2603.17051" target="_blank" rel="noopener">arXiv ↗</a> — forward-process RL + 滚动 KV cache 流式训练；不确定性感知的选择性正则。</div></div>
+    <div class="r"><div class="id">2601.16933</div><div>Reward-Forcing: Autoregressive Video Generation with Reward Feedback ·
+      <a href="https://arxiv.org/abs/2601.16933" target="_blank" rel="noopener">arXiv ↗</a> — <span class="pill n">奖励加权蒸馏</span> 先 ODE 轨迹学运动、再 ImageReward 精修纹理，绕开对强自回归教师的依赖。</div></div>
+    <div class="r"><div class="id">2606.00793</div><div>MBench: A Comprehensive Benchmark on Memory Capability for Video World Models ·
+      <a href="https://arxiv.org/abs/2606.00793" target="_blank" rel="noopener">arXiv ↗</a> · <a href="https://github.com/study-overflow/MBench" target="_blank" rel="noopener">代码 ↗</a>
+      — <span class="pill t">缺口 01 的关键素材</span> 实体 / 环境 / 因果一致性三层、12 个子维度。</div></div>
+    <div class="r"><div class="id">2602.08025</div><div>MIND: Benchmarking Memory Consistency and Action Control in World Models ·
+      <a href="https://arxiv.org/abs/2602.08025" target="_blank" rel="noopener">arXiv ↗</a></div></div>
+    <div class="r"><div class="id">2603.13215</div><div>Out of Sight, Out of Mind? Evaluating State Evolution in Video World Models (STEVOBench) ·
+      <a href="https://arxiv.org/abs/2603.13215" target="_blank" rel="noopener">arXiv ↗</a> — 视野外状态演化，正好覆盖循环闭合覆盖不到的那半。</div></div>
+    <div class="r"><div class="id">2505.22976</div><div>Toward Memory-Aided World Models: Benchmarking via Spatial Consistency (LoopNav) ·
+      <a href="https://arxiv.org/abs/2505.22976" target="_blank" rel="noopener">arXiv ↗</a> — 回环导航式的空间一致性评测。</div></div>
+    <div class="r"><div class="id">2606.20545</div><div>Current World Models Lack a Persistent State Core ·
+      <a href="https://arxiv.org/abs/2606.20545" target="_blank" rel="noopener">arXiv ↗</a> — 立场文章，与本页的判断方向一致。</div></div>
+  </div>
+
+  <h3><span class="ix">15.1</span>速查表</h3>
+  <dl class="gloss">
+    <dt>验证瓶颈</dt><dd>对任意开放动作序列，长时程未来没有 ground truth，因此「长程状态对不对」不可直接打分。WorldCycle 用这个词。</dd>
+    <dt>ESC / RPS / RCS</dt><dd>CycleBench 三指标：终点状态闭合（终点帧 vs 首帧）、反向路径对称性（镜像帧对平均距离）、重复循环稳定性（跨循环同相位距离）。均用 RoMa 稠密匹配的平均像素位移，越低越好。</dd>
+    <dt>clip 级 rollout</dt><dd>共享前 n−1 个 clip 的前缀，只在目标 clip 上采 G 个候选。复杂度 O(N+G) 而非 O(N·G)，且奖励粒度落在「误差相互独立」的层级上。</dd>
+    <dt>DiffusionNFT</dt><dd>negative-aware fine-tuning：把组内 advantage 折成一个最优性概率 r，用它加权正 / 负速度目标的 flow matching 损失。不需要似然比，也不需要 KL 项。</dd>
+    <dt>CM-GRPO</dt><dd>把一致性采样步写成条件高斯转移核 π<sub>θ</sub>(z̃<sup>(s)</sup>|z̃<sup>(u)</sup>) = N(α<sub>s</sub>x̂<sub>θ</sub>, σ<sub>s</sub>²I)，策略目标直接定义在推理时用的那个更新规则上。</dd>
+    <dt>CHR</dt><dd>Causal History Routing（KVPO）：sink KV 不动，local 9 槽里后 3 槽保持最近帧，前 6 槽从更旧历史随机重填，构造分支特异的语义上下文。</dd>
+    <dt>counterfactual 评测</dt><dd>GrndCtrl 提出：场景见过、但动作被镜像 / 方向反转。用来测「模型是否把几何结构外推到新运动模式」，是最接近记忆的现成评测制度。</dd>
+    <dt>RLWG</dt><dd>Reinforcement Learning with World Grounding。RLVR 在语言域把模型锚定在逻辑上，RLWG 在具身域把世界模型锚定在几何与时间不变量上。</dd>
+  </dl>
+
+  <div class="foot">
+    <p>调研时间 2026 年 9 月 · 覆盖 arXiv 2024.07 – 2026.09 · 全部数字来自各篇论文自报的表格，未经独立复现。
+    与本仓库 <a href="https://github.com/ZhangShuui/Awesome-Interactive-Video-World-Models" target="_blank" rel="noopener">README</a> 的 Long-Horizon Memory &amp; Consistency 一节交叉引用；
+    该节收录的一百多篇绝大多数是<b>监督 / 免训练</b>的记忆结构设计，与本页的 RL 后训练视角互补。</p>
+    <p>本页的判断（尤其是「只有一族直接奖励长程状态」这一条）是读完之后的个人结论，可能因为漏读而有误。
+    如果你知道一篇把记忆一致性写进奖励函数的工作而这里没有，那是我的疏漏——欢迎开 issue 指出。</p>
+    <p style="margin-top:10px;opacity:.7">深浅色主题跟随系统设置，也可以用右上角的 ◐ 手动切换。</p>
+  </div>
+</section>
+
+</main>
+</div>
+<script>
+(function(){
+'use strict';
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs={}, parent=null){
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs){ if (attrs[k] !== null && attrs[k] !== undefined) e.setAttribute(k, attrs[k]); }
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function txt(parent, x, y, s, cls='lbl', anchor='start', attrs={}){
+  const t = el('text', Object.assign({x, y, 'text-anchor':anchor, class:cls}, attrs), parent);
+  t.textContent = s; return t;
+}
+function clear(node){ while (node.firstChild) node.removeChild(node.firstChild); }
+
+/* ------------------------------------------------ theme + progress + toc */
+const root = document.documentElement;
+try { const saved = localStorage.getItem('rlmem-theme'); if (saved) root.setAttribute('data-theme', saved); } catch(e){}
+$('#themeBtn').addEventListener('click', () => {
+  const cur = root.getAttribute('data-theme') || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  root.setAttribute('data-theme', next);
+  try { localStorage.setItem('rlmem-theme', next); } catch(e){}
+});
+const prog = $('#prog');
+function onScroll(){
+  const h = document.documentElement;
+  prog.style.width = ((h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight))*100).toFixed(2) + '%';
+}
+document.addEventListener('scroll', onScroll, {passive:true}); onScroll();
+const tocLinks = $$('#toc a');
+const secs = tocLinks.map(a => $(a.getAttribute('href'))).filter(Boolean);
+if ('IntersectionObserver' in window){
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(en => { if (en.isIntersecting){ tocLinks.forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#'+en.target.id)); } });
+  }, {rootMargin:'-20% 0px -70% 0px', threshold:0});
+  secs.forEach(s => io.observe(s));
+}
+
+/* ------------------------------------------------ tooltip */
+function bindTip(wrap, tip, target, html){
+  target.addEventListener('mousemove', ev => {
+    const r = wrap.getBoundingClientRect();
+    tip.innerHTML = html; tip.style.opacity = 1;
+    let x = ev.clientX - r.left + 14, y = ev.clientY - r.top + 14;
+    if (x + tip.offsetWidth > r.width - 4) x = ev.clientX - r.left - tip.offsetWidth - 10;
+    if (y + tip.offsetHeight > r.height - 4) y = ev.clientY - r.top - tip.offsetHeight - 10;
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  });
+  target.addEventListener('mouseleave', () => { tip.style.opacity = 0; });
+  target.addEventListener('focus', () => { tip.innerHTML = html; tip.style.opacity = 1; tip.style.left = '10px'; tip.style.top = '10px'; });
+  target.addEventListener('blur', () => { tip.style.opacity = 0; });
+}
+function segment(sel, cb){
+  $$(sel + ' button').forEach(b => b.addEventListener('click', () => {
+    $$(sel + ' button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    cb(b.dataset);
+  }));
+}
+
+/* ------------------------------------------------ generic grouped bars */
+function groupedBars(svg, tip, o){
+  const wrap = svg.parentElement; clear(svg);
+  const x0 = o.x0 ?? 62, x1 = o.x1 ?? 878, y0 = o.y0 ?? 22, y1 = o.y1 ?? 178;
+  const [lo, hi] = o.y;
+  const sy = v => y1 - (v - lo)/(hi - lo)*(y1 - y0);
+  (o.ticks||[]).forEach(t => {
+    el('line', {x1:x0, y1:sy(t), x2:x1, y2:sy(t), class: t===0?'s-axis':'s-grid', 'stroke-width':1}, svg);
+    txt(svg, x0-8, sy(t)+4, o.fmtT ? o.fmtT(t) : t, 'xs f-ink3 tab-num', 'end');
+  });
+  const nC = o.cats.length, nS = o.series.length;
+  const gw = (x1-x0)/nC, bw = Math.min(o.maxBw || 46, (gw - 22)/nS);
+  o.cats.forEach((c, ci) => {
+    const gx = x0 + ci*gw + gw/2;
+    String(c).split('\n').forEach((ln, li) => txt(svg, gx, y1 + 17 + li*12.5, ln, 'xs f-ink2', 'middle'));
+    o.series.forEach((s, si) => {
+      const v = s.values[ci]; if (v === null || v === undefined) return;
+      const bx = gx - (nS*bw)/2 + si*bw;
+      const base = sy(Math.max(lo, Math.min(0, hi)));
+      const top = Math.min(sy(v), base), hgt = Math.max(1, Math.abs(base - sy(v)));
+      const hit = el('rect', {x:bx, y:y0, width:bw, height:y1-y0, class:'bar-hit', tabindex:0}, svg);
+      el('rect', {x:bx+1.5, y:top, width:bw-3, height:hgt, rx:3, fill:s.color, opacity:s.dim?0.42:1}, svg);
+      if (o.showVal !== false) txt(svg, bx+bw/2, v>=0 ? top-4 : top+hgt+11, (o.fmtV?o.fmtV(v):v), 'xs f-ink2 tab-num', 'middle');
+      bindTip(wrap, tip, hit, '<b>'+s.name+'</b><br><span class="k">'+String(c).replace(/\n/g,' ')+'</span> '+(o.fmtV?o.fmtV(v):v));
+    });
+  });
+  if (o.legendEl){
+    o.legendEl.innerHTML = o.series.map(s => '<span><i style="background:'+s.color+'"></i>'+s.name+'</span>').join('');
+  }
+}
+
+/* ================================================= FIG 1 drift simulator */
+(function drift(){
+  const svg = $('#driftSvg'), tip = $('#tipDrift'), wrap = svg.parentElement, out = $('#driftOut');
+  const rot = $('#dRot'), scl = $('#dScl'), mm = $('#dM');
+  let mode = 0, actKind = 1;
+  function sim(m, eps, sc, cycles, turn){
+    // 每一步：模型实现的变换 = 真变换 ∘ 残差（多转 eps 弧度、步长 ×(1+sc)）。
+    // 前进段 = (转 turn，再前进 d)×m；反向段 = (后退 d，再转 −turn)×m。
+    // eps=0 且 sc=0 时反向段精确回溯前进段；残差不随动作取逆而取逆，因此不断累积。
+    const pts = [{x:0,y:0}]; let hd = -Math.PI/2, d = 1;
+    for (let c=0;c<cycles;c++){
+      for (let i=0;i<m;i++){ hd += turn + eps; const s = d*(1+sc); const p = pts[pts.length-1]; pts.push({x:p.x+Math.cos(hd)*s, y:p.y+Math.sin(hd)*s}); }
+      for (let i=0;i<m;i++){ const s = d*(1+sc); const p = pts[pts.length-1]; pts.push({x:p.x-Math.cos(hd)*s, y:p.y-Math.sin(hd)*s}); hd += -turn + eps; }
+    }
+    return pts;
+  }
+  function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+  function render(){
+    const m = +mm.value, eps = +rot.value*Math.PI/180, sc = +scl.value/100;
+    $('#dRotV').textContent = (+rot.value).toFixed(1);
+    $('#dSclV').textContent = (+scl.value).toFixed(1);
+    $('#dMV').textContent = m;
+    const K = mode ? 3 : 1;
+    const turn = actKind ? (Math.PI/180)*(150/m) : 0;
+    const pts = sim(m, eps, sc, K, turn);
+    // 指标
+    const esc = dist(pts[2*m*K], pts[0]);
+    let rps = 0; for (let i=0;i<=m;i++) rps += dist(pts[i], pts[2*m-i]); rps /= (m+1);
+    let rcs = 0, n = 0;
+    if (K > 1){ for (let k=1;k<K;k++) for (let i=0;i<=2*m;i++){ rcs += dist(pts[k*2*m+i], pts[i]); n++; } rcs = n? rcs/n : 0; }
+    // 视图
+    clear(svg);
+    const xs = pts.map(p=>p.x), ys = pts.map(p=>p.y);
+    const pad = 0.9;
+    const minX = Math.min(...xs)-pad, maxX = Math.max(...xs)+pad, minY = Math.min(...ys)-pad, maxY = Math.max(...ys)+pad;
+    const W = 560, H = 286, ox = 24, oy = 22;
+    const k = Math.min(W/(maxX-minX||1), H/(maxY-minY||1));
+    const cx = ox + W/2 - k*(minX+maxX)/2, cy = oy + H/2 - k*(minY+maxY)/2;
+    const X = p => cx + k*p.x, Y = p => cy + k*p.y;
+    el('rect', {x:ox, y:oy, width:W, height:H, rx:10, class:'f-surf2 s-rule1', 'stroke-width':1}, svg);
+    // 网格
+    for (let g=Math.ceil(minX); g<=maxX; g++) el('line', {x1:X({x:g,y:0}), y1:oy, x2:X({x:g,y:0}), y2:oy+H, class:'s-grid', 'stroke-width':1}, svg);
+    for (let g=Math.ceil(minY); g<=maxY; g++) el('line', {x1:ox, y1:Y({x:0,y:g}), x2:ox+W, y2:Y({x:0,y:g}), class:'s-grid', 'stroke-width':1}, svg);
+    // 镜像连线（只画第一个循环）
+    if (mode === 0){
+      for (let i=1;i<m;i++){
+        const a = pts[i], b = pts[2*m-i];
+        el('line', {x1:X(a), y1:Y(a), x2:X(b), y2:Y(b), class:'s-ink3', 'stroke-width':1, 'stroke-dasharray':'3 3', opacity:.55}, svg);
+      }
+    } else {
+      for (let ph=0; ph<=2*m; ph+=Math.max(1,Math.round(m/2))){
+        for (let kk=1; kk<K; kk++){
+          const a = pts[ph], b = pts[kk*2*m+ph];
+          el('line', {x1:X(a), y1:Y(a), x2:X(b), y2:Y(b), class:'s-A', 'stroke-width':1.2, 'stroke-dasharray':'2 3', opacity:.6}, svg);
+        }
+      }
+    }
+    // 路径
+    for (let c=0;c<K;c++){
+      const f = pts.slice(c*2*m, c*2*m+m+1), r = pts.slice(c*2*m+m, c*2*m+2*m+1);
+      el('polyline', {points:f.map(p=>X(p)+','+Y(p)).join(' '), class:'nofill s-T', 'stroke-width':2.2, opacity: c===0?1:.45, 'marker-end':'url(#ar-T)'}, svg);
+      el('polyline', {points:r.map(p=>X(p)+','+Y(p)).join(' '), class:'nofill s-X', 'stroke-width':2.2, opacity: c===0?1:.45, 'marker-end':'url(#ar-X)'}, svg);
+    }
+    pts.forEach((p,i) => {
+      const isEnd = i === pts.length-1;
+      el('circle', {cx:X(p), cy:Y(p), r: (i===0||isEnd)?5:2.6, fill: i===0 ? 'var(--ok)' : (isEnd ? 'var(--bad)' : (i%(2*m) <= m ? 'var(--act)' : 'var(--bad)')), stroke:'var(--surf)', 'stroke-width': (i===0||isEnd)?2:0}, svg);
+      const hit = el('circle', {cx:X(p), cy:Y(p), r:9, class:'bar-hit', tabindex:0}, svg);
+      bindTip(wrap, tip, hit, '<b>第 '+i+' 步</b><br><span class="k">与首帧距离</span> '+dist(p,pts[0]).toFixed(3));
+    });
+    // 起终点标注
+    txt(svg, X(pts[0])+9, Y(pts[0])-8, '起点 o₀', 'sml f-ink2');
+    txt(svg, X(pts[pts.length-1])-9, Y(pts[pts.length-1])-10, '终点', 'sml f-Xi', 'end');
+    // 右侧说明
+    const rx = 616;
+    el('rect', {x:rx, y:oy, width:262, height:H, rx:10, class:'f-surf s-rule1', 'stroke-width':1}, svg);
+    txt(svg, rx+16, oy+26, '理想情况', 'big f-ink');
+    txt(svg, rx+16, oy+46, actKind ? '走 (W+D)×m 再执行其逆程序，应回到 o₀。' : '走 W×m 再 S×m，应当回到 o₀。', 'sml f-ink2');
+    txt(svg, rx+16, oy+62, 'Tγ⁻¹∘γ = I，与场景内容无关。', 'sml f-ink3 mono');
+    txt(svg, rx+16, oy+94, '实际发生的事', 'big f-ink');
+    txt(svg, rx+16, oy+114, '每步 T̂ₐ = Tₐ ∘ Eₐ，残差不抵消，', 'sml f-ink2');
+    txt(svg, rx+16, oy+130, '而是随时程复合放大。', 'sml f-ink2');
+    txt(svg, rx+16, oy+162, '两种失败', 'big f-ink');
+    el('rect', {x:rx+16, y:oy+174, width:10, height:10, rx:2, class:'f-T'}, svg);
+    txt(svg, rx+32, oy+183, '空间闭合失败 → ESC / RPS', 'sml f-ink2');
+    el('rect', {x:rx+16, y:oy+196, width:10, height:10, rx:2, class:'f-A'}, svg);
+    txt(svg, rx+32, oy+205, '时间一致性失败 → RCS', 'sml f-ink2');
+    txt(svg, rx+16, oy+230, '把每步残差调到 0，', 'sml f-ink3');
+    txt(svg, rx+16, oy+246, '三个数都会归零 —— 这正是', 'sml f-ink3');
+    txt(svg, rx+16, oy+262, 'WorldCycle 奖励的优化目标。', 'sml f-ink3');
+    if (actKind){
+      el('line', {x1:rx+16, y1:oy+276, x2:rx+246, y2:oy+276, class:'s-rule1', 'stroke-width':1}, svg);
+      txt(svg, rx+16, oy+H-8, '复合动作是基座的分布外区域：WorldPlay 仅 0.136', 'xs f-Ti');
+    }
+
+    out.innerHTML =
+      card('ESC ↓', esc.toFixed(3), '终点与首帧的距离。信号稀疏：整段只有一个数') +
+      card('RPS ↓', rps.toFixed(3), '镜像帧对的平均距离。每个中间深度都可验证') +
+      card('RCS ↓', mode ? rcs.toFixed(3) : '—', mode ? '跨循环同相位距离' : '切到「重复 3 次循环」才有') +
+      card('总步数', (2*m*K), 'chunk 数；WorldCycle 训练时最长 16 个 clip');
+  }
+  function card(k, v, d){ return '<div><div class="k">'+k+'</div><div class="v">'+v+'</div><div class="d">'+d+'</div></div>'; }
+  [rot, scl, mm].forEach(i => i.addEventListener('input', render));
+  segment('#dMode', d => { mode = +d.m; render(); });
+  segment('#dAct', d => { actKind = +d.a; render(); });
+  render();
+})();
+
+/* ================================================= FIG 2 family map */
+(function famMap(){
+  const svg = $('#mapSvg'), tip = $('#tipMap'), wrap = svg.parentElement, info = $('#famInfo');
+  const F = [
+    {n:'族 I · 像素 / GT 可验证', c:'var(--tie)', ci:'var(--tie-ink)', cls:'f-N', ink:'f-Ni',
+     ver:'真实未来帧', det:'L1 + LPIPS / 预测准确率 / F1',
+     span:0.12, gt:'需要 GT 未来', who:['RLVR-World'],
+     txt:'<b>最早的一代，也是最受限的。</b>把世界模型统一成自回归 token 序列，预测指标直接当 verifiable reward。样本效率极高（几百步梯度超过几十万步 MLE），但必须有真实未来帧，因此结构上只能覆盖 teacher-forcing 式的短程预测。RLIR 后来实测：把它搬到动作条件的游戏世界模型上几乎不涨，还会被「整体调暗」这种捷径 hack。'},
+    {n:'族 II · 动作反演可验证', c:'var(--A)', ci:'var(--A-ink)', cls:'f-A', ink:'f-Ai',
+     ver:'IDM / 3D 轨迹估计器', det:'把视频反推回低维动作空间再比对',
+     span:0.3, gt:'不需要 GT', who:['RLIR','WorldCompass'],
+     txt:'<b>这条线的工程主干。</b>核心洞察：一个动作序列可以对应很多合法视频，但所有高质量生成都必须忠实编码了输入动作。RLIR 用 IDM 逐帧反推，WorldCompass 用 3D 基础模型估相机轨迹再映射到离散动作。奖励粒度落在 frame / clip 级——正好是「误差相互独立」的层级。局限：奖励在一个 clip 内就能算完，看不见跨越几百帧的漂移。'},
+    {n:'族 III · 几何 3D 可验证', c:'var(--vis)', ci:'var(--vis-ink)', cls:'f-V', ink:'f-Vi',
+     ver:'冻结的 3D 基础模型', det:'位姿 / 深度重投影 / 3DGS 重建 + meta-view',
+     span:0.42, gt:'不需要 GT', who:['GrndCtrl','World-R1'],
+     txt:'<b>约束结构而非指令。</b>问的是「这段视频能不能被重建成一个自洽的三维场景」。GrndCtrl 用 MapAnything 给位姿与深度内点率，在 counterfactual（镜像 / 反向动作）上收益最大——这是最接近记忆的现成证据。World-R1 更进一步，从偏离轨迹的 meta-view 渲染 3DGS 让 VLM 打分，专治「2D 合理、3D 是纸板」的幻觉。天花板：重建一致 ≠ 内容记忆。'},
+    {n:'族 IV · 代数闭合自验证', c:'var(--act)', ci:'var(--act-ink)', cls:'f-T', ink:'f-Ti',
+     ver:'一条代数恒等式', det:'Tγ⁻¹∘γ = I，与场景内容完全无关',
+     span:1.0, gt:'不需要 GT', who:['WorldCycle'],
+     txt:'<b>唯一能突破短程限制的一族。</b>验证器不是一个模型，而是可逆动作循环的解析恒等式——因此长程目标是精确已知的、与场景内容无关的、免标注的。两个奖励：稠密镜像闭合（每个中间深度都配一对）与跨循环相位对齐。副作用很有意思：它能优化基座根本不会执行的 OOD 复合动作，因为恒等式对任何可逆组合都成立。边界：只覆盖可逆动作。'},
+    {n:'族 V · 学习型奖励模型', c:'var(--vlm)', ci:'var(--vlm-ink)', cls:'f-L', ink:'f-Li',
+     ver:'人类偏好蒸馏的 VLM 判官', det:'成对偏好 / 多维打分 / agent 式课程评估',
+     span:0.36, gt:'不需要 GT', who:['WorldReward','ReWorld','RoboAlign-R1','Reward as an Agent'],
+     txt:'<b>补上几何看不见的那半。</b>规则和几何能判「相机转对了没有」，判不了「转对了但纹理在往外漂」。WorldReward 的关键设计是把长视频切成动作对齐的块（4 个动作一组）再让 VLM 看六张结构化证据——不要求判官看整段视频，因此判断质量高得多。代价：继承奖励模型自身的偏差（RLIR 实测 VideoAlign 在世界模型上不涨），且窗口仍是短程。'},
+    {n:'机制层 · rollout / 探索 / 算法', c:'var(--hum)', ci:'var(--hum-ink)', cls:'f-H', ink:'f-Hi',
+     ver:'不生产奖励', det:'决定奖励能不能有效传进模型',
+     span:0.0, gt:'—', who:['DiffusionNFT','CM-GRPO','KVPO','RAVEN','PROWL','Astrolabe'],
+     txt:'<b>对世界模型来说这不是细节。</b>同样的奖励换个 rollout 结构，WorldCompass 的结果从 +35 分变成 −7 分。三件事最关键：<b>rollout 粒度</b>（clip 级 vs sample 级）、<b>探索源</b>（SDE 注噪只改外观不改相机运动 → 换成不同初始噪声、一致性核、或 KV 路由）、<b>历史是否进入监督</b>（Self-Forcing 的 cache 是 detach 的，RAVEN 让它接收后续 chunk 的梯度）。'}
+  ];
+  let sel = 3;
+  function render(){
+    clear(svg);
+    const f = F[sel];
+    const bw = 220, bx = 40;
+    function box(y, h, label, sub, cls, strong){
+      el('rect', {x:bx, y, width:bw, height:h, rx:10, class:(strong?'f-surf2 ':'f-surf ')+ 's-rule', 'stroke-width':strong?2:1, stroke: strong? f.c : 'var(--rule2)'}, svg);
+      txt(svg, bx+16, y+22, label, 'big '+(strong? f.ink : 'f-ink'));
+      if (sub) sub.split('\n').forEach((s,i)=>txt(svg, bx+16, y+40+i*14, s, 'sml f-ink3'));
+    }
+    function arrow(y1v, y2v, c){ el('line', {x1:bx+bw/2, y1:y1v, x2:bx+bw/2, y2:y2v, stroke:c||'var(--ink3)', 'stroke-width':1.6, 'marker-end':'url(#ar-i)'}, svg); }
+    box(14, 52, '预训练世界模型 π', '被后训练的策略', '', false);
+    arrow(66, 86);
+    box(90, 58, 'Rollout G 个候选', 'clip 级共享前缀 / 组大小 G=8–16', '', false);
+    arrow(148, 168);
+    box(172, 74, '验证器：' + f.ver, f.det, '', true);
+    arrow(246, 266);
+    box(270, 56, '组内标准化 advantage', 'Aᵢ = (Rᵢ − mean) / std', '', false);
+    arrow(326, 346);
+    box(350, 54, '策略更新', 'GRPO / DiffusionNFT / CM-GRPO', '', false);
+    // 右侧：可验证时间跨度
+    const px = 300, pw = 330;
+    el('rect', {x:px, y:14, width:pw, height:390, rx:12, class:'f-surf s-rule1', 'stroke-width':1}, svg);
+    txt(svg, px+18, 38, '这一族能验证多长的时间跨度？', 'big f-ink');
+    const gx0 = px+18, gx1 = px+pw-24, gy = 74;
+    el('rect', {x:gx0, y:gy, width:gx1-gx0, height:16, rx:8, class:'f-surf3'}, svg);
+    if (f.span > 0) el('rect', {x:gx0, y:gy, width:Math.max(8,(gx1-gx0)*f.span), height:16, rx:8, fill:f.c}, svg);
+    txt(svg, gx0, gy+34, '单 chunk', 'xs f-ink3');
+    txt(svg, (gx0+gx1)/2, gy+34, '数十帧', 'xs f-ink3', 'middle');
+    txt(svg, gx1, gy+34, '整条轨迹', 'xs f-ink3', 'end');
+    txt(svg, gx0, gy-8, f.span>=1 ? '整条轨迹 · 解析已知' : (f.span>0 ? '短窗口内可算完' : '不适用'), 'sml '+f.ink);
+    // 属性
+    const rows = [['奖励来源', f.ver], ['需要 GT 未来', f.gt], ['代表工作', f.who.join('、')]];
+    rows.forEach((r, i) => {
+      const y = 132 + i*46;
+      txt(svg, gx0, y, r[0], 'xs f-ink3 mono');
+      const words = String(r[1]).split('、');
+      let line = '', ly = y+18, lines = [];
+      words.forEach(w => { if ((line+w).length > 22){ lines.push(line); line = w + '、'; } else line += w + '、'; });
+      lines.push(line.replace(/、$/, ''));
+      lines.forEach((l, li) => txt(svg, gx0, ly + li*15, l.replace(/、$/, ''), 'sml f-ink2'));
+    });
+    // 五族的相对位置示意
+    txt(svg, gx0, 288, '五族在「可验证跨度」上的位置', 'xs f-ink3 mono');
+    F.slice(0,5).forEach((ff, i) => {
+      const y = 306 + i*20;
+      el('rect', {x:gx0, y:y-8, width:Math.max(6,(gx1-gx0-70)*ff.span), height:10, rx:5, fill:ff.c, opacity: i===sel?1:.35}, svg);
+      txt(svg, gx1, y, ff.n.split(' · ')[0], 'xs '+(i===sel?ff.ink:'f-ink3'), 'end');
+      const hit = el('rect', {x:gx0, y:y-11, width:gx1-gx0, height:16, class:'bar-hit', tabindex:0}, svg);
+      bindTip(wrap, tip, hit, '<b>'+ff.n+'</b><br><span class="k">验证器</span> '+ff.ver);
+      hit.addEventListener('click', () => { sel = i; sync(); });
+    });
+    info.innerHTML = '<div class="kk" style="color:'+f.ci+'">'+f.n+'</div>' + f.txt +
+      '<div class="who">' + f.who.map(w => '<span class="pill" style="color:'+f.ci+';border-color:'+f.c+'">'+w+'</span>').join('') + '</div>';
+  }
+  function sync(){ $$('#famPick button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.f === sel))); render(); }
+  $$('#famPick button').forEach(b => b.addEventListener('click', () => { sel = +b.dataset.f; sync(); }));
+  sync();
+})();
+
+/* ================================================= FIG 3 rollout cost */
+(function roll(){
+  const svg = $('#rollSvg'), tip = $('#tipRoll'), wrap = svg.parentElement, out = $('#rollOut');
+  function render(){
+    const N = +$('#rN').value, G = +$('#rG').value;
+    $('#rNV').textContent = N; $('#rGV').textContent = G;
+    clear(svg);
+    const SX = 236, RIGHT = 792;
+    const cw = Math.max(9, Math.min(22, (RIGHT - SX) / N - 2)), ch = 8, vg = 2.5;
+    const shown = Math.min(G, 6);
+    const stripW = N*(cw+2);
+
+    // ---------- sample 级 ----------
+    txt(svg, 24, 26, 'sample 级 rollout', 'big f-Xi');
+    txt(svg, 24, 44, 'G 条完整轨迹', 'xs f-ink3');
+    txt(svg, 24, 58, '每条只给一个整体分', 'xs f-ink3');
+    for (let g=0; g<shown; g++){
+      const y = 24 + g*(ch+vg);
+      for (let n=0; n<N; n++) el('rect', {x:SX + n*(cw+2), y, width:cw, height:ch, rx:2, fill:'var(--bad)', opacity:.6}, svg);
+      el('circle', {cx:SX + stripW + 16, cy:y+ch/2, r:3.6, class:'f-X'}, svg);
+    }
+    const sBot = 24 + shown*(ch+vg);
+    if (G > shown) txt(svg, SX, sBot + 12, '… 共 ' + G + ' 条完整轨迹（每条 ' + N + ' 个 clip）', 'xs f-ink3');
+    txt(svg, SX + stripW + 28, 24 + shown*(ch+vg)/2, G + ' 个分', 'xs f-Xi');
+    const hitS = el('rect', {x:SX, y:20, width:stripW, height:shown*(ch+vg), class:'bar-hit', tabindex:0}, svg);
+    bindTip(wrap, tip, hitS, '<b>sample 级</b><br><span class="k">每条轨迹独立生成全部 '+N+' 个 clip</span> 共 '+(N*G)+' 次 clip 生成');
+
+    // 分隔
+    el('line', {x1:24, y1:sBot + 30, x2:876, y2:sBot + 30, class:'s-rule1', 'stroke-width':1}, svg);
+
+    // ---------- clip 级 ----------
+    const B = sBot + 58;
+    txt(svg, 24, B, 'clip 级 rollout', 'big f-Ai');
+    txt(svg, 24, B+18, '共享前缀只采一次', 'xs f-ink3');
+    txt(svg, 24, B+32, '只在目标 clip 上采 G 个候选', 'xs f-ink3');
+    txt(svg, SX, B-10, '共享前缀 x₁:ₙ₋₁', 'xs f-Ni');
+    for (let n=0; n<N-1; n++) el('rect', {x:SX + n*(cw+2), y:B-4, width:cw, height:ch, rx:2, class:'f-N', opacity:.75}, svg);
+    // 候选
+    for (let g=0; g<shown; g++){
+      const y = B + 14 + g*(ch+vg);
+      el('line', {x1:SX + (N-1)*(cw+2) - 4, y1:B+4, x2:SX + (N-1)*(cw+2) - 1, y2:y+ch/2, class:'s-rule', 'stroke-width':1, opacity:.5}, svg);
+      el('rect', {x:SX + (N-1)*(cw+2), y, width:cw, height:ch, rx:2, fill:'var(--A)'}, svg);
+      el('circle', {cx:SX + stripW + 16, cy:y+ch/2, r:3.6, class:'f-A'}, svg);
+    }
+    if (G > shown) txt(svg, SX + (N-1)*(cw+2), B + 14 + shown*(ch+vg) + 11, '… 共 ' + G + ' 个候选 clip', 'xs f-ink3');
+    txt(svg, SX + stripW + 28, B + 14 + shown*(ch+vg)/2, G + ' 个分（同前缀，可比）', 'xs f-Ai');
+    const hitC = el('rect', {x:SX, y:B-8, width:stripW, height:shown*(ch+vg)+28, class:'bar-hit', tabindex:0}, svg);
+    bindTip(wrap, tip, hitC, '<b>clip 级</b><br><span class="k">前缀 '+(N-1)+' 个 clip 只采一次 + '+G+' 个候选</span> 共 '+((N-1)+G)+' 次 clip 生成');
+
+    const a = N*G, b = (N-1)+G;
+    out.innerHTML =
+      '<div><div class="k">sample 级 · clip 生成数</div><div class="v" style="color:var(--bad-ink)">'+a+'</div><div class="d">O(N·G)</div></div>' +
+      '<div><div class="k">clip 级 · clip 生成数</div><div class="v" style="color:var(--A-ink)">'+b+'</div><div class="d">O(N+G)</div></div>' +
+      '<div><div class="k">省下</div><div class="v">'+(a/b).toFixed(1)+'×</div><div class="d">论文设置 N=16、G=16 时约 8.3 倍</div></div>' +
+      '<div><div class="k">奖励密度</div><div class="v">'+G+' <small>vs</small> '+G+'</div><div class="d">数量相同，但 clip 级的分都落在<b>同一个前缀</b>上，组内可比性高得多</div></div>';
+  }
+  ['#rN','#rG'].forEach(s2 => $(s2).addEventListener('input', render));
+  render();
+})();
+
+/* ================================================= FIG 4 GrndCtrl */
+(function grnd(){
+  const svg = $('#grndSvg'), tip = $('#tipGrnd');
+  // [dataset][regime] = [baseline, T+R, T+R+DTRI, T+R+DTRI+V] 平移误差 (m)
+  const D = {
+    0: {n:'CODa', y:[0,80], t:[0,20,40,60,80], v:[[57.8,46.4,65.7,39.9],[71.5,50.5,57.7,40.7],[56.9,54.3,42.6,31.0]]},
+    1: {n:'SCAND', y:[0,340], t:[0,100,200,300], v:[[186.3,158.2,157.9,133.4],[315.9,251.2,288.6,220.1],[117.0,131.1,118.6,123.4]]},
+    2: {n:'CityWalk', y:[0,24], t:[0,6,12,18,24], v:[[11.7,8.9,8.4,8.8],[13.1,4.8,4.7,4.7],[20.8,10.2,10.9,9.9]]}
+  };
+  const RG = ['Seen（见过的场景与动作）','Counterfactual（镜像 / 反向动作）','Unseen（新场景 + 新动作）'];
+  let d = 0, r = 1;
+  function render(){
+    const set = D[d];
+    groupedBars(svg, tip, {
+      cats:['基座\nCosmos-Predict2 SFT','+ 平移/旋转\nT+R','+ 深度重投影\n+DTRI','+ 感知质量\n+V（完整）'],
+      series:[{name:set.n + ' · ' + RG[r] + ' · 平移误差 (m, 越低越好)',
+               color: r===1 ? 'var(--vis)' : (r===0 ? 'var(--tie)' : 'var(--A)'),
+               values:set.v[r]}],
+      y:set.y, ticks:set.t, fmtV:v=>v.toFixed(1), maxBw:70, y1:190
+    });
+    // 基线参考线
+    const [lo,hi] = set.y, y0=22, y1=190;
+    const sy = v => y1 - (v-lo)/(hi-lo)*(y1-y0);
+    el('line', {x1:62, y1:sy(set.v[r][0]), x2:878, y2:sy(set.v[r][0]), class:'s-X', 'stroke-width':1, 'stroke-dasharray':'4 4', opacity:.6}, svg);
+    txt(svg, 872, sy(set.v[r][0])-6, '基座水平', 'xs f-Xi', 'end');
+    const best = Math.min(...set.v[r]), imp = (1 - best/set.v[r][0])*100;
+    txt(svg, 62, 244, RG[r] + ' · 最好一档相对基座 ' + (imp>=0?'−':'+') + Math.abs(imp).toFixed(0) + '%', 'sml f-ink2');
+  }
+  segment('#gDs', ds => { d = +ds.d; render(); });
+  segment('#gRg', ds => { r = +ds.r; render(); });
+  render();
+})();
+
+/* ================================================= FIG 5 WorldCycle structure */
+(function cyc(){
+  const svg = $('#cycSvg'), tip = $('#tipCyc'), wrap = svg.parentElement, exp = $('#cycExp');
+  let show = 0;
+  function render(){
+    const m = +$('#cM').value, K = +$('#cK').value;
+    $('#cMV').textContent = m; $('#cKV').textContent = K;
+    clear(svg);
+    const n = 2*m;
+    const L = 92, R = 872, gap = 5;
+    const cw = Math.min(52, (R - L - (n-1)*gap)/n);
+    const total = n*cw + (n-1)*gap;
+    const xs = L + Math.max(0, (R - L - total)/2);
+    const rows = (show === 0) ? 1 : K;
+    const rh = (show === 2) ? 38 : 46;
+    const top = (show === 0) ? 226 : (show === 1 ? 84 : 158);
+    const arcMax = (show === 0) ? 150 : 86;
+    const cxOf = i => xs + i*(cw+gap) + cw/2;
+
+    // 标题
+    txt(svg, L, 24, '闭合循环 γ_c = (a₁ … a_m, a⁻¹_m … a⁻¹₁)　共 ' + n + ' 个 chunk × 16 帧 = ' + (n*16) + ' 帧', 'big f-ink');
+    txt(svg, L, 42, show===0 ? 'R_spatial · 镜像帧对：每个中间深度 i 都把 o_i 与 o_{2m−i} 配对'
+        : (show===1 ? 'R_temporal · 跨循环相位对齐：同一相位在 K 次重复之间应保持一致'
+                    : '两个奖励叠加 —— 实际训练用的形态（spatial 预热 300 步后再加 temporal）'), 'sml f-ink3');
+
+    // 色块图例
+    const lg = [['var(--act)','前进段 aᵢ'],['var(--bad)','反向段 a⁻¹ᵢ']];
+    lg.forEach((g,i) => { el('rect',{x:R-150+i*80, y:16, width:10, height:10, rx:2, fill:g[0]}, svg);
+      txt(svg, R-136+i*80, 25, g[1], 'xs f-ink3'); });
+
+    // chunk 条带
+    for (let k=0; k<rows; k++){
+      const y = top + k*rh;
+      txt(svg, xs-14, y+18, (show===0 ? '循环' : '第 '+(k+1)+' 次'), 'sml f-ink3', 'end');
+      for (let i=0; i<n; i++){
+        const x = xs + i*(cw+gap), fwd = i < m;
+        el('rect', {x, y, width:cw, height:26, rx:4, fill: fwd ? 'var(--act)' : 'var(--bad)', opacity: k===0?0.92:0.5}, svg);
+        txt(svg, x+cw/2, y+18, fwd ? 'a'+(i+1) : 'a⁻¹'+(n-i), 'xs', 'middle', {fill:'#fff','font-weight':600});
+        const hit = el('rect', {x, y:y-3, width:cw, height:32, class:'bar-hit', tabindex:0}, svg);
+        bindTip(wrap, tip, hit, '<b>chunk '+(i+1)+'</b>（16 帧）<br><span class="k">'+(fwd?'前进段':'反向段')+' · 相位 '+i+'</span>');
+      }
+    }
+
+    // 空间闭合：镜像弧
+    if (show === 0 || show === 2){
+      const yb = top - 4;
+      for (let i=0; i<=m; i++){
+        const j = 2*m - i;
+        const xa = cxOf(i), xb = cxOf(Math.min(j, n-1));
+        if (i === m){ // 折返点自配对
+          el('circle', {cx:xa, cy:yb-10, r:4, class:'nofill s-T', 'stroke-width':1.6}, svg);
+          continue;
+        }
+        const rx = Math.abs(xb-xa)/2;
+        const ry = Math.min(arcMax, 18 + rx*0.55);
+        el('path', {d:'M '+xa+' '+yb+' A '+rx+' '+ry+' 0 0 1 '+xb+' '+yb, class:'nofill s-T', 'stroke-width':1.7, opacity:.9}, svg);
+        const mx = (xa+xb)/2, my = yb - ry;
+        el('circle', {cx:mx, cy:my, r:3, class:'f-T'}, svg);
+        const hit = el('circle', {cx:mx, cy:my, r:9, class:'bar-hit', tabindex:0}, svg);
+        bindTip(wrap, tip, hit, '<b>镜像帧对</b> (o<sub>'+i+'</sub>, o<sub>'+j+'</sub>)<br><span class="k">深度 i='+i+'</span> 这两帧本该重合');
+      }
+      if (show === 0) txt(svg, xs, top + 26 + 18, (m+1) + ' 个可独立验证的闭合检查（含折返点自配对）—— 而不是只在终点看一次', 'sml f-Ti');
+    }
+
+    // 时间一致：相位竖连线
+    if (show === 1 || show === 2){
+      const base = (show === 1) ? top : top;
+      for (let i=0; i<n; i++){
+        const x = cxOf(i);
+        for (let k=1; k<rows; k++){
+          el('line', {x1:x, y1:base + (k-1)*rh + 26, x2:x, y2:base + k*rh, class:'s-A', 'stroke-width':1.4, 'stroke-dasharray':'2 3', opacity:.8}, svg);
+        }
+      }
+      const ly = base + (rows-1)*rh + 26 + 18;
+      if (show === 1) txt(svg, xs, ly, n + ' 个相位 × ' + (K-1) + ' 组跨循环比较 —— 惩罚「同一动作在不同 rollout 深度行为不同」', 'sml f-Ai');
+      else { txt(svg, xs, ly, (m+1) + ' 个镜像闭合检查', 'sml f-Ti');
+             txt(svg, xs + 130, ly, '＋　' + n + ' 个相位 × ' + (K-1) + ' 组跨循环比较', 'sml f-Ai'); }
+    }
+
+    const totalChunks = n*K;
+    exp.innerHTML = '<div class="kk">当前配置</div>' +
+      '半循环 m = <b>'+m+'</b>，重复 K = <b>'+K+'</b>，总计 <b>'+totalChunks+'</b> 个 chunk ≈ <b>'+(totalChunks*16)+'</b> 帧。' +
+      (totalChunks > 16 ? ' <span class="pill x">超过 WorldCycle 训练时的 16 clip 上限</span>——论文的做法是<b>每训练步只采一个层级</b>（hierarchy level），把每步 rollout 成本压平，K 最多 8。' : ' 在 WorldCycle 的 16 clip 训练上限内。') +
+      '<ul><li><b>为什么不只看终点</b>：端点信号太稀疏，没法定位中间哪一步出的错。'+(m+1)+' 个镜像对把它变成稠密监督，且天然匹配自回归后训练的 chunk 结构。</li>' +
+      '<li><b>为什么需要重复循环</b>：单个循环闭合了，不代表同一个动作在 rollout 深处还表现一致。AR 累积会让「第 2 次的 a₁」和「第 1 次的 a₁」产生不同位移——这只有跨循环比较才看得见。</li>' +
+      '<li><b>调度</b>：先 spatial 跑 300 步 warm-up，再<b>叠加</b> temporal。反过来（sequential S→T）或一上来就联合，长时程 ESC 都更差（0.176 / 0.180 vs 0.163）。</li></ul>';
+  }
+  ['#cM','#cK'].forEach(s2 => $(s2).addEventListener('input', render));
+  segment('#cShow', d => { show = +d.s; render(); });
+  render();
+})();
+
+/* ================================================= FIG 6 WorldCycle ablation */
+(function cycAbl(){
+  const svg = $('#caSvg'), tip = $('#tipCa');
+  const V = ['基座\nWorldPlay 8B','仅空间\nSpatial only','仅时间\nTemporal only','顺序 S→T\nSequential','联合无预热\nJoint scratch','完整\nWorldCycle'];
+  const M = [
+    {n:'短 125 帧 ESC ↓', v:[0.076,0.033,0.059,0.028,0.030,0.026], y:[0,0.09], t:[0,0.03,0.06,0.09], f:v=>v.toFixed(3), low:true},
+    {n:'中 253 帧 ESC ↓', v:[0.092,0.050,0.078,0.041,0.044,0.038], y:[0,0.10], t:[0,0.025,0.05,0.075,0.10], f:v=>v.toFixed(3), low:true},
+    {n:'长 381 帧 ESC ↓', v:[0.302,0.212,0.268,0.176,0.180,0.163], y:[0,0.32], t:[0,0.1,0.2,0.3], f:v=>v.toFixed(3), low:true},
+    {n:'复合动作 Acc ↑', v:[0.136,0.473,0.378,0.529,0.510,0.553], y:[0,0.6], t:[0,0.2,0.4,0.6], f:v=>v.toFixed(3), low:false},
+    {n:'复合动作 HPSv3 ↑', v:[8.98,9.77,9.20,10.21,10.04,10.42], y:[8,11], t:[8,9,10,11], f:v=>v.toFixed(2), low:false}
+  ];
+  let k = 0;
+  function render(){
+    const m = M[k];
+    const best = m.low ? Math.min(...m.v) : Math.max(...m.v);
+    groupedBars(svg, tip, {
+      cats:V,
+      series:[{name:m.n, color:'var(--act)', values:m.v}],
+      y:m.y, ticks:m.t, fmtV:m.f, fmtT:t=>m.f(t), maxBw:74, y1:180
+    });
+    // 高亮基座和最优
+    const [lo,hi]=m.y, y0=22, y1=180, sy=v=>y1-(v-lo)/(hi-lo)*(y1-y0);
+    el('line', {x1:62, y1:sy(m.v[0]), x2:878, y2:sy(m.v[0]), class:'s-N', 'stroke-width':1, 'stroke-dasharray':'4 4', opacity:.7}, svg);
+    txt(svg, 872, sy(m.v[0])-6, '基座', 'xs f-Ni', 'end');
+    txt(svg, 62, 236, m.n + ' · 完整模型相对基座 ' + (m.low ? ('−' + ((1-m.v[5]/m.v[0])*100).toFixed(0) + '%') : ('+' + ((m.v[5]/m.v[0]-1)*100).toFixed(0) + '%')), 'sml f-ink2');
+  }
+  segment('#caMetric', d => { k = +d.k; render(); });
+  render();
+})();
+
+/* ================================================= FIG 7 granularity */
+(function gran(){
+  const svg = $('#granSvg'), tip = $('#tipGran'), wrap = svg.parentElement; clear(svg);
+  const P = [
+    {t:'RLIR · MineWorld-700M（F1 ↑）', x:26, cats:['pixel\nL1+LPIPS','video\nVideoAlign','frame\nIDM 动作'], v:[0.71,0.73,0.81], base:0.70, y:[0.6,0.85], f:v=>v.toFixed(2)},
+    {t:'RLIR · NFD-774M（F1 ↑）', x:310, cats:['pixel\nL1+LPIPS','video\nVideoAlign','frame\nIDM 动作'], v:[0.77,0.76,0.83], base:0.77, y:[0.7,0.86], f:v=>v.toFixed(2)},
+    {t:'WorldCompass · 长时程组合动作 Acc % ↑', x:600, cats:['sample 级\nrollout','—','clip 级\nrollout'], v:[12.45,null,54.82], base:19.70, y:[0,60], f:v=>v===null?'':v.toFixed(1)}
+  ];
+  P.forEach(p => {
+    const w = 244, y0 = 56, y1 = 178;
+    txt(svg, p.x, 24, p.t, 'sml f-ink', 'start', {'font-weight':600});
+    txt(svg, p.x, 38, '虚线 = 未后训练的基座 ' + p.f(p.base), 'xs f-Ni');
+    const sy = v => y1 - (v-p.y[0])/(p.y[1]-p.y[0])*(y1-y0);
+    el('line', {x1:p.x, y1:y1, x2:p.x+w, y2:y1, class:'s-axis', 'stroke-width':1}, svg);
+    el('line', {x1:p.x, y1:sy(p.base), x2:p.x+w, y2:sy(p.base), class:'s-N', 'stroke-width':1.2, 'stroke-dasharray':'4 4'}, svg);
+    el('path', {d:'M '+(p.x-9)+' '+(sy(p.base)-4)+' L '+(p.x-1)+' '+sy(p.base)+' L '+(p.x-9)+' '+(sy(p.base)+4)+' z', class:'f-N'}, svg);
+    p.cats.forEach((c, i) => {
+      const cx = p.x + 34 + i*((w-56)/2);
+      c.split('\n').forEach((ln,li) => txt(svg, cx, y1+15+li*12, ln, 'xs f-ink2', 'middle'));
+      if (p.v[i] === null) return;
+      const good = p.v[i] > p.base * 1.02;
+      const top = Math.min(sy(p.v[i]), sy(p.base)), h = Math.abs(sy(p.v[i]) - sy(p.base));
+      el('rect', {x:cx-22, y:top, width:44, height:Math.max(2,h), rx:3, fill: good ? 'var(--act)' : 'var(--bad)'}, svg);
+      txt(svg, cx, p.v[i] >= p.base ? top-5 : top+h+11, p.f(p.v[i]), 'xs f-ink2 tab-num', 'middle');
+      const hit = el('rect', {x:cx-26, y:y0, width:52, height:y1-y0, class:'bar-hit', tabindex:0}, svg);
+      bindTip(wrap, tip, hit, '<b>'+c.replace('\n',' ')+'</b><br><span class="k">'+p.t+'</span> '+p.f(p.v[i])+'（基座 '+p.f(p.base)+'）');
+    });
+  });
+  txt(svg, 26, 222, '柱子从基座水平起画：琥珀 = 相对基座提升，红 = 退化。中间那格 WorldCompass 没有对应实验，留空。', 'xs f-ink3');
+})();
+
+/* ================================================= FIG 8 complementary rewards */
+(function comp(){
+  const svg = $('#compSvg'), tip = $('#tipComp'), wrap = svg.parentElement, out = $('#compOut'), lam = $('#lamW');
+  // 三个锚点全部来自 WorldReward Tab.9（长时程组合动作）实测：
+  //   λ=0 仅视觉 27.82 / 0.89　λ=1 仅动作 52.73 / 0.21　λ=2/3 动作+视觉 56.40 / 1.02　（无奖励基座 19.70 / −0.33）
+  // 曲线 = 线性端点 + 一个正弦协同项，系数由 λ=2/3 的实测点定出，因此三点精确通过，中间是插值。
+  function act(l){ return 27.82 + (52.73-27.82)*l + 13.82*Math.sin(Math.PI*l); }
+  function vis(l){ return 0.89 + (0.21-0.89)*l + 0.673*Math.sin(Math.PI*l); }
+  function render(){
+    const l = +lam.value/100;
+    $('#lamWV').textContent = l.toFixed(2);
+    clear(svg);
+    const x0=70, x1=830, y0=28, y1=190;
+    const sx = v => x0 + v*(x1-x0);
+    const syA = v => y1 - (v-15)/(60-15)*(y1-y0);
+    const syV = v => y1 - (v+1.2)/(1.4+1.2)*(y1-y0);
+    [15,30,45,60].forEach(t => { el('line',{x1:x0,y1:syA(t),x2:x1,y2:syA(t),class:'s-grid','stroke-width':1},svg); txt(svg,x0-8,syA(t)+4,t,'xs f-Ai tab-num','end'); });
+    [-1.0,0,1.0].forEach(t => txt(svg,x1+8,syV(t)+4,t.toFixed(1),'xs f-Vi tab-num'));
+    let pa=[], pv=[];
+    for (let i=0;i<=100;i++){ const q=i/100; pa.push(sx(q)+','+syA(act(q))); pv.push(sx(q)+','+syV(vis(q))); }
+    el('polyline',{points:pa.join(' '),class:'nofill s-A','stroke-width':2.4},svg);
+    el('polyline',{points:pv.join(' '),class:'nofill s-V','stroke-width':2.4,'stroke-dasharray':'6 4'},svg);
+    // 实测端点
+    [[0,27.82,0.89,'仅视觉奖励'],[1,52.73,0.21,'仅动作奖励']].forEach(([q,a,v,n]) => {
+      el('circle',{cx:sx(q),cy:syA(a),r:5,class:'f-A',stroke:'var(--surf)','stroke-width':2},svg);
+      el('circle',{cx:sx(q),cy:syV(v),r:5,class:'f-V',stroke:'var(--surf)','stroke-width':2},svg);
+      txt(svg, q===0?sx(q)+10:sx(q)-10, y0+2, n+'（实测）', 'xs f-ink3', q===0?'start':'end');
+    });
+    el('line',{x1:sx(2/3),y1:y0,x2:sx(2/3),y2:y1,class:'s-T','stroke-width':1.4,'stroke-dasharray':'4 3'},svg);
+    el('circle',{cx:sx(2/3),cy:syA(56.40),r:5,class:'f-A',stroke:'var(--act)','stroke-width':2},svg);
+    el('circle',{cx:sx(2/3),cy:syV(1.02),r:5,class:'f-V',stroke:'var(--act)','stroke-width':2},svg);
+    txt(svg, sx(2/3)-8, y1-6, 'λ = 2/3 · 动作+视觉（实测 56.40 / 1.02）', 'xs f-Ti', 'end');
+    el('line',{x1:sx(l),y1:y0,x2:sx(l),y2:y1,class:'s-ink','stroke-width':1.6},svg);
+    el('circle',{cx:sx(l),cy:syA(act(l)),r:6,class:'f-A',stroke:'var(--surf)','stroke-width':2},svg);
+    el('circle',{cx:sx(l),cy:syV(vis(l)),r:6,class:'f-V',stroke:'var(--surf)','stroke-width':2},svg);
+    txt(svg,x0,215,'λ = 0（全给视觉质量）','xs f-ink3');
+    txt(svg,x1,215,'λ = 1（全给动作跟随）','xs f-ink3','end');
+    txt(svg,x0-8,y0-8,'动作 Acc %','xs f-Ai','end');
+    txt(svg,x1+8,y0-8,'HPSv3','xs f-Vi');
+    out.innerHTML =
+      '<div><div class="k">动作准确率</div><div class="v" style="color:var(--A-ink)">'+act(l).toFixed(1)+'</div><div class="d">三个实测锚点：0 → 27.82，2/3 → 56.40，1 → 52.73；无奖励基座 19.70</div></div>' +
+      '<div><div class="k">HPSv3</div><div class="v" style="color:var(--vis-ink)">'+vis(l).toFixed(2)+'</div><div class="d">三个实测锚点：0 → 0.89，2/3 → 1.02，1 → 0.21；无奖励基座 −0.33</div></div>' +
+      '<div><div class="k">λ = 0 的退化解</div><div class="v" style="font-size:15px">静止不动</div><div class="d">WorldCompass：只用视觉奖励时准确率掉到 11.51（基座 64.28）</div></div>' +
+      '<div><div class="k">λ = 1 的退化解</div><div class="v" style="font-size:15px">画面塌缩</div><div class="d">WorldCompass：只用动作奖励时 HPSv3 掉到 −2.67，常导致模型崩溃</div></div>';
+  }
+  lam.addEventListener('input', render); render();
+})();
+
+/* ================================================= FIG 9 CycleBench */
+(function cb(){
+  const svg = $('#cbSvg'), tip = $('#tipCb'), leg = $('#cbLeg');
+  const SET = ['短 125 帧','中 253 帧','复合动作 125 帧','长 381 帧'];
+  const MOD = [
+    {n:'Lingbot World v2 (14B)', c:'var(--tie)'},
+    {n:'WorldPlay 8B（基座）', c:'var(--hum)'},
+    {n:'WorldCompass（RL）', c:'var(--vlm)'},
+    {n:'WorldCycle（RL）', c:'var(--act)'}
+  ];
+  // [metric][model] = [short, mid, composite, long]
+  const D = [
+    {n:'ESC ↓', y:[0,0.32], t:[0,0.1,0.2,0.3], f:v=>v.toFixed(3), v:[[0.198,0.227,0.204,0.221],[0.076,0.092,0.119,0.302],[0.038,0.048,0.073,0.187],[0.026,0.038,0.057,0.163]]},
+    {n:'RPS ↓', y:[0,0.25], t:[0,0.05,0.1,0.15,0.2,0.25], f:v=>v.toFixed(3), v:[[0.143,0.233,0.143,0.186],[0.057,0.065,0.088,0.202],[0.034,0.039,0.059,0.104],[0.019,0.028,0.042,0.087]]},
+    {n:'RCS ↓', y:[0,0.18], t:[0,0.06,0.12,0.18], f:v=>v.toFixed(3), v:[[0.085,0.062,0.102,0.123],[0.066,0.053,0.057,0.173],[0.026,0.025,0.040,0.074],[0.020,0.018,0.026,0.049]]},
+    {n:'Acc ↑', y:[0,0.9], t:[0,0.3,0.6,0.9], f:v=>v.toFixed(3), v:[[0.464,0.480,0.414,0.033],[0.635,0.695,0.136,0.073],[0.829,0.868,0.499,0.084],[0.833,0.878,0.553,0.095]]},
+    {n:'HPSv3 ↑', y:[0,13], t:[0,4,8,12], f:v=>v.toFixed(2), v:[[12.11,10.58,10.81,11.73],[9.66,9.00,8.98,4.71],[11.06,10.67,10.12,9.81],[11.24,10.81,10.42,10.31]]}
+  ];
+  let k = 0;
+  function render(){
+    const m = D[k];
+    groupedBars(svg, tip, {
+      cats:SET,
+      series:MOD.map((mo,i)=>({name:mo.n, color:mo.c, values:m.v[i]})),
+      y:m.y, ticks:m.t, fmtV:m.f, fmtT:t=>m.f(t), maxBw:40, y1:196, legendEl:leg, showVal:true
+    });
+    txt(svg, 62, 236, m.n + '　（WorldCompass 与 WorldCycle 都从 WorldPlay 8B 初始化，唯一差别是后训练目标）', 'sml f-ink3');
+  }
+  segment('#cbMet', d => { k = +d.m; render(); });
+  render();
+})();
+
+/* ================================================= FIG 10 WorldPlay split */
+(function wp(){
+  const svg = $('#wpSvg'), tip = $('#tipWp'), wrap = svg.parentElement, leg = $('#wpLeg');
+  const H = ['短 ~125 帧','中 ~253 帧','长 ~381 帧'];
+  const MOD = [
+    {n:'HY-WorldPlay 1.5（基座）', c:'var(--hum)'},
+    {n:'WorldCompass（几何 + HPSv3）', c:'var(--vlm)'},
+    {n:'WorldReward-RL（块级 VLM 偏好）', c:'var(--act)'}
+  ];
+  const M = [
+    {n:'组合动作 Acc ↑ (%)', y:[15,65], t:[15,30,45,60], f:v=>v.toFixed(2), v:[[21.74,19.73,19.70],[58.20,55.01,54.82],[59.96,57.79,56.40]]},
+    {n:'基本动作 Acc ↑ (%)', y:[55,85], t:[55,65,75,85], f:v=>v.toFixed(2), v:[[62.33,63.35,64.28],[68.62,74.09,76.56],[74.43,77.27,78.84]]},
+    {n:'组合动作 HPSv3 ↑', y:[-1.5,1.5], t:[-1.5,-0.5,0.5,1.5], f:v=>v.toFixed(2), v:[[-1.05,-0.19,-0.33],[0.42,0.37,0.73],[0.68,0.55,1.02]]},
+    {n:'基本动作 HPSv3 ↑', y:[1.5,4.5], t:[1.5,2.5,3.5,4.5], f:v=>v.toFixed(2), v:[[1.96,1.91,1.90],[3.77,3.61,3.72],[3.92,3.85,3.94]]}
+  ];
+  let k = 0;
+  function render(){
+    const m = M[k]; clear(svg);
+    leg.innerHTML = MOD.map(o=>'<span><i style="background:'+o.c+'"></i>'+o.n+'</span>').join('');
+    const x0=120, x1=800, y0=26, y1=176;
+    const sx = i => x0 + i*(x1-x0)/2, sy = v => y1 - (v-m.y[0])/(m.y[1]-m.y[0])*(y1-y0);
+    m.t.forEach(t => { el('line',{x1:x0,y1:sy(t),x2:x1,y2:sy(t),class:t===0?'s-axis':'s-grid','stroke-width':1},svg); txt(svg,x0-8,sy(t)+4,m.f(t),'xs f-ink3 tab-num','end'); });
+    H.forEach((h,i)=>txt(svg,sx(i),y1+18,h,'sml f-ink2','middle'));
+    txt(svg, x0-8, y0-8, m.n, 'sml f-ink', 'start');
+    MOD.forEach((mo,mi)=>{
+      const vals = m.v[mi];
+      el('polyline',{points:vals.map((v,i)=>sx(i)+','+sy(v)).join(' '),fill:'none',stroke:mo.c,'stroke-width':2.4},svg);
+      vals.forEach((v,i)=>{
+        el('circle',{cx:sx(i),cy:sy(v),r:5,fill:mo.c,stroke:'var(--surf)','stroke-width':2},svg);
+        const hit = el('circle',{cx:sx(i),cy:sy(v),r:13,class:'bar-hit',tabindex:0},svg);
+        bindTip(wrap,tip,hit,'<b>'+mo.n+'</b><br><span class="k">'+m.n+' · '+H[i]+'</span> '+m.f(v));
+      });
+      txt(svg, sx(2)+10, sy(vals[2])+4, m.f(vals[2]), 'xs f-ink2 tab-num');
+    });
+    const d = m.v[2][2] - m.v[1][2];
+    txt(svg, x0, 212, '长时程上 WorldReward-RL 相对 WorldCompass ' + (d>=0?'+':'') + d.toFixed(2) + '　（同基座、同流程、同配置，只换奖励信号）', 'sml f-ink3');
+  }
+  segment('#wpMet', d => { k = +d.m; render(); });
+  render();
+})();
+
+/* ================================================= filterable paper table */
+(function tbl(){
+  const FAM = ['I 像素/GT','II 动作反演','III 几何','IV 代数闭合','V 奖励模型','机制层'];
+  const P = [
+    {name:'RLVR-World', id:'2505.13934', date:'2025-05', fam:0, rw:'预测指标本身（准确率 / F1 / L1+LPIPS）', algo:'GRPO', base:'iVideoGPT / R1-Distill-Qwen', mem:'间接', gt:'需要', on:'是', note:'NeurIPS 2025 · 这条线的起点'},
+    {name:'RLIR', id:'2509.23958', date:'2025-09', fam:1, rw:'IDM 逐帧动作命中率（0/1）', algo:'GRPO', base:'MineWorld 300M–1.2B / NFD 310M–774M', mem:'间接', gt:'不需要', on:'是', note:'奖励粒度论点的出处'},
+    {name:'GrndCtrl / RLWG', id:'2512.01952', date:'2025-12', fam:2, rw:'平移 + 旋转 + 深度重投影内点率 + VideoAlign', algo:'GRPO', base:'Cosmos-Predict2-2B（先 SFT）', mem:'部分', gt:'不需要', on:'是', note:'位姿 cycle-consistency；counterfactual 制度'},
+    {name:'ReWorld', id:'2601.12428', date:'2026-01', fam:4, rw:'层级四维偏好奖励模型（235K 偏好对）', algo:'PPO 式', base:'flow-based 具身世界模型', mem:'间接', gt:'不需要', on:'是', note:'物理真实 / 任务完成 / 具身合理 / 视觉质量'},
+    {name:'Reward-Forcing', id:'2601.16933', date:'2026-01', fam:4, rw:'ImageReward', algo:'奖励加权蒸馏', base:'Wan2.1-T2V-1.3B（DMD 4 步）', mem:'间接', gt:'不需要', on:'否', note:'先 ODE 学运动、再奖励精修纹理'},
+    {name:'WorldCompass', id:'2602.09022', date:'2026-02', fam:1, rw:'3D 估轨迹→离散动作准确率 + HPSv3', algo:'DiffusionNFT', base:'WorldPlay（HY-Video-1.5-8B / Wan2.2-5B）', mem:'间接', gt:'不需要', on:'是', note:'ICML 2026 · clip 级 rollout；附录自陈无记忆奖励'},
+    {name:'Astrolabe', id:'2603.17051', date:'2026-03', fam:5, rw:'多奖励 + 不确定性感知选择性正则', algo:'forward-process RL', base:'蒸馏 AR 视频模型', mem:'间接', gt:'不需要', on:'是', note:'滚动 KV cache 的流式训练方案'},
+    {name:'World-R1', id:'2604.24764', date:'2026-04', fam:2, rw:'3DGS meta-view VLM + 重建保真 + 轨迹对齐 + 通用生成', algo:'Flow-GRPO', base:'Wan2.1-T2V 1.3B / 14B', mem:'部分', gt:'不需要', on:'是', note:'ICML 2026 · 不改架构；周期性解耦训练'},
+    {name:'Stream-R1', id:'2605.03849', date:'2026-05', fam:5, rw:'rollout 可靠性 × 时空困惑度双重加权', algo:'加权 DMD', base:'Wan2.1-T2V-1.3B（14B 教师）', mem:'间接', gt:'不需要', on:'否', note:'VBench 84.40，超过多步教师'},
+    {name:'RoboAlign-R1', id:'2605.03821', date:'2026-05', fam:4, rw:'六维教师判官蒸馏成 98M 学生奖励模型', algo:'GRPO', base:'12 层 LLaMA AR + FSQ tokenizer', mem:'间接', gt:'不需要', on:'是', note:'另配 SWR 推理期滑窗重编码抗漂移'},
+    {name:'KVPO', id:'2605.14278', date:'2026-05', fam:5, rw:'通用视觉偏好（VQ / MQ / TA）', algo:'PPO + TVE surrogate', base:'LongLive / Self-Forcing / MemFlow', mem:'间接', gt:'不需要', on:'是', note:'Causal History Routing：在 KV cache 上做探索'},
+    {name:'RAVEN + CM-GRPO', id:'2605.15190', date:'2026-05', fam:5, rw:'VBench 表征奖励 + VideoReward 文本对齐', algo:'CM-GRPO', base:'Wan2.1-T2V-1.3B（Causal Forcing 初始化）', mem:'间接', gt:'不需要', on:'是', note:'历史表征进入监督；一致性核作为策略接口'},
+    {name:'PROWL', id:'2605.18803', date:'2026-05', fam:5, rw:'潜空间 regret + 光流动作保真（对抗策略的奖励）', algo:'PPO 对抗课程', base:'Wan2.1-T2V-1.3B DiT（MineRL）', mem:'间接', gt:'需要', on:'是', note:'反向做法：训策略去找世界模型的破绽'},
+    {name:'World Models as Group Actions', id:'2605.24578', date:'2026-05', fam:3, rw:'identity / inverse / composition 一致性', algo:'可微正则（非 RL）', base:'多个 SOTA 视频世界模型', mem:'部分', gt:'不需要', on:'否', note:'提出 GAC / GAR 指标；本页的对照组'},
+    {name:'Reward as an Agent', id:'2606.19990', date:'2026-06', fam:4, rw:'agent 式四维课程评估（规划/课程/投票/反思）', algo:'DynDiff-GRPO', base:'多个开源具身世界模型', mem:'间接', gt:'不需要', on:'是', note:'四类 reward hacking 的归纳出处'},
+    {name:'Cycle-World', id:'2607.11836', date:'2026-07', fam:3, rw:'反向预测 cycle 一致性（潜空间）', algo:'可微 loss + 推理期梯度引导', base:'Self-Forcing / LongLive 系', mem:'部分', gt:'不需要', on:'否', note:'Cycle-Bounded Drift 定理；CGI 可即插即用'},
+    {name:'WorldCycle', id:'2608.04964', date:'2026-08', fam:3, rw:'空间闭合 + 时间状态一致（稠密点跟踪代理）', algo:'自验证 RL（GRPO 式）', base:'WorldPlay 8B', mem:'直接', gt:'不需要', on:'是', note:'唯一直接奖励长程状态；CycleBench'},
+    {name:'WorldReward', id:'2609.03952', date:'2026-09', fam:4, rw:'块级 VLM 成对偏好（动作一致性 + 视觉质量）', algo:'Pref-GRPO + DiffusionNFT', base:'HY-WorldPlay 1.5', mem:'间接', gt:'不需要', on:'是', note:'与 WorldCompass 的受控奖励替换'}
+  ];
+  const state = {fam:new Set(), mem:new Set(), gt:new Set(), on:new Set()};
+  let sortK = 'date', sortD = 1;
+  const body = $('#pbody'), cnt = $('#fcount');
+  function pass(p){
+    if (state.fam.size && !state.fam.has(String(p.fam))) return false;
+    if (state.mem.size && !state.mem.has(p.mem)) return false;
+    if (state.gt.size && !state.gt.has(p.gt)) return false;
+    if (state.on.size && !state.on.has(p.on)) return false;
+    return true;
+  }
+  const MEMP = {'直接':'t','部分':'v','间接':'n'};
+  function render(){
+    const rows = P.filter(pass).slice().sort((a,b) => {
+      let x = a[sortK], y = b[sortK];
+      if (sortK === 'mem'){ const o = {'直接':0,'部分':1,'间接':2}; x = o[x]; y = o[y]; }
+      return (x < y ? -1 : x > y ? 1 : 0) * sortD;
+    });
+    body.innerHTML = rows.map(p => {
+      const cls = p.mem === '直接' ? ' class="hl"' : '';
+      return '<tr'+cls+'>' +
+        '<td class="nm"><b>'+p.name+'</b><span>'+p.note+'</span></td>' +
+        '<td class="num">'+p.date+'</td>' +
+        '<td><span class="famdot d'+p.fam+'"></span>'+FAM[p.fam]+'</td>' +
+        '<td>'+p.rw+'</td>' +
+        '<td>'+p.algo+(p.on==='否'?' <span class="pill n">非在线 RL</span>':'')+'</td>' +
+        '<td>'+p.base+'</td>' +
+        '<td><span class="pill '+MEMP[p.mem]+'">'+p.mem+'</span>'+(p.gt==='需要'?' <span class="pill x">需 GT</span>':'')+'</td>' +
+      '</tr>';
+    }).join('') || '<tr><td colspan="7" style="text-align:center;padding:26px;color:var(--ink3)">没有符合条件的条目</td></tr>';
+    cnt.textContent = rows.length + ' / ' + P.length + ' 篇';
+    $$('#papers th[data-s]').forEach(th => {
+      const a = th.querySelector('.ar');
+      a.textContent = th.dataset.s === sortK ? (sortD>0 ? '▲' : '▼') : '';
+    });
+  }
+  $$('#filters .chip').forEach(c => c.addEventListener('click', () => {
+    const k = c.dataset.k, v = c.dataset.v, on = c.getAttribute('aria-pressed') === 'true';
+    c.setAttribute('aria-pressed', String(!on));
+    if (on) state[k].delete(v); else state[k].add(v);
+    render();
+  }));
+  $('#clearF').addEventListener('click', () => {
+    Object.values(state).forEach(s => s.clear());
+    $$('#filters .chip').forEach(c => c.setAttribute('aria-pressed','false'));
+    render();
+  });
+  $$('#papers th[data-s]').forEach(th => th.addEventListener('click', () => {
+    if (sortK === th.dataset.s) sortD = -sortD; else { sortK = th.dataset.s; sortD = 1; }
+    render();
+  }));
+  render();
+})();
+})();
+</script>
+</body>
+</html>

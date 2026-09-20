@@ -1,0 +1,1695 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StateBench 与 StateAgent 精读</title>
+<meta name="description" content="arXiv 2609.03673 · Do Video Generators Track the World Across Segments? — 跨片段世界状态推理：StateBench 基准与 StateAgent 方法的精读与交互图解">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   StateBench / StateAgent 精读 — design tokens.
+   Dark is the default ground (the problem lives at the dark cut
+   between two segments); light is a fully designed second theme.
+   角色色：obs  = 观测记忆 / 帧 / 像素证据（最后一帧、关键帧、KV cache）
+           st   = 世界状态 / 实体状态图 / 信念 S_t
+           fut  = 预测 / 未来末帧 / Ŝ_{t+1}
+           vid  = 渲染器 / 首末帧生视频 / 像素输出
+           ball = 被藏起来的东西（红球）= 边界帧看不见的状态
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0f1114; --surf:#15181c; --surf2:#1b1f25; --surf3:#242a32;
+  --rule:#272d35; --rule2:#3a424d;
+  --ink:#eceff3; --ink2:#aab2bd; --ink3:#7b8592;
+  --obs:#e3b341;  --obs-ink:#f0c766;  --obs-soft:rgba(227,179,65,.16);
+  --st:#1fbfae;   --st-ink:#4fd9c8;   --st-soft:rgba(31,191,174,.16);
+  --fut:#9d86f5;  --fut-ink:#b9a8ff;  --fut-soft:rgba(157,134,245,.18);
+  --vid:#4c8dff;  --vid-ink:#7fb0ff;  --vid-soft:rgba(76,141,255,.16);
+  --ball:#e5484d; --ball-ink:#ff6b6e; --ball-soft:rgba(229,72,77,.16);
+  --ok:#3fb27a; --ok-ink:#62cf95; --ok-soft:rgba(63,178,122,.14);
+  --bad:#e06a63; --bad-ink:#f08983; --bad-soft:rgba(224,106,99,.14);
+  /* scene colours for the drawn frames */
+  --table:#6b4a2e; --table-top:#8a6240; --wall:#1c2129;
+  --boxc:#3b7dd8; --boxc2:#2b5fa8; --boxin:#d9e2ee; --pencil:#f2c14e; --hand:#d9a887; --hand2:#b8876a;
+  --cupdark:#23262b; --paper:#f1eee6; --drawer:#8a6a48; --drawer2:#6d5236;
+  /* per-method series colours, shared by every chart */
+  --m-i2v:#e8c15a; --m-longcat:#e0913a; --m-storymem:#8b9bb4; --m-storymemkf:#5b8def; --m-magi:#d3448c; --m-agent:#21c3b0;
+  --grid:#232931; --axis:#3a424d;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 32px rgba(0,0,0,.38);
+  --font-display:"Bricolage Grotesque","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f3f3f1; --surf:#ffffff; --surf2:#ebecea; --surf3:#e0e2df;
+    --rule:#dcdedb; --rule2:#c3c7c2;
+    --ink:#15181c; --ink2:#4a525b; --ink3:#727b86;
+    --obs:#b98512;  --obs-ink:#8f6608;  --obs-soft:rgba(185,133,18,.14);
+    --st:#0f9d8e;   --st-ink:#0b7f73;   --st-soft:rgba(15,157,142,.13);
+    --fut:#6f56e0;  --fut-ink:#5a41c9;  --fut-soft:rgba(111,86,224,.13);
+    --vid:#2f6fdc;  --vid-ink:#2358b8;  --vid-soft:rgba(47,111,220,.13);
+    --ball:#d13a40; --ball-ink:#b42d33; --ball-soft:rgba(209,58,64,.12);
+    --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+    --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+    --table:#9c7048; --table-top:#b8895c; --wall:#e6e8ea;
+    --boxc:#3b7dd8; --boxc2:#2b5fa8; --boxin:#eef2f7; --pencil:#e6b23a; --hand:#e0b291; --hand2:#c4926f;
+    --cupdark:#2a2d33; --paper:#fbfaf5; --drawer:#a67d55; --drawer2:#87643f;
+    --m-i2v:#c99a1c; --m-longcat:#d1741e; --m-storymem:#6f7f98; --m-storymemkf:#2f6fdc; --m-magi:#c33a80; --m-agent:#0f9d8e;
+    --grid:#e2e5e2; --axis:#c3c7c2;
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f3f3f1; --surf:#ffffff; --surf2:#ebecea; --surf3:#e0e2df;
+  --rule:#dcdedb; --rule2:#c3c7c2;
+  --ink:#15181c; --ink2:#4a525b; --ink3:#727b86;
+  --obs:#b98512;  --obs-ink:#8f6608;  --obs-soft:rgba(185,133,18,.14);
+  --st:#0f9d8e;   --st-ink:#0b7f73;   --st-soft:rgba(15,157,142,.13);
+  --fut:#6f56e0;  --fut-ink:#5a41c9;  --fut-soft:rgba(111,86,224,.13);
+  --vid:#2f6fdc;  --vid-ink:#2358b8;  --vid-soft:rgba(47,111,220,.13);
+  --ball:#d13a40; --ball-ink:#b42d33; --ball-soft:rgba(209,58,64,.12);
+  --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+  --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+  --table:#9c7048; --table-top:#b8895c; --wall:#e6e8ea;
+  --boxc:#3b7dd8; --boxc2:#2b5fa8; --boxin:#eef2f7; --pencil:#e6b23a; --hand:#e0b291; --hand2:#c4926f;
+  --cupdark:#2a2d33; --paper:#fbfaf5; --drawer:#a67d55; --drawer2:#87643f;
+  --m-i2v:#c99a1c; --m-longcat:#d1741e; --m-storymem:#6f7f98; --m-storymemkf:#2f6fdc; --m-magi:#c33a80; --m-agent:#0f9d8e;
+  --grid:#e2e5e2; --axis:#c3c7c2;
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:84px}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{transition-duration:.01ms !important; animation-duration:.01ms !important}
+}
+h1,h2,h3,h4{margin:0; line-height:1.25; font-family:var(--font-display); text-wrap:balance; font-weight:700}
+p{margin:0}
+a{color:var(--fut-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--st-ink); outline-offset:3px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); border:1px solid var(--rule);
+  padding:.06em .36em; border-radius:5px; white-space:nowrap}
+strong{font-weight:600; color:var(--ink)}
+hr{border:0; border-top:1px solid var(--rule); margin:40px 0}
+.m{font-family:var(--font-math); font-style:italic; font-size:1.02em}
+.mr{font-family:var(--font-math); font-style:normal}
+sub,sup{font-size:.72em; line-height:0}
+.eq{font-family:var(--font-math); font-size:1.08em; line-height:1.6; padding:14px 18px; margin:16px 0;
+  background:var(--surf); border:1px solid var(--rule); border-radius:10px; overflow-x:auto; display:flex; align-items:center; gap:14px; flex-wrap:wrap}
+.eq .num{margin-left:auto; font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-style:normal}
+.eq i{font-style:italic}
+.eq .hat{position:relative; display:inline-block}
+.eq .hat::before{content:"^"; position:absolute; left:50%; top:-.62em; transform:translateX(-50%); font-size:.8em; font-style:normal}
+.frac{display:inline-flex; flex-direction:column; align-items:center; vertical-align:middle; margin:0 .2em; line-height:1.2}
+.frac > span:first-child{border-bottom:1px solid currentColor; padding:0 .2em}
+.frac > span:last-child{padding:0 .2em}
+.tag{display:inline-block; font-family:var(--font-mono); font-size:11.5px; letter-spacing:.04em; padding:2px 8px; border-radius:999px;
+  border:1px solid var(--rule2); color:var(--ink2); vertical-align:middle; white-space:nowrap}
+.tag.obs{color:var(--obs-ink); border-color:var(--obs); background:var(--obs-soft)}
+.tag.st{color:var(--st-ink); border-color:var(--st); background:var(--st-soft)}
+.tag.fut{color:var(--fut-ink); border-color:var(--fut); background:var(--fut-soft)}
+.tag.vid{color:var(--vid-ink); border-color:var(--vid); background:var(--vid-soft)}
+.tag.ball{color:var(--ball-ink); border-color:var(--ball); background:var(--ball-soft)}
+.tag.ok{color:var(--ok-ink); border-color:var(--ok); background:var(--ok-soft)}
+.tag.bad{color:var(--bad-ink); border-color:var(--bad); background:var(--bad-soft)}
+.k-obs{color:var(--obs-ink)} .k-st{color:var(--st-ink)} .k-fut{color:var(--fut-ink)} .k-vid{color:var(--vid-ink)} .k-ball{color:var(--ball-ink)}
+
+/* ============================================================ chrome */
+#prog{position:fixed; inset:0 auto auto 0; height:2px; width:0; z-index:200;
+  background:linear-gradient(90deg,var(--obs),var(--st),var(--fut),var(--vid)); transition:width .1s linear}
+.top{position:sticky; top:0; z-index:150; display:flex; align-items:center; gap:12px; padding:10px 24px;
+  background:color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:14.5px; letter-spacing:-.005em; display:flex; align-items:center; gap:10px; white-space:nowrap}
+.brand .dot{width:10px; height:10px; border-radius:50%; background:var(--ball); box-shadow:0 0 0 3px var(--ball-soft)}
+.brand em{font-style:normal; font-family:var(--font-mono); font-weight:500; font-size:12px; color:var(--ink3)}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2); background:var(--surf3)}
+.jump{position:relative}
+.jump-menu{position:absolute; right:0; top:42px; width:340px; max-height:70vh; overflow:auto; background:var(--surf); border:1px solid var(--rule);
+  border-radius:12px; box-shadow:var(--shadow); padding:8px; display:none; z-index:160}
+.jump-menu.open{display:block}
+.jump-menu a{display:flex; gap:10px; align-items:baseline; padding:7px 10px; border-radius:8px; color:var(--ink2); font-size:13.5px; border:0}
+.jump-menu a:hover{background:var(--surf2); color:var(--ink)}
+.jump-menu a .sec{font-family:var(--font-mono); font-size:11px; color:var(--ink3); min-width:44px}
+
+/* ============================================================ layout */
+.wrap{max-width:1120px; margin:0 auto; padding:0 24px}
+.prose{max-width:760px}
+.prose p{margin:0 0 16px; color:var(--ink2)}
+.prose p strong{color:var(--ink)}
+.prose ul,.prose ol{margin:0 0 16px; padding-left:1.2em; color:var(--ink2)}
+.prose li{margin:0 0 8px}
+section.sec{padding:64px 0 24px; border-top:1px solid var(--rule)}
+.eyebrow{display:flex; align-items:center; gap:10px; font-family:var(--font-mono); font-size:12px; letter-spacing:.06em; color:var(--ink3); margin-bottom:12px; text-transform:uppercase; flex-wrap:wrap}
+.eyebrow .paper{color:var(--ink2); background:var(--surf2); border:1px solid var(--rule); padding:2px 8px; border-radius:6px; text-transform:none; letter-spacing:0}
+h2{font-size:clamp(26px,3.2vw,34px); letter-spacing:-.015em; margin-bottom:18px; font-variation-settings:"opsz" 60}
+h3{font-size:19px; margin:32px 0 10px; letter-spacing:-.005em}
+h4{font-size:15.5px; margin:20px 0 8px; font-family:var(--font-body); font-weight:600}
+.lead{font-size:18px; line-height:1.7; color:var(--ink); margin-bottom:18px; max-width:760px}
+.grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:18px; margin:18px 0}
+.grid3{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; margin:18px 0}
+.grid4{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:14px; margin:18px 0}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:18px 20px}
+.card h4{margin-top:0}
+.card p{color:var(--ink2); margin:0 0 8px; font-size:15px}
+.card p:last-child{margin-bottom:0}
+.card.obs{border-top:3px solid var(--obs)} .card.st{border-top:3px solid var(--st)} .card.fut{border-top:3px solid var(--fut)} .card.vid{border-top:3px solid var(--vid)} .card.ball{border-top:3px solid var(--ball)}
+.note{border-left:3px solid var(--rule2); padding:6px 16px; margin:18px 0; color:var(--ink2); font-size:15px; background:var(--surf)}
+.note.obs{border-color:var(--obs)} .note.st{border-color:var(--st)} .note.fut{border-color:var(--fut)} .note.vid{border-color:var(--vid)} .note.ball{border-color:var(--ball)}
+.note b{color:var(--ink)}
+.callout{padding:16px 20px; border-radius:12px; margin:20px 0; font-size:15px; border:1px solid}
+.callout.ok{background:var(--ok-soft); border-color:var(--ok); color:var(--ink)}
+.callout.warn{background:var(--obs-soft); border-color:var(--obs); color:var(--ink)}
+.callout.bad{background:var(--bad-soft); border-color:var(--bad); color:var(--ink)}
+.callout.st{background:var(--st-soft); border-color:var(--st); color:var(--ink)}
+figure{margin:24px 0}
+figure.wide{margin:28px 0}
+figcaption{font-size:13.5px; color:var(--ink3); line-height:1.6; margin-top:10px; max-width:860px}
+figcaption b{color:var(--ink2); font-weight:600}
+.fig{background:var(--surf); border:1px solid var(--rule); border-radius:14px; padding:18px; overflow-x:auto}
+.fig svg{max-width:100%; height:auto; display:block}
+.diag{font-family:var(--font-body); color:var(--ink)}
+.diag text{fill:currentColor; font-size:12px}
+.diag .mono{font-family:var(--font-mono); font-size:11px}
+.diag .math{font-family:var(--font-math); font-style:italic; font-size:13px}
+.diag .dim{fill:var(--ink3)}
+.diag .box{fill:var(--surf2); stroke:var(--rule2)}
+.diag .line{stroke:currentColor; fill:none; stroke-width:1.3}
+.diag .dash{stroke-dasharray:4 4}
+.kv{display:grid; grid-template-columns:auto 1fr; gap:6px 16px; font-size:14px; margin:10px 0}
+.kv dt{font-family:var(--font-mono); font-size:12.5px; color:var(--ink3); padding-top:2px}
+.kv dd{margin:0; color:var(--ink2)}
+.kv dd b{color:var(--ink)}
+table.t{border-collapse:collapse; width:100%; font-size:13.5px; font-variant-numeric:tabular-nums}
+table.t th,table.t td{padding:8px 10px; border-bottom:1px solid var(--rule); text-align:right; vertical-align:top}
+table.t th{font-weight:600; color:var(--ink2); font-family:var(--font-mono); font-size:12px; letter-spacing:.03em; border-bottom:1px solid var(--rule2)}
+table.t th:first-child,table.t td:first-child{text-align:left}
+table.t td.best{color:var(--ink); font-weight:600}
+table.t tr.hi td{background:var(--st-soft)}
+table.t td.l,table.t th.l{text-align:left}
+.tscroll{overflow-x:auto; border:1px solid var(--rule); border-radius:12px; background:var(--surf); padding:6px 10px}
+.small{font-size:13px; color:var(--ink3)}
+.mine{font-size:12px; font-family:var(--font-mono); color:var(--ink3); letter-spacing:.03em}
+
+/* ============================================================ hero */
+.hero{padding:96px 0 30px}
+.hero .kicker{font-family:var(--font-mono); font-size:12.5px; color:var(--ink3); letter-spacing:.05em; display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:20px}
+.hero .kicker a{color:var(--ink2); border-bottom:1px dotted var(--rule2)}
+.hero h1{font-size:clamp(34px,5.4vw,62px); letter-spacing:-.025em; line-height:1.06; font-weight:800; max-width:980px; font-variation-settings:"opsz" 96}
+.hero h1 .q{color:var(--ball-ink)}
+.hero .sub{font-family:var(--font-display); font-weight:500; font-size:clamp(16px,2vw,21px); color:var(--ink2); margin:16px 0 0; max-width:860px; letter-spacing:-.005em; line-height:1.4}
+.hero .thesis{margin:26px 0 0; max-width:860px; font-size:17px; color:var(--ink2); line-height:1.8}
+.hero .thesis b{color:var(--ink)}
+.facts{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:12px; overflow:hidden; margin:30px 0 0}
+.facts div{background:var(--surf); padding:12px 14px}
+.facts .v{font-family:var(--font-display); font-weight:700; font-size:22px; letter-spacing:-.01em; font-variant-numeric:tabular-nums; line-height:1.15}
+.facts .v small{font-size:13px; color:var(--ink3); font-weight:500; margin-left:3px}
+.facts .l{font-size:12px; color:var(--ink3); margin-top:4px; font-family:var(--font-mono)}
+.authors{display:flex; flex-wrap:wrap; gap:6px 18px; margin-top:14px; font-size:14px; color:var(--ink2)}
+.authors span sup{color:var(--ink3)}
+
+/* ============================================================ boundary experiment (opener widget) */
+.bx{display:grid; grid-template-columns:minmax(0,1.45fr) minmax(300px,1fr); gap:18px; margin-top:26px}
+@media (max-width:860px){.bx{grid-template-columns:1fr}}
+.stage{background:var(--surf); border:1px solid var(--rule); border-radius:14px; padding:14px; position:relative}
+.stage svg{width:100%; height:auto; display:block}
+.stage .lbl{font-family:var(--font-mono); font-size:11px; fill:var(--ink3)}
+.stage .cut{stroke:var(--ball); stroke-width:2; stroke-dasharray:6 5}
+.strip{display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:6px; margin-top:12px}
+.strip .fr{border:1px solid var(--rule2); border-radius:7px; background:var(--surf2); padding:3px; cursor:pointer; position:relative; transition:.15s; aspect-ratio:4/3}
+.strip .fr svg{width:100%; height:100%; display:block}
+.strip .fr:hover{border-color:var(--ink3)}
+.strip .fr.cur{outline:2px solid var(--st-ink); outline-offset:1px}
+.strip .fr.exp{border-color:var(--obs); box-shadow:0 0 0 2px var(--obs-soft)}
+.strip .fr.exp::after{content:"exposed"; position:absolute; left:4px; bottom:3px; font-family:var(--font-mono); font-size:8.5px; color:var(--obs-ink); letter-spacing:.03em}
+.strip .fr.tail::before{content:"尾帧"; position:absolute; right:4px; top:2px; font-family:var(--font-mono); font-size:9px; color:var(--ball-ink)}
+.strip .fr .t{position:absolute; left:4px; top:2px; font-family:var(--font-mono); font-size:9px; color:var(--ink3)}
+.gpanel{background:var(--surf); border:1px solid var(--rule); border-radius:14px; padding:14px 16px; display:flex; flex-direction:column; gap:12px; font-size:14px}
+.gpanel h4{margin:0; font-size:14px}
+.btns{display:flex; gap:8px; flex-wrap:wrap}
+.btn{background:var(--surf2); border:1px solid var(--rule2); color:var(--ink); padding:7px 12px; border-radius:9px; cursor:pointer; font:inherit; font-size:13.5px; transition:.15s}
+.btn:hover{background:var(--surf3)}
+.btn.primary{background:var(--ball); border-color:var(--ball); color:#fff}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.st{background:var(--st-soft); border-color:var(--st); color:var(--st-ink)}
+.btn.fut{background:var(--fut-soft); border-color:var(--fut); color:var(--fut-ink)}
+.btn.on{outline:2px solid var(--st-ink); outline-offset:1px}
+.btn:disabled{opacity:.45; cursor:not-allowed}
+.seg{display:inline-flex; border:1px solid var(--rule2); border-radius:9px; overflow:hidden}
+.seg button{background:var(--surf2); border:0; color:var(--ink2); padding:6px 11px; cursor:pointer; font:inherit; font-size:13px; border-right:1px solid var(--rule2)}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--st-soft); color:var(--st-ink)}
+.seg.obs button.on{background:var(--obs-soft); color:var(--obs-ink)}
+.ledger{font-family:var(--font-mono); font-size:12px; background:var(--surf2); border-radius:8px; padding:8px 10px; line-height:1.7; color:var(--ink2); border-left:3px solid var(--st)}
+.ledger b{color:var(--ink); font-weight:600}
+.ledger .hid{color:var(--ball-ink)}
+.ledger .vis{color:var(--ok-ink)}
+.ledger .chg{background:var(--fut-soft); color:var(--fut-ink); padding:0 4px; border-radius:4px}
+.verdict{display:grid; grid-template-columns:auto 1fr; gap:6px 12px; font-size:13px}
+.verdict dt{font-family:var(--font-mono); font-size:12px; color:var(--ink3)}
+.verdict dd{margin:0}
+.verdict .y{color:var(--ok-ink)} .verdict .n{color:var(--bad-ink)} .verdict .w{color:var(--obs-ink)}
+
+/* ============================================================ argument chain */
+.chain{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px; margin:20px 0}
+.chain .step{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:14px 16px; position:relative; font-size:14px; color:var(--ink2)}
+.chain .step .n{font-family:var(--font-mono); font-size:11px; color:var(--ink3); margin-bottom:6px; letter-spacing:.05em}
+.chain .step b{display:block; color:var(--ink); font-size:15px; margin-bottom:6px; font-family:var(--font-display); font-weight:600}
+.chain .step.obs{border-color:var(--obs)} .chain .step.st{border-color:var(--st)} .chain .step.fut{border-color:var(--fut)} .chain .step.bad{border-color:var(--bad)} .chain .step.ok{border-color:var(--ok)}
+
+/* ============================================================ storyboards */
+.sb{display:grid; grid-template-columns:minmax(220px,.9fr) minmax(0,2.1fr); gap:16px; align-items:start; margin:14px 0}
+@media (max-width:760px){.sb{grid-template-columns:1fr}}
+.sb .frames{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; align-items:end}
+.sb .fr{background:var(--surf); border:1px solid var(--rule); border-radius:8px; padding:4px; position:relative}
+.sb .fr svg{width:100%; height:auto; display:block}
+.sb .fr .cap{font-family:var(--font-mono); font-size:10.5px; color:var(--ink3); margin-top:4px; line-height:1.4; min-height:28px}
+.sb .fr.tail{border-color:var(--ball)}
+.sb .fr.reveal{border-color:var(--st)}
+.sb .fr.reveal .cap{color:var(--st-ink)}
+.sb .fr.tail .cap{color:var(--ball-ink)}
+.sb .cutline{display:flex; align-items:center; justify-content:center; height:100%; min-height:90px}
+.sb .cutline span{writing-mode:vertical-rl; font-family:var(--font-mono); font-size:10px; color:var(--ball-ink); letter-spacing:.1em; border-left:2px dashed var(--ball); padding-left:6px}
+.sb .fail{font-size:12.5px; color:var(--ink3); margin-top:8px}
+.sb .fail b{color:var(--bad-ink); font-weight:600}
+.sb h4{margin:0 0 6px}
+.sb .cnt{font-family:var(--font-display); font-weight:700; font-size:30px; letter-spacing:-.01em; line-height:1}
+.sb .cnt small{font-size:13px; color:var(--ink3); font-weight:500; margin-left:4px}
+.sb p{font-size:14px; color:var(--ink2); margin:6px 0 0}
+
+/* ============================================================ task browser */
+.tb{display:grid; grid-template-columns:minmax(230px,.85fr) minmax(0,1.6fr); gap:16px; margin-top:16px}
+@media (max-width:820px){.tb{grid-template-columns:1fr}}
+.tb .list{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:8px; max-height:520px; overflow:auto}
+.tb .list button{display:flex; width:100%; text-align:left; gap:8px; align-items:baseline; background:none; border:0; border-radius:8px; padding:7px 10px; cursor:pointer; font:inherit; font-size:13px; color:var(--ink2)}
+.tb .list button:hover{background:var(--surf2); color:var(--ink)}
+.tb .list button.on{background:var(--st-soft); color:var(--st-ink)}
+.tb .list button .id{font-family:var(--font-mono); font-size:12px; flex:1; word-break:break-all}
+.tb .list button .fam{font-family:var(--font-mono); font-size:10px; color:var(--ink3); white-space:nowrap}
+.tb .detail{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:16px 18px; font-size:14px}
+.shot{border-left:3px solid var(--obs); padding:6px 12px; margin:8px 0; background:var(--surf2); border-radius:0 8px 8px 0}
+.shot.reveal{border-color:var(--st)}
+.shot .role{font-family:var(--font-mono); font-size:11px; color:var(--ink3); letter-spacing:.04em}
+.shot p{margin:2px 0 0; color:var(--ink2); font-size:13.5px; line-height:1.6}
+.chk{margin:6px 0 0; padding:0; list-style:none; font-size:13px}
+.chk li{display:flex; gap:8px; align-items:flex-start; padding:4px 0; border-bottom:1px dashed var(--rule)}
+.chk li:last-child{border-bottom:0}
+.chk .q{font-family:var(--font-mono); font-size:11px; color:var(--ink3); min-width:26px; padding-top:3px}
+.chk .cat{font-family:var(--font-mono); font-size:10.5px; padding:1px 6px; border-radius:999px; border:1px solid var(--rule2); color:var(--ink3); white-space:nowrap; margin-top:2px}
+.chk .cat.ses{border-color:var(--obs); color:var(--obs-ink)} .chk .cat.sc{border-color:var(--st); color:var(--st-ink)} .chk .cat.nv{border-color:var(--bad); color:var(--bad-ink)}
+.chk .refs{font-family:var(--font-mono); font-size:10.5px; color:var(--fut-ink)}
+.refbar{position:relative; height:34px; margin:8px 0 2px; background:var(--surf2); border-radius:6px; border:1px solid var(--rule)}
+.refbar .mk{position:absolute; top:-1px; bottom:-1px; width:2px; background:var(--fut)}
+.refbar .mk span{position:absolute; top:100%; left:50%; transform:translateX(-50%); font-family:var(--font-mono); font-size:10px; color:var(--fut-ink); white-space:nowrap; margin-top:2px}
+.refbar .seglbl{position:absolute; left:17%; top:7px; font-family:var(--font-mono); font-size:11px; color:var(--ink3)}
+.refbar .cutm{position:absolute; right:-1px; top:-4px; bottom:-4px; width:2px; background:var(--ball)}
+
+/* ============================================================ metric calculator */
+.calc{display:grid; grid-template-columns:minmax(0,1.6fr) minmax(260px,1fr); gap:16px}
+@media (max-width:820px){.calc{grid-template-columns:1fr}}
+.calc table{border-collapse:collapse; width:100%; font-size:13px; font-variant-numeric:tabular-nums}
+.calc th{font-family:var(--font-mono); font-size:11px; color:var(--ink3); text-align:center; padding:6px 4px; border-bottom:1px solid var(--rule2); font-weight:500; letter-spacing:.03em}
+.calc td{text-align:center; padding:5px 4px; border-bottom:1px solid var(--rule)}
+.calc td:first-child,.calc th:first-child{text-align:left; font-family:var(--font-mono); font-size:12px; color:var(--ink3)}
+.calc .tg{width:36px; height:22px; border-radius:6px; border:1px solid var(--rule2); background:var(--surf2); cursor:pointer; font:inherit; font-size:12px; color:var(--ink3); display:inline-grid; place-items:center; transition:.12s}
+.calc .tg.y{background:var(--ok-soft); border-color:var(--ok); color:var(--ok-ink)}
+.calc .tg.n{background:var(--bad-soft); border-color:var(--bad); color:var(--bad-ink)}
+.calc .tg:disabled{opacity:.3; cursor:not-allowed}
+.calc .tg.e.y{background:var(--obs-soft); border-color:var(--obs); color:var(--obs-ink)}
+.calc tr.off td{opacity:.55}
+.calc tr.off td:first-child{opacity:1}
+.out{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+.out .o{background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:10px 12px}
+.out .o .k{font-family:var(--font-mono); font-size:11px; color:var(--ink3); letter-spacing:.04em}
+.out .o .v{font-family:var(--font-display); font-weight:700; font-size:24px; letter-spacing:-.01em; font-variant-numeric:tabular-nums; line-height:1.2}
+.out .o .f{font-family:var(--font-mono); font-size:11px; color:var(--ink3); margin-top:2px}
+.out .o.ses{border-color:var(--obs)} .out .o.sc{border-color:var(--st)} .out .o.hr{border-color:var(--bad)} .out .o.scs{border-color:var(--fut)} .out .o.all{border-color:var(--vid); grid-column:1/-1}
+
+/* ============================================================ method diagram + state graph */
+.pipe .stage-g{cursor:pointer}
+.pipe .stage-g rect.bg{fill:var(--surf2); stroke:var(--rule2); transition:.15s}
+.pipe .stage-g:hover rect.bg,.pipe .stage-g.on rect.bg{stroke-width:2}
+.pipe .stage-g.s1:hover rect.bg,.pipe .stage-g.s1.on rect.bg{stroke:var(--st)} .pipe .stage-g.s2:hover rect.bg,.pipe .stage-g.s2.on rect.bg{stroke:var(--fut)}
+.pipe .stage-g.s3:hover rect.bg,.pipe .stage-g.s3.on rect.bg{stroke:var(--fut)} .pipe .stage-g.s4:hover rect.bg,.pipe .stage-g.s4.on rect.bg{stroke:var(--vid)}
+.pipe text{fill:var(--ink); font-size:12px}
+.pipe .ttl{font-family:var(--font-display); font-weight:600; font-size:13.5px}
+.pipe .dim{fill:var(--ink3); font-size:11px}
+.pipe .mono{font-family:var(--font-mono); font-size:10.5px}
+.pipe .math{font-family:var(--font-math); font-style:italic; font-size:13px}
+.pipe .arrow{stroke:var(--ink3); fill:none; stroke-width:1.4}
+.pipe .chip{fill:var(--surf); stroke:var(--rule2)}
+.pipedesc{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:14px 18px; margin-top:12px; font-size:14px; color:var(--ink2); min-height:96px}
+.pipedesc b{color:var(--ink)}
+.pipedesc .hd{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.05em; color:var(--ink3); margin-bottom:6px}
+.sg{display:grid; grid-template-columns:minmax(0,1.3fr) minmax(280px,1fr); gap:16px; margin-top:14px}
+@media (max-width:820px){.sg{grid-template-columns:1fr}}
+.sg .graph{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:10px}
+.sg .graph svg{width:100%; height:auto; display:block}
+.sg .node{cursor:pointer}
+.sg .node rect{fill:var(--surf2); stroke:var(--rule2); transition:.15s}
+.sg .node:hover rect,.sg .node.on rect{stroke:var(--st); stroke-width:2}
+.sg .node.chg rect{stroke:var(--fut); stroke-dasharray:4 3}
+.sg .node text{fill:var(--ink); font-size:12px}
+.sg .node .id{font-family:var(--font-mono); font-size:11.5px; font-weight:600}
+.sg .node .sub{fill:var(--ink3); font-size:10.5px; font-family:var(--font-mono)}
+.sg .node .hidmark{fill:var(--ball-ink); font-size:10px; font-family:var(--font-mono)}
+.sg .edge{stroke:var(--ink3); fill:none; stroke-width:1.4}
+.sg .edge.chg{stroke:var(--fut); stroke-width:2}
+.sg .edge.gone{stroke:var(--bad); stroke-dasharray:3 3; opacity:.7}
+.sg .elbl{font-family:var(--font-mono); font-size:10px; fill:var(--ink2)}
+.sg .elbl.chg{fill:var(--fut-ink)}
+.jsoncard{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:12px 14px; font-family:var(--font-mono); font-size:12px; line-height:1.65; color:var(--ink2); overflow-x:auto; min-height:300px}
+.jsoncard .k{color:var(--ink3)} .jsoncard .s{color:var(--st-ink)} .jsoncard .v{color:var(--ink)} .jsoncard .d{background:var(--fut-soft); color:var(--fut-ink); border-radius:3px; padding:0 3px} .jsoncard .r{color:var(--ball-ink)}
+.jsoncard .hd{font-size:11px; letter-spacing:.05em; color:var(--ink3); margin-bottom:6px}
+
+/* ============================================================ code walkthrough stepper */
+.stepper{display:grid; grid-template-columns:minmax(240px,.9fr) minmax(0,1.5fr); gap:16px; margin-top:14px}
+@media (max-width:820px){.stepper{grid-template-columns:1fr}}
+.steps{display:flex; flex-direction:column; gap:4px}
+.steps button{display:grid; grid-template-columns:28px 1fr auto; gap:10px; align-items:center; text-align:left; background:var(--surf); border:1px solid var(--rule); border-radius:10px; padding:8px 10px; cursor:pointer; font:inherit; font-size:13px; color:var(--ink2); transition:.12s}
+.steps button:hover{border-color:var(--rule2); color:var(--ink)}
+.steps button.on{border-color:var(--st); background:var(--st-soft); color:var(--ink)}
+.steps .num{font-family:var(--font-mono); font-size:11px; color:var(--ink3); width:28px; height:28px; border-radius:50%; border:1px solid var(--rule2); display:grid; place-items:center}
+.steps button.on .num{border-color:var(--st); color:var(--st-ink)}
+.steps .who{font-family:var(--font-mono); font-size:10px; padding:1px 6px; border-radius:999px; border:1px solid var(--rule2); color:var(--ink3); white-space:nowrap}
+.steps .who.vlm{border-color:var(--st); color:var(--st-ink)} .steps .who.img{border-color:var(--fut); color:var(--fut-ink)} .steps .who.vidm{border-color:var(--vid); color:var(--vid-ink)} .steps .who.py{border-color:var(--rule2)}
+.steps .grp{font-family:var(--font-mono); font-size:11px; color:var(--ink3); letter-spacing:.05em; margin:8px 0 2px 6px}
+.stepbody{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:16px 18px; font-size:14px; color:var(--ink2); align-self:start; position:sticky; top:72px}
+.stepbody h4{margin:0 0 8px; font-family:var(--font-display); font-size:16px}
+.stepbody .io{display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:13px; margin:10px 0}
+.stepbody .io dt{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); padding-top:2px}
+.stepbody .io dd{margin:0}
+.stepbody pre{margin:10px 0 0; background:var(--surf2); border:1px solid var(--rule); border-radius:8px; padding:10px 12px; font-family:var(--font-mono); font-size:12px; line-height:1.6; color:var(--ink2); white-space:pre-wrap; word-break:break-word; max-height:260px; overflow:auto}
+.stepbody pre b{color:var(--ink); font-weight:600}
+.stepbody .file{font-family:var(--font-mono); font-size:11.5px; color:var(--fut-ink)}
+
+/* ============================================================ charts */
+.chart{position:relative}
+.chart svg{max-width:100%; height:auto; display:block; font-family:var(--font-body)}
+.chart .ax{stroke:var(--axis); stroke-width:1}
+.chart .gr{stroke:var(--grid); stroke-width:1}
+.chart .tk{fill:var(--ink3); font-size:11px; font-family:var(--font-mono)}
+.chart .ttl{fill:var(--ink); font-size:13px; font-weight:600}
+.chart .sub{fill:var(--ink3); font-size:11px}
+.chart .cat{fill:var(--ink2); font-size:12px}
+.chart .vl{fill:var(--ink); font-size:10.5px; font-family:var(--font-mono)}
+.chart .series{transition:opacity .15s}
+.chart .series.dim{opacity:.14}
+.legend{display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:10px; font-size:12.5px}
+.legend button{background:none; border:0; padding:2px 4px; cursor:pointer; color:var(--ink2); display:inline-flex; align-items:center; gap:7px; font:inherit; font-size:12.5px; border-radius:6px}
+.legend button:hover{background:var(--surf2); color:var(--ink)}
+.legend button.off{opacity:.4; text-decoration:line-through}
+.legend .sw{width:14px; height:14px; border-radius:3px; display:inline-block}
+.tip{position:absolute; pointer-events:none; background:var(--surf3); color:var(--ink); border:1px solid var(--rule2); border-radius:8px; padding:6px 9px; font-size:12px; font-family:var(--font-mono); box-shadow:var(--shadow); white-space:nowrap; display:none; z-index:5}
+.charts2{display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px}
+.mini{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:12px}
+.mini .ttl2{font-size:13px; font-weight:600; margin-bottom:2px}
+.mini .sub2{font-size:11.5px; color:var(--ink3); margin-bottom:6px}
+.ctrls{display:flex; gap:14px; flex-wrap:wrap; align-items:center; font-size:13.5px; margin:8px 0 12px}
+.ctrls label{display:inline-flex; gap:8px; align-items:center; color:var(--ink2)}
+.ladder{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:14px 0}
+@media (max-width:720px){.ladder{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.ladder .rung{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:12px 14px; position:relative}
+.ladder .rung .nm{font-size:13px; color:var(--ink2); min-height:38px}
+.ladder .rung .big{font-family:var(--font-display); font-weight:700; font-size:30px; letter-spacing:-.01em; font-variant-numeric:tabular-nums; margin-top:4px}
+.ladder .rung .row{display:flex; gap:10px; font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); margin-top:4px}
+.ladder .rung .row b{color:var(--ink2); font-weight:500}
+.ladder .rung .bar{height:6px; border-radius:3px; background:var(--surf3); margin-top:8px; overflow:hidden}
+.ladder .rung .bar i{display:block; height:100%; border-radius:3px; background:var(--fut)}
+.ladder .rung.last{border-color:var(--st)} .ladder .rung.last .bar i{background:var(--st)}
+.ladder .rung .delta{position:absolute; right:12px; top:12px; font-family:var(--font-mono); font-size:11px; color:var(--ok-ink)}
+
+/* ============================================================ misc blocks */
+.compare{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; margin:16px 0}
+.compare .c{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:14px 16px; font-size:14px; color:var(--ink2)}
+.compare .c h4{margin:0 0 8px; font-family:var(--font-display); font-size:15px}
+.compare .c ul{margin:0; padding-left:1.1em}
+.compare .c li{margin:0 0 4px}
+.compare .c .pro{color:var(--ok-ink)} .compare .c .con{color:var(--bad-ink)}
+.compare .c.pick{border-color:var(--fut)}
+.rel{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px; margin:18px 0}
+.rel .card{font-size:14px; color:var(--ink2)}
+.rel .card b{display:block; color:var(--ink); margin-bottom:4px; font-family:var(--font-display); font-weight:600; font-size:15px}
+.rel .card .where{font-family:var(--font-mono); font-size:11px; color:var(--ink3); letter-spacing:.04em; margin-bottom:6px}
+.gloss{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:8px 24px; font-size:14px; margin-top:8px}
+.gloss div{padding:8px 0; border-bottom:1px dashed var(--rule); color:var(--ink2)}
+.gloss b{color:var(--ink); font-weight:600; margin-right:8px}
+.prompts{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px; margin:14px 0}
+.prompts .p{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:14px 16px; font-size:13.5px}
+.prompts .p .who{font-family:var(--font-mono); font-size:11px; letter-spacing:.05em; color:var(--st-ink); margin-bottom:6px}
+.prompts .p .who em{font-style:normal; color:var(--ink3); margin-left:8px}
+.prompts .p q{quotes:none; display:block; font-family:var(--font-body); color:var(--ink2); line-height:1.65; border-left:2px solid var(--rule2); padding-left:10px; margin:6px 0}
+.prompts .p .zh{color:var(--ink); font-size:13.5px}
+.spectrum{display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin:14px 0}
+@media (max-width:820px){.spectrum{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.spectrum .s{background:var(--surf); border:1px solid var(--rule); border-radius:10px; padding:10px 12px; font-size:12.5px; color:var(--ink2); position:relative}
+.spectrum .s b{display:block; color:var(--ink); font-size:13px; margin-bottom:4px}
+.spectrum .s .ex{font-family:var(--font-mono); font-size:10.5px; color:var(--ink3); margin-top:6px}
+.spectrum .s.obs{border-top:3px solid var(--obs)} .spectrum .s.st{border-top:3px solid var(--st)}
+.tri{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:12px; overflow:hidden; margin:16px 0}
+@media (max-width:720px){.tri{grid-template-columns:1fr}}
+.tri div{background:var(--surf); padding:14px 16px; font-size:14px; color:var(--ink2)}
+.tri div b{display:block; color:var(--ink); margin-bottom:4px}
+footer{border-top:1px solid var(--rule); margin-top:60px; padding:30px 0 60px; font-size:13px; color:var(--ink3); line-height:1.7}
+footer p{margin:0 0 8px}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+<header class="top">
+  <div class="brand"><span class="dot"></span>StateBench / StateAgent 精读 <em>arXiv 2609.03673</em></div>
+  <div class="spacer"></div>
+  <div class="jump">
+    <button class="tbtn" id="jumpBtn" aria-haspopup="true" aria-expanded="false">目录 ▾</button>
+    <nav class="jump-menu" id="jumpMenu" aria-label="页面目录"></nav>
+  </div>
+  <button class="tbtn" id="themeBtn" title="切换明暗主题" aria-label="切换明暗主题">◐</button>
+</header>
+
+<main class="wrap">
+<!-- ============================================================ HERO -->
+<section class="hero" id="top">
+  <div class="kicker">
+    <span>arXiv:2609.03673v1 · cs.CV · 2026-09-03 · Preprint</span>
+    <a href="https://arxiv.org/abs/2609.03673" target="_blank" rel="noopener">arxiv.org/abs/2609.03673</a>
+    <a href="https://github.com/AMAP-ML/StateAgent" target="_blank" rel="noopener">github.com/AMAP-ML/StateAgent</a>
+    <span class="tag">基准 + 测试时智能体 · 不训练视频模型</span>
+  </div>
+  <h1>视频生成器，<span class="q">能跨片段追踪世界吗？</span></h1>
+  <p class="sub">Do Video Generators Track the World Across Segments? — 把「上一段视频建立了什么状态」和「下一段提示要求它怎么变」拆开来问：<b>StateBench</b> 用 200 个「先藏起来、再揭示」的续写任务测量生成器是否携带了正确的世界状态；<b>StateAgent</b> 用一张显式的实体状态图和一张<em>预测出来的未来末帧</em>，把状态推理从视频渲染里剥离出来。</p>
+  <div class="authors">
+    <span>Yingmao Miao<sup>1,2†</sup></span><span>Pengfei Zhang<sup>2‡</sup></span><span>Chaoran Xu<sup>2†</sup></span><span>Meng Yu<sup>2,3†</sup></span><span>Jing Tang<sup>2*</sup></span><span>Xiangxiang Chu<sup>2</sup></span><span>Chao Shen<sup>1</sup></span><span>Chenhao Lin<sup>1*</sup></span>
+    <span class="small"><sup>1</sup>西安交通大学 · <sup>2</sup>阿里巴巴 DreamX Team · <sup>3</sup>上海交通大学 · <sup>†</sup>DreamX 实习期间完成 · <sup>‡</sup>项目负责人 · <sup>*</sup>通讯作者</span>
+  </div>
+  <p class="thesis">一句话结论：<b>观测记忆 ≠ 世界状态。</b>最后一帧、近几帧、关键帧库、KV cache 保存的是「过去看见过什么」，而下一段真正需要的是「现在什么为真、按新提示该变成什么」。当边界帧把关键关系藏起来（球进了盒子、颜料在不透明杯里混好了、面包在烤面包机里），只靠观测接口的生成器<b>分不清两段后果不同的历史</b>。把状态显式写成实体状态图、按新提示更新、再用图像编辑把更新后的状态落成一张未来末帧、最后首末帧生视频——全案例状态分 SCS-All 从 45.2 提到 69.3；而单纯塞进更多关键帧，只把 43.9 变成 45.2。</p>
+
+  <div class="facts" aria-label="关键数字">
+    <div><div class="v">200<small>任务</small></div><div class="l">85 past-visible · 65 occluded-process · 50 complex-transition</div></div>
+    <div><div class="v">45.2 → 69.3</div><div class="l">SCS-All：最强观测记忆基线 → StateAgent</div></div>
+    <div><div class="v">58.5 → 74.9</div><div class="l">条件 SCS（仅在揭示成功的样本上）</div></div>
+    <div><div class="v">92.5<small>SES</small></div><div class="l">揭示动作完成率（StoryMem+全关键帧 78.5）</div></div>
+    <div><div class="v">6<small>问</small></div><div class="l">每题 checklist：1 揭示 + 3/2 状态正确 + 2 反幻觉</div></div>
+    <div><div class="v">3<small>模型</small></div><div class="l">Qwen3.5-Plus · Wan2.7-Image · Wan2.2-KF2V-Flash</div></div>
+    <div><div class="v">0<small>训练</small></div><div class="l">测试时 agent，视频生成器不做任何微调</div></div>
+  </div>
+
+  <!-- ---------- boundary experiment ---------- -->
+  <div class="bx" id="bx">
+    <div class="stage">
+      <svg viewBox="0 0 400 260" role="img" aria-label="可交互的边界帧实验：同一张尾帧，两段不同历史" id="bxStage"></svg>
+      <div class="strip" id="bxStrip" aria-label="上一段视频的帧"></div>
+    </div>
+    <div class="gpanel">
+      <h4>把 Eq.&nbsp;(3) 亲手玩一遍：同一张尾帧，两段不同的历史</h4>
+      <div class="small">上一段视频 <span class="m">V<sub>t</sub></span> 的 7 帧。两段历史的<b>最后一帧一模一样</b>（盒子直立、球不可见、铅笔在桌上），但世界状态不同。点击缩略图查看每一帧；切换「暴露给下一段生成器的接口」，看它到底拿到了什么证据。</div>
+      <div>
+        <div class="small" style="margin-bottom:4px">历史</div>
+        <div class="seg" id="bxHist">
+          <button class="on" data-h="A">A · 球留在盒里</button>
+          <button data-h="B">B · 球又被拿走</button>
+        </div>
+      </div>
+      <div>
+        <div class="small" style="margin-bottom:4px">下一段生成器拿到的历史接口 <span class="m">M<sub>obs</sub>(V<sub>t</sub>)</span></div>
+        <div class="seg obs" id="bxIface">
+          <button class="on" data-i="last">最后一帧</button>
+          <button data-i="recent">近 2 帧</button>
+          <button data-i="kf">6 关键帧</button>
+          <button data-i="state">状态图 S<sub>t</sub></button>
+        </div>
+      </div>
+      <div id="bxLedger" class="ledger" hidden></div>
+      <dl class="verdict" id="bxVerdict"></dl>
+      <div class="small">续写提示 <span class="m">p<sub>t+1</sub></span>：“The man tilts the blue box toward the camera to show what is inside.”（不点名盒子里有什么）</div>
+      <div class="btns">
+        <button class="btn primary" id="bxReveal">续写：把盒子朝镜头倾斜</button>
+        <button class="btn" id="bxReset">回到尾帧</button>
+      </div>
+      <div class="small" id="bxMsg">先选一段历史，再按「续写」，看正确的下一段应该露出什么。</div>
+    </div>
+  </div>
+  <p class="small" style="margin-top:12px">历史 A 就是 StateBench 里的 <code>red_ball_into_blue_box</code>（occluded-process），也是论文 Fig. 3 的例子；历史 B 是本页为说明 Eq.&nbsp;(3) 构造的对照，不在基准里。</p>
+</section>
+
+<!-- ============================================================ TL;DR -->
+<section class="sec" id="tldr">
+  <div class="eyebrow"><span>论证链</span><span class="paper">§1 · §2 · §5</span></div>
+  <h2>论证链：从「观测记忆不是状态接口」到「用一张未来末帧携带状态」</h2>
+  <p class="lead">这篇论文的骨架只有一句话：<strong>历史帧记录的是过去某刻看得见的东西，下一段需要的是此刻应当为真的东西</strong>。下面七步把它从问题定义推到实验结论。</p>
+  <div class="chain">
+    <div class="step obs"><div class="n">01 · 出发点</div><b>长视频 = 分段拼接</b>逐段生成或自回归扩块，每个新单元都要依赖历史。完整历史太贵，所以现有系统把历史压成「观测记忆」：最后一帧、近几帧、关键帧、记忆库、缓存特征。</div>
+    <div class="step bad"><div class="n">02 · 缺口</div><b>观测 ≠ 状态</b>一张过去的帧是合法历史，却不一定描述当前状态：关键关系可能在边界被遮住、可能在更早的观测之后又变了、也可能是一段看不见的过程的产物。</div>
+    <div class="step bad"><div class="n">03 · 形式化 Eq.(3)</div><b>接口缺口</b>两段历史 (a)(b) 暴露给下一段生成器的证据几乎相同，<span class="m">M<sub>obs</sub>(V<sup>(a)</sup>) ≈ M<sub>obs</sub>(V<sup>(b)</sup>)</span>，但后历史状态不同，<span class="m">S<sup>(a)</sup> ≠ S<sup>(b)</sup></span>。只看接口的生成器只能猜。</div>
+    <div class="step st"><div class="n">04 · 测量</div><b>StateBench</b>200 个「先建立状态 → 尾帧藏住 → 新提示揭示/使用/变换」的单元测试。先判揭示动作是否完成（SES），再在成功样本上判暴露出的状态是否与历史一致（SCS）。</div>
+    <div class="step bad"><div class="n">05 · 观察</div><b>更强的观测记忆不够</b>最后一帧、近帧、关键帧、记忆库、自回归全线在「隐藏更新」与「复杂变换」上失败；把 StoryMem 的记忆库塞满覆盖全过程的关键帧，SCS-All 只从 43.9 到 45.2。</div>
+    <div class="step fut"><div class="n">06 · 方法</div><b>StateAgent：状态推理与渲染解耦</b>VLM 解析实体状态图 <span class="m">S<sub>t</sub></span> → 按 <span class="m">p<sub>t+1</sub></span> 更新为 <span class="m">Ŝ<sub>t+1</sub></span> → 图像编辑把它落成未来末帧 → 首末帧生视频。SCS-All 45.2 → 69.3，条件 SCS 58.5 → 74.9。</div>
+    <div class="step ok"><div class="n">07 · 归因</div><b>增益来自耦合</b>只给文字状态提示：SES 冲到 90.0 但 SCS 停在 61.9（没有外观绑定）；只直接编辑末帧：56.6（有视觉但没有状态更新）；两者串起来才到 74.9。</div>
+  </div>
+  <div class="callout st">读法提醒：论文把这条能力称为「未来的视频世界模型应当内化的能力」，StateAgent 只是<b>当前模型能力下的实用方案</b>——一个不改任何视频模型权重的测试时智能体。这决定了它的定位：它证明的是「显式状态载体能补上这个缺口」，而不是「视频模型学会了追踪状态」。</div>
+</section>
+
+<!-- ============================================================ PROBLEM FORMULATION -->
+<section class="sec" id="problem">
+  <div class="eyebrow"><span>问题形式化</span><span class="paper">§2 · Eq. 1–5</span></div>
+  <h2>跨片段状态交接：两条路径，一个接口缺口</h2>
+  <div class="prose">
+    <p>记上一段视频为 <span class="m">V<sub>t</sub></span>，它的源提示为 <span class="m">p<sub>t</sub></span>，下一段的提示为 <span class="m">p<sub>t+1</sub></span>。现有续写系统通过一个<strong>观测记忆接口</strong>把历史传给下一段：</p>
+  </div>
+  <div class="eq"><span><i>O<sub>t</sub></i> = <i>M</i><sub>obs</sub>(<i>V<sub>t</sub></i>),&nbsp;&nbsp;&nbsp;<i>V<sub>t+1</sub></i> ∼ <i>G</i>(<i>O<sub>t</sub></i>, <i>p<sub>t+1</sub></i>)</span><span class="num">(1)</span></div>
+  <div class="prose">
+    <p>这里 <span class="m">M<sub>obs</sub></span> 是<strong>真正暴露给下一段生成器的历史接口</strong>（最后一帧、近几帧、检索到的关键帧、记忆库条目、缓存的时序特征），而不是 <span class="m">V<sub>t</sub></span> 的全部信息量。它以稀疏、压缩、可能过期的形式暴露视觉证据，生成器很难从中推出一个能被查询、更新、并用于渲染的状态。作者要求的状态感知续写则要同时保留视觉证据和一个显式的后历史状态信念：</p>
+  </div>
+  <div class="eq"><span><i>S<sub>t</sub></i> = <i>E</i>(<i>V<sub>t</sub></i>, <i>p<sub>t</sub></i>),&nbsp;&nbsp;&nbsp;<i>V<sub>t+1</sub></i> ∼ <i>G</i>(<i>O<sub>t</sub></i>, <i>S<sub>t</sub></i>, <i>p<sub>t+1</sub></i>)</span><span class="num">(2)</span></div>
+  <div class="prose">
+    <p><span class="k-obs"><span class="m">O<sub>t</sub></span> 负责外观、身份、布局、风格</span>；<span class="k-st"><span class="m">S<sub>t</sub></span> 负责「上一段之后什么在物理上为真」</span>。核心问题出现在观测接口把不同历史映射到相似证据、而后历史状态不同的时候：</p>
+  </div>
+  <div class="eq"><span><i>M</i><sub>obs</sub>(<i>V</i><sub>t</sub><sup>(a)</sup>) ≈ <i>M</i><sub>obs</sub>(<i>V</i><sub>t</sub><sup>(b)</sup>),&nbsp;&nbsp;&nbsp;<i>S</i><sub>t</sub><sup>(a)</sup> ≠ <i>S</i><sub>t</sub><sup>(b)</sup></span><span class="num">(3)</span></div>
+  <div class="prose">
+    <p>这正是页首小实验里的 A/B：尾帧像素相同，一个盒里有球、一个没有。接着，续写提示被当成一次<strong>动作条件</strong>，诱导一次状态更新——揭示、使用、或进一步变换这个状态：</p>
+  </div>
+  <div class="eq"><span><i>S<sub>t+1</sub></i> = <i>τ</i>(<i>S<sub>t</sub></i>, <i>a<sub>t+1</sub></i>)</span><span class="num">(4)</span></div>
+  <div class="eq"><span><i>S<sub>t</sub></i> = {<i>r<sub>i</sub></i>},&nbsp;&nbsp;<i>r<sub>i</sub></i> ∈ <i>F</i></span><span class="num">(5)</span></div>
+  <div class="prose">
+    <p>其中 <span class="m">a<sub>t+1</sub></span> 是 <span class="m">p<sub>t+1</sub></span> 描述或隐含的物理事件，<span class="m">τ</span> 抽象了「续写提示如何使用或更新从上一段带来的状态」。状态本身被定义为<strong>一组可能超越可见性而持续存在的任务相关物理关系</strong>——作者称之为「因果信念」（state as causal belief）。StateBench 评测的状态类型 <span class="m">F</span> 包括：
+      <span class="tag st">可见性</span> <span class="tag st">位置</span> <span class="tag st">容纳关系</span> <span class="tag st">变换</span> <span class="tag st">表面/材质状态</span> <span class="tag st">数量</span> <span class="tag st">主体–物体关系</span>。</p>
+  </div>
+
+  <figure class="wide">
+    <div class="fig">
+      <svg class="diag" viewBox="0 0 1100 330" role="img" aria-label="观测记忆路径与状态推理路径的对比示意">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--ink3)"/></marker>
+          <marker id="arrSt" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--st)"/></marker>
+          <marker id="arrObs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--obs)"/></marker>
+        </defs>
+        <!-- previous video strip -->
+        <g>
+          <rect x="20" y="95" width="180" height="120" rx="8" fill="var(--surf2)" stroke="var(--rule2)"/>
+          <text x="110" y="82" text-anchor="middle" class="math" style="font-size:14px">V<tspan baseline-shift="sub" font-size="10">t</tspan> , p<tspan baseline-shift="sub" font-size="10">t</tspan></text>
+          <g class="mono dim"><text x="110" y="232" text-anchor="middle">上一段视频（5–10 s）+ 源提示</text></g>
+          <!-- film frames -->
+          <rect x="30" y="110" width="34" height="26" rx="2" fill="var(--wall)" stroke="var(--rule2)"/>
+          <circle cx="47" cy="128" r="5" fill="var(--ball)"/>
+          <rect x="70" y="110" width="34" height="26" rx="2" fill="var(--wall)" stroke="var(--rule2)"/>
+          <circle cx="87" cy="118" r="5" fill="var(--ball)"/><rect x="80" y="124" width="16" height="10" fill="var(--boxc)"/>
+          <rect x="110" y="110" width="34" height="26" rx="2" fill="var(--wall)" stroke="var(--rule2)"/>
+          <rect x="120" y="120" width="16" height="12" fill="var(--boxc)"/>
+          <rect x="150" y="110" width="40" height="26" rx="2" fill="var(--wall)" stroke="var(--ball)" stroke-width="1.5"/>
+          <rect x="163" y="120" width="16" height="12" fill="var(--boxc)"/>
+          <text x="170" y="148" text-anchor="middle" class="mono" style="fill:var(--ball-ink)">尾帧 F<tspan baseline-shift="super" font-size="8">end</tspan></text>
+          <text x="110" y="172" text-anchor="middle" class="dim" style="font-size:11px">事件：球被放进盒子</text>
+          <text x="110" y="190" text-anchor="middle" class="dim" style="font-size:11px">边界：球在盒内但不可见</text>
+        </g>
+        <!-- top lane: observation memory -->
+        <g>
+          <rect x="250" y="20" width="830" height="118" rx="10" fill="none" stroke="var(--obs)" stroke-dasharray="5 4" opacity=".8"/>
+          <text x="264" y="40" class="mono" style="fill:var(--obs-ink)">现有续写接口 · Eq. (1)</text>
+          <path d="M200 120 C230 120 230 80 258 80" class="line" marker-end="url(#arrObs)" style="stroke:var(--obs)"/>
+          <rect x="260" y="58" width="140" height="48" rx="8" class="box"/>
+          <text x="330" y="78" text-anchor="middle" class="math">M<tspan baseline-shift="sub" font-size="10">obs</tspan></text>
+          <text x="330" y="95" text-anchor="middle" class="dim" style="font-size:10.5px">压缩 / 选择 / 缓存</text>
+          <path d="M400 82 L438 82" class="line" marker-end="url(#arr)"/>
+          <rect x="440" y="52" width="250" height="60" rx="8" class="box"/>
+          <text x="565" y="72" text-anchor="middle" class="math">O<tspan baseline-shift="sub" font-size="10">t</tspan> = 观测记忆</text>
+          <text x="565" y="90" text-anchor="middle" class="dim" style="font-size:10.5px">最后一帧 · 近帧 · 关键帧 · 记忆库 · KV cache</text>
+          <text x="565" y="104" text-anchor="middle" class="mono" style="fill:var(--obs-ink); font-size:10px">保留外观 / 身份 / 布局 · 状态不显式</text>
+          <path d="M690 82 L738 82" class="line" marker-end="url(#arr)"/>
+          <rect x="740" y="58" width="120" height="48" rx="8" class="box"/>
+          <text x="800" y="78" text-anchor="middle" class="math">G(O<tspan baseline-shift="sub" font-size="10">t</tspan>, p<tspan baseline-shift="sub" font-size="10">t+1</tspan>)</text>
+          <text x="800" y="95" text-anchor="middle" class="dim" style="font-size:10.5px">视频生成器</text>
+          <path d="M860 82 L908 82" class="line" marker-end="url(#arr)"/>
+          <rect x="910" y="58" width="150" height="48" rx="8" fill="var(--bad-soft)" stroke="var(--bad)"/>
+          <text x="985" y="78" text-anchor="middle" class="math">V<tspan baseline-shift="sub" font-size="10">t+1</tspan></text>
+          <text x="985" y="95" text-anchor="middle" class="dim" style="font-size:10.5px; fill:var(--bad-ink)">盒子里是什么？只能猜</text>
+        </g>
+        <!-- bottom lane: state reasoning -->
+        <g>
+          <rect x="250" y="160" width="830" height="150" rx="10" fill="none" stroke="var(--st)" stroke-dasharray="5 4" opacity=".9"/>
+          <text x="264" y="180" class="mono" style="fill:var(--st-ink)">状态感知续写 · Eq. (2)(4)</text>
+          <path d="M200 160 C230 160 230 235 258 235" class="line" marker-end="url(#arrSt)" style="stroke:var(--st)"/>
+          <rect x="260" y="210" width="140" height="50" rx="8" class="box"/>
+          <text x="330" y="230" text-anchor="middle" class="math">E(V<tspan baseline-shift="sub" font-size="10">t</tspan>, p<tspan baseline-shift="sub" font-size="10">t</tspan>)</text>
+          <text x="330" y="248" text-anchor="middle" class="dim" style="font-size:10.5px">状态解析</text>
+          <path d="M400 235 L438 235" class="line" marker-end="url(#arr)"/>
+          <rect x="440" y="196" width="160" height="80" rx="8" fill="var(--st-soft)" stroke="var(--st)"/>
+          <text x="520" y="214" text-anchor="middle" class="math" style="fill:var(--st-ink)">S<tspan baseline-shift="sub" font-size="10">t</tspan> = {r<tspan baseline-shift="sub" font-size="10">i</tspan>}</text>
+          <text x="452" y="234" class="mono" style="font-size:10.5px">ball_1: inside(box_1)</text>
+          <text x="452" y="249" class="mono" style="font-size:10.5px; fill:var(--ball-ink)">        visibility=hidden</text>
+          <text x="452" y="264" class="mono" style="font-size:10.5px">box_1 : open, on table</text>
+          <path d="M600 235 L648 235" class="line" marker-end="url(#arr)"/>
+          <rect x="650" y="210" width="130" height="50" rx="8" class="box"/>
+          <text x="715" y="230" text-anchor="middle" class="math">τ(S<tspan baseline-shift="sub" font-size="10">t</tspan>, a<tspan baseline-shift="sub" font-size="10">t+1</tspan>)</text>
+          <text x="715" y="248" text-anchor="middle" class="dim" style="font-size:10.5px">按提示更新</text>
+          <path d="M715 190 L715 208" class="line" marker-end="url(#arr)"/>
+          <text x="715" y="186" text-anchor="middle" class="math" style="font-size:12px">p<tspan baseline-shift="sub" font-size="10">t+1</tspan>：把盒子朝镜头倾斜</text>
+          <path d="M780 235 L828 235" class="line" marker-end="url(#arr)"/>
+          <rect x="830" y="210" width="110" height="50" rx="8" class="box"/>
+          <text x="885" y="230" text-anchor="middle" class="math">G(O<tspan baseline-shift="sub" font-size="10">t</tspan>, S<tspan baseline-shift="sub" font-size="10">t</tspan>, p<tspan baseline-shift="sub" font-size="10">t+1</tspan>)</text>
+          <text x="885" y="248" text-anchor="middle" class="dim" style="font-size:10.5px">渲染</text>
+          <path d="M940 235 L968 235" class="line" marker-end="url(#arr)"/>
+          <rect x="970" y="210" width="100" height="50" rx="8" fill="var(--ok-soft)" stroke="var(--ok)"/>
+          <text x="1020" y="230" text-anchor="middle" class="math">V<tspan baseline-shift="sub" font-size="10">t+1</tspan></text>
+          <text x="1020" y="248" text-anchor="middle" class="dim" style="font-size:10.5px; fill:var(--ok-ink)">球在盒内</text>
+          <!-- O_t also feeds the lower G -->
+          <path d="M565 112 C565 150 885 150 885 208" class="line dash" style="stroke:var(--obs)" marker-end="url(#arrObs)"/>
+          <text x="740" y="150" text-anchor="middle" class="mono" style="fill:var(--obs-ink); font-size:10px">O<tspan baseline-shift="sub" font-size="8">t</tspan> 仍提供外观与布局</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption><b>两条路径。</b>上：现有续写只通过观测记忆接口 <span class="m">O<sub>t</sub></span> 传递历史（Eq. 1），球是否在盒内没有被显式表示。下：状态感知续写额外维护一个后历史状态信念 <span class="m">S<sub>t</sub></span>（Eq. 2），把续写提示当作动作条件做一次状态更新（Eq. 4），观测记忆仍负责外观与布局。示意图为本页重绘。</figcaption>
+  </figure>
+
+  <h3>观测记忆接口的谱系：越往右保留的证据越多，但没有一个是「状态接口」</h3>
+  <div class="spectrum">
+    <div class="s obs"><b>最后一帧</b>I2V 式续写，只看尾帧。<div class="ex">Wan2.2-I2V 基线</div></div>
+    <div class="s obs"><b>近几帧</b>视频前缀续写，看最近一小段。<div class="ex">LongCat-Video 基线</div></div>
+    <div class="s obs"><b>关键帧</b>选出/检索历史关键帧放进记忆库。<div class="ex">StoryMem（≤10 帧）· StoryDiffusion</div></div>
+    <div class="s obs"><b>视觉记忆库</b>实体/空间记忆、surfel 索引视图、4D 记忆。<div class="ex">VideoMemory · WorldMem · VMem · LiveWorld</div></div>
+    <div class="s obs"><b>缓存特征</b>自回归骨干的 KV cache / 时序特征。<div class="ex">MAGI-1 基线 · Context Forcing · CausalCine</div></div>
+    <div class="s st"><b>显式状态 + 未来末帧</b>实体状态图可标记「不可见但为真」「已过期」，再落成像素。<div class="ex">StateAgent（本文）</div></div>
+  </div>
+  <div class="note st"><b>观测记忆与状态推理是互补而非替代。</b>论文反复强调：视觉记忆机制能保留实体长什么样、出现在哪、镜头怎么取景，这些对续写不可或缺；它只是不能可靠地回答「动作之后什么应当为真」。StateAgent 因此没有丢掉观测记忆——历史末帧和参考帧仍然进入渲染，只是在它们旁边多了一份显式状态。</div>
+</section>
+
+<!-- ============================================================ THREE CATEGORIES -->
+<section class="sec" id="cats">
+  <div class="eyebrow"><span>三类状态证据</span><span class="paper">§3.1 · Fig. 2</span></div>
+  <h2>状态被历史「证明」的三种方式，对应三种失败</h2>
+  <p class="lead">StateBench 不按物体或场景分类，而按<strong>目标状态如何被历史证据支撑</strong>分成三类。每一类里，尾帧都把任务相关的关系藏住或弄模糊，续写提示则要求一个揭示 / 使用 / 变换该状态的动作，且不点名答案。</p>
+
+  <div class="sb">
+    <div>
+      <div class="cnt">85<small>past-visible</small></div>
+      <h4>过去可见</h4>
+      <p>历史里<strong>存在一帧直接显示目标状态</strong>，随后它被藏起来。检索到的帧确实有帮助，但模型仍要判断「那张过去的观测现在还成立吗」。</p>
+      <div class="fail">基线典型失败：<b>把过期观测当成当前状态</b>（苹果又出现在桌面），或拉开抽屉却是空的。</div>
+    </div>
+    <div class="frames">
+      <div class="fr"><svg viewBox="0 0 120 90"><rect width="120" height="90" fill="var(--wall)"/><rect x="0" y="62" width="120" height="28" fill="var(--table)"/><rect x="8" y="30" width="56" height="34" rx="2" fill="var(--drawer2)"/><rect x="12" y="36" width="48" height="22" rx="2" fill="var(--drawer)"/><rect x="31" y="45" width="10" height="3" rx="1" fill="var(--ink3)"/><circle cx="90" cy="54" r="9" fill="var(--ball)"/><rect x="89" y="43" width="2" height="5" fill="var(--ok)"/></svg><div class="cap">① 苹果在桌上，抽屉关着</div></div>
+      <div class="fr"><svg viewBox="0 0 120 90"><rect width="120" height="90" fill="var(--wall)"/><rect x="0" y="62" width="120" height="28" fill="var(--table)"/><rect x="8" y="30" width="56" height="34" rx="2" fill="var(--drawer2)"/><rect x="12" y="22" width="48" height="14" fill="var(--boxin)"/><rect x="12" y="36" width="48" height="22" rx="2" fill="var(--drawer)"/><rect x="31" y="45" width="10" height="3" rx="1" fill="var(--ink3)"/><circle cx="36" cy="28" r="7" fill="var(--ball)"/><path d="M36 10 C48 10 60 14 68 8" stroke="var(--hand)" stroke-width="9" stroke-linecap="round" fill="none"/></svg><div class="cap">② 手把苹果放进拉开的抽屉</div></div>
+      <div class="fr tail"><svg viewBox="0 0 120 90"><rect width="120" height="90" fill="var(--wall)"/><rect x="0" y="62" width="120" height="28" fill="var(--table)"/><rect x="8" y="30" width="56" height="34" rx="2" fill="var(--drawer2)"/><rect x="12" y="36" width="48" height="22" rx="2" fill="var(--drawer)"/><rect x="31" y="45" width="10" height="3" rx="1" fill="var(--ink3)"/></svg><div class="cap">③ 尾帧：抽屉推上，苹果不可见</div></div>
+      <div class="cutline"><span>SEGMENT CUT</span></div>
+      <div class="fr reveal"><svg viewBox="0 0 120 90"><rect width="120" height="90" fill="var(--wall)"/><rect x="0" y="62" width="120" height="28" fill="var(--table)"/><rect x="8" y="30" width="56" height="34" rx="2" fill="var(--drawer2)"/><rect x="12" y="22" width="48" height="14" fill="var(--boxin)"/><rect x="12" y="36" width="48" height="22" rx="2" fill="var(--drawer)"/><rect x="31" y="45" width="10" height="3" rx="1" fill="var(--ink3)"/><circle cx="36" cy="29" r="7" fill="var(--ball)"/><path d="M78 12 C88 22 92 30 96 38" stroke="var(--hand)" stroke-width="9" stroke-linecap="round" fill="none"/></svg><div class="cap">揭示：拉开抽屉 → 应看到那个苹果</div></div>
+    </div>
+  </div>
+
+  <div class="sb">
+    <div>
+      <div class="cnt">65<small>occluded-process</small></div>
+      <h4>遮挡过程</h4>
+      <p>状态改变发生在<strong>容器内、遮挡物后或视线外</strong>：目标状态是一次隐藏更新的产物，<strong>从未以任何一张可复用的帧出现过</strong>——没有帧可以检索。</p>
+      <div class="fail">基线典型失败：翻过来<b>一片空白</b>、盒子<b>空空如也</b>，或印出别的图案/颜色（<b>幻觉</b>）。</div>
+    </div>
+    <div class="frames">
+      <div class="fr"><svg viewBox="0 0 120 90"><rect width="120" height="90" fill="var(--wall)"/><rect x="0" y="66" width="120" height="24" fill="var(--table)"/><rect x="40" y="14" width="46" height="60" rx="3" fill="var(--paper)" stroke="var(--rule2)"/><rect x="56" y="10" width="14" height="8" rx="2" fill="var(--ink3)"/><rect x="8" y="52" width="16" height="12" rx="2" fill="var(--drawer)"/><rect x="12" y="46" width="8" height="8" rx="1" fill="var(--drawer2)"/><rect x="96" y="56" width="18" height="8" rx="2" fill="var(--vid)"/></svg><div class="cap">① 举着写字板；桌上有心形印章、蓝印台</div></div>
+      <div class="fr"><svg viewBox="0 0 120 90"><rect width="120" height="90" fill="var(--wall)"/><rect x="0" y="66" width="120" height="24" fill="var(--table)"/><rect x="40" y="14" width="46" height="60" rx="3" fill="var(--paper)" stroke="var(--rule2)"/><rect x="56" y="10" width="14" height="8" rx="2" fill="var(--ink3)"/><rect x="58" y="0" width="8" height="14" rx="1" fill="var(--drawer2)"/><path d="M62 0 C72 -2 84 4 96 4" stroke="var(--hand)" stroke-width="8" stroke-linecap="round" fill="none"/><rect x="96" y="56" width="18" height="8" rx="2" fill="var(--vid)"/><text x="63" y="48" text-anchor="middle" font-size="9" fill="var(--ink3)" font-family="var(--font-mono)">背面?</text></svg><div class="cap">② 印章按在写字板<b>背面</b>——镜头看不到印记</div></div>
+      <div class="fr tail"><svg viewBox="0 0 120 90"><rect width="120" height="90" fill="var(--wall)"/><rect x="0" y="66" width="120" height="24" fill="var(--table)"/><rect x="40" y="14" width="46" height="60" rx="3" fill="var(--paper)" stroke="var(--rule2)"/><rect x="56" y="10" width="14" height="8" rx="2" fill="var(--ink3)"/><rect x="8" y="52" width="16" height="12" rx="2" fill="var(--drawer)"/><rect x="12" y="46" width="8" height="8" rx="1" fill="var(--drawer2)"/><rect x="96" y="56" width="18" height="8" rx="2" fill="var(--vid)"/></svg><div class="cap">③ 尾帧：空白面朝镜头，印章放回</div></div>
+      <div class="cutline"><span>SEGMENT CUT</span></div>
+      <div class="fr reveal"><svg viewBox="0 0 120 90"><rect width="120" height="90" fill="var(--wall)"/><rect x="0" y="66" width="120" height="24" fill="var(--table)"/><rect x="40" y="14" width="46" height="60" rx="3" fill="var(--paper)" stroke="var(--rule2)"/><rect x="56" y="10" width="14" height="8" rx="2" fill="var(--ink3)"/><path d="M63 54 C50 44 52 32 63 36 C74 32 76 44 63 54 Z" fill="var(--vid)"/><rect x="8" y="52" width="16" height="12" rx="2" fill="var(--drawer)"/><rect x="96" y="56" width="18" height="8" rx="2" fill="var(--vid)"/></svg><div class="cap">揭示：翻转写字板 → 应是蓝色心形印记</div></div>
+    </div>
+  </div>
+
+  <div class="sb">
+    <div>
+      <div class="cnt">50<small>complex-transition</small></div>
+      <h4>复杂变换</h4>
+      <p>更难的物理或关系变换：<strong>空间转移（杯球）、数量变化（9−5=4）、颜色混合（蓝+黄）、溶解、材质/表面变换</strong>（面包→烤面包、水→冰）。与过去观测的相似性在这里只是弱线索，必须做一步计算。</p>
+      <div class="fail">基线典型失败：抹出<b>蓝色或黄色</b>（复制最近看到的颜色）、数量不对、纸上什么都没有。</div>
+    </div>
+    <div class="frames">
+      <div class="fr"><svg viewBox="0 0 120 90"><rect width="120" height="90" fill="var(--wall)"/><rect x="0" y="64" width="120" height="26" fill="var(--table)"/><rect x="10" y="40" width="16" height="24" rx="2" fill="var(--vid)"/><rect x="30" y="40" width="16" height="24" rx="2" fill="var(--pencil)"/><path d="M56 44 L80 44 L76 66 L60 66 Z" fill="var(--cupdark)"/><rect x="86" y="50" width="28" height="18" fill="var(--paper)"/><rect x="82" y="36" width="3" height="28" fill="var(--drawer2)" transform="rotate(20 83 50)"/></svg><div class="cap">① 蓝、黄两罐颜料，不透明黑杯，白纸，搅拌棒</div></div>
+      <div class="fr"><svg viewBox="0 0 120 90"><rect width="120" height="90" fill="var(--wall)"/><rect x="0" y="64" width="120" height="26" fill="var(--table)"/><g transform="rotate(-40 60 30)"><rect x="52" y="18" width="16" height="24" rx="2" fill="var(--vid)"/></g><path d="M66 36 C66 40 68 44 68 46" stroke="var(--vid)" stroke-width="3" fill="none"/><rect x="30" y="40" width="16" height="24" rx="2" fill="var(--pencil)"/><path d="M56 44 L80 44 L76 66 L60 66 Z" fill="var(--cupdark)"/><rect x="86" y="50" width="28" height="18" fill="var(--paper)"/></svg><div class="cap">② 倒入蓝色（杯内始终不可见）</div></div>
+      <div class="fr tail"><svg viewBox="0 0 120 90"><rect width="120" height="90" fill="var(--wall)"/><rect x="0" y="64" width="120" height="26" fill="var(--table)"/><rect x="10" y="40" width="16" height="24" rx="2" fill="var(--vid)"/><rect x="30" y="40" width="16" height="24" rx="2" fill="var(--pencil)"/><path d="M56 44 L80 44 L76 66 L60 66 Z" fill="var(--cupdark)"/><rect x="66" y="20" width="3" height="28" fill="var(--drawer2)" transform="rotate(12 67 34)"/><rect x="86" y="50" width="28" height="18" fill="var(--paper)"/></svg><div class="cap">③ 尾帧：倒入黄色并搅匀，杯子不透明</div></div>
+      <div class="cutline"><span>SEGMENT CUT</span></div>
+      <div class="fr reveal"><svg viewBox="0 0 120 90"><rect width="120" height="90" fill="var(--wall)"/><rect x="0" y="64" width="120" height="26" fill="var(--table)"/><rect x="10" y="40" width="16" height="24" rx="2" fill="var(--vid)"/><rect x="30" y="40" width="16" height="24" rx="2" fill="var(--pencil)"/><path d="M56 44 L80 44 L76 66 L60 66 Z" fill="var(--cupdark)"/><rect x="86" y="50" width="28" height="18" fill="var(--paper)"/><path d="M90 60 C96 52 104 64 110 56" stroke="#3aa655" stroke-width="5" stroke-linecap="round" fill="none"/><rect x="104" y="30" width="3" height="26" fill="var(--drawer2)" transform="rotate(30 105 43)"/></svg><div class="cap">揭示：抽出搅拌棒抹在纸上 → 应是绿色</div></div>
+    </div>
+  </div>
+  <div class="note ball"><b>为什么按「证据方式」而不是按「物体」分类？</b>因为三类分别对应观测记忆的三个不同缺陷：past-visible 考验的是<b>时效判断</b>（检索能拿到帧，但帧可能过期）；occluded-process 考验的是<b>无帧可用时的推理</b>（目标状态没有任何像素证据）；complex-transition 考验的是<b>计算</b>（要把两个可见的原因合成一个不可见的结果）。Table 1 的按类结果正好沿着这三条线展开。</div>
+</section>
+
+<!-- ============================================================ STATEBENCH -->
+<section class="sec" id="bench">
+  <div class="eyebrow"><span>基准</span><span class="paper">§3 · App. A.1–A.2 · Tab. 4</span></div>
+  <h2>StateBench：200 个「先藏起来、再揭示」的单元测试</h2>
+  <p class="lead">每个任务给出一段 5–10 秒的上一段视频 <span class="m">V<sub>t</sub></span>、它的源提示 <span class="m">p<sub>t</sub></span>、和一条续写提示 <span class="m">p<sub>t+1</sub></span>。上一段建立一个物理状态，尾帧把任务相关的关系藏住或弄模糊；续写必须使用<strong>边界之前</strong>建立的状态，而不只是末帧的表面，来完成被要求的状态更新。</p>
+
+  <div class="grid3">
+    <div class="card obs"><h4>数据怎么来</h4><p>先定义细粒度状态类型，再为「上一段」和「续写段」生成成对提示：上一段提示制造一个建立状态的事件，续写提示要求一个揭示 / 使用 / 变换该状态的动作，且<b>不点名答案</b>。</p><p>上一段视频用 Wan2.2-T2V/I2V-plus 生成，480p、16 FPS；多步设置的任务按段顺序生成，每段以前一段的边界为条件。</p></div>
+    <div class="card ball"><h4>人工过滤的四个条件</h4><p>保留的案例必须满足：(1) 状态改变事件确实完成了；(2) 边界帧没有直接暴露任务相关状态；(3) 续写提示没有泄露目标答案；(4) 能用具体的「揭示/动作」与「状态一致性」checklist 评测。不满足的重生成或删除。</p></div>
+    <div class="card st"><h4>规模与结构</h4><p>85 past-visible · 65 occluded-process · 50 complex-transition。在公开的元数据里，<b>170 个任务是 2 镜（1 段历史 + 1 段揭示），30 个是 3 镜</b>（2 段历史 + 揭示），全部落在 complex-transition：杯球移位、数量增减、颜色混合三族各 10 个。</p></div>
+  </div>
+
+  <h3>细粒度状态类型（Tab. 4）：六个状态族，23 个探针</h3>
+  <div class="tscroll">
+    <table class="t">
+      <thead><tr><th class="l">状态族</th><th class="l">细粒度类型</th><th class="l">状态推理的例子</th></tr></thead>
+      <tbody>
+        <tr><td class="l"><b>Existence</b> 存在</td><td class="l"><code>containment</code> <code>occlusion</code> <code>coverage</code> <code>exit_frame</code> <code>departure</code></td><td class="l">物体仍在容器里；被藏起、被盖住、或离开了场景。</td></tr>
+        <tr><td class="l"><b>Quantity / Degree</b> 数量 / 程度</td><td class="l"><code>consumption</code> <code>addition</code> <code>division</code> <code>emptying</code></td><td class="l">量增加、减少、被消耗、被分割、被倒空。</td></tr>
+        <tr><td class="l"><b>Spatial</b> 空间</td><td class="l"><code>displacement</code> <code>swap</code> <code>flip</code></td><td class="l">物体移动、交换位置、翻转，或在遮挡下被追踪。</td></tr>
+        <tr><td class="l"><b>Physical state</b> 物理状态</td><td class="l"><code>open_close</code> <code>fold</code> <code>breakage</code> <code>melting</code> <code>cooking</code></td><td class="l">打开/关闭、折叠、破碎、融化、加热/烹饪带来的变化。</td></tr>
+        <tr><td class="l"><b>Surface / Appearance</b> 表面 / 外观</td><td class="l"><code>writing</code> <code>staining</code> <code>labeling</code> <code>wearing</code></td><td class="l">文字、污渍、标签、穿戴改变可见外观。</td></tr>
+        <tr><td class="l"><b>Agent state</b> 主体状态</td><td class="l"><code>held_object</code> <code>posture</code> <code>costume_change</code></td><td class="l">人物手里换了东西、改变姿态、换了可见的衣着。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:8px">作者明确说这些类型是「受控探针，而不是世界状态的完整本体」。注意：公开的 <code>statebench.json</code> 只带 <code>difficulty</code>、<code>target_object</code>、<code>expected_state</code> 三个语义字段，<b>没有</b>论文 A.2 提到的 <code>state_type</code> / <code>fine_type</code>——想按 Tab. 4 做细粒度分析得自己标。</p>
+
+  <h3>逐个翻看真实任务</h3>
+  <p class="prose" style="color:var(--ink2)">下面 21 个任务直接取自仓库 <code>statebench/metadata/statebench.json</code>（含论文 Fig. 4、6–13 出现的 8 个例子）。每个任务显示所有镜头的提示、目标状态、完整 checklist，以及评测用参考帧在历史里的取样位置。族名（<span class="mine">FAMILY</span>）是本页按任务 id 归纳的，不是官方字段。</p>
+  <div class="ctrls">
+    <div class="seg" id="tbCat">
+      <button class="on" data-c="past_visible">past-visible · 85</button>
+      <button data-c="occluded_process">occluded-process · 65</button>
+      <button data-c="complex_transition">complex-transition · 50</button>
+    </div>
+  </div>
+  <div class="tb">
+    <div class="list" id="tbList" role="listbox" aria-label="任务列表"></div>
+    <div class="detail" id="tbDetail"></div>
+  </div>
+
+  <h3>公开数据里的族结构（本页统计，非论文内容）</h3>
+  <div class="tri">
+    <div><b>past-visible · 85</b>题材最杂：盖住（枕头、桌布、报纸、围巾、罩子…）、放进抽屉/盒/袋、交换位置、翻面、污渍/字迹/贴标、穿戴、消耗与倒空、拆解、撕碎…全部使用「Realistic, natural speed, handheld camera feel」的提示模板。</div>
+    <div><b>occluded-process · 65</b>五族各 10 个 + 15 个杂项：<code>*_stamp_on_*</code>（印章按在背面）、<code>*_seen_through_window</code>（窗外走到门后）、<code>*_takes_*</code>（拿着东西穿门而去）、<code>*_tries_*</code>（试衣间换装）、<code>*_into_*</code> 带干扰物（「只有 X，Y 不在里面」）。50 个用固定机位模板。</div>
+    <div><b>complex-transition · 50</b>五族各 10 个：<code>*_under_cup</code>（杯球移位，3 镜）、<code>*_into_box</code>（数量：先看 9 颗、拿走 5 颗，3 镜）、<code>mix_*</code>（颜色混合，3 镜）、<code>*_into_teapot</code>（溶解/染色，含一个「糖溶解后仍无色」的反例）、变换（烤面包、微波、烤箱、榨汁、冷冻…）。</div>
+  </div>
+  <div class="note obs"><b>这意味着什么。</b>200 个任务是高度模板化的族，而不是 200 个独立场景；一个方法若在某一族上有系统性偏差（比如总把「倒进茶壶」当成「颜色不变」），会以 10 的倍数体现在类别分数里。另外三个类别与提示模板几乎完全绑定（past-visible 全部手持风格、complex-transition 几乎全部固定机位），类别间的差异里混有生成风格的差异。这不否定基准的诊断价值——单元测试本来就该是受控的——但读 Table 1 的按类数字时应记得这一点。</div>
+</section>
+
+<!-- ============================================================ EVALUATION -->
+<section class="sec" id="metric">
+  <div class="eyebrow"><span>评测协议</span><span class="paper">§3.2 · Eq. 6–9 · App. A.3</span></div>
+  <h2>两阶段 checklist：先问「揭示了吗」，再问「揭示出来的对吗」</h2>
+  <p class="lead">所有方法收到同一个三元组 <span class="m">(V<sub>t</sub>, p<sub>t</sub>, p<sub>t+1</sub>)</span>，各生成一段续写 <span class="m">V̂<sub>t+1</sub></span>。评判器收到 <span class="m">(V<sub>t</sub>, p<sub>t</sub>, p<sub>t+1</sub>, V̂<sub>t+1</sub>)</span>、任务专属 checklist、以及从 <span class="m">V<sub>t</sub></span> 中为外观敏感实体选出的参考帧——参考帧<strong>只给评判器，不给生成器</strong>。</p>
+  <div class="prose">
+    <p>令 <span class="m">e<sub>i</sub></span> ∈ {0,1} 表示样本 <span class="m">i</span> 是否完成了被要求的状态揭示/更新动作，<span class="m">y<sub>iq</sub></span> ∈ {0,1} 表示评判器对样本 <span class="m">i</span> 的 checklist 问题 <span class="m">q</span> 是否回答「yes」。<span class="m">C<sub>i</sub></span> 是状态正确性问题集，<span class="m">H<sub>i</sub></span> 是反幻觉问题集。</p>
+  </div>
+  <div class="grid2">
+    <div>
+      <div class="eq"><span>SES = <span class="frac"><span>1</span><span><i>N</i></span></span> Σ<sub><i>i</i>=1</sub><sup><i>N</i></sup> <i>e<sub>i</sub></i></span><span class="num">(6)</span></div>
+      <div class="eq" style="flex-direction:column; align-items:flex-start; gap:8px"><span>SC = <span class="frac"><span>Σ<sub><i>i</i></sub> <i>e<sub>i</sub></i> Σ<sub><i>q</i>∈<i>C<sub>i</sub></i></sub> <i>y<sub>iq</sub></i></span><span>Σ<sub><i>i</i></sub> <i>e<sub>i</sub></i> |<i>C<sub>i</sub></i>|</span></span></span><span>HR = 1 − <span class="frac"><span>Σ<sub><i>i</i></sub> <i>e<sub>i</sub></i> Σ<sub><i>q</i>∈<i>H<sub>i</sub></i></sub> <i>y<sub>iq</sub></i></span><span>Σ<sub><i>i</i></sub> <i>e<sub>i</sub></i> |<i>H<sub>i</sub></i>|</span></span><span class="num" style="margin-left:auto">(7)</span></span></div>
+    </div>
+    <div>
+      <div class="eq"><span>SCS<sub>cond</sub> = <span class="frac"><span>Σ<sub><i>i</i></sub> <i>e<sub>i</sub></i> Σ<sub><i>q</i>∈<i>C<sub>i</sub></i>∪<i>H<sub>i</sub></i></sub> <i>y<sub>iq</sub></i></span><span>Σ<sub><i>i</i></sub> <i>e<sub>i</sub></i> |<i>C<sub>i</sub></i> ∪ <i>H<sub>i</sub></i>|</span></span></span><span class="num">(8)</span></div>
+      <div class="eq"><span>SCS<sub>All</sub> = <span class="frac"><span>1</span><span><i>N</i></span></span> Σ<sub><i>i</i></sub> <i>e<sub>i</sub></i> <i>c<sub>i</sub></i>,&nbsp;&nbsp; <i>c<sub>i</sub></i> = <span class="frac"><span>1</span><span>|<i>C<sub>i</sub></i> ∪ <i>H<sub>i</sub></i>|</span></span> Σ<sub><i>q</i></sub> <i>y<sub>iq</sub></i></span><span class="num">(9)</span></div>
+    </div>
+  </div>
+  <div class="grid4">
+    <div class="card obs"><h4>SES · State Exposure Score</h4><p>揭示/更新动作是否完成。它<b>不看状态对不对</b>：盒子倾斜了、抽屉拉开了、杯子举起来了就算 1。</p></div>
+    <div class="card st"><h4>SC · State Correctness</h4><p>在 SES=1 的样本上，状态正确性问题的 yes 率。是「揭示出来的东西对不对」的核心。</p></div>
+    <div class="card ball"><h4>HR · Hallucination Rate</h4><p>在 SES=1 的样本上，反幻觉问题的<b> no 率</b>（1 − yes 率）：多出来的物体、重复目标、身份改变、矛盾属性、不可能的内容。越低越好。</p></div>
+    <div class="card fut"><h4>SCS · 条件 / 全案例</h4><p>SCS<sub>cond</sub> 把 C 与 H 两组问题合起来算 yes 率；SCS-All 把揭示失败视为端到端的状态失败。表格里的 SCS 一律指条件版。</p></div>
+  </div>
+
+  <h3>亲手算一遍：8 个样本的 checklist → 五个指标</h3>
+  <p class="prose" style="color:var(--ink2)">按公开数据的典型结构，每个样本有 1 道揭示问题（决定 <span class="m">e<sub>i</sub></span>）、3 道状态正确问题（<span class="m">C<sub>i</sub></span>）、2 道反幻觉问题（<span class="m">H<sub>i</sub></span>）。点格子切换 yes/no；揭示失败的样本不再计入条件指标，但会把 SCS-All 拉下来。右侧几个预设复现了几种典型画像。</p>
+  <div class="calc">
+    <div class="card">
+      <table id="calcTable" aria-label="checklist 计算器">
+        <thead><tr><th>样本</th><th>揭示 e<sub>i</sub></th><th>C₁</th><th>C₂</th><th>C₃</th><th>H₁</th><th>H₂</th><th>c<sub>i</sub></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="btns" style="margin-top:12px">
+        <button class="btn" data-preset="perfect">全部正确</button>
+        <button class="btn" data-preset="emptybox">揭示成功但盒子是空的</button>
+        <button class="btn" data-preset="noreveal">半数没完成揭示</button>
+        <button class="btn" data-preset="halluc">状态对但多画了东西</button>
+        <button class="btn st" data-preset="agent">≈ StateAgent 画像</button>
+        <button class="btn" data-preset="i2v">≈ Wan-I2V 画像</button>
+      </div>
+    </div>
+    <div>
+      <div class="out" id="calcOut"></div>
+      <div class="small" style="margin-top:10px" id="calcNote"></div>
+    </div>
+  </div>
+
+  <h3>两个从数字里读出来的事实</h3>
+  <div class="grid2">
+    <div class="card fut"><h4>SCS-All ≈ SES × SCS</h4><p>Table 1 的每一行都满足 SCS-All ≈ SES × SCS（StateAgent：0.925 × 74.9 = 69.3；StoryMem+全关键帧：0.785 × 57.5 = 45.1 ≈ 45.2；MAGI-1：0.33 × 42.8 = 14.1）。这不是巧合：只要条件 SCS 按样本平均，Eq.&nbsp;(9) 就恰好是两者的乘积。所以 SCS-All 没有带来新信息，它只是把「做了动作」和「做对了」乘起来，惩罚那些只擅长其中一件的方法。</p></div>
+    <div class="card ball"><h4>SCS 里一半是反幻觉分，地板很高</h4><p>SCS 把 C、H 两组问题合并计算，而反幻觉问题对「保守」的输出天然友好。Wan-I2V 在 complex-transition 上 SC 只有 17.1（状态基本全错），HR 18.4 意味着反幻觉题有 81.6% 的 yes，两者一混，SCS 还有 48.2。<b>看方法到底有没有把状态带过去，盯 SC；看它有没有乱画，盯 HR；SCS 是两者的折中。</b></p></div>
+  </div>
+
+  <h3>评判器怎么工作</h3>
+  <div class="grid2">
+    <div class="card"><h4>论文描述（§3.2 · A.3）</h4><p>沿用 VideoPhy、PhyGenBench、StEvo-Bench 等基准的「按准则打分的 VLM 评判」协议。评判器是 <b>Qwen3.5-Plus</b>，收到上一段视频、两条提示、生成的续写、任务 checklist，以及需要比对外观时的实体参考帧，逐题回答 yes/no 并给一句理由，输出紧凑 JSON。三组问题：<code>reveal_achieved</code>（1 道动作完成题）、<code>state_correct</code>（暴露/使用的状态是否符合标注目标）、<code>no_violation</code>（不引入无依据的物体、重复目标、身份改变、矛盾属性、不可能内容）。</p></div>
+    <div class="card obs"><h4>公开代码里的实现（<span class="mine">statebench/eval/evaluate.py</span>）</h4><p>评判器<b>只收到揭示段视频</b>（<code>video_url</code>）、揭示提示、<code>expected_state</code> 的文字、以及 checklist 问题引用到的<b>三张参考帧</b>——它们取自最后一段历史的 12% / 50% / 88% 处（<code>ref_history_start</code> / <code>ref_history_action</code> / <code>ref_pre_reveal</code>）。整段历史视频本身并不进入评判请求。温度 0.1，<code>enable_thinking=false</code>。checklist 高度模板化：三道状态题中有一道就是「最终状态是否符合：{expected_state}」。</p><p>还有一个命名上的不一致：仓库 README 把 SES 写成 State <em>Equivalence</em> Score、SCS 写成 State <em>Correctness</em> Score，论文里分别是 State <em>Exposure</em> Score 与 State <em>Consistency</em> Score。本页一律按论文。</p></div>
+  </div>
+</section>
+
+<!-- ============================================================ STATEAGENT -->
+<section class="sec" id="method">
+  <div class="eyebrow"><span>方法</span><span class="paper">§4 · Eq. 10–12 · Fig. 3</span></div>
+  <h2>StateAgent：把状态推理从渲染里拆出来，用一张未来末帧把状态带过去</h2>
+  <p class="lead">核心洞见只有一句：<strong>状态一致的续写应当解耦「决定下一个状态」与「把状态渲染成像素」</strong>。一个显式的状态推理角色决定下一段结束时世界应该是什么样，视频生成器只负责把这个预测出来的状态画出来、并从上一段末帧平滑运动过去。</p>
+
+  <figure class="wide">
+    <div class="fig">
+      <svg class="diag pipe" id="pipeSvg" viewBox="0 0 1100 400" role="img" aria-label="StateAgent 四阶段流水线，点击阶段查看说明">
+        <defs>
+          <marker id="arrP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--ink3)"/></marker>
+        </defs>
+        <!-- inputs row -->
+        <g>
+          <rect x="20" y="20" width="150" height="46" rx="8" fill="var(--obs-soft)" stroke="var(--obs)"/>
+          <text x="95" y="39" text-anchor="middle" class="math">V<tspan baseline-shift="sub" font-size="10">t</tspan>, p<tspan baseline-shift="sub" font-size="10">t</tspan></text>
+          <text x="95" y="56" text-anchor="middle" class="dim">上一段视频 + 源提示</text>
+          <rect x="300" y="20" width="170" height="46" rx="8" fill="var(--obs-soft)" stroke="var(--obs)"/>
+          <text x="385" y="39" text-anchor="middle" class="math">p<tspan baseline-shift="sub" font-size="10">t+1</tspan></text>
+          <text x="385" y="56" text-anchor="middle" class="dim">续写提示 = 动作条件</text>
+          <rect x="560" y="20" width="190" height="46" rx="8" fill="var(--obs-soft)" stroke="var(--obs)"/>
+          <text x="655" y="39" text-anchor="middle" class="math">F<tspan baseline-shift="sub" font-size="10">t</tspan><tspan baseline-shift="super" font-size="9">end</tspan>, R<tspan baseline-shift="sub" font-size="10">t</tspan></text>
+          <text x="655" y="56" text-anchor="middle" class="dim">历史末帧 + 参考帧（外观）</text>
+        </g>
+        <!-- stage 1 -->
+        <g class="stage-g s1 on" data-stage="1">
+          <rect class="bg" x="20" y="100" width="250" height="220" rx="12"/>
+          <text x="34" y="124" class="ttl">① 结构化状态解析</text>
+          <text x="34" y="141" class="dim">Structured State Parsing · VLM</text>
+          <rect x="34" y="156" width="222" height="26" rx="6" class="chip"/><text x="145" y="173" text-anchor="middle">实体抽取（只用 p<tspan baseline-shift="sub" font-size="9">t</tspan> 绑定名字）</text>
+          <rect x="34" y="188" width="222" height="26" rx="6" class="chip"/><text x="145" y="205" text-anchor="middle">状态描述（以视频证据为准）</text>
+          <rect x="34" y="220" width="222" height="26" rx="6" class="chip"/><text x="145" y="237" text-anchor="middle">外观绑定（每个实体一张清晰帧）</text>
+          <rect x="34" y="256" width="222" height="50" rx="6" fill="var(--st-soft)" stroke="var(--st)"/>
+          <text x="145" y="275" text-anchor="middle" class="math" style="fill:var(--st-ink)">S<tspan baseline-shift="sub" font-size="10">t</tspan> = 实体状态图</text>
+          <text x="145" y="293" text-anchor="middle" class="mono">ball_1: inside box_1 · hidden</text>
+        </g>
+        <path d="M170 66 L120 98" class="arrow" marker-end="url(#arrP)"/>
+        <!-- stage 2 -->
+        <g class="stage-g s2" data-stage="2">
+          <rect class="bg" x="300" y="100" width="230" height="220" rx="12"/>
+          <text x="314" y="124" class="ttl">② 提示条件状态更新</text>
+          <text x="314" y="141" class="dim">Prompt-Conditioned Update · VLM</text>
+          <rect x="314" y="156" width="202" height="58" rx="6" class="chip"/>
+          <text x="415" y="176" text-anchor="middle" class="math">Ŝ<tspan baseline-shift="sub" font-size="10">t+1</tspan> = U(S<tspan baseline-shift="sub" font-size="10">t</tspan>, p<tspan baseline-shift="sub" font-size="10">t+1</tspan>)</text>
+          <text x="415" y="196" text-anchor="middle" class="dim">揭示 / 使用 / 进一步变换</text>
+          <text x="415" y="208" text-anchor="middle" class="dim">区分「物理存在」与「相机可见」</text>
+          <rect x="314" y="222" width="202" height="84" rx="6" fill="var(--fut-soft)" stroke="var(--fut)"/>
+          <text x="415" y="241" text-anchor="middle" class="math" style="fill:var(--fut-ink)">Ŝ<tspan baseline-shift="sub" font-size="10">t+1</tspan> = 目标续写状态</text>
+          <text x="326" y="260" class="mono">ball_1: inside box_1 · <tspan style="fill:var(--fut-ink)">visible</tspan></text>
+          <text x="326" y="276" class="mono">box_1 : <tspan style="fill:var(--fut-ink)">held by person_1</tspan></text>
+          <text x="326" y="292" class="mono">+ entities_becoming_visible</text>
+        </g>
+        <path d="M270 280 L298 280" class="arrow" marker-end="url(#arrP)"/>
+        <path d="M385 66 L385 98" class="arrow" marker-end="url(#arrP)"/>
+        <!-- stage 3 -->
+        <g class="stage-g s3" data-stage="3">
+          <rect class="bg" x="560" y="100" width="250" height="220" rx="12"/>
+          <text x="574" y="124" class="ttl">③ 未来帧落地</text>
+          <text x="574" y="141" class="dim">Future-Frame Grounding · VLM + 图像编辑</text>
+          <rect x="574" y="156" width="222" height="26" rx="6" class="chip"/><text x="685" y="173" text-anchor="middle" style="font-size:11.5px">选参考：参与更新或将变可见的实体</text>
+          <rect x="574" y="188" width="222" height="26" rx="6" class="chip"/><text x="685" y="205" text-anchor="middle" style="font-size:11.5px">写编辑指令（Image N = 待编辑帧）</text>
+          <rect x="574" y="220" width="222" height="26" rx="6" class="chip"/><text x="685" y="237" text-anchor="middle" style="font-size:11.5px">Wan2.7-Image 生成 + 校验重试</text>
+          <rect x="574" y="256" width="222" height="50" rx="6" fill="var(--fut-soft)" stroke="var(--fut)"/>
+          <text x="685" y="275" text-anchor="middle" class="math" style="fill:var(--fut-ink)">F̂<tspan baseline-shift="sub" font-size="10">t+1</tspan><tspan baseline-shift="super" font-size="9">end</tspan> = 可视化的状态预测</text>
+          <text x="685" y="293" text-anchor="middle" class="mono">不是记忆帧，是「将来应该是什么样」</text>
+        </g>
+        <path d="M530 280 L558 280" class="arrow" marker-end="url(#arrP)"/>
+        <path d="M655 66 L655 98" class="arrow" marker-end="url(#arrP)"/>
+        <!-- stage 4 -->
+        <g class="stage-g s4" data-stage="4">
+          <rect class="bg" x="840" y="100" width="240" height="220" rx="12"/>
+          <text x="854" y="124" class="ttl">④ 视频渲染</text>
+          <text x="854" y="141" class="dim">Video Rendering · Wan2.2-KF2V-Flash</text>
+          <rect x="854" y="156" width="212" height="90" rx="6" class="chip"/>
+          <text x="960" y="178" text-anchor="middle" class="math">V̂<tspan baseline-shift="sub" font-size="10">t+1</tspan> = G<tspan baseline-shift="sub" font-size="10">video</tspan>(F<tspan baseline-shift="sub" font-size="10">t</tspan><tspan baseline-shift="super" font-size="9">end</tspan>, F̂<tspan baseline-shift="sub" font-size="10">t+1</tspan><tspan baseline-shift="super" font-size="9">end</tspan>, p<tspan baseline-shift="sub" font-size="10">t+1</tspan>)</text>
+          <text x="960" y="200" text-anchor="middle" class="dim">首帧 = 历史末帧 → 时间连续</text>
+          <text x="960" y="216" text-anchor="middle" class="dim">末帧 = 预测末帧 → 状态约束</text>
+          <text x="960" y="232" text-anchor="middle" class="dim">渲染器只负责运动与真实感</text>
+          <rect x="854" y="256" width="212" height="50" rx="6" fill="var(--vid-soft)" stroke="var(--vid)"/>
+          <text x="960" y="275" text-anchor="middle" class="math" style="fill:var(--vid-ink)">V̂<tspan baseline-shift="sub" font-size="10">t+1</tspan></text>
+          <text x="960" y="293" text-anchor="middle" class="mono">盒子倾斜，红球在里面</text>
+        </g>
+        <path d="M810 280 L838 280" class="arrow" marker-end="url(#arrP)"/>
+        <path d="M750 66 C900 66 960 70 960 98" class="arrow" marker-end="url(#arrP)"/>
+        <!-- failure attribution row -->
+        <g class="mono dim">
+          <text x="145" y="352" text-anchor="middle">可归因失败：历史解析错</text>
+          <text x="415" y="352" text-anchor="middle">可归因失败：状态更新错</text>
+          <text x="685" y="352" text-anchor="middle">可归因失败：外观绑定 / 落地错</text>
+          <text x="960" y="352" text-anchor="middle">可归因失败：动画没朝目标走</text>
+          <text x="550" y="385" text-anchor="middle" style="font-size:11px">黑盒视频生成的失败在最终视频里长得一样；模块化让每一种失败都能被单独指认（§4.4）</text>
+        </g>
+      </svg>
+    </div>
+    <div class="pipedesc" id="pipeDesc"></div>
+    <figcaption><b>StateAgent 流水线（点击阶段）。</b>四个阶段对应 Eq. (10)(11)(12)：解析出 <span class="m">S<sub>t</sub></span>，按提示更新为 <span class="m">Ŝ<sub>t+1</sub></span>，用历史末帧与参考帧把它落成未来末帧 <span class="m">F̂<sup>end</sup><sub>t+1</sub></span>，再以首末帧生视频。按论文 Fig. 3 与官方仓库 <code>assets/pipeline.jpg</code> 重绘。</figcaption>
+  </figure>
+
+  <h3>4.1 结构化状态载体：一张故意稀疏的实体状态图</h3>
+  <div class="prose">
+    <p>给定 <span class="m">(V<sub>t</sub>, p<sub>t</sub>)</span>，StateAgent 不去检索帧，而是建一张轻量状态图 <span class="m">S<sub>t</sub></span>。每个实体节点存：身份、它在哪些帧里可见的引用、以及一段概括当前状况的简短描述（开着/破了/被藏起/被拿着/被弄脏）。关系边记录可见性、容纳、位置等。图是<strong>故意稀疏</strong>的：只存未来续写需要的状态变量，把纹理、姿态、运动留给渲染器。</p>
+    <p>它和关键帧记忆有两个本质区别：<strong>可以把一条关系标为「为真」即使它在边界处不可见</strong>（球在盒里）；<strong>可以把一次更早的观测标为「已过期」</strong>（球曾在桌上，但后来的动作改变了这一点）。构建 <span class="m">S<sub>t</sub></span> 时，<span class="m">p<sub>t</sub></span> 只用来把文字里的名字绑定到画面里的实体，状态解析以观测到的视频证据为准——提示与视频不一致时，以视频为准。</p>
+  </div>
+
+  <h3>4.2 提示条件下的状态更新</h3>
+  <div class="eq"><span><span class="hat"><i>S</i></span><sub><i>t</i>+1</sub> = <i>U</i>(<i>S<sub>t</sub></i>, <i>p<sub>t+1</sub></i>)</span><span class="num">(10)</span></div>
+  <div class="prose">
+    <p>续写提示被当成一个动作条件。<span class="m">Ŝ<sub>t+1</sub></span> 是方法对「续写里应当体现的状态」的显式估计：它可能揭示一条隐藏关系、使用一条既有关系、或进一步变换物理状态。这一步直接对准观测记忆的瓶颈——<strong>隐藏物体可以留在 <span class="m">S<sub>t</sub></span> 里，而更早帧里的过期外观不会被当成当前状态</strong>。</p>
+  </div>
+
+  <h3>4.3 未来帧落地：把符号状态变成视频生成器能跟随的视觉条件</h3>
+  <div class="eq"><span><span class="hat"><i>F</i></span><sup>end</sup><sub><i>t</i>+1</sub> = <i>G</i><sub>frame</sub>(<i>F</i><sup>end</sup><sub><i>t</i></sub>, <i>R<sub>t</sub></i>, <span class="hat"><i>S</i></span><sub><i>t</i>+1</sub>, <i>p<sub>t+1</sub></i>)</span><span class="num">(11)</span></div>
+  <div class="prose">
+    <p>结构化状态本身不足以条件化视频生成器，因为它没有具体的外观绑定。于是把 <span class="m">Ŝ<sub>t+1</sub></span> 落成一张未来末帧：<span class="k-obs">历史末帧 <span class="m">F<sup>end</sup><sub>t</sub></span> 提供相机、布局和可见实体</span>；<span class="k-obs">参考帧 <span class="m">R<sub>t</sub></span> 提供那些在边界处不可见、但预测状态里需要出现的实体的外观</span>。编辑指令由预测的状态变化和选出的视觉参考生成，使编辑后的帧反映目标状态、同时保持外观与布局。<strong>目标帧不是一张记忆帧，而是对未来状态的可视化预测。</strong></p>
+  </div>
+
+  <h3>4.4 视频渲染与诊断</h3>
+  <div class="eq"><span><span class="hat"><i>V</i></span><sub><i>t</i>+1</sub> = <i>G</i><sub>video</sub>(<i>F</i><sup>end</sup><sub><i>t</i></sub>, <span class="hat"><i>F</i></span><sup>end</sup><sub><i>t</i>+1</sub>, <i>p<sub>t+1</sub></i>)</span><span class="num">(12)</span></div>
+  <div class="prose">
+    <p><span class="m">G<sub>video</sub></span> 用 Wan 的首末帧生视频接口实现。历史末帧保证与上一段的时间连续性，未来末帧约束续写必须体现的状态，渲染器只需负责运动与真实感，而不是从零重新发现隐藏的物理状态。模块化还带来<strong>可诊断性</strong>：一次错误的续写可以归因到历史解析、状态更新、未来帧落地或视频渲染中的某一环。</p>
+  </div>
+
+  <h3>为什么载体是一张「未来末帧」，而不是文字或潜变量</h3>
+  <div class="compare">
+    <div class="c"><h4>纯文字状态</h4><ul><li class="pro">容易更新、可读、可检查</li><li class="con">太抽象，无法保留外观绑定：「红球」是哪个红球？</li><li class="con">视频生成器对文字状态提示的跟随不可靠（消融：SES 90.0 但 SCS 61.9）</li></ul></div>
+    <div class="c"><h4>隐式潜状态</h4><ul><li class="pro">可以支撑动力学（PAN、ReMind 一类）</li><li class="con">难以检查、训练昂贵</li><li class="con">可能丢掉忠实续写需要的视觉细节；实体身份绑定弱</li></ul></div>
+    <div class="c pick"><h4>未来末帧（本文）</h4><ul><li class="pro">符号状态由 VLM 预测 → 可读可改</li><li class="pro">图像编辑器用历史参考把状态落成像素 → 外观绑定</li><li class="pro">当前视频生成器天然能跟随「首末帧」条件，无需重训</li><li class="con">首末帧差异过大时可能出现镜头切换（作者自述局限）</li></ul></div>
+  </div>
+  <p class="small">作者把这一思路与 ImageWAM 相提并论：后者用图像编辑作为世界-动作建模的紧凑「目标状态变换先验」。两者共同的直觉是——<em>一张画出来的目标帧，是当前生成器能理解的最便宜的状态接口</em>。</p>
+
+  <h3>看一张真实的状态图：<code>red_ball_into_blue_box</code></h3>
+  <p class="prose" style="color:var(--ink2)">下面的节点与字段来自仓库里这条任务的实际输出（<span class="mine">outputs/stateagent/red_ball_into_blue_box/results.json</span>）。切换「观测 <span class="m">S<sub>t</sub></span>」与「预测 <span class="m">Ŝ<sub>t+1</sub></span>」看哪些字段被更新（虚线 / 紫色标记）；点节点查看它的完整记录。</p>
+  <div class="ctrls">
+    <div class="seg" id="sgMode">
+      <button class="on" data-m="obs">观测状态 S<sub>t</sub>（尾帧之后）</button>
+      <button data-m="pred">预测状态 Ŝ<sub>t+1</sub>（续写结束时）</button>
+    </div>
+  </div>
+  <div class="sg">
+    <div class="graph"><svg id="sgSvg" viewBox="0 0 580 300" role="img" aria-label="实体状态图"></svg></div>
+    <div class="jsoncard" id="sgJson"></div>
+  </div>
+  <div class="note fut"><b>一句最能说明「状态 ≠ 观测」的字段。</b>预测前，VLM 给 <code>box_1</code> 写下的 <code>state_description</code> 是：<em>“open and empty-looking from outside, but logically contains the red ball based on action sequence”</em>——从外面看是空的，但按动作序列推理它装着红球。这正是 Eq.&nbsp;(3) 里观测接口给不出、而状态图能显式携带的那一位信息。</div>
+
+  <h3>四段核心提示词（App. A.4）：每个 VLM 角色只做一件事</h3>
+  <div class="prompts">
+    <div class="p"><div class="who">ENTITY BINDING <em>实体绑定</em></div><q>Extract only entity names, entity types, and explicitly mentioned appearance attributes from the source prompt. Do not infer hidden state, future state, or task answers.</q><div class="zh">只从源提示里抽名字、类型、显式提到的外观属性；<b>禁止推断隐藏状态、未来状态或任务答案</b>。抽出来的实体只用于把名字绑定到视频里观察到的实体。</div></div>
+    <div class="p"><div class="who">STATE PARSING <em>状态解析</em></div><q>Analyze the observed video evidence and return the actual state of each entity at the current boundary … If the prompt and video disagree, report the observed video state.</q><div class="zh">报告可见实体、隐藏实体、位置、容器开合、物理状况，以及 inside / holding / wearing / covered by / behind / occluded by 等关系；源提示可辅助绑定名字，但<b>提示与视频冲突时以视频为准</b>。</div></div>
+    <div class="p"><div class="who">STATE UPDATE <em>状态更新</em></div><q>Given the current world state and the next-shot prompt, predict the complete world state at the end of the next shot. Treat the prompt as an action condition … Carefully distinguish physical existence from camera visibility.</q><div class="zh">把提示当作动作条件，更新每个实体的可见性、位置、物理状况、外观描述、状态描述与开放式关系（容纳、附着、表面/材质、数量、主体-物体交互）。<b>物理存在 ≠ 相机可见</b>：东西可以存在但不在当前视角里。</div></div>
+    <div class="p"><div class="who">EDITING PROMPT WRITER <em>编辑指令撰写</em></div><q>The last numbered image is the current frame to edit, and earlier numbered images are appearance references. Describe the expected result image in natural photographic language … If the prompt changes viewpoint, describe the full scene from the new viewpoint.</q><div class="zh">用自然的摄影语言描述<b>结果图</b>应当是什么样：动作之后什么可见、需要匹配外观时引用哪张参考图、视角不变时保留背景/光照/相机/未变物体；视角改变则描述新视角下的完整场景。</div></div>
+  </div>
+  <div class="note st"><b>参考帧的选择规则。</b>未来帧落地时只带两类实体的参考：参与了这次预测更新的实体，以及在边界处不可见、但续写中应当变为可见的实体。其余实体不进参考，避免编辑器被无关外观带偏。论文附录只报告了这四段提示的「核心逻辑」，输出 schema、格式约束、重试规则等工程细节放在了代码里——下一节就去代码里看。</div>
+</section>
+
+<!-- ============================================================ CODE WALKTHROUGH -->
+<section class="sec" id="code">
+  <div class="eyebrow"><span>代码精读</span><span class="paper">github.com/AMAP-ML/StateAgent · scripts/run_stateagent.py · stateagent/*.py</span></div>
+  <h2>代码里的闭环：论文的 4 个阶段，在仓库里是 3 + 10 步</h2>
+  <p class="lead">论文只报告提示词的「核心逻辑」，把 schema、重试、校验放进了代码。逐步走一遍 <code>run_stateagent.py</code> 对一条 StateBench 任务的处理，能看到几处论文没写、但影响理解的细节：<strong>观察器只看一张末帧、预测器完全不看图、底帧可以从历史里挑、编辑结果有校验重试、最终校验只记录不干预</strong>。</p>
+  <div class="stepper">
+    <div class="steps" id="stepList"></div>
+    <div class="stepbody" id="stepBody"></div>
+  </div>
+
+  <h3>每一次 VLM 调用拿到什么、怎么设参数</h3>
+  <div class="tscroll">
+    <table class="t">
+      <thead><tr><th class="l">模块</th><th class="l">代码位置</th><th class="l">输入</th><th>温度</th><th class="l">thinking</th><th>重试</th></tr></thead>
+      <tbody>
+        <tr><td class="l">实体抽取</td><td class="l"><code>run_pipeline.vlm_extract_entities</code></td><td class="l">仅第一段的<b>文本提示</b></td><td>0.1</td><td class="l">关</td><td>3</td></tr>
+        <tr><td class="l">状态观察</td><td class="l"><code>video_observer.observe</code></td><td class="l"><b>一张末帧</b> + 上一份记忆 JSON + 该段提示</td><td>0.1</td><td class="l">关</td><td>3</td></tr>
+        <tr><td class="l">可见性分析</td><td class="l"><code>video_observer.analyze_frame_visibility</code></td><td class="l">单帧 + 实体 id 列表 → 每个实体是否清晰可见</td><td>0.1</td><td class="l">关</td><td>3</td></tr>
+        <tr class="hi"><td class="l">状态预测</td><td class="l"><code>state_predictor.predict</code></td><td class="l">记忆 JSON + 续写提示 —— <b>纯文本，不带任何图像</b></td><td>0.1</td><td class="l">未显式关闭</td><td>3</td></tr>
+        <tr><td class="l">底帧选择</td><td class="l"><code>frame_selector.select_base_frame</code></td><td class="l">历史视频的 6 张候选帧 + 预测状态 + 续写提示</td><td>0.1</td><td class="l">关</td><td>3</td></tr>
+        <tr><td class="l">编辑指令</td><td class="l"><code>frame_spec_writer.write / refine</code></td><td class="l">参考图（Image 1…N−1）+ 底帧（Image N）+ 当前/预测状态</td><td>0.3</td><td class="l">关</td><td>3</td></tr>
+        <tr><td class="l">编辑校验</td><td class="l"><code>edit_verifier.verify_edit</code></td><td class="l">底帧 + 编辑后帧 + 预测状态 + 提示 → passed / state_ok / scene_ok / feedback</td><td>0.1</td><td class="l">关</td><td>2</td></tr>
+        <tr><td class="l">结果校验</td><td class="l"><code>verifier.verify</code></td><td class="l">末帧 + 预测状态 → scs / identity / visibility ∈ {pass, fail, partial, skip}</td><td>0.1</td><td class="l">关</td><td>2</td></tr>
+        <tr><td class="l">评测评判</td><td class="l"><code>statebench/eval/evaluate.py</code></td><td class="l">揭示段视频 + 3 张参考帧 + checklist + expected_state</td><td>0.1</td><td class="l">关</td><td>2</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:8px">所有 VLM 角色与评判器都是 Qwen3.5-Plus（DashScope 兼容接口）；图像编辑 <code>wan2.7-image</code>（1K 生成后 ffmpeg 缩放到 832×480）；视频 <code>wan2.2-kf2v-flash</code>（480P，<code>prompt_extend=true</code>）；基线 I2V 为 <code>wan2.2-i2v-plus</code>。JSON 解析三级兜底：直接解析 → 提取 ```json 代码块 → 正则抓第一个 {…}，并剥掉 <code>&lt;think&gt;</code> 标签。</p>
+
+  <h3>论文与代码对照：五处值得记住的差异</h3>
+  <div class="grid2">
+    <div class="card obs"><h4>① 「以视频证据为准」在代码里是「以末帧为准」</h4><p>论文 §4.1 说状态解析「grounded in the observed video evidence」。<code>VideoObserver.observe</code> 收到的视觉输入只有<b>一张末帧</b>；被遮挡过程的知识来自两处：该段的文字提示（观察器被要求「比较已知状态与本段描述，判断实际发生了什么」）和「对不可见实体按逻辑推断」的指令。历史视频的中间帧只在外观绑定与底帧选择时被抽成 6 张关键帧看过。</p></div>
+    <div class="card fut"><h4>② 状态更新是纯文本推理</h4><p><code>StatePredictor</code> 的请求里没有任何图像：输入是格式化的记忆 JSON（含 <code>has_appearance</code> 布尔值，而非图片）和续写提示。这与「状态推理与渲染解耦」的主张完全一致，也解释了为什么它能显式区分「物理存在」与「相机可见」——这是语言层面的推理，不是像素层面的。</p></div>
+    <div class="card st"><h4>③ 底帧不一定是最后一帧，甚至可以不编辑</h4><p><code>FrameSelector</code> 让 VLM 在历史视频的 6 张候选帧（取自 T/7…6T/7，<b>不含真正的末帧</b>）里挑一张最接近未来状态的做编辑底帧，给出 0–10 的满足度；若某帧已经满足未来状态（<code>needs_editing=false</code>），则跳过图像编辑，直接把那张历史帧当未来末帧。对 past-visible 任务这相当于一次「关键帧检索」的捷径——论文正文没有描述这个分支。首末帧生视频的首帧则始终是真正的历史末帧。</p></div>
+    <div class="card ball"><h4>④ 编辑有校验重试，最终校验只做记录</h4><p><code>EditVerifier</code> 对比底帧与编辑帧，分别判断状态维度与场景维度（含相机运动时背景是否应变），失败则把反馈交给 <code>FrameSpecWriter.refine</code> 改写指令，最多重试 2 次（最多 3 次生成）。而第 9 步的 <code>Verifier</code>（scs / identity / visibility）结果只写进 <code>results.json</code>，<b>不触发任何重生成</b>。论文附录提到的「retry rules」指的是前者。</p></div>
+    <div class="card vid" style="grid-column:1/-1"><h4>⑤ 渲染阶段有两处「静默」的提示改写</h4><p><code>kf2v.generate_video</code> 在续写提示后追加 <em>“Maintain smooth, continuous motion between the first and last frame.”</em>，并开启 API 端的 <code>prompt_extend</code>；同样的 <code>prompt_extend</code> 也用于 T2V 基线。这意味着渲染器实际看到的提示并不完全等于 <span class="m">p<sub>t+1</sub></span>。另外，仓库示例里 <code>FrameSpecWriter</code> 产出的编辑指令含有「图1」「图2」这样的中文图号（“the red sphere from 图1 is clearly visible”），说明提示词模板经历过中英版本迭代，指令会原样交给图像模型。</p></div>
+  </div>
+</section>
+
+<!-- ============================================================ EXPERIMENTS -->
+<section class="sec" id="results">
+  <div class="eyebrow"><span>实验</span><span class="paper">§5 · Tab. 1–3 · Fig. 4–5</span></div>
+  <h2>更强的观测记忆没有换来更对的状态；显式状态载体换来了</h2>
+  <p class="lead">五个基线覆盖三类续写接口：<span class="k-obs">帧条件</span>（Wan-I2V 用末帧；LongCat-Video 用近几帧）、<span class="k-obs">关键帧与记忆</span>（StoryMem；以及塞满覆盖全过程关键帧的 StoryMem+full KFs，每 5 秒 6 帧、记忆库上限 10 帧）、<span class="k-obs">自回归</span>（MAGI-1）。所有方法只生成下一段；上一段只作为条件证据。输出长度、分辨率、提示模板、采样设置与随机种子在同一模型族内对齐。</p>
+
+  <h3>Table 1 · 主结果（按类别）</h3>
+  <div class="ctrls">
+    <span class="small">指标</span>
+    <div class="seg" id="chMetric">
+      <button class="on" data-m="SES">SES ↑</button>
+      <button data-m="SC">SC ↑</button>
+      <button data-m="HR">HR ↓</button>
+      <button data-m="SCS">SCS ↑</button>
+    </div>
+    <span class="small" id="chHint"></span>
+  </div>
+  <div class="chart" id="mainChart"></div>
+  <div class="legend" id="mainLegend"></div>
+  <figure>
+    <div class="tscroll">
+      <table class="t">
+        <thead>
+          <tr><th class="l" rowspan="2">方法</th><th colspan="4">Past-visible (85)</th><th colspan="4">Occluded-process (65)</th><th colspan="4">Complex-transition (50)</th><th colspan="3">Overall (200)</th></tr>
+          <tr><th>SES↑</th><th>SC↑</th><th>HR↓</th><th>SCS↑</th><th>SES↑</th><th>SC↑</th><th>HR↓</th><th>SCS↑</th><th>SES↑</th><th>SC↑</th><th>HR↓</th><th>SCS↑</th><th>SES↑</th><th>SCS↑</th><th>SCS-All↑</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="l">Wan-I2V（末帧）</td><td>69.4</td><td>26.0</td><td>40.7</td><td>42.9</td><td>90.8</td><td>22.6</td><td>49.2</td><td>36.1</td><td>76.0</td><td>17.1</td><td>18.4</td><td>48.2</td><td>78.0</td><td>41.6</td><td>32.5</td></tr>
+          <tr><td class="l">LongCat-Video（近帧）</td><td>57.6</td><td>27.9</td><td>22.4</td><td>51.8</td><td>70.8</td><td>23.9</td><td>27.2</td><td>46.0</td><td>60.0</td><td>10.6</td><td>10.0</td><td>49.2</td><td>62.5</td><td>49.0</td><td>30.6</td></tr>
+          <tr><td class="l">StoryMem</td><td>80.0</td><td>50.5</td><td>15.4</td><td>66.9</td><td>75.4</td><td>34.7</td><td>20.4</td><td>54.8</td><td>66.0</td><td>27.8</td><td>34.8</td><td>46.5</td><td>75.0</td><td>58.5</td><td>43.9</td></tr>
+          <tr><td class="l">StoryMem + full KFs</td><td class="best">91.2</td><td>51.9</td><td>13.5</td><td>68.3</td><td>86.0</td><td>36.1</td><td>19.4</td><td>55.5</td><td>56.0</td><td>19.0</td><td>37.5</td><td>41.1</td><td>78.5</td><td>57.5</td><td>45.2</td></tr>
+          <tr><td class="l">MAGI-1（自回归）</td><td>40.0</td><td>19.6</td><td>23.5</td><td>47.1</td><td>40.0</td><td>21.8</td><td>51.9</td><td>33.5</td><td>12.0</td><td>44.4</td><td>25.0</td><td>59.2</td><td>33.0</td><td>42.8</td><td>14.1</td></tr>
+          <tr class="hi"><td class="l"><b>StateAgent</b></td><td>89.4</td><td class="best">61.0</td><td class="best">11.2</td><td class="best">74.1</td><td class="best">96.9</td><td class="best">68.8</td><td class="best">10.3</td><td class="best">78.5</td><td class="best">92.0</td><td class="best">61.2</td><td class="best">17.4</td><td class="best">71.4</td><td class="best">92.5</td><td class="best">74.9</td><td class="best">69.3</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <figcaption><b>Table 1。</b>SES 衡量揭示/更新动作的完成；SCS 是 SES 为正样本上的条件状态一致性；SC 是状态正确题的 yes 率，HR 是反幻觉题的 no 率；SCS-All 把揭示失败计为失败。粗体为列最优。注意 MAGI-1 在 complex-transition 上 SES 只有 12.0（50 个里约 6 个），其 SC 44.4 / SCS 59.2 建立在极小的分母上，不宜与其他行直接比较。</figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card obs"><h4>Past-visible：检索有用，但要判断时效</h4><p>给 StoryMem 塞满关键帧确实把 SES 推到 91.2（列最高），但 SC 只从 50.5 到 51.9——<b>拿到帧 ≠ 知道哪张帧还算数</b>。StateAgent 的 SES 略低（89.4），SC 却到 61.0。</p></div>
+    <div class="card ball"><h4>Occluded-process：目标状态从未出现在任何帧里</h4><p>这是观测记忆最无能为力的一类：所有基线的 SC 都在 22–36 之间，Wan-I2V 的 HR 高达 49.2（一半的反幻觉题不通过）。StateAgent 的 SC 68.8、HR 10.3，是三类中差距最大的一类。</p></div>
+    <div class="card fut"><h4>Complex-transition：相似性是弱线索</h4><p>颜色混合、数量增减、杯球移位、溶解与材质变换需要一步计算。全量关键帧在这里反而更差（SC 27.8 → 19.0，SCS 46.5 → 41.1）：更多过去的像素，更多可以「抄」的错误答案。StateAgent 的 HR 也在这里最高（17.4）——预测出的状态落成像素时最容易失真。</p></div>
+  </div>
+
+  <h3>Fig. 4 的例子：三种长得不一样的失败</h3>
+  <div class="prose">
+    <p>设置提示：一位女士把一个绿苹果丢进敞开的纸箱，香蕉留在厨房台面上。续写提示：“The woman tilts the cardboard box toward the camera to show what is inside.”（这就是 <code>green_apple_into_cardboard_box</code>，可在上面的任务浏览器里查看 checklist。）</p>
+    <ul>
+      <li><strong>没有倾斜盒子</strong>——揭示动作没完成，SES = 0。这一类失败在 SCS-All 里被记为完全失败。</li>
+      <li><strong>打开了盒子，里面是空的</strong>——尽管上一段刚把苹果放进去。这是最纯粹的「观测记忆 ≠ 状态」：尾帧里确实看不见苹果。</li>
+      <li><strong>幻觉出一个模糊或错误的物体</strong>——反幻觉题失败，HR 上升。</li>
+    </ul>
+    <p>StateAgent 避开三者的方式是机械的：预测「苹果应当仍在盒内」，把它落成一张盒子倾斜、苹果在内的未来末帧，再让渲染器从尾帧动过去。</p>
+  </div>
+
+  <h3>Table 2 · 消融：增益来自「状态更新 × 视觉落地」的耦合</h3>
+  <div class="ladder">
+    <div class="rung"><div class="nm">Base I2V<br><span class="small">只给末帧与提示</span></div><div class="big">32.5</div><div class="row"><span>SES <b>78.0</b></span><span>SCS <b>41.6</b></span></div><div class="bar"><i style="width:32.5%"></i></div></div>
+    <div class="rung"><div class="delta">+12.2</div><div class="nm">直接编辑末帧<br><span class="small">有视觉落地，无状态更新</span></div><div class="big">44.7</div><div class="row"><span>SES <b>79.0</b></span><span>SCS <b>56.6</b></span></div><div class="bar"><i style="width:44.7%"></i></div></div>
+    <div class="rung"><div class="delta">+11.1</div><div class="nm">基于状态的提示增强<br><span class="small">有状态推理，只用文字传递</span></div><div class="big">55.8</div><div class="row"><span>SES <b>90.0</b></span><span>SCS <b>61.9</b></span></div><div class="bar"><i style="width:55.8%"></i></div></div>
+    <div class="rung last"><div class="delta">+13.5</div><div class="nm">完整 StateAgent<br><span class="small">状态更新 → 未来帧落地 → 渲染</span></div><div class="big">69.3</div><div class="row"><span>SES <b>92.5</b></span><span>SCS <b>74.9</b></span></div><div class="bar"><i style="width:69.3%"></i></div></div>
+  </div>
+  <div class="prose">
+    <p>大数字是 SCS-All。读法：<strong>文字状态提示</strong>把 SES 推到 90.0——说明「告诉生成器该做什么动作」文字就够了——但 SCS 停在 61.9，因为文字缺少把预测状态绑定到实体外观的视觉锚点；<strong>直接编辑末帧</strong>提供了这个锚点、超过了多个观测记忆基线，但没有完整的状态更新流水线，还差一截。两者串起来才拿到最好的 SCS 与 SCS-All。</p>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Table 3 · ST-Bench 多镜故事生成</h4>
+      <p>在 StoryMem 提出的 ST-Bench 协议下（1 分钟长的故事脚本、镜头级提示、转场标记），两种方法从同一脚本逐镜生成，按 StoryMem 的口径评美学、提示跟随（PF）与跨镜一致性。</p>
+      <div class="tscroll" style="border:0; padding:0">
+        <table class="t"><thead><tr><th class="l">方法</th><th>Aesthetic</th><th>PF</th><th>Consistency</th></tr></thead>
+        <tbody><tr><td class="l">StoryMem</td><td>5.81</td><td>0.222</td><td>0.586</td></tr><tr class="hi"><td class="l">StateAgent</td><td class="best">6.35</td><td class="best">0.230</td><td class="best">0.594</td></tr></tbody></table>
+      </div>
+      <p class="small" style="margin-top:8px">三项都更好，但 PF 与 Consistency 的差距只有 0.008——「有益于分钟级故事生成」的证据主要是定性的：Fig. 5 里 StoryMem 的记忆库被早期关键帧「记忆汇」主导，导致背景重复、新角色被绑到旧外观、小物件漂移（棕榈叶扇变成纸扇）；StateAgent 靠显式实体状态避开这些。</p>
+    </div>
+    <div class="card">
+      <h4>App. B · 双盲成对人评（Tab. 6–7）</h4>
+      <p>15 位参与者 × 30 次比较 = 450 对、1,350 个维度级判断。每次比较把 StateAgent 与一个基线并排（位置随机、方法名隐藏），历史视频作为参考显示，只评最后一段续写。得分：胜 1 / 平 0.5 / 负 0。</p>
+      <div class="chart" id="humanChart"></div>
+      <p class="small" style="margin-top:8px">状态一致性是人类偏好最一致的维度（得分率 85.6，去平局胜率 88.8，多数一致性 90.0）；美学差距最小、平局最多（26.7%），作者认为这是因为几种方法共享相近的视觉先验。按基线拆分：对 StoryMem 差距最小（72.1），对 MAGI-1 最大（95.3）。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ discussion & my reservations -->
+<section class="sec" id="limits">
+  <div class="eyebrow"><span>讨论与局限</span><span class="paper">§4 · §7 · App. D</span></div>
+  <h2>作者自己划的边界，以及我读下来的保留意见</h2>
+
+  <h3>作者的边界</h3>
+  <div class="grid2">
+    <div class="card"><h4>能力归属</h4><p>StateBench 定义的是「未来的视频生成模型最终应当内化的能力：跨生成边界携带世界状态并在新提示下更新它」。StateAgent 被明确定位为<b>当前模型能力阶段的实用方案</b>——外置一个显式的状态推理角色，而不是让视频模型学会状态推理。</p></div>
+    <div class="card"><h4>镜头切换（App. D）</h4><p>StateAgent 从历史末帧渲染到预测的未来末帧；当两帧差异很大时，生成的视频可能出现镜头切换。作者提出更丰富的时间约束或中间状态锚点可能缓解。</p></div>
+    <div class="card"><h4>探针而非本体</h4><p>Tab. 4 的六族 23 型是「受控探针，而不是世界状态的完整本体」；基准是一个紧凑的单元测试，故意把状态的建立、隐藏、揭示分到两段，以便归因。</p></div>
+    <div class="card"><h4>与相邻工作的区隔</h4><p>StEvo-Bench 在单次生成内耦合建立/隐藏/演化/揭示，失败难归因；PAN 用 LLM 潜特征做状态，缺外观绑定；LiveWorld 的 4D 记忆昂贵，且仍是在更丰富的空间里存观测而非把事件转成状态；ReMind 用训练教 KV cache 记忆——本文则不重训视频生成器。</p></div>
+  </div>
+
+  <h3>我的保留意见（读者视角，不代表论文观点）</h3>
+  <div class="prose">
+    <ul>
+      <li><strong>最大的疑问：<span class="m">p<sub>t</sub></span> 对 StateAgent 是一份几乎完美的文字状态说明，对基线却不是。</strong>所有方法名义上收到同一个三元组，但 Wan-I2V、LongCat-Video、MAGI-1 这类生成器本质上只能消费像素与 <span class="m">p<sub>t+1</sub></span>，论文没有说明它们如何（或是否）使用 <span class="m">p<sub>t</sub></span>。而 StateAgent 的 VLM 把 <span class="m">p<sub>t</sub></span> 读进了观察器——在 StateBench 里，<span class="m">p<sub>t</sub></span> 就是生成上一段视频的提示，它逐字叙述了被遮挡的事件（“drops it into the open blue box”、“pours blue paint … pours yellow paint … stirs”）。对 occluded-process 与 complex-transition 而言，<span class="m">p<sub>t</sub></span> + <span class="m">p<sub>t+1</sub></span> 在语言层面几乎已经决定了答案，「把证据转换成状态」有相当一部分是「把提示读成状态」。论文说 <span class="m">p<sub>t</sub></span> 只用于实体绑定，但代码里观察器的指令是「比较已知状态与本段描述来判断实际发生了什么」。一个不给 <span class="m">p<sub>t</sub></span>、或把事件从 <span class="m">p<sub>t</sub></span> 里抹掉的 video-only 变体，才能回答标题里的问题到底被回答了多少。</li>
+      <li><strong>评判器与推理器同一个模型。</strong>Qwen3.5-Plus 既是 StateAgent 的解析器、更新器、编辑指令撰写器与校验器，也是 StateBench 的评判器，而 checklist 里直接写着 <code>expected_state</code>。自偏好偏差在这种设置里是已知风险。双盲人评（450 对，状态一致性得分率 85.6）在方向上支持了自动指标，但人评只覆盖 4 个基线、15 位参与者，且没有报告 VLM 评判与人类判断的逐样本一致率。</li>
+      <li><strong>生成器也同源。</strong>历史视频由 Wan2.2 生成，StateAgent 用 Wan2.2-KF2V-Flash 渲染、Wan2.7-Image 编辑，末帧 I2V 基线也是 Wan2.2。LongCat-Video 与 MAGI-1 是在别家模型生成的历史上做续写，域不匹配可能放大了它们的劣势（MAGI-1 的 SES 只有 33.0，说明它在这个设置里连揭示动作都很少完成）。</li>
+      <li><strong>SCS 的一半是反幻觉分。</strong>C 与 H 合并计算让 SCS 有一个高地板（Wan-I2V complex-transition：SC 17.1、SCS 48.2）。真正衡量「状态带过去了没有」的是 SC；论文正文里的对比多以 SCS 表述（58.5 → 74.9），若以 SC 论，差距其实更大（overall SC 未单列，按类看是 ~52 → 61、~36 → 69、~28 → 61）。</li>
+      <li><strong>条件指标的选择效应与小分母。</strong>SCS<sub>cond</sub> 只在揭示成功的样本上算，一个只在容易的样本上完成揭示的方法会得到虚高的条件分；SCS-All 用乘积修正了这一点，但按类的 SC/HR 没有对应修正——MAGI-1 在 complex-transition 上的 SC 44.4 / SCS 59.2 来自约 6 个样本。</li>
+      <li><strong>底帧选择的捷径没有被单独消融。</strong>代码里 <code>FrameSelector</code> 可以跳过编辑、直接把一张历史帧当未来末帧，这对 past-visible 任务就是关键帧检索。Table 2 的「直接编辑末帧」变体用的是末帧，「完整 StateAgent」的增益里混有这一分支的贡献，读者无法拆开。</li>
+      <li><strong>观察器只看一张末帧。</strong>论文强调状态解析「以观测到的视频证据为准」，代码里视觉证据只有末帧一张图（中间帧仅用于外观绑定与底帧候选）。这与第一条相互印证：隐藏过程的信息主要来自文字。</li>
+      <li><strong>成本与定位。</strong>每段续写约 8–10 次 VLM 调用（部分携带 6 张图）、1–3 次图像生成、1 次首末帧生视频，全部走 API 异步任务；论文没有报告延迟。StateAgent 是离线的智能体封装，不是交互式世界模型；它的可诊断性是用一条很重的流水线换来的。</li>
+      <li><strong>基准是模板化的族，类别与提示风格绑定。</strong>如「基准」一节所述，complex-transition 是 5 族 × 10，occluded-process 是 5 族 × 10 + 15；past-visible 全用手持风格模板、complex-transition 几乎全用固定机位模板。按类别的差异里混着生成风格的差异；单族的系统性错误会以 10 为单位放大。</li>
+      <li><strong>「有益于故事生成」主要是定性证据。</strong>ST-Bench 上 PF 与 Consistency 的提升只有 0.008，美学 +0.54；Fig. 5 的定性对比更有说服力，但只有一个例子。</li>
+    </ul>
+    <p>这些保留意见不推翻主线。「观测记忆接口把不同后果的历史映射到相似证据 → 只看接口的生成器只能猜 → 一个显式、可更新、能绑定外观的状态载体能补上这个缺口」这条论证是自洽的，Table 1 与 Table 2 也确实支持它。它们只是把结论收窄成：<strong>在历史提示可读的条件下，用 VLM 外置状态推理 + 图像编辑落地，能显著提升当前视频生成器的跨段状态一致性；至于视频生成器本身能否从像素里读出状态，这篇论文没有（也没打算）回答。</strong></p>
+  </div>
+</section>
+
+<!-- ============================================================ Awesome coordinates -->
+<section class="sec" id="context">
+  <div class="eyebrow"><span>坐标系</span><span class="paper">Awesome-Interactive-Video-World-Models</span></div>
+  <h2>放回 Awesome-Interactive-Video-World-Models 的坐标系里</h2>
+  <p class="lead">按列表的三条轴，这篇落在<strong>「长时程一致性与记忆」</strong>轴上，形态是<strong>基准 + 测试时方法</strong>：它不满足交互式世界模型的三条硬标准（没有逐步动作条件、不是因果/流式生成），但它给「记忆」轴补了一个此前缺失的坐标——<em>状态更新</em>，区别于此前主导的<em>视觉检索</em>。建议归入 <code>benchmarks</code>，并在 <code>memory</code> 轴上标注为「显式状态载体」路线。</p>
+  <div class="rel">
+    <div class="card"><div class="where">benchmarks · 2603.13215</div><b>Out of Sight, Out of Mind? / StEvo-Bench（Ma et al., 2026）</b>同样问隐藏状态能否演化，但在<em>一次生成</em>里让模型建立、隐藏、演化、揭示状态，失败难以归因。StateBench 用段边界把「建立」与「揭示」拆开，是对它的方法论回应；两者一起读，能看清「视频模型内部能否演化状态」与「系统能否跨段交接状态」是两个问题。</div>
+    <div class="card"><div class="where">列表里上一篇精读 · 2608.30692</div><b>Can Video World Models Track Unobserved World States?（Shell Game）</b>问的是状态「住在架构的哪里」：像素目标不监督隐状态，KV cache 只是追加式历史，需要携带状态 + 原地更新。本文走的是相反的路线——把状态<b>外置</b>到 VLM 的实体账本和一张编辑出来的图里，视频模型只做渲染。Shell Game 那篇引用 Cosmos 3「推理塔 + 渲染器」的拆分作为另一条路线，StateAgent 就是这条路线在测试时的一个具体实例。顺带一提：StateBench 的 <code>*_under_cup</code> 族正是一次移动的两杯/三杯 shell game。</div>
+    <div class="card"><div class="where">memory · 2603.07145</div><b>LiveWorld（Duan et al., 2026）</b>用持久的 4D 时空记忆模拟视野外的动态。本文的批评是：它在更丰富的空间里存的仍是观测，没有把历史事件显式转成下一段所需的状态，而且昂贵、难扩展。两者其实互补——LiveWorld 回答「视野外的东西现在在哪」，StateBench 问「容器里的东西现在是什么样」。</div>
+    <div class="card"><div class="where">memory · 2605.25333</div><b>Teaching Video Generators to Remember / ReMind（Xu et al., 2026）</b>通过训练让生成器把 KV cache 当成隐藏状态演化的动态记忆。这是「让模型内化」路线的代表，正是本文声称未来应当达到、但当前用外置 agent 代替的那件事。一个自然的后续实验：把 ReMind 放到 StateBench 上。</div>
+    <div class="card"><div class="where">systems · 2511.09057</div><b>PAN（Xiang et al., 2025）</b>用 LLM 潜特征作为世界状态、再用视频解码器渲染。本文指出其状态缺少显式外观绑定，难以在下一段保持实体视觉身份——StateAgent 的「未来末帧」正是为这个绑定问题给出的答案：符号状态负责更新，编辑出的图负责外观。</div>
+    <div class="card"><div class="where">systems / memory · 2504.12369 · 2506.05284 · 2506.18903</div><b>WorldMem · Long-term Spatial Memory · VMem</b>列表里「记忆」轴的主流：以相机位姿为键检索空间记忆，解决「回到原地时世界还在」。本文的观测记忆批评正对着这一类——它们保证的是<em>外观与布局</em>的持久，而不是<em>动作后果</em>的持久。两类记忆缺一不可。</div>
+    <div class="card"><div class="where">realtime / memory · 2505.13211 · 2602.06028 · 2608.05237</div><b>MAGI-1 · Context Forcing · In-Context Forcing</b>「缓存特征」接口的代表。MAGI-1 在这里作为自回归基线，SES 只有 33.0；Context Forcing 一类的长上下文 KV 缓存扩大了接口容量，但按本文的框架，容量不是瓶颈，把缓存里的证据转成状态才是。</div>
+    <div class="card"><div class="where">benchmarks · 2606.27537 · 2602.08025 · 2605.10434</div><b>MemoBench · MIND · WorldReasonBench</b>相邻基准：MemoBench 测动态变化环境里的重访（相机控制）、MIND 测记忆一致性与动作控制、WorldReasonBench 测从初始条件 + 动作预测未来世界状态（单段）。StateBench 填的是「跨段交接」这一格：历史建立状态、后续提示使用或改变它。</div>
+    <div class="card"><div class="where">systems · 2606.16993</div><b>DreamX-World 1.0（DreamX Team, 2026）</b>同一团队的通用交互式世界模型。把两篇并置读很有意思：一边在造生成器侧的世界模型，一边用基准诊断现有生成器「记得住外观、算不出状态」。StateBench 更像团队内部的一份能力清单。</div>
+    <div class="card"><div class="where">未收录 · 相关</div><b>StoryMem（Zhang et al., 2025）· ImageWAM（Zhang et al., 2026）</b>StoryMem 既是最强基线、ST-Bench 协议来源，也是 StateAgent 代码库的基础（README 致谢）；ImageWAM 提出「世界-动作模型也许只需要图像编辑」，是「未来末帧作为状态载体」的直接思想来源。</div>
+  </div>
+</section>
+
+<!-- ============================================================ appendix quick ref -->
+<section class="sec" id="ref">
+  <div class="eyebrow"><span>附录速查</span><span class="paper">App. A · B · 仓库</span></div>
+  <h2>附录速查</h2>
+  <div class="grid2">
+    <div class="card">
+      <h4>StateBench 一页纸</h4>
+      <dl class="kv">
+        <dt>规模</dt><dd><b>200</b> 任务：85 / 65 / 50；公开元数据 170 个 2 镜 + 30 个 3 镜</dd>
+        <dt>历史视频</dt><dd>Wan2.2-T2V/I2V-plus，480p，16 FPS，5–10 s；多步任务逐段生成；人工按四条件过滤</dd>
+        <dt>提示</dt><dd>历史提示平均约 50 词、揭示提示约 25 词；揭示提示不点名答案</dd>
+        <dt>checklist</dt><dd>1 道 <code>reveal_achieved</code> + 3（113 题）或 2（87 题）道 <code>state_correct</code> + 2 道 <code>no_violation</code></dd>
+        <dt>参考帧</dt><dd>3 张，取自最后一段历史的 12% / 50% / 88%：start · action · pre_reveal；只给评判器</dd>
+        <dt>评判器</dt><dd>Qwen3.5-Plus，温度 0.1，JSON（answer + reason）；公开代码只送揭示段视频 + 参考帧</dd>
+        <dt>指标</dt><dd>SES；SES=1 上的 SC、HR、SCS<sub>cond</sub>；SCS-All = 全样本 <span class="m">e<sub>i</sub>c<sub>i</sub></span> 均值 ≈ SES × SCS</dd>
+        <dt>数据</dt><dd>HuggingFace <code>moore12138/StateBench</code>；元数据 <code>statebench/metadata/statebench.json</code></dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h4>StateAgent 一页纸（Tab. 5 + 代码）</h4>
+      <dl class="kv">
+        <dt>VLM</dt><dd>Qwen3.5-Plus：实体抽取、状态观察、状态预测、底帧选择、编辑指令、两级校验</dd>
+        <dt>图像</dt><dd>Wan2.7-Image，1K → ffmpeg 缩放 832×480；参考图 = 变可见实体的外观帧 + 底帧（最后一张）</dd>
+        <dt>视频</dt><dd>Wan2.2-KF2V-Flash，480P，首帧 = 历史末帧，末帧 = 预测末帧，提示追加平滑运动句，<code>prompt_extend=true</code></dd>
+        <dt>关键帧</dt><dd>每段抽 6 帧，时刻 kT/7（k=1…6）；外观帧 = 实体首次「清晰可见」的那一帧</dd>
+        <dt>重试</dt><dd>编辑校验失败 → 改写指令重生成，最多 2 次；VLM 调用 tenacity 指数退避 2–3 次</dd>
+        <dt>校验</dt><dd><code>verifier_checks: [scs, identity, visibility]</code>，结果只记录到 results.json</dd>
+        <dt>拼接</dt><dd>ffmpeg concat，后段丢第 0 帧去重，832×480，24 fps，libx264 crf 18</dd>
+        <dt>基线</dt><dd>Wan2.2-I2V-A14B（末帧）· LongCat-Video（前缀）· StoryMem / +full KFs（6 帧/5 s，≤10）· MAGI-1</dd>
+      </dl>
+    </div>
+  </div>
+
+  <h3>案例 schema：论文 A.2 vs 公开 JSON</h3>
+  <div class="grid2">
+    <div class="card st"><h4>论文描述的字段</h4><p><code>id</code> · <code>category</code>（三类之一）· <code>state_type</code>（六族）· <code>fine_type</code> · <code>previous_video</code> · <code>previous_prompt</code> · <code>state_after_previous</code>（历史末帧处的标注状态）· <code>continuation_prompt</code> · <code>target_state</code> · <code>evaluation</code>（揭示/动作 checklist + 状态一致性 checklist）</p></div>
+    <div class="card obs"><h4>仓库 statebench.json 的字段</h4><p><code>id</code> · <code>difficulty</code> · <code>target_object</code>（10 条为空）· <code>shots[{shot, role, prompt}]</code>（role ∈ setup_action / setup / action / pour_first / pour_second_stir / move / swap / reveal）· <code>expected_state</code> · <code>checklist{reveal_achieved, state_correct[], no_violation[]}</code>（每题带 <code>reference_frame_ids</code>）· <code>reference_frames[3]</code> · <code>video_path</code> · <code>endframe_path</code>。缺 <code>state_type</code> / <code>fine_type</code> / <code>state_after_previous</code>。</p></div>
+  </div>
+
+  <h3>术语表</h3>
+  <div class="gloss">
+    <div><b>观测记忆 observation memory</b><span>暴露给下一段生成器的历史接口：最后一帧、近帧、关键帧、记忆库、缓存特征。保存「看见过什么」。</span></div>
+    <div><b>状态接口 / 状态推理</b><span>把历史证据转成「此刻什么为真、按新提示该怎么变」的显式表示，并可查询、更新、用于渲染。</span></div>
+    <div><b>跨段状态交接 cross-segment state handoff</b><span>在生成边界把上一段建立的状态传给下一段、并在新提示下更新它的问题（Eq. 2–4）。</span></div>
+    <div><b>边界帧 / 尾帧</b><span>上一段的最后一帧，也是两段的生成边界；StateBench 里它藏住或弄模糊任务相关关系。</span></div>
+    <div><b>因果信念 state as causal belief</b><span>状态 = 一组可能超越可见性而持续存在的任务相关物理关系。</span></div>
+    <div><b>past-visible / occluded-process / complex-transition</b><span>目标状态曾直接可见 / 在遮挡中改变从未可见 / 需要一步物理或关系计算。</span></div>
+    <div><b>SES</b><span>State Exposure Score：完成揭示/更新动作的样本比例，不看状态对错。</span></div>
+    <div><b>SC / HR</b><span>SES 为正样本上，状态正确题的 yes 率 / 反幻觉题的 no 率。</span></div>
+    <div><b>SCS<sub>cond</sub> / SCS-All</b><span>合并 C、H 两组题的 yes 率 / 把揭示失败计为 0 的全案例版本，≈ SES × SCS。</span></div>
+    <div><b>实体状态图 / MemoryBank</b><span>StateAgent 的稀疏状态载体：实体 id、类型、属性、可见性、位置、开合、关系、外观帧、状态描述、来源段。</span></div>
+    <div><b>过期观测 stale observation</b><span>某帧曾显示的状态已被后来的动作改变；状态图可显式标记，关键帧记忆不能。</span></div>
+    <div><b>未来末帧 future end frame</b><span>把 <span class="m">Ŝ<sub>t+1</sub></span> 用图像编辑落成的视觉条件——「对未来状态的可视化预测，而非记忆帧」。</span></div>
+    <div><b>KF2V / 首末帧生视频</b><span>给定首帧与末帧渲染中间运动的接口（Wan2.2-KF2V-Flash）。</span></div>
+    <div><b>entities_becoming_visible</b><span>预测器输出的、从 hidden/partially_visible 变为 visible 的实体列表，决定哪些外观参考进入编辑。</span></div>
+    <div><b>needs_editing / satisfaction_score</b><span>底帧选择器的输出：所选历史帧是否已满足未来状态、满足程度 0–10。</span></div>
+    <div><b>ST-Bench</b><span>StoryMem 提出的 1 分钟多镜故事生成协议，评美学、提示跟随、跨镜一致性。</span></div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>精读对象：Miao, Zhang, Xu, Yu, Tang, Chu, Shen, Lin. <em>Do Video Generators Track the World Across Segments? A Benchmark and Method for World-State Reasoning in Video Continuation.</em> arXiv:2609.03673v1, 2026-09-03. DreamX Team, Alibaba Group · 西安交通大学 · 上海交通大学。</p>
+    <p>本页表格数字来自论文 Tab. 1–3、6–7；任务示例、checklist、参考帧位置与族结构统计来自官方仓库 <code>statebench/metadata/statebench.json</code>（200 条）；流水线细节、提示词与参数来自仓库代码（<code>stateagent/*.py</code>、<code>scripts/run_stateagent.py</code>、<code>scripts/run_pipeline.py</code>、<code>statebench/eval/evaluate.py</code>、<code>configs/default.yaml</code>）；状态图示例来自 <code>outputs/stateagent/red_ball_into_blue_box/results.json</code>。示意图为本页重绘，并非论文原图；页首的历史 B 为本页构造的对照。</p>
+    <p>Awesome-Interactive-Video-World-Models · docs/ · 2026-09-05</p>
+  </div>
+</footer>
+<script>
+(function(){
+'use strict';
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+const NS = 'http://www.w3.org/2000/svg';
+const svgEl = (tag, attrs={}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const fmt1 = v => (Math.round(v*10)/10).toFixed(1);
+
+/* ============================================================ chrome */
+const root = document.documentElement;
+const themeBtn = $('#themeBtn');
+function currentTheme(){ const t = root.getAttribute('data-theme'); if (t) return t; return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; }
+themeBtn.addEventListener('click', () => { const next = currentTheme()==='dark' ? 'light' : 'dark'; root.setAttribute('data-theme', next); try{ localStorage.setItem('sa-theme', next);}catch(e){} rerenderCharts(); });
+try{ const saved = localStorage.getItem('sa-theme'); if (saved) root.setAttribute('data-theme', saved); }catch(e){}
+matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => rerenderCharts());
+
+const prog = $('#prog');
+addEventListener('scroll', () => { const h = document.documentElement; const p = h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight); prog.style.width = (p*100).toFixed(2)+'%'; }, {passive:true});
+
+const jumpBtn = $('#jumpBtn'), jumpMenu = $('#jumpMenu');
+$$('section.sec').forEach(sec => { const h2 = $('h2', sec), eb = $('.eyebrow span', sec); if (!h2) return; const a = document.createElement('a'); a.href = '#'+sec.id; a.innerHTML = `<span class="sec">${eb ? esc(eb.textContent.trim()) : ''}</span><span>${esc(h2.textContent)}</span>`; jumpMenu.appendChild(a); });
+jumpBtn.addEventListener('click', e => { e.stopPropagation(); const open = jumpMenu.classList.toggle('open'); jumpBtn.setAttribute('aria-expanded', open); });
+document.addEventListener('click', e => { if (!jumpMenu.contains(e.target)) jumpMenu.classList.remove('open'); });
+jumpMenu.addEventListener('click', () => jumpMenu.classList.remove('open'));
+
+/* ============================================================ boundary experiment */
+(function boundary(){
+  const stage = $('#bxStage'), strip = $('#bxStrip'), ledger = $('#bxLedger'), verdict = $('#bxVerdict'), msg = $('#bxMsg');
+  if (!stage) return;
+  const HIST = {
+    A: [
+      {ball:'table', hand:'away', cap:'桌上：红球、铅笔、开口蓝盒'},
+      {ball:'hand',  hand:'table', cap:'手拿起红球'},
+      {ball:'above', hand:'above', cap:'球移到盒口上方'},
+      {ball:'inbox', hand:'above', cap:'球落入盒中 → 相机看不到'},
+      {ball:'inbox', hand:'rest',  cap:'手收回'},
+      {ball:'inbox', hand:'away',  cap:'静止'},
+      {ball:'inbox', hand:'away',  cap:'尾帧：盒子直立，球不可见', tail:true},
+    ],
+    B: [
+      {ball:'table', hand:'away', cap:'桌上：红球、铅笔、开口蓝盒'},
+      {ball:'hand',  hand:'table', cap:'手拿起红球'},
+      {ball:'inbox', hand:'above', cap:'球落入盒中'},
+      {ball:'takeout', hand:'takeout', cap:'手又伸进盒里，把球取出'},
+      {ball:'out',   hand:'out',   cap:'球被拿出画面'},
+      {ball:'none',  hand:'rest',  cap:'空手收回'},
+      {ball:'none',  hand:'away',  cap:'尾帧：盒子直立，球不可见', tail:true},
+    ]
+  };
+  const IFACE = {
+    last:   {idx:[6], name:'第 7 帧（尾帧）', dist:['n','✕ 两段历史的尾帧像素相同'], read:['n','✕ 盒内是否有球没有任何像素证据']},
+    recent: {idx:[5,6], name:'第 6–7 帧', dist:['n','✕ 两段的近 2 帧都看不到球；手的位置不同，但不携带球的信息'], read:['n','✕ 仍需从更早的帧推断']},
+    kf:     {idx:[0,1,2,3,4,5], name:'第 1–6 帧（每 5 秒 6 帧，StoryMem+full KFs 的做法）', dist:['w','△ 证据在里面：A 有「球进盒」，B 有「球取出」'], read:['w','△ 但 A 的第 1 帧还显示球在桌上（过期观测），B 要把「取出」换算成「盒空」——生成器必须自己判断哪张帧还算数']},
+    state:  {idx:[], name:'实体状态图（VLM 从历史解析）', dist:['y','✓ ball_1 的 current_location 直接不同'], read:['y','✓ 「不可见但为真」与「已过期」都被显式写出']},
+  };
+  let hist = 'A', iface = 'last', cur = 6, tilt = 0, anim = null;
+
+  function drawScene(svg, f, t){
+    svg.innerHTML = '';
+    const W = 400, H = 260;
+    svgEl('rect', {x:0, y:0, width:W, height:H, rx:8, fill:'var(--wall)'}, svg);
+    svgEl('rect', {x:0, y:175, width:W, height:85, fill:'var(--table)'}, svg);
+    svgEl('rect', {x:0, y:175, width:W, height:12, fill:'var(--table-top)'}, svg);
+    // pencil
+    const pg = svgEl('g', {transform:'translate(305 182) rotate(-6)'}, svg);
+    svgEl('rect', {x:-46, y:-4, width:84, height:8, rx:3, fill:'var(--pencil)'}, pg);
+    svgEl('path', {d:'M38 -4 L52 0 L38 4 Z', fill:'#f2a7bd'}, pg);
+    svgEl('rect', {x:-46, y:-4, width:8, height:8, rx:2, fill:'#e8a0b0'}, pg);
+    // hand (behind box when 'above'/'takeout')
+    const handPos = {table:[122,150], above:[200,78], rest:[330,118], takeout:[236,104], out:[34,110], holdbox:null};
+    const drawHand = (x, y) => { svgEl('path', {d:`M392 6 Q ${x+60} ${y-60} ${x} ${y}`, stroke:'var(--hand2)', 'stroke-width':22, 'stroke-linecap':'round', fill:'none'}, svg); svgEl('circle', {cx:x, cy:y, r:17, fill:'var(--hand)'}, svg); };
+    if (f.hand !== 'away' && f.hand !== 'holdbox' && handPos[f.hand]) drawHand(...handPos[f.hand]);
+    // ball outside the box
+    const ballPos = {table:[95,174], hand:[122,140], above:[200,70], takeout:[236,96], out:[24,106]};
+    if (ballPos[f.ball]) { const [bx, by] = ballPos[f.ball]; svgEl('circle', {cx:bx, cy:by, r:13, fill:'var(--ball)'}, svg); svgEl('circle', {cx:bx-4, cy:by-5, r:4, fill:'rgba(255,255,255,.35)'}, svg); }
+    // box (front face + rim; interior appears when tilted)
+    const frontH = 70*(1-0.45*t), frontTop = 186 - frontH;
+    if (t > 0.02) {
+      const it = frontTop - 62*t;
+      svgEl('path', {d:`M150 ${it} L250 ${it} L256 ${frontTop} L144 ${frontTop} Z`, fill:'var(--boxin)', stroke:'var(--boxc2)', 'stroke-width':1.2}, svg);
+      if (f.ball === 'inbox' && t > 0.18) { const by = frontTop - 22*t, r = 13*(0.55+0.45*t); svgEl('circle', {cx:200, cy:by, r:r, fill:'var(--ball)'}, svg); svgEl('circle', {cx:200-r*.3, cy:by-r*.35, r:r*.3, fill:'rgba(255,255,255,.35)'}, svg); }
+    }
+    svgEl('rect', {x:145, y:frontTop, width:110, height:frontH, rx:3, fill:'var(--boxc)'}, svg);
+    svgEl('rect', {x:145, y:frontTop-6, width:110, height:8, rx:2, fill:'var(--boxc2)'}, svg);
+    if (t > 0.02 || f.hand === 'holdbox') { svgEl('circle', {cx:140, cy:frontTop+frontH*0.55, r:14, fill:'var(--hand)'}, svg); svgEl('circle', {cx:260, cy:frontTop+frontH*0.55, r:14, fill:'var(--hand)'}, svg); }
+    // labels
+    if (svg === stage) {
+      const lbl = svgEl('text', {x:12, y:22, class:'lbl'}, svg); lbl.textContent = `历史 ${hist} · 帧 ${cur+1}/7 · ${f.cap}`;
+      if (f.tail && t < 0.02) { svgEl('line', {x1:392, y1:0, x2:392, y2:260, class:'cut'}, svg); const c = svgEl('text', {x:384, y:250, class:'lbl', 'text-anchor':'end'}, svg); c.textContent = '生成边界 →'; c.style.fill = 'var(--ball-ink)'; }
+      if (t > 0.98) { const r = svgEl('text', {x:388, y:22, class:'lbl', 'text-anchor':'end'}, svg); r.textContent = '续写末帧：盒子朝镜头倾斜'; r.style.fill = 'var(--st-ink)'; }
+    }
+  }
+  function renderStrip(){
+    strip.innerHTML = '';
+    const frames = HIST[hist], exp = new Set(IFACE[iface].idx);
+    frames.forEach((f, i) => {
+      const d = document.createElement('div'); d.className = 'fr' + (i===cur ? ' cur' : '') + (exp.has(i) ? ' exp' : '') + (f.tail ? ' tail' : '');
+      d.title = f.cap; d.setAttribute('role','button'); d.tabIndex = 0;
+      const s = document.createElementNS(NS, 'svg'); s.setAttribute('viewBox','0 0 400 260'); d.appendChild(s); drawScene(s, f, 0);
+      const t = document.createElement('span'); t.className = 't'; t.textContent = String(i+1); d.appendChild(t);
+      const go = () => { stopAnim(); cur = i; tilt = 0; renderAll(false); };
+      d.addEventListener('click', go); d.addEventListener('keydown', e => { if (e.key==='Enter' || e.key===' ') { e.preventDefault(); go(); } });
+      strip.appendChild(d);
+    });
+  }
+  function renderPanel(){
+    const I = IFACE[iface];
+    if (iface === 'state') {
+      ledger.hidden = false;
+      ledger.innerHTML = hist === 'A'
+        ? `<b>S<sub>t</sub> · 历史 A</b><br>person_1  <span class="vis">visible</span> · 不持物<br>box_1     <span class="vis">visible</span> · open · on table_1<br>ball_1    <span class="hid">hidden</span> · <b>inside box_1</b>   ← 不可见但为真<br>pencil_1  <span class="vis">visible</span> · on table_1`
+        : `<b>S<sub>t</sub> · 历史 B</b><br>person_1  <span class="vis">visible</span> · 不持物<br>box_1     <span class="vis">visible</span> · open · on table_1 · <b>empty</b><br>ball_1    <span class="hid">hidden</span> · <span class="chg">outside frame（已被拿走）</span>   ← 「球曾在盒内」标为过期<br>pencil_1  <span class="vis">visible</span> · on table_1`;
+    } else ledger.hidden = true;
+    verdict.innerHTML = `<dt>暴露的证据</dt><dd>${I.name}</dd><dt>能区分 A / B？</dt><dd class="${I.dist[0]}">${I.dist[1]}</dd><dt>当前状态可直接读出？</dt><dd class="${I.read[0]}">${I.read[1]}</dd>`;
+  }
+  function renderAll(keepMsg){
+    drawScene(stage, HIST[hist][cur], tilt); renderStrip(); renderPanel();
+    if (!keepMsg) msg.textContent = tilt > 0.98 ? '' : (cur === 6 ? '这是生成边界。按「续写」看正确的下一段应该露出什么。' : `帧 ${cur+1}：${HIST[hist][cur].cap}`);
+  }
+  function stopAnim(){ if (anim) { cancelAnimationFrame(anim); anim = null; } }
+  $('#bxHist').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; $$('#bxHist button').forEach(x => x.classList.toggle('on', x===b)); hist = b.dataset.h; stopAnim(); cur = 6; tilt = 0; renderAll(false); });
+  $('#bxIface').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; $$('#bxIface button').forEach(x => x.classList.toggle('on', x===b)); iface = b.dataset.i; renderStrip(); renderPanel(); });
+  $('#bxReveal').addEventListener('click', () => {
+    stopAnim(); cur = 6; const f = HIST[hist][6]; const t0 = performance.now(); const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const step = now => { tilt = reduce ? 1 : Math.min(1, (now - t0)/750); tilt = 1 - Math.pow(1-tilt, 3); if (tilt > 0.999) tilt = 1; drawScene(stage, f, tilt); if (tilt < 1) anim = requestAnimationFrame(step); else { anim = null; renderStrip(); } };
+    anim = requestAnimationFrame(step);
+    msg.innerHTML = hist === 'A'
+      ? '<b>正确续写：</b>盒子倾斜，红球在盒底——状态图早已写着 <code>ball_1: inside box_1</code>。只看尾帧的生成器面对 A 和 B 拿到的是同一张输入图。'
+      : '<b>正确续写：</b>盒子倾斜，里面是<b>空的</b>。尾帧与 A 完全相同，只有状态图记录了「球已被拿走」。一个只用观测记忆的生成器，对 A 和 B 只能给出同一个答案——所以至少错一个。';
+  });
+  $('#bxReset').addEventListener('click', () => { stopAnim(); cur = 6; tilt = 0; renderAll(false); });
+  renderAll(false);
+})();
+
+/* ============================================================ task browser */
+const TASKS = [{"id":"apple_into_drawer","cat":"past_visible","fam":"containment","target":"The drawer contains a red apple.","expected":"The drawer contains a red apple.","shots":[{"role":"setup_action","p":"Realistic, natural speed, handheld camera feel. A red apple sits on a wooden table. A hand picks it up and places it into the drawer, then pushes the drawer shut."},{"role":"reveal","p":"Realistic, natural speed, handheld camera feel. A hand reaches over, pulls the drawer open, and the camera looks inside."}],"rq":{"q":"Is the drawer pulled open with its interior visible?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The drawer contains a red apple?","r":[]},{"q":"Does the revealed target/state (The drawer contains a red apple) match the same object, person, text, mark, liquid, count, position, identity, and relevant attributes shown in the historical reference frames?","r":["start","action"]},{"q":"Does the revealed container, surface, room, person, or local scene remain consistent with the historical reference frames, except for the intended state change caused by the described action?","r":["start","pre_reveal"]}],"nv":[{"q":"Are there no extra objects, duplicated targets, unsupported marks/text, changed attributes, or impossible contents in the revealed area that are absent from the historical reference frames and not introduced by the described action?","r":["start","action","pre_reveal"]},{"q":"Does the reveal avoid hallucinated changes to the container/interior/background/person that would contradict the historical reference frames?","r":["start","pre_reveal"]}]},{"id":"cups_position_swapped","cat":"past_visible","fam":"swap/flip","target":"The red cup is on the left, the blue cup on the right.","expected":"The red cup is on the left, the blue cup on the right.","shots":[{"role":"setup_action","p":"Realistic, natural speed, handheld camera feel. A red cup is on the left and a blue cup is on the right of the table. A hand moves both cups to new positions while keeping the red cup on the left and the blue cup on the right, then a large towel is draped over the entire table surface."},{"role":"reveal","p":"Realistic, natural speed, handheld camera feel. A hand lifts the large towel off the table."}],"rq":{"q":"Is the towel lifted off the table?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The red cup is on the left, the blue cup on the right?","r":[]},{"q":"Does the revealed target/state (The red cup is on the left, the blue cup on the right) match the same object, person, text, mark, liquid, count, position, identity, and relevant attributes shown in the historical reference frames?","r":["start","action"]},{"q":"Does the revealed container, surface, room, person, or local scene remain consistent with the historical reference frames, except for the intended state change caused by the described action?","r":["start","pre_reveal"]}],"nv":[{"q":"Are there no extra objects, duplicated targets, unsupported marks/text, changed attributes, or impossible contents in the revealed area that are absent from the historical reference frames and not introduced by the described action?","r":["start","action","pre_reveal"]},{"q":"Does the reveal avoid hallucinated changes to the container/interior/background/person that would contradict the historical reference frames?","r":["start","pre_reveal"]}]},{"id":"coffee_stain_on_carpet","cat":"past_visible","fam":"surface","target":"The beige carpet has a brown coffee stain where the cushion was.","expected":"The beige carpet has a brown coffee stain where the cushion was.","shots":[{"role":"setup_action","p":"Realistic, natural speed, handheld camera feel. A clean beige carpet fills the frame. A hand knocks over a cup of coffee spilling a brown stain. A person quickly places a large cushion over the stain."},{"role":"reveal","p":"Realistic, natural speed, handheld camera feel. A hand lifts the cushion off the carpet and sets it aside."}],"rq":{"q":"Is the cushion removed from the carpet?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The beige carpet has a brown coffee stain where the cushion was?","r":[]},{"q":"Are the key visible final attributes, such as count, color, text, mark, material, pose, position, or transformation outcome, clearly correct in the reveal?","r":[]}],"nv":[{"q":"Are there no extra, duplicated, contradictory, or impossible visible objects, marks, text, contents, or attributes that conflict with the intended final state?","r":[]},{"q":"Does the reveal avoid obvious visual artifacts or physically implausible changes in the revealed area?","r":[]}]},{"id":"half_juice_into_bag","cat":"past_visible","fam":"quantity","target":"The glass is about half full of orange juice.","expected":"The glass is about half full of orange juice.","shots":[{"role":"setup_action","p":"Realistic, natural speed, handheld camera feel. A full glass of orange juice sits on the table. A person picks it up, drinks about half, then places the glass into an opaque paper bag beside it."},{"role":"reveal","p":"Realistic, natural speed, handheld camera feel. A hand reaches into the opaque paper bag and lifts the glass back out."}],"rq":{"q":"Is the glass taken back out of the bag and visible?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The glass is about half full of orange juice?","r":[]},{"q":"Are the key visible final attributes, such as count, color, text, mark, material, pose, position, or transformation outcome, clearly correct in the reveal?","r":[]}],"nv":[{"q":"Are there no extra, duplicated, contradictory, or impossible visible objects, marks, text, contents, or attributes that conflict with the intended final state?","r":[]},{"q":"Does the reveal avoid obvious visual artifacts or physically implausible changes in the revealed area?","r":[]}]},{"id":"playing_card_flipped_facedown","cat":"past_visible","fam":"swap/flip","target":"The card's face (suit and number) is showing.","expected":"The card's face (suit and number) is showing.","shots":[{"role":"setup_action","p":"Realistic, natural speed, handheld camera feel. A playing card with its face showing lies on the table. A hand flips it face-down, then places another card on top of it."},{"role":"reveal","p":"Realistic, natural speed, handheld camera feel. A hand removes the top card and flips the lower card face-up."}],"rq":{"q":"Is the card turned face-up?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The card's face (suit and number) is showing?","r":[]},{"q":"Are the key visible final attributes, such as count, color, text, mark, material, pose, position, or transformation outcome, clearly correct in the reveal?","r":[]}],"nv":[{"q":"Are there no extra, duplicated, contradictory, or impossible visible objects, marks, text, contents, or attributes that conflict with the intended final state?","r":[]},{"q":"Does the reveal avoid obvious visual artifacts or physically implausible changes in the revealed area?","r":[]}]},{"id":"keys_pocketed_away","cat":"past_visible","fam":"departure","target":"The kitchen table is empty; the keys are gone.","expected":"The kitchen table is empty; the keys are gone.","shots":[{"role":"setup_action","p":"Realistic, natural speed, handheld camera feel. A set of keys lies on the kitchen table. A person scoops them up and jingles them, then shoves them into their jacket pocket and walks to the door."},{"role":"reveal","p":"Realistic, natural speed, handheld camera feel. The camera returns to the kitchen table surface."}],"rq":{"q":"Does the camera show the kitchen table?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The kitchen table is empty; the keys are gone?","r":[]},{"q":"Does the revealed target/state (The kitchen table is empty; the keys are gone) match the same object, person, text, mark, liquid, count, position, identity, and relevant attributes shown in the historical reference frames?","r":["start","action"]},{"q":"Does the revealed container, surface, room, person, or local scene remain consistent with the historical reference frames, except for the intended state change caused by the described action?","r":["start","pre_reveal"]}],"nv":[{"q":"Are there no extra objects, duplicated targets, unsupported marks/text, changed attributes, or impossible contents in the revealed area that are absent from the historical reference frames and not introduced by the described action?","r":["start","action","pre_reveal"]},{"q":"Does the reveal avoid hallucinated changes to the container/interior/background/person that would contradict the historical reference frames?","r":["start","pre_reveal"]}]},{"id":"alarm_clock_hidden_by_pillow","cat":"past_visible","fam":"covered","target":"A small alarm clock is on the bedside table.","expected":"A small alarm clock is on the bedside table.","shots":[{"role":"setup_action","p":"Realistic, natural speed, handheld camera feel. A small alarm clock sits on a bedside table. A person stands a large pillow upright in front of it, hiding it completely."},{"role":"reveal","p":"Realistic, natural speed, handheld camera feel. A hand lifts the large pillow away from the bedside table."}],"rq":{"q":"Is the pillow lifted away so the table is visible?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: A small alarm clock is on the bedside table?","r":[]},{"q":"Does the revealed target/state (A small alarm clock is on the bedside table) match the same object, person, text, mark, liquid, count, position, identity, and relevant attributes shown in the historical reference frames?","r":["start","action"]},{"q":"Does the revealed container, surface, room, person, or local scene remain consistent with the historical reference frames, except for the intended state change caused by the described action?","r":["start","pre_reveal"]}],"nv":[{"q":"Are there no extra objects, duplicated targets, unsupported marks/text, changed attributes, or impossible contents in the revealed area that are absent from the historical reference frames and not introduced by the described action?","r":["start","action","pre_reveal"]},{"q":"Does the reveal avoid hallucinated changes to the container/interior/background/person that would contradict the historical reference frames?","r":["start","pre_reveal"]}]},{"id":"green_apple_into_cardboard_box","cat":"occluded_process","fam":"container+distractor","target":"green apple","expected":"The cardboard box contains only the green apple; the banana is not inside.","shots":[{"role":"setup_action","p":"A single continuous realistic video on a kitchen counter. A woman stands behind the counter with a green apple, a banana, and an open brown cardboard box in front of her, all clearly visible. She picks up the green apple and drops it into the open cardboard box; the banana stays on the counter. Fixed camera, medium shot, bright indoor lighting."},{"role":"reveal","p":"A single continuous realistic video on a kitchen counter. The woman tilts the cardboard box toward the camera to show what is inside. Fixed camera, medium shot, bright indoor lighting."}],"rq":{"q":"Is the cardboard box tilted toward the camera so its interior is visible?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The cardboard box contains only the green apple; the banana is not inside?","r":[]},{"q":"Does the revealed target/state (green apple) match the same object, person, text, mark, liquid, count, position, identity, and relevant attributes shown in the historical reference frames?","r":["start","action"]},{"q":"Does the revealed container, surface, room, person, or local scene remain consistent with the historical reference frames, except for the intended state change caused by the described action?","r":["start","pre_reveal"]}],"nv":[{"q":"Are there no extra objects, duplicated targets, unsupported marks/text, changed attributes, or impossible contents in the revealed area that are absent from the historical reference frames and not introduced by the described action?","r":["start","action","pre_reveal"]},{"q":"Does the reveal avoid hallucinated changes to the container/interior/background/person that would contradict the historical reference frames?","r":["start","pre_reveal"]}]},{"id":"red_ball_into_blue_box","cat":"occluded_process","fam":"container+distractor","target":"red ball","expected":"The blue box contains only the red ball; the yellow pencil is not inside.","shots":[{"role":"setup_action","p":"A single continuous realistic video on a wooden tabletop. A man stands behind the table with a small red ball, a yellow pencil, and an open blue box in front of him, all clearly visible. He picks up the red ball and drops it into the open blue box; the yellow pencil stays on the table. Fixed camera, medium shot, bright indoor lighting."},{"role":"reveal","p":"A single continuous realistic video on a wooden tabletop. The man tilts the blue box toward the camera to show what is inside. Fixed camera, medium shot, bright indoor lighting."}],"rq":{"q":"Is the blue box tilted toward the camera so its interior is visible?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The blue box contains only the red ball; the yellow pencil is not inside?","r":[]},{"q":"Does the revealed target/state (red ball) match the same object, person, text, mark, liquid, count, position, identity, and relevant attributes shown in the historical reference frames?","r":["start","action"]},{"q":"Does the revealed container, surface, room, person, or local scene remain consistent with the historical reference frames, except for the intended state change caused by the described action?","r":["start","pre_reveal"]}],"nv":[{"q":"Are there no extra objects, duplicated targets, unsupported marks/text, changed attributes, or impossible contents in the revealed area that are absent from the historical reference frames and not introduced by the described action?","r":["start","action","pre_reveal"]},{"q":"Does the reveal avoid hallucinated changes to the container/interior/background/person that would contradict the historical reference frames?","r":["start","pre_reveal"]}]},{"id":"man_takes_blue_water_bottle","cat":"occluded_process","fam":"through door","target":"blue water bottle","expected":"The man is still holding the blue water bottle.","shots":[{"role":"setup_action","p":"A single continuous realistic video in a gym hallway with a closed door. A blue water bottle and an orange towel rest on a bench. A man picks up the blue water bottle, leaving the towel, walks through the doorway into the locker room, and closes the door behind him. Fixed camera, medium shot, bright indoor lighting."},{"role":"reveal","p":"A single continuous realistic video in a gym hallway. The door opens, revealing the man standing inside. Fixed camera, medium shot, bright indoor lighting."}],"rq":{"q":"Is the door opened so the man is visible?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The man is still holding the blue water bottle?","r":[]},{"q":"Does the revealed target/state (blue water bottle) match the same object, person, text, mark, liquid, count, position, identity, and relevant attributes shown in the historical reference frames?","r":["start","action"]},{"q":"Does the revealed container, surface, room, person, or local scene remain consistent with the historical reference frames, except for the intended state change caused by the described action?","r":["start","pre_reveal"]}],"nv":[{"q":"Are there no extra objects, duplicated targets, unsupported marks/text, changed attributes, or impossible contents in the revealed area that are absent from the historical reference frames and not introduced by the described action?","r":["start","action","pre_reveal"]},{"q":"Does the reveal avoid hallucinated changes to the container/interior/background/person that would contradict the historical reference frames?","r":["start","pre_reveal"]}]},{"id":"blue_heart_stamp_on_board","cat":"occluded_process","fam":"stamp","target":"blue heart imprint","expected":"The clipboard shows a blue heart imprint.","shots":[{"role":"setup_action","p":"A continuous realistic desktop video. A woman sits at a desk, holding a clipboard diagonally. On the desk are a rubber stamp with a heart pattern engraved and a blue ink pad. She picks up the stamp, dips it in the blue ink pad, then stamps a mark on the front of the clipboard. After stamping, she puts the stamp back on the desk. Fixed camera, medium shot, bright indoor lighting."},{"role":"reveal","p":"A continuous realistic desktop video, same desk. The woman flips the clipboard in her hands all the way over, with the stamped side facing the camera, showing the stamp mark on it. Fixed camera, medium shot, bright indoor lighting."}],"rq":{"q":"Is the clipboard's stamped face turned to face the camera?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The clipboard shows a blue heart imprint?","r":[]},{"q":"Are the key visible final attributes, such as count, color, text, mark, material, pose, position, or transformation outcome, clearly correct in the reveal?","r":[]}],"nv":[{"q":"Are there no extra, duplicated, contradictory, or impossible visible objects, marks, text, contents, or attributes that conflict with the intended final state?","r":[]},{"q":"Does the reveal avoid obvious visual artifacts or physically implausible changes in the revealed area?","r":[]}]},{"id":"egg_cracked_into_bowl","cat":"occluded_process","fam":"misc","target":"A cracked raw egg is in the bowl.","expected":"A cracked raw egg is in the bowl.","shots":[{"role":"setup_action","p":"Realistic, natural speed, handheld camera feel. An egg sits on the counter. A hand cracks it into a bowl, drops the shells in the trash, then covers the bowl with a plate."},{"role":"reveal","p":"Realistic, natural speed, handheld camera feel. A hand lifts the plate off the bowl."}],"rq":{"q":"Is the plate removed from the bowl?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: A cracked raw egg is in the bowl?","r":[]},{"q":"Are the key visible final attributes, such as count, color, text, mark, material, pose, position, or transformation outcome, clearly correct in the reveal?","r":[]}],"nv":[{"q":"Are there no extra, duplicated, contradictory, or impossible visible objects, marks, text, contents, or attributes that conflict with the intended final state?","r":[]},{"q":"Does the reveal avoid obvious visual artifacts or physically implausible changes in the revealed area?","r":[]}]},{"id":"woman_denim_jacket_seen_through_window","cat":"occluded_process","fam":"window→door","target":"woman in a denim jacket holding a grocery bag","expected":"A woman in a denim jacket holding a grocery bag is standing at the door.","shots":[{"role":"setup_action","p":"A single continuous realistic video, fixed camera inside a room facing a closed front door with a window beside it. Through the window, a woman in a denim jacket holding a grocery bag is seen walking up from outside toward the door. She steps up to the door and stops, now hidden behind the closed door and no longer visible through the window. Fixed camera, medium shot, bright indoor lighting."},{"role":"reveal","p":"A single continuous realistic video, fixed camera inside the room. The front door opens. Fixed camera, medium shot, bright indoor lighting."}],"rq":{"q":"Is the door opened so the area behind it is visible?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: A woman in a denim jacket holding a grocery bag is standing at the door?","r":[]},{"q":"Does the revealed target/state (woman in a denim jacket holding a grocery bag) match the same object, person, text, mark, liquid, count, position, identity, and relevant attributes shown in the historical reference frames?","r":["start","action"]},{"q":"Does the revealed container, surface, room, person, or local scene remain consistent with the historical reference frames, except for the intended state change caused by the described action?","r":["start","pre_reveal"]}],"nv":[{"q":"Are there no extra objects, duplicated targets, unsupported marks/text, changed attributes, or impossible contents in the revealed area that are absent from the historical reference frames and not introduced by the described action?","r":["start","action","pre_reveal"]},{"q":"Does the reveal avoid hallucinated changes to the container/interior/background/person that would contradict the historical reference frames?","r":["start","pre_reveal"]}]},{"id":"man_tries_blue_denim_jacket","cat":"occluded_process","fam":"fitting room","target":"blue denim jacket","expected":"The man is now wearing the blue denim jacket.","shots":[{"role":"setup_action","p":"A single continuous realistic video. The camera faces a fitting room with a curtain. A man in a black T-shirt holds up a hanger with a blue denim jacket to show it to the camera, then carries it into the fitting room and pulls the curtain closed. Fixed camera, medium shot, bright indoor lighting."},{"role":"reveal","p":"A single continuous realistic video. The curtain of the fitting room is pulled open, He tried on his clothes and walked out. Fixed camera, medium shot, bright indoor lighting."}],"rq":{"q":"Is the fitting room curtain pulled open so the man is visible?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The man is now wearing the blue denim jacket?","r":[]},{"q":"Does the revealed target/state (blue denim jacket) match the same object, person, text, mark, liquid, count, position, identity, and relevant attributes shown in the historical reference frames?","r":["start","action"]},{"q":"Does the revealed container, surface, room, person, or local scene remain consistent with the historical reference frames, except for the intended state change caused by the described action?","r":["start","pre_reveal"]}],"nv":[{"q":"Are there no extra objects, duplicated targets, unsupported marks/text, changed attributes, or impossible contents in the revealed area that are absent from the historical reference frames and not introduced by the described action?","r":["start","action","pre_reveal"]},{"q":"Does the reveal avoid hallucinated changes to the container/interior/background/person that would contradict the historical reference frames?","r":["start","pre_reveal"]}]},{"id":"mix_blue_yellow_to_green","cat":"complex_transition","fam":"mix","target":"green paint (blue + yellow)","expected":"The revealed paint is green (a blend of blue and yellow).","shots":[{"role":"pour_first","p":"A single continuous realistic video on a table. A man stands at the table with a can of blue paint, a can of yellow paint, a sheet of white paper, a wooden stirring stick, and a completely opaque black mixing cup whose outside color cannot change or reveal the contents inside, all clearly visible. He picks up the blue paint can, pours a small amount of blue paint into the opaque cup, then puts the blue paint can back down on the table. The inside of the cup is never visible. Fixed camera, medium shot, bright indoor lighting."},{"role":"pour_second_stir","p":"A single continuous realistic video on the same table. The man picks up the yellow paint can, pours a small amount of yellow paint into the same completely opaque black cup, then puts the yellow paint can back down. He picks up the wooden stirring stick and stirs inside the cup thoroughly until the mixing action is complete; the cup remains fully opaque and its outside does not change color. Fixed camera, medium shot, bright indoor lighting."},{"role":"reveal","p":"A single continuous realistic video on the same table. The man pulls the stirring stick out of the opaque cup and smears the paint from the stick onto the white paper, revealing the mixed paint color on the paper. Fixed camera, medium shot, bright indoor lighting."}],"rq":{"q":"Is the mixed paint smeared onto the paper with the stirring stick so the color is visible?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The revealed paint is green (a blend of blue and yellow)?","r":[]},{"q":"Are the key visible final attributes, such as count, color, text, mark, material, pose, position, or transformation outcome, clearly correct in the reveal?","r":[]}],"nv":[{"q":"Are there no extra, duplicated, contradictory, or impossible visible objects, marks, text, contents, or attributes that conflict with the intended final state?","r":[]},{"q":"Does the reveal avoid obvious visual artifacts or physically implausible changes in the revealed area?","r":[]}]},{"id":"candies_into_box","cat":"complex_transition","fam":"quantity","target":"","expected":"The cardboard box contains exactly four wrapped candies","shots":[{"role":"setup_action","p":"A single continuous realistic video on a table. A man stands behind the table with an open-top opaque cardboard box with tall side walls on the table. He tilts the box toward the camera to clearly show nine wrapped candies inside. He then places the open-top cardboard box upright on the table, so the camera angle cannot see any candies inside. Fixed camera, medium shot, bright indoor lighting."},{"role":"action","p":"A single continuous realistic video on the same table. The man keeps the open-top opaque cardboard box upright on the table, reaches down into the box from above without revealing the inside, takes out five candies, and places all five candies on the table beside the box. The camera never sees the remaining candies inside the cardboard box during this action. Fixed camera, medium shot, bright indoor lighting."},{"role":"reveal","p":"A single continuous realistic video on the same table. The man lifts the open-top cardboard box and tilts it toward the camera to show exactly what remains inside the box. Fixed camera, medium shot, bright indoor lighting."}],"rq":{"q":"Is the cardboard box tilted so its interior is visible and countable?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The cardboard box contains exactly four wrapped candies?","r":[]},{"q":"Does the revealed target/state (The cardboard box contains exactly four wrapped candies) match the same object, person, text, mark, liquid, count, position, identity, and relevant attributes shown in the historical reference frames?","r":["start","action"]},{"q":"Does the revealed container, surface, room, person, or local scene remain consistent with the historical reference frames, except for the intended state change caused by the described action?","r":["start","pre_reveal"]}],"nv":[{"q":"Are there no extra objects, duplicated targets, unsupported marks/text, changed attributes, or impossible contents in the revealed area that are absent from the historical reference frames and not introduced by the described action?","r":["start","action","pre_reveal"]},{"q":"Does the reveal avoid hallucinated changes to the container/interior/background/person that would contradict the historical reference frames?","r":["start","pre_reveal"]}]},{"id":"green_marble_under_cup","cat":"complex_transition","fam":"under_cup","target":"green marble","expected":"The green marble is under the right cup (the cup hiding it slid around the other cup to the far right); the other lifted cup is empty.","shots":[{"role":"setup","p":"A continuous realistic video. On a wooden table, two inverted opaque cups are side by side on the left and right. A man lifts the left cup, revealing a green glass marble underneath, then puts the cup back in place. Fixed camera, medium shot, bright indoor lighting."},{"role":"move","p":"A continuous realistic video, same wooden table. The man slides the left cup on the table in a semicircular path around the right cup to the far right; this cup slides on the table the whole time, never leaving the surface, while the right cup remains still. Fixed camera, medium shot, bright indoor lighting."},{"role":"reveal","p":"A continuous realistic video, same wooden table. The man lifts the left cup and the right cup simultaneously, showing what is under each cup. Fixed camera, medium shot, bright indoor lighting."}],"rq":{"q":"Are both cups lifted so what is under each is visible?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The green marble is under the right cup (the cup hiding it slid around the other cup to the far right); the other lifted cup is empty?","r":[]},{"q":"Does the revealed target/state (green marble) match the same object, person, text, mark, liquid, count, position, identity, and relevant attributes shown in the historical reference frames?","r":["start","action"]},{"q":"Does the revealed container, surface, room, person, or local scene remain consistent with the historical reference frames, except for the intended state change caused by the described action?","r":["start","pre_reveal"]}],"nv":[{"q":"Are there no extra objects, duplicated targets, unsupported marks/text, changed attributes, or impossible contents in the revealed area that are absent from the historical reference frames and not introduced by the described action?","r":["start","action","pre_reveal"]},{"q":"Does the reveal avoid hallucinated changes to the container/interior/background/person that would contradict the historical reference frames?","r":["start","pre_reveal"]}]},{"id":"fruit_punch_powder_into_teapot","cat":"complex_transition","fam":"teapot","target":"red fruit drink","expected":"The liquid poured into the glass is red fruit drink.","shots":[{"role":"setup_action","p":"A single continuous realistic video on a table. A woman sits at the table with an empty transparent glass cup and an opaque teapot already filled with clear water, both clearly visible. She scoops a spoonful of red fruit-punch drink powder and drops it into the teapot; the liquid inside the opaque teapot stays hidden from the camera. Fixed camera, medium shot, bright indoor lighting."},{"role":"reveal","p":"A single continuous realistic video on a table. The woman lifts the teapot and pours its liquid into the transparent glass cup. Fixed camera, medium shot, bright indoor lighting."}],"rq":{"q":"Is the liquid poured into the transparent cup and clearly visible?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The liquid poured into the glass is red fruit drink?","r":[]},{"q":"Are the key visible final attributes, such as count, color, text, mark, material, pose, position, or transformation outcome, clearly correct in the reveal?","r":[]}],"nv":[{"q":"Are there no extra, duplicated, contradictory, or impossible visible objects, marks, text, contents, or attributes that conflict with the intended final state?","r":[]},{"q":"Does the reveal avoid obvious visual artifacts or physically implausible changes in the revealed area?","r":[]}]},{"id":"bread_into_toaster","cat":"complex_transition","fam":"transform","target":"slice of white bread","expected":"The slice of bread is now toasted and browned.","shots":[{"role":"setup_action","p":"A continuous realistic kitchen counter video. A man stands in front of the counter. On the counter are a slice of white bread and a toaster, both clearly visible. He places the white bread vertically into the toaster slot, then presses the toaster lever, and the bread goes completely inside the machine. Fixed camera, medium shot, bright indoor lighting."},{"role":"reveal","p":"A continuous realistic kitchen counter video, same toaster. Time is up, and the toaster pops up. The man takes the bread slice out and holds it up to the camera. Fixed camera, medium shot, bright indoor lighting."}],"rq":{"q":"Is the slice taken out and shown to the camera?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The slice of bread is now toasted and browned?","r":[]},{"q":"Are the key visible final attributes, such as count, color, text, mark, material, pose, position, or transformation outcome, clearly correct in the reveal?","r":[]}],"nv":[{"q":"Are there no extra, duplicated, contradictory, or impossible visible objects, marks, text, contents, or attributes that conflict with the intended final state?","r":[]},{"q":"Does the reveal avoid obvious visual artifacts or physically implausible changes in the revealed area?","r":[]}]},{"id":"water_tray_into_freezer","cat":"complex_transition","fam":"transform","target":"tray of water","expected":"The water is now frozen into solid ice cubes that drop out of the tray.","shots":[{"role":"setup_action","p":"A continuous realistic kitchen video. A woman stands in front of the freezer, holding an ice cube tray filled with liquid water, and the freezer is clearly visible. She places the water-filled ice tray steadily into the freezer, then closes the freezer door. Fixed camera, medium shot, bright indoor lighting."},{"role":"reveal","p":"A continuous realistic kitchen video, same freezer. Time is up, and freezing is complete. The woman opens the freezer door, takes out the ice tray, and flips the tray upside down on the counter to show the contents. Fixed camera, medium shot, bright indoor lighting."}],"rq":{"q":"Is the tray turned over so its contents are visible?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The water is now frozen into solid ice cubes that drop out of the tray?","r":[]},{"q":"Are the key visible final attributes, such as count, color, text, mark, material, pose, position, or transformation outcome, clearly correct in the reveal?","r":[]}],"nv":[{"q":"Are there no extra, duplicated, contradictory, or impossible visible objects, marks, text, contents, or attributes that conflict with the intended final state?","r":[]},{"q":"Does the reveal avoid obvious visual artifacts or physically implausible changes in the revealed area?","r":[]}]},{"id":"sugar_cubes_into_teapot","cat":"complex_transition","fam":"teapot","target":"clear colorless liquid","expected":"The liquid poured into the glass is still clear and colorless (the sugar dissolved without adding any color).","shots":[{"role":"setup_action","p":"A single continuous realistic video on a table. A woman sits at the table with an empty transparent glass cup and an opaque teapot already filled with clear hot water, both clearly visible. She drops a few sugar cubes into the teapot; the liquid inside the opaque teapot stays hidden from the camera. Fixed camera, medium shot, bright indoor lighting."},{"role":"reveal","p":"A single continuous realistic video on a table. The woman lifts the teapot and pours its liquid into the transparent glass cup. Fixed camera, medium shot, bright indoor lighting."}],"rq":{"q":"Is the liquid poured into the transparent cup and clearly visible?","r":[]},"sc":[{"q":"Does the revealed final state match the intended state: The liquid poured into the glass is still clear and colorless (the sugar dissolved without adding any color)?","r":[]},{"q":"Are the key visible final attributes, such as count, color, text, mark, material, pose, position, or transformation outcome, clearly correct in the reveal?","r":[]}],"nv":[{"q":"Are there no extra, duplicated, contradictory, or impossible visible objects, marks, text, contents, or attributes that conflict with the intended final state?","r":[]},{"q":"Does the reveal avoid obvious visual artifacts or physically implausible changes in the revealed area?","r":[]}]}];
+(function taskBrowser(){
+  const list = $('#tbList'), detail = $('#tbDetail'); if (!list) return;
+  let cat = 'past_visible', sel = null;
+  const catLabel = {past_visible:'past-visible', occluded_process:'occluded-process', complex_transition:'complex-transition'};
+  function renderList(){
+    list.innerHTML = '';
+    const items = TASKS.filter(t => t.cat === cat);
+    if (!items.find(t => t.id === sel)) sel = items[0] && items[0].id;
+    items.forEach(t => { const b = document.createElement('button'); b.className = t.id===sel ? 'on' : ''; b.setAttribute('role','option'); b.innerHTML = `<span class="id">${esc(t.id)}</span><span class="fam">${esc(t.fam)}</span>`; b.addEventListener('click', () => { sel = t.id; renderList(); renderDetail(); }); list.appendChild(b); });
+  }
+  function q(item, cls, label, n){ return `<li><span class="q">Q${n}</span><span class="cat ${cls}">${label}</span><span>${esc(item.q)}${item.r.length ? ` <span class="refs">[refs: ${item.r.join(', ')}]</span>` : ''}</span></li>`; }
+  function renderDetail(){
+    const t = TASKS.find(x => x.id === sel); if (!t) { detail.innerHTML = ''; return; }
+    let n = 1; const qs = [];
+    qs.push(q(t.rq, 'ses', 'reveal → SES', n++));
+    t.sc.forEach(x => qs.push(q(x, 'sc', 'state_correct → SC', n++)));
+    t.nv.forEach(x => qs.push(q(x, 'nv', 'no_violation → HR', n++)));
+    const nH = t.shots.length - 1;
+    const refSeg = nH === 1 ? '历史段 1' : `历史段 ${nH}（最后一段）`;
+    const hasRefs = t.sc.concat(t.nv).some(x => x.r.length);
+    detail.innerHTML = `
+      <div class="eyebrow" style="margin-bottom:6px"><span>${catLabel[t.cat]}</span><span class="paper">${esc(t.id)}</span><span class="mine" style="text-transform:none">FAMILY · ${esc(t.fam)}</span></div>
+      ${t.shots.map((s, i) => `<div class="shot ${s.role==='reveal' ? 'reveal' : ''}"><div class="role">shot ${i+1} · ${esc(s.role)}${s.role==='reveal' ? ' · 续写提示 p<sub>t+1</sub>（待生成）' : ' · 历史提示 p<sub>t</sub>（已生成的视频）'}</div><p>${esc(s.p)}</p></div>`).join('')}
+      <div class="kv" style="margin-top:10px"><dt>target_object</dt><dd>${t.target ? esc(t.target) : '<span class="small">（空）</span>'}</dd><dt>expected_state</dt><dd><b>${esc(t.expected)}</b></dd></div>
+      <h4 style="margin:12px 0 4px">评测 checklist（${qs.length} 问）</h4>
+      <ul class="chk">${qs.join('')}</ul>
+      <h4 style="margin:14px 0 2px">评判器看到的历史参考帧</h4>
+      <div class="refbar"><span class="seglbl">${refSeg} · 时间 →</span><div class="mk" style="left:12%"><span>start 12%</span></div><div class="mk" style="left:50%"><span>action 50%</span></div><div class="mk" style="left:88%"><span>pre_reveal 88%</span></div><div class="cutm" title="生成边界"></div></div>
+      <div class="small" style="margin-top:22px">${hasRefs ? '这条任务的 checklist 引用了参考帧：评判器会拿到这 3 张历史帧来比对物体身份、场景一致性与幻觉。' : '<b>这条任务的 checklist 不引用任何参考帧</b>：公开评测代码里，评判器只看揭示段视频与 expected_state 文本（全基准 87/200 条如此）。'}</div>`;
+  }
+  $('#tbCat').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; $$('#tbCat button').forEach(x => x.classList.toggle('on', x===b)); cat = b.dataset.c; sel = null; renderList(); renderDetail(); });
+  renderList(); renderDetail();
+})();
+
+/* ============================================================ metric calculator */
+(function calc(){
+  const tbody = $('#calcTable tbody'), out = $('#calcOut'), note = $('#calcNote'); if (!tbody) return;
+  const N = 8;
+  // each row: [e, c1, c2, c3, h1, h2]
+  const PRESETS = {
+    perfect:  Array.from({length:N}, () => [1,1,1,1,1,1]),
+    emptybox: Array.from({length:N}, (_, i) => i < 6 ? [1,0,0,1,1,1] : [1,1,1,1,1,1]),
+    noreveal: Array.from({length:N}, (_, i) => i < 4 ? [0,0,0,0,0,0] : [1,1,1,1,1,1]),
+    halluc:   Array.from({length:N}, (_, i) => [1,1,1,1, i%2, 0]),
+    agent:    [[1,1,1,1,1,1],[1,1,1,1,1,1],[1,1,0,1,1,1],[1,1,1,1,1,1],[1,0,1,1,1,0],[1,1,1,0,1,1],[1,1,1,1,1,1],[0,0,0,0,0,0]],
+    i2v:      [[1,0,0,1,1,1],[1,0,0,0,1,0],[0,0,0,0,0,0],[1,1,0,1,1,1],[1,0,0,1,0,1],[1,0,1,0,1,1],[0,0,0,0,0,0],[1,0,0,1,1,1]],
+  };
+  let rows = PRESETS.agent.map(r => r.slice());
+  function render(){
+    tbody.innerHTML = '';
+    rows.forEach((r, i) => {
+      const tr = document.createElement('tr'); if (!r[0]) tr.className = 'off';
+      const ci = r[0] ? (r[1]+r[2]+r[3]+r[4]+r[5])/5 : 0;
+      tr.innerHTML = `<td>#${i+1}</td>` + r.map((v, j) => `<td><button class="tg ${j===0?'e ':''}${v?'y':'n'}" data-i="${i}" data-j="${j}" ${(!r[0] && j>0) ? 'disabled' : ''} aria-label="切换">${v ? 'yes' : 'no'}</button></td>`).join('') + `<td class="mono">${r[0] ? ci.toFixed(2) : '—'}</td>`;
+      tbody.appendChild(tr);
+    });
+    const pos = rows.filter(r => r[0]); const nP = pos.length;
+    const SES = rows.reduce((a, r) => a + r[0], 0)/N;
+    const sumC = pos.reduce((a, r) => a + r[1]+r[2]+r[3], 0), sumH = pos.reduce((a, r) => a + r[4]+r[5], 0);
+    const SC = nP ? sumC/(3*nP) : NaN, HR = nP ? 1 - sumH/(2*nP) : NaN, SCS = nP ? (sumC+sumH)/(5*nP) : NaN;
+    const ALL = rows.reduce((a, r) => a + (r[0] ? (r[1]+r[2]+r[3]+r[4]+r[5])/5 : 0), 0)/N;
+    const pct = v => isNaN(v) ? '—' : (v*100).toFixed(1);
+    out.innerHTML = `
+      <div class="o ses"><div class="k">SES</div><div class="v">${pct(SES)}</div><div class="f">${nP} / ${N} 完成揭示</div></div>
+      <div class="o sc"><div class="k">SC</div><div class="v">${pct(SC)}</div><div class="f">${sumC} / ${3*nP} 状态题 yes</div></div>
+      <div class="o hr"><div class="k">HR ↓</div><div class="v">${pct(HR)}</div><div class="f">1 − ${sumH} / ${2*nP} 反幻觉题 yes</div></div>
+      <div class="o scs"><div class="k">SCS<sub>cond</sub></div><div class="v">${pct(SCS)}</div><div class="f">${sumC+sumH} / ${5*nP} 全部状态题 yes</div></div>
+      <div class="o all"><div class="k">SCS-All</div><div class="v">${pct(ALL)}</div><div class="f">Σ e<sub>i</sub>c<sub>i</sub> / N = ${pct(SES)} × ${pct(SCS)} / 100（每题问数相同时恰为乘积）</div></div>`;
+    note.innerHTML = !nP ? '没有任何样本完成揭示：条件指标无定义，SCS-All = 0。' :
+      (SC < 0.5 && SCS > 0.45 ? `注意：SC 只有 ${pct(SC)}，但 SCS 还有 ${pct(SCS)}——反幻觉题在拉高 SCS。看「状态带过去了没有」请盯 SC。` :
+      (SES < 0.7 ? `揭示失败的 ${N-nP} 个样本不进入 SC / HR / SCS<sub>cond</sub>，只在 SCS-All 里被计为 0；所以条件 SCS 可能很高而 SCS-All 很低。` :
+      '试试各个预设：同一组数字下，SES、SC、HR、SCS 各自对哪种失败敏感。'));
+  }
+  tbody.addEventListener('click', e => { const b = e.target.closest('button.tg'); if (!b || b.disabled) return; const i = +b.dataset.i, j = +b.dataset.j; rows[i][j] = rows[i][j] ? 0 : 1; if (j===0 && !rows[i][0]) { /* keep answers but they don't count */ } render(); });
+  $$('.calc [data-preset]').forEach(b => b.addEventListener('click', () => { rows = PRESETS[b.dataset.preset].map(r => r.slice()); render(); }));
+  render();
+})();
+
+/* ============================================================ pipeline diagram */
+(function pipe(){
+  const svg = $('#pipeSvg'), desc = $('#pipeDesc'); if (!svg) return;
+  const D = {
+    1: `<div class="hd">阶段 ① · 结构化状态解析 · S<sub>t</sub> = E(V<sub>t</sub>, p<sub>t</sub>) · VLM = Qwen3.5-Plus</div><b>输入</b> 上一段视频与源提示。<b>做什么</b> 先从 p<sub>t</sub> 抽实体（只抽名字、类型、显式外观，禁止推断状态），再对照视频证据给每个实体写状态：可见性、位置、容器开合、物理状况，以及 inside / holding / wearing / covered by / behind / occluded by 等关系；最后为每个实体绑定一张它清晰可见的参考帧。<b>与关键帧记忆的区别</b> 图可以把「球在盒内」标为真即使不可见，也能把「球曾在桌上」标为过期。<b>可归因失败</b> 历史解析错——比如把「拿走」看成「放入」。`,
+    2: `<div class="hd">阶段 ② · 提示条件状态更新 · Ŝ<sub>t+1</sub> = U(S<sub>t</sub>, p<sub>t+1</sub>) · Eq. (10)</div><b>输入</b> 状态图 S<sub>t</sub> 与续写提示。<b>做什么</b> 把 p<sub>t+1</sub> 当作动作条件，预测续写结束时的完整世界状态：每个实体的可见性、位置、物理状况、外观与状态描述、开放式关系；同时列出哪些实体会从不可见变为可见（<code>entities_becoming_visible</code>），这决定后面要带哪些外观参考。<b>关键指令</b> 区分「物理存在」与「相机可见」：盒子打开不等于相机看得见里面，除非提示说「朝镜头倾斜」。<b>可归因失败</b> 状态更新错——比如算错 9−5、或蓝+黄没有变绿。`,
+    3: `<div class="hd">阶段 ③ · 未来帧落地 · F̂<sup>end</sup><sub>t+1</sub> = G<sub>frame</sub>(F<sup>end</sup><sub>t</sub>, R<sub>t</sub>, Ŝ<sub>t+1</sub>, p<sub>t+1</sub>) · Eq. (11) · Wan2.7-Image</div><b>输入</b> 历史末帧（相机、布局、可见实体）、参考帧 R<sub>t</sub>（边界处不可见但将出现的实体的外观）、预测状态、续写提示。<b>做什么</b> VLM 把「状态变化 + 参考图」写成一段自然的摄影语言编辑指令（Image 1…N−1 为参考、Image N 为待编辑帧），图像编辑器生成未来末帧；代码里还有一个校验-改写-重试循环（最多 2 次）。<b>本质</b> 这张图不是记忆帧，是对未来状态的可视化预测。<b>可归因失败</b> 外观绑定错（红球变成别的红球）或落地错（编辑器没画出目标状态）。`,
+    4: `<div class="hd">阶段 ④ · 视频渲染 · V̂<sub>t+1</sub> = G<sub>video</sub>(F<sup>end</sup><sub>t</sub>, F̂<sup>end</sup><sub>t+1</sub>, p<sub>t+1</sub>) · Eq. (12) · Wan2.2-KF2V-Flash</div><b>输入</b> 首帧 = 历史末帧（保证与上一段时间连续），末帧 = 预测末帧（约束续写必须体现的状态），加上续写提示。<b>做什么</b> 首末帧生视频接口渲染中间的运动与真实感——渲染器不再需要从零「重新发现」隐藏的物理状态。<b>代价</b> 当首末两帧差异很大时可能出现镜头切换（App. D）。<b>可归因失败</b> 动画没有朝目标帧走、或中途出现跳变。`,
+  };
+  function set(n){ $$('.stage-g', svg).forEach(g => g.classList.toggle('on', g.dataset.stage === String(n))); desc.innerHTML = D[n]; }
+  $$('.stage-g', svg).forEach(g => { g.addEventListener('click', () => set(g.dataset.stage)); g.setAttribute('tabindex','0'); g.setAttribute('role','button'); g.addEventListener('keydown', e => { if (e.key==='Enter' || e.key===' ') { e.preventDefault(); set(g.dataset.stage); } }); });
+  set(1);
+})();
+
+/* ============================================================ state graph explorer */
+(function stateGraph(){
+  const svg = $('#sgSvg'), card = $('#sgJson'); if (!svg) return;
+  const NODES = [
+    {id:'person_1', type:'person', x:100, y:66, attrs:{color:'dark blue', material:'fabric', shape:'human torso and arms', size:'upper body visible'},
+      obs:{visibility:'visible', current_location:null, open_state:'n/a', relations:[]},
+      pred:{visibility:'visible', current_location:null, open_state:'n/a', relations:['holding(person_1, box_1)']},
+      desc:'standing behind the table with hands near the box, not holding any object', src:'shot2/keyframe_00_0.7s.png'},
+    {id:'table_1', type:'object', x:100, y:232, attrs:{material:'wooden', color:'light brown', shape:'rectangular tabletop', size:'large flat surface'},
+      obs:{visibility:'visible', current_location:null, open_state:'n/a', relations:['on_top_of(pencil_1, table_1)', 'on_top_of(box_1, table_1)*']},
+      pred:{visibility:'visible', current_location:null, open_state:'n/a', relations:['on_top_of(pencil_1, table_1)']},
+      desc:'supporting a yellow pencil and an open blue box', src:'shot2/keyframe_00_0.7s.png'},
+    {id:'box_1', type:'container', x:290, y:150, attrs:{color:'blue', material:'cardboard', shape:'rectangular prism with open top', size:'medium-sized rectangular container'},
+      obs:{visibility:'visible', current_location:'on:table_1*', open_state:'open', relations:['inside(ball_1, box_1)']},
+      pred:{visibility:'visible', current_location:'holding:person_1', open_state:'open', relations:['holding(person_1, box_1)', 'inside(ball_1, box_1)']},
+      desc:'open and empty-looking from outside, but logically contains the red ball based on action sequence', src:'shot2/keyframe_00_0.7s.png'},
+    {id:'ball_1', type:'object', x:480, y:232, attrs:{color:'red', size:'small', material:'unknown', shape:'sphere'},
+      obs:{visibility:'hidden', current_location:'inside:box_1', open_state:'n/a', relations:['inside(ball_1, box_1)']},
+      pred:{visibility:'visible', current_location:'inside:box_1', open_state:'n/a', relations:['inside(ball_1, box_1)']},
+      desc:'inside the open blue box, not visible in the frame', src:'shot2/keyframe_02_2.1s.png'},
+    {id:'pencil_1', type:'object', x:480, y:66, attrs:{color:'yellow', tip_color:'pink', material:'wood', shape:'cylindrical with pointed tip', size:'standard writing instrument length'},
+      obs:{visibility:'visible', current_location:null, open_state:'n/a', relations:['on_top_of(pencil_1, table_1)']},
+      pred:{visibility:'visible', current_location:null, open_state:'n/a', relations:['on_top_of(pencil_1, table_1)']},
+      desc:'lying horizontally on the wooden table, untouched', src:'shot2/keyframe_00_0.7s.png'},
+  ];
+  const EDGES = {
+    obs:  [{t:'inside', s:'ball_1', o:'box_1'}, {t:'on_top_of', s:'pencil_1', o:'table_1'}, {t:'on_top_of*', s:'box_1', o:'table_1'}],
+    pred: [{t:'inside', s:'ball_1', o:'box_1'}, {t:'on_top_of', s:'pencil_1', o:'table_1'}, {t:'holding', s:'person_1', o:'box_1', chg:true}, {t:'on_top_of*', s:'box_1', o:'table_1', gone:true}],
+  };
+  let mode = 'obs', sel = 'ball_1';
+  const byId = id => NODES.find(n => n.id === id);
+  const W = 170, H = 64;
+  function changed(n){ return n.obs.visibility !== n.pred.visibility || n.obs.current_location !== n.pred.current_location || n.obs.relations.join() !== n.pred.relations.join(); }
+  function anchor(a, b){ // point on rect edge of a toward b
+    const dx = b.x - a.x, dy = b.y - a.y; const sx = Math.abs(dx) > 0 ? (W/2)/Math.abs(dx) : Infinity, sy = Math.abs(dy) > 0 ? (H/2)/Math.abs(dy) : Infinity; const s = Math.min(sx, sy); return [a.x + dx*s, a.y + dy*s];
+  }
+  function render(){
+    svg.innerHTML = '';
+    const defs = svgEl('defs', {}, svg);
+    for (const [id, col] of [['sgA','var(--ink3)'], ['sgC','var(--fut)'], ['sgG','var(--bad)']]) { const m = svgEl('marker', {id, viewBox:'0 0 10 10', refX:9, refY:5, markerWidth:7, markerHeight:7, orient:'auto-start-reverse'}, defs); svgEl('path', {d:'M0 0 L10 5 L0 10 z', fill:col}, m); }
+    EDGES[mode].forEach(e => {
+      const a = byId(e.s), b = byId(e.o); const [x1, y1] = anchor(a, b), [x2, y2] = anchor(b, a);
+      const cls = 'edge' + (e.chg ? ' chg' : '') + (e.gone ? ' gone' : '');
+      svgEl('line', {x1, y1, x2, y2, class:cls, 'marker-end': e.gone ? 'url(#sgG)' : (e.chg ? 'url(#sgC)' : 'url(#sgA)')}, svg);
+      const mx = (x1+x2)/2, my = (y1+y2)/2; const bg = svgEl('rect', {x:mx-34, y:my-9, width:68, height:16, rx:4, fill:'var(--surf)'}, svg);
+      const t = svgEl('text', {x:mx, y:my+3, 'text-anchor':'middle', class:'elbl' + (e.chg ? ' chg' : '')}, svg); t.textContent = e.gone ? '✕ ' + e.t.replace('*','') : e.t.replace('*','') + (e.chg ? ' +' : '');
+      if (e.gone) t.style.fill = 'var(--bad-ink)';
+      bg.setAttribute('width', Math.max(48, t.textContent.length*6.4+10)); bg.setAttribute('x', mx - (+bg.getAttribute('width'))/2);
+    });
+    NODES.forEach(n => {
+      const st = n[mode]; const g = svgEl('g', {class:'node' + (n.id===sel ? ' on' : '') + (mode==='pred' && changed(n) ? ' chg' : ''), transform:`translate(${n.x-W/2} ${n.y-H/2})`, tabindex:0, role:'button'}, svg);
+      svgEl('rect', {width:W, height:H, rx:9}, g);
+      const t1 = svgEl('text', {x:10, y:20, class:'id'}, g); t1.textContent = n.id;
+      const t2 = svgEl('text', {x:10, y:37, class:'sub'}, g); t2.textContent = `${n.type} · ${st.visibility}`;
+      const t3 = svgEl('text', {x:10, y:53, class:'sub'}, g); t3.textContent = st.current_location ? 'loc: ' + st.current_location.replace('*','') : (st.relations.length ? st.relations[0].replace('*','') : '—');
+      if (st.visibility === 'hidden') { const h = svgEl('text', {x:W-8, y:20, 'text-anchor':'end', class:'hidmark'}, g); h.textContent = 'hidden'; }
+      if (mode==='pred' && changed(n)) { const c = svgEl('text', {x:W-8, y:20, 'text-anchor':'end', class:'sub'}, g); c.textContent = 'updated'; c.style.fill = 'var(--fut-ink)'; }
+      const pick = () => { sel = n.id; render(); }; g.addEventListener('click', pick); g.addEventListener('keydown', e => { if (e.key==='Enter' || e.key===' ') { e.preventDefault(); pick(); } });
+    });
+    const n = byId(sel), st = n[mode], other = n[mode==='obs' ? 'pred' : 'obs'];
+    const dif = (k, v) => (mode==='pred' && String(st[k]) !== String(other[k])) ? `<span class="d">${esc(String(v))}</span>` : `<span class="v">${esc(String(v))}</span>`;
+    const rel = st.relations.length ? st.relations.map(r => { const isNew = mode==='pred' && !other.relations.includes(r); return `<br>&nbsp;&nbsp;&nbsp;&nbsp;{ ${isNew ? '<span class="d">' : '<span class="v">'}${esc(r.replace('*',''))}</span> }${r.endsWith('*') ? ' <span class="k">// 重构</span>' : ''}`; }).join(',') + '<br>&nbsp;&nbsp;' : '';
+    card.innerHTML = `<div class="hd">${mode==='obs' ? 'S_t · 观测态（尾帧之后）' : 'Ŝ_t+1 · 预测态（续写结束时）'} · <span class="s">${esc(n.id)}</span></div>`
+      + `{<br>&nbsp;&nbsp;<span class="k">"entity_id"</span>: <span class="s">"${esc(n.id)}"</span>,<br>&nbsp;&nbsp;<span class="k">"type"</span>: <span class="v">"${n.type}"</span>,`
+      + `<br>&nbsp;&nbsp;<span class="k">"attributes"</span>: { ${Object.entries(n.attrs).map(([k, v]) => `<span class="k">${k}</span>: <span class="v">"${esc(v)}"</span>`).join(', ')} },`
+      + `<br>&nbsp;&nbsp;<span class="k">"visibility"</span>: ${st.visibility==='hidden' ? `<span class="r">"hidden"</span>` : dif('visibility', `"${st.visibility}"`)},`
+      + `<br>&nbsp;&nbsp;<span class="k">"current_location"</span>: ${dif('current_location', st.current_location ? `"${st.current_location.replace('*','')}"` : 'null')}${st.current_location && st.current_location.endsWith('*') ? ' <span class="k">// 重构</span>' : ''},`
+      + `<br>&nbsp;&nbsp;<span class="k">"open_state"</span>: <span class="v">"${st.open_state}"</span>,`
+      + `<br>&nbsp;&nbsp;<span class="k">"relations"</span>: [${rel}],`
+      + `<br>&nbsp;&nbsp;<span class="k">"state_description"</span>: <span class="v">"${esc(n.desc)}"</span>,`
+      + `<br>&nbsp;&nbsp;<span class="k">"appearance_image"</span>: <span class="v">"…/frames/${esc(n.src)}"</span>,`
+      + `<br>&nbsp;&nbsp;<span class="k">"source_shot"</span>: <span class="v">1</span><br>}`
+      + `<div class="hd" style="margin-top:10px">${mode==='pred' ? '紫色 = 相对观测态被更新的字段。state_description 在合并预测时不更新（<code>_merge_predicted_state</code> 只写 visibility / location / open_state / relations / attributes）。' : '带 // 重构 的值按论文 Fig. 3 与 state_description 补出（仓库快照只保存了合并后的字段）；其余为仓库原始值。'}</div>`;
+  }
+  $('#sgMode').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; $$('#sgMode button').forEach(x => x.classList.toggle('on', x===b)); mode = b.dataset.m; render(); });
+  render();
+})();
+
+/* ============================================================ code stepper */
+(function stepper(){
+  const list = $('#stepList'), body = $('#stepBody'); if (!list) return;
+  const S = [
+    {grp:'历史段预处理（每段历史各一次）'},
+    {n:'P1', who:'vlm', title:'实体抽取（只在第一段）', file:'scripts/run_pipeline.py · vlm_extract_entities', io:[['输入','第一段的文本提示 p₁（不看任何图像）'],['输出','EntityMemory 列表：entity_id（{type}_{n}）、type、显式属性；visibility 预设 visible，source_shot=1']], text:'这一步对应论文的「实体绑定」。系统提示只有两句：抽取所有实体、<b>不要预测状态</b>。它决定了状态图的节点集合与命名（后续所有步骤都被要求保持 entity_id 一致）。', pre:`// red_ball_into_blue_box 的实际抽取结果（results.json）
+person_1  {}                         table_1 {material: wooden}
+ball_1    {color: red, size: small}  pencil_1 {color: yellow}
+box_1     {color: blue, state: open}`},
+    {n:'P2', who:'vlm', title:'观察末帧 → 当前状态', file:'stateagent/video_observer.py · VideoObserver.observe', io:[['输入','<b>该段末帧一张图</b> + 上一份记忆 JSON + 该段提示'],['输出','新的 MemoryBank（time+1）：每个实体的 type / attributes / visibility / current_location / open_state / relations / size·shape·state_description']], text:'这是论文的「状态解析」。注意视觉输入只有末帧：观察器被要求「比较已知状态与本段描述，判断实际发生了什么」，并「对不可见实体按逻辑推断（例如封闭容器里的物体）」。提示里也写了：视频可能没有完全按描述生成，要报告实际观察到的。', pre:`OBSERVER_USER_TEMPLATE（节选）
+This is the video ending frame. Please analyze the image and describe the current state.
+This shot's description: "{prompt}"
+Previously known state: {previous_state_json}
+…
+- For invisible entities, infer based on logic (e.g., objects inside closed containers)`},
+    {n:'P3', who:'vlm', title:'外观绑定：每个实体一张清晰帧', file:'scripts/run_pipeline.py · _select_best_frames', io:[['输入','该段视频抽出的 6 张关键帧（时刻 kT/7，k=1…6）+ 实体 id 列表'],['输出','每个实体的 appearance_image = 它<b>第一次</b>被判为「清晰可见」的那一帧']], text:'对每张关键帧调用一次 <code>analyze_frame_visibility</code>（VLM 只回答每个实体 true/false）。5 秒视频的抽帧时刻是 0.7 / 1.4 / 2.1 / 2.9 / 3.6 / 4.3 s。红球的参考帧因此是 shot1 的第一张关键帧——球还在桌上、最清楚的时候。', pre:`extract_keyframes: step = duration / (num_frames + 1)
+timestamps = [step * (i + 1) for i in range(6)]      # 避开最开头与最末尾
+ball_1.appearance_image = frames/shot1/keyframe_00_0.7s.png`},
+    {grp:'揭示段：StateAgent 主流程（scripts/run_stateagent.py）'},
+    {n:'1', who:'vlm', title:'再观察一次历史末帧 → S_t', file:'run_stateagent.py · Step 1 Observe', io:[['输入','最后一段历史的末帧 + 当前记忆 + 该段提示'],['输出','观测态 S_t']], text:'与 P2 相同的调用，再跑一次（在 <code>run_stateagent.py</code> 里这是对最后一段历史的重复观察）。此刻的状态图就是页面上方状态图浏览器里的「观测态」：ball_1 hidden · inside box_1；box_1 「从外面看是空的，但按动作序列应当装着红球」。'},
+    {n:'2', who:'vlm', title:'预测续写结束时的状态 → Ŝ_t+1', file:'stateagent/state_predictor.py · StatePredictor.predict', io:[['输入','记忆 JSON（含 has_appearance 布尔）+ 续写提示 —— <b>没有任何图像</b>'],['输出','predicted_memory、entities_becoming_visible、一句 description；随后 _merge_predicted_state 把 visibility / location / open_state / relations / attributes 写回，<b>保留外观帧</b>']], text:'论文 Eq. (10)。系统提示专门强调 visibility 指「从当前相机视角是否可见」而非「是否存在」：固定中景里盒子打开也看不到里面，只有提示明确说「show interior」「tilts toward camera」才把内部物体设为 visible。这是纯文本推理，是整条流水线里唯一没有显式关闭 thinking 模式的调用。', pre:`// 实际预测（results.json 合并后的字段）
+ball_1.visibility        hidden  → visible        entities_becoming_visible = ["ball_1"]
+box_1.current_location   (table) → holding:person_1
+person_1.relations       []      → [holding(person_1, box_1)]`},
+    {n:'3', who:'vlm', title:'从历史视频里选编辑底帧', file:'stateagent/frame_selector.py · FrameSelector.select_base_frame', io:[['输入','历史视频的 6 张候选帧（kT/7，不含真正末帧）+ 预测状态 + 续写提示'],['输出','selected_index、reasoning、<b>needs_editing</b>、satisfaction_score（0–10）']], text:'论文正文没有这一步。VLM 按四条标准挑底帧：相机角度连续、物体可见/隐藏状态最接近预测、遮挡关系合理、背景随相机运动而变。若某帧已完全满足未来状态，<code>needs_editing=false</code>，后面 4–6 步全部跳过，直接用这张历史帧当未来末帧。示例任务里选的是第 6 张候选（4.3 s），需要编辑。', pre:`if selection and not selection.needs_editing:
+    end_frame_path = selection.selected_frame_path   # 跳过图像编辑
+    image_prompt = "(no editing needed)"`},
+    {n:'4', who:'py', title:'收集参考图', file:'scripts/run_pipeline.py · _collect_reference_images', io:[['输入','entities_becoming_visible + 底帧'],['输出','有序列表：[变可见实体的外观帧…, 底帧]，去重；<b>底帧永远放最后</b>（保持分辨率/构图）']], text:'只有「将从不可见变为可见」的实体才带参考——这就是论文 A.4 的参考选择规则在代码里的样子。示例里只有两张：红球的外观帧（shot1 第一张关键帧）与底帧。'},
+    {n:'5', who:'vlm', title:'写图像编辑指令', file:'stateagent/frame_spec_writer.py · FrameSpecWriter.write（温度 0.3）', io:[['输入','编号图像（Image 1…N−1 参考、Image N 底帧）+ 当前可见/隐藏实体描述（含 has_reference）+ 预测状态 JSON + 续写提示'],['输出','{"image_prompt": "…"}：一段描述<b>结果图</b>的摄影语言']], text:'系统提示区分两种情形：涉及相机运动/视角变化时描述新视角下的整个场景、不许说「背景不变」；只有物体状态变化时描述变化并加一句「Image N 的其他元素保持不变」。还特别指出「遮挡不是删除」：一个实体挡住另一个时，要描述前者的新位置并说明后者被挡住。', pre:`// 示例任务实际生成的编辑指令（原样交给 wan2.7-image）
+"The person is now holding the blue box with both hands, tilting it forward toward the camera
+ to reveal its interior. Inside the tilted box, the red sphere from 图1 is clearly visible
+ resting at the bottom. The yellow pencil remains lying horizontally on the wooden table in the
+ same position as in 图2. The background, lighting, and tabletop remain unchanged from 图2."`},
+    {n:'6', who:'img', title:'生成未来末帧 + 校验重试', file:'generators/image_generator.py · stateagent/edit_verifier.py', io:[['输入','编辑指令 + 参考图列表 → wan2.7-image（1K）→ ffmpeg 缩放到 832×480'],['校验','EditVerifier 对比底帧与编辑帧：state_ok（实体可见性/位置/属性/关系）、scene_ok（相机运动时背景是否应变）→ passed / feedback'],['重试','失败则 FrameSpecWriter.refine(原指令, feedback) 改写后重生成，max_retries=2']], text:'论文 Eq. (11) 的 G_frame 在代码里是「生成 → 校验 → 改写 → 再生成」的小闭环。校验器失败时会给出具体修正建议（例如「应该看到房子的背面而不是正面」）。这些就是论文附录说「放到代码里」的 retry rules。', pre:`for attempt in range(max_retries + 1):          # 最多 3 次生成
+    image_generator.generate_image(prompt=image_prompt, reference_images=ref_images, ...)
+    verify_result = edit_verifier_inst.verify_edit(edited, base, predicted_memory, prompt)
+    if verify_result.passed: break
+    image_prompt = frame_writer.refine(image_prompt, verify_result.feedback, base, predicted_memory)`},
+    {n:'7', who:'vidm', title:'首末帧生视频', file:'generators/kf2v.py · kf2v.generate_video', io:[['输入','first_frame = <b>历史末帧</b>，last_frame = 未来末帧，prompt = 续写提示 + “Maintain smooth, continuous motion between the first and last frame.”'],['参数','wan2.2-kf2v-flash，480P，prompt_extend=true，异步任务轮询（15 s 间隔，10 min 超时）'],['输出','02.mp4 + 提取的末帧']], text:'论文 Eq. (12)。首帧永远是真正的历史末帧（即使底帧选的是更早的帧），保证时间连续；末帧携带状态。追加的那句平滑运动提示是为了抑制镜头切换——正是 App. D 承认的局限。'},
+    {n:'8', who:'vlm', title:'从生成的视频更新外观', file:'scripts/run_pipeline.py · _select_best_frames', io:[['输入','刚生成的揭示段视频的 6 张关键帧'],['输出','各实体的 appearance_image 更新为新视频里首次清晰可见的帧']], text:'为多镜故事生成准备的：下一段将用最新的外观帧做参考。示例里红球的外观帧从 shot1/keyframe_00 变成了 shot2/keyframe_02_2.1s.png（盒子倾斜后球露出来的那一帧）。'},
+    {n:'9', who:'vlm', title:'结果校验（只记录，不干预）', file:'stateagent/verifier.py · Verifier.verify', io:[['输入','未来末帧 + 预测状态 + 提示'],['输出','scs / identity / visibility ∈ {pass, fail, partial, skip} + failure_reason，写入 results.json']], text:'三项检查：末帧是否反映预测状态；有外观参考的可见实体是否保持颜色/材质/形状/尺寸；预测为 hidden 的实体是否确实没出现。<b>结果不会触发重生成</b>——它是论文 §4.4 所说「可诊断性」的落地，而不是质量闸门。示例任务：pass / pass / pass。'},
+    {n:'10', who:'py', title:'拼接并落盘', file:'run_stateagent.py · concat_videos', io:[['做法','ffmpeg concat：后段丢掉第 0 帧去重（select=not(eq(n,0))），统一 832×480、24 fps，libx264 crf 18'],['输出','combined.mp4、results.json（记忆快照、编辑指令、参考图、校验）、metadata.json（含 checklist，供 evaluate.py 使用）']], text:'评测脚本只取最后一段（揭示段）视频送给评判器；combined.mp4 是给人看的。'},
+  ];
+  let cur = 6;
+  function render(){
+    list.innerHTML = '';
+    S.forEach((s, i) => {
+      if (s.grp) { const g = document.createElement('div'); g.className = 'grp'; g.textContent = s.grp; list.appendChild(g); return; }
+      const b = document.createElement('button'); b.className = i===cur ? 'on' : ''; b.innerHTML = `<span class="num">${s.n}</span><span>${esc(s.title)}</span><span class="who ${s.who}">${{vlm:'VLM', img:'图像', vidm:'视频', py:'py'}[s.who]}</span>`; b.addEventListener('click', () => { cur = i; render(); }); list.appendChild(b);
+    });
+    const s = S[cur];
+    body.innerHTML = `<div class="mine" style="margin-bottom:6px">STEP ${esc(s.n)} · <span class="file">${esc(s.file)}</span></div><h4>${esc(s.title)}</h4><dl class="io">${s.io.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl><p>${s.text}</p>${s.pre ? `<pre>${esc(s.pre)}</pre>` : ''}`;
+  }
+  render();
+})();
+
+/* ============================================================ charts */
+const T1 = {
+  methods: ['Wan-I2V（末帧）', 'LongCat-Video（近帧）', 'StoryMem', 'StoryMem + full KFs', 'MAGI-1（自回归）', 'StateAgent'],
+  colors: ['var(--m-i2v)', 'var(--m-longcat)', 'var(--m-storymem)', 'var(--m-storymemkf)', 'var(--m-magi)', 'var(--m-agent)'],
+  rows: [
+    {pv:[69.4,26.0,40.7,42.9], op:[90.8,22.6,49.2,36.1], ct:[76.0,17.1,18.4,48.2], ov:[78.0,41.6,32.5]},
+    {pv:[57.6,27.9,22.4,51.8], op:[70.8,23.9,27.2,46.0], ct:[60.0,10.6,10.0,49.2], ov:[62.5,49.0,30.6]},
+    {pv:[80.0,50.5,15.4,66.9], op:[75.4,34.7,20.4,54.8], ct:[66.0,27.8,34.8,46.5], ov:[75.0,58.5,43.9]},
+    {pv:[91.2,51.9,13.5,68.3], op:[86.0,36.1,19.4,55.5], ct:[56.0,19.0,37.5,41.1], ov:[78.5,57.5,45.2]},
+    {pv:[40.0,19.6,23.5,47.1], op:[40.0,21.8,51.9,33.5], ct:[12.0,44.4,25.0,59.2], ov:[33.0,42.8,14.1]},
+    {pv:[89.4,61.0,11.2,74.1], op:[96.9,68.8,10.3,78.5], ct:[92.0,61.2,17.4,71.4], ov:[92.5,74.9,69.3]},
+  ]
+};
+const METRIC = {SES:{i:0, ov:0, hint:'揭示/更新动作完成率。越高越好。'}, SC:{i:1, ov:null, hint:'SES 为正样本上状态正确题的 yes 率——「状态带过去了没有」的核心指标。论文未报告 overall 值。'}, HR:{i:2, ov:null, hint:'SES 为正样本上反幻觉题的 no 率。越低越好。论文未报告 overall 值。'}, SCS:{i:3, ov:1, hint:'合并状态正确题与反幻觉题的 yes 率（条件版）。'}};
+const chartState = {metric:'SES', hidden:new Set()};
+function drawMainChart(){
+  const host = $('#mainChart'); if (!host) return; host.innerHTML = '';
+  const M = METRIC[chartState.metric];
+  const groups = [{k:'pv', name:'Past-visible (85)'}, {k:'op', name:'Occluded-process (65)'}, {k:'ct', name:'Complex-transition (50)'}];
+  if (M.ov !== null) groups.push({k:'ov', name:'Overall (200)'});
+  const W = 1000, H = 330, mL = 44, mR = 12, mT = 26, mB = 46; const iw = W - mL - mR, ih = H - mT - mB;
+  const svg = svgEl('svg', {viewBox:`0 0 ${W} ${H}`, role:'img', 'aria-label':'Table 1 分组柱状图'}, host);
+  const y = v => mT + ih - ih*v/100;
+  for (let v = 0; v <= 100; v += 20) { svgEl('line', {x1:mL, x2:W-mR, y1:y(v), y2:y(v), class:'gr'}, svg); const t = svgEl('text', {x:mL-8, y:y(v)+4, 'text-anchor':'end', class:'tk'}, svg); t.textContent = v; }
+  svgEl('line', {x1:mL, x2:W-mR, y1:y(0), y2:y(0), class:'ax'}, svg);
+  const vis = T1.methods.map((_, i) => i).filter(i => !chartState.hidden.has(i));
+  const gw = iw/groups.length, pad = gw*0.16, bw = vis.length ? (gw - 2*pad)/vis.length : 0;
+  const tip = document.createElement('div'); tip.className = 'tip'; host.appendChild(tip);
+  groups.forEach((g, gi) => {
+    const gx = mL + gi*gw;
+    const lab = svgEl('text', {x:gx+gw/2, y:H-mB+22, 'text-anchor':'middle', class:'cat'}, svg); lab.textContent = g.name;
+    vis.forEach((mi, k) => {
+      const row = T1.rows[mi]; const v = g.k === 'ov' ? row.ov[M.ov] : row[g.k][M.i];
+      const x = gx + pad + k*bw; const grp = svgEl('g', {class:'series'}, svg);
+      const r = svgEl('rect', {x:x+1, y:y(v), width:Math.max(2, bw-2), height:y(0)-y(v), rx:2, style:`fill:${T1.colors[mi]}`}, grp);
+      if (mi === 5) r.setAttribute('stroke', 'var(--ink)'), r.setAttribute('stroke-width', '1');
+      const vl = svgEl('text', {x:x+bw/2, y:y(v)-4, 'text-anchor':'middle', class:'vl'}, grp); vl.textContent = fmt1(v);
+      if (vis.length > 4) vl.setAttribute('font-size', '9.5');
+      grp.addEventListener('mousemove', e => { const b = host.getBoundingClientRect(); tip.style.display = 'block'; tip.style.left = (e.clientX - b.left + 12) + 'px'; tip.style.top = (e.clientY - b.top - 30) + 'px'; tip.textContent = `${T1.methods[mi]} · ${g.name} · ${chartState.metric} = ${fmt1(v)}`; });
+      grp.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+    });
+  });
+  const ttl = svgEl('text', {x:mL, y:16, class:'ttl'}, svg); ttl.textContent = `${chartState.metric}${chartState.metric==='HR' ? ' ↓（越低越好）' : ' ↑'} · 按状态证据类别`;
+  $('#chHint').textContent = M.hint;
+  const lg = $('#mainLegend'); lg.innerHTML = '';
+  T1.methods.forEach((m, i) => { const b = document.createElement('button'); b.className = chartState.hidden.has(i) ? 'off' : ''; b.innerHTML = `<span class="sw" style="background:${T1.colors[i]}"></span>${esc(m)}`; b.addEventListener('click', () => { if (chartState.hidden.has(i)) chartState.hidden.delete(i); else chartState.hidden.add(i); drawMainChart(); }); lg.appendChild(b); });
+}
+$('#chMetric') && $('#chMetric').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; $$('#chMetric button').forEach(x => x.classList.toggle('on', x===b)); chartState.metric = b.dataset.m; drawMainChart(); });
+
+function drawHumanChart(){
+  const host = $('#humanChart'); if (!host) return; host.innerHTML = '';
+  // rows: [name, win, tie, lose, score]
+  const rows = [
+    ['按维度：美学质量', 61.3, 26.7, 12.0, 74.7], ['状态揭示成功', 71.8, 18.4, 9.8, 81.0], ['状态一致性', 81.3, 8.4, 10.2, 85.6], ['全部 (1,350)', 71.5, 17.9, 10.7, 80.4],
+    ['按基线：vs 末帧 I2V', 66.1, 22.7, 11.2, 77.5], ['vs LongCat-Video', 71.4, 17.3, 11.3, 80.0], ['vs StoryMem', 61.0, 22.2, 16.8, 72.1], ['vs MAGI-1', 92.0, 6.6, 1.4, 95.3],
+  ];
+  const W = 520, rh = 24, mL = 150, mR = 54, mT = 22, gap = 6; const H = mT + rows.length*(rh+gap) + 22; const iw = W - mL - mR;
+  const svg = svgEl('svg', {viewBox:`0 0 ${W} ${H}`, role:'img', 'aria-label':'成对人评 胜/平/负 分布'}, host);
+  const ttl = svgEl('text', {x:0, y:14, class:'ttl'}, svg); ttl.textContent = 'StateAgent 胜 / 平 / 负（%）与得分率';
+  rows.forEach((r, i) => {
+    const yy = mT + i*(rh+gap); if (i === 4) svgEl('line', {x1:0, x2:W, y1:yy-gap/2, y2:yy-gap/2, class:'gr'}, svg);
+    const lab = svgEl('text', {x:mL-8, y:yy+rh/2+4, 'text-anchor':'end', class:'cat'}, svg); lab.textContent = r[0];
+    let x = mL; const parts = [[r[1], 'var(--m-agent)'], [r[2], 'var(--rule2)'], [r[3], 'var(--bad)']];
+    parts.forEach(([v, c], k) => { const w = iw*v/100; svgEl('rect', {x, y:yy, width:Math.max(0, w), height:rh, style:`fill:${c}`}, svg); if (w > 30) { const t = svgEl('text', {x:x+w/2, y:yy+rh/2+4, 'text-anchor':'middle', class:'vl'}, svg); t.textContent = fmt1(v); if (k===0) t.style.fill = '#fff'; } x += w; });
+    const sc = svgEl('text', {x:W-mR+8, y:yy+rh/2+4, class:'vl'}, svg); sc.textContent = fmt1(r[4]); sc.setAttribute('font-weight', '600');
+  });
+  const lg = svgEl('text', {x:mL, y:H-2, class:'sub'}, svg); lg.textContent = '■ StateAgent 胜   ■ 平局   ■ 基线胜   右列 = 得分率（胜 1 / 平 0.5 / 负 0）';
+}
+function rerenderCharts(){ drawMainChart(); drawHumanChart(); }
+rerenderCharts();
+})();
+</script>
+</body>
+</html>

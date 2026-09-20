@@ -1,0 +1,1587 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shell Game 隐状态追踪</title>
+<meta name="description" content="arXiv 2608.30692 · Can Video World Models Track Unobserved World States? 方法精读与交互图解">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   Shell Game 精读 — design tokens.
+   Dark is the default ground (the game is played on a dark stage);
+   light is a fully designed second theme.
+   角色色：ball = 隐藏状态 / 小球 / "state"
+           neg  = 负特征值 / 反射 / 线性注意力可行机制
+           fw   = 快权重 / LaCT / TTT
+           attn = 注意力 / KV cache / 可见历史
+           cup  = 像素 / 渲染 / 可见内容
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0f1114; --surf:#15181c; --surf2:#1b1f25; --surf3:#242a32;
+  --rule:#272d35; --rule2:#3a424d;
+  --ink:#eceff3; --ink2:#aab2bd; --ink3:#7b8592;
+  --ball:#e5484d; --ball-ink:#ff6b6e; --ball-soft:rgba(229,72,77,.16);
+  --neg:#1fbfae;  --neg-ink:#4fd9c8;  --neg-soft:rgba(31,191,174,.16);
+  --fw:#9d86f5;   --fw-ink:#b9a8ff;   --fw-soft:rgba(157,134,245,.18);
+  --attn:#e3b341; --attn-ink:#f0c766; --attn-soft:rgba(227,179,65,.16);
+  --cup:#e8e2d3;  --cup-ink:#f3eee2;  --cup-soft:rgba(232,226,211,.12);
+  --ok:#3fb27a; --ok-ink:#62cf95; --ok-soft:rgba(63,178,122,.14);
+  --bad:#e06a63; --bad-ink:#f08983; --bad-soft:rgba(224,106,99,.14);
+  --table:#6b4a2e; --table-top:#8a6240; --cupfill:#e8e2d3; --cupedge:#8f8674;
+  --lh1:#8d97a6; --lh2:#5f6a78; --lh4:#7fb0ff; --lh8:#a78bfa; --lh16:#d072e0; --lh48:#ff7aa2;
+  --sm1:#ffb3c7; --sm4:#f28cb8; --sm64:#e0609c; --sm256:#c4407f; --sm1024:#9a2f66;
+  /* per-model series colours, shared by every chart on the page */
+  --m-bidi:#e8c15a; --m-swa7:#e0913a; --m-swa1:#b07a4a;
+  --m-mamba:#8b9bb4; --m-gdn:#5b8def; --m-gdnneg:#21c3b0;
+  --m-kda:#4ab0d9; --m-kdaneg:#19a67a; --m-gdn2:#e46fa8; --m-gdn2neg:#ff9ccf;
+  --m-gdp3:#7cc46a; --m-gdp3neg:#b8f09a; --m-lact:#a78bfa; --m-scratch:#f28cb8;
+  --m-rnn:#6ccf7a; --m-tf:#e8c15a;
+  --grid:#232931; --axis:#3a424d;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 32px rgba(0,0,0,.38);
+  --font-display:"Bricolage Grotesque","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f3f5; --surf:#ffffff; --surf2:#eaedf1; --surf3:#dfe3e9;
+    --rule:#dcdfe5; --rule2:#c2c8d1;
+    --ink:#14171c; --ink2:#4a525d; --ink3:#727c89;
+    --ball:#d13a40; --ball-ink:#b42d33; --ball-soft:rgba(209,58,64,.12);
+    --neg:#0f9d8e;  --neg-ink:#0b7f73;  --neg-soft:rgba(15,157,142,.13);
+    --fw:#6f56e0;   --fw-ink:#5a41c9;   --fw-soft:rgba(111,86,224,.13);
+    --attn:#b98512; --attn-ink:#8f6608; --attn-soft:rgba(185,133,18,.14);
+    --cup:#7a6a52;  --cup-ink:#5e5040;  --cup-soft:rgba(122,106,82,.12);
+    --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+    --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+    --table:#9c7048; --table-top:#b8895c; --cupfill:#f1ebdd; --cupedge:#a89b83;
+    --lh1:#7a8494; --lh2:#4e5866; --lh4:#2f7be0; --lh8:#6f56e0; --lh16:#a63cb8; --lh48:#d8386a;
+    --sm1:#e99ab2; --sm4:#d8548f; --sm64:#c03a78; --sm256:#9c2a60; --sm1024:#6e1c45;
+    --m-bidi:#c99a1c; --m-swa7:#d1741e; --m-swa1:#9a6a3c;
+    --m-mamba:#6f7f98; --m-gdn:#2f6fdc; --m-gdnneg:#0f9d8e;
+    --m-kda:#1f8fbe; --m-kdaneg:#128a63; --m-gdn2:#d3448c; --m-gdn2neg:#ee7db8;
+    --m-gdp3:#4aa438; --m-gdp3neg:#8fd070; --m-lact:#6f56e0; --m-scratch:#d8548f;
+    --m-rnn:#2f9d45; --m-tf:#c99a1c;
+    --grid:#e2e5ea; --axis:#c2c8d1;
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f3f5; --surf:#ffffff; --surf2:#eaedf1; --surf3:#dfe3e9;
+  --rule:#dcdfe5; --rule2:#c2c8d1;
+  --ink:#14171c; --ink2:#4a525d; --ink3:#727c89;
+  --ball:#d13a40; --ball-ink:#b42d33; --ball-soft:rgba(209,58,64,.12);
+  --neg:#0f9d8e;  --neg-ink:#0b7f73;  --neg-soft:rgba(15,157,142,.13);
+  --fw:#6f56e0;   --fw-ink:#5a41c9;   --fw-soft:rgba(111,86,224,.13);
+  --attn:#b98512; --attn-ink:#8f6608; --attn-soft:rgba(185,133,18,.14);
+  --cup:#7a6a52;  --cup-ink:#5e5040;  --cup-soft:rgba(122,106,82,.12);
+  --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+  --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+  --table:#9c7048; --table-top:#b8895c; --cupfill:#f1ebdd; --cupedge:#a89b83;
+  --lh1:#7a8494; --lh2:#4e5866; --lh4:#2f7be0; --lh8:#6f56e0; --lh16:#a63cb8; --lh48:#d8386a;
+  --sm1:#e99ab2; --sm4:#d8548f; --sm64:#c03a78; --sm256:#9c2a60; --sm1024:#6e1c45;
+  --m-bidi:#c99a1c; --m-swa7:#d1741e; --m-swa1:#9a6a3c;
+  --m-mamba:#6f7f98; --m-gdn:#2f6fdc; --m-gdnneg:#0f9d8e;
+  --m-kda:#1f8fbe; --m-kdaneg:#128a63; --m-gdn2:#d3448c; --m-gdn2neg:#ee7db8;
+  --m-gdp3:#4aa438; --m-gdp3neg:#8fd070; --m-lact:#6f56e0; --m-scratch:#d8548f;
+  --m-rnn:#2f9d45; --m-tf:#c99a1c;
+  --grid:#e2e5ea; --axis:#c2c8d1;
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:84px}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{transition-duration:.01ms !important; animation-duration:.01ms !important}
+}
+h1,h2,h3,h4{margin:0; line-height:1.25; font-family:var(--font-display); text-wrap:balance; font-weight:700}
+p{margin:0}
+a{color:var(--fw-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--neg-ink); outline-offset:3px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); border:1px solid var(--rule);
+  padding:.06em .36em; border-radius:5px; white-space:nowrap}
+strong{font-weight:600; color:var(--ink)}
+hr{border:0; border-top:1px solid var(--rule); margin:40px 0}
+.m{font-family:var(--font-math); font-style:italic; font-size:1.02em}
+.mr{font-family:var(--font-math); font-style:normal}
+sub,sup{font-size:.72em; line-height:0}
+.eq{font-family:var(--font-math); font-size:1.08em; line-height:1.6; padding:14px 18px; margin:16px 0;
+  background:var(--surf); border:1px solid var(--rule); border-radius:10px; overflow-x:auto; display:flex; align-items:center; gap:14px; flex-wrap:wrap}
+.eq .num{margin-left:auto; font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-style:normal}
+.eq i{font-style:italic}
+.frac{display:inline-flex; flex-direction:column; align-items:center; vertical-align:middle; margin:0 .2em; line-height:1.2}
+.frac > span:first-child{border-bottom:1px solid currentColor; padding:0 .2em}
+.frac > span:last-child{padding:0 .2em}
+.tag{display:inline-block; font-family:var(--font-mono); font-size:11.5px; letter-spacing:.04em; padding:2px 8px; border-radius:999px;
+  border:1px solid var(--rule2); color:var(--ink2); vertical-align:middle; white-space:nowrap}
+.tag.ball{color:var(--ball-ink); border-color:var(--ball); background:var(--ball-soft)}
+.tag.neg{color:var(--neg-ink); border-color:var(--neg); background:var(--neg-soft)}
+.tag.fw{color:var(--fw-ink); border-color:var(--fw); background:var(--fw-soft)}
+.tag.attn{color:var(--attn-ink); border-color:var(--attn); background:var(--attn-soft)}
+.tag.cup{color:var(--cup-ink); border-color:var(--cup); background:var(--cup-soft)}
+.tag.ok{color:var(--ok-ink); border-color:var(--ok); background:var(--ok-soft)}
+.tag.bad{color:var(--bad-ink); border-color:var(--bad); background:var(--bad-soft)}
+.k-ball{color:var(--ball-ink)} .k-neg{color:var(--neg-ink)} .k-fw{color:var(--fw-ink)} .k-attn{color:var(--attn-ink)} .k-cup{color:var(--cup-ink)}
+
+/* ============================================================ chrome */
+#prog{position:fixed; inset:0 auto auto 0; height:2px; width:0; z-index:200;
+  background:linear-gradient(90deg,var(--attn),var(--neg),var(--fw)); transition:width .08s linear}
+.top{position:fixed; inset:0 0 auto 0; height:58px; z-index:150; display:flex; align-items:center; gap:14px;
+  padding:0 20px; background:color-mix(in srgb, var(--surf) 88%, transparent);
+  backdrop-filter:saturate(1.4) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap; display:flex; align-items:center; gap:10px}
+.brand .dot{width:10px; height:10px; border-radius:50%; background:var(--ball); box-shadow:0 0 0 3px var(--ball-soft)}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:4px; font-size:12.5px; font-family:var(--font-mono)}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2); background:var(--surf3)}
+.jump{position:relative}
+.jump-menu{position:absolute; right:0; top:42px; width:320px; max-height:70vh; overflow:auto; background:var(--surf); border:1px solid var(--rule);
+  border-radius:12px; box-shadow:var(--shadow); padding:8px; display:none; z-index:160}
+.jump-menu.open{display:block}
+.jump-menu a{display:flex; gap:10px; align-items:baseline; padding:7px 10px; border-radius:8px; color:var(--ink2); font-size:13.5px; border:0}
+.jump-menu a:hover{background:var(--surf2); color:var(--ink)}
+.jump-menu a .sec{font-family:var(--font-mono); font-size:11px; color:var(--ink3); min-width:44px}
+
+/* ============================================================ layout */
+.wrap{max-width:1120px; margin:0 auto; padding:0 24px}
+.prose{max-width:760px}
+.prose p{margin:0 0 16px; color:var(--ink2)}
+.prose p strong{color:var(--ink)}
+.prose ul{margin:0 0 16px; padding-left:1.2em; color:var(--ink2)}
+.prose li{margin:0 0 8px}
+section.sec{padding:64px 0 24px; border-top:1px solid var(--rule)}
+section.sec:first-of-type{border-top:0}
+.eyebrow{display:flex; align-items:center; gap:10px; font-family:var(--font-mono); font-size:12px; letter-spacing:.06em; color:var(--ink3); margin-bottom:12px; text-transform:uppercase}
+.eyebrow .paper{color:var(--ink2); background:var(--surf2); border:1px solid var(--rule); padding:2px 8px; border-radius:6px; text-transform:none; letter-spacing:0}
+h2{font-size:clamp(26px,3.2vw,34px); letter-spacing:-.015em; margin-bottom:18px; font-variation-settings:"opsz" 60}
+h3{font-size:19px; margin:32px 0 10px; letter-spacing:-.005em}
+h4{font-size:15.5px; margin:20px 0 8px; font-family:var(--font-body); font-weight:600}
+.lead{font-size:18px; line-height:1.7; color:var(--ink); margin-bottom:18px; max-width:760px}
+.grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:18px; margin:18px 0}
+.grid3{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; margin:18px 0}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:18px 20px}
+.card h4{margin-top:0}
+.card p{color:var(--ink2); margin:0 0 8px; font-size:15px}
+.card p:last-child{margin-bottom:0}
+.note{border-left:3px solid var(--rule2); padding:6px 16px; margin:18px 0; color:var(--ink2); font-size:15px; background:var(--surf)}
+.note.ball{border-color:var(--ball)} .note.neg{border-color:var(--neg)} .note.fw{border-color:var(--fw)} .note.attn{border-color:var(--attn)}
+.note b{color:var(--ink)}
+.callout{padding:16px 20px; border-radius:12px; margin:20px 0; font-size:15px; border:1px solid}
+.callout.ok{background:var(--ok-soft); border-color:var(--ok); color:var(--ink)}
+.callout.warn{background:var(--attn-soft); border-color:var(--attn); color:var(--ink)}
+.callout.bad{background:var(--bad-soft); border-color:var(--bad); color:var(--ink)}
+figure{margin:24px 0}
+figure.wide{margin:28px 0}
+figcaption{font-size:13.5px; color:var(--ink3); line-height:1.6; margin-top:10px; max-width:860px}
+figcaption b{color:var(--ink2); font-weight:600}
+.fig{background:var(--surf); border:1px solid var(--rule); border-radius:14px; padding:18px; overflow-x:auto}
+.fig svg{max-width:100%; height:auto; display:block}
+.diag{font-family:var(--font-body); color:var(--ink)}
+.diag text{fill:currentColor; font-size:12px}
+.diag .mono{font-family:var(--font-mono); font-size:11px}
+.diag .math{font-family:var(--font-math); font-style:italic; font-size:13px}
+.diag .dim{fill:var(--ink3)}
+.diag .box{fill:var(--surf2); stroke:var(--rule2)}
+.diag .line{stroke:currentColor; fill:none; stroke-width:1.3}
+.diag .dash{stroke-dasharray:4 4}
+.kv{display:grid; grid-template-columns:auto 1fr; gap:6px 16px; font-size:14px; margin:10px 0}
+.kv dt{font-family:var(--font-mono); font-size:12.5px; color:var(--ink3); padding-top:2px}
+.kv dd{margin:0; color:var(--ink2)}
+.kv dd b{color:var(--ink)}
+table.t{border-collapse:collapse; width:100%; font-size:13.5px; font-variant-numeric:tabular-nums}
+table.t th,table.t td{padding:8px 10px; border-bottom:1px solid var(--rule); text-align:right; vertical-align:top}
+table.t th{font-weight:600; color:var(--ink2); font-family:var(--font-mono); font-size:12px; letter-spacing:.03em; border-bottom:1px solid var(--rule2)}
+table.t th:first-child,table.t td:first-child{text-align:left}
+table.t td.best{color:var(--ink); font-weight:600}
+table.t tr.hi td{background:var(--fw-soft)}
+.tscroll{overflow-x:auto; border:1px solid var(--rule); border-radius:12px; background:var(--surf); padding:6px 10px}
+.small{font-size:13px; color:var(--ink3)}
+
+/* ============================================================ hero */
+.hero{padding:96px 0 30px}
+.hero .kicker{font-family:var(--font-mono); font-size:12.5px; color:var(--ink3); letter-spacing:.05em; display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:20px}
+.hero .kicker a{color:var(--ink2); border-bottom:1px dotted var(--rule2)}
+.hero h1{font-size:clamp(34px,5.4vw,62px); letter-spacing:-.025em; line-height:1.06; font-weight:800; max-width:980px; font-variation-settings:"opsz" 96}
+.hero h1 .q{color:var(--ball-ink)}
+.hero .sub{font-family:var(--font-display); font-weight:500; font-size:clamp(16px,2vw,21px); color:var(--ink2); margin:16px 0 0; max-width:820px; letter-spacing:-.005em; line-height:1.4}
+.hero .thesis{margin:26px 0 0; max-width:820px; font-size:17px; color:var(--ink2); line-height:1.8}
+.hero .thesis b{color:var(--ink)}
+.facts{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:12px; overflow:hidden; margin:30px 0 0}
+.facts div{background:var(--surf); padding:12px 14px}
+.facts .v{font-family:var(--font-display); font-weight:700; font-size:22px; letter-spacing:-.01em; font-variant-numeric:tabular-nums; line-height:1.15}
+.facts .v small{font-size:13px; color:var(--ink3); font-weight:500; margin-left:3px}
+.facts .l{font-size:12px; color:var(--ink3); margin-top:4px; font-family:var(--font-mono)}
+.authors{display:flex; flex-wrap:wrap; gap:6px 18px; margin-top:14px; font-size:14px; color:var(--ink2)}
+.authors span sup{color:var(--ink3)}
+
+/* ============================================================ shell game */
+.game{display:grid; grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr); gap:18px; margin-top:26px}
+@media (max-width:820px){.game{grid-template-columns:1fr}}
+.stage{background:var(--surf); border:1px solid var(--rule); border-radius:14px; padding:14px; position:relative; display:flex; align-items:center}
+.stage svg{width:100%; height:auto; display:block}
+.stage .cup{cursor:pointer; transition:transform .55s cubic-bezier(.4,.1,.2,1)}
+.stage .cup.sel .body{stroke:var(--neg-ink); stroke-width:3}
+.stage .cup .body{fill:var(--cupfill); stroke:var(--cupedge); stroke-width:1.2}
+.stage .cup .rim{fill:color-mix(in srgb, var(--cupfill) 78%, #000)}
+.stage .cup.lift{transform:translateY(-46px)}
+.stage .ballc{fill:var(--ball); transition:opacity .3s}
+.stage .ballc.hid{opacity:0}
+.stage .lbl{font-family:var(--font-mono); font-size:11px; fill:var(--ink3)}
+.stage .slotlbl{font-family:var(--font-mono); font-size:11px; fill:#fff; opacity:.75}
+.gpanel{background:var(--surf); border:1px solid var(--rule); border-radius:14px; padding:14px 16px; display:flex; flex-direction:column; gap:12px; font-size:14px}
+.gpanel h4{margin:0; font-size:14px}
+.btns{display:flex; gap:8px; flex-wrap:wrap}
+.btn{background:var(--surf2); border:1px solid var(--rule2); color:var(--ink); padding:7px 12px; border-radius:9px; cursor:pointer; font:inherit; font-size:13.5px; transition:.15s}
+.btn:hover{background:var(--surf3)}
+.btn.primary{background:var(--ball); border-color:var(--ball); color:#fff}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.neg{background:var(--neg-soft); border-color:var(--neg); color:var(--neg-ink)}
+.btn.fw{background:var(--fw-soft); border-color:var(--fw); color:var(--fw-ink)}
+.btn:disabled{opacity:.45; cursor:not-allowed}
+.timeline{display:flex; gap:4px; flex-wrap:wrap; align-items:flex-end}
+.chunk{width:34px; border-radius:6px; border:1px solid var(--rule2); background:var(--surf2); display:flex; flex-direction:column; align-items:center; padding:4px 2px 3px; gap:3px}
+.chunk .fr{display:flex; gap:1px}
+.chunk .fr i{width:4px; height:8px; border-radius:1px; background:var(--cup); opacity:.6}
+.chunk .t{font-family:var(--font-mono); font-size:9.5px; color:var(--ink3); line-height:1}
+.chunk.reveal{border-color:var(--ball); background:var(--ball-soft)}
+.chunk.reveal .fr i{background:var(--ball); opacity:.9}
+.chunk.cur{outline:2px solid var(--neg-ink); outline-offset:1px}
+.perm{display:flex; gap:6px; align-items:center; font-family:var(--font-mono); font-size:13px}
+.perm .slot{width:28px; height:28px; border-radius:7px; border:1px solid var(--rule2); display:grid; place-items:center; background:var(--surf2); color:var(--ink2)}
+.perm .slot.ball{background:var(--ball); color:#fff; border-color:var(--ball)}
+.perm .slot.unk{background:var(--surf2); color:var(--ink3)}
+.gpanel .stat{display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:13px}
+.gpanel .stat dt{color:var(--ink3); font-family:var(--font-mono); font-size:12px}
+.gpanel .stat dd{margin:0; font-variant-numeric:tabular-nums}
+.log{font-family:var(--font-mono); font-size:12px; color:var(--ink2); background:var(--surf2); border-radius:8px; padding:8px 10px; min-height:40px; max-height:88px; overflow:auto; line-height:1.6; word-break:break-all}
+
+/* ============================================================ argument chain (TL;DR) */
+.chain{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin:20px 0}
+.chain .step{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:14px 16px; position:relative; font-size:14px; color:var(--ink2)}
+.chain .step .n{font-family:var(--font-mono); font-size:11px; color:var(--ink3); margin-bottom:6px; letter-spacing:.05em}
+.chain .step b{display:block; color:var(--ink); font-size:15px; margin-bottom:6px; font-family:var(--font-display); font-weight:600}
+.chain .step.ok{border-color:var(--ok)} .chain .step.bad{border-color:var(--bad)}
+
+/* ============================================================ charts */
+.chart{position:relative}
+.chart svg{max-width:100%; height:auto; display:block; font-family:var(--font-body)}
+.chart .ax{stroke:var(--axis); stroke-width:1}
+.chart .gr{stroke:var(--grid); stroke-width:1}
+.chart .tk{fill:var(--ink3); font-size:11px; font-family:var(--font-mono)}
+.chart .ttl{fill:var(--ink); font-size:13px; font-weight:600}
+.chart .sub{fill:var(--ink3); font-size:11px}
+.chart .ref{stroke:var(--ink3); stroke-dasharray:4 4; stroke-width:1}
+.chart .reft{fill:var(--ink3); font-size:10.5px; font-family:var(--font-mono)}
+.chart .series{transition:opacity .15s}
+.chart .series.dim{opacity:.14}
+.chart .series path{fill:none; stroke-width:2}
+.chart .series.dashed path{stroke-dasharray:5 4}
+.chart .series circle,.chart .series rect.mk{stroke-width:1.5}
+.legend{display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:10px; font-size:12.5px}
+.legend button{background:none; border:0; padding:2px 4px; cursor:pointer; color:var(--ink2); display:inline-flex; align-items:center; gap:7px; font:inherit; font-size:12.5px; border-radius:6px}
+.legend button:hover{background:var(--surf2); color:var(--ink)}
+.legend button.off{opacity:.4; text-decoration:line-through}
+.legend .sw{width:18px; height:3px; border-radius:2px; display:inline-block}
+.legend .sw.dashed{background:repeating-linear-gradient(90deg,currentColor 0 4px,transparent 4px 7px)}
+.tip{position:absolute; pointer-events:none; background:var(--surf3); color:var(--ink); border:1px solid var(--rule2); border-radius:8px; padding:6px 9px; font-size:12px; font-family:var(--font-mono); box-shadow:var(--shadow); white-space:nowrap; display:none; z-index:5; line-height:1.5}
+.charts2{display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px}
+.charts3{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px}
+.charts4{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px}
+@media (max-width:720px){.charts4{grid-template-columns:1fr}}
+.mini{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:12px}
+.mini .ttl2{font-size:13px; font-weight:600; margin-bottom:2px}
+.mini .sub2{font-size:11.5px; color:var(--ink3); margin-bottom:6px}
+
+/* ============================================================ interactive widgets */
+.widget{background:var(--surf); border:1px solid var(--rule); border-radius:14px; padding:18px; margin:20px 0}
+.widget h4{margin-top:0}
+.ctrls{display:flex; gap:14px; flex-wrap:wrap; align-items:center; font-size:13.5px; margin:8px 0 12px}
+.ctrls label{display:inline-flex; gap:8px; align-items:center; color:var(--ink2)}
+.ctrls input[type=range]{accent-color:var(--neg); width:200px}
+.ctrls select{font:inherit; font-size:13px; background:var(--surf2); color:var(--ink); border:1px solid var(--rule2); border-radius:8px; padding:5px 8px}
+.ctrls .val{font-family:var(--font-mono); font-size:13px; color:var(--ink); min-width:56px}
+.matrix{display:grid; gap:3px; font-family:var(--font-mono); font-size:12px}
+.matrix .c{height:36px; display:grid; place-items:center; border-radius:6px; background:var(--surf2); color:var(--ink2); font-variant-numeric:tabular-nums; transition:background .2s,color .2s}
+.vec{display:flex; gap:3px}
+.vec .c{width:44px; height:36px; display:grid; place-items:center; border-radius:6px; background:var(--surf2); font-family:var(--font-mono); font-size:12px; font-variant-numeric:tabular-nums}
+.hh{display:grid; grid-template-columns:auto auto auto auto auto; gap:16px; align-items:center; justify-content:start; flex-wrap:wrap; overflow-x:auto; padding-bottom:6px}
+.hh .op{font-family:var(--font-math); font-size:20px; color:var(--ink2)}
+.hh .lab{font-family:var(--font-mono); font-size:11px; color:var(--ink3); text-align:center; margin-bottom:4px}
+.eigline{position:relative; height:44px; margin:14px 0 0}
+.eigline .bar{position:absolute; left:0; right:0; top:20px; height:2px; background:var(--rule2)}
+.eigline .zone{position:absolute; top:16px; height:10px; border-radius:3px}
+.eigline .zone.pos{background:var(--attn-soft); border:1px solid var(--attn)}
+.eigline .zone.neg{background:var(--neg-soft); border:1px solid var(--neg)}
+.eigline .pt{position:absolute; top:13px; width:16px; height:16px; border-radius:50%; background:var(--ball); border:2px solid var(--bg); transform:translateX(-50%); transition:left .15s}
+.eigline .tk{position:absolute; top:30px; font-family:var(--font-mono); font-size:11px; color:var(--ink3); transform:translateX(-50%)}
+.eigline .tk.l{transform:none} .eigline .tk.r{transform:translateX(-100%)}
+.ladder{display:grid; grid-template-columns:1fr 1fr; gap:18px}
+@media (max-width:760px){.ladder{grid-template-columns:1fr}}
+.ladder .col{background:var(--surf2); border-radius:12px; padding:12px}
+.ladder .col h5{margin:0 0 8px; font-size:13px; font-family:var(--font-mono); font-weight:500; color:var(--ink2); letter-spacing:.03em}
+.ladder .layers{display:flex; flex-direction:column-reverse; gap:4px}
+.ladder .layer{display:grid; grid-template-columns:34px 1fr; gap:8px; align-items:center; height:26px}
+.ladder .layer .id{font-family:var(--font-mono); font-size:11px; color:var(--ink3)}
+.ladder .layer .cells{display:flex; gap:3px; height:20px}
+.ladder .cell{flex:0 0 30px; border-radius:4px; background:var(--surf3); border:1px solid transparent; display:grid; place-items:center; font-family:var(--font-mono); font-size:10px; color:var(--ink3); transition:.2s}
+.ladder .cell.stale{background:var(--attn-soft); border-color:var(--attn); color:var(--attn-ink)}
+.ladder .cell.live{background:var(--ball); color:#fff; border-color:var(--ball)}
+.ladder .cell.fw{background:var(--fw); color:#fff; border-color:var(--fw)}
+.ladder .cell.over{background:var(--bad-soft); border-color:var(--bad); color:var(--bad-ink)}
+.ladder .msg{font-size:13px; color:var(--ink2); margin-top:10px; min-height:44px}
+.ladder .msg b{color:var(--ink)}
+.abl{display:grid; grid-template-columns:minmax(260px,1fr) minmax(280px,1.2fr); gap:18px}
+@media (max-width:760px){.abl{grid-template-columns:1fr}}
+.abl .rows{display:flex; flex-direction:column; gap:6px}
+.abl .row{display:grid; grid-template-columns:1fr repeat(4,44px); gap:6px; align-items:center; padding:8px 10px; border-radius:10px; border:1px solid var(--rule); background:var(--surf2); cursor:pointer; font-size:13px; font-variant-numeric:tabular-nums; text-align:right}
+.abl .row .nm{text-align:left; color:var(--ink)}
+.abl .row.on{border-color:var(--fw); background:var(--fw-soft)}
+.abl .row.hd{cursor:default; background:none; border:0; color:var(--ink3); font-family:var(--font-mono); font-size:11px; padding:0 10px}
+.abl .row .lo{color:var(--bad-ink)} .abl .row .hi{color:var(--ok-ink)}
+.swig{background:var(--surf2); border-radius:12px; padding:12px}
+.swig svg{width:100%; height:auto; display:block}
+.swig .wbox{fill:var(--surf3); stroke:var(--rule2)}
+.swig .wbox.upd{fill:var(--fw-soft); stroke:var(--fw)}
+.swig .wbox.frz{fill:var(--surf3); stroke:var(--ink3); stroke-dasharray:4 3}
+.swig .wbox.gone{opacity:.25}
+.swig text{fill:var(--ink); font-size:12px}
+.swig .why{font-size:13.5px; color:var(--ink2); margin-top:10px; min-height:60px}
+.swig .why b{color:var(--ink)}
+.toggle{display:inline-flex; border:1px solid var(--rule2); border-radius:9px; overflow:hidden}
+.toggle button{background:var(--surf2); border:0; color:var(--ink2); padding:6px 12px; cursor:pointer; font:inherit; font-size:13px}
+.toggle button.on{background:var(--fw); color:#fff}
+.toggle button + button{border-left:1px solid var(--rule2)}
+.bars{display:flex; gap:10px; align-items:flex-end; height:170px; padding:0 4px}
+.bars .b{flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; justify-content:flex-end}
+.bars .b .bar{width:100%; max-width:64px; flex:0 0 auto; border-radius:6px 6px 2px 2px; background:var(--fw); transition:height .3s; position:relative}
+.bars .b .bar.dimm{background:var(--rule2)}
+.bars .b .v{font-family:var(--font-mono); font-size:12px; color:var(--ink)}
+.bars .b .n{font-family:var(--font-mono); font-size:11px; color:var(--ink3)}
+.rel{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px}
+.rel .card{font-size:14px}
+.rel .card b{display:block; font-family:var(--font-display); font-weight:600; font-size:15px; margin-bottom:4px}
+.gloss{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:10px 22px; font-size:14px}
+.gloss div{padding:8px 0; border-bottom:1px solid var(--rule)}
+.gloss b{font-family:var(--font-mono); font-size:13px; color:var(--ink); font-weight:500}
+.gloss span{display:block; color:var(--ink2); margin-top:2px}
+footer{padding:40px 0 60px; color:var(--ink3); font-size:13px; border-top:1px solid var(--rule); margin-top:40px}
+footer p{margin:0 0 6px}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+<header class="top">
+  <div class="brand"><span class="dot"></span>Shell Game 隐状态追踪 <em>arXiv 2608.30692</em></div>
+  <div class="spacer"></div>
+  <div class="jump">
+    <button class="tbtn" id="jumpBtn" aria-haspopup="true" aria-expanded="false">目录 ▾</button>
+    <nav class="jump-menu" id="jumpMenu" aria-label="页面目录"></nav>
+  </div>
+  <button class="tbtn" id="themeBtn" title="切换明暗主题" aria-label="切换明暗主题">◐</button>
+</header>
+
+<main class="wrap">
+<!-- ============================================================ HERO -->
+<section class="hero" id="top">
+  <div class="kicker">
+    <span>arXiv:2608.30692v1 · cs.CV · 2026-08-31 · Preprint</span>
+    <a href="https://arxiv.org/abs/2608.30692" target="_blank" rel="noopener">arxiv.org/abs/2608.30692</a>
+    <span class="tag">分析型论文 · 合成基准</span>
+  </div>
+  <h1>视频世界模型，<span class="q">能追踪看不见的状态吗？</span></h1>
+  <p class="sub">Can Video World Models Track Unobserved World States? — 用一个动作条件的「杯球戏法」（Shell Game）把 S<sub>5</sub> 状态追踪搬进视频扩散模型，逐个骨干地问：画面之下的隐藏排列，到底存在哪里、由谁更新。</p>
+  <div class="authors">
+    <span>Joonghyuk Shin<sup>1</sup></span><span>Yicong Hong<sup>2</sup></span><span>Jaesik Park<sup>1</sup></span><span>Xun Huang<sup>2</sup></span>
+    <span class="small"><sup>1</sup>Seoul National University · <sup>2</sup>Roblox</span>
+  </div>
+  <p class="thesis">一句话结论：<b>像素级扩散目标从不监督看不见的状态</b>，所以生成的帧本身载不动它，状态只能藏在架构里。Transformer 的架构状态只有一个「只追加、不修改」的 KV cache，每个 chunk 都得从整段历史重新推导排列，深度一固定就只能学捷径；双向/自回归 Transformer、Mamba2、非负特征值的线性注意力全都拟合了训练长度（5 次交换），一旦交换链变长就跌向随机水平，而画面依然逼真，加采样步数也无济于事。<b>能外推的只有两类机制</b>：把线性注意力的转移特征值放宽到负数（<span class="k-neg">反射 = 一次交换</span>），或用非线性快权重的 TTT（<span class="k-fw">LaCT</span>）在每个 chunk 原地改写状态、连读状态的特征映射一起改。</p>
+
+  <div class="facts" aria-label="关键数字">
+    <div><div class="v">5<small>杯</small> / 10<small>种交换</small></div><div class="l">动作词表 13（含 lift / lower / no-op）</div></div>
+    <div><div class="v">N=5 → 30</div><div class="l">训练交换次数 → 评测最长交换链</div></div>
+    <div><div class="v">1 chunk</div><div class="l">= 1 swap = 5 帧 latent ≈ 20 像素帧</div></div>
+    <div><div class="v">~200M</div><div class="l">参数预算，宽 1152，深度按变体调整</div></div>
+    <div><div class="v">0.2</div><div class="l">随机水平（5 个杯子）</div></div>
+    <div><div class="v">0.95 / 0.69</div><div class="l">N=30 时 GDN-neg / LaCT8 的状态准确率</div></div>
+  </div>
+
+  <!-- ---------- interactive shell game ---------- -->
+  <div class="game" id="game">
+    <div class="stage">
+      <svg viewBox="0 0 560 250" role="img" aria-label="可交互的五杯杯球戏法：点击两个杯子交换，揭示后显示小球位置" id="stageSvg">
+        <defs>
+          <linearGradient id="tblg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="var(--table-top)"/><stop offset="1" stop-color="var(--table)"/>
+          </linearGradient>
+        </defs>
+        <rect x="0" y="0" width="560" height="250" rx="10" fill="var(--surf2)"/>
+        <path d="M20 190 L540 190 L520 240 L40 240 Z" fill="url(#tblg)"/>
+        <g id="cups"></g>
+        <text x="16" y="24" class="lbl">action-conditioned video · 256×192 · 固定机位</text>
+        <text x="544" y="24" class="lbl" text-anchor="end" id="phaseLbl">reveal</text>
+      </svg>
+    </div>
+    <div class="gpanel">
+      <h4>把论文的任务亲手玩一遍</h4>
+      <div class="btns">
+        <button class="btn primary" id="gReveal">揭示 (reveal)</button>
+        <button class="btn" id="gLower">盖上 (lower)</button>
+        <button class="btn" id="gRand">随机交换 ×1</button>
+        <button class="btn" id="gAuto">自动 5 次交换</button>
+        <button class="btn" id="gReset">重开一局</button>
+      </div>
+      <div class="small">盖上后点击任意两个杯子即执行一次 swap(i, j)；每次交换 = 一个自回归 chunk。模型在盖上期间只看到「两只一模一样的杯子互换位置」，看不到球。</div>
+      <div>
+        <div class="small" style="margin-bottom:4px">隐藏状态（模型看不到，只有 reveal 时可见）· <label style="cursor:pointer"><input type="checkbox" id="gPeek"> 上帝视角</label></div>
+        <div class="perm" id="permRow"></div>
+      </div>
+      <div>
+        <div class="small" style="margin-bottom:4px">episode 时间线：N+3 个 chunk（reveal · lower · swap×N · reveal）</div>
+        <div class="timeline" id="timeline"></div>
+      </div>
+      <dl class="stat">
+        <dt>N (swaps)</dt><dd id="sN">0</dd>
+        <dt>chunks / latent / px</dt><dd id="sFrames">3 / 15 / 57</dd>
+        <dt>episode 空间</dt><dd id="sSpace">5 × 10<sup>0</sup> = 5</dd>
+      </dl>
+      <div class="log" id="gLog">动作序列会显示在这里。</div>
+    </div>
+  </div>
+  <figcaption>论文 Fig. 2 的可交互版：一局先揭示小球并盖上杯子，随后施加 N 次两两交换（小球始终不可见），最后揭示。小球位置是整条交换链复合出的置换的一个坐标——它取决于全部历史，而不是任何一帧画面。像素帧数按 Wan 2.1 VAE 的时间压缩换算：4·5(N+3) − 3 = 20N + 57。</figcaption>
+</section>
+
+<!-- ============================================================ TL;DR -->
+<section class="sec" id="tldr">
+  <div class="eyebrow"><span>一图看懂</span><span class="paper">§1 · §4 · §5</span></div>
+  <h2>论证链：从「像素损失监督不到隐状态」到「两种能外推的机制」</h2>
+  <p class="lead">这篇论文不提出新模型，而是把语言模型里的状态追踪（state tracking）理论搬到视频世界模型上做一次受控实验。它的推理是一条链，每一环都有对应的实验。</p>
+  <div class="chain">
+    <div class="step"><div class="n">前提 · §3.1</div><b>Shell Game ≡ S<sub>5</sub> 的 swap-only 词问题</b>N 次两两交换复合出一个置换，问小球在哪 = 问置换的一个坐标。S<sub>5</sub> 不可解，词问题 NC<sup>1</sup>-完全，超出固定深度并行模型的 TC<sup>0</sup>。</div>
+    <div class="step bad"><div class="n">实验 · §4.1</div><b>标准骨干全部失败</b>双向/自回归 DiT、Mamba2、GDN、KDA 都在 N=5 达到 100%，N 变长即跌向 0.2；PSNR 却始终很高；4 步与 50 步去噪结果相同。</div>
+    <div class="step"><div class="n">诊断 · §4.2 · App. A</div><b>KV cache 是视觉历史，不是运行状态</b>cache 只追加不修改，一次交换只能把状态往上「推」一层；每个 chunk 要在固定深度内从整段历史重推排列。探针显示 AR 骨干里几乎解不出小球位置。</div>
+    <div class="step"><div class="n">假设 · §5</div><b>需要两样东西</b>① 一个跨 chunk 携带的状态；② 一个足够表达、能在原地把状态「转」一下的更新规则。注意力缺①，非负特征值线性注意力缺②。</div>
+    <div class="step ok"><div class="n">机制一 · §5.1</div><b>负特征值线性注意力</b>把 DeltaNet 的 β<sub>t</sub> 从 [0,1] 放宽到 [0,2]，转移矩阵特征值达到 [−1,1]，β=2 就是一次精确反射 = 一次交换。GDN-neg 在 N=30 仍有 0.95。</div>
+    <div class="step ok"><div class="n">机制二 · §5.2</div><b>非线性快权重 TTT（LaCT）</b>SwiGLU 快权重每个 chunk 原地改写；关键是特征映射 (W<sub>0</sub>, W<sub>2</sub>) 也在线更新，让有效核随历史变化。只更新读出 W<sub>1</sub> 就退化成静态核线性注意力，照样失败。</div>
+    <div class="step bad"><div class="n">对照 · §5.3</div><b>显式 scratchpad token 只够到 N=10</b>逐层 M 个可读写记忆 token、按 M ← M + ΔM 加性携带：能拟合并外推到 10 次交换，N=20 归于随机；记忆范数在长 rollout 上爆炸。</div>
+    <div class="step"><div class="n">边界 · §6 · App. E/F</div><b>真实世界状态不只是动作的函数</b>Memory Maze 与 3D Block World 里，状态还得靠观测纠正、在无动作时自行演化；LaCT 大多最强，但负特征值那一招失去了一致的收益。</div>
+  </div>
+</section>
+
+<!-- ============================================================ S5 & complexity -->
+<section class="sec" id="s5">
+  <div class="eyebrow"><span>问题设定</span><span class="paper">§1 · §3.1</span></div>
+  <h2>为什么偏偏选 S<sub>5</sub>：状态追踪与并行深度的边界</h2>
+  <p class="lead">状态追踪就是有限群的「词问题」：读入一串群元素 <span class="m">g<sub>1</sub>, g<sub>2</sub>, …, g<sub>t</sub></span>，输出它们的复合 <span class="m">g<sub>1</sub>g<sub>2</sub>⋯g<sub>t</sub></span>。选哪个群，决定了它落在哪个复杂度类里。</p>
+  <div class="prose">
+    <p><strong>S<sub>5</sub> 是最小的不可解对称群</strong>（它包含单群 A<sub>5</sub>），Barrington (1986) 证明非可解群的词问题是 NC<sup>1</sup>-完全的。而在标准的对数精度假设下，固定深度的 Transformer、状态空间模型和多种线性注意力都落在 TC<sup>0</sup> 里——常数深度、多项式规模的阈值电路，一个与输入长度无关的固定并行预算。若 TC<sup>0</sup> ≠ NC<sup>1</sup>（普遍猜想），这些骨干就<strong>不可能</strong>靠自身复合任意长的非交换状态更新链。可解的 S<sub>3</sub> 则容易得多。</p>
+    <p>论文用的是 Grazzi et al. (2024) 的 <strong>swap-only 限制</strong>：每个输入都是一个对换（transposition），运行状态是这些对换复合成的置换。任何 k 元置换最多是 k−1 个对换之积，所以限制到对换只把链长拉长常数倍，问题仍是 NC<sup>1</sup>-完全的。视觉版 Shell Game 只问小球的位置，即复合置换的<em>一个坐标</em>——但这个坐标同样依赖整条交换链，没有捷径。</p>
+    <p>要恢复这种表达力，只有两条路：<strong>在架构里重新引入串行计算</strong>（非线性 RNN，或代数结构对头的线性递推），或者<strong>在推理时增加串行深度</strong>（chain-of-thought 每步外化一个转移；循环/递归推理器）。视频扩散的去噪循环看起来像第二条路，但 Liu et al. (2025) 与 Chao et al. (2026) 证明：在常数深度骨干上迭代去噪<strong>不增加串行深度</strong>——每次调用都朝同一个目标训练，调用次数也不随交换链增长。这就是论文后面「加采样步数没用」的理论预告。</p>
+  </div>
+
+  <figure class="wide">
+    <div class="fig">
+      <svg class="diag" viewBox="0 0 1000 300" role="img" aria-label="左：复杂度类嵌套，TC0 包含固定深度 Transformer、SSM 与线性注意力，S5 词问题在 NC1 完全；右：三次对换复合成一个置换，小球坐标取决于整条链">
+        <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+        <!-- complexity nesting -->
+        <g>
+          <ellipse cx="235" cy="150" rx="225" ry="128" fill="none" stroke="var(--rule2)" stroke-width="1.3"/>
+          <text x="235" y="40" text-anchor="middle" class="mono dim">NC¹ · O(log n) 深度布尔电路</text>
+          <ellipse cx="190" cy="150" rx="128" ry="88" fill="var(--attn-soft)" stroke="var(--attn)" stroke-width="1.3"/>
+          <text x="190" y="98" text-anchor="middle" class="mono">TC⁰ · 常数深度阈值电路</text>
+          <text x="190" y="124" text-anchor="middle">固定深度 Transformer（双向 / 因果）</text>
+          <text x="190" y="142" text-anchor="middle">Mamba2 · GDN · KDA（特征值 ∈ [0,1]）</text>
+          <text x="190" y="160" text-anchor="middle" class="dim" style="font-size:11px">＋ 固定步数的去噪循环，深度不增</text>
+          <g>
+            <circle cx="100" cy="196" r="5" fill="var(--neg)"/>
+            <text x="112" y="200" class="mono">S₃ 词问题（可解，在 TC⁰ 内）</text>
+            <text x="112" y="216" class="dim" style="font-size:11px">仍需深度随 N 增长（Fig.1A）</text>
+          </g>
+          <g>
+            <circle cx="345" cy="92" r="6" fill="var(--ball)"/>
+            <text x="357" y="96" class="mono">S₅ 词问题</text>
+            <text x="357" y="112" class="mono">NC¹-完全</text>
+          </g>
+          <text x="235" y="296" text-anchor="middle" class="dim" style="font-size:11px">Barrington 1986 · 若 TC⁰ ≠ NC¹，则 S₅ 词问题在 TC⁰ 之外</text>
+        </g>
+        <!-- composition of swaps -->
+        <g transform="translate(520,40)">
+          <text x="0" y="0" class="mono dim">swap-only 词问题：状态 = 对换的复合</text>
+          <g id="compRows"></g>
+          <text x="0" y="228" class="dim" style="font-size:11px">每一行是一个 chunk；小球的坐标 = 置换作用在初始位置上，依赖整条链。</text>
+          <text x="0" y="246" class="dim" style="font-size:11px">Shell Game 只问这一个坐标，但它没有比复合整条链更短的算法。</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption><b>左</b>：论文依赖的复杂度图景——固定深度并行骨干（含固定去噪步数）落在 TC<sup>0</sup>，而 S<sub>5</sub> 的词问题是 NC<sup>1</sup>-完全的。<b>右</b>：swap-only 设定下，状态 = 对换序列的复合；小球位置只是这个置换的一个坐标。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ toy experiments -->
+<section class="sec" id="toy">
+  <div class="eyebrow"><span>无像素的预演</span><span class="paper">§3.2 · App. C · Fig. 1</span></div>
+  <h2>先不看画面：符号序列上的 S<sub>3</sub> / S<sub>5</sub> 探针</h2>
+  <p class="lead">在把任务渲染成视频之前，论文先在纯符号版本上跑了一遍这个领域的标准探针：输入 S<sub>3</sub>、S<sub>5</sub> 的对换序列，每步预测当前置换。结论决定了后面视频实验的「预期」。</p>
+
+  <div class="prose">
+    <p>对线性注意力家族，<strong>一层能否施加一次交换，由它的状态转移矩阵决定</strong>。DeltaNet 风格的层携带矩阵状态 <span class="m">S<sub>t</sub></span>，按下式更新：</p>
+  </div>
+  <div class="eq"><span><i>S</i><sub>t</sub> = ( <i>I</i> − <i>β</i><sub>t</sub> <i>k</i><sub>t</sub><i>k</i><sub>t</sub><sup>⊤</sup> ) <i>S</i><sub>t−1</sub> + <i>β</i><sub>t</sub> <i>k</i><sub>t</sub><i>v</i><sub>t</sub><sup>⊤</sup></span><span class="num">(1)</span></div>
+  <div class="prose">
+    <p>键 <span class="m">k<sub>t</sub></span> 单位范数，所以转移 <span class="m">A<sub>t</sub> = I − β<sub>t</sub>k<sub>t</sub>k<sub>t</sub><sup>⊤</sup></span> 是一个广义 Householder 矩阵，只有一个非 1 的特征值：<span class="m">1 − β<sub>t</sub></span>。常规取值 <span class="m">β<sub>t</sub> ∈ [0,1]</span> 把它限制在 [0,1]——<strong>能擦除、能覆盖，但永远不能反射</strong>。放宽到 <span class="m">β<sub>t</sub> ∈ [0,2]</span>，特征值覆盖 [−1,1]；<span class="m">β<sub>t</sub> = 2</span> 时转移正是实现一次交换的精确反射（Grazzi et al., 2024）。下面这个小工具把这句话做成了可以拨的。</p>
+  </div>
+
+  <!-- ---------- Householder explorer ---------- -->
+  <div class="widget" id="hhWidget">
+    <h4>拨一下 β：广义 Householder 转移 <span class="mr">I − β k k<sup>⊤</sup></span> 如何从「擦除」变成「交换」</h4>
+    <p class="small" style="margin-bottom:8px">取 <span class="m">k = (e<sub>i</sub> − e<sub>j</sub>)/√2</span>（单位范数）。它作用在 5 维「小球在第几个杯子」的 one-hot 向量上：β=0 什么都不做，β=1 把 i、j 两格取平均（信息被抹平），β=2 恰好是对换 (i j) 的置换矩阵。这正是式 (1) 里线性注意力实现一次 swap 需要的转移。</p>
+    <div class="ctrls">
+      <label>β<sub>t</sub> <input type="range" id="beta" min="0" max="2" step="0.05" value="1"> <span class="val" id="betaVal">1.00</span></label>
+      <label>交换 <select id="hhI"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option></select> ↔ <select id="hhJ"><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option></select></label>
+      <label>小球初始在 <select id="hhB"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option></select></label>
+      <span class="btns"><button class="btn" data-beta="0">β=0</button><button class="btn" data-beta="1">β=1</button><button class="btn neg" data-beta="2">β=2</button></span>
+    </div>
+    <div class="hh">
+      <div><div class="lab">A = I − β k kᵀ</div><div class="matrix" id="hhMat" style="grid-template-columns:repeat(5,44px)"></div></div>
+      <div class="op">·</div>
+      <div><div class="lab">s（小球 one-hot）</div><div class="vec" id="hhVecIn" style="flex-direction:column"></div></div>
+      <div class="op">=</div>
+      <div><div class="lab">A s</div><div class="vec" id="hhVecOut" style="flex-direction:column"></div></div>
+    </div>
+    <div class="eigline" aria-hidden="true">
+      <div class="bar"></div>
+      <div class="zone pos" style="left:50%; right:0"></div>
+      <div class="zone neg" style="left:0; right:50%"></div>
+      <div class="pt" id="eigPt" style="left:50%"></div>
+      <div class="tk l" style="left:0">−1（反射）</div><div class="tk" style="left:50%">0（擦除）</div><div class="tk r" style="left:100%">+1（恒等）</div>
+    </div>
+    <p class="small" style="margin-top:8px">红点 = 转移的唯一非 1 特征值 <span class="m">1 − β</span>。<span class="k-attn">右半区 [0,1]</span> 是 GDN / KDA / Mamba2 默认能到的范围；<span class="k-neg">左半区 [−1,0)</span> 只有「-neg」变体能到。 说明：<span id="hhMsg"></span></p>
+  </div>
+
+  <div class="prose">
+    <p>Fig. 1 的结果与这一分析一致：<strong>非线性 RNN 一层就能施加一次交换</strong>；GDN 与 KDA 只有在特征值允许跨到 [−1,1]（论文全篇用「-neg」后缀标记）之后才能一层解决；Mamba2 的转移特征值始终非负、Transformer 根本没有递推转移，它们只能学一个<strong>随目标长度加深的捷径</strong>（Liu et al., 2022a），超过训练长度即失效。就连可解的 S<sub>3</sub> 也已经迫使 Transformer 的深度随序列长度增长。</p>
+  </div>
+
+  <figure class="wide">
+    <div class="charts4">
+      <div class="mini"><div class="ttl2">A. Transformer 所需层数随序列长度增长</div><div class="sub2">解出 N 长度所需的最小层数（阈值：最终步准确率 0.95）</div><div class="chart" id="fig1a"></div></div>
+      <div class="mini"><div class="ttl2">B. N=128 时各架构所需最小层数</div><div class="sub2">RNN / -neg 变体 1 层即解；Mamba2 在 S₅ 上要 28 层</div><div class="chart" id="fig1b"></div></div>
+      <div class="mini"><div class="ttl2">C. S₃ 长度外推（训练 N=128）</div><div class="sub2">最终步准确率 · 随机水平 1/6 ≈ 0.167</div><div class="chart" id="fig1c"></div></div>
+      <div class="mini"><div class="ttl2">D. S₅ 长度外推（训练 N=128）</div><div class="sub2">最终步准确率 · 随机水平 1/120 ≈ 0.008</div><div class="chart" id="fig1d"></div></div>
+    </div>
+    <figcaption>论文 Fig. 1 的重绘（数据从 arXiv HTML 版矢量图逐点解析，C/D 面板精度约 ±0.01）。设置：宽度按家族固定（Transformer 256、Mamba2 288、GDN/KDA 304、RNN/GRU/LSTM 644/376/324），AdamW、batch 256、lr 10<sup>−4</sup>、最多 300K 步，训练长度 N=128；外推时取每个架构解出 N=128 的最小深度模型。三种非线性 RNN 都一层解出两个任务，图中以 vanilla RNN 代表。值得注意的是 KDA-neg 在 S<sub>5</sub> 上外推到 N=1000 反而好于 S<sub>3</sub>（0.69 vs 0.44）——玩具实验的噪声不小，读图时别把这些尾部数字看得太重。</figcaption>
+  </figure>
+</section>
+<!-- ============================================================ benchmark construction -->
+<section class="sec" id="bench">
+  <div class="eyebrow"><span>基准构造</span><span class="paper">§3.3 · App. D · D.3</span></div>
+  <h2>视觉 Shell Game：把 S<sub>5</sub> 渲染成动作条件视频</h2>
+  <p class="lead">渲染器改自 Liu &amp; Lee (2026) 的 Three.js/WebGL 杯球代码，加入显式的 lift / reveal 阶段和动作标注。杯子完全相同、机位固定，<strong>每一帧都容易画，唯一的难点是两次揭示之间从未出现在画面里的排列</strong>。</p>
+
+  <figure class="wide">
+    <div class="fig">
+      <svg class="diag" viewBox="0 0 1000 250" role="img" aria-label="一个 N 次交换的 episode 由 N+3 个 chunk 组成：reveal、lower、N 个 swap、reveal；每个 chunk 是 5 帧 latent；只有首尾两个 reveal 的像素里含有小球">
+        <defs><marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+        <g id="episodeDiag"></g>
+      </svg>
+    </div>
+    <figcaption>episode 的 chunk 结构。<b>一次交换对齐一个自回归 chunk（5 帧 latent）</b>，所以每个 chunk 恰好把隐藏置换推进一个对换。N 次交换 = N+3 个 chunk = 5(N+3) 帧 latent；Wan 2.1 VAE 把第一帧 latent 解码成 1 像素帧、之后每帧 latent 解码成 4 帧，故像素帧数 = 20N+57。训练 N=5：8 chunk、40 latent、157 像素帧；评测 N=30：33 chunk、165 latent、657 像素帧。像素损失能「看见」小球的只有首尾两个 reveal chunk。</figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card"><h4>动作词表</h4><p>k=5 个杯子 → C(5,2)=<b>10 种两两交换</b>，加上全体 lift、lower、no-op，共 <b>13 个动作</b>。动作以 72 维查表嵌入，与 256 维正弦时间步嵌入一起投影到 D 后经 AdaLN 注入每个 block。</p></div>
+    <div class="card"><h4>数据规模</h4><p>训练集 <b>30,000</b> 条 5 杯 5 交换的序列（8 chunk、157 帧），分辨率 256×192。5 个起始位置 × 每步 10 种交换 → 长度 N 的 episode 有 <b>5×10<sup>N</sup></b> 种，背不下来；长度外推是主要诊断。</p></div>
+    <div class="card"><h4>评测协议</h4><p>推理时给两个干净的起始 chunk（reveal + lower），之后自回归生成。<b>64 个 episode</b>、50 步采样、200K 步 EMA 权重。状态准确率用<b>颜色检测器</b>读最后一帧 reveal：分成 5 个等宽区域，取满足 r − max(g,b) &gt; 0.18 的红色响应最强的区域；检测不到小球记为错——所以 0.0 可能是「没画出球」而非「选错杯」。</p></div>
+  </div>
+  <div class="note ball"><b>为什么这个设计是「解耦」的。</b>视觉渲染（杯子怎么动）与隐状态合成（球在哪）被彻底分开：交换阶段每一帧都不含小球信息，任何靠画面「读状态」的策略都不可能；模型若想在最后一帧画对小球，只能在内部把 N 个对换复合起来。这就是为什么它能干净地把「画得像」和「记得对」区分开。</div>
+</section>
+
+<!-- ============================================================ models & training -->
+<section class="sec" id="models">
+  <div class="eyebrow"><span>模型与训练配方</span><span class="paper">§3.3 · Fig. 3 · App. D.1 · D.2</span></div>
+  <h2>同一副 Wan 式 DiT 骨架，只换时间混合器</h2>
+  <p class="lead">所有变体共享一个 Wan 风格的潜空间视频扩散 Transformer：冻结的 Wan 2.1 VAE 给出 8×8×4 压缩的 16 通道 latent；每个 chunk 5 帧 latent 在 32×24 网格上、以 1×2×2 patch 得到 <strong>960 个 token</strong>。宽度固定 1152，深度按变体调到约 200M 参数，于是<strong>时间混合器成为唯一的自变量</strong>。</p>
+
+  <figure class="wide">
+    <div class="fig">
+      <svg class="diag" viewBox="0 0 1040 384" role="img" aria-label="三联图：A 视频模型 block 的三个残差子层；B 递归模型的空间分块扫描；C LaCT 快权重层与 scratchpad token 层的 chunk 级处理">
+        <defs><marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+        <!-- A. block -->
+        <g transform="translate(10,10)">
+          <text x="0" y="14" class="mono dim">A · 一个 block（自下而上）</text>
+          <rect x="0" y="24" width="250" height="346" rx="12" class="box"/>
+          <g transform="translate(16,40)">
+            <text x="109" y="10" text-anchor="middle" class="dim" style="font-size:11px">× L 层 · D=1152 · 16 头 × 72 · QK-norm</text>
+            <rect x="0" y="24" width="218" height="20" rx="5" fill="var(--surf3)" stroke="var(--rule2)"/><text x="109" y="38" text-anchor="middle" style="font-size:11px">Residual Gate (α)</text>
+            <rect x="0" y="48" width="218" height="20" rx="5" fill="var(--surf3)" stroke="var(--rule2)"/><text x="109" y="62" text-anchor="middle" style="font-size:11px">FFN · 4D · GELU</text>
+            <rect x="0" y="72" width="218" height="20" rx="5" fill="var(--surf3)" stroke="var(--rule2)"/><text x="109" y="86" text-anchor="middle" style="font-size:11px">AdaLN (γ, β)</text>
+            <rect x="0" y="102" width="218" height="20" rx="5" fill="var(--surf3)" stroke="var(--rule2)"/><text x="109" y="116" text-anchor="middle" style="font-size:11px">Residual Gate (α)</text>
+            <rect x="0" y="126" width="218" height="20" rx="5" fill="var(--attn-soft)" stroke="var(--attn)"/><text x="109" y="140" text-anchor="middle" style="font-size:11px">SWA{1} softmax attn · 3D RoPE</text>
+            <rect x="0" y="150" width="218" height="20" rx="5" fill="var(--surf3)" stroke="var(--rule2)"/><text x="109" y="164" text-anchor="middle" style="font-size:11px">AdaLN (γ, β)</text>
+            <rect x="0" y="180" width="218" height="20" rx="5" fill="var(--surf3)" stroke="var(--rule2)"/><text x="109" y="194" text-anchor="middle" style="font-size:11px">Residual Gate (α)</text>
+            <rect x="0" y="204" width="218" height="20" rx="5" fill="var(--fw-soft)" stroke="var(--fw)"/><text x="109" y="218" text-anchor="middle" style="font-size:11px">Temporal Mixer（唯一自变量）</text>
+            <rect x="0" y="228" width="218" height="20" rx="5" fill="var(--surf3)" stroke="var(--rule2)"/><text x="109" y="242" text-anchor="middle" style="font-size:11px">AdaLN (γ, β)</text>
+            <rect x="0" y="262" width="104" height="22" rx="6" fill="var(--attn-soft)" stroke="var(--attn)"/><text x="52" y="277" text-anchor="middle" style="font-size:10.5px">Action Emb. 72→D</text>
+            <rect x="114" y="262" width="104" height="22" rx="6" fill="var(--attn-soft)" stroke="var(--attn)"/><text x="166" y="277" text-anchor="middle" style="font-size:10.5px">Time Emb. 256→D</text>
+            <rect x="0" y="290" width="218" height="22" rx="6" fill="var(--surf3)" stroke="var(--rule2)"/><text x="109" y="305" text-anchor="middle" class="mono" style="font-size:10.5px">Noisy latents · 960 tok / chunk</text>
+          </g>
+          <text x="125" y="362" text-anchor="middle" class="dim" style="font-size:10.5px">纯注意力 DiT 去掉 Temporal Mixer；嵌入经 AdaLN 进入每个子层</text>
+        </g>
+        <!-- B. blockwise scan -->
+        <g transform="translate(280,10)">
+          <text x="0" y="14" class="mono dim">B · 递归模型的空间分块扫描（Po et al., 2025）</text>
+          <rect x="0" y="24" width="330" height="346" rx="12" class="box"/>
+          <g transform="translate(18,44)">
+            <text x="0" y="6" style="font-size:11px">H × W × T 的 latent 网格</text>
+            <g transform="translate(6,40)">
+              <path d="M0 0 L26 -20 L146 -20 L120 0 Z" fill="var(--surf3)" stroke="var(--rule2)"/>
+              <path d="M120 0 L146 -20 L146 70 L120 90 Z" fill="var(--surf3)" stroke="var(--rule2)"/>
+              <rect x="0" y="0" width="120" height="90" fill="var(--surf2)" stroke="var(--rule2)"/>
+              <line x1="0" y1="30" x2="120" y2="30" stroke="var(--rule2)"/><line x1="0" y1="60" x2="120" y2="60" stroke="var(--rule2)"/>
+              <line x1="40" y1="0" x2="40" y2="90" stroke="var(--rule2)"/><line x1="80" y1="0" x2="80" y2="90" stroke="var(--rule2)"/>
+              <text x="-8" y="50" text-anchor="end" class="math">H</text><text x="60" y="106" text-anchor="middle" class="math">W</text><text x="150" y="44" class="math">T</text>
+            </g>
+            <line x1="176" y1="80" x2="206" y2="80" class="line" marker-end="url(#arr3)"/>
+            <text x="191" y="70" text-anchor="middle" class="dim" style="font-size:10px">重排</text>
+            <g transform="translate(214,36)">
+              <rect x="0" y="0" width="38" height="38" fill="var(--neg-soft)" stroke="var(--neg)"/><rect x="44" y="0" width="38" height="38" fill="var(--fw-soft)" stroke="var(--fw)"/>
+              <rect x="0" y="44" width="38" height="38" fill="var(--attn-soft)" stroke="var(--attn)"/><rect x="44" y="44" width="38" height="38" fill="var(--ball-soft)" stroke="var(--ball)"/>
+              <path d="M5 7 L33 7 L5 19 L33 19 L5 31 L33 31" fill="none" stroke="var(--neg-ink)" stroke-width="1.4" marker-end="url(#arr3)"/>
+              <text x="41" y="98" text-anchor="middle" class="dim" style="font-size:10px">b_h × b_w 块</text>
+              <text x="41" y="111" text-anchor="middle" class="dim" style="font-size:10px">各自独立扫描</text>
+            </g>
+            <text x="0" y="176" style="font-size:11.5px">① 块内按空间 Z 字形扫描，② 再沿时间 T 推进；</text>
+            <text x="0" y="194" style="font-size:11.5px">各块并行 → 更好的并行度、更大的有效状态</text>
+            <text x="0" y="222" class="dim" style="font-size:11px">RNN / Mamba2 / 线性注意力族：8 层</text>
+            <text x="0" y="238" class="dim" style="font-size:11px">时间子块尺寸自下而上 [1,1,1,1,2,2,4,4]</text>
+            <text x="0" y="254" class="dim" style="font-size:11px">线性注意力 12 个递归头 × 宽 96</text>
+            <text x="0" y="270" class="dim" style="font-size:11px">Mamba2：d_state 256 · d_conv 4 · expand 2</text>
+            <text x="0" y="296" class="dim" style="font-size:11px">块内的递归状态（矩阵 S / 隐状态 h）跨 chunk 携带，</text>
+            <text x="0" y="312" class="dim" style="font-size:11px">每个 chunk 在同一层内原地更新</text>
+          </g>
+        </g>
+        <!-- C. LaCT & scratchpad -->
+        <g transform="translate(630,10)">
+          <text x="0" y="14" class="mono dim">C · 跨 chunk 携带的逐层状态</text>
+          <rect x="0" y="24" width="400" height="158" rx="12" fill="var(--fw-soft)" stroke="var(--fw)"/>
+          <text x="12" y="44" style="font-size:12px; font-weight:600">LaCT 层（TTT-KVB，大 chunk 快权重）</text>
+          <g transform="translate(12,56)">
+            <rect x="0" y="0" width="50" height="70" rx="6" fill="var(--surf3)" stroke="var(--rule2)"/><text x="25" y="30" text-anchor="middle" class="mono" style="font-size:10px">chunk t</text><text x="25" y="44" text-anchor="middle" class="mono" style="font-size:10px">clean</text>
+            <rect x="74" y="0" width="30" height="20" rx="4" fill="var(--surf3)" stroke="var(--rule2)"/><text x="89" y="14" text-anchor="middle" class="mono" style="font-size:10px">K</text>
+            <rect x="74" y="25" width="30" height="20" rx="4" fill="var(--surf3)" stroke="var(--rule2)"/><text x="89" y="39" text-anchor="middle" class="mono" style="font-size:10px">V</text>
+            <rect x="74" y="50" width="30" height="20" rx="4" fill="var(--surf3)" stroke="var(--rule2)"/><text x="89" y="64" text-anchor="middle" class="mono" style="font-size:10px">Q</text>
+            <line x1="50" y1="10" x2="74" y2="10" class="line"/><line x1="50" y1="35" x2="74" y2="35" class="line"/><line x1="50" y1="60" x2="74" y2="60" class="line"/>
+            <rect x="134" y="0" width="112" height="36" rx="6" fill="var(--fw)"/><text x="190" y="15" text-anchor="middle" style="font-size:10.5px; fill:#fff">Update W（一次）</text><text x="190" y="29" text-anchor="middle" style="font-size:9.5px; fill:#fff">∇ ℓ_dot 在整块 (K,V) 上</text>
+            <rect x="134" y="48" width="112" height="24" rx="6" fill="var(--surf3)" stroke="var(--fw)"/><text x="190" y="64" text-anchor="middle" style="font-size:10.5px">Apply W · f_W(Q)</text>
+            <line x1="104" y1="17" x2="134" y2="17" class="line" marker-end="url(#arr3)"/><line x1="104" y1="60" x2="134" y2="60" class="line" marker-end="url(#arr3)"/>
+            <path d="M246 18 L268 18 L268 60 L246 60" fill="none" stroke="var(--fw-ink)" stroke-width="1.3" marker-end="url(#arr3)"/>
+            <text x="276" y="16" class="mono" style="font-size:10px">W 携带到 chunk t+1</text>
+            <text x="276" y="30" class="dim" style="font-size:10px">（去噪下一 chunk 时读）</text>
+            <text x="276" y="58" style="font-size:10px">＋ 局部 self-attn 分支</text>
+            <text x="276" y="72" style="font-size:10px">→ 两路相加输出</text>
+            <text x="0" y="100" class="dim" style="font-size:10.5px">W = (W₀, W₁, W₂) 为 SwiGLU · H 头 · 每 chunk 1 次更新 · 行范数归一</text>
+            <text x="0" y="114" class="dim" style="font-size:10.5px">与 scratchpad 相同：状态在层内被改写，而非追加到 cache</text>
+          </g>
+          <rect x="0" y="194" width="400" height="176" rx="12" fill="var(--ball-soft)" stroke="var(--m-scratch)"/>
+          <text x="12" y="214" style="font-size:12px; font-weight:600">Scratchpad-token 层（显式记忆 token）</text>
+          <g transform="translate(12,226)">
+            <g><rect x="0" y="0" width="18" height="18" rx="3" fill="var(--m-scratch)"/><rect x="21" y="0" width="18" height="18" rx="3" fill="var(--m-scratch)"/><rect x="42" y="0" width="18" height="18" rx="3" fill="var(--m-scratch)"/><text x="30" y="33" text-anchor="middle" class="mono" style="font-size:9.5px">M 个记忆 token</text></g>
+            <text x="70" y="13" class="mono">;</text>
+            <g transform="translate(84,0)"><rect x="0" y="0" width="92" height="18" rx="3" fill="var(--surf3)" stroke="var(--rule2)"/><text x="46" y="13" text-anchor="middle" class="mono" style="font-size:10px">chunk t · 960 tok</text><text x="46" y="33" text-anchor="middle" class="mono" style="font-size:9.5px">拼接 [M ; chunk]</text></g>
+            <line x1="184" y1="9" x2="212" y2="9" class="line" marker-end="url(#arr3)"/>
+            <rect x="216" y="0" width="94" height="18" rx="3" fill="var(--surf3)" stroke="var(--rule2)"/><text x="263" y="13" text-anchor="middle" class="mono" style="font-size:10px">共享 self-attn</text>
+            <line x1="310" y1="9" x2="336" y2="9" class="line" marker-end="url(#arr3)"/>
+            <text x="340" y="7" class="mono" style="font-size:9.5px">mem 切片 → ΔM</text>
+            <text x="340" y="20" class="mono" style="font-size:9.5px">chunk 切片 → 输出</text>
+            <text x="0" y="62" style="font-size:11px">M ← M + ΔM，加性携带到下一个 chunk（每层各有 M 个，宽 D=1152）</text>
+            <text x="0" y="80" class="dim" style="font-size:10.5px">与 LaCT 相比：有「携带的状态」，但更新只是相加，没有原地「转」它的规则；</text>
+            <text x="0" y="96" class="dim" style="font-size:10.5px">长 rollout 上记忆范数爆炸（§5.3）。对照组 M=0 即纯 SWA1 骨干，停在随机水平</text>
+          </g>
+        </g>
+      </svg>
+    </div>
+    <figcaption>论文 Fig. 3 的重绘。<b>A</b>：每个 block 依次是时间混合器、带 3D RoPE 的滑窗 softmax 注意力（SWA）、FFN 三个残差子层，各自由动作与扩散时间步嵌入回归出 AdaLN 的 γ、β 与残差门 α。<b>B</b>：递归/线性注意力模型先把 token 重排成 H×W×T 网格，再切成 b<sub>h</sub>×b<sub>w</sub>×T 的小块独立扫描。<b>C</b>：两种跨 chunk 携带的逐层状态——LaCT 用 chunk 的 K/V 更新快权重 MLP 并作用在 Q 上，与自注意力分支相加；scratchpad 把 M 个记忆 token 与 chunk 拼接后共享自注意力，记忆按 M ← M + ΔM 原地累加。</figcaption>
+  </figure>
+
+  <h3>骨干清单：谁有携带的状态，谁的转移能反射</h3>
+  <p class="small" style="margin-bottom:10px">记号：SWA{k} = 注意当前与前 k 个 chunk（总跨度 k+1）；LaCT{H} = H 个快权重头；「-neg」= 转移谱从 [0,1] 放宽到 [−1,1]；GDP3 = 三个 Householder 因子的 Gated Delta Product。所有递归/线性注意力变体都搭配 SWA1。</p>
+  <div class="tscroll">
+    <table class="t">
+      <thead><tr><th>骨干</th><th>层数 L</th><th>混合器配置</th><th>携带状态</th><th>转移范围</th><th>参数 (M)</th></tr></thead>
+      <tbody>
+        <tr><td>Bidirectional DiT</td><td>12</td><td style="text-align:left">无混合器，整段双向注意力</td><td>无</td><td>–</td><td>201.503</td></tr>
+        <tr><td>Causal DiT（训练上下文 SWA7）</td><td>12</td><td style="text-align:left">无混合器，SWA7 注意力</td><td>KV cache（只追加）</td><td>–</td><td>201.503</td></tr>
+        <tr><td>Causal DiT (SWA1)</td><td>12</td><td style="text-align:left">无混合器，SWA1 注意力</td><td>KV cache</td><td>–</td><td>201.503</td></tr>
+        <tr><td>RNN / GRU / LSTM + SWA1</td><td>8</td><td style="text-align:left">宽 1152 的非线性递推</td><td>隐状态</td><td>非线性</td><td>162.988 / 205.492 / 226.744</td></tr>
+        <tr><td>Mamba2 + SWA1</td><td>8</td><td style="text-align:left">d_state 256, d_conv 4, expand 2, 头维 72</td><td>矩阵状态</td><td>正</td><td>210.582</td></tr>
+        <tr><td>GDN / GDN-neg + SWA1</td><td>8</td><td style="text-align:left">12 头 × 宽 96</td><td>矩阵状态</td><td>[0,1] / [−1,1]</td><td>195.153</td></tr>
+        <tr><td>GDN2 / GDN2-neg + SWA1</td><td>8</td><td style="text-align:left">12 头 × 宽 96（擦写解耦）</td><td>矩阵状态</td><td>[0,1] / [−1,1]</td><td>209.106</td></tr>
+        <tr><td>GDP3 / GDP3-neg + SWA1</td><td>8</td><td style="text-align:left">12 头 × 宽 96，3 个 Householder 因子</td><td>矩阵状态</td><td>[0,1] / [−1,1]</td><td>237.989</td></tr>
+        <tr><td>KDA / KDA-neg + SWA1</td><td>8</td><td style="text-align:left">12 头 × 宽 96</td><td>矩阵状态</td><td>[0,1] / [−1,1]</td><td>187.983</td></tr>
+        <tr class="hi"><td>LaCT8 + SWA1（参考配置）</td><td>12</td><td style="text-align:left">H=8，每头 d=144，三个 SwiGLU 矩阵</td><td>快权重 995,328 标量/层</td><td>非线性</td><td>213.850</td></tr>
+        <tr><td>LaCT1 / 2 / 4 / 16 / 48</td><td>8 / 10 / 11 / 12 / 12</td><td style="text-align:left">d = 1152 / 576 / 288 / 72 / 24</td><td>7.96M / 3.98M / 1.99M / 498K / 166K 每层</td><td>非线性</td><td>201.5 / 209.6 / 207.7 / 208.2 / 205.6</td></tr>
+        <tr><td>Scratchpad M ∈ {1,4,64,256,1024}</td><td>12</td><td style="text-align:left">M×1152 加性记忆</td><td>1,152 × M 每层</td><td>加性</td><td>201.5 – 215.7</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:8px">来源：Tab. A1、A2。快权重状态量 = H·(3·r·d²) = 3rD²/H（r=2 为 SwiGLU 扩展比），所以头数越多，状态反而越小。</p>
+
+  <h3>训练配方（所有模型从零训练）</h3>
+  <div class="grid2">
+    <div class="card">
+      <h4>共同部分</h4>
+      <dl class="kv">
+        <dt>目标</dt><dd><b>diffusion forcing</b>（teacher forcing 的扩散版）：每个 5 帧 chunk 独立采样噪声等级；flow matching，shift s=3</dd>
+        <dt>掩码</dt><dd>chunk 级因果注意力，PyTorch FlexAttention</dd>
+        <dt>优化</dt><dd><b>NorMuon</b>，lr 2×10<sup>−4</sup>，有效 batch 16，<b>200K 步</b>，混合精度（RNN/LSTM/GRU 层保持全精度）；报告 200K 步 EMA 权重</dd>
+        <dt>为什么 NorMuon</dt><dd>在 Shell Game 与原版 Memory Maze 上都比 AdamW 更早收敛（Fig. A1，均以 Mamba2+SWA1 展示）。作者还试过 AdamW 下把最后一个 chunk 的损失 ×10，几乎没效果</dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h4>两种 chunk 打包方式（一个需要留意的差异）</h4>
+      <dl class="kv">
+        <dt>注意力 / SSM / 线性注意力 / RNN</dt><dd><b>context mixing</b>，概率 0.5：随机抽一个前缀替换成干净 latent，只在其余噪声 chunk 上算损失（长上下文常规做法，Po et al., 2025）</dd>
+        <dt>LaCT / scratchpad</dt><dd>每个 chunk 的<b>干净副本与噪声副本交错</b>：在 chunk t 的干净副本上更新携带状态，再用它去噪 chunk t+1（Zhang et al., 2025a 与 Dalal et al., 2025 的惯例）。代价：有效序列长度翻倍，且携带状态使训练跨 chunk 串行化，训练明显更慢</dd>
+      </dl>
+    </div>
+  </div>
+  <figure>
+    <div class="fig">
+      <svg class="diag" viewBox="0 0 1000 150" role="img" aria-label="LaCT 的训练序列：噪声 chunk 与干净 chunk 交错，快权重在干净副本上更新、在下一个噪声 chunk 上读取">
+        <defs><marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+        <g id="interleave"></g>
+      </svg>
+    </div>
+    <figcaption>LaCT / scratchpad 的打包：序列里交替出现 chunk t 的噪声副本与干净副本；携带状态 W 只在<b>干净</b>副本上更新，然后在<b>下一个</b>噪声 chunk 的去噪里被读取。推理时前两个 chunk（reveal、lower）作为干净上下文给出。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ §4.1 standard backbones fail -->
+<section class="sec" id="fail">
+  <div class="eyebrow"><span>主实验</span><span class="paper">§4.1 · Fig. 4</span></div>
+  <h2>标准骨干全都失败：画面逼真，不等于状态正确</h2>
+  <p class="lead">固定 200K 步训练后，除了 SWA1 基线以外，所有全上下文注意力和递归变体都在训练长度 N=5 上达到 100% 准确率——<strong>但没有一个能稳健外推</strong>。与此同时，整段动作序列的画面保真度始终很高。</p>
+
+  <figure class="wide">
+    <div class="charts3">
+      <div class="mini"><div class="ttl2">A. 长度外推（训练 N=5）</div><div class="sub2">状态准确率 vs 交换链长度 · 64 episode · 50 步采样</div><div class="chart" id="fig4a"></div></div>
+      <div class="mini"><div class="ttl2">B. 去噪步数扫描（N=10）</div><div class="sub2">4 → 50 步，状态准确率一动不动</div><div class="chart" id="fig4b"></div></div>
+      <div class="mini"><div class="ttl2">C. 视觉保真度（N=10）</div><div class="sub2">PSNR 随去噪步数；准确率接近随机的模型 PSNR 照样 40+</div><div class="chart" id="fig4c"></div></div>
+    </div>
+    <div class="legend" id="leg4"></div>
+    <figcaption>论文 Fig. 4 的重绘（点击图例可隐藏/显示曲线，悬停看精确值；数据从矢量图解析，准确率是 64 个 episode 的均值，故取值都是 1/64 的整数倍）。所有递归/线性注意力变体共用 SWA1 骨干，因果 DiT 以窗口大小标注。<b>A</b>：Mamba2 在 N=7 就掉到 0.27；GDN 从 N=6 起滑落；KDA 撑到 N=10 仍有 0.78 但 N=20 只剩 0.19；只有 LaCT8 在 N=20 保持 0.98、N=30 为 0.69。双向 DiT 在 N=8 读数为 0.0——按 D.3 的检测器规则，这更可能是「没画出小球」（双向模型无法截断上下文，超长时输出退化），而不是选错了杯子。<b>B/C</b>：把采样步数从 4 加到 50，准确率纹丝不动；PSNR 除双向 DiT (~29) 与 Mamba2 (~34) 外都在 40 以上。</figcaption>
+  </figure>
+
+  <div class="prose">
+    <p><strong>它们学到的只是捷径。</strong>正如 §3.2 的玩具分析所预言的，这些固定深度骨干学到的是「复合有限次交换」的捷径，一旦链长超过那个深度就失效。评测时作者尽量让每个 softmax 注意力变体保持在训练时见过的时间上下文里——因果全注意力 DiT 训练于 8 个 chunk，长 rollout 时把注意力截到当前加前 7 个 chunk（否则会撞上从未见过的时间 RoPE 偏移而退化），SWA 变体按训练窗口评测——目的是让失败反映状态追踪本身，而不是 RoPE 外推。</p>
+    <p><strong>加去噪步数没有用。</strong>这与串行深度分析一致：对失败的模型，4 步与 50 步准确率相同；对成功的模型，4 步采样就已经和 50 步一样准。扩散时间步主要影响视觉保真度，而作者怀疑 Shell Game 的画面过于简单，连这一效应都不明显。</p>
+  </div>
+</section>
+
+<!-- ============================================================ §4.2 KV cache -->
+<section class="sec" id="cache">
+  <div class="eyebrow"><span>诊断</span><span class="paper">§4.2 · App. A · Fig. 5</span></div>
+  <h2>翻开自回归模型的 KV cache：它是一段视觉历史，不是一份运行状态</h2>
+  <p class="lead">对自回归 Transformer 来说，KV cache 是隐藏排列唯一可能的跨 chunk 载体。论文用三件事把它看穿：变窗口消融、一个关于「状态只能往上推」的论证、以及对携带状态的线性探针。</p>
+
+  <h3>① 窗口越宽，只是让 reveal 看得更远</h3>
+  <figure class="wide">
+    <div class="charts2">
+      <div class="mini"><div class="ttl2">A. 不同 SWA 窗口下的状态准确率</div><div class="sub2">因果 DiT，窗口 1–7 个 chunk（SWA7 覆盖训练 episode 的全部 8 个 chunk）</div><div class="chart" id="fig5a"></div></div>
+      <div class="mini"><div class="ttl2">B. 携带状态的可解码性（固定探针库 B=16）</div><div class="sub2">最佳层的隐藏小球线性探针准确率 · 随机 0.2</div><div class="chart" id="fig5b"></div></div>
+    </div>
+    <figcaption>论文 Fig. 5 的重绘。<b>A</b>：SWA1–SWA4 连训练长度 N=5 都追不上（≈0.22）；SWA5 是最后一个 reveal 首次能同时看到全部 5 个交换 chunk 的设置，从此拟合训练长度（0.95→1.0），但所有窗口在 N=10 都跌到 0.13–0.22。<b>B</b>：用 16 个固定随机高斯向量去「读」携带状态，再训线性探针预测小球位置：LaCT8 0.87/0.78（N=5/10），GDN-neg 0.70/0.46，其余 0.22–0.48。</figcaption>
+  </figure>
+  <div class="prose">
+    <p>更宽的窗口治不了本，因为 <strong>KV 条目一旦写下就固定了</strong>：一个 chunk 只能在更高的层里变换它读到的东西，每个 chunk 都得在固定深度里从一段只追加的历史重新推出排列。语言模型会绕过这个问题——把每个中间结果写进自己的下一个 token、下一步再读回来；而这里的下一个 chunk 收到的是一段视觉 latent，里面没有任何关于隐藏小球的目标。</p>
+  </div>
+
+  <h3>② 为什么 cache 里的状态只能「往上推」（App. A）</h3>
+  <div class="widget" id="ladderWidget">
+    <h4>逐次交换，看状态住在哪一层</h4>
+    <p class="small" style="margin-bottom:8px">论文的论证：第 ℓ 层的 KV 条目由该层的输入算出，所以「读它并更新」只能把新状态写到更高一层，在那里才能被读到。起始 reveal 把小球位置写进每一层的 cache；第 1 次交换在第 1 层读、把更新后的排列写到第 2 层；第 2 次交换在第 2 层读、写到第 3 层……每次交换都把状态往上推一层，直到顶。层内递推（RNN、线性注意力、TTT）没有这个约束：每次转移都在<b>同一层</b>作用于上一个状态。</p>
+    <div class="ctrls">
+      <label>深度 L <select id="ladL"><option>4</option><option>6</option><option>8</option><option selected>12</option></select></label>
+      <button class="btn" id="ladStep">下一次交换 →</button>
+      <button class="btn" id="ladReset">重置</button>
+      <span class="val" id="ladN">已交换 0 次</span>
+    </div>
+    <div class="ladder">
+      <div class="col"><h5><span class="k-attn">自回归 Transformer · KV cache</span>（列 = chunk，行 = 层）</h5><div class="layers" id="ladA"></div><div class="msg" id="ladMsgA"></div></div>
+      <div class="col"><h5><span class="k-fw">层内递推 · 携带状态原地更新</span></h5><div class="layers" id="ladB"></div><div class="msg" id="ladMsgB"></div></div>
+    </div>
+    <p class="small" style="margin-top:10px">红格 = 该层此刻能读到的「最新排列」；黄格 = 只追加、已过期的历史条目；紫格 = 原地改写的携带状态。深度用尽后，Transformer 若还想追踪，只能让某些层一次复合多个交换——这就是「捷径」，它对训练长度成立，对更长链不成立。这个示意取自附录 A 的文字论证，是理想化的；真实模型并不严格一层一步，但深度有限这一点不变。</p>
+  </div>
+
+  <div class="note attn"><b>生成出来的 chunk 也没被训练成状态 token。</b>推理时生成的视频 chunk 会作为下一次的输入，原则上可以像 CoT token 那样带上更新后的排列。但训练时冻结的 Wan VAE 把每个教师 chunk 映射成视觉 latent：被遮住的交换里，这个目标只表示杯子的运动，没有小球位置的标签；teacher / diffusion forcing 给下一个 chunk 的是教师 latent 而不是模型自己写的输出。于是后面 reveal 的错误无法通过 rollout 反向教会前面的 chunk 保留什么。Self Forcing 虽然把生成的 chunk 喂回训练，但实际实现只让梯度穿过每个 chunk 中一次选定的去噪调用、并 detach 更早的缓存表示，后面的错误仍教不到前面的 chunk。作者刻意不做完整 rollout BPTT、显式状态目标或任务奖励，以保持设定通用。</div>
+
+  <h3>③ 探针：读得出「当前动作」，读不出「小球在哪」</h3>
+  <figure class="wide">
+    <div class="fig">
+      <svg class="diag" viewBox="0 0 1000 210" role="img" aria-label="探针方法：模型自己的读出 y 与固定探针库对携带状态的读出 r，分别训练线性探针预测可见的交换动作与隐藏的小球位置">
+        <defs><marker id="arr5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+        <g transform="translate(10,16)">
+          <rect x="0" y="0" width="230" height="170" rx="12" class="box"/>
+          <text x="115" y="22" text-anchor="middle" style="font-weight:600">第 ℓ 层 · chunk t</text>
+          <text x="115" y="52" text-anchor="middle" class="math">x<tspan baseline-shift="super" font-size="9">ℓ+1</tspan><tspan baseline-shift="sub" font-size="9">t</tspan> = x<tspan baseline-shift="super" font-size="9">ℓ</tspan><tspan baseline-shift="sub" font-size="9">t</tspan> + g<tspan baseline-shift="super" font-size="9">ℓ</tspan><tspan baseline-shift="sub" font-size="9">t</tspan> · y<tspan baseline-shift="super" font-size="9">ℓ</tspan><tspan baseline-shift="sub" font-size="9">t</tspan></text>
+          <rect x="20" y="70" width="190" height="34" rx="7" fill="var(--cup-soft)" stroke="var(--cup)"/>
+          <text x="115" y="91" text-anchor="middle" style="font-size:11.5px">当前读出 y：模型传给渲染的内容</text>
+          <rect x="20" y="116" width="190" height="42" rx="7" fill="var(--ball-soft)" stroke="var(--ball)"/>
+          <text x="115" y="133" text-anchor="middle" style="font-size:11.5px">携带状态（KV cache / 矩阵 S / 快权重 W）</text>
+          <text x="115" y="149" text-anchor="middle" class="dim" style="font-size:10.5px">形式复杂，只能间接读</text>
+        </g>
+        <g transform="translate(290,16)">
+          <text x="0" y="12" class="mono dim">固定探针库：B=16 个随机高斯向量 p_m，所有 chunk 共用</text>
+          <rect x="0" y="24" width="300" height="34" rx="7" fill="var(--surf2)" stroke="var(--rule2)"/><text x="150" y="45" text-anchor="middle" class="mono" style="font-size:11px">KV：r = Attn(p_m, K≤t, V≤t)</text>
+          <rect x="0" y="66" width="300" height="34" rx="7" fill="var(--surf2)" stroke="var(--rule2)"/><text x="150" y="87" text-anchor="middle" class="mono" style="font-size:11px">矩阵状态：r = Sₜᵀ p_m</text>
+          <rect x="0" y="108" width="300" height="34" rx="7" fill="var(--surf2)" stroke="var(--rule2)"/><text x="150" y="129" text-anchor="middle" class="mono" style="font-size:11px">LaCT 快权重：r = f_{Wₜ}(p_m)</text>
+          <text x="0" y="168" class="dim" style="font-size:11px">从 5 次（分布内）与 10 次（外推）交换的 episode 采样读出，</text>
+          <text x="0" y="184" class="dim" style="font-size:11px">拼接 {r_{t,m}}_{m=1..16} 后训练线性探针</text>
+        </g>
+        <line x1="250" y1="103" x2="288" y2="60" class="line" marker-end="url(#arr5)"/>
+        <g transform="translate(640,16)">
+          <rect x="0" y="0" width="350" height="178" rx="12" class="box"/>
+          <text x="16" y="24" style="font-weight:600">线性探针要预测两样东西</text>
+          <rect x="16" y="40" width="318" height="54" rx="8" fill="var(--cup-soft)" stroke="var(--cup)"/>
+          <text x="28" y="60" style="font-size:12px">可见的交换动作（当前 chunk 是哪对杯子在换）</text>
+          <text x="28" y="80" class="mono" style="font-size:11px">当前读出 y 的最佳层探针：所有模型、两种长度都 = 1.00</text>
+          <rect x="16" y="104" width="318" height="62" rx="8" fill="var(--ball-soft)" stroke="var(--ball)"/>
+          <text x="28" y="124" style="font-size:12px">隐藏的小球位置</text>
+          <text x="28" y="142" class="mono" style="font-size:11px">从 y 读：0.2–0.3（N=10 约 0.2）—— y 是为渲染服务的</text>
+          <text x="28" y="158" class="mono" style="font-size:11px">从携带状态读：LaCT8 0.87/0.78 · GDN-neg 0.70/0.46</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>探针设计。模型自己的读出 <span class="m">y<sup>ℓ</sup><sub>t</sub></span>（残差更新里被门 <span class="m">g</span> 加进去的那一项）几乎完美地编码<b>可见的</b>交换身份，却几乎不含小球位置——它是为渲染当前 chunk 服务的，不是一份紧凑的持久状态。真正能解出小球的是<b>携带状态</b>本身，而且只在两个能外推的模型里解得出来。作者的解读：失败的 AR 骨干携带的主要是与动作、检索绑定的内容，成功的递归机制则为隐藏的交换序列维护了一个独立的状态变量。</figcaption>
+  </figure>
+</section>
+<!-- ============================================================ §5 mechanisms -->
+<section class="sec" id="mech">
+  <div class="eyebrow"><span>能外推的机制</span><span class="paper">§5 · Fig. 6</span></div>
+  <h2>两样东西缺一不可：跨 chunk 携带的状态，和能原地实现一次交换的更新规则</h2>
+  <p class="lead">从上面的失败里，作者提炼出假设：<strong>AR Transformer 缺的是携带的状态，非负特征值线性注意力缺的是足够表达的规则。</strong>§5 给出这对组合的两种实现——允许负特征值的状态转移（§5.1）和带非线性内模型的 TTT-KVB（§5.2）——外加一个「有状态、但只会加」的显式 token 对照（§5.3）。</p>
+
+  <figure class="wide">
+    <div class="charts3">
+      <div class="mini"><div class="ttl2">A. 负特征值对线性注意力变体的影响</div><div class="sub2">虚线/空心 = 基线 [0,1]；实线/实心 = 负特征值 [−1,1]</div><div class="chart" id="fig6a"></div></div>
+      <div class="mini"><div class="ttl2">B. LaCT 快权重头数 H</div><div class="sub2">1–2 头失败；≥4 头外推，且状态更小</div><div class="chart" id="fig6b"></div></div>
+      <div class="mini"><div class="ttl2">C. scratchpad token 数 M</div><div class="sub2">M=1 已能到 N=10；N=20 全部归于随机</div><div class="chart" id="fig6c"></div></div>
+    </div>
+    <div class="legend" id="leg6a"></div>
+    <div class="legend" id="leg6b"></div>
+    <div class="legend" id="leg6c"></div>
+    <figcaption>论文 Fig. 6 的重绘（三张图各自的图例分三行；点击可隐藏曲线）。所有变体共用 SWA1 骨干，只在其上加时间机制；纯 SWA1（C 中 M=0）连 N=5 都停在随机水平，是天然的对照。<b>A</b>：四个线性注意力家族放宽到 [−1,1] 后全部改善，GDN-neg 在 N=30 达 0.95、GDP3-neg 0.94、GDN2-neg 0.80、KDA-neg 0.56。<b>B</b>：H=1、2 在 N=6 就崩，H=4 及以上都能外推；H=48 在 N=30 最高（0.86）。<b>C</b>：从 1 到 1024 个 token 都在 N=20 失败。</figcaption>
+  </figure>
+
+  <h3 id="neg">§5.1 负特征值线性注意力：把 β<sub>t</sub> 的上限从 1 改成 2</h3>
+  <div class="prose">
+    <p>回到式 (1)：把 <span class="m">β<sub>t</sub> ∈ [0,1]</span> 放宽为 <span class="m">β<sub>t</sub> ∈ [0,2]</span>，转移矩阵的谱就覆盖了 [−1,1]。作者把这个开关直接加到所有线性注意力变体上——包括较新的 Gated Delta Product（GDP，Siems et al., 2025）与 Gated DeltaNet-2（GDN2，Hatamizadeh et al., 2026）——<strong>所有变体一致改善</strong>，GDN-neg 基本解决了任务（N=30 时 0.95）。回看上面的 Householder 小工具：<span class="m">β=2</span>、<span class="m">k=(e<sub>i</sub>−e<sub>j</sub>)/√2</span> 时，<span class="m">I − βkk<sup>⊤</sup></span> 恰好就是对换 (i j) 的置换矩阵；这就是一层线性注意力「原地」完成一次交换所需的全部代数。</p>
+    <p>值得强调这只改动了<strong>转移的参数化</strong>：GDN 与 GDN-neg 的参数量完全相同（195.153M），层数、头数、宽度都不变。</p>
+  </div>
+
+  <h3 id="lact">§5.2 非线性快权重（LaCT）：把状态放进一个小网络的权重里</h3>
+  <div class="prose">
+    <p>第二种可行机制来自 LaCT（Zhang et al., 2025a）——一个 TTT-KVB 层，它的递归状态就是一个小内网络的参数。论文用的是无偏置的 SwiGLU：</p>
+  </div>
+  <div class="eq"><span><i>f</i><sub>W</sub>(<i>x</i>) = <i>W</i><sub>1</sub> [ silu(<i>W</i><sub>0</sub><i>x</i>) ⊙ (<i>W</i><sub>2</sub><i>x</i>) ] ,&nbsp;&nbsp; <i>W</i> = (<i>W</i><sub>0</sub>, <i>W</i><sub>1</sub>, <i>W</i><sub>2</sub>)</span><span class="num">(2)</span></div>
+  <div class="prose">
+    <p>LaCT 在每个干净 chunk <span class="m">C<sub>t</sub></span> 上把梯度聚合起来、对快权重做<strong>一次</strong>更新，随后的噪声 chunk 读取它。默认使用负点积的 KV 绑定目标，并与 MSE 目标做消融：</p>
+  </div>
+  <div class="eq"><span>ℓ<sup>dot</sup><sub>t</sub> = − Σ<sub><i>i</i>∈C<sub>t</sub></sub> ⟨ <i>f</i><sub>W</sub>(<i>k</i><sub>i</sub>), <i>v</i><sub>i</sub> ⟩ ,&nbsp;&nbsp; ℓ<sup>mse</sup><sub>t</sub> = ½ Σ<sub><i>i</i>∈C<sub>t</sub></sub> ‖ <i>f</i><sub>W</sub>(<i>k</i><sub>i</sub>) − <i>v</i><sub>i</sub> ‖²</span><span class="num">(3)</span></div>
+  <div class="prose">
+    <p>矩阵 <span class="m">W<sub>0</sub>, W<sub>1</sub>, W<sub>2</sub></span> 跨自回归 chunk 持续存在、在每层内部更新，给了模型一个视频目标可以学着使用的显式递归状态。把 SwiGLU 拆开写，可以把「在演化的特征映射」与「最终读出矩阵」分开：</p>
+  </div>
+  <div class="eq"><span>φ<sub>t</sub>(<i>x</i>) = silu(<i>W</i><sub>0,t</sub><i>x</i>) ⊙ (<i>W</i><sub>2,t</sub><i>x</i>) ,&nbsp;&nbsp; <i>f</i><sub>W<sub>t</sub></sub>(<i>x</i>) = <i>W</i><sub>1,t</sub> φ<sub>t</sub>(<i>x</i>)</span><span class="num">(4)</span></div>
+
+  <!-- ---------- Table 1 interactive ---------- -->
+  <div class="widget" id="ablWidget">
+    <h4>Tab. 1 消融：点一行，看它冻结/替换了 SwiGLU 的哪一部分，以及后果</h4>
+    <div class="abl">
+      <div class="rows" id="ablRows"></div>
+      <div>
+        <div class="swig">
+          <svg viewBox="0 0 460 150" role="img" aria-label="SwiGLU 快权重示意：输入 x 经 W0 与 W2 得到特征映射 φ，再经 W1 读出；高亮显示当前消融中在线更新与冻结的矩阵">
+            <defs><marker id="arr6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+            <text x="14" y="78" class="mono">x</text>
+            <line x1="30" y1="74" x2="70" y2="40" class="line" marker-end="url(#arr6)" stroke="currentColor" fill="none"/>
+            <line x1="30" y1="74" x2="70" y2="108" class="line" marker-end="url(#arr6)" stroke="currentColor" fill="none"/>
+            <rect id="sw0" x="72" y="22" width="72" height="34" rx="7" class="wbox"/><text x="108" y="44" text-anchor="middle" class="mono">W₀ · silu</text>
+            <rect id="sw2" x="72" y="90" width="72" height="34" rx="7" class="wbox"/><text x="108" y="112" text-anchor="middle" class="mono">W₂</text>
+            <line x1="144" y1="39" x2="190" y2="66" class="line" marker-end="url(#arr6)" stroke="currentColor" fill="none"/>
+            <line x1="144" y1="107" x2="190" y2="80" class="line" marker-end="url(#arr6)" stroke="currentColor" fill="none"/>
+            <circle cx="204" cy="73" r="13" fill="var(--surf3)" stroke="var(--rule2)"/><text x="204" y="78" text-anchor="middle" class="mono">⊙</text>
+            <text x="204" y="108" text-anchor="middle" class="mono" style="fill:var(--ink3); font-size:10.5px">φ_t(x) 特征映射</text>
+            <line x1="218" y1="73" x2="262" y2="73" class="line" marker-end="url(#arr6)" stroke="currentColor" fill="none"/>
+            <rect id="sw1" x="264" y="56" width="72" height="34" rx="7" class="wbox"/><text x="300" y="78" text-anchor="middle" class="mono">W₁ 读出</text>
+            <line x1="336" y1="73" x2="380" y2="73" class="line" marker-end="url(#arr6)" stroke="currentColor" fill="none"/>
+            <text x="388" y="78" class="mono">f_W(x)</text>
+            <g id="swLegend"><rect x="14" y="132" width="12" height="10" rx="2" fill="var(--fw-soft)" stroke="var(--fw)"/><text x="30" y="141" style="font-size:10.5px; fill:var(--ink3)">每 chunk 在线更新</text><rect x="140" y="132" width="12" height="10" rx="2" fill="var(--surf3)" stroke="var(--ink3)" stroke-dasharray="4 3"/><text x="156" y="141" style="font-size:10.5px; fill:var(--ink3)">冻结（只由外循环训练）</text></g>
+          </svg>
+          <div class="why" id="ablWhy"></div>
+        </div>
+        <div class="bars" id="ablBars" style="margin-top:12px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="prose">
+    <p><strong>头数越多、状态越小，追踪反而越好。</strong>宽度 D 固定时每头宽 d = D/H；SwiGLU 扩展比 r 下，<span class="m">W<sub>0</sub>, W<sub>2</sub> ∈ ℝ<sup>rd×d</sup></span>、<span class="m">W<sub>1</sub> ∈ ℝ<sup>d×rd</sup></span>，每层快权重共 <span class="m">H(3rd²) = 3rD²/H</span> 个标量。增加 H 会缩小状态，同时把更新拆到更多独立控制的头上——在这个实验里后者显然更重要。作者猜测单头时同一份快权重既要负责渲染又要负责状态更新，多头则允许某些通道专门化到任务相关的状态。</p>
+    <p><strong>单层线性内模型不够。</strong>把 SwiGLU 换成单层 MLP，递归存储还在、训练长度也拟合，但无法外推（Tab. 1：N=10 就 0.23）。对线性内映射 <span class="m">f<sub>S</sub>(x) = S<sup>⊤</sup>x</span>，一步点积梯度给出 <span class="m">S<sub>t</sub> = S<sub>t−1</sub> + ηk<sub>t</sub>v<sub>t</sub><sup>⊤</sup></span>——正是普通线性注意力的加性外积更新（App. B）。SwiGLU 内模型则产生一个随历史变化的特征映射，不存在同样的闭式结合律约简，因此 LaCT 拥有比线性注意力更丰富的更新类（Liu et al., 2026b）。</p>
+    <p><strong>状态追踪依赖的是特征映射的在线更新。</strong>只更新 <span class="m">W<sub>1</sub></span>（冻结 <span class="m">W<sub>0</sub>, W<sub>2</sub></span>）失败；更新 <span class="m">W<sub>0</sub>, W<sub>2</sub></span> 而固定 <span class="m">W<sub>1</sub></span> 则保留了大部分能力（N=30：0.64 vs 基线 0.69）。也就是说，能做 NC<sup>1</sup>-难状态追踪所需的复合更新，靠的是<em>每次交换都改变核</em>，而不是在固定特征空间里处理每次交换。</p>
+    <p><strong>内循环损失不决定追踪机制，但 MSE 更敏感。</strong>把点积更新的符号反过来（梯度上升）几乎不影响追踪（N=30 反而 0.72）——端到端训练能吸收快权重写入的符号，与 Liu et al. (2026b) 的观察一致。MSE 却连训练长度都拟合不了（0.22）。作者的解释：token 级单层线性情形下 MSE 恢复的是 DeltaNet 规则，但<em>整块聚合</em>的 MSE 残差引入了一个尺度随 chunk 大小增长的乘性转移，使内循环学习率极难调；两种损失引导写入的方式也不同——点积奖励朝值方向 <span class="m">v<sub>t</sub></span> 移动，MSE 追随完整残差 <span class="m">v<sub>t</sub> − f<sub>W</sub>(k<sub>t</sub>)</span> 直至精确重建。他们<em>试探性地</em>假设：配合权重归一化，简单的点积更新给了 LaCT 一个稳定、正则良好的写入空间，外层训练可以围绕隐状态来组织它；MSE 则把同一空间更紧地绑在可见的、为渲染服务的值上。</p>
+  </div>
+
+  <h4>App. B：线性 TTT 一步更新 = 线性注意力 / DeltaNet（以及为什么整块 MSE 会「膨胀」）</h4>
+  <div class="grid2">
+    <div class="card">
+      <p><b>点积绑定损失</b> <span class="m">ℓ<sub>t</sub>(S) = −⟨S<sup>⊤</sup>k<sub>t</sub>, v<sub>t</sub>⟩</span>，梯度 <span class="m">−k<sub>t</sub>v<sub>t</sub><sup>⊤</sup></span>，一步更新：</p>
+      <div class="eq" style="margin:8px 0"><span><i>S</i><sub>t</sub> = <i>S</i><sub>t−1</sub> + η<sub>t</sub> <i>k</i><sub>t</sub><i>v</i><sub>t</sub><sup>⊤</sup>,&nbsp; <i>o</i><sub>t</sub> = <i>S</i><sub>0</sub><sup>⊤</sup><i>q</i><sub>t</sub> + Σ<sub>i≤t</sub> η<sub>i</sub> <i>v</i><sub>i</sub>(<i>k</i><sub>i</sub><sup>⊤</sup><i>q</i><sub>t</sub>)</span><span class="num">(A1)</span></div>
+      <p>S<sub>0</sub>=0 时就是因果线性注意力的加性外积记忆（Schlag et al., 2021）。</p>
+      <p><b>MSE 绑定损失</b> <span class="m">½‖S<sup>⊤</sup>k<sub>t</sub> − v<sub>t</sub>‖²</span>，一步更新：</p>
+      <div class="eq" style="margin:8px 0"><span><i>S</i><sub>t</sub> = (<i>I</i> − η<sub>t</sub><i>k</i><sub>t</sub><i>k</i><sub>t</sub><sup>⊤</sup>) <i>S</i><sub>t−1</sub> + η<sub>t</sub><i>k</i><sub>t</sub><i>v</i><sub>t</sub><sup>⊤</sup></span><span class="num">(A2)</span></div>
+      <p>‖k<sub>t</sub>‖=1 时 <span class="m">S<sub>t</sub><sup>⊤</sup>k<sub>t</sub> = (1−η<sub>t</sub>)S<sub>t−1</sub><sup>⊤</sup>k<sub>t</sub> + η<sub>t</sub>v<sub>t</sub></span>：η 在旧值与新值之间插值，η=1 精确替换——这就是写入强度 β<sub>t</sub>=η<sub>t</sub> 的 DeltaNet delta 规则。</p>
+    </div>
+    <div class="card">
+      <p><b>整块更新。</b>chunk 大小 c，<span class="m">K<sub>m</sub>, V<sub>m</sub></span> 堆叠键值，<span class="m">D<sub>m</sub> = diag(η<sub>i</sub>)</span>，所有 token 的梯度都在更新前的状态处计算：</p>
+      <div class="eq" style="margin:8px 0"><span><i>S</i><sup>dot</sup><sub>m</sub> = <i>S</i><sub>m−1</sub> + <i>K</i><sub>m</sub><i>D</i><sub>m</sub><i>V</i><sub>m</sub><sup>⊤</sup>,&nbsp; <i>S</i><sup>mse</sup><sub>m</sub> = (<i>I</i> − <i>K</i><sub>m</sub><i>D</i><sub>m</sub><i>K</i><sub>m</sub><sup>⊤</sup>)<i>S</i><sub>m−1</sub> + <i>K</i><sub>m</sub><i>D</i><sub>m</sub><i>V</i><sub>m</sub><sup>⊤</sup></span><span class="num">(A3)</span></div>
+      <p>c=1 时 MSE 规则就是 DeltaNet；c&gt;1 时它是一次批梯度步，而非顺序 DeltaNet 更新之积。记 <span class="m">G<sub>m</sub> = K<sub>m</sub>D<sub>m</sub>K<sub>m</sub><sup>⊤</sup></span>，原始 MSE 转移在 Frobenius 范数下非扩张当且仅当 <span class="m">λ<sub>max</sub>(G<sub>m</sub>) ≤ 2</span>。chunk 越大，G<sub>m</sub> 里堆的半正定秩一项越多（特征相关时尤甚），要保持非扩张就得把内循环学习率按 chunk 缩小，最坏 <span class="m">η ≤ 2/c</span>——而这里一个 chunk 有 <b>c = 960</b> 个 token。点积规则在线性设定下没有对应的乘性转移。</p>
+      <p>对 SwiGLU 内模型，<span class="m">W<sub>1</sub></span> 的更新恰是同一形式，只是把 K<sub>m</sub> 换成 <span class="m">Φ<sub>m</sub> = [φ(k<sub>i</sub>)]</span>：<b>冻结特征映射 = 固定核下的分块线性注意力</b>，即 Tab. 1 里超过训练长度就失败的那个变体；完整 LaCT 还更新 W<sub>0</sub>、W<sub>2</sub> 并在每个 chunk 后恢复三个矩阵的行范数。即便在点积目标下，完整 LaCT 也不会退化成静态核的前缀和。</p>
+    </div>
+  </div>
+
+  <h3 id="scratch">§5.3 显式 scratchpad token：状态不必住在权重里，但「只会加」不够</h3>
+  <div class="prose">
+    <p>作者也测试了 token 空间的寄存器：每层加 M 个记忆 token，每个 block 通过注意力读写它们，并按 <span class="m">M ← M + ΔM</span> 加性地跨 chunk 携带（Fig. 3C）。在 960 个视频 token 旁边<strong>只加 1 个记忆 token</strong>，就把停在随机水平的 SWA1 基线提到了完美的分布内准确率，并能泛化到 N=10。但从 1 到 1024 个 token 的所有配置都在 N=20 跌回随机（Fig. 6C）。作者发现，纯加性更新让携带的记忆范数在长 rollout 上爆炸；LaCT 通过快权重（行范数归一）把状态归一化得更好，因而作为一个正则更好的寄存器持续外推。</p>
+  </div>
+</section>
+
+<!-- ============================================================ §6 beyond -->
+<section class="sec" id="beyond">
+  <div class="eyebrow"><span>超出 Shell Game</span><span class="paper">§6 · App. E · App. F</span></div>
+  <h2>当状态不再只是动作的函数：Memory Maze 与 3D Block World</h2>
+  <p class="lead">Shell Game 的结论很干净：只要正确的帧依赖于五个以上隐藏物体之间的长交换链，当前 AR 视频骨干就应该失败。但真实世界模型难得多——很多预测问题虽在 TC<sup>0</sup> 内却仍难学，另一些则可能需要 NC<sup>1</sup>-难的状态追踪；更重要的是，<strong>世界状态很少是动作流的纯函数</strong>：它还得从观测里更新，还有一部分在视野之外自行演化。论文用两个「最初促成这项研究」的困难设定收尾。</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Memory Maze（Pašukonis et al., 2022；Po et al., 2025）</h4>
+      <p>给一段干净的探索前缀，生成后续帧。128×128，400 帧片段训练；29K 训练 / 1K 验证轨迹，各 1001 帧；同一批骨干家族。</p>
+      <dl class="kv">
+        <dt>global-state</dt><dd>每帧提供真实位姿（归一化 2D 位置 + 2D 朝向，两层 MLP 投影到 D）：观测被位姿「打上标签」，递归状态或 KV cache 可以当作按位姿索引的视觉记忆——<b>纯检索</b></dd>
+        <dt>local-action</dt><dd>只给初始位姿 + 六个离散控制（no-op、前进、左转、右转、前左、前右）：必须先<b>追踪位姿</b>，再检索该位置的视觉记忆——<b>状态追踪 + 检索</b></dd>
+        <dt>原版的问题</dt><dd>MuJoCo 动力学让同一个离散动作产生不同位移，位姿漂移累积；所有骨干在 local-action 下都严重退化</dd>
+        <dt>确定性重建</dt><dd>用网格运动学重放原版 9×9 布局：前进恰好一格、转向恰好 90°；位姿成为动作的确定函数。追踪它是 SE(2) 中虚拟阿贝尔子群里旋转单位步的迭代加法——很可能在 TC<sup>0</sup> 内，远比 S<sub>5</sub> 复合容易。<b>允许撞墙</b>会打破这一点：被挡住的移动变成 no-op，更新取决于看不见的布局，必须从画面纠正</dd>
+        <dt>评测</dt><dd>生成 220 帧续写，前缀 177 帧（400F，训练长度）或 577 帧（800F，对齐 Po et al.）；因果 DiT 用训练上下文 SWA19（20 chunk = 397 帧）</dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h4>Textured 3D Block World（Lillemark et al., 2026）</h4>
+      <p>基于 MiniWorld 的房间，方块自己持续运动，所以当相机转开时场景仍在演化——<b>无动作也在变的状态</b>。</p>
+      <dl class="kv">
+        <dt>控制</dt><dd>四个离散动作（no-op、前进、左转、右转），每次转向恰好 90°；初始位姿只在第一帧 latent 注入</dd>
+        <dt>数据</dt><dd>500 帧 episode，128×128；Wan VAE 的 4× 时间压缩处理不好 90° 的急转，改用 FloWM 的逐帧 MAE-ViT 图像 VAE（8 通道、16× 空间压缩、无时间压缩），一个动作对齐一帧 latent；chunk 仍是 5 帧 latent</dd>
+        <dt>训练</dt><dd>160 帧片段，NorMuon lr 2×10<sup>−4</sup>，batch 32，200K 步；干净前缀覆盖前半到全部 chunk 随机；LaCT 仍用交错打包、不用前缀</dd>
+        <dt>评测</dt><dd>80 帧干净前缀；160 帧设定生成 80 帧（训练长度），320 帧设定生成 240 帧</dd>
+      </dl>
+    </div>
+  </div>
+
+  <h3>结果：Memory Maze（Tab. A3 / A4）</h3>
+  <div class="ctrls">
+    <span class="toggle" id="mazeSet"><button class="on" data-set="orig">原版（MuJoCo，AdamW）</button><button data-set="nocoll">确定性 · 无碰撞</button><button data-set="coll">确定性 · 有碰撞</button></span>
+    <span class="toggle" id="mazeLen"><button data-len="400">400F</button><button class="on" data-len="800">800F</button></span>
+  </div>
+  <div class="tscroll"><table class="t" id="mazeTable"></table></div>
+  <p class="small" style="margin-top:8px" id="mazeNote"></p>
+  <div class="prose" style="margin-top:14px">
+    <p><strong>读法。</strong>global-state 下 Mamba2 与 LaCT 都很强——两种机制都能在长轨迹上存取视觉信息，<em>检索不是瓶颈</em>。原版 local-action 下所有模型都差很多，进一步检查指向 MuJoCo 动力学带来的定位误差累积。确定性重建把 global 与 local 的差距大幅缩小：无碰撞时 LaCT 在 800F 下两种条件都达到 SSIM 0.952，差距基本关闭——说明 local-action 本身不是原版差距的主因。允许碰撞后所有骨干相对无碰撞都下降，local-action 下降得更多：被挡住的前进让位姿不变，模型得从帧里判断动作是否成功再更新状态，这已不再是纯动作的前缀累积。LaCT 在大多数 800F 设定里最强，尤其是 local-action；而 <strong>GDN-neg 与 GDN 表现相近</strong>——Shell Game 上决定性的负特征值开关在这里没有一致收益。另外，尽管只在 400F 训练，多数递归变体在更长的 800F 前缀下反而更好。作者也提到自己的因果 DiT 在原版 800F 上 PSNR 29.25、Mamba2+SWA1 32.18，高于 Po et al. (2025) 同类模型的 28.8 与 28.2（后者还额外做了 800F 训练），归因于 DiT 骨架、潜空间与优化上的进步。</p>
+  </div>
+
+  <h3>结果：3D Block World（Tab. A5 / A6，local-action）</h3>
+  <div class="charts2">
+    <div class="mini"><div class="ttl2">A. 骨干比较 · PSNR（160 帧 / 320 帧）</div><div class="sub2">SWA1 组只在递归更新上不同；LaCT8 远好于其他递归骨干，但 SWA5 因果 DiT 更好</div><div class="chart" id="figbw"></div></div>
+    <div class="mini"><div class="ttl2">B. Mamba2 的 SWA 窗口扫描 · 320 帧 PSNR</div><div class="sub2">SWA1→SWA10 从 21.3 到 32.3；SWA15/20 又回落</div><div class="chart" id="figbw2"></div></div>
+  </div>
+  <div class="tscroll" style="margin-top:14px">
+    <table class="t">
+      <thead><tr><th>骨干</th><th>k</th><th>SSIM↑ 160</th><th>PSNR↑ 160</th><th>LPIPS↓ 160</th><th>SSIM↑ 320</th><th>PSNR↑ 320</th><th>LPIPS↓ 320</th></tr></thead>
+      <tbody>
+        <tr><td>Causal DiT（训练上下文 SWA31）</td><td>31</td><td class="best">0.9944</td><td class="best">42.03</td><td class="best">0.0058</td><td>0.9630</td><td>24.98</td><td>0.0495</td></tr>
+        <tr><td>Causal DiT (SWA5)</td><td>5</td><td>0.9922</td><td>40.02</td><td>0.0088</td><td class="best">0.9907</td><td class="best">37.60</td><td class="best">0.0111</td></tr>
+        <tr><td>Causal DiT (SWA1)</td><td>1</td><td>0.9376</td><td>22.02</td><td>0.0877</td><td>0.9104</td><td>20.21</td><td>0.1284</td></tr>
+        <tr><td>Mamba2 + SWA1</td><td>1</td><td>0.9473</td><td>23.88</td><td>0.0745</td><td>0.9255</td><td>21.32</td><td>0.1060</td></tr>
+        <tr><td>GDN + SWA1</td><td>1</td><td>0.9469</td><td>23.96</td><td>0.0747</td><td>0.9250</td><td>21.52</td><td>0.1067</td></tr>
+        <tr><td>GDN-neg + SWA1</td><td>1</td><td>0.9478</td><td>24.42</td><td>0.0723</td><td>0.9260</td><td>21.36</td><td>0.1037</td></tr>
+        <tr class="hi"><td>LaCT8 + SWA1</td><td>1</td><td>0.9908</td><td>38.26</td><td>0.0114</td><td>0.9791</td><td>29.36</td><td>0.0288</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose" style="margin-top:14px">
+    <p>约 200M 参数下所有骨干都能不错地建模训练长度的 rollout，多数在 320 帧仍视觉连贯。限定 SWA1 的组里 LaCT 显著优于其他递归骨干（320 帧 PSNR 29.36 / LPIPS 0.0288，Mamba2 为 21.32 / 0.1060）——它没有任何针对视野外物体的显式状态目标或结构约束，非线性快权重更新可能只是提供了更有表达力的载体；GDN 与 Mamba2 相近，GDN-neg 几乎没有额外收益。<strong>但在这个任务上，加宽局部注意力窗口比换递归更新影响更大</strong>：Mamba2 从 SWA1 到 SWA10，320 帧 PSNR 从 21.32 升到 32.29，LPIPS 从 0.1060 降到 0.0167，SWA15、SWA20 又回落；逐帧编码与 90° 急转让相邻观测的冗余更少，所以更长的近期上下文尤其有用。作者也坦言这些带窗口的基线相对 Lillemark et al. (2026) 报告的数字（FloWM / DFoT / DFoT-SSM 在 70+210 帧设定下 PSNR 30.33 / 20.43 / 19.15）很强：他们更长的 80+240 帧设定里 Causal SWA5、Mamba2+SWA10、LaCT+SWA1 分别达到 37.60、32.29、29.36——<strong>任务的大部分可以靠骨干规模和足够的近期上下文解决</strong>，开放房间布局里运动物体常常仍在视野内或很快回到注意力窗口里。</p>
+  </div>
+</section>
+
+<!-- ============================================================ discussion & my reservations -->
+<section class="sec" id="limits">
+  <div class="eyebrow"><span>讨论与局限</span><span class="paper">App. G · §7</span></div>
+  <h2>作者自己划的边界，以及我读下来的保留意见</h2>
+
+  <h3>作者的讨论（App. G）</h3>
+  <div class="grid2">
+    <div class="card"><h4>global-state 与 local-action 条件</h4><p>很多近期世界模型直接以全局相机位姿或预设轨迹为条件（交互时通过校准控制器把键鼠映射成相机运动），这支持精确视角控制与按位姿检索，但假定了相机状态可得、把自定位排除在学习问题之外。原始离散动作更便宜，但模型必须自己推断局部控制如何改变全局状态。作者认为「从初始位姿 + 局部动作流恢复位姿」几乎没被直接研究过；原版 Memory Maze 已经表明，在 MuJoCo 下积分出的位姿会漂移，没有任何 local-action 骨干恢复到 global-state 的保真度。</p></div>
+    <div class="card"><h4>状态载体与可学性</h4><p>LLM 可以追加一个快照当前状态的 token 并在下一步读回，监督轨迹或序列级奖励可以教会这套协议；纯视频训练没有这样的目标。大系统正开始据此拆分问题——Cosmos 3 把推理交给一个专门的自回归塔，再由独立的扩散生成器渲染。把状态留在视频骨干内部正是本文递归变体所测试的，但作者常发现<b>表达力本身不够</b>：非线性 RNN 在玩具 S<sub>5</sub> 上一层就解，进了视频栈后 vanilla RNN 连训练长度都拟合不了，GRU 拟合了但外推仍跌向随机；单头 LaCT 携带最大的状态却不能外推，更多头用更少状态反而追踪更好——指向分解式更新或更容易的优化，而非原始容量。收益也有上限：在确定性 Memory Maze 上把 LaCT 头数从 8 提到 48 会降低视觉保真度，所以全篇以 LaCT8 为参考。内架构、更新损失、归一化、更新调度都影响一个形式上足够表达的快权重模型是否学到有用的转移——<b>一次失败的运行可能反映学习困难，而非表示能力的极限</b>。</p></div>
+    <div class="card"><h4>LaCT 的 chunk 大小</h4><p>LaCT 每个 chunk 做一次串行快权重更新：长度 L、chunk 大小 c 的序列约得到 L/c 次串行更新，chunk 内的交换必须先由固定深度的 chunk 处理器复合、再写入状态。按 Fig. 1 的深度扫描，chunk 越大，工作就从递推被推回骨干深度。作者在玩具设定里尝试过 TTT 层的 chunk 大小消融，但小 chunk 把快权重更新展开成极长的梯度链，训练太慢、太不稳定而没能完成扫描；能跑完的运行方向符合预期——更小的 chunk 在更低深度解出任务。视频上没有做受控扫描。矩阵状态线性注意力更容易沿这条轴移动（外积写入可以定义在 token / 帧 / 组粒度并保留优化过的并行核），非线性快权重则没有这样的核；在他们的运行里 LaCT 与 scratchpad 的训练明显慢于注意力与线性注意力基线。</p></div>
+    <div class="card"><h4>局限</h4><p>Shell Game 与 S<sub>5</sub> 状态追踪一一对应，但更一般的设定没有这样干净的对应；那里的一部分状态必须从观测纠正（通常没有动作标注），作者还不知道哪种状态追踪才是视频世界模型的正确抽象。有效的机制只通过<b>合成任务上的长度外推</b>验证，只在<b>约 200M 一个规模</b>、<b>一种 flow-matching 配方</b>下；是否迁移到真实视频、能否在现代世界模型的规模下存活，都未经检验。</p></div>
+  </div>
+
+  <h3>我的保留意见（读者视角，不代表论文观点）</h3>
+  <div class="prose">
+    <ul>
+      <li><strong>深度并不完全对齐。</strong>参数量匹配在 ~200M，但 LaCT8 是 12 层、递归/线性注意力族是 8 层、纯注意力 DiT 是 12 层。论文自己的玩具实验说明深度会影响「捷径」能复合多少次交换。当然 12 层的 DiT 一样失败，所以深度不是 LaCT 成功的解释；但 GDN-neg（8 层）与 LaCT8（12 层）之间的比较、以及 LaCT 头数扫描里 L 从 8 变到 12，都掺了深度这个变量。</li>
+      <li><strong>两套不同的训练打包。</strong>LaCT / scratchpad 用干净-噪声交错，其余用 context mixing（p=0.5）。作者说明这是各自的惯例，并且 scratchpad 用了同样的交错打包却仍失败，这在一定程度上排除了「交错本身导致成功」；但严格说这仍是一个未被单独消融的差异。</li>
+      <li><strong>「0.0」不等于「选错杯」。</strong>D.3 明说检测不到小球就计错。双向 DiT 在 N=8 的 0.0 更像渲染崩溃；Fig. 4A 里它的曲线不应被解读为「状态追踪比别人更差」。同理，所有准确率都混合了「画没画出球」与「放没放对位置」两种失败。</li>
+      <li><strong>负特征值机制的普适性有限。</strong>它在 Shell Game 上决定性，在 Memory Maze 与 Block World 上没有一致收益——作者自己也承认「复合动作置换链的代数结构不直接迁移」。这意味着标题的问题在不同世界里答案不同；Shell Game 是对 S<sub>5</sub> 的精确对齐，而不是世界模型通用的诊断。</li>
+      <li><strong>Block World 上最强的其实是加宽窗口的因果 DiT。</strong>SWA5 的 37.60 PSNR 高于 LaCT8 的 29.36（LaCT 只配 SWA1）。论文没有报告 LaCT + 更宽 SWA 的组合，「非线性快权重更有表达力」的说法在这个任务上还没有与「更长近期上下文」正面比过。</li>
+      <li><strong>scratchpad 的失败被归因于范数爆炸，但没有尝试修复。</strong>既然 LaCT 靠行范数归一化稳住了状态，一个带归一化或门控的 token 寄存器是否也能外推，是一个很自然、却没做的对照。「携带的状态 + 只会加的更新不够」这个结论，目前只对朴素加性版本成立。</li>
+      <li><strong>探针数字的读法。</strong>Fig. 5B 的固定探针库读出对 LaCT 和 GDN-neg 有利，但读出方式对不同状态形式并不等价（对 KV cache 是注意力查询，对矩阵状态是线性读，对快权重是非线性前向）；探针准确率的差异里混有「读出方式合不合适」的因素。</li>
+      <li><strong>玩具实验的尾部噪声。</strong>Fig. 1C/D 里 KDA-neg 在 S<sub>5</sub> 上外推（0.69）反而好于 S<sub>3</sub>（0.44），提示这些外推数字受随机性影响不小；把它们当作定性趋势更稳妥。</li>
+    </ul>
+    <p>这些保留意见并不推翻主线：在一个设计得极干净的任务上，「像素目标不监督隐状态 → 状态只能在架构里 → 只追加的 cache 不够 → 需要携带状态 + 可反射/非线性的原地更新」这条论证是自洽的，而且每一环都有对应实验。它们只是提醒：这篇论文回答的是「在什么条件下能追踪」，而不是「哪个骨干更好」。</p>
+  </div>
+</section>
+
+<!-- ============================================================ Awesome coordinates -->
+<section class="sec" id="context">
+  <div class="eyebrow"><span>坐标系</span><span class="paper">Awesome-Interactive-Video-World-Models</span></div>
+  <h2>放回 Awesome-Interactive-Video-World-Models 的坐标系里</h2>
+  <p class="lead">按列表的三条轴，这篇属于<strong>「长时程一致性与记忆」</strong>轴上的分析型工作：不提出系统，而是给出一个可控基准和一组关于「状态住在哪里」的机制结论。它与列表里几篇已收录/已精读的工作有直接的血缘。</p>
+  <div class="rel">
+    <div class="card"><b>Long-Context State-Space Video World Models（Po et al., 2025）</b>本文 Mamba2 + SWA 骨干、空间分块扫描、context mixing、Memory Maze 协议都直接沿用它（共同作者 Xun Huang）。本文可以看作对它的追问：SSM 的状态到底能不能承载非交换的隐状态更新？答案是「转移特征值非负时不能」。</div>
+    <div class="card"><b>Test-Time Training Done Right / LaCT（Zhang et al., 2025a）</b>本文最成功的机制。LaCT 原本为硬件效率把 TTT 更新放大到大 chunk；本文发现它在状态追踪上的关键不是容量，而是特征映射的在线更新与多头分解。</div>
+    <div class="card"><b>TTT with KV binding is secretly linear attention（Liu et al., 2026b）</b>App. B 的理论基础：线性内模型 + 一步梯度 = 线性注意力 / DeltaNet。本文用消融反过来证明：只有跳出这个等价（非线性内模型 + 更新特征映射），才能外推。</div>
+    <div class="card"><b>Diffusion Forcing / Self Forcing（Chen et al., 2024；Huang et al., 2025b）</b>本文全篇用 diffusion forcing 训练，并在 App. A 指出：teacher/diffusion forcing 乃至 Self Forcing 的截断梯度都不能让「生成的 chunk」学会携带隐状态——这是对这类训练范式的一条明确的能力边界。</div>
+    <div class="card"><b>ReWorld（列表里上一篇精读）</b>ReWorld 用 landmark bank 与定额 KV 预算做长时召回，属于「记忆 = 检索」路线。本文的 Memory Maze global-state 结果印证「检索不是瓶颈」，而 local-action / 碰撞 / 自行演化的物体才是检索式记忆覆盖不到的部分。</div>
+    <div class="card"><b>Unlocking State-Tracking in Linear RNNs through Negative Eigenvalues（Grazzi et al., 2024）· DeltaProduct（Siems et al., 2025）</b>语言侧的理论来源。本文把「β ∈ [0,2]」的开关原样搬到 GDN / GDN2 / GDP3 / KDA 四个视频骨干上，全部一致改善。</div>
+    <div class="card"><b>Can VLMs solve the Shell Game?（Liu &amp; Lee, 2026）· Benchmarking visual state tracking（Yu et al., 2026）</b>理解侧的同类基准：本文借用了前者的渲染器，把问题从「看视频答题」改成「按动作生成视频」，把状态追踪与生成绑在一起。</div>
+    <div class="card"><b>Cosmos 3（Aditi et al., 2026）</b>作者在讨论里引用它作为另一条路线：把推理交给专门的自回归塔、扩散模型只负责渲染——即承认视频骨干内部难以承载状态，改用外置的符号/推理载体。</div>
+    <div class="card"><b>SANA-WM / Gated DeltaNet 路线（Zhu et al., 2026）</b>列表里以线性注意力做分钟级世界模型的代表。本文的结论对它有直接的工程含义：如果转移谱停留在 [0,1]，长链隐状态就追踪不了；放宽到 [−1,1] 是几乎零成本的改动。</div>
+  </div>
+</section>
+
+<!-- ============================================================ appendix quick ref -->
+<section class="sec" id="ref">
+  <div class="eyebrow"><span>附录速查</span><span class="paper">App. C · D · E · F</span></div>
+  <h2>附录速查</h2>
+  <div class="grid2">
+    <div class="card">
+      <h4>Shell Game 一页纸</h4>
+      <dl class="kv">
+        <dt>渲染</dt><dd>Three.js / WebGL，改自 Liu &amp; Lee (2026)；256×192；5 杯；13 动作</dd>
+        <dt>episode</dt><dd>reveal · lower · swap×N · reveal；N+3 chunk；5(N+3) latent；20N+57 像素帧</dd>
+        <dt>VAE</dt><dd>Wan 2.1，16 通道，4× 时间、8× 空间压缩；chunk = 5 latent = 32×24 网格 → 1×2×2 patch → 960 token</dd>
+        <dt>DiT</dt><dd>D=1152，16 头 × 72，QK-norm，3D RoPE，FFN 4D GELU；时间步 256-d 正弦、动作 72-d 查表 → AdaLN；因果模型默认 SWA1</dd>
+        <dt>训练</dt><dd>30K 条 N=5 序列；diffusion forcing；flow matching shift 3；FlexAttention；batch 16；NorMuon 2×10<sup>−4</sup>；200K 步；EMA</dd>
+        <dt>LaCT</dt><dd>点积绑定损失；内循环基础 lr 10<sup>−3</sup>；行范数归一；每个干净 chunk 一次更新；r=2</dd>
+        <dt>评测</dt><dd>64 episode；50 步；N=5…30；检测器 r − max(g,b) &gt; 0.18；随机 0.2；PSNR/SSIM/LPIPS 对续写段计算</dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h4>三个任务的「状态」各是什么</h4>
+      <dl class="kv">
+        <dt>Shell Game</dt><dd>S<sub>5</sub> 置换的一个坐标；纯动作函数；NC<sup>1</sup>-完全</dd>
+        <dt>Memory Maze（确定性、无碰撞）</dt><dd>SE(2) 位姿 = 旋转单位步的迭代加法（虚拟阿贝尔子群），大概率在 TC<sup>0</sup>；纯动作函数</dd>
+        <dt>Memory Maze（有碰撞）</dt><dd>位姿更新取决于看不见的布局；必须从观测判断动作是否成功</dd>
+        <dt>3D Block World</dt><dd>相机之外的物体自己在动；状态在无动作时演化；开放房间使物体常回到窗口内</dd>
+      </dl>
+      <h4 style="margin-top:16px">Tab. 1 数字（LaCT8，N=5/10/20/30）</h4>
+      <dl class="kv">
+        <dt>baseline</dt><dd>1.00 / 1.00 / 0.98 / 0.69</dd>
+        <dt>+1-layer MLP</dt><dd>1.00 / 0.23 / 0.23 / 0.13</dd>
+        <dt>Freeze W₀,W₂</dt><dd>1.00 / 0.14 / 0.30 / 0.16</dd>
+        <dt>Freeze W₁</dt><dd>1.00 / 1.00 / 0.97 / 0.64</dd>
+        <dt>Gradient ascent</dt><dd>1.00 / 1.00 / 0.95 / 0.72</dd>
+        <dt>MSE loss</dt><dd>0.22 / 0.16 / 0.22 / 0.22</dd>
+      </dl>
+    </div>
+  </div>
+  <h3>术语表</h3>
+  <div class="gloss">
+    <div><b>状态追踪 / 词问题</b><span>读入群元素序列，输出其复合；S<sub>5</sub> 版本是 NC<sup>1</sup>-完全的经典难例。</span></div>
+    <div><b>TC⁰ / NC¹</b><span>常数深度多项式规模阈值电路 / O(log n) 深度有界扇入布尔电路；固定深度 Transformer、SSM 落在前者。</span></div>
+    <div><b>swap-only</b><span>输入限制为对换；链长最多拉长常数倍，难度不变。</span></div>
+    <div><b>广义 Householder 转移</b><span>I − βkkᵀ，‖k‖=1；唯一非 1 特征值为 1−β；β=2 为精确反射。</span></div>
+    <div><b>-neg</b><span>把线性注意力转移谱从 [0,1] 放宽到 [−1,1]（β ∈ [0,2]）。</span></div>
+    <div><b>delta 规则 / DeltaNet</b><span>先擦掉键上的旧关联再写入残差，S = (I − βkkᵀ)S + βkvᵀ；门控变体加入数据依赖衰减。</span></div>
+    <div><b>TTT-KVB / TTT-E2E</b><span>把递归状态做成小内网络的权重，用键值绑定损失在线更新 / 用外层任务损失端到端反传到部分权重。</span></div>
+    <div><b>LaCT</b><span>大 chunk 的 TTT：在整段干净 chunk 上一次更新快权重，与局部注意力配对。</span></div>
+    <div><b>快权重 / 慢权重</b><span>前向过程中在线改写的参数 / 外循环梯度训练的参数（Q/K/V 投影等）。</span></div>
+    <div><b>diffusion forcing</b><span>teacher forcing 的扩散版：每个 chunk 独立噪声等级，同一序列内混合去噪程度。</span></div>
+    <div><b>context mixing</b><span>以概率 0.5 把随机前缀替换成干净 latent，只对其余噪声 chunk 计算损失。</span></div>
+    <div><b>SWA{k}</b><span>滑窗注意力：当前 chunk + 前 k 个 chunk。</span></div>
+    <div><b>scratchpad token</b><span>逐层 M 个可读写记忆 token，M ← M + ΔM 加性携带。</span></div>
+    <div><b>固定探针库</b><span>B 个固定随机高斯向量，作为查询/读向量去读携带状态，再训线性探针。</span></div>
+    <div><b>global-state / local-action</b><span>每帧给真实位姿 / 只给初始位姿与离散控制。</span></div>
+    <div><b>NorMuon</b><span>Muon 的归一化变体；本文里比 AdamW 收敛更早。</span></div>
+  </div>
+</section>
+</main>
+<footer>
+  <div class="wrap">
+    <p>精读对象：Shin, Hong, Park, Huang. <em>Can Video World Models Track Unobserved World States?</em> arXiv:2608.30692v1, 2026-08-31（CC BY-NC-SA 4.0）。</p>
+    <p>本页所有曲线与柱状数据均从 arXiv HTML 版的矢量图（SVG）逐点解析，准确率为 64 个 episode 均值、取值为 1/64 的整数倍；表格数字来自论文 Tab. 1、A1–A6。示意图为本页重绘，并非论文原图。</p>
+    <p>Awesome-Interactive-Video-World-Models · docs/ · 2026-09-02</p>
+  </div>
+</footer>
+<script>
+(function(){
+'use strict';
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+const NS = 'http://www.w3.org/2000/svg';
+const svgEl = (tag, attrs={}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = (v, d=3) => (Math.round(v*1000)/1000).toFixed(d).replace(/\.?0+$/,'');
+
+/* ============================================================ chrome */
+const root = document.documentElement;
+const themeBtn = $('#themeBtn');
+function currentTheme(){ const t = root.getAttribute('data-theme'); if (t) return t; return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; }
+themeBtn.addEventListener('click', () => { const next = currentTheme()==='dark' ? 'light' : 'dark'; root.setAttribute('data-theme', next); try{ localStorage.setItem('sg-theme', next);}catch(e){} rerenderCharts(); });
+try{ const saved = localStorage.getItem('sg-theme'); if (saved) root.setAttribute('data-theme', saved); }catch(e){}
+matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => rerenderCharts());
+
+const prog = $('#prog');
+addEventListener('scroll', () => { const h = document.documentElement; const p = h.scrollTop / (h.scrollHeight - h.clientHeight); prog.style.width = (p*100).toFixed(2)+'%'; }, {passive:true});
+
+const jumpBtn = $('#jumpBtn'), jumpMenu = $('#jumpMenu');
+$$('section.sec').forEach(sec => { const h2 = $('h2', sec), eb = $('.eyebrow .paper', sec); if (!h2) return; const a = document.createElement('a'); a.href = '#'+sec.id; a.innerHTML = `<span class="sec">${eb ? eb.textContent.split('·')[0].trim() : ''}</span><span>${h2.textContent}</span>`; jumpMenu.appendChild(a); });
+jumpBtn.addEventListener('click', e => { e.stopPropagation(); const open = jumpMenu.classList.toggle('open'); jumpBtn.setAttribute('aria-expanded', open); });
+document.addEventListener('click', e => { if (!jumpMenu.contains(e.target)) jumpMenu.classList.remove('open'); });
+jumpMenu.addEventListener('click', () => jumpMenu.classList.remove('open'));
+
+/* ============================================================ shell game */
+(function game(){
+  const svg = $('#stageSvg'), cupsG = $('#cups');
+  const slotX = i => 70 + i*105;
+  const K = 5;
+  let cupAt = [0,1,2,3,4];      // slot -> cup id
+  let ball = 1;                 // slot holding the ball (0-based)
+  let lifted = true;            // reveal state
+  let sel = null, N = 0, busy = false, actions = ['reveal'];
+  let revealedAtEnd = false;
+  const cupEls = [];
+  for (let c=0;c<K;c++){
+    const g = svgEl('g', {class:'cup', 'data-cup':c}, cupsG);
+    g.style.transformOrigin = '0 0';
+    svgEl('path', {class:'body', d:'M-30 6 L-22 -60 L22 -60 L30 6 Z'}, g);
+    svgEl('rect', {class:'rim', x:-31, y:2, width:62, height:8, rx:3}, g);
+    svgEl('rect', {class:'rim', x:-23, y:-66, width:46, height:7, rx:3}, g);
+    cupEls.push(g);
+    g.addEventListener('click', () => onCup(c));
+  }
+  const ballEl = svgEl('circle', {class:'ballc', r:11}, cupsG);
+  const labels = [];
+  for (let i=0;i<K;i++){ labels.push(svgEl('text', {class:'slotlbl', x:slotX(i), y:232, 'text-anchor':'middle'}, svg)); labels[i].textContent = String(i+1); }
+  cupsG.appendChild(ballEl); // ball behind cups? keep cups above ball: re-append cups
+  cupEls.forEach(g => cupsG.appendChild(g));
+  function baseY(){ return 188; }
+  function render(){
+    for (let s=0;s<K;s++){ const c = cupAt[s]; cupEls[c].style.transform = `translate(${slotX(s)}px, ${baseY() + (lifted?-46:0)}px)`; cupEls[c].classList.toggle('sel', sel===c); cupEls[c].classList.toggle('lift', false); }
+    ballEl.setAttribute('cx', slotX(ball)); ballEl.setAttribute('cy', baseY()-8);
+    const peek = $('#gPeek').checked;
+    ballEl.classList.toggle('hid', !(lifted || peek));
+    $('#phaseLbl').textContent = lifted ? 'reveal · ball visible' : (N===0 ? 'lower · ball hidden' : `swap ${N} · ball hidden`);
+    // perm row
+    const pr = $('#permRow'); pr.innerHTML = '';
+    for (let s=0;s<K;s++){ const d = document.createElement('div'); const known = lifted || peek; d.className = 'slot' + (known ? (s===ball ? ' ball' : '') : ' unk'); d.textContent = known ? (s===ball ? '●' : '·') : '?'; pr.appendChild(d); }
+    // timeline
+    const tl = $('#timeline'); tl.innerHTML = '';
+    const chunks = [...actions]; if (!lifted || N===0 && actions[actions.length-1]!=='reveal') {}
+    const seq = actions.slice();
+    if (seq[seq.length-1] !== 'reveal') seq.push('reveal?');
+    seq.forEach((a, i) => { const d = document.createElement('div'); const isRev = a.startsWith('reveal'); d.className = 'chunk' + (isRev && a==='reveal' ? ' reveal' : '') + (i===actions.length-1 ? ' cur' : ''); if (a==='reveal?') d.style.opacity = .45; d.innerHTML = `<div class="fr">${'<i></i>'.repeat(5)}</div><div class="t">${a==='reveal?'?'reveal':a.replace('swap','s')}</div>`; tl.appendChild(d); });
+    $('#sN').textContent = N;
+    $('#sFrames').textContent = `${N+3} / ${5*(N+3)} / ${20*N+57}`;
+    $('#sSpace').innerHTML = `5 × 10<sup>${N}</sup> = ${N<=6 ? (5*Math.pow(10,N)).toLocaleString() : '5e'+N}`;
+    $('#gLog').textContent = actions.map((a,i)=>`c${i+1}:${a}`).join(' → ');
+    $('#gLower').disabled = !lifted || busy; $('#gReveal').disabled = lifted || busy; $('#gRand').disabled = lifted || busy; $('#gAuto').disabled = lifted || busy;
+  }
+  function doSwap(i, j){ if (i===j) return; [cupAt[i], cupAt[j]] = [cupAt[j], cupAt[i]]; if (ball===i) ball = j; else if (ball===j) ball = i; N++; actions.push(`swap(${Math.min(i,j)+1},${Math.max(i,j)+1})`); sel = null; render(); }
+  function onCup(c){ if (lifted || busy) return; const s = cupAt.indexOf(c); if (sel===null){ sel = c; render(); return; } const s0 = cupAt.indexOf(sel); if (s0===s){ sel=null; render(); return; } doSwap(s0, s); }
+  $('#gLower').addEventListener('click', () => { if (!lifted) return; lifted = false; actions.push('lower'); render(); });
+  $('#gReveal').addEventListener('click', () => { if (lifted) return; lifted = true; actions.push('reveal'); render(); });
+  $('#gRand').addEventListener('click', () => { if (lifted) return; let i = Math.floor(Math.random()*K), j = Math.floor(Math.random()*(K-1)); if (j>=i) j++; doSwap(i,j); });
+  $('#gAuto').addEventListener('click', () => { if (lifted || busy) return; busy = true; render(); let n=0; const tick = () => { let i = Math.floor(Math.random()*K), j = Math.floor(Math.random()*(K-1)); if (j>=i) j++; doSwap(i,j); n++; if (n<5) setTimeout(tick, 650); else { busy=false; render(); } }; tick(); });
+  $('#gReset').addEventListener('click', () => { cupAt=[0,1,2,3,4]; ball = Math.floor(Math.random()*K); lifted = true; sel=null; N=0; actions=['reveal']; busy=false; render(); });
+  $('#gPeek').addEventListener('change', render);
+  render();
+})();
+
+/* ============================================================ composition rows diagram */
+(function comp(){
+  const g = $('#compRows'); if (!g) return;
+  const swaps = [[2,4],[1,2],[4,5]]; let ball = 2; const rows = [{lab:'reveal', ball}];
+  swaps.forEach(([a,b]) => { if (ball===a) ball=b; else if (ball===b) ball=a; rows.push({lab:`swap (${a} ${b})`, ball, a, b}); });
+  rows.forEach((r, i) => { const y = 22 + i*44; const row = svgEl('g', {transform:`translate(0,${y})`}, g);
+    const t = svgEl('text', {x:0, y:22, class:'mono'}, row); t.textContent = r.lab; if (i>0) t.setAttribute('fill','var(--ink)');
+    for (let s=1;s<=5;s++){ const x = 110 + (s-1)*44; const hot = r.a===s || r.b===s; svgEl('rect', {x, y:4, width:36, height:28, rx:6, fill: hot ? 'var(--neg-soft)' : 'var(--surf2)', stroke: hot ? 'var(--neg)' : 'var(--rule2)'}, row); if (s===r.ball){ svgEl('circle', {cx:x+18, cy:18, r:7, fill:'var(--ball)'}, row); } else { const d = svgEl('text', {x:x+18, y:23, 'text-anchor':'middle', class:'mono dim'}, row); d.textContent = s; } }
+    if (i>0){ const p = svgEl('path', {d:`M${110+(r.a-1)*44+18} 2 C ${110+(r.a-1)*44+18} -12, ${110+(r.b-1)*44+18} -12, ${110+(r.b-1)*44+18} 2`, fill:'none', stroke:'var(--neg-ink)', 'stroke-width':1.4}, row); }
+    const s = svgEl('text', {x:346, y:22, class:'mono dim', style:'font-size:11px'}, row); s.textContent = i===0 ? '球在 2' : `σ = (${r.a} ${r.b})·σ  →  球在 ${r.ball}`;
+  });
+})();
+
+/* ============================================================ Householder explorer */
+(function hh(){
+  const beta = $('#beta'), bv = $('#betaVal'), selI = $('#hhI'), selJ = $('#hhJ'), selB = $('#hhB');
+  const mat = $('#hhMat'), vin = $('#hhVecIn'), vout = $('#hhVecOut'), pt = $('#eigPt'), msg = $('#hhMsg');
+  function render(){
+    const b = parseFloat(beta.value); bv.textContent = b.toFixed(2);
+    let i = +selI.value-1, j = +selJ.value-1, s = +selB.value-1; if (i===j){ j = (i+1)%5; selJ.value = j+1; }
+    const k = new Array(5).fill(0); k[i] = 1/Math.SQRT2; k[j] = -1/Math.SQRT2;
+    const A = []; for (let r=0;r<5;r++){ A.push([]); for (let c=0;c<5;c++){ A[r].push((r===c?1:0) - b*k[r]*k[c]); } }
+    const x = new Array(5).fill(0); x[s] = 1; const y = A.map(row => row.reduce((acc,v,c)=>acc+v*x[c],0));
+    mat.innerHTML = ''; A.forEach((row,r) => row.forEach((v,c) => { const d = document.createElement('div'); d.className='c'; const av = Math.abs(v); d.textContent = av<1e-9 ? '0' : (Math.abs(v-1)<1e-9 ? '1' : v.toFixed(2)); const hot = (r===i||r===j)&&(c===i||c===j); if (hot){ d.style.background = v<0 ? 'var(--neg-soft)' : (av>1e-9 ? 'var(--attn-soft)' : 'var(--surf2)'); d.style.color = 'var(--ink)'; } if ((r===i||r===j)&&(c===i||c===j)) d.style.outline = '1px solid var(--rule2)'; mat.appendChild(d); }));
+    const cell = (v, hot) => { const d = document.createElement('div'); d.className='c'; d.textContent = Math.abs(v)<1e-9?'0':(Math.abs(v-1)<1e-9?'1':v.toFixed(2)); if (hot){ d.style.background='var(--ball)'; d.style.color='#fff'; } else if (Math.abs(v)>1e-9){ d.style.background='var(--ball-soft)'; d.style.color='var(--ball-ink)'; } return d; };
+    vin.innerHTML=''; x.forEach((v,r)=>vin.appendChild(cell(v, v>0.999)));
+    vout.innerHTML=''; y.forEach((v,r)=>vout.appendChild(cell(v, v>0.999)));
+    const eig = 1-b; pt.style.left = ((eig+1)/2*100)+'%';
+    let m;
+    if (Math.abs(b)<1e-9) m = 'β=0：恒等，状态原样保留（什么也没写）。';
+    else if (Math.abs(b-1)<1e-9) m = 'β=1：特征值 0，把杯子 '+(i+1)+' 与 '+(j+1)+' 两格取平均——小球在哪的信息被抹平，这是 DeltaNet 的「擦除后覆盖」。';
+    else if (Math.abs(b-2)<1e-9) m = 'β=2：特征值 −1，A 恰好是对换 ('+(i+1)+' '+(j+1)+') 的置换矩阵，one-hot 被精确搬到另一个杯子：一层就实现了一次 swap。';
+    else if (b<1) m = 'β∈(0,1)：特征值在 (0,1)，部分擦除，仍是非负谱；'+(s===i||s===j?'小球所在的坐标被衰减到 '+(1-b/2).toFixed(2)+'，另一格得到 '+(b/2).toFixed(2)+'。':'小球不在这两个杯子里，向量不变。');
+    else m = 'β∈(1,2)：特征值为负，转移已带有反射成分——这是「-neg」变体才允许的区域；β 越接近 2，越接近一次精确交换。';
+    if (s!==i && s!==j && b>0) m += ' 注意 k 只涉及杯子 '+(i+1)+'、'+(j+1)+'，其余坐标不受影响。';
+    msg.textContent = m;
+  }
+  [beta, selI, selJ, selB].forEach(el => el.addEventListener('input', render));
+  $$('#hhWidget [data-beta]').forEach(b => b.addEventListener('click', () => { beta.value = b.dataset.beta; render(); }));
+  render();
+})();
+
+/* ============================================================ episode diagram */
+(function ep(){
+  const g = $('#episodeDiag'); if (!g) return;
+  const items = [{l:'reveal', k:'rev'},{l:'lower', k:'low'},{l:'swap 1', k:'sw'},{l:'swap 2', k:'sw'},{l:'⋯', k:'dots'},{l:'swap N', k:'sw'},{l:'reveal', k:'rev'}];
+  const w = 118, gap = 22, x0 = 30, y0 = 40;
+  items.forEach((it, i) => { const x = x0 + i*(w+gap); const box = svgEl('g', {transform:`translate(${x},${y0})`}, g);
+    if (it.k==='dots'){ const t = svgEl('text', {x:w/2, y:48, 'text-anchor':'middle', class:'dim', style:'font-size:22px'}, box); t.textContent='⋯'; const t2 = svgEl('text', {x:w/2, y:80, 'text-anchor':'middle', class:'mono dim'}, box); t2.textContent = 'one per swap'; return; }
+    const rev = it.k==='rev';
+    svgEl('rect', {x:0, y:0, width:w, height:72, rx:9, fill: rev ? 'var(--ball-soft)' : 'var(--surf2)', stroke: rev ? 'var(--ball)' : 'var(--rule2)'}, box);
+    // little cups
+    for (let c=0;c<5;c++){ const cx = 14 + c*22; const lift = rev ? -8 : 0; svgEl('path', {d:`M${cx-7} ${44+lift} L${cx-5} ${26+lift} L${cx+5} ${26+lift} L${cx+7} ${44+lift} Z`, fill:'var(--cup)', stroke:'var(--rule2)', 'stroke-width':.8}, box); if (rev && c===1) svgEl('circle', {cx, cy:46, r:3.5, fill:'var(--ball)'}, box); }
+    if (it.k==='sw'){ svgEl('path', {d:'M36 58 C 40 66, 64 66, 68 58', fill:'none', stroke:'var(--neg-ink)', 'stroke-width':1.3, 'marker-end':'url(#arr2)'}, box); }
+    const t = svgEl('text', {x:w/2, y:16, 'text-anchor':'middle', class:'mono', style:'font-size:11px; font-weight:600'}, box); t.textContent = it.l;
+    // 5 latent frames
+    for (let f=0; f<5; f++) svgEl('rect', {x:24+f*14, y:82, width:10, height:12, rx:2, fill: rev ? 'var(--ball)' : 'var(--cup)', opacity: rev ? .9 : .55}, box);
+    const t2 = svgEl('text', {x:w/2, y:112, 'text-anchor':'middle', class:'mono dim', style:'font-size:10.5px'}, box); t2.textContent = i<4 ? `chunk ${i+1}` : (i===5 ? 'chunk N+2' : 'chunk N+3');
+    if (i<items.length-1 && it.k!=='dots' && items[i+1].k!=='dots') svgEl('line', {x1:w+3, y1:36, x2:w+gap-3, y2:36, class:'line', 'marker-end':'url(#arr2)'}, g).setAttribute('transform', `translate(${x},${y0})`);
+  });
+  // visibility bars
+  const xs = x0, xe = x0 + 7*(w+gap) - gap;
+  const bar = (x1, x2, y, color, txt) => { svgEl('rect', {x:x1, y, width:x2-x1, height:20, rx:6, fill:color, opacity:.9}, g); const t = svgEl('text', {x:(x1+x2)/2, y:y+14, 'text-anchor':'middle', style:'font-size:11px; fill:#fff; font-weight:600'}, g); t.textContent = txt; };
+  bar(xs, xs+w, 170, 'var(--ball)', '球可见');
+  bar(xs+(w+gap), xe-w, 170, 'var(--ink3)', '整个交换序列里球都不可见 → 像素损失里没有它的标签');
+  bar(xe-w, xe, 170, 'var(--ball)', '球可见');
+  const t = svgEl('text', {x:xs, y:220, class:'mono dim', style:'font-size:11px'}, g); t.textContent = 'N 次交换 = N+3 个 chunk = 5(N+3) 帧 latent = 20N+57 像素帧 ·  N=5 → 8 / 40 / 157 ·  N=30 → 33 / 165 / 657';
+  const t3 = svgEl('text', {x:xs, y:238, class:'mono dim', style:'font-size:11px'}, g); t3.textContent = '推理时前两个 chunk（reveal + lower）作为干净上下文给出，其后自回归生成';
+})();
+
+/* ============================================================ interleave diagram */
+(function inter(){
+  const g = $('#interleave'); if (!g) return;
+  const w = 78, gap = 14, x0 = 20, y = 46;
+  const seq = []; for (let t=1;t<=5;t++){ seq.push({t, clean:false}); seq.push({t, clean:true}); }
+  seq.forEach((s, i) => { const x = x0 + i*(w+gap); svgEl('rect', {x, y, width:w, height:40, rx:8, fill: s.clean ? 'var(--fw-soft)' : 'var(--surf2)', stroke: s.clean ? 'var(--fw)' : 'var(--rule2)'}, g); const t = svgEl('text', {x:x+w/2, y:y+17, 'text-anchor':'middle', class:'mono', style:'font-size:11px'}, g); t.textContent = `chunk ${s.t}`; const t2 = svgEl('text', {x:x+w/2, y:y+31, 'text-anchor':'middle', class:'mono', style:'font-size:10px; fill:var(--ink3)'}, g); t2.textContent = s.clean ? 'clean → 更新 W' : 'noisy → 读 W 去噪';
+    if (s.clean && i<seq.length-1){ svgEl('path', {d:`M${x+w/2} ${y-4} C ${x+w/2} ${y-30}, ${x+w+gap+w/2} ${y-30}, ${x+w+gap+w/2} ${y-4}`, fill:'none', stroke:'var(--fw-ink)', 'stroke-width':1.4, 'marker-end':'url(#arr4)'}, g); const l = svgEl('text', {x:x+w+gap/2, y:y-30, 'text-anchor':'middle', class:'mono', style:'font-size:10px; fill:var(--fw-ink)'}, g); l.textContent = `W${s.t}`; }
+  });
+  const t = svgEl('text', {x:x0, y:118, class:'mono dim', style:'font-size:11px'}, g); t.textContent = '快权重 W_t 在 chunk t 的干净副本上做一次更新（ℓ_dot 梯度聚合整块 960 token），随后被 chunk t+1 的噪声副本读取；有效序列长度 ×2。';
+  const t2 = svgEl('text', {x:x0, y:136, class:'mono dim', style:'font-size:11px'}, g); t2.textContent = '对照：注意力 / SSM / 线性注意力 / RNN 用 context mixing（p=0.5 把随机前缀换成干净 latent），不交错。';
+})();
+
+/* ============================================================ chart library */
+const charts = [];
+function lineChart(el, spec){
+  el.innerHTML = '';
+  const W = spec.w || 460, H = spec.h || 260, mL = 56, mR = 16, mT = 16, mB = 40;
+  const svg = svgEl('svg', {viewBox:`0 0 ${W} ${H}`, role:'img', 'aria-label': spec.aria || ''}, el);
+  const pw = W - mL - mR, ph = H - mT - mB;
+  const xs = spec.x, ys = spec.y;
+  const xmap = v => { if (xs.scale==='log'){ const a = Math.log(xs.min), b = Math.log(xs.max); return mL + (Math.log(v)-a)/(b-a)*pw; } if (xs.scale==='cat'){ const i = xs.ticks.indexOf(v); return mL + (i+0.5)/xs.ticks.length*pw; } return mL + (v-xs.min)/(xs.max-xs.min)*pw; };
+  const ymap = v => mT + ph - (v-ys.min)/(ys.max-ys.min)*ph;
+  // grid + ticks
+  ys.ticks.forEach(t => { svgEl('line', {x1:mL, x2:W-mR, y1:ymap(t), y2:ymap(t), class:'gr'}, svg); const tx = svgEl('text', {x:mL-6, y:ymap(t)+4, 'text-anchor':'end', class:'tk'}, svg); tx.textContent = ys.fmt ? ys.fmt(t) : t; });
+  xs.ticks.forEach(t => { svgEl('line', {x1:xmap(t), x2:xmap(t), y1:mT, y2:mT+ph, class:'gr'}, svg); const tx = svgEl('text', {x:xmap(t), y:mT+ph+16, 'text-anchor':'middle', class:'tk'}, svg); tx.textContent = xs.fmt ? xs.fmt(t) : t; });
+  svgEl('line', {x1:mL, x2:W-mR, y1:mT+ph, y2:mT+ph, class:'ax'}, svg); svgEl('line', {x1:mL, x2:mL, y1:mT, y2:mT+ph, class:'ax'}, svg);
+  if (xs.label){ const t = svgEl('text', {x:mL+pw/2, y:H-6, 'text-anchor':'middle', class:'tk'}, svg); t.textContent = xs.label; }
+  if (ys.label){ const t = svgEl('text', {x:13, y:mT+ph/2, 'text-anchor':'middle', class:'tk', transform:`rotate(-90 13 ${mT+ph/2})`}, svg); t.textContent = ys.label; }
+  (spec.refs||[]).forEach(r => { if (r.y!=null){ svgEl('line', {x1:mL, x2:W-mR, y1:ymap(r.y), y2:ymap(r.y), class:'ref'}, svg); const t = svgEl('text', {x:W-mR-4, y:ymap(r.y)-4, 'text-anchor':'end', class:'reft'}, svg); t.textContent = r.label; } if (r.x!=null){ svgEl('line', {x1:xmap(r.x), x2:xmap(r.x), y1:mT, y2:mT+ph, class:'ref'}, svg); const t = svgEl('text', {x:xmap(r.x)+(r.left?-4:4), y:mT+ph-6, 'text-anchor': r.left?'end':'start', class:'reft'}, svg); t.textContent = r.label; } });
+  const tip = document.createElement('div'); tip.className='tip'; el.appendChild(tip);
+  spec.series.forEach(s => {
+    const g = svgEl('g', {class:'series' + (s.dashed?' dashed':''), 'data-name':s.name}, svg);
+    const color = s.color;
+    const d = s.data.map((p,i) => (i?'L':'M') + xmap(p[0]).toFixed(1) + ' ' + ymap(p[1]).toFixed(1)).join(' ');
+    svgEl('path', {d, stroke:color, 'stroke-width': s.width || 2}, g);
+    s.data.forEach(p => { const c = svgEl('circle', {cx:xmap(p[0]), cy:ymap(p[1]), r: s.r || 3.6, fill: s.hollow ? 'var(--surf)' : color, stroke: color}, g);
+      const show = e => { tip.style.display='block'; tip.innerHTML = `<b style="color:${color}">${s.name}</b><br>${xs.tipLabel||'x'} = ${p[0]} · ${ys.tipLabel||'y'} = ${fmt(p[1])}`; const r = el.getBoundingClientRect(); tip.style.left = Math.min(r.width-160, Math.max(0, e.clientX - r.left + 12)) + 'px'; tip.style.top = (e.clientY - r.top - 44) + 'px'; };
+      c.addEventListener('mouseenter', show); c.addEventListener('mousemove', show); c.addEventListener('mouseleave', () => tip.style.display='none');
+      svgEl('circle', {cx:xmap(p[0]), cy:ymap(p[1]), r:9, fill:'transparent', 'pointer-events':'all'}, g).addEventListener('mouseenter', show);
+    });
+  });
+  const chart = {el, svg, spec, kind:'line'}; charts.push(chart); return chart;
+}
+function barChart(el, spec){
+  el.innerHTML = '';
+  const W = spec.w || 460, H = spec.h || 260, mL = 56, mR = 16, mT = 16, mB = spec.mB || 56;
+  const svg = svgEl('svg', {viewBox:`0 0 ${W} ${H}`, role:'img', 'aria-label': spec.aria || ''}, el);
+  const pw = W - mL - mR, ph = H - mT - mB; const ys = spec.y;
+  const ymap = v => mT + ph - (v-ys.min)/(ys.max-ys.min)*ph;
+  ys.ticks.forEach(t => { svgEl('line', {x1:mL, x2:W-mR, y1:ymap(t), y2:ymap(t), class:'gr'}, svg); const tx = svgEl('text', {x:mL-6, y:ymap(t)+4, 'text-anchor':'end', class:'tk'}, svg); tx.textContent = ys.fmt ? ys.fmt(t) : t; });
+  svgEl('line', {x1:mL, x2:W-mR, y1:mT+ph, y2:mT+ph, class:'ax'}, svg); svgEl('line', {x1:mL, x2:mL, y1:mT, y2:mT+ph, class:'ax'}, svg);
+  (spec.refs||[]).forEach(r => { svgEl('line', {x1:mL, x2:W-mR, y1:ymap(r.y), y2:ymap(r.y), class:'ref'}, svg); const t = svgEl('text', {x:W-mR-4, y:ymap(r.y)-4, 'text-anchor':'end', class:'reft'}, svg); t.textContent = r.label; });
+  const tip = document.createElement('div'); tip.className='tip'; el.appendChild(tip);
+  const n = spec.cats.length, gw = pw/n, ns = spec.series.length, bw = Math.min(26, gw*0.8/ns);
+  spec.cats.forEach((c, i) => { const cx = mL + (i+0.5)*gw; const lines = String(c).split('\n'); lines.forEach((ln, k) => { const t = svgEl('text', {x:cx, y:mT+ph+15+k*12, 'text-anchor':'middle', class:'tk'}, svg); t.textContent = ln; });
+    spec.series.forEach((s, j) => { const v = s.data[i]; if (v==null) return; const x = cx - (ns*bw)/2 + j*bw + 1; const g = svgEl('g', {class:'series', 'data-name':s.name}, svg); const rect = svgEl('rect', {class:'mk', x, y:ymap(v), width:bw-2, height:Math.max(0, mT+ph-ymap(v)), rx:3, fill:s.color, stroke:s.color}, g);
+      if (spec.showVals){ const t = svgEl('text', {x:x+(bw-2)/2, y:ymap(v)-4, 'text-anchor':'middle', class:'tk', style:'font-size:9.5px'}, g); t.textContent = spec.valFmt ? spec.valFmt(v) : v; }
+      const show = e => { tip.style.display='block'; tip.innerHTML = `<b style="color:${s.color}">${s.name}</b> · ${String(c).replace('\n',' ')}<br>${ys.tipLabel||'y'} = ${fmt(v)}`; const r = el.getBoundingClientRect(); tip.style.left = Math.min(r.width-170, Math.max(0, e.clientX - r.left + 12)) + 'px'; tip.style.top = (e.clientY - r.top - 44) + 'px'; };
+      rect.addEventListener('mouseenter', show); rect.addEventListener('mousemove', show); rect.addEventListener('mouseleave', () => tip.style.display='none'); });
+  });
+  const chart = {el, svg, spec, kind:'bar'}; charts.push(chart); return chart;
+}
+function makeLegend(el, series, chartList){
+  el.innerHTML = '';
+  series.forEach(s => { const b = document.createElement('button'); b.innerHTML = `<span class="sw${s.dashed?' dashed':''}" style="background:${s.dashed?'':s.color}; color:${s.color}"></span>${s.name}`; b.setAttribute('aria-pressed','true'); let on = true;
+    b.addEventListener('click', () => { on = !on; b.classList.toggle('off', !on); b.setAttribute('aria-pressed', on); chartList().forEach(ch => $$(`.series[data-name="${CSS.escape(s.name)}"]`, ch.svg).forEach(g => g.style.display = on ? '' : 'none')); });
+    b.addEventListener('mouseenter', () => chartList().forEach(ch => $$('.series', ch.svg).forEach(g => g.classList.toggle('dim', g.dataset.name!==s.name))));
+    b.addEventListener('mouseleave', () => chartList().forEach(ch => $$('.series', ch.svg).forEach(g => g.classList.remove('dim'))));
+    el.appendChild(b); });
+}
+const C = n => cssVar('--m-'+n);
+const V = n => cssVar('--'+n);
+let renderAll;
+function rerenderCharts(){ if (renderAll) renderAll(); }
+
+/* ============================================================ data (parsed from the paper's SVG figures) */
+const NX = [5,6,7,8,9,10,20,30];
+const zip = (xs, ys) => xs.map((x,i)=>[x, ys[i]]);
+const F4A = {
+  'Bidi DiT':        [1,.953,.672,0,.234,.234,.234,.187],
+  'Causal SWA7 DiT': [1,.906,.812,.578,.531,.437,.109,.203],
+  'Causal SWA1 DiT': [.219,.234,.328,.187,.172,.125,.203,.219],
+  'Mamba2':          [1,1,.266,.234,.125,.125,.234,.203],
+  'GDN':             [1,.672,.578,.312,.266,.25,.219,.187],
+  'KDA':             [1,1,.969,.969,.891,.781,.187,.141],
+  'LaCT8':           [1,1,1,1,1,1,.984,.687]
+};
+const STEPS = [4,8,16,32,50];
+const F4B = { 'Bidi DiT':[.234,.234,.234,.234,.234], 'Causal SWA7 DiT':[.437,.437,.437,.437,.437], 'Causal SWA1 DiT':[.125,.125,.125,.125,.125], 'Mamba2':[.125,.141,.141,.125,.125], 'GDN':[.25,.25,.25,.25,.25], 'KDA':[.781,.781,.781,.781,.781], 'LaCT8':[1,1,1,1,1] };
+const F4C = { 'Bidi DiT':[29.07,29.03,29.01,29.00,29.01], 'Causal SWA7 DiT':[40.69,40.68,40.68,40.68,40.67], 'Causal SWA1 DiT':[40.42,40.42,40.42,40.42,40.42], 'Mamba2':[34.33,34.27,34.21,34.19,34.19], 'GDN':[40.55,40.54,40.54,40.54,40.54], 'KDA':[40.98,40.97,40.98,40.97,40.97], 'LaCT8':[41.09,41.09,41.10,41.10,41.10] };
+const COL4 = { 'Bidi DiT':'bidi', 'Causal SWA7 DiT':'swa7', 'Causal SWA1 DiT':'swa1', 'Mamba2':'mamba', 'GDN':'gdn', 'KDA':'kda', 'LaCT8':'lact' };
+const F6A = [
+  {name:'GDN 基线 [0,1]', key:'gdn', dashed:true, hollow:true, data:[1,.672,.578,.313,.266,.25,.219,.188]},
+  {name:'GDN-neg [−1,1]', key:'gdn', data:[1,1,1,1,1,1,.984,.953]},
+  {name:'GDN2 基线', key:'gdn2', dashed:true, hollow:true, data:[1,1,.984,.969,.922,.891,.297,.156]},
+  {name:'GDN2-neg', key:'gdn2', data:[1,1,1,1,1,1,.922,.797]},
+  {name:'GDP3 基线', key:'gdp3', dashed:true, hollow:true, data:[1,1,1,.938,.953,.922,.531,.188]},
+  {name:'GDP3-neg', key:'gdp3', data:[1,1,1,1,1,1,.984,.938]},
+  {name:'KDA 基线', key:'kda', dashed:true, hollow:true, data:[1,1,.969,.969,.891,.781,.188,.141]},
+  {name:'KDA-neg', key:'kda', data:[1,1,1,1,.984,.984,.844,.563]}
+];
+const F6B = [
+  {name:'H=1 (d=1152)', data:[1,.547,.297,.219,.219,.203,.188,.234]},
+  {name:'H=2 (d=576)', data:[1,.531,.344,.219,.125,.172,.156,.172]},
+  {name:'H=4 (d=288)', data:[1,1,1,1,1,1,.766,.563]},
+  {name:'H=8 (d=144)', data:[1,1,1,1,1,1,.984,.688]},
+  {name:'H=16 (d=72)', data:[1,1,1,1,1,1,.984,.781]},
+  {name:'H=48 (d=24)', data:[1,1,1,1,1,1,.953,.859]}
+];
+const F6C = [
+  {name:'M=1', data:[1,1,.938,.922,.875,.906,.203,.109]},
+  {name:'M=4', data:[1,1,1,.969,.922,.844,.219,.203]},
+  {name:'M=64', data:[1,1,.984,.906,.844,.828,.25,.125]},
+  {name:'M=256', data:[1,.938,.922,.891,.906,.938,.234,.188]},
+  {name:'M=1024', data:[1,1,1,1,1,1,.297,.172]},
+  {name:'SWA1 (M=0)', data:[.219,.234,.328,.188,.172,.125,.203,.219], color:'swa1'}
+];
+const F1 = {
+  A: { S3:[2,4,6,6,6], S5:[4,6,8,8,10], N:[8,16,32,64,128] },
+  B: { cats:['RNNs','GDN-neg','KDA-neg','GDN','KDA','Transf.','Mamba2'], S3:[1,1,1,4,4,6,10], S5:[1,1,1,6,6,10,28] },
+  N:[128,256,512,1000],
+  C: { 'RNN':[1,1,1,1], 'GDN':[.96,.12,.13,.11], 'KDA':[.99,.08,.08,.09], 'GDN-neg':[1,1,.96,.78], 'KDA-neg':[1,1,.96,.44], 'Transformer':[.97,.08,.10,.06], 'Mamba2':[.96,.10,.07,.06] },
+  D: { 'RNN':[1,1,1,1], 'GDN':[.96,0,0,.01], 'KDA':[.99,0,0,0], 'GDN-neg':[1,.98,.84,.54], 'KDA-neg':[1,1,.97,.69], 'Transformer':[.99,0,0,0], 'Mamba2':[.97,0,0,0] }
+};
+const COL1 = { 'RNN':'rnn', 'GDN':'gdn', 'KDA':'kda', 'GDN-neg':'gdnneg', 'KDA-neg':'kdaneg', 'Transformer':'tf', 'Mamba2':'mamba' };
+const F5A = { n5:[.219,.234,.219,.219,.953,1,1], n10:[.125,.125,.125,.125,.172,.219,.125] };
+const F5B = { cats:['SWA1','SWA7','Mamba2','GDN','GDN-neg','LaCT8'], n5:[.302,.48,.347,.341,.702,.865], n10:[.239,.341,.265,.216,.461,.775] };
+const BW = { cats:['Causal\nSWA31','Causal\nSWA5','Causal\nSWA1','Mamba2\n+SWA1','GDN\n+SWA1','GDN-neg\n+SWA1','LaCT8\n+SWA1'], p160:[42.03,40.02,22.02,23.88,23.96,24.42,38.26], p320:[24.98,37.60,20.21,21.32,21.52,21.36,29.36] };
+const BW2 = { cats:['k=1','2','3','5','10','15','20'], p160:[23.88,29.58,35.98,39.40,40.21,40.67,40.57], p320:[21.32,23.62,28.87,30.29,32.29,27.07,23.27] };
+
+renderAll = function(){
+  charts.length = 0;
+  const acc = {min:0, max:1.02, ticks:[0,.2,.4,.6,.8,1], fmt:v=>v.toFixed(1), tipLabel:'acc'};
+  const xN = {scale:'log', min:4.6, max:32.5, ticks:[5,6,7,8,9,10,20,30], label:'交换链长度 N（对数轴）', tipLabel:'N'};
+  // Fig 4
+  const s4 = Object.keys(F4A).map(n => ({name:n, color:C(COL4[n])}));
+  const c4a = lineChart($('#fig4a'), {aria:'长度外推曲线', x:xN, y:{...acc, label:'状态准确率'}, refs:[{y:.2,label:'chance'},{x:5,label:'train N=5'}], series:s4.map(s=>({...s, data:zip(NX, F4A[s.name])}))});
+  const c4b = lineChart($('#fig4b'), {aria:'去噪步数与状态准确率', x:{min:2, max:52, ticks:STEPS, label:'去噪步数', tipLabel:'steps'}, y:{...acc, label:'状态准确率 @N=10'}, refs:[{y:.2,label:'chance'}], series:s4.map(s=>({...s, data:zip(STEPS, F4B[s.name])}))});
+  const c4c = lineChart($('#fig4c'), {aria:'去噪步数与 PSNR', x:{min:2, max:52, ticks:STEPS, label:'去噪步数', tipLabel:'steps'}, y:{min:25, max:43, ticks:[25,30,35,40], fmt:v=>v, label:'PSNR @N=10', tipLabel:'PSNR'}, series:s4.map(s=>({...s, data:zip(STEPS, F4C[s.name])}))});
+  makeLegend($('#leg4'), s4, () => [c4a,c4b,c4c]);
+  // Fig 6
+  const s6a = F6A.map(s => ({name:s.name, color:C(s.key), dashed:!!s.dashed, hollow:!!s.hollow, data:zip(NX, s.data)}));
+  const c6a = lineChart($('#fig6a'), {aria:'负特征值消融', x:xN, y:{...acc, label:'状态准确率'}, refs:[{y:.2,label:'chance'},{x:5,label:'train N=5'}], series:s6a});
+  makeLegend($('#leg6a'), s6a, () => [c6a]);
+  const lactCols = ['lh1','lh2','lh4','lh8','lh16','lh48'].map(V);
+  const s6b = F6B.map((s,i) => ({name:s.name, color:lactCols[i], dashed:i<2, data:zip(NX, s.data)}));
+  const c6b = lineChart($('#fig6b'), {aria:'LaCT 头数消融', x:xN, y:{...acc, label:'状态准确率'}, refs:[{y:.2,label:'chance'},{x:5,label:'train N=5'}], series:s6b});
+  makeLegend($('#leg6b'), s6b, () => [c6b]);
+  const scCols = ['sm1','sm4','sm64','sm256','sm1024'].map(V);
+  const s6c = F6C.map((s,i) => ({name:s.name, color: s.color ? C(s.color) : scCols[i], dashed: !!s.color, data:zip(NX, s.data)}));
+  const c6c = lineChart($('#fig6c'), {aria:'scratchpad token 数消融', x:xN, y:{...acc, label:'状态准确率'}, refs:[{y:.2,label:'chance'},{x:5,label:'train N=5'}], series:s6c});
+  makeLegend($('#leg6c'), s6c, () => [c6c]);
+  // Fig 1
+  lineChart($('#fig1a'), {aria:'Transformer 所需层数', x:{scale:'log', min:7, max:150, ticks:F1.A.N, label:'序列长度 N（对数轴）', tipLabel:'N'}, y:{min:0, max:11, ticks:[2,4,6,8,10], fmt:v=>v, label:'最小层数', tipLabel:'layers'}, refs:[{x:128,label:'train N=128',left:true}], series:[{name:'S₃', color:V('neg'), data:zip(F1.A.N, F1.A.S3)}, {name:'S₅', color:V('ball'), data:zip(F1.A.N, F1.A.S5)}]});
+  barChart($('#fig1b'), {aria:'各架构最小层数', cats:F1.B.cats, y:{min:0, max:30, ticks:[1,10,20,30], fmt:v=>v, label:'最小层数', tipLabel:'layers'}, showVals:true, series:[{name:'S₃', color:V('neg'), data:F1.B.S3},{name:'S₅', color:V('ball'), data:F1.B.S5}], mB:40});
+  const s1 = Object.keys(F1.C).map(n => ({name:n, color:C(COL1[n])}));
+  const xL = {scale:'log', min:110, max:1150, ticks:F1.N, label:'序列长度 N（对数轴）', tipLabel:'N'};
+  lineChart($('#fig1c'), {aria:'S3 外推', x:xL, y:{...acc, label:'最终步准确率'}, refs:[{y:1/6,label:'chance 1/6'}], series:s1.map(s=>({...s, data:zip(F1.N, F1.C[s.name])}))});
+  lineChart($('#fig1d'), {aria:'S5 外推', x:xL, y:{...acc, label:'最终步准确率'}, refs:[{y:1/120,label:'chance 1/120'}], series:s1.map(s=>({...s, data:zip(F1.N, F1.D[s.name])}))});
+  // Fig 5
+  lineChart($('#fig5a'), {aria:'SWA 窗口消融', x:{min:.5, max:7.5, ticks:[1,2,3,4,5,6,7], label:'SWA 窗口（chunk 数）', tipLabel:'SWA'}, y:{...acc, label:'状态准确率'}, refs:[{y:.2,label:'chance'}], series:[{name:'N=5（训练长度）', color:C('swa7'), data:zip([1,2,3,4,5,6,7], F5A.n5)},{name:'N=10（外推）', color:C('bidi'), dashed:true, data:zip([1,2,3,4,5,6,7], F5A.n10)}]});
+  barChart($('#fig5b'), {aria:'探针准确率', cats:F5B.cats, y:{min:0, max:1, ticks:[0,.2,.4,.6,.8,1], fmt:v=>v.toFixed(1), label:'小球探针准确率', tipLabel:'probe acc'}, refs:[{y:.2,label:'chance'}], showVals:true, valFmt:v=>v.toFixed(2), series:[{name:'N=5', color:C('lact'), data:F5B.n5},{name:'N=10', color:C('mamba'), data:F5B.n10}], mB:40});
+  // Block world
+  barChart($('#figbw'), {aria:'Block World PSNR', cats:BW.cats, y:{min:0, max:45, ticks:[0,10,20,30,40], fmt:v=>v, label:'PSNR', tipLabel:'PSNR'}, showVals:true, valFmt:v=>v.toFixed(1), series:[{name:'160 帧', color:C('mamba'), data:BW.p160},{name:'320 帧', color:C('lact'), data:BW.p320}], mB:44});
+  barChart($('#figbw2'), {aria:'Mamba2 SWA 扫描', cats:BW2.cats, y:{min:0, max:45, ticks:[0,10,20,30,40], fmt:v=>v, label:'PSNR', tipLabel:'PSNR'}, showVals:true, valFmt:v=>v.toFixed(1), series:[{name:'160 帧', color:C('mamba'), data:BW2.p160},{name:'320 帧', color:C('lact'), data:BW2.p320}], mB:40});
+  // legends for small charts
+  const legendInline = (id, items) => { const el = $(id); if (!el) return; const lg = document.createElement('div'); lg.className='legend'; lg.style.marginTop='4px'; items.forEach(it => { const b = document.createElement('span'); b.innerHTML = `<span class="sw" style="background:${it.color}"></span>${it.name}`; b.style.cssText='display:inline-flex;align-items:center;gap:7px;color:var(--ink2)'; lg.appendChild(b); }); el.appendChild(lg); };
+  legendInline('#fig1a', [{name:'S₃', color:V('neg')},{name:'S₅', color:V('ball')}]);
+  legendInline('#fig1b', [{name:'S₃', color:V('neg')},{name:'S₅', color:V('ball')}]);
+  legendInline('#fig1c', s1); legendInline('#fig1d', s1);
+  legendInline('#fig5a', [{name:'N=5（训练长度）', color:C('swa7')},{name:'N=10（外推）', color:C('bidi')}]);
+  legendInline('#fig5b', [{name:'N=5', color:C('lact')},{name:'N=10', color:C('mamba')}]);
+  legendInline('#figbw', [{name:'160 帧', color:C('mamba')},{name:'320 帧', color:C('lact')}]);
+  legendInline('#figbw2', [{name:'160 帧', color:C('mamba')},{name:'320 帧', color:C('lact')}]);
+};
+renderAll();
+
+/* ============================================================ ladder widget */
+(function ladder(){
+  const selL = $('#ladL'), A = $('#ladA'), B = $('#ladB'), mA = $('#ladMsgA'), mB = $('#ladMsgB'), nLbl = $('#ladN');
+  let n = 0;
+  function render(){
+    const L = +selL.value; A.innerHTML=''; B.innerHTML='';
+    const cols = n+1; const maxCols = 13; const start = Math.max(0, cols-maxCols);
+    for (let l=1;l<=L;l++){
+      const row = document.createElement('div'); row.className='layer'; row.innerHTML = `<div class="id">层 ${l}</div><div class="cells"></div>`; const cells = $('.cells', row);
+      for (let c=start;c<cols;c++){ const d = document.createElement('div'); d.className='cell'; d.title = c===0 ? 'reveal chunk' : `swap ${c}`;
+        // live: after swap c, the up-to-date arrangement is readable at layer c+1 (col c). reveal (c=0) writes at every layer.
+        let cls = '';
+        if (c===0) cls = (n===0 ? 'live' : 'stale');
+        else if (c===n){ cls = (c+1<=L) ? (l===c+1 ? 'live' : (l>c+1 ? '' : 'stale')) : (l===L ? 'over' : 'stale'); if (c+1>L && l<L) cls='stale'; }
+        else cls = (l<=c+1 ? 'stale' : '');
+        if (cls) d.classList.add(cls); if (cls==='live') d.textContent = '●'; if (cls==='over') d.textContent='✕';
+        cells.appendChild(d); }
+      A.appendChild(row);
+      const rowB = document.createElement('div'); rowB.className='layer'; rowB.innerHTML = `<div class="id">层 ${l}</div><div class="cells"></div>`; const cb = $('.cells', rowB); const d = document.createElement('div'); d.className='cell fw'; d.style.flex='0 0 64px'; d.textContent = n===0 ? 'σ₀' : `σ${n}`; cb.appendChild(d); const txt = document.createElement('div'); txt.className='cell'; txt.style.cssText='background:transparent; flex:1 1 auto; white-space:nowrap; justify-items:start; border:0'; txt.textContent = l===1 ? `同一层内 σ ← (i j)·σ，已复合 ${n} 次` : ''; cb.appendChild(txt); B.appendChild(rowB);
+    }
+    nLbl.textContent = `已交换 ${n} 次 · 深度 L=${L}`;
+    if (n===0) mA.innerHTML = '起始 reveal 把小球位置写进<b>每一层</b>的 cache。';
+    else if (n+1<=L) mA.innerHTML = `第 ${n} 次交换在第 ${n} 层读到上一版排列，把新排列写到第 <b>${n+1}</b> 层；更低层里的条目已经过期但仍留在 cache 中（只追加）。`;
+    else mA.innerHTML = `<b>深度用尽：</b>第 ${n} 次交换需要在第 ${n+1} 层写入，但只有 ${L} 层。要继续追踪只能让某些层一次复合多次交换——那是训练长度内学到的<b>捷径</b>，超出后就不成立。`;
+    mB.innerHTML = n===0 ? '携带的状态 σ 在每一层都可用，等待第一次转移。' : `每层的递推状态在<b>原地</b>被转移矩阵作用（GDN-neg：Householder 反射；LaCT：快权重改写），层数不随 N 增长；第 ${n} 次与第 1 次交换用的是同一套机制。`;
+  }
+  $('#ladStep').addEventListener('click', () => { n = Math.min(n+1, 30); render(); });
+  $('#ladReset').addEventListener('click', () => { n=0; render(); });
+  selL.addEventListener('change', () => { n=0; render(); });
+  render();
+})();
+
+/* ============================================================ Table 1 ablation widget */
+(function abl(){
+  const rows = [
+    {name:'LaCT8 baseline', acc:[1.00,1.00,0.98,0.69], st:{w0:'upd', w2:'upd', w1:'upd'}, why:'完整 SwiGLU 快权重，三个矩阵都在每个干净 chunk 上做一次点积 KV 绑定更新。N=20 仍 0.98，N=30 为 0.69——本文参考配置。'},
+    {name:'+ 1-layer MLP', acc:[1.00,0.23,0.23,0.13], st:{w0:'gone', w2:'gone', w1:'upd'}, why:'把非线性 SwiGLU 换成单层线性内模型 f_S(x)=Sᵀx。递归存储还在、训练长度也能拟合，但一步点积梯度只是 S ← S + ηkvᵀ：普通线性注意力的加性外积更新（App. B），N=10 就跌到 0.23。'},
+    {name:'+ Freeze W₀, W₂', acc:[1.00,0.14,0.30,0.16], st:{w0:'frz', w2:'frz', w1:'upd'}, why:'特征映射 φ 固定，只在线更新读出 W₁。这等价于固定核下的分块线性注意力（K 换成 Φ），是一个「静态核」；超出训练长度立刻失败——说明追踪靠的是核随历史变化。'},
+    {name:'+ Freeze W₁', acc:[1.00,1.00,0.97,0.64], st:{w0:'upd', w2:'upd', w1:'frz'}, why:'反过来只更新 W₀、W₂、固定 W₁，保留了绝大部分能力（N=30：0.64 vs 0.69）。状态追踪依赖的是在演化的特征映射及其诱导的历史相关核，而不是读出矩阵的更新。'},
+    {name:'+ Gradient ascent', acc:[1.00,1.00,0.95,0.72], st:{w0:'upd', w2:'upd', w1:'upd'}, why:'把点积更新的符号反过来，追踪几乎不变（N=30 甚至 0.72）。端到端的外层训练能吸收快权重写入的符号——内循环损失的具体形式不决定追踪机制（与 Liu et al., 2026b 的观察一致）。'},
+    {name:'+ MSE loss', acc:[0.22,0.16,0.22,0.22], st:{w0:'upd', w2:'upd', w1:'upd'}, why:'内循环改用 MSE 绑定目标，连训练长度都拟合不了。token 级线性情形下 MSE 恢复 DeltaNet，但整块（c=960）聚合的 MSE 残差引入尺度随 chunk 增长的乘性转移（非扩张要求 λ_max(G) ≤ 2，最坏 η ≤ 2/c），内循环学习率极难调；MSE 也把写入空间更紧地绑在可见的渲染值上。'}
+  ];
+  const cont = $('#ablRows'), why = $('#ablWhy'), bars = $('#ablBars');
+  const hd = document.createElement('div'); hd.className='row hd'; hd.innerHTML = '<div class="nm">变体（H=8，每 chunk 一次更新）</div><div>N=5</div><div>N=10</div><div>N=20</div><div>N=30</div>'; cont.appendChild(hd);
+  let cur = 0;
+  rows.forEach((r, i) => { const d = document.createElement('div'); d.className='row'; d.setAttribute('role','button'); d.tabIndex=0; d.innerHTML = `<div class="nm">${r.name}</div>` + r.acc.map(v => `<div class="${v>=0.9?'hi':(v<=0.35?'lo':'')}">${v.toFixed(2)}</div>`).join(''); d.addEventListener('click', () => { cur=i; render(); }); d.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' '){ e.preventDefault(); cur=i; render(); } }); cont.appendChild(d); });
+  function render(){
+    $$('.row', cont).forEach((d,i) => d.classList.toggle('on', i-1===cur));
+    const r = rows[cur];
+    ['w0','w1','w2'].forEach(k => { const el = $('#s'+k); el.setAttribute('class', 'wbox ' + r.st[k]); });
+    why.innerHTML = `<b>${r.name}</b> — ${r.why}`;
+    bars.innerHTML = ''; [5,10,20,30].forEach((n,i) => { const v = r.acc[i]; const b = document.createElement('div'); b.className='b'; b.innerHTML = `<div class="v">${v.toFixed(2)}</div><div class="bar${v<0.3?' dimm':''}" style="height:${Math.max(4, Math.round(v*118))}px"></div><div class="n">N=${n}</div>`; bars.appendChild(b); });
+  }
+  render();
+})();
+
+/* ============================================================ Memory Maze table */
+(function maze(){
+  const D = {
+    orig: { title:'原版 Memory Maze（MuJoCo 动力学，AdamW，200K 步）', rows:{
+      'Bidirectional DiT':[[0.928,27.79,0.118],[0.912,26.32,0.142],[0.842,21.96,0.210],[0.733,17.13,0.365]],
+      'Causal DiT (SWA19)':[[0.933,30.39,0.102],[0.938,29.25,0.094],[0.826,21.85,0.227],[0.846,22.05,0.194]],
+      'GRU + SWA1':[[0.914,27.23,0.118],[0.918,27.76,0.113],[0.780,19.02,0.299],[0.824,21.20,0.232]],
+      'Mamba2 + SWA1':[[0.932,29.35,0.109],[0.943,32.18,0.087],[0.818,21.20,0.239],[0.849,23.43,0.192]],
+      'GDN + SWA1':[[0.931,29.24,0.102],[0.935,29.42,0.097],[0.828,20.90,0.223],[0.849,22.13,0.193]],
+      'GDN-neg + SWA1':[[0.926,27.87,0.111],[0.933,29.40,0.097],[0.827,20.86,0.225],[0.854,22.81,0.185]],
+      'LaCT8 + SWA1':[[0.934,30.47,0.095],[0.937,31.46,0.086],[0.827,22.21,0.230],[0.864,24.29,0.174]] },
+      note:'同一离散动作在 MuJoCo 里位移不同 → 位姿漂移累积；local-action 下所有骨干都显著变差（Tab. A3）。' },
+    nocoll: { title:'确定性 Memory Maze · 无碰撞（网格运动学，NorMuon，200K 步）', rows:{
+      'Causal DiT (SWA19)':[[0.945,30.51,0.075],[0.948,32.09,0.072],[0.934,29.02,0.087],[0.935,30.42,0.083]],
+      'GRU + SWA1':[[0.940,31.48,0.082],[0.944,32.56,0.077],[0.883,22.73,0.177],[0.899,24.15,0.145]],
+      'Mamba2 + SWA1':[[0.942,31.43,0.083],[0.949,33.53,0.069],[0.928,29.75,0.097],[0.936,31.56,0.082]],
+      'GDN + SWA1':[[0.942,30.20,0.080],[0.948,33.22,0.071],[0.929,30.37,0.094],[0.936,31.96,0.082]],
+      'GDN-neg + SWA1':[[0.942,30.13,0.080],[0.948,33.25,0.071],[0.932,30.83,0.089],[0.938,32.16,0.080]],
+      'LaCT8 + SWA1':[[0.946,32.25,0.077],[0.952,33.94,0.065],[0.943,31.47,0.081],[0.952,33.57,0.066]] },
+      note:'位姿是动作流的确定函数（前进一格 / 转 90°）。global 与 local 的差距大幅缩小；LaCT 在 800F 两种条件都达到 SSIM 0.952（Tab. A4 上半）。' },
+    coll: { title:'确定性 Memory Maze · 有碰撞（被挡住的移动 = no-op）', rows:{
+      'Causal DiT (SWA19)':[[0.911,27.84,0.112],[0.923,28.69,0.091],[0.859,24.62,0.173],[0.884,24.84,0.137]],
+      'GRU + SWA1':[[0.892,25.65,0.140],[0.911,28.73,0.108],[0.765,17.57,0.331],[0.792,18.40,0.285]],
+      'Mamba2 + SWA1':[[0.910,27.63,0.113],[0.926,30.84,0.085],[0.827,21.14,0.230],[0.863,24.54,0.171]],
+      'GDN + SWA1':[[0.907,24.82,0.121],[0.929,30.90,0.083],[0.853,23.76,0.187],[0.878,26.39,0.149]],
+      'GDN-neg + SWA1':[[0.908,25.11,0.119],[0.929,30.58,0.085],[0.863,24.98,0.171],[0.895,28.24,0.122]],
+      'LaCT8 + SWA1':[[0.917,28.42,0.103],[0.937,32.05,0.075],[0.878,25.16,0.158],[0.906,28.24,0.116]] },
+      note:'状态更新取决于看不见的布局，必须从帧里判断动作是否成功；所有骨干相对无碰撞都下降，local-action 降得更多（Tab. A4 下半）。' }
+  };
+  let set = 'orig', len = '800';
+  const tbl = $('#mazeTable'), note = $('#mazeNote');
+  function render(){
+    const d = D[set]; const gi = len==='400' ? 0 : 1, li = len==='400' ? 2 : 3;
+    const names = Object.keys(d.rows);
+    const best = (idx, k, dir) => { let bv = null, bn = null; names.forEach(n => { const v = d.rows[n][idx][k]; if (bv===null || (dir>0 ? v>bv : v<bv)){ bv=v; bn=n; } }); return bn; };
+    const bests = [[best(gi,0,1),best(gi,1,1),best(gi,2,-1)],[best(li,0,1),best(li,1,1),best(li,2,-1)]];
+    let h = `<thead><tr><th>骨干</th><th colspan="3">Global State · ${len}F</th><th colspan="3">Local Action · ${len}F</th></tr><tr><th></th><th>SSIM↑</th><th>PSNR↑</th><th>LPIPS↓</th><th>SSIM↑</th><th>PSNR↑</th><th>LPIPS↓</th></tr></thead><tbody>`;
+    names.forEach(n => { const g = d.rows[n][gi], l = d.rows[n][li]; h += `<tr${n.startsWith('LaCT')?' class="hi"':''}><td>${n}</td>` + g.map((v,k)=>`<td class="${bests[0][k]===n?'best':''}">${k===1?v.toFixed(2):v.toFixed(3)}</td>`).join('') + l.map((v,k)=>`<td class="${bests[1][k]===n?'best':''}">${k===1?v.toFixed(2):v.toFixed(3)}</td>`).join('') + '</tr>'; });
+    tbl.innerHTML = h + '</tbody>';
+    note.textContent = d.title + ' — ' + d.note + ' 加粗 = 该列最优。评测为 220 帧续写，前缀 ' + (len==='400' ? '177' : '577') + ' 帧干净探索。';
+  }
+  $$('#mazeSet button').forEach(b => b.addEventListener('click', () => { set = b.dataset.set; $$('#mazeSet button').forEach(x => x.classList.toggle('on', x===b)); render(); }));
+  $$('#mazeLen button').forEach(b => b.addEventListener('click', () => { len = b.dataset.len; $$('#mazeLen button').forEach(x => x.classList.toggle('on', x===b)); render(); }));
+  render();
+})();
+})();
+</script>
+</body>
+</html>

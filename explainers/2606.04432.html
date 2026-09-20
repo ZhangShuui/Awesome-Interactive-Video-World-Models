@@ -1,0 +1,1715 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSA 精读</title>
+<meta name="description" content="DSA：给自回归视频扩散装一个置信度头，让每个 chunk 自己决定跑 1 步还是 4 步。方法精读、数字复核（NFE 记账被反推出来了）与交互图解。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   DSA 精读 — design tokens
+   角色色：ar = 自回归 chunk / 帧序列
+           cf = confidence 置信度信号（强调色）
+           dm = DMD / 教师分布匹配
+           sp = 速度 / NFE / 吞吐
+           qa = 质量 / VBench
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0d1014; --surf:#13171c; --surf2:#191e25; --surf3:#222932;
+  --rule:#252c35; --rule2:#38414d;
+  --ink:#ebeff4; --ink2:#a7b1bd; --ink3:#78838f;
+
+  --ar:#5a9bf6;  --ar-ink:#82b6ff;  --ar-soft:rgba(90,155,246,.16);
+  --cf:#e0a53a;  --cf-ink:#f0bd5c;  --cf-soft:rgba(224,165,58,.16);
+  --dm:#9d7bf0;  --dm-ink:#b79dff;  --dm-soft:rgba(157,123,240,.17);
+  --sp:#1fbfae;  --sp-ink:#4fd9c8;  --sp-soft:rgba(31,191,174,.16);
+  --qa:#ec6a9c;  --qa-ink:#ff8fb6;  --qa-soft:rgba(236,106,156,.16);
+
+  --ok:#3fb27a; --ok-ink:#62cf95; --ok-soft:rgba(63,178,122,.14);
+  --bad:#e0605a; --bad-ink:#f0857f; --bad-soft:rgba(224,96,90,.14);
+  --warn:#e3b341; --warn-ink:#f0c766; --warn-soft:rgba(227,179,65,.14);
+
+  --grid:#1f242c; --axis:#38414d; --tint:rgba(255,255,255,.03);
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 32px rgba(0,0,0,.36);
+  --font-display:"Bricolage Grotesque","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f3f5; --surf:#ffffff; --surf2:#eaedf1; --surf3:#dfe3e9;
+    --rule:#dcdfe5; --rule2:#c1c7d0;
+    --ink:#12161b; --ink2:#485058; --ink3:#6f7986;
+    --ar:#2b6fd6;  --ar-ink:#1f58b0;  --ar-soft:rgba(43,111,214,.12);
+    --cf:#b07908;  --cf-ink:#8d6106;  --cf-soft:rgba(176,121,8,.13);
+    --dm:#6f4fd6;  --dm-ink:#5b3cc4;  --dm-soft:rgba(111,79,214,.12);
+    --sp:#0d8f81;  --sp-ink:#0a7469;  --sp-soft:rgba(13,143,129,.13);
+    --qa:#c93a72;  --qa-ink:#a72c5d;  --qa-soft:rgba(201,58,114,.12);
+    --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+    --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+    --warn:#b98512; --warn-ink:#8f6608; --warn-soft:rgba(185,133,18,.14);
+    --grid:#e2e5ea; --axis:#c1c7d0; --tint:rgba(16,20,28,.028);
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f3f5; --surf:#ffffff; --surf2:#eaedf1; --surf3:#dfe3e9;
+  --rule:#dcdfe5; --rule2:#c1c7d0;
+  --ink:#12161b; --ink2:#485058; --ink3:#6f7986;
+  --ar:#2b6fd6;  --ar-ink:#1f58b0;  --ar-soft:rgba(43,111,214,.12);
+  --cf:#b07908;  --cf-ink:#8d6106;  --cf-soft:rgba(176,121,8,.13);
+  --dm:#6f4fd6;  --dm-ink:#5b3cc4;  --dm-soft:rgba(111,79,214,.12);
+  --sp:#0d8f81;  --sp-ink:#0a7469;  --sp-soft:rgba(13,143,129,.13);
+  --qa:#c93a72;  --qa-ink:#a72c5d;  --qa-soft:rgba(201,58,114,.12);
+  --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+  --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+  --warn:#b98512; --warn-ink:#8f6608; --warn-soft:rgba(185,133,18,.14);
+  --grid:#e2e5ea; --axis:#c1c7d0; --tint:rgba(16,20,28,.028);
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;}
+h1,h2,h3,h4,h5{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--sp-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--sp); outline-offset:2px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.9em; background:var(--surf2); border:1px solid var(--rule); border-radius:5px; padding:1px 5px; color:var(--ink2)}
+sup{font-size:.72em}
+b{font-weight:600}
+#prog{position:fixed; top:0; left:0; height:2px; width:0; background:var(--cf); z-index:60}
+
+.top{position:fixed; top:0; left:0; right:0; height:52px; z-index:50; display:flex; align-items:center; gap:14px;
+  padding:0 22px; background:color-mix(in srgb,var(--bg) 84%,transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2)}
+@media (max-width:640px){
+  code{white-space:normal; word-break:break-word}
+  .top{padding:0 14px; gap:10px}
+  .brand{font-size:13px; min-width:0; overflow:hidden; text-overflow:ellipsis}
+  .brand em{display:none}
+}
+
+.shell{display:grid; grid-template-columns:250px minmax(0,1fr); gap:0; max-width:1270px; margin:0 auto; padding:84px 28px 120px}
+.rail{position:sticky; top:84px; align-self:start; max-height:calc(100vh - 100px); overflow:auto; padding-right:18px}
+.rail .rl{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); margin:0 0 10px}
+.rail ol{list-style:none; margin:0; padding:0; border-left:1px solid var(--rule)}
+.rail li{margin:0}
+.rail a{display:block; padding:5px 0 5px 14px; margin-left:-1px; font-size:12.5px; line-height:1.4; color:var(--ink3);
+  border-left:2px solid transparent; border-bottom:0; transition:.15s}
+.rail a:hover{color:var(--ink)}
+.rail a.on{color:var(--ink); border-left-color:var(--cf)}
+main{min-width:0; max-width:880px; padding-left:44px}
+@media (max-width:980px){
+  .shell{grid-template-columns:minmax(0,1fr); padding:72px 18px 90px}
+  .rail{display:none}
+  main{padding-left:0}
+}
+
+/* ============================================================ hero */
+.hero{position:relative; overflow:hidden; border:1px solid var(--rule); border-radius:20px; background:
+  radial-gradient(1200px 340px at 8% -20%, var(--cf-soft), transparent 62%),
+  radial-gradient(900px 300px at 96% 0%, var(--sp-soft), transparent 58%), var(--surf);
+  padding:34px 34px 30px; margin-bottom:54px; box-shadow:var(--shadow)}
+.hero .fieldpat{position:absolute; inset:auto -78px -86px auto; width:230px; height:230px; opacity:.32; pointer-events:none}
+.kicker{display:flex; flex-wrap:wrap; gap:7px; margin-bottom:16px}
+.tag{font-family:var(--font-mono); font-size:11px; letter-spacing:.03em; color:var(--ink3);
+  border:1px solid var(--rule2); border-radius:999px; padding:2.5px 10px; background:var(--surf2)}
+.tag.hl{color:var(--cf-ink); border-color:color-mix(in srgb,var(--cf) 46%,transparent); background:var(--cf-soft)}
+.hero h1{font-size:clamp(38px,6vw,60px); font-weight:800; letter-spacing:-.025em; margin-bottom:12px}
+.hero .zh{font-size:19px; color:var(--ink2); max-width:70ch; line-height:1.7}
+.hero .thesis{margin-top:18px; padding:15px 17px; border-radius:13px; background:var(--surf2); border:1px solid var(--rule);
+  font-size:15px; color:var(--ink2); max-width:78ch; line-height:1.78}
+.hero .authors{margin-top:16px; font-size:13px; color:var(--ink3); line-height:1.7}
+.hero .links{margin-top:12px; display:flex; flex-wrap:wrap; gap:8px; font-family:var(--font-mono); font-size:12px}
+.hero .links a,.hero .links span{border:1px solid var(--rule2); border-radius:8px; padding:4px 11px; color:var(--ink2); background:var(--surf2)}
+.hero .links a:hover{color:var(--ink); border-color:var(--sp)}
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(178px,1fr)); gap:11px; margin-top:24px}
+.stat{background:var(--surf2); border:1px solid var(--rule); border-radius:13px; padding:13px 15px}
+.stat .lb{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3)}
+.stat .vl{font-family:var(--font-display); font-size:27px; font-weight:700; letter-spacing:-.02em; margin:3px 0 4px}
+.stat .dl{font-size:12px; color:var(--ink3); line-height:1.6}
+@media (max-width:640px){ .hero{padding:24px 18px 22px; border-radius:16px} .hero .fieldpat{display:none} }
+
+/* ============================================================ sections */
+.sec{margin:0 0 70px; scroll-margin-top:88px}
+.eyebrow{display:flex; align-items:center; gap:11px; margin-bottom:13px}
+.eyebrow .n{font-family:var(--font-mono); font-size:11px; color:var(--bg); background:var(--ink3); border-radius:5px; padding:2px 7px; font-weight:600}
+.eyebrow .t{font-family:var(--font-mono); font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink3)}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec h2{font-size:clamp(24px,3.2vw,31px); font-weight:700; letter-spacing:-.02em; margin-bottom:14px}
+.sec h3{font-size:19px; margin:34px 0 11px; display:flex; gap:10px; align-items:baseline}
+.sec h3 .ix{font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-weight:500}
+.sec h5{font-size:15px; margin:0 0 6px}
+.sec p{margin:0 0 13px; color:var(--ink2)}
+.sec .lead{font-size:17px; color:var(--ink); line-height:1.78; margin-bottom:20px}
+.sec ul,.sec ol{margin:0 0 14px; padding-left:22px; color:var(--ink2)}
+.sec li{margin:0 0 7px}
+.rA{color:var(--ar-ink); font-weight:600}
+.rC{color:var(--cf-ink); font-weight:600}
+.rD{color:var(--dm-ink); font-weight:600}
+.rS{color:var(--sp-ink); font-weight:600}
+.rQ{color:var(--qa-ink); font-weight:600}
+
+/* figures */
+.fig{margin:24px 0 26px; border:1px solid var(--rule); border-radius:16px; background:var(--surf); overflow:hidden; box-shadow:var(--shadow)}
+.fh{display:flex; align-items:center; gap:10px; padding:11px 16px; border-bottom:1px solid var(--rule); background:var(--surf2)}
+.fh .no{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; color:var(--bg); background:var(--cf); border-radius:4px; padding:1.5px 7px; font-weight:600}
+.fh .ti{font-size:13px; color:var(--ink2); font-weight:500}
+.fig svg{display:block; width:100%; height:auto}
+.fig figcaption{padding:11px 16px; border-top:1px solid var(--rule); font-size:12.5px; color:var(--ink3); line-height:1.7; background:var(--surf2)}
+.pad{padding:16px}
+.tabs,.ctl{display:flex; flex-wrap:wrap; gap:7px; padding:11px 16px; border-bottom:1px solid var(--rule); align-items:center}
+.ctl .sp{flex:1}
+.tab,.btn{font-family:var(--font-mono); font-size:11.5px; background:var(--surf2); border:1px solid var(--rule);
+  color:var(--ink3); border-radius:8px; padding:5px 11px; cursor:pointer; transition:.15s}
+.tab:hover,.btn:hover{color:var(--ink); border-color:var(--rule2)}
+.tab[aria-selected="true"]{color:var(--cf-ink); border-color:color-mix(in srgb,var(--cf) 50%,transparent); background:var(--cf-soft)}
+.seg{display:inline-flex; border:1px solid var(--rule); border-radius:8px; overflow:hidden; background:var(--surf2)}
+.seg button{font-family:var(--font-mono); font-size:11.5px; background:transparent; border:0; border-right:1px solid var(--rule);
+  color:var(--ink3); padding:5px 11px; cursor:pointer; transition:.15s}
+.seg button:last-child{border-right:0}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{color:var(--cf-ink); background:var(--cf-soft)}
+.slider{display:flex; align-items:center; gap:10px; font-family:var(--font-mono); font-size:11.5px; color:var(--ink3)}
+.slider input[type=range]{width:150px; accent-color:var(--cf)}
+.slider .v{color:var(--ink); min-width:46px; display:inline-block; text-align:right}
+
+/* cards / callouts */
+.grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(272px,1fr)); gap:13px; margin:18px 0}
+.grid3{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:13px; margin:18px 0}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:13px; padding:15px 17px; font-size:14px; color:var(--ink2); line-height:1.72}
+.card .mono{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink3); margin-bottom:6px}
+.card.cA{border-left:3px solid var(--ar)} .card.cC{border-left:3px solid var(--cf)}
+.card.cD{border-left:3px solid var(--dm)} .card.cS{border-left:3px solid var(--sp)}
+.card.cQ{border-left:3px solid var(--qa)} .card.cB{border-left:3px solid var(--rule2)}
+.card.cW{border-left:3px solid var(--warn); background:var(--warn-soft)}
+.card.cOK{border-left:3px solid var(--ok); background:var(--ok-soft)}
+.note{border:1px solid var(--rule); border-left:3px solid var(--warn); background:var(--warn-soft); border-radius:11px;
+  padding:13px 16px; font-size:14px; color:var(--ink2); margin:18px 0; line-height:1.74}
+.note .hd{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--warn-ink); margin-bottom:5px}
+.note.ok{border-left-color:var(--ok); background:var(--ok-soft)} .note.ok .hd{color:var(--ok-ink)}
+.note.bad{border-left-color:var(--bad); background:var(--bad-soft)} .note.bad .hd{color:var(--bad-ink)}
+
+/* equations */
+.eq{font-family:var(--font-math); font-size:16.5px; background:var(--surf); border:1px solid var(--rule); border-left:3px solid var(--dm);
+  border-radius:11px; padding:15px 19px; margin:16px 0; overflow-x:auto; color:var(--ink); line-height:2}
+.eq .cm{font-family:var(--font-body); font-size:12.5px; color:var(--ink3); display:block; margin-top:7px; line-height:1.65}
+.eq i{font-style:italic}
+
+/* tables */
+.tw{overflow-x:auto; margin:18px 0; border:1px solid var(--rule); border-radius:13px; background:var(--surf)}
+table{border-collapse:collapse; width:100%; font-size:13.3px; min-width:520px}
+th,td{padding:8px 11px; text-align:right; border-bottom:1px solid var(--rule); white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink3);
+  background:var(--surf2); position:sticky; top:0; cursor:pointer; user-select:none}
+thead th:hover{color:var(--ink)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr.me td{background:var(--cf-soft)}
+tbody tr.dim td{color:var(--ink3)}
+td.num{font-family:var(--font-mono)}
+td .bst{color:var(--ok-ink); font-weight:600}
+td .wst{color:var(--bad-ink)}
+
+/* algorithm walker */
+.explore{display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:0}
+@media (max-width:860px){ .explore{grid-template-columns:minmax(0,1fr)} }
+.algo{font-family:var(--font-mono); font-size:12.2px; line-height:1.95; padding:14px 6px 14px 14px; border-right:1px solid var(--rule); overflow-x:auto}
+@media (max-width:860px){ .algo{border-right:0; border-bottom:1px solid var(--rule)} }
+.algo .ln{display:flex; gap:9px; padding:1px 8px; border-radius:6px; cursor:pointer; transition:.12s; white-space:pre}
+.algo .ln:hover{background:var(--surf2)}
+.algo .ln .no{color:var(--ink3); min-width:19px; text-align:right; user-select:none}
+.algo .ln.on{background:var(--cf-soft); box-shadow:inset 2px 0 0 var(--cf)}
+.algo .ln.on .tx{color:var(--ink)}
+.algo .tx{color:var(--ink2)}
+.algo .kw{color:var(--dm-ink)}
+.algo .cmt{color:var(--ink3); font-style:italic}
+.pane{padding:15px 17px; font-size:13.6px; color:var(--ink2); line-height:1.76; min-height:230px}
+.pane h5{font-size:14.5px; color:var(--ink); margin-bottom:7px}
+.pane .tagline{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--cf-ink); margin-bottom:5px}
+.pane .kv{margin-top:11px; font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); border-top:1px dashed var(--rule); padding-top:9px}
+
+/* doubts */
+.dfilter{display:flex; gap:9px; align-items:center; margin:16px 0 14px; flex-wrap:wrap}
+.dt{border:1px solid var(--rule); border-radius:12px; background:var(--surf); margin-bottom:9px; overflow:hidden}
+.dt summary{list-style:none; cursor:pointer; padding:12px 15px; display:flex; align-items:center; gap:10px; font-size:14.3px; color:var(--ink)}
+.dt summary::-webkit-details-marker{display:none}
+.dt summary:hover{background:var(--surf2)}
+.dt .sev{font-family:var(--font-mono); font-size:10px; letter-spacing:.06em; border-radius:4px; padding:1.5px 7px; font-weight:600}
+.dt .sev.hi{background:var(--bad-soft); color:var(--bad-ink); border:1px solid color-mix(in srgb,var(--bad) 40%,transparent)}
+.dt .sev.mid{background:var(--warn-soft); color:var(--warn-ink); border:1px solid color-mix(in srgb,var(--warn) 40%,transparent)}
+.dt .sev.lo{background:var(--surf2); color:var(--ink3); border:1px solid var(--rule2)}
+.dt .dn{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3)}
+.dt summary span:nth-child(3){flex:1; min-width:0}
+.dt .caret{color:var(--ink3); font-size:11px; transition:.18s}
+.dt[open] .caret{transform:rotate(90deg)}
+.dt .body{padding:2px 17px 15px; font-size:13.8px; color:var(--ink2); line-height:1.78; border-top:1px solid var(--rule)}
+.dt .body p{margin:0 0 11px}
+.dt .lb{display:inline-block; font-family:var(--font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--ink3); border:1px solid var(--rule); border-radius:4px; padding:1px 6px; margin:11px 0 5px; background:var(--surf2)}
+
+/* svg text roles */
+.s-ttl{font-family:var(--font-display); font-size:13px; font-weight:600; fill:var(--ink)}
+.s-lb{font-family:var(--font-body); font-size:11.5px; fill:var(--ink2)}
+.s-sm{font-family:var(--font-mono); font-size:10px; fill:var(--ink3)}
+.s-mono{font-family:var(--font-mono); font-size:11px; fill:var(--ink2)}
+.s-big{font-family:var(--font-display); font-size:19px; font-weight:700; fill:var(--ink)}
+.s-box{fill:var(--surf2); stroke:var(--rule2); stroke-width:1.2}
+.s-box2{fill:var(--surf3); stroke:var(--rule2); stroke-width:1.2}
+.s-rule{stroke:var(--rule2); fill:none}
+.s-grid{stroke:var(--grid); fill:none; stroke-width:1}
+.s-axis{stroke:var(--axis); fill:none; stroke-width:1.2}
+.mk-A{fill:var(--ar)} .mk-C{fill:var(--cf)} .mk-D{fill:var(--dm)} .mk-S{fill:var(--sp)} .mk-Q{fill:var(--qa)} .mk-N{fill:var(--rule2)}
+.l-A{stroke:var(--ar); fill:none; stroke-width:2}
+.l-C{stroke:var(--cf); fill:none; stroke-width:2}
+.l-D{stroke:var(--dm); fill:none; stroke-width:2}
+.l-S{stroke:var(--sp); fill:none; stroke-width:2}
+.l-Q{stroke:var(--qa); fill:none; stroke-width:2}
+.l-N{stroke:var(--rule2); fill:none; stroke-width:1.4}
+.f-A{fill:var(--ar-soft); stroke:var(--ar); stroke-width:1.3}
+.f-C{fill:var(--cf-soft); stroke:var(--cf); stroke-width:1.3}
+.f-D{fill:var(--dm-soft); stroke:var(--dm); stroke-width:1.3}
+.f-S{fill:var(--sp-soft); stroke:var(--sp); stroke-width:1.3}
+.f-Q{fill:var(--qa-soft); stroke:var(--qa); stroke-width:1.3}
+
+.legend{display:flex; flex-wrap:wrap; gap:13px; padding:10px 16px; border-top:1px solid var(--rule); font-size:11.5px; color:var(--ink3); background:var(--surf2)}
+.legend i{display:inline-block; width:11px; height:11px; border-radius:3px; margin-right:6px; vertical-align:-1px}
+
+.kbd{font-family:var(--font-mono); font-size:11px; border:1px solid var(--rule2); border-bottom-width:2px; border-radius:5px; padding:1px 5px; color:var(--ink2); background:var(--surf2)}
+.foot{margin-top:70px; padding-top:22px; border-top:1px solid var(--rule); font-size:12.5px; color:var(--ink3); line-height:1.8}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">DSA<em>让每个 chunk 自己决定跑几步 · 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <marker id="ar-A" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-A"/></marker>
+  <marker id="ar-C" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-C"/></marker>
+  <marker id="ar-D" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-D"/></marker>
+  <marker id="ar-S" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-S"/></marker>
+  <marker id="ar-Q" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-Q"/></marker>
+  <marker id="ar-N" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-N"/></marker>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" class="s-rule" stroke-width="2.2"/>
+  </pattern>
+  <pattern id="noisepat" width="34" height="34" patternUnits="userSpaceOnUse">
+    <rect width="34" height="34" fill="none"/>
+    <circle cx="6" cy="8" r="1.7" fill="var(--cf)" opacity=".5"/>
+    <circle cx="20" cy="4" r="1.2" fill="var(--ar)" opacity=".5"/>
+    <circle cx="28" cy="17" r="1.8" fill="var(--sp)" opacity=".45"/>
+    <circle cx="12" cy="24" r="1.3" fill="var(--dm)" opacity=".5"/>
+    <circle cx="25" cy="29" r="1.5" fill="var(--cf)" opacity=".5"/>
+    <circle cx="3" cy="30" r="1.1" fill="var(--qa)" opacity=".4"/>
+  </pattern>
+</defs></svg>
+
+<div class="shell">
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-tldr">00 · 一图看懂（可切换）</a></li>
+    <li><a href="#s-why">01 · 固定步数浪费在哪（可拖）</a></li>
+    <li><a href="#s-sf">02 · 地基：Self-Forcing 三件事</a></li>
+    <li><a href="#s-head">03 · 置信度头：三处抽头</a></li>
+    <li><a href="#s-loss">04 · 损失的闭式解 c*=λ/d（可调）</a></li>
+    <li><a href="#s-algo">05 · Algorithm 1 逐行（可步进）</a></li>
+    <li><a href="#s-sim">06 · 调度模拟器（可玩）</a></li>
+    <li><a href="#s-num">07 · 数字复核：反推出记账</a></li>
+    <li><a href="#s-res">08 · 把「快」和「好」拆开</a></li>
+    <li><a href="#s-doubt">09 · 我的存疑清单</a></li>
+    <li><a href="#s-missing">10 · 复现清单（未给）</a></li>
+    <li><a href="#s-place">11 · 谱系与定位</a></li>
+    <li><a href="#s-appendix">12 · 附录速查</a></li>
+  </ol>
+</nav>
+<main>
+
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <svg class="fieldpat" viewBox="0 0 200 200" aria-hidden="true"><rect width="200" height="200" fill="url(#noisepat)"/></svg>
+  <div class="kicker">
+    <span class="tag">arXiv:2606.04432v1</span>
+    <span class="tag">cs.CV · 2026-06-03</span>
+    <span class="tag">CVPR 2026 Findings</span>
+    <span class="tag hl">自适应计算 / Adaptive Compute</span>
+    <span class="tag">Self-Forcing + DMD</span>
+    <span class="tag">Wan2.1-T2V-1.3B 学生</span>
+  </div>
+  <h1>DSA</h1>
+  <p class="zh">在 Self-Forcing 的自回归学生上挂一个<span class="rC">置信度头</span>，让模型在跑完<b>第 1 步</b>之后就先自问一句「这块够干净了吗」——够就<b>直接收工</b>，不够就<b>把剩下 3 步跑完</b>。</p>
+  <p class="thesis">这篇论文的真实贡献是<b>一个提前退出（early-exit）开关</b>，不是摘要字面上的「动态调整步数」。<b>Algorithm 1 里的分支是二值的</b>：要么 1 步，要么 4 步，中间没有 2 步和 3 步。它带来的是 <b>1.35× 的吞吐</b>（35 NFE → 23 NFE），<b>延迟一点没动</b>（0.90 s → 0.91 s，而且按算法首块必然满步）。表 1 里那些更漂亮的质量数字，来自换了个 <b>14B 教师</b>，与自适应采样无关。下面我会把论文没写出来的记账（<b>NFE = 7 × (k+1)</b>）反推出来，并指出一个<b>同成本、零新增参数的静态基线</b>——它的 NFE 恰好也是 23，而论文没有做这个对照。</p>
+  <p class="authors"><b>Thanh-Tung Le</b><sup>1,2</sup>*, Yunhan Zhao<sup>3</sup>, Menglei Chai<sup>2</sup>, Zhengyang Shen<sup>2</sup>, Zhe Cao<sup>2</sup>, Danhang Tang<sup>2</sup>, Xiaohui Xie<sup>1</sup>, <b>Deying Kong</b><sup>2</sup>　·　<sup>1</sup>UC Irvine　<sup>2</sup>Google　<sup>3</sup>Google DeepMind　（*实习期间完成）</p>
+  <div class="links">
+    <a href="https://arxiv.org/abs/2606.04432" target="_blank" rel="noopener">arXiv abs</a>
+    <a href="https://arxiv.org/pdf/2606.04432" target="_blank" rel="noopener">PDF</a>
+    <a href="https://arxiv.org/abs/2506.08009" target="_blank" rel="noopener">Self-Forcing（地基）</a>
+    <span>代码 · 未公布</span>
+    <span>权重 · 未公布</span>
+    <span>项目页 · 无</span>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="lb">吞吐（标题数）</div><div class="vl" style="color:var(--sp-ink)">22.63 <span style="font-size:14px;font-weight:500">FPS</span></div><div class="dl">这是 <b>1.3B 教师</b>那一版；VBench 总分 <b>83.73</b>，<b>低于</b> Self-Forcing 的 83.95</div></div>
+    <div class="stat"><div class="lb">首帧延迟</div><div class="vl">0.91 <span style="font-size:14px;font-weight:500">s</span></div><div class="dl">SF 是 0.90 s。<b>DSA 在延迟上零收益</b>——首块 <code>prev_c=1.0</code> 必然触发满步</div></div>
+    <div class="stat"><div class="lb">NFE（我反推）</div><div class="vl" style="color:var(--cf-ink)">35 → 23</div><div class="dl">= 7 个 chunk × (步数+1)。那个 <b>+1</b> 是 KV cache 刷新，论文从没提</div></div>
+    <div class="stat"><div class="lb">质量净增益</div><div class="vl" style="color:var(--qa-ink)">+0.01</div><div class="dl">Table 2：自适应 83.95 vs 固定 4 步 83.94。<b>噪声量级</b></div></div>
+  </div>
+</section>
+
+<!-- ============================================================ 00 TLDR -->
+<section class="sec" id="s-tldr">
+  <div class="eyebrow"><span class="n">00</span><span class="t">The whole thing in one figure</span><span class="line"></span></div>
+  <h2>一图看懂：一个开关，装在「第 1 步之后」</h2>
+  <p class="lead">Self-Forcing 的推理是这样的：把 21 个 latent 帧切成 <span class="rA">7 个 chunk</span>，每个 chunk 从纯噪声出发跑 <b>4 步</b>去噪，跑完再用一次 <code>t=0</code> 的前向把干净结果写进 <span class="rA">KV cache</span>，然后做下一个 chunk。DSA 只改了一件事：<b>在第 1 步跑完、第 2 步开始之前，插一个 if</b>。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 0</span><span class="ti">DSA 的全部机制（点标签切换视角）</span></div>
+    <div class="tabs" id="f0Tabs" role="tablist">
+      <button class="tab" role="tab" data-k="a" aria-selected="true">① 推理时间线</button>
+      <button class="tab" role="tab" data-k="b">② 一个 chunk 内部</button>
+      <button class="tab" role="tab" data-k="c">③ 训练时多了什么</button>
+    </div>
+    <div class="pad" style="padding:6px 8px 2px">
+    <svg viewBox="0 0 880 392" role="img" aria-label="DSA 机制总览">
+      <!-- ============ PANEL A ============ -->
+      <g id="f0a">
+        <text class="s-ttl" x="20" y="26">推理：7 个 chunk 顺序生成，每个 chunk 自己决定跑 1 步还是 4 步</text>
+        <text class="s-sm" x="20" y="45">Wan2.1-T2V-1.3B · 81 像素帧 = 21 latent 帧 ÷ 3 帧每块 = 7 块 · 时间步表 {1000, 750, 500, 250}</text>
+
+        <g id="f0aChunks"></g>
+
+        <!-- KV strip -->
+        <text class="s-sm" x="20" y="300">KV cache</text>
+        <rect x="76" y="286" width="786" height="22" rx="6" class="s-box"/>
+        <g id="f0aKV"></g>
+
+        <text class="s-sm" x="20" y="340">NFE 累计</text>
+        <rect x="76" y="326" width="786" height="20" rx="6" class="s-box"/>
+        <g id="f0aNFE"></g>
+        <text class="s-mono" x="76" y="372">总计 <tspan fill="var(--cf)" font-weight="600">23</tspan> 次前向 = 3 块满步 × 5 + 4 块单步 × 2　·　固定 4 步需要 <tspan fill="var(--ink3)">35</tspan> 次</text>
+      </g>
+
+      <!-- ============ PANEL B ============ -->
+      <g id="f0b" hidden>
+        <text class="s-ttl" x="20" y="26">一个 chunk 内部：分支只判一次，判在第 1 步之后</text>
+        <text class="s-sm" x="20" y="45">Algorithm 1 第 6–13 行。注意 if 在 for 之外——进了 for 就一路跑到底，没有中途 break</text>
+
+        <rect x="20" y="88" width="94" height="58" rx="10" class="f-A"/>
+        <text class="s-lb" x="67" y="112" text-anchor="middle">纯噪声</text>
+        <text class="s-mono" x="67" y="130" text-anchor="middle" fill="var(--ink3)">x ~ N(0,I)</text>
+        <path d="M118 117 H152" class="l-A" marker-end="url(#ar-A)"/>
+
+        <rect x="156" y="78" width="124" height="78" rx="10" class="f-D"/>
+        <text class="s-lb" x="218" y="104" text-anchor="middle">因果 DiT</text>
+        <text class="s-mono" x="218" y="122" text-anchor="middle" fill="var(--ink3)">t = 1000</text>
+        <text class="s-mono" x="218" y="140" text-anchor="middle" fill="var(--ink3)">+ KV cache</text>
+
+        <path d="M284 103 H326" class="l-A" marker-end="url(#ar-A)"/>
+        <path d="M284 141 H326" class="l-C" marker-end="url(#ar-C)"/>
+        <rect x="330" y="86" width="82" height="34" rx="8" class="f-A"/>
+        <text class="s-mono" x="371" y="108" text-anchor="middle">x̂₀</text>
+        <rect x="330" y="124" width="82" height="34" rx="8" class="f-C"/>
+        <text class="s-mono" x="371" y="146" text-anchor="middle">c</text>
+        <path d="M412 141 H428" class="l-C" marker-end="url(#ar-C)"/>
+
+        <!-- diamond -->
+        <path d="M500 82 L562 122 L500 162 L438 122 Z" class="f-C"/>
+        <text class="s-mono" x="500" y="118" text-anchor="middle" font-size="10">sigmoid(c)</text>
+        <text class="s-mono" x="500" y="133" text-anchor="middle" font-size="10">&lt; prev_c ?</text>
+
+        <!-- NO branch -->
+        <path d="M562 122 H620 V62 H694" class="l-S" marker-end="url(#ar-S)"/>
+        <text class="s-sm" x="628" y="96" fill="var(--ok)">否 → 这块收工</text>
+        <rect x="698" y="42" width="152" height="40" rx="9" class="f-S"/>
+        <text class="s-lb" x="774" y="67" text-anchor="middle">1 步出图</text>
+        <path d="M850 62 H866 V318 H662" class="l-S" marker-end="url(#ar-S)"/>
+
+        <!-- YES branch -->
+        <path d="M500 162 V196" class="l-C" marker-end="url(#ar-C)"/>
+        <text class="s-sm" x="512" y="186" fill="var(--bad)">是 → 补跑 3 步</text>
+        <rect x="300" y="200" width="550" height="74" rx="10" class="s-box"/>
+        <text class="s-sm" x="318" y="224">for j = T−1 … 1　<tspan fill="var(--warn)">（固定跑满，循环内没有 break）</tspan></text>
+        <circle cx="344" cy="252" r="12" class="f-C"/><text class="s-mono" x="344" y="256" text-anchor="middle" font-size="9">750</text>
+        <path d="M359 252 H385" class="l-N" marker-end="url(#ar-N)"/>
+        <circle cx="400" cy="252" r="12" class="f-C"/><text class="s-mono" x="400" y="256" text-anchor="middle" font-size="9">500</text>
+        <path d="M415 252 H441" class="l-N" marker-end="url(#ar-N)"/>
+        <circle cx="456" cy="252" r="12" class="f-C"/><text class="s-mono" x="456" y="256" text-anchor="middle" font-size="9">250</text>
+        <text class="s-sm" x="484" y="256">每步：把 x̂₀ 重新加噪到下一档，再去噪一次</text>
+        <path d="M575 276 V296" class="l-C" marker-end="url(#ar-C)"/>
+
+        <!-- KV refresh -->
+        <rect x="336" y="300" width="322" height="44" rx="10" class="f-A"/>
+        <text class="s-lb" x="497" y="319" text-anchor="middle">再跑一次 t = 0，写 KV cache</text>
+        <text class="s-sm" x="497" y="336" text-anchor="middle">两条路都要付 —— 这就是那个 +1</text>
+        <path d="M336 322 H286" class="l-A" marker-end="url(#ar-A)"/>
+        <rect x="150" y="300" width="132" height="44" rx="10" class="s-box2"/>
+        <text class="s-lb" x="216" y="327" text-anchor="middle">下一个 chunk</text>
+
+        <text class="s-sm" x="20" y="372" fill="var(--warn)">代价记账：单步分支 = 1 次去噪 + 1 次写 cache = 2 次前向；满步分支 = 4 + 1 = 5 次前向。</text>
+        <text class="s-sm" x="20" y="388">这就是为什么消融表里 1/2/3/4 步对应的 NFE 是 14/21/28/35 —— 每一档都比「步数 × 7」多出 7。</text>
+      </g>
+
+      <!-- ============ PANEL C ============ -->
+      <g id="f0c" hidden>
+        <text class="s-ttl" x="20" y="26">训练：Self-Forcing 的 DMD 回路原样保留，旁边挂一条置信度回归</text>
+        <text class="s-sm" x="20" y="45">1000 步训练 · batch 128 · 只用文本 prompt（VidProM 过滤 + Qwen2.5-7B 扩写），不需要任何真实视频</text>
+
+        <rect x="24" y="72" width="150" height="62" rx="10" class="f-A"/>
+        <text class="s-lb" x="99" y="96" text-anchor="middle">自 rollout</text>
+        <text class="s-sm" x="99" y="114" text-anchor="middle">学生自己生成历史帧</text>
+
+        <path d="M178 103 H216" class="l-A" marker-end="url(#ar-A)"/>
+        <rect x="220" y="62" width="130" height="82" rx="10" class="f-D"/>
+        <text class="s-lb" x="285" y="88" text-anchor="middle">学生 G<tspan baseline-shift="sub" font-size="9">θ</tspan></text>
+        <text class="s-mono" x="285" y="108" text-anchor="middle" fill="var(--ink3)">x̂_G</text>
+        <text class="s-mono" x="285" y="128" text-anchor="middle" fill="var(--cf)">c</text>
+
+        <path d="M354 88 H404" class="l-D" marker-end="url(#ar-D)"/>
+        <rect x="408" y="60" width="150" height="56" rx="10" class="s-box"/>
+        <text class="s-lb" x="483" y="82" text-anchor="middle">教师 real score</text>
+        <text class="s-sm" x="483" y="100" text-anchor="middle">冻结 · 输出 x̂_R</text>
+
+        <rect x="408" y="126" width="150" height="50" rx="10" class="s-box"/>
+        <text class="s-lb" x="483" y="146" text-anchor="middle">critic / fake score</text>
+        <text class="s-sm" x="483" y="164" text-anchor="middle">可训 · 每 5 步更新生成器 1 次</text>
+        <path d="M354 120 H404" class="l-D" marker-end="url(#ar-D)"/>
+
+        <path d="M562 88 H616" class="l-D" marker-end="url(#ar-D)"/>
+        <path d="M562 150 H600 V104 H616" class="l-D" marker-end="url(#ar-D)"/>
+        <rect x="620" y="72" width="184" height="52" rx="10" class="f-D"/>
+        <text class="s-lb" x="712" y="93" text-anchor="middle">DMD 损失</text>
+        <text class="s-mono" x="712" y="112" text-anchor="middle" font-size="10">∇ ∝ (f_ψ − f_φ) · ∂x̂/∂θ</text>
+
+        <path d="M285 148 V222 H558" class="l-C" marker-end="url(#ar-C)"/>
+        <path d="M408 88 H386 V202 H558" class="l-N" stroke-dasharray="4 4" marker-end="url(#ar-N)"/>
+        <text class="s-sm" x="300" y="216" fill="var(--cf)">c</text>
+        <text class="s-sm" x="420" y="196" fill="var(--ink3)">x̂_R（停梯度）</text>
+
+        <rect x="564" y="186" width="290" height="62" rx="10" class="f-C"/>
+        <text class="s-lb" x="709" y="208" text-anchor="middle">置信度损失（quality-aware）</text>
+        <text class="s-mono" x="709" y="230" text-anchor="middle" font-size="11">L = c · sg[ d(x̂_G, x̂_R) ] − λ log c</text>
+
+        <rect x="24" y="268" width="830" height="100" rx="11" class="s-box"/>
+        <text class="s-lb" x="42" y="292">这一项到底在教什么：</text>
+        <text class="s-sm" x="42" y="313">对 c 求导置零 → <tspan font-family="var(--font-mono)" fill="var(--cf)">c* = min(1, λ / d)</tspan>。也就是说，置信度头被训练成一个<tspan font-weight="600" fill="var(--ink2)">「教师残差的倒数回归器」</tspan>——</text>
+        <text class="s-sm" x="42" y="333">学生输出离教师越近，c 越高；越远，c 越低。d 上的 stop-grad 保证生成器<tspan font-weight="600" fill="var(--ink2)">不能靠压低 d 来作弊</tspan>刷高 c。</text>
+        <text class="s-sm" x="42" y="353" fill="var(--warn)">但 λ 的取值直接决定 c 落在什么量级：正文写 λ=0.2，附录写 λ=0.02，相差 10 倍（见 §04 与 §09·D5）。最终目标 = DMD 损失 + 置信度损失，<tspan font-weight="600">相对权重论文未给</tspan>。</text>
+      </g>
+    </svg>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--ar)"></i>自回归 chunk / KV cache / prev_c 门槛</span>
+      <span><i style="background:var(--cf)"></i>置信度（1 步后）</span>
+      <span><i style="background:var(--dm)"></i>DMD / 教师 · 精炼 4 步后的置信度</span>
+      <span><i style="background:var(--sp)"></i>提前退出</span>
+      <span><i style="background:var(--qa)"></i>满步精炼</span>
+    </div>
+    <figcaption>按论文 Fig 2、Fig 3、Algorithm 1 与 §3 重绘并补上论文未画出的记账（t=0 的 KV 刷新前向）。面板 ① 里的具体步数分配是<b>我根据 NFE=23 反推的一种解</b>（3 块满步 + 4 块单步），论文未公布实际分配。</figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card cS"><div class="mono">它确实做到了</div><h5>同质量下 1.35× 吞吐</h5>把固定 4 步的 35 NFE 压到 23 NFE，VBench 总分从 83.94 变成 83.95。这个结论是干净的，而且在 1.3B / 14B 两个教师上都成立。</div>
+    <div class="card cW"><div class="mono">它没做到但听起来像做到了</div><h5>「动态调整步数」</h5>Algorithm 1 的分支是 <b>if / else 二值</b>：1 步或 4 步。正文写的「until the output stabilizes」在伪代码里没有对应物。</div>
+    <div class="card cB"><div class="mono">它不涉及</div><h5>延迟</h5><code>prev_c</code> 初始化为 1.0，而 sigmoid 恒小于 1 → <b>第一个 chunk 必然走满步</b>。所以首帧延迟只能和 SF 持平（0.91 vs 0.90 s）。</div>
+  </div>
+</section>
+
+<!-- ============================================================ 01 WHY -->
+<section class="sec" id="s-why">
+  <div class="eyebrow"><span class="n">01</span><span class="t">Where the waste actually is</span><span class="line"></span></div>
+  <h2>固定步数浪费在哪：先把账算清楚，论文没算</h2>
+  <p class="lead">论文的出发点是一句很直觉的话：「有的帧好猜，有的帧难猜，凭什么都跑一样多步？」这句话没错，但要判断省下来的算力值不值得，得先知道<b>一次生成到底做了多少次前向</b>。论文给了消融表里的 NFE 数字，却没解释这些数字是怎么来的——而它们恰好藏着一个关键事实。</p>
+
+  <h3><span class="ix">1.1</span>把 14 / 21 / 28 / 35 这四个数拆开</h3>
+  <p>消融表（Table 2）里，1/2/3/4 步对应 NFE = 14 / 21 / 28 / 35。等差为 7，且<b>截距也是 7</b>：</p>
+  <div class="eq">NFE = 7 × (<i>k</i> + 1)<span class="cm">7 = chunk 个数（21 个 latent 帧 ÷ 每块 3 帧）；<i>k</i> = 每块去噪步数；<b>那个 +1 是每块结束后用 t=0 再跑一次前向，把干净 latent 写进 KV cache</b>。这一步在 Self-Forcing 的 Algorithm 1/2 里明确存在（<code>kv<sup>i</sup> ← G<sup>KV</sup><sub>θ</sub>(x̂<sub>0</sub><sup>i</sup>; 0, KV)</code>），在 DSA 的 Algorithm 1 第 15 行也在，但论文正文从未把它计入「步数」的讨论。</span></div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 1</span><span class="ti">NFE 记账（拖滑块换步数 / 点按钮切到自适应）</span></div>
+    <div class="ctl">
+      <label class="slider">每块去噪步数 k <input type="range" id="nfeK" min="1" max="4" step="1" value="4"><span class="v" id="nfeKv">4</span></label>
+      <span class="sp"></span>
+      <span class="seg" id="nfeMode"><button type="button" data-m="fix" aria-pressed="true">固定步数</button><button type="button" data-m="dsa">DSA 自适应</button></span>
+    </div>
+    <div id="nfeFig" class="pad" style="padding:8px 10px 2px"></div>
+    <div class="legend">
+      <span><i style="background:var(--cf)"></i>去噪前向（算法真正「省」的部分）</span>
+      <span><i style="background:var(--ar)"></i>KV cache 刷新前向（省不掉，每块固定 1 次）</span>
+      <span><i style="background:var(--surf3);border:1px solid var(--rule2)"></i>被跳过的步</span>
+    </div>
+    <figcaption>NFE = 7×(k+1) 是我从消融表四个数反推出的模型，四个点<b>严格吻合</b>，且与 Self-Forcing 官方实现（<code>num_frame_per_block: 3</code>、21 个 latent 帧、<code>denoising_step_list</code> 长度 4）一致。自适应那一档的分配为我的反推。</figcaption>
+  </figure>
+
+  <div class="note">
+    <div class="hd">这个 +1 为什么重要</div>
+    它把<b>理论加速比的天花板压掉了一截</b>。如果只看「步数」，4 步降到 1 步应该是 4×；算上每块那次省不掉的 cache 前向，实际是 35/14 = <b>2.5×</b>。DSA 实测的 35→23 也只有 <b>1.52× 的 NFE 比</b>，考虑到还有约 1.5 s 的固定开销（文本编码 + VAE 解码，见 §07），落到墙钟上就是 <b>1.35×</b>。论文摘要里「real-time」的说法成立，但「adaptive computation」省下的份额，比不读记账时想象的要小。
+  </div>
+
+  <h3><span class="ix">1.2</span>「难帧多跑步」这个直觉，有一个它没验证的前提</h3>
+  <p>论文的动机链条是三段：(a) 视频里的帧难度不均；(b) 难度可以被模型自己估出来；(c) <b>给难帧多跑步能带来比给易帧多跑步更大的收益</b>。(a) 显然成立，(b) 论文花了整节来做，而 <b>(c) 整篇论文没有任何证据</b>。</p>
+  <p>这不是吹毛求疵。<b>(c) 完全可能不成立</b>：一个 chunk 之所以「难」，可能是因为它的内容本身熵高（快速运动、复杂纹理），这类内容即使多跑 3 步也未必更接近教师；而一个「易」chunk 少跑 3 步造成的微小偏差，会通过 KV cache 一路传给后面所有 chunk。自回归生成里，<b>误差的代价和它发生的位置有关，而不只和它的大小有关</b>——这一点在 §06 的模拟器里可以直接玩到。</p>
+</section>
+
+<!-- ============================================================ 02 SF -->
+<section class="sec" id="s-sf">
+  <div class="eyebrow"><span class="n">02</span><span class="t">The foundation it stands on</span><span class="line"></span></div>
+  <h2>地基：Self-Forcing 的三件事，DSA 一件都没改</h2>
+  <p class="lead">读 DSA 之前要先接受一个事实：<b>它是 Self-Forcing 的一个 patch</b>。学生结构、教师、损失、学习率、critic 更新比例、数据源全部沿用，连超参数值都一模一样。理解这三件事，DSA 的新增部分就只剩半页纸。</p>
+
+  <div class="grid3">
+    <div class="card cA"><div class="mono">地基 ①</div><h5>自 rollout：训练时就用自己生成的历史</h5>Teacher Forcing 用真值历史、Diffusion Forcing 用加噪真值历史，两者在推理时都会碰上<b>曝光偏差</b>——推理时的历史是模型自己产的，训练时没见过。SF 直接在训练循环里做自回归 rollout，让训练分布 = 推理分布。代价是反传会爆，所以它<b>只对每块的最后一步回传梯度</b>（gradient truncation），并随机采样这个「最后一步」是第几步。</div>
+    <div class="card cA"><div class="mono">地基 ②</div><h5>rolling KV cache：训练时也开</h5>KV cache 原本只是推理优化。SF 把它挪到训练里，于是不需要特制的注意力掩码来模拟因果性——缓存本身就是因果的。副作用是每块结束后必须<b>额外跑一次 t=0 前向</b>来把干净 latent 写进缓存，这就是 §01 那个 +1。</div>
+    <div class="card cD"><div class="mono">地基 ③</div><h5>DMD：对齐整段视频的分布，而不是逐帧回归</h5>不做 per-frame 去噪损失，而是让学生生成的<b>整段视频分布</b> p<sub>θ</sub>(x<sup>1:N</sup>) 去贴近数据分布。反向 KL 的梯度是两个分数网络之差：冻结教师 f<sub>φ</sub>（real score）减去可训 critic f<sub>ψ</sub>（fake score）。好处：<b>训练完全不需要真实视频，只需要文本 prompt</b>。DSA 正是靠这一点宣称「no extra video data」。</div>
+  </div>
+
+  <div class="eq">∇<sub>θ</sub> E<sub>t</sub>[ D<sub>KL</sub>( p<sub>θ,t</sub> ‖ p<sub>data,t</sub> ) ] = − E[ ( <i>s</i><sub>real</sub>(x̂<sub>t</sub>,t) − <i>s</i><sub>fake</sub>(x̂<sub>t</sub>,t) ) · ∂x̂/∂θ ]
+  <span class="cm">论文附录式 (5)。实现成式 (6) 那个带 stop-grad 的 L2 形式。<b>请记住这个式子的形状：DMD 的残差是「两个分数网络之差」，不是「学生输出与教师输出之差」</b>——§04 会用到这个区别。</span></div>
+
+  <h3><span class="ix">2.1</span>DSA 到底改了什么：一张对照表</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>维度</th><th>Self-Forcing</th><th>DSA</th></tr></thead>
+      <tbody>
+        <tr><td>学生骨干</td><td>Wan2.1-T2V-1.3B，因果注意力</td><td>相同，+ 3 处 cross-attention 抽头</td></tr>
+        <tr><td>chunk 大小</td><td>3 latent 帧</td><td>3 latent 帧（相同）</td></tr>
+        <tr><td>去噪步表</td><td>{1000, 750, 500, 250}，固定跑满</td><td class="num">相同的表，<b>可能只跑第 1 个</b></td></tr>
+        <tr><td>蒸馏目标</td><td>DMD（也支持 SiD / GAN）</td><td>DMD + 置信度损失</td></tr>
+        <tr><td>生成器 lr</td><td class="num">2.0e−6</td><td class="num">2.0e−6（相同）</td></tr>
+        <tr><td>critic lr</td><td class="num">4.0e−7</td><td class="num">4.0e−7（相同）</td></tr>
+        <tr><td>critic : 生成器 更新比</td><td class="num">5 : 1</td><td class="num">5 : 1（相同）</td></tr>
+        <tr><td>总 batch</td><td class="num">64</td><td class="num">128</td></tr>
+        <tr><td>prompt 来源</td><td>VidProM 过滤 + 扩写</td><td>相同（扩写器点名 Qwen2.5-7B-Instruct）</td></tr>
+        <tr class="me"><td><b>推理步数</b></td><td>每块固定 4 步</td><td><b>每块 1 步或 4 步，由置信度决定</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="font-size:13px;color:var(--ink3)">左列的超参来自 Self-Forcing 官方仓库 <code>configs/self_forcing_dmd.yaml</code>，右列来自 DSA §4.1 与附录 §6。两列逐行相同不是巧合——DSA 明确说它 build on 开源的 Wan2.1 与 Self-Forcing 框架。</p>
+
+  <div class="note">
+    <div class="hd">一个容易被读漏的细节</div>
+    Self-Forcing 官方 DMD 配置里 <code>real_name: Wan2.1-T2V-14B</code>——<b>SF 自己的 real score network 本来就是 14B</b>（1.3B 只出现在 SiD 配置里）。所以 DSA 表 1 里「Ours (14B-Teacher)」和 Self-Forcing 才是真正同教师的对照，而那一行的 VBench 总分是 <b>83.95 : 83.95</b>，打平。论文没有说明它的 SF 基线用的是哪个 checkpoint，也没说明 14B 教师那一版的 critic 是 1.3B 还是 14B（附录只写「real score network 和 critic 都用 base model 的预训练权重初始化」，而 §4.1 定义 base model = Wan2.1-T2V-<b>1.3B</b>）。这两句话放在一起是自相矛盾的，见 §09·D3。
+  </div>
+</section>
+
+<!-- ============================================================ 03 HEAD -->
+<section class="sec" id="s-head">
+  <div class="eyebrow"><span class="n">03</span><span class="t">The confidence head, in parts</span><span class="line"></span></div>
+  <h2>置信度头：从 DiT 身上抽三处特征，挤出一个标量</h2>
+  <p class="lead">论文强调「little architectural modification」。具体有多 little？它在 DiT 的第 <b>13 / 21 / 29</b> 个 block 后各挂一个 cross-attention：<b>用一个可学习 token 当 query</b>，去 attend 该层的全部视觉 token，每层挤出一个 token；三个拼起来过一段 MLP，输出一个标量 logit，sigmoid 之后就是置信度。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 2</span><span class="ti">置信度头的接线（按论文 Fig 3 重绘，补上 Wan2.1-1.3B 的真实层数与 token 数）</span></div>
+    <div class="pad" style="padding:8px 10px 2px">
+    <svg viewBox="0 0 880 330" role="img" aria-label="置信度头架构">
+      <text class="s-ttl" x="20" y="24">Wan2.1-T2V-1.3B 因果 DiT · 30 个 block · dim 1536 · 12 heads</text>
+      <text class="s-sm" x="20" y="42">每个 chunk 的视觉 token 数 = 3 latent 帧 × (60/2) × (104/2) = 4 680 个（patch size 1×2×2）</text>
+
+      <g id="f2blocks"></g>
+
+      <!-- taps -->
+      <path d="M393 100 V116" class="l-C" marker-end="url(#ar-C)"/>
+      <path d="M609 100 V116" class="l-C" marker-end="url(#ar-C)"/>
+      <path d="M825 100 V108 H770 V116" class="l-C" marker-end="url(#ar-C)"/>
+
+      <rect x="318" y="120" width="150" height="58" rx="10" class="f-C"/>
+      <text class="s-lb" x="393" y="141" text-anchor="middle">Cross-Attn</text>
+      <text class="s-sm" x="393" y="158" text-anchor="middle">Q = 1 个可学习 token</text>
+      <text class="s-sm" x="393" y="172" text-anchor="middle">K,V = 4 680 视觉 token</text>
+
+      <rect x="534" y="120" width="150" height="58" rx="10" class="f-C"/>
+      <text class="s-lb" x="609" y="141" text-anchor="middle">Cross-Attn</text>
+      <text class="s-sm" x="609" y="158" text-anchor="middle">QK-Norm · O-Proj</text>
+      <text class="s-sm" x="609" y="172" text-anchor="middle">输出 1 个 token</text>
+
+      <rect x="695" y="120" width="150" height="58" rx="10" class="f-C"/>
+      <text class="s-lb" x="770" y="141" text-anchor="middle">Cross-Attn</text>
+      <text class="s-sm" x="770" y="158" text-anchor="middle">block 29 = 最后一层</text>
+      <text class="s-sm" x="770" y="172" text-anchor="middle">（若 0-indexed）</text>
+
+      <path d="M393 182 V200" class="l-C" marker-end="url(#ar-C)"/>
+      <path d="M609 182 V200" class="l-C" marker-end="url(#ar-C)"/>
+      <path d="M770 182 V200" class="l-C" marker-end="url(#ar-C)"/>
+
+      <rect x="318" y="202" width="527" height="26" rx="7" class="f-C"/>
+      <text class="s-mono" x="581" y="220" text-anchor="middle">Concat 沿通道 → 3 × 1536 = 4 608 维</text>
+
+      <path d="M581 232 V248" class="l-C" marker-end="url(#ar-C)"/>
+
+      <rect x="318" y="252" width="80" height="32" rx="8" class="s-box"/><text class="s-mono" x="358" y="272" text-anchor="middle">Norm</text>
+      <path d="M400 268 H408" class="l-N" marker-end="url(#ar-N)"/>
+      <rect x="410" y="252" width="80" height="32" rx="8" class="s-box"/><text class="s-mono" x="450" y="272" text-anchor="middle">Linear</text>
+      <path d="M492 268 H500" class="l-N" marker-end="url(#ar-N)"/>
+      <rect x="502" y="252" width="60" height="32" rx="8" class="s-box"/><text class="s-mono" x="532" y="272" text-anchor="middle">SiLU</text>
+      <path d="M564 268 H572" class="l-N" marker-end="url(#ar-N)"/>
+      <rect x="574" y="252" width="80" height="32" rx="8" class="s-box"/><text class="s-mono" x="614" y="272" text-anchor="middle">Linear</text>
+      <path d="M656 268 H664" class="l-N" marker-end="url(#ar-N)"/>
+      <rect x="666" y="252" width="90" height="32" rx="8" class="s-box"/><text class="s-mono" x="711" y="272" text-anchor="middle">Sigmoid</text>
+      <path d="M758 268 H784" class="l-C" marker-end="url(#ar-C)"/>
+      <rect x="788" y="250" width="58" height="36" rx="9" class="f-C"/>
+      <text class="s-big" x="817" y="275" text-anchor="middle" fill="var(--cf)">c</text>
+
+      <!-- left annotations -->
+      <rect x="20" y="120" width="278" height="182" rx="11" class="s-box"/>
+      <text class="s-lb" x="36" y="143">我的参数/算力估算</text>
+      <text class="s-sm" x="36" y="164">每处抽头：Q/K/V/O 四个 1536×1536 投影</text>
+      <text class="s-sm" x="36" y="181">≈ 9.4 M 参数 × 3 = <tspan font-weight="600" fill="var(--ink2)">28 M</tspan>；加末端 MLP ≈ <tspan font-weight="600" fill="var(--ink2)">35 M</tspan></text>
+      <text class="s-sm" x="36" y="198">占 1.3B 骨干的 <tspan font-weight="600" fill="var(--cf)">≈ 2.7%</tspan>（参数，不算小）</text>
+      <text class="s-sm" x="36" y="222">FLOPs 侧：query 只有 1 个 token，成本由</text>
+      <text class="s-sm" x="36" y="239">K/V 投影主导 ≈ 0.13 TFLOP / chunk，对比</text>
+      <text class="s-sm" x="36" y="256">骨干一次前向 ≈ 12 TFLOP → <tspan font-weight="600" fill="var(--sp)">≈ 1%</tspan></text>
+      <text class="s-sm" x="36" y="276" fill="var(--ink3)">「negligible overhead」在算力上成立，</text>
+      <text class="s-sm" x="36" y="292" fill="var(--ink3)">在参数上则是 2.7%——论文未提</text>
+
+      <text class="s-sm" x="20" y="310" fill="var(--warn)">论文没说 13/21/29 是 0-indexed 还是 1-indexed，也没有任何关于「为什么是这三层」「为什么是 1 个 token」的消融。</text>
+    </svg>
+    </div>
+    <figcaption>层数 30、dim 1536、heads 12、VAE stride (4,8,8)、patch (1,2,2) 来自 Wan2.1 官方 config；token 数与参数/FLOPs 为我的推算。论文 Fig 3 只画了结构，没给任何数量级。</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <div class="card cOK"><div class="mono">这个设计的好处是真的</div><h5>不需要独立的 critic 网络</h5>对比 APT（Lin et al.）那种用<b>单独判别器</b>来估质量的做法，DSA 直接从生成器骨干里抽 logit，于是 x̂₀ 和 c 是<b>同一次前向</b>的两个输出。这意味着「先算质量分再决定要不要继续」这件事在推理时<b>不增加任何一次完整前向</b>——这是整套方案能真正提速的前提。</div>
+    <div class="card cW"><div class="mono">但有一处没说清</div><h5>置信度损失的梯度会流回骨干吗</h5>c 依赖骨干第 13/21/29 层的特征，所以 ∂L<sub>conf</sub>/∂θ<sub>backbone</sub> 非零。论文没说是否对骨干停梯度。如果不停，那么<b>置信度目标在改写生成器本身</b>——它可能把特征推向「更容易预测 c」的方向而牺牲生成质量；如果停，那置信度头只能读一组它无法塑形的特征。两种设计的取舍完全不同，论文一个字没提。</div>
+  </div>
+
+  <h3><span class="ix">3.1</span>一个被术语掩盖的粒度问题：这不是 per-frame</h3>
+  <p>论文从头到尾说「per-frame confidence」，Fig 1 的图注写「The number of diffusion steps adaptively changes at different <b>frame</b>」。但生成是 <b>chunk-wise</b> 的，一个 chunk = 3 个 latent 帧 ≈ 12 个像素帧；而置信度头一次前向只产出<b>一个标量</b>（1 个可学习 token → 1 个 logit）。</p>
+  <p>所以真实的自适应粒度是 <b>7 档，每档 0.75 秒视频</b>，不是 81 帧里的每一帧。这个差别对宣传图的说服力影响不小：Fig 1 那种「步数随帧起伏」的想象，在实现上最多是七级阶梯，而且每级只有两个取值。</p>
+</section>
+
+<!-- ============================================================ 04 LOSS -->
+<section class="sec" id="s-loss">
+  <div class="eyebrow"><span class="n">04</span><span class="t">One line of loss, one closed form</span><span class="line"></span></div>
+  <h2>损失函数：一行公式，一个闭式解，和一个 10 倍的矛盾</h2>
+  <p class="lead">整篇论文新增的训练信号就是式 (4) 这一行。它长得像个正则化技巧，但它其实有<b>精确的闭式最优解</b>——把它解出来，就能看清置信度头到底被训练成了什么东西。</p>
+
+  <div class="eq">L = <i>c</i> ⊙ sg[ <i>d</i>( x̂<sub>G</sub>, x̂<sub>R</sub> ) ] − λ log <i>c</i>
+  <span class="cm">x̂<sub>G</sub> = 学生预测的干净 latent；x̂<sub>R</sub> = 冻结教师（real score network）对同一个加噪 latent 的一步去噪结果；<i>d</i> = 两者的 L2 距离；sg[·] = 停梯度；λ = 正则系数。形式上这是 ConfNet（Wan et al., ICASSP 2018）那一族的「学习型置信度」。</span></div>
+
+  <h3><span class="ix">4.1</span>对 c 求导置零：c* = λ / d</h3>
+  <p>∂L/∂c = d − λ/c = 0 ⟹ <b>c* = λ/d</b>，再被 sigmoid 的值域截到 (0,1]，即 <b>c* = min(1, λ/d)</b>。两项的角色一目了然：第一项 <i>c·d</i> 把 c 往 0 压（残差大就别说自己行），第二项 <i>−λ log c</i> 把 c 往 1 拉（别一味认怂）。平衡点就是残差的倒数。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 3</span><span class="ti">c* = min(1, λ/d)：拖动看 λ 的两个取值把置信度推到哪个量级</span></div>
+    <div class="ctl">
+      <label class="slider">λ <input type="range" id="lamS" min="0" max="100" step="1" value="33"><span class="v" id="lamV">0.020</span></label>
+      <label class="slider">典型残差 d <input type="range" id="dS" min="1" max="100" step="1" value="30"><span class="v" id="dV">0.30</span></label>
+      <span class="sp"></span>
+      <span class="seg" id="lamPreset"><button type="button" data-l="0.2">正文 λ=0.2</button><button type="button" data-l="0.02" aria-pressed="true">附录 λ=0.02</button></span>
+    </div>
+    <div id="lossFig" class="pad" style="padding:8px 10px 2px"></div>
+    <figcaption>横轴为教师残差 d（对数刻度），纵轴为最优置信度 c*。<b>灰色区域 = 饱和区</b>：c* 被截在 1，此时不同难度的 chunk 输出同一个值，判据 <code>c<sub>i</sub> &lt; prev_c</code> 退化成比较浮点噪声。</figcaption>
+  </figure>
+
+  <div class="note bad">
+    <div class="hd">矛盾 · λ 有两个值</div>
+    正文 §4.1 写 <b>λ = 0.2</b>，附录 §6 写 <b>λ = 0.02</b>。相差 10 倍，而从上图可以看到这不是一个无关紧要的差别：λ 定的是<b>「多大的残差才配叫低置信度」</b>的门槛。若残差的典型量级在 0.1 附近，λ=0.2 会让几乎所有 chunk 都落进饱和区（c*≡1，logit 被推向 +∞，梯度消失），整个自适应机制形同虚设；λ=0.02 才能让 c 落在有区分度的区间。<b>我倾向于附录的 0.02 是实际使用值</b>，但这只是根据机制合理性的推断，论文本身无法判定。
+  </div>
+
+  <h3><span class="ix">4.2</span>一个更要紧的问题：d 不是 DMD 的残差</h3>
+  <p>论文在式 (4) 后面写道：「whereas the DMD loss forces the generator to match the teacher by minimizing the residual between x̂<sub>G</sub> and x̂<sub>R</sub>, our confidence loss leverages this residual…」。<b>这句话是不准确的</b>，而且不是措辞问题。</p>
+  <div class="grid2">
+    <div class="card cD"><div class="mono">DMD 实际在最小化的</div><h5>两个<b>分数网络</b>之差</h5>附录式 (6)：<code>‖x̂ − sg[x̂ − (f<sub>ψ</sub> − f<sub>φ</sub>)]‖²</code>，梯度 ∝ (f<sub>ψ</sub> − f<sub>φ</sub>)。这是 critic 与教师<b>对同一个加噪样本的两个预测之差</b>。当 p<sub>θ</sub> = p<sub>data</sub> 时这一项→0。</div>
+    <div class="card cC"><div class="mono">置信度损失用的</div><h5>学生输出与<b>教师一步去噪</b>之差</h5><code>d(x̂<sub>G</sub>, x̂<sub>R</sub>)</code>，只涉及教师，不涉及 critic。<b>即使学生已经完美</b>，这一项也不会趋于 0——教师对一个高噪声 latent 的一步去噪必然是后验均值（偏模糊），与任何一个具体的清晰样本都有距离。</div>
+  </div>
+  <p>这个区别的后果很具体：<b>d 有一个不可约的下界，而这个下界随内容熵而变</b>。快速运动、复杂纹理的 chunk，其后验方差天然更大，d 也就天然更高——<b>哪怕它生成得完全没问题</b>。于是置信度头学到的东西是「内容复杂度」与「生成误差」的混合物，而不是论文所说的「denoising reliability」或「self-calibrated uncertainty」。</p>
+  <div class="note">
+    <div class="hd">这未必是坏事，但改变了故事</div>
+    如果目标就是「复杂的 chunk 多跑步」，那么一个偏向内容复杂度的信号<b>恰好合用</b>。但论文卖的是「模型知道自己什么时候没做好」（self-assessment / calibrated uncertainty），这个说法需要的是<b>误差</b>信号而非<b>难度</b>信号。论文没有给任何校准曲线（置信度 vs 实际质量），所以两种解释都无法被排除。
+  </div>
+
+  <h3><span class="ix">4.3</span>还有一处没交代：这一项和 DMD 损失怎么加</h3>
+  <p>「The final training objective incorporates both the above confidence loss and the standard DMD loss.」——<b>没有权重系数</b>。DMD 损失的量级与置信度损失的量级不在一个刻度上（前者是 latent 空间的 L2，后者含一个 log 项），直接相加还是按某个比例相加，会显著影响训练动力学。这是复现这篇论文的第一个拦路虎。</p>
+</section>
+
+<!-- ============================================================ 05 ALGO -->
+<section class="sec" id="s-algo">
+  <div class="eyebrow"><span class="n">05</span><span class="t">Line by line, where the claims break</span><span class="line"></span></div>
+  <h2>Algorithm 1 逐行：三处正文没说、或与正文相反的东西</h2>
+  <p class="lead">这一节是整篇论文里信息密度最高的地方。摘要说「dynamically adjusts the number of diffusion steps」，§3.3 说「continues denoising … <b>until the output stabilizes</b>」——但伪代码里既没有「number」的连续取值，也没有任何「stabilize」的判据。点任意一行看它实际在干什么。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 4</span><span class="ti">DSA 推理循环（论文 Algorithm 1 逐行转写）</span></div>
+    <div class="ctl">
+      <button class="btn" id="agPrev" type="button">← 上一行</button>
+      <button class="btn" id="agNext" type="button">下一行 →</button>
+      <span class="sp"></span>
+      <span class="seg" id="agJump"><button type="button" data-g="dec">跳到分支判据</button><button type="button" data-g="loop">跳到内层循环</button><button type="button" data-g="kv">跳到 KV 刷新</button></span>
+    </div>
+    <div class="explore">
+      <div class="algo" id="agCode"></div>
+      <div class="pane" id="agPane"></div>
+    </div>
+    <figcaption>记号按论文转写（略作中文化）。标 <b style="color:var(--warn)">⚑</b> 的几行是我认为与正文表述不一致、或存在笔误、或承载了论文未点明的关键后果的地方。</figcaption>
+  </figure>
+
+  <h3><span class="ix">5.1</span>问题一：分支是二值的，不是「动态步数」</h3>
+  <p>第 7 行的 <code>if</code> 在第 8 行的 <code>for</code> <b>之外</b>，而 <code>for j = T−1 downto 1</code> 内部<b>没有任何 break</b>。所以每个 chunk 的步数只有两种可能：<b>1 步</b>（条件不成立）或 <b>T 步</b>（条件成立，T=4）。不存在 2 步和 3 步。</p>
+  <p>这与摘要「dynamically adjusts the number of diffusion steps」和 Fig 1 图注「The number of diffusion steps adaptively changes at different frame」的字面含义不符，也与 §3.3 的「until the output stabilizes」直接冲突——后者描述的是一个<b>带停止判据的循环</b>，伪代码里没有。两种可能：要么实现里有 break 而伪代码写漏了，要么伪代码是对的而正文写得过于宽泛。<b>好消息是，NFE=23 这个数在两种读法下都成立</b>（见 §07），所以这不影响速度结论，只影响对机制的理解。</p>
+
+  <h3><span class="ix">5.2</span>问题二：判据比较的是两个不同精炼程度的量</h3>
+  <p>第 7 行比较 <code>sigmoid(c<sup>i</sup>)</code> 与 <code>prev_c</code>。但这两个数的来历完全不同：</p>
+  <div class="grid2">
+    <div class="card cC"><div class="mono">左边</div><h5>c<sup>i</sup>：本块<b>只跑了 1 步</b>之后的置信度</h5>从纯高斯噪声出发的一次前向，t=1000。这是「我一步就画出来了，你看行不行」。</div>
+    <div class="card cA"><div class="mono">右边</div><h5>prev_c：上一块<b>收工时</b>的置信度</h5>第 14 行写的。如果上一块跑了满步，它是 <b>4 步精炼后</b>的值；如果上一块也提前退出，它才是 1 步的值。</div>
+  </div>
+  <p>于是这个判据的行为带有<b>棘轮效应</b>：一旦某块走了满步、把 prev_c 拉高，下一块的 1 步置信度就很难越过这个更高的门槛，于是也倾向走满步；反过来，连续提前退出会让门槛逐级下滑，进入「越省越敢省」的通道。论文自己也承认固定阈值不好使（「the threshold varies by frames and by videos」），但换上的这个相对判据<b>同样是一个启发式</b>——而摘要写的是「requires … no heuristics」。§06 的模拟器可以直接把这个动力学玩出来。</p>
+
+  <h3><span class="ix">5.3</span>问题三：时间步下标是错的</h3>
+  <p>Require 里声明的时间步集合是 <code>{t<sub>1</sub>, …, t<sub>T</sub>}</code>，第 6 行用 <code>t<sub>T</sub></code> 起手。但第 8–11 行的循环是 <code>for j = T−1 downto 1</code>，用的是 <code>t<sub>j−1</sub></code>，即依次访问 <code>t<sub>T−2</sub>, …, t<sub>0</sub></code>——<b>跳过了 t<sub>T−1</sub>，并用到了未定义的 t<sub>0</sub></b>。对 T=4 与步表 {1000, 750, 500, 250} 而言，正确的序列显然应是 750 → 500 → 250。这是一个无害的排版笔误，但它是「伪代码没被仔细校对过」的直接证据，因此 §5.1 里「实现里可能有 break 只是没写」的可能性不能排除。</p>
+
+  <div class="note ok">
+    <div class="hd">一个设计上的优点，论文自己没点出来</div>
+    第 3 行 <code>prev_c ← 1.0</code> 配合第 7 行的严格小于号，意味着<b>第一个 chunk 几乎必然走满步</b>（sigmoid 的值域是开区间，恒 &lt; 1）。这是个好设计：自回归生成里第一块的质量会通过 KV cache 影响之后所有块，把它锚死是对的。代价是<b>首帧延迟无法被优化</b>——这正好解释了表 1 里 0.91 s vs SF 的 0.90 s。对交互式应用来说，这是个需要注意的定位：DSA 优化的是稳态吞吐，不是响应延迟。
+  </div>
+</section>
+
+<!-- ============================================================ 06 SIM -->
+<section class="sec" id="s-sim">
+  <div class="eyebrow"><span class="n">06</span><span class="t">Play with the scheduler</span><span class="line"></span></div>
+  <h2>调度模拟器：把棘轮效应和级联退化玩出来</h2>
+  <p class="lead">下面是一个按 Algorithm 1 第 3–14 行<b>逐字实现</b>的小模拟器。七个 chunk，每个给一个「内容难度」，模型据此产生 1 步置信度与 4 步置信度，然后跑论文的判据。你可以拖难度，也可以打开<b>误差累积</b>——后者是自回归模型的真实行为：前面偷工，后面更难。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 5</span><span class="ti">Algorithm 1 逐字模拟（7 个 chunk）</span></div>
+    <div class="ctl">
+      <span class="seg" id="simPreset">
+        <button type="button" data-p="flat" aria-pressed="true">平稳镜头</button>
+        <button type="button" data-p="rise">越来越难</button>
+        <button type="button" data-p="fall">越来越易</button>
+        <button type="button" data-p="burst">中段爆发</button>
+      </span>
+      <span class="sp"></span>
+      <label class="slider">误差累积 δ <input type="range" id="simDelta" min="0" max="60" step="1" value="0"><span class="v" id="simDeltaV">0.00</span></label>
+      <button class="btn" id="simNoise" type="button">↻ 换随机噪声</button>
+    </div>
+    <div class="pad" style="padding:10px 14px 4px">
+      <div id="simSliders" style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin-bottom:6px"></div>
+    </div>
+    <div id="simFig" class="pad" style="padding:2px 10px 2px"></div>
+    <div id="simRead" class="pad" style="padding:4px 16px 16px"></div>
+    <div class="legend">
+      <span><i style="background:var(--cf)"></i>1 步置信度 c</span>
+      <span><i style="background:var(--dm)"></i>4 步精炼后的 c</span>
+      <span><i style="background:var(--ar)"></i>prev_c 门槛（棘轮）</span>
+      <span><i style="background:var(--sp)"></i>提前退出（2 次前向）</span>
+      <span><i style="background:var(--qa)"></i>满步（5 次前向）</span>
+    </div>
+    <figcaption>置信度模型为我的合成假设（c 随难度单调下降、4 步精炼带来固定比例的提升），<b>不是论文数据</b>——论文没有公布任何逐块的置信度轨迹或步数分配。此图的用途是让 Algorithm 1 的<b>判据动力学</b>可见，不是复现论文结果。</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <div class="card cW"><div class="mono">玩法 ①　棘轮的滞后</div><h5>点「越来越易」</h5>内容<b>一路在变简单</b>，但前 4 块仍然全部被迫跑满步——因为每一次精炼都把门槛顶得更高，本块只能拿「1 步的分」去够「上块 4 步的门槛」。直到内容简单到足以一次性越过门槛，早退才开始发生。<b>这个滞后是判据的结构性产物，与内容无关。</b></div>
+    <div class="card cW"><div class="mono">玩法 ②　自己造工作量</div><h5>默认设置下把 δ 拉到 0.2</h5>NFE 从 <b>23 跳到 29</b>。机制是：早退 → 误差进入 KV cache → 后面的块真实难度上升 → 置信度掉到门槛下 → 被迫满步。<b>省下来的算力又被自己赔了回去</b>，而画面质量已经受损。论文 §5.1 承认长视频会退化，但没有考察调度规则本身是否是贡献因素。</div>
+    <div class="card cW"><div class="mono">玩法 ③　彻底失效</div><h5>点「越来越难」</h5>七块全部满步，NFE 锁死在 <b>35</b>——与固定 4 步完全相同，置信度头白装了。这不是 bug：难度单调上升时，本块的 1 步分<b>永远</b>低于上块的精炼分。凡是「整体趋难」的镜头，DSA 退化为 Self-Forcing 加 2.7% 的参数。</div>
+    <div class="card cB"><div class="mono">默认那一档</div><h5>「平稳镜头」正好落在 23 NFE</h5>这是巧合（我为了对上论文的数字挑了噪声种子），但它说明论文报告的 23 确实对应一个<b>难度平稳、置信度在门槛附近来回穿越</b>的典型场景。点「↻ 换随机噪声」会看到同一组难度下 NFE 在 20–32 之间跳——这就是 D13 说的抖动。</div>
+  </div>
+</section>
+
+<!-- ============================================================ 07 NUMBERS -->
+<section class="sec" id="s-num">
+  <div class="eyebrow"><span class="n">07</span><span class="t">Three independent consistency checks</span><span class="line"></span></div>
+  <h2>数字复核：三套检验全部通过，顺带把论文没写的记账反推了出来</h2>
+  <p class="lead">先给结论：<b>这篇论文的数字是自洽的</b>。我用三个彼此独立的模型去核对它的表格，全部吻合。这既说明表格可信，也让我们能反推出论文没公布的执行细节。下面按可靠性从高到低排列。</p>
+
+  <h3><span class="ix">7.1</span>检验一：VBench 总分的加权，6/6 行复现</h3>
+  <p>VBench 的 Total = 0.8 × Quality + 0.2 × Semantic。用这个公式去算表 1 的六行：</p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>模型</th><th>Quality</th><th>Semantic</th><th>论文 Total</th><th>复算</th><th>偏差</th></tr></thead>
+      <tbody>
+        <tr><td>SkyReels-V2 (1.3B)</td><td class="num">84.70</td><td class="num">74.53</td><td class="num">82.67</td><td class="num">82.666</td><td class="num"><span class="bst">−0.004</span></td></tr>
+        <tr><td>MAGI-1 (4.5B)</td><td class="num">82.04</td><td class="num">67.74</td><td class="num">79.18</td><td class="num">79.180</td><td class="num"><span class="bst">0.000</span></td></tr>
+        <tr><td>CausVid</td><td class="num">83.97</td><td class="num">79.08</td><td class="num">82.99</td><td class="num">82.992</td><td class="num"><span class="bst">+0.002</span></td></tr>
+        <tr><td>Self-Forcing</td><td class="num">84.89</td><td class="num">80.20</td><td class="num">83.95</td><td class="num">83.952</td><td class="num"><span class="bst">+0.002</span></td></tr>
+        <tr class="me"><td>DSA（1.3B 教师）</td><td class="num">84.75</td><td class="num">79.67</td><td class="num">83.73</td><td class="num">83.734</td><td class="num"><span class="bst">+0.004</span></td></tr>
+        <tr class="me"><td>DSA（14B 教师）</td><td class="num">84.50</td><td class="num">81.73</td><td class="num">83.95</td><td class="num">83.946</td><td class="num"><span class="bst">−0.004</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>全部落在 ±0.004 以内（四舍五入误差）。<b>表 1 没有录入错误</b>。这一点值得单独说，因为同类论文在这里翻车并不罕见。</p>
+
+  <h3><span class="ix">7.2</span>检验二：NFE = 7 × (k+1)，4/4 点精确命中</h3>
+  <p>消融表的 14 / 21 / 28 / 35 完全落在这条直线上，且与 Self-Forcing 官方配置（21 个 latent 帧、每块 3 帧 → 7 块；步表长度 4；每块一次 t=0 的 KV 刷新前向）严格一致。<b>这是我对论文未公开细节最有信心的一条反推</b>。</p>
+
+  <h3><span class="ix">7.3</span>检验三：把 FPS 换算成墙钟时间，是一条直线</h3>
+  <p>81 个像素帧 ÷ FPS = 生成一段视频的总时间。对四个固定步数档位做线性拟合 <i>time</i> = <i>a</i> + <i>b</i> · NFE：</p>
+  <div class="eq"><i>a</i> ≈ 1.53 s　　<i>b</i> ≈ 0.096 s / 次前向　　（即 ≈ 10.4 次前向 / 秒）
+  <span class="cm"><i>a</i> 是与步数无关的固定开销：T5 文本编码 + VAE 解码 81 帧 + 调度开销。<i>b</i> 是一次 DiT 前向（4 680 个 token）的墙钟成本。四个点的拟合残差都在 ±2.3% 以内。</span></div>
+  <div class="tw">
+    <table>
+      <thead><tr><th>档位</th><th>NFE</th><th>论文 FPS</th><th>实测总时长</th><th>拟合时长</th><th>残差</th></tr></thead>
+      <tbody>
+        <tr><td>固定 1 步</td><td class="num">14</td><td class="num">27.75</td><td class="num">2.919 s</td><td class="num">2.874 s</td><td class="num">−1.5%</td></tr>
+        <tr><td>固定 2 步</td><td class="num">21</td><td class="num">22.97</td><td class="num">3.526 s</td><td class="num">3.547 s</td><td class="num">+0.6%</td></tr>
+        <tr><td>固定 3 步</td><td class="num">28</td><td class="num">19.63</td><td class="num">4.126 s</td><td class="num">4.219 s</td><td class="num">+2.3%</td></tr>
+        <tr><td>固定 4 步</td><td class="num">35</td><td class="num">16.33</td><td class="num">4.960 s</td><td class="num">4.892 s</td><td class="num">−1.4%</td></tr>
+        <tr class="me"><td><b>DSA 自适应</b></td><td class="num">23</td><td class="num">22.01</td><td class="num">3.680 s</td><td class="num">3.739 s</td><td class="num">+1.6%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>自适应那一行用<b>同一条直线</b>就能预测出来，误差和固定档位同量级。这是一个很强的旁证：<b>置信度头在推理时的额外开销确实可以忽略</b>（否则自适应行会系统性地慢于拟合值）。</p>
+
+  <h3><span class="ix">7.4</span>反推：NFE = 23 是怎么凑出来的</h3>
+  <p>按 §05 的二值读法，每块的代价只有两种：提前退出 = 1 次去噪 + 1 次 KV = <b>2 次前向</b>；满步 = 4 + 1 = <b>5 次前向</b>。设 7 块里有 <i>n</i> 块走满步：</p>
+  <div class="eq">NFE = 2 × (7 − <i>n</i>) + 5 × <i>n</i> = 14 + 3<i>n</i> = 23　⟹　<i>n</i> = <b>3</b>
+  <span class="cm">整数解唯一。也就是说：<b>7 块里有 3 块跑满 4 步（其中必然包含第 1 块），另外 4 块只跑 1 步</b>。若按「循环里其实有 break」的连续读法，则 NFE = 7 + Σk<sub>i</sub> = 23 ⟹ Σk<sub>i</sub> = 16，平均每块 2.29 步。两种读法都成立，论文未提供可区分二者的信息。</span></div>
+
+  <div class="note bad">
+    <div class="hd">这个反推直接指出了论文缺的那个基线</div>
+    如果真实分配是「3 块满步 + 4 块单步」，那么存在一个<b>零新增参数、零新增训练、完全确定性</b>的静态排程与之成本完全相同：<b>前 3 块跑满 4 步，后 4 块各跑 1 步</b> → 3×5 + 4×2 = <b>23 次前向，分毫不差</b>。自回归生成里前面的块通过 KV cache 影响后面所有块，「把算力前置」本就是最自然的先验。<b>论文没有做这个对照</b>，也没有做「随机挑 3 块跑满步」的对照。在补上之前，我们无法区分「置信度信号有用」和「把步数前置有用」这两个假设——而后者不需要这篇论文的任何一个新组件。
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 6</span><span class="ti">质量–成本前沿：自适应点落在哪，以及那个没人测过的对照点</span></div>
+    <div class="pad" style="padding:8px 10px 2px">
+    <svg viewBox="0 0 880 352" role="img" aria-label="VBench 总分随 NFE 的变化">
+      <!-- grid -->
+      <line x1="90" y1="260.8" x2="820" y2="260.8" class="s-grid"/><text class="s-sm" x="78" y="264" text-anchor="end">79</text>
+      <line x1="90" y1="222.5" x2="820" y2="222.5" class="s-grid"/><text class="s-sm" x="78" y="226" text-anchor="end">80</text>
+      <line x1="90" y1="184.2" x2="820" y2="184.2" class="s-grid"/><text class="s-sm" x="78" y="188" text-anchor="end">81</text>
+      <line x1="90" y1="145.8" x2="820" y2="145.8" class="s-grid"/><text class="s-sm" x="78" y="150" text-anchor="end">82</text>
+      <line x1="90" y1="107.5" x2="820" y2="107.5" class="s-grid"/><text class="s-sm" x="78" y="111" text-anchor="end">83</text>
+      <line x1="90" y1="69.2" x2="820" y2="69.2" class="s-grid"/><text class="s-sm" x="78" y="73" text-anchor="end">84</text>
+      <line x1="90" y1="40" x2="90" y2="290" class="s-axis"/>
+      <line x1="90" y1="290" x2="820" y2="290" class="s-axis"/>
+      <text class="s-sm" x="36" y="36">VBench 总分</text>
+      <text class="s-sm" x="820" y="336" text-anchor="end">NFE（次前向 / 段视频）</text>
+
+      <line x1="148.4" y1="286" x2="148.4" y2="294" class="s-axis"/><text class="s-sm" x="148.4" y="308" text-anchor="middle">14</text>
+      <line x1="352.8" y1="286" x2="352.8" y2="294" class="s-axis"/><text class="s-sm" x="352.8" y="308" text-anchor="middle">21</text>
+      <line x1="411.2" y1="286" x2="411.2" y2="294" class="s-axis"/><text class="s-sm" x="411.2" y="308" text-anchor="middle" fill="var(--cf)">23</text>
+      <line x1="557.2" y1="286" x2="557.2" y2="294" class="s-axis"/><text class="s-sm" x="557.2" y="308" text-anchor="middle">28</text>
+      <line x1="761.6" y1="286" x2="761.6" y2="294" class="s-axis"/><text class="s-sm" x="761.6" y="308" text-anchor="middle">35</text>
+
+      <!-- fixed-step curve -->
+      <polyline points="148.4,250.5 352.8,116.3 557.2,82.2 761.6,71.5" class="l-N" stroke-width="2.2"/>
+      <circle cx="148.4" cy="250.5" r="6" class="f-Q"/><text class="s-sm" x="148.4" y="236" text-anchor="middle">1 步 · 79.27</text>
+      <circle cx="352.8" cy="116.3" r="6" class="f-Q"/><text class="s-sm" x="352.8" y="102" text-anchor="middle">2 步 · 82.77</text>
+      <circle cx="557.2" cy="82.2" r="6" class="f-Q"/><text class="s-sm" x="557.2" y="100" text-anchor="middle">3 步 · 83.66</text>
+      <circle cx="761.6" cy="71.5" r="6" class="f-Q"/><text class="s-sm" x="761.6" y="58" text-anchor="middle">4 步 · 83.94</text>
+
+      <!-- adaptive -->
+      <circle cx="411.2" cy="71.1" r="9" class="f-C" stroke-width="2.4"/>
+      <text class="s-ttl" x="411.2" y="52" text-anchor="middle" fill="var(--cf)">DSA 自适应 · 83.95</text>
+      <path d="M411.2 71.1 H752" class="l-C" stroke-dasharray="5 4"/>
+      <text class="s-sm" x="580" y="66" text-anchor="middle" fill="var(--cf)">同质量，省下 12 次前向</text>
+
+      <!-- missing baseline -->
+      <circle cx="411.2" cy="140" r="8" fill="none" stroke="var(--ink3)" stroke-width="2" stroke-dasharray="4 3"/>
+      <text class="s-sm" x="411.2" y="162" text-anchor="middle" fill="var(--ink3)">静态排程「前 3 块满步 + 后 4 块单步」</text>
+      <text class="s-sm" x="411.2" y="178" text-anchor="middle" fill="var(--ink3)">成本同为 23 NFE　·　<tspan fill="var(--bad)" font-weight="600">论文未测，纵坐标未知</tspan></text>
+      <path d="M411.2 132 V82" class="l-N" stroke-dasharray="3 3" marker-end="url(#ar-N)"/>
+
+      <text class="s-sm" x="100" y="200">固定步数档位（论文 Table 2）</text>
+      <path d="M96 205 Q 120 240 144 248" class="l-N" marker-end="url(#ar-N)"/>
+    </svg>
+    </div>
+    <figcaption>实心点与自适应点为论文 Table 2 数值；虚线空心点为我指出的缺失对照，纵坐标未知。注意固定步数曲线在 3→4 步之间已经<b>基本平坦</b>（83.66→83.94），这意味着第 4 步本身的边际收益就很小——「省掉一些第 2/3/4 步」能保住质量，并不需要一个特别聪明的选择器。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 08 RESULTS -->
+<section class="sec" id="s-res">
+  <div class="eyebrow"><span class="n">08</span><span class="t">Untangling speed from quality</span><span class="line"></span></div>
+  <h2>把「快」和「好」拆开：它们来自两个不同的改动</h2>
+  <p class="lead">表 1 读起来像是「DSA 又快又好」。但把行对齐之后会发现：<b>速度来自自适应采样，质量来自换了个更大的教师</b>，这两件事在论文里是捆绑发布的，而它们彼此无关。摘要把 22.63 FPS 和「competitive or superior quality」写在一句话里，但这两个数<b>来自两个不同的模型</b>。</p>
+
+  <div class="tw">
+    <table id="mainTbl">
+      <thead><tr>
+        <th data-c="0" data-t="s">模型</th><th data-c="1" data-t="s">参数</th><th data-c="2">FPS ↑</th><th data-c="3">延迟(s) ↓</th>
+        <th data-c="4">美学 ↑</th><th data-c="5">空间关系 ↑</th><th data-c="6">时序风格 ↑</th><th data-c="7">Quality ↑</th><th data-c="8">Semantic ↑</th><th data-c="9">Total ↑</th>
+      </tr></thead>
+      <tbody>
+        <tr class="dim"><td>SkyReels-V2 †</td><td>1.3B</td><td class="num">0.49</td><td class="num">112</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">84.70</td><td class="num">74.53</td><td class="num">82.67</td></tr>
+        <tr class="dim"><td>MAGI-1 †</td><td>4.5B</td><td class="num">0.19</td><td class="num">282</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">82.04</td><td class="num">67.74</td><td class="num">79.18</td></tr>
+        <tr><td>CausVid</td><td>1.3B</td><td class="num">15.30</td><td class="num">0.90</td><td class="num">65.01</td><td class="num">71.16</td><td class="num">24.16</td><td class="num">83.97</td><td class="num">79.08</td><td class="num">82.99</td></tr>
+        <tr><td>Self-Forcing</td><td>1.3B</td><td class="num">15.30</td><td class="num">0.90</td><td class="num">65.84</td><td class="num">80.12</td><td class="num"><span class="bst">24.33</span></td><td class="num"><span class="bst">84.89</span></td><td class="num">80.20</td><td class="num"><span class="bst">83.95</span></td></tr>
+        <tr class="me"><td>DSA（1.3B 教师）</td><td>1.3B</td><td class="num"><span class="bst">22.63</span></td><td class="num">0.91</td><td class="num">64.72</td><td class="num">76.87</td><td class="num">24.13</td><td class="num">84.75</td><td class="num">79.67</td><td class="num">83.73</td></tr>
+        <tr class="me"><td>DSA（14B 教师）</td><td>1.3B</td><td class="num">22.01</td><td class="num">0.91</td><td class="num"><span class="bst">67.02</span></td><td class="num"><span class="bst">84.82</span></td><td class="num">24.12</td><td class="num">84.50</td><td class="num"><span class="bst">81.73</span></td><td class="num"><span class="bst">83.95</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="font-size:13px;color:var(--ink3)">点表头可排序。† 的两行数值转引自 Self-Forcing 论文，非本文重测。</p>
+
+  <h3><span class="ix">8.1</span>速度：1.48× 里有多少是方法带来的</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 7</span><span class="ti">吞吐的来源分解</span></div>
+    <div class="pad" style="padding:10px 10px 2px">
+    <svg viewBox="0 0 880 308" role="img" aria-label="吞吐来源分解">
+      <line x1="200" y1="24" x2="200" y2="262" class="s-axis"/>
+      <g>
+        <text class="s-lb" x="192" y="46" text-anchor="end">Self-Forcing 自报</text>
+        <rect x="200" y="30" width="374" height="22" rx="5" fill="none" stroke="var(--rule2)" stroke-width="1.4" stroke-dasharray="5 4"/>
+        <text class="s-mono" x="584" y="46">17.00 FPS　<tspan fill="var(--ink3)">（其原论文的数字）</tspan></text>
+      </g>
+      <g>
+        <text class="s-lb" x="192" y="84" text-anchor="end">Self-Forcing（本文重测）</text>
+        <rect x="200" y="68" width="337" height="22" rx="5" class="f-A"/>
+        <text class="s-mono" x="547" y="84">15.30 FPS</text>
+      </g>
+      <g>
+        <text class="s-lb" x="192" y="122" text-anchor="end">DSA 固定 4 步</text>
+        <rect x="200" y="106" width="359" height="22" rx="5" class="f-A"/>
+        <text class="s-mono" x="569" y="122">16.33 FPS　<tspan fill="var(--sp)">+6.7%</tspan>　<tspan fill="var(--ink3)">← 同样 35 NFE，纯实现增益</tspan></text>
+      </g>
+      <g>
+        <text class="s-lb" x="192" y="160" text-anchor="end">DSA 自适应（14B 教师）</text>
+        <rect x="200" y="144" width="484" height="22" rx="5" class="f-C"/>
+        <text class="s-mono" x="694" y="160">22.01 FPS　<tspan fill="var(--cf)">+34.8%</tspan>　<tspan fill="var(--ink3)">← 方法本身</tspan></text>
+      </g>
+      <g>
+        <text class="s-lb" x="192" y="198" text-anchor="end">DSA 自适应（1.3B 教师）</text>
+        <rect x="200" y="182" width="498" height="22" rx="5" class="f-C"/>
+        <text class="s-mono" x="708" y="198">22.63 FPS</text>
+      </g>
+      <g>
+        <text class="s-lb" x="192" y="236" text-anchor="end">固定 1 步（质量塌了）</text>
+        <rect x="200" y="220" width="610" height="22" rx="5" class="s-box2"/>
+        <text class="s-mono" x="700" y="236" fill="var(--ink3)">27.75 FPS · 总分 79.27</text>
+      </g>
+      <text class="s-sm" x="200" y="272" fill="var(--warn)">对 Self-Forcing 的 1.48× 加速里，约 1.07× 来自实现，约 1.35× 来自自适应采样。</text>
+      <text class="s-sm" x="200" y="292" fill="var(--ink3)">依据：本文自己的固定 4 步基线（35 NFE，与 SF 完全同成本）就比它重测的 SF 快 6.7%；附录提到使用 FlashAttention-3。</text>
+    </svg>
+    </div>
+    <figcaption>17.00 FPS 一行来自 Self-Forcing 原论文的自述（「real-time video generation at 17 FPS … on a single H100」），本文表 1 将其重测为 15.30。两者差 11%，论文未说明配置差异。</figcaption>
+  </figure>
+
+  <h3><span class="ix">8.2</span>质量：好的那几个维度，和自适应没关系</h3>
+  <div class="grid2">
+    <div class="card cQ"><div class="mono">对齐来看</div><h5>同教师的对照是打平</h5>Self-Forcing 官方 DMD 配置里 real score network 就是 <b>Wan2.1-T2V-14B</b>。所以「DSA（14B 教师）83.95」对「Self-Forcing 83.95」才是同教师对照——<b>总分完全相同</b>。而「DSA（1.3B 教师）83.73」<b>低于</b> SF 0.22 分。</div>
+    <div class="card cQ"><div class="mono">拆到维度</div><h5>涨的是语义，跌的是画质</h5>DSA(14B) 对 SF：Semantic <b>+1.53</b>（80.20→81.73）、空间关系 <b>+4.70</b>、美学 <b>+1.18</b>；但 Quality <b>−0.39</b>（84.89→84.50）。由于总分权重是 0.8 : 0.2，两边正好抵消。<b>这组此消彼长的模式是「换了教师」的典型特征</b>，与采样步数无关。</div>
+  </div>
+  <div class="note">
+    <div class="hd">消融表里那个 +0.01</div>
+    Table 2 的结论句是「achieves the highest overall quality (83.95) while maintaining significantly higher throughput」。但固定 4 步是 <b>83.94</b>，自适应是 <b>83.95</b>——<b>差 0.01 分</b>，远在 VBench 的重复测量噪声之内（论文未报方差、未报随机种子数）。诚实的表述应该是「<b>在质量不可区分的前提下把 NFE 从 35 降到 23</b>」，这已经是个不错的结果，不需要说成质量最高。
+  </div>
+
+  <h3><span class="ix">8.3</span>和基础 AR 模型的「46×」怎么看</h3>
+  <p>论文反复引用「比 SkyReels-V2 快 46× 吞吐、120× 延迟」。这两个倍数算术上没问题（22.63/0.49 = 46.2；112/0.91 = 123）。但要注意：<b>这两行数字是转引自 Self-Forcing 论文的</b>，不是本文重测；而且比较对象是<b>未蒸馏的多步基础模型</b>。「蒸馏学生比多步教师快一到两个数量级」是这条技术路线的<b>共有属性</b>，CausVid 和 Self-Forcing 早已达成，不是 DSA 的增量贡献。DSA 相对于它<b>真正的同代对手</b>（SF）的增量是 1.48×。</p>
+</section>
+
+<!-- ============================================================ 09 DOUBTS -->
+<section class="sec" id="s-doubt">
+  <div class="eyebrow"><span class="n">09</span><span class="t">What I would push back on</span><span class="line"></span></div>
+  <h2>我的存疑清单</h2>
+  <p class="lead">先说立场：<b>这篇论文的速度结论我认为是成立的</b>——数字自洽、记账能对上、开销可忽略这一点有独立旁证。我的疑问集中在<b>「因果归属」</b>上：省下来的算力确实省下来了，但它是<b>因为置信度信号选对了地方</b>，还是<b>因为第 4 步本来就没什么用</b>？论文没有能区分这两者的实验。下面按我判断的严重程度排序，四条「高」里有三条<b>作者补一张表就能解决</b>。</p>
+
+  <div class="dfilter">
+    <span class="seg" id="dvFilter"><button type="button" data-s="all" aria-pressed="true">全部 14</button><button type="button" data-s="hi">高 4</button><button type="button" data-s="mid">中 5</button><button type="button" data-s="lo">低 5</button></span>
+    <button class="btn" id="dvAll" type="button">展开 / 折叠全部</button>
+  </div>
+
+  <div id="dvList">
+
+  <details class="dt" data-s="hi"><summary><span class="sev hi">高</span><span class="dn">D1</span><span>缺少同成本对照：静态前置排程的 NFE 恰好也是 23</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>消融表只对比了「自适应 vs 固定 k 步」。但自适应的收益有两个可能来源：(a) 置信度信号把算力分配到了<b>对的块</b>；(b) 仅仅是<b>少跑了一些边际收益很低的步</b>，跟分到哪块无关。区分二者需要两个对照，论文一个都没做：<b>① 同 NFE 的静态排程</b>（前 3 块满步 + 后 4 块单步 = 23 NFE，见 §7.4）；<b>② 同 NFE 的随机分配</b>（随机挑 3 块跑满步）。</p>
+      <span class="lb">为什么重要</span>
+      <p>这是整篇论文<b>唯一</b>需要置信度头存在的理由。如果静态前置排程也能拿到 83.9x，那么这篇论文的 35M 新增参数、新增损失、新增训练全都可以删掉，收益不变。而从 Fig 6 能看到，固定步数曲线在 3 步（83.66）到 4 步（83.94）之间已经几乎平坦——<b>边际收益本来就低</b>，这让 (b) 成为一个相当有力的竞争假设。</p>
+      <span class="lb">怎么排除</span>
+      <p>补两行表。作者已经有全部基础设施（固定步数基线就是这么跑的），改几行推理代码即可，<b>不需要重新训练</b>。这是成本最低、信息量最大的一个补实验。</p>
+    </div></details>
+
+  <details class="dt" data-s="hi"><summary><span class="sev hi">高</span><span class="dn">D2</span><span>Algorithm 1 的分支是二值的，与摘要和 §3.3 的表述相冲突</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>第 7 行的 <code>if</code> 在第 8 行的 <code>for j = T−1 downto 1</code> 之外，循环体内<b>没有 break</b>。步数因此只有 1 或 T 两个取值。而摘要写「dynamically adjusts the number of diffusion steps」，§3.3 写「continues denoising with progressively smaller timesteps … <b>until the output stabilizes</b>」，Fig 1 图注写「The number of diffusion steps adaptively changes at different frame」——这三处都在描述一个连续或多档的机制。</p>
+      <span class="lb">为什么重要</span>
+      <p>它改变了读者对方法的理解：一个「每步都检查是否收敛」的机制和一个「只在第 1 步后判一次」的开关，在设计空间、失败模式、可扩展性上完全不同。前者可以推广到 T=8、T=16；后者在 T 更大时会变成一个很粗的二分。此外这也影响对 NFE=23 的解读（见 §7.4 的两种读法）。</p>
+      <span class="lb">怎么排除</span>
+      <p>作者只需说明一句：内层循环是否有提前退出判据。若有，请给出判据；若无，请把正文的「until the output stabilizes」改掉，并在 Fig 1 里如实画成两档。</p>
+    </div></details>
+
+  <details class="dt" data-s="hi"><summary><span class="sev hi">高</span><span class="dn">D3</span><span>质量卖点来自 14B 教师，而 14B 教师的配置论文从未描述且自相矛盾</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>表 1 里「Ours (14B-Teacher)」在美学、空间关系、Semantic 三项领先，摘要据此称「competitive or superior quality」。但论文 §4.1 只说「We implement our method using <b>Wan2.1-T2V-1.3B as the base model</b>」，附录 §6 只说「We initialized the <b>real score network and critic network using pretrained weight of the base model</b>」。把这两句合起来读，real score network 是 1.3B——那 14B 教师那一版是怎么配的？critic 也是 14B 吗？显存、学习率、更新比例有没有变？<b>论文没有任何一句话描述这个配置</b>。</p>
+      <span class="lb">为什么重要</span>
+      <p>①「换更大的教师能提升学生质量」是已知结论，不是这篇论文的贡献，但它承担了摘要里质量主张的全部重量。② 更关键的是：Self-Forcing 官方 DMD 配置里 <code>real_name: Wan2.1-T2V-14B</code>——<b>SF 自己的教师本来就是 14B</b>。如果论文的 SF 基线用的是官方 checkpoint，那么「DSA(14B) 83.95 : SF 83.95」才是同条件对照，结论是<b>打平</b>，而「DSA(1.3B) 83.73」比 SF <b>低 0.22</b>。论文没有说明它的 SF 基线来源。</p>
+      <span class="lb">怎么排除</span>
+      <p>在实现细节里补一段 14B 教师配置；并说明 SF 基线是官方权重还是自训。若是自训，给出其教师规模。</p>
+    </div></details>
+
+  <details class="dt" data-s="hi"><summary><span class="sev hi">高</span><span class="dn">D4</span><span>推理判据本身就是启发式，而摘要说「no heuristics」</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>摘要与引言两次强调「requires no extra video data, <b>no heuristics</b>, and little architectural modification」。但 §3.3 的推理规则是：论文先否定了固定阈值（「suboptimal since we observe that the threshold varies by frames and by videos」），然后换成<b>「与上一块比」</b>。这个替代品同样是手工设计的规则，而且<b>比固定阈值更难分析</b>——它把决策变成了一个有状态的序贯过程。</p>
+      <span class="lb">为什么重要</span>
+      <p>除了表述问题，这个规则有两个结构性后果（§06 的模拟器可以复现）：<b>棘轮效应</b>——一次满步会抬高后续块的门槛，倾向于连锁满步；<b>级联退化</b>——连续提前退出会让门槛逐级下滑，在误差累积下形成「越省越敢省 → 质量掉 → 难度升 → 全满步」的震荡。论文承认长视频会退化（§5.1），但把原因归给通用的时序漂移，没有考察调度规则自身是否是贡献因素之一。</p>
+      <span class="lb">怎么排除</span>
+      <p>① 把「no heuristics」改成「no hand-tuned threshold」。② 报告 7 个块的步数分配分布（跨 prompt 的直方图），并给出把视频拉长到 2 倍、4 倍时这个分布怎么变。③ 对比一个无状态的判据（如 <code>c<sub>i</sub> &lt; 全局分位数</code>）来说明有状态判据的必要性。</p>
+    </div></details>
+
+  <details class="dt" data-s="mid"><summary><span class="sev mid">中</span><span class="dn">D5</span><span>λ 在正文与附录中相差 10 倍，且它单独决定了置信度的尺度</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>§4.1 写 <code>λ = 0.2</code>，附录 §6 写 <code>λ = 0.02</code>。</p>
+      <span class="lb">为什么重要</span>
+      <p>置信度损失的闭式最优解是 <code>c* = min(1, λ/d)</code>（§04）。λ 不是一个无关紧要的正则强度，它<b>就是</b>「多大的残差算低置信度」的定义。取值偏大会让绝大多数块落进 c*≡1 的饱和区（logit→+∞，梯度消失），判据退化为比较浮点噪声；取值偏小会让 c 全都挤在接近 0 的区间。更根本地：既然 c 的绝对尺度由 λ 任意指定，<b>论文所称的「self-calibrated uncertainty」就不成立</b>——它是一个单调变换后的残差估计，不是校准过的概率。</p>
+      <span class="lb">怎么排除</span>
+      <p>勘误 λ，并报告 <code>d</code> 是按元素平均还是求和（latent 形状 3×16×60×104，两者相差约 3×10⁵ 倍，直接决定 c 落在哪）。另外给一张校准图：横轴 c，纵轴该块的实际质量指标。</p>
+    </div></details>
+
+  <details class="dt" data-s="mid"><summary><span class="sev mid">中</span><span class="dn">D6</span><span>式 (1)/(3) 与 Fig 2 宣称「以置信度为条件」，但实现里 c 从未作为输入</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>式 (1) 把联合分布写成 <code>Π p<sub>θ</sub>(x<sup>i</sup>, c<sup>i</sup> | x<sup>&lt;i</sup>, c<sup>&lt;i</sup>)</code>，式 (3) 写 <code>G<sub>θ</sub>(x, t, x<sup>&lt;i</sup><sub>0</sub>, <b>c<sup>&lt;i</sup></b>)</code>，Fig 2 图注写「conditions the denoising on the confidence score as well」。但 Fig 3 的架构图里没有任何 c 进入 DiT 的路径，Algorithm 1 里 <code>G<sub>θ</sub>(x; t, K)</code> 的参数表也只有噪声 latent、时间步和 KV cache。论文的解释是「history confidence c<sup>&lt;i</sup> are implicitly embedded via KV-cache of previous frames」以及「both x<sup>i</sup><sub>0</sub> and c<sup>i</sup> are employed as the autoregressive context, and their KV embeddings are stored in the cache」——但<b>没有描述任何把标量 c 嵌入 KV cache 的机制</b>。</p>
+      <span class="lb">为什么重要</span>
+      <p>如果 c 确实没有回流，那么 c<sup>&lt;i</sup> 是 x<sup>&lt;i</sup> 的确定性函数，式 (1) 的条件项是<b>冗余记号</b>，「joint AR modeling of frames and confidence」的框架叙事就是修辞而非机制——c 只是一个只读探针。这不影响方法有效性，但影响读者对「这篇论文提出了什么」的判断：探针 vs 联合生成模型，是两个量级的贡献。</p>
+      <span class="lb">怎么排除</span>
+      <p>一句话：c 是否以任何形式进入 G<sub>θ</sub> 的输入？若否，把式 (1)(3) 的 c<sup>&lt;i</sup> 去掉并改写 Fig 2 图注。</p>
+    </div></details>
+
+  <details class="dt" data-s="mid"><summary><span class="sev mid">中</span><span class="dn">D7</span><span>d(x̂<sub>G</sub>, x̂<sub>R</sub>) 不是 DMD 的残差，且有随内容变化的不可约下界</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>论文说「DMD loss forces the generator to match the teacher by minimizing the residual between x̂<sub>G</sub> and x̂<sub>R</sub>, our confidence loss leverages this residual」。但 DMD 的梯度是 <code>(f<sub>ψ</sub> − f<sub>φ</sub>)</code>，即 <b>critic 与教师两个分数预测之差</b>；置信度损失用的是 <code>‖x̂<sub>G</sub> − x̂<sub>R</sub>‖</code>，即<b>学生输出与教师一步去噪之差</b>。这是两个不同的量。</p>
+      <span class="lb">为什么重要</span>
+      <p>教师对高噪声 latent 的一步去噪是后验均值，天然偏模糊；即便学生完美地从数据分布采样，<code>‖x̂<sub>G</sub> − x̂<sub>R</sub>‖</code> 也不会趋于 0，其下界由该内容的<b>后验方差</b>决定。于是快速运动、复杂纹理的块会系统性地得到低置信度——<b>哪怕它生成得没有任何问题</b>。置信度头因此是「内容复杂度 + 生成误差」的混合估计。这对「难块多跑步」的目标也许恰好有用，但对「模型知道自己何时没做好」的叙事是致命的。</p>
+      <span class="lb">怎么排除</span>
+      <p>做一个对照：在<b>同一段内容</b>上人为注入退化（如强行减步、加噪），看 c 是否随之下降；再在<b>不同复杂度的内容</b>上看 c 的分布。两条曲线的分离度就是「误差信号 vs 难度信号」的答案。</p>
+    </div></details>
+
+  <details class="dt" data-s="mid"><summary><span class="sev mid">中</span><span class="dn">D8</span><span>通篇写「per-frame」，实际粒度是 per-chunk（3 个 latent 帧 ≈ 12 像素帧）</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>§3.2 标题「Joint AR Modeling of Frames and Confidence」、摘要「per-frame denoising reliability」、Fig 1 图注「at different <b>frame</b>」。但 §4.1 明确说 chunk 大小为 3 个 latent 帧，而置信度头一次前向只输出<b>一个</b>标量（1 个可学习 token → 1 个 logit）。</p>
+      <span class="lb">为什么重要</span>
+      <p>真实的自适应分辨率是 <b>7 档 × 2 个取值</b>，覆盖 81 帧。Fig 1 那张「步数随帧起伏」的示意图对读者是误导性的。这也限制了方法的上界：块内的难度差异（比如一个转场恰好落在块中间）无法被利用。</p>
+      <span class="lb">怎么排除</span>
+      <p>把 per-frame 改成 per-chunk / per-block，并在 Fig 1 里按 7 段画。</p>
+    </div></details>
+
+  <details class="dt" data-s="mid"><summary><span class="sev mid">中</span><span class="dn">D9</span><span>基线的 FPS 与其原论文不一致，实现层增益被计入方法增益</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>Self-Forcing 原论文自述「real-time video generation at <b>17 FPS</b> … on a single H100」，本文表 1 把它测成 <b>15.30</b>（且与 CausVid 完全相同，说明是按「同架构同 NFE」估的）。而本文自己的<b>固定 4 步</b>基线是 <b>16.33</b>——同样 35 NFE，比它重测的 SF 快 6.7%。附录提到本文用了 FlashAttention-3。</p>
+      <span class="lb">为什么重要</span>
+      <p>摘要和正文引用的「1.5× faster than Self-Forcing」里，约 1.07× 来自实现优化，1.35× 才来自方法。这个拆分论文自己已经具备（Table 2 的 4 步行），但没有明示。</p>
+      <span class="lb">怎么排除</span>
+      <p>在正文里直接写：「相对我们自己的固定 4 步基线，自适应带来 1.35× 加速」。这个数字更小但更可信，而且作者手里就有。</p>
+    </div></details>
+
+  <details class="dt" data-s="lo"><summary><span class="sev lo">低</span><span class="dn">D10</span><span>Algorithm 1 第 8–11 行时间步下标 off-by-one</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>Require 声明步集为 <code>{t<sub>1</sub>,…,t<sub>T</sub>}</code>，第 6 行用 t<sub>T</sub>；第 8 行 <code>for j = T−1 downto 1</code>，第 10–11 行用 <code>t<sub>j−1</sub></code>，于是实际访问 t<sub>T−2</sub>…t<sub>0</sub>——<b>跳过 t<sub>T−1</sub>，用到未定义的 t<sub>0</sub></b>。</p>
+      <span class="lb">为什么重要</span>
+      <p>本身无害（显然应是 750→500→250），但它说明伪代码没经过仔细校对，因此 D2 里「实现有 break 只是没写进伪代码」的可能性不能被排除。</p>
+      <span class="lb">怎么排除</span>
+      <p>改成 <code>for j = T−1 downto 1: … Ψ(x̂₀, ε, t<sub>j</sub>) … G<sub>θ</sub>(·; t<sub>j</sub>, K)</code>。</p>
+    </div></details>
+
+  <details class="dt" data-s="lo"><summary><span class="sev lo">低</span><span class="dn">D11</span><span>c 的记号在 logit 与概率之间反复横跳，Algorithm 1 疑似双重 sigmoid</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>Fig 3 说头部末端「projected to yield a single scalar logit, which is finally converted to a confidence score <b>via the sigmoid function</b>」——即 c 已经是 (0,1) 内的概率。式 (4) 里有 <code>log c</code>，也要求 c ∈ (0,1]。但 §3.3 说「predicts both the denoised frame and its confidence <b>logit</b> c<sup>i</sup>」，Algorithm 1 第 7、14 行又写 <code>sigmoid(c<sup>i</sup>)</code>。</p>
+      <span class="lb">为什么重要</span>
+      <p>不影响结论（sigmoid 单调，第 7 行的比较不受影响，前提是第 14 行存的也是同一种量，而它确实是）。但它是读者理解式 (4) 的一个绊脚石。</p>
+      <span class="lb">怎么排除</span>
+      <p>统一记号：让 <code>c</code> 始终表示 sigmoid 之后的分数，Algorithm 1 里去掉多余的 sigmoid。</p>
+    </div></details>
+
+  <details class="dt" data-s="lo"><summary><span class="sev lo">低</span><span class="dn">D12</span><span>三处设计选择零消融：抽头层 13/21/29、可学习 token 数 = 1、两个损失的相对权重</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>「we extract and process features from DiT blocks 13, 21 and 29」——为什么是这三层？一层行不行？「a single learnable token as the query」——为什么是 1 个？最终目标「incorporates both the confidence loss and the standard DMD loss」——<b>权重系数未给</b>。整篇论文只有一个消融（固定步数 vs 自适应）。</p>
+      <span class="lb">为什么重要</span>
+      <p>这些是复现的必需信息，也是判断方法鲁棒性的依据。35M 参数的头部有没有过设计，从现有材料无法判断。</p>
+      <span class="lb">怎么排除</span>
+      <p>补一张小表：抽头层数 {1,2,3} × token 数 {1,4} 的置信度预测质量（比如与 d 的秩相关系数）。</p>
+    </div></details>
+
+  <details class="dt" data-s="lo"><summary><span class="sev lo">低</span><span class="dn">D13</span><span>NFE 会随随机种子波动，但吞吐与延迟都只报了一个点估计</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>第 5 行 <code>x ~ N(0,I)</code> 的抽样直接影响第 6 行的 x̂₀ 和 c，进而影响分支。<b>同一个 prompt 换个种子，NFE 可能从 20 变成 29</b>。论文只给了「22.01 FPS」一个数，没有方差、没有分位数、没有说明是多少个 prompt 的平均。</p>
+      <span class="lb">为什么重要</span>
+      <p>对离线批量生成，均值就够了。但论文的定位是「interactive video generation」——交互系统关心的是<b>最坏情况和抖动</b>。一个块从 2 次前向突变成 5 次，在 10.4 次前向/秒的速率下是 0.29 s 的突发延迟，足以在实时渲染里造成可感知的卡顿。</p>
+      <span class="lb">怎么排除</span>
+      <p>报告 NFE 的分布（跨 prompt × 跨种子）与 p95 的逐块生成时间。</p>
+    </div></details>
+
+  <details class="dt" data-s="lo"><summary><span class="sev lo">低</span><span class="dn">D14</span><span>1000 步训练里要同时收敛 DMD 与一个从零初始化的置信度头</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>「Training runs for 1000 steps with batch size 128」。置信度头（≈35M 参数）是新增模块，从随机初始化开始学；同时生成器每 5 个 critic 步才更新一次，意味着生成器实际只更新了约 200 次。</p>
+      <span class="lb">为什么重要</span>
+      <p>短训练本身是优点（成本低），但它让「置信度头是否学到了有意义的信号」这件事更需要证据。而论文既没有给训练曲线，也没有给置信度与质量的相关性。在 D1 的对照补上之前，不能排除「置信度头输出的其实接近常数/噪声，而收益全部来自少跑步」。</p>
+      <span class="lb">怎么排除</span>
+      <p>给一条 c 与 d 的散点/秩相关随训练步数的变化曲线。若相关性显著且稳定，D1 的竞争假设会被大幅削弱。</p>
+    </div></details>
+
+  </div>
+</section>
+
+<!-- ============================================================ 10 MISSING -->
+<section class="sec" id="s-missing">
+  <div class="eyebrow"><span class="n">10</span><span class="t">What you would need to reproduce it</span><span class="line"></span></div>
+  <h2>复现清单：想接着做，这些论文没给</h2>
+  <p class="lead">代码与权重未公布，也没有项目页。按「拿到这份清单就能开工」的标准，下面是缺口，按阻塞程度排序。</p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>缺口</th><th>阻塞程度</th><th>能否猜</th><th>备注</th></tr></thead>
+      <tbody>
+        <tr><td>置信度损失与 DMD 损失的加权系数</td><td><span class="wst">阻塞</span></td><td>否</td><td>两者量级不同，直接相加还是按比例，训练动力学完全不同</td></tr>
+        <tr><td>λ 到底是 0.2 还是 0.02</td><td><span class="wst">阻塞</span></td><td>倾向 0.02</td><td>见 §04；取错会落进饱和区</td></tr>
+        <tr><td><code>d</code> 是按元素平均还是求和</td><td><span class="wst">阻塞</span></td><td>倾向平均</td><td>latent 3×16×60×104，两者差约 3×10⁵ 倍，决定 c 的量级</td></tr>
+        <tr><td>14B 教师配置（critic 规模、显存策略）</td><td><span class="wst">阻塞</span></td><td>否</td><td>表 1 最好的那一行就靠它</td></tr>
+        <tr><td>置信度损失是否对骨干停梯度</td><td>较重</td><td>否</td><td>决定它是探针还是会改写生成器</td></tr>
+        <tr><td>内层循环是否有提前退出判据</td><td>较重</td><td>倾向无</td><td>见 §5.1 / D2</td></tr>
+        <tr><td>抽头层 13/21/29 的索引基准（0 还是 1）</td><td>轻</td><td>可试</td><td>30 层模型，影响不大</td></tr>
+        <tr><td>rolling KV cache 长度 L</td><td>轻</td><td>可查 SF</td><td>Algorithm 1 里出现但从未给值</td></tr>
+        <tr><td>训练的 real score / critic 初始化来源</td><td>轻</td><td>可查 SF</td><td>附录说「base model 预训练权重」，与 14B 那版矛盾</td></tr>
+        <tr><td>逐块步数分配的实际统计</td><td>不阻塞但关键</td><td>否</td><td>没有它就无法判断 D1</td></tr>
+        <tr><td>置信度校准曲线（c vs 实际质量）</td><td>不阻塞但关键</td><td>否</td><td>没有它「self-calibrated」只是措辞</td></tr>
+        <tr><td>吞吐/NFE 的方差与 p95</td><td>不阻塞但关键</td><td>否</td><td>交互场景下比均值更重要</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ 11 PLACE -->
+<section class="sec" id="s-place">
+  <div class="eyebrow"><span class="n">11</span><span class="t">Where it sits</span><span class="line"></span></div>
+  <h2>谱系与定位</h2>
+
+  <h3><span class="ix">11.1</span>加速视频扩散的四条路，DSA 在哪条上</h3>
+  <div class="grid2">
+    <div class="card cD"><div class="mono">路线 A</div><h5>少步蒸馏（step distillation）</h5>把 50 步教师压成 4 步学生。DMD / DMD2 / SiD / PCM / APT。<b>DSA 站在这条路的终点上</b>——它不改蒸馏本身，只在已经压到 4 步之后再省。</div>
+    <div class="card cS"><div class="mono">路线 B</div><h5>缓存复用（caching）</h5>TeaCache、AdaCache、DeepCache、Block Caching：<b>复用相邻去噪步之间变化不大的特征</b>。DSA 在引言里把自己和这条路对立起来（「requires neither additional video data nor handcrafted heuristics」），但两者其实<b>正交</b>：缓存省的是单步内部的算力，DSA 省的是步数本身，理论上可叠加。论文没做这个组合实验。</div>
+    <div class="card cA"><div class="mono">路线 C</div><h5>因果化 + KV cache</h5>CausVid、Self-Forcing、MAGI-1、SkyReels-V2：把双向注意力换成因果注意力，换来流式生成与常数级增量成本。DSA 的<b>全部地基</b>。</div>
+    <div class="card cB"><div class="mono">路线 D</div><h5>token / 分辨率削减</h5>ToMe、VidToMe、区域化生成。与 DSA 正交，论文未讨论。</div>
+  </div>
+  <p>把 DSA 放进这张图里，它的位置很清楚：<b>路线 A 之后的一个小增量，借用路线 B 的问题意识（自适应计算），但实现手段是砍步数而非复用特征。</b>它的真正新意在于「用蒸馏目标的副产品（教师残差）来免费训练一个难度估计器」——这个想法是干净且可迁移的，<b>即使这篇论文的具体调度规则被更好的规则取代，这个训练信号仍然值得留下</b>。</p>
+
+  <h3><span class="ix">11.2</span>对「交互式视频世界模型」这条线意味着什么</h3>
+  <div class="note">
+    <div class="hd">先说不适用的部分</div>
+    DSA 是<b>纯文生视频</b>：没有动作条件、没有交互接口、没有状态记忆机制、没有可控视角。它不是一个世界模型，也没有声称是。它与这条线的接口只有一个——<b>推理效率</b>。
+  </div>
+  <ul>
+    <li><b>它优化的是吞吐，不是延迟。</b>交互式世界模型的核心指标是「从用户输入到画面响应」的延迟和抖动。DSA 的首块必然满步（<code>prev_c=1.0</code>），延迟原地不动（0.91 vs 0.90 s）。<b>如果你在做一个需要 &lt;100 ms 响应的交互系统，这篇论文帮不上忙。</b></li>
+    <li><b>可变算力对实时系统是负债不是资产。</b>实时渲染需要的是<b>确定的帧预算</b>。一个块突然从 2 次前向变成 5 次，在 ~10 次前向/秒的速率下是 0.29 s 的突发。要用在交互系统里，得反过来设计：给定固定预算，让置信度信号决定<b>怎么花</b>（比如在预算内决定哪块多分一步），而不是决定<b>花多少</b>。这是一个值得做的改造，论文没往这个方向走。</li>
+    <li><b>置信度信号本身对世界模型有独立价值。</b>一个能在线判断「我这一块生成得有多可信」的标量，在世界模型里可以用来做：触发重新生成、切换到显式状态记忆、向下游策略暴露不确定度、或者作为长程漂移的早期报警。<b>这个副产品可能比它的原用途（省步数）更有用</b>——前提是 D7 先被回答清楚（它到底是误差信号还是难度信号）。</li>
+    <li><b>长程漂移这个老问题它没解决，可能还加了一点。</b>论文自己在 §5.1 承认长视频会退化。而 §06 的模拟显示，相对判据在误差累积下会形成「连续提前退出 → 门槛下滑」的通道。要用在长视频/世界模型上，判据至少要改成有绝对锚点的形式。</li>
+  </ul>
+
+  <h3><span class="ix">11.3</span>一句话评价</h3>
+  <p class="lead" style="border-left:3px solid var(--cf);padding-left:16px">这是一篇<b>工程上干净、叙事上过度包装</b>的短论文。它真实做到的事——「在 Self-Forcing 之上，用蒸馏的免费副产品训一个轻量难度估计器，把 NFE 从 35 降到 23 而质量不掉」——是一个值得发表的结果。但它把一个<b>二值提前退出开关</b>写成了「dynamic step allocation」，把<b>换大教师</b>的质量收益写进了自适应采样的功劳簿，并且<b>没有做那个只需要改几行推理代码就能做的同成本对照</b>。读这篇论文时，请把摘要的三句话拆成三件事分别验收。</p>
+</section>
+
+<!-- ============================================================ 12 APPENDIX -->
+<section class="sec" id="s-appendix">
+  <div class="eyebrow"><span class="n">12</span><span class="t">Cheat sheet</span><span class="line"></span></div>
+  <h2>附录速查</h2>
+
+  <h3><span class="ix">A</span>关键数字一页纸</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>量</th><th>值</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td>学生 / 骨干</td><td>Wan2.1-T2V-1.3B，30 层，dim 1536，12 heads</td><td>论文 §4.1 + Wan 官方 config</td></tr>
+        <tr><td>输出视频</td><td>81 像素帧 · 832×480 · 21 个 latent 帧</td><td>SF 官方 config</td></tr>
+        <tr><td>chunk</td><td>3 latent 帧 → <b>7 个 chunk</b></td><td>论文 §4.1 + SF config</td></tr>
+        <tr><td>去噪步表</td><td>{1000, 750, 500, 250}，T = 4，带 shift</td><td>SF config + 论文附录</td></tr>
+        <tr><td>NFE 记账</td><td><b>7 × (步数 + 1)</b>；+1 为 t=0 的 KV 刷新</td><td class="num">我反推，4/4 点精确</td></tr>
+        <tr><td>自适应 NFE</td><td><b>23</b> = 3 块满步 ×5 + 4 块单步 ×2</td><td class="num">我反推，整数解唯一</td></tr>
+        <tr><td>置信度头</td><td>blocks 13/21/29 各一个 cross-attn，1 个可学习 token</td><td>论文 §3.2 / Fig 3</td></tr>
+        <tr><td>置信度头规模</td><td class="num">≈ 35 M 参数（≈2.7%）· ≈1% FLOPs</td><td class="num">我估算</td></tr>
+        <tr><td>置信度损失</td><td>L = c·sg[d] − λ log c，最优 c* = min(1, λ/d)</td><td>论文式 (4) + 我求解</td></tr>
+        <tr><td>λ</td><td class="num">0.2（正文）/ 0.02（附录）<span class="wst"> ← 矛盾</span></td><td>论文 §4.1 / 附录 §6</td></tr>
+        <tr><td>训练</td><td>1000 步 · batch 128 · H100 · 仅文本 prompt</td><td>论文 §4.1</td></tr>
+        <tr><td>优化器</td><td>AdamW · 生成器 2e−6 · critic 4e−7 · 5:1</td><td>论文 §4.1（与 SF 一致）</td></tr>
+        <tr><td>墙钟模型</td><td>t ≈ 1.53 s + 0.096 s × NFE</td><td class="num">我拟合，残差 ±2.3%</td></tr>
+        <tr><td>吞吐</td><td>22.63 FPS（1.3B 教师）/ 22.01（14B 教师）</td><td>论文 Table 1/2</td></tr>
+        <tr><td>延迟</td><td>0.91 s（SF 0.90 s）</td><td>论文 Table 1</td></tr>
+        <tr><td>VBench 总分</td><td>83.73（1.3B 教师）/ 83.95（14B 教师）</td><td>论文 Table 1</td></tr>
+        <tr><td>VBench 加权</td><td>Total = 0.8×Quality + 0.2×Semantic</td><td class="num">我复现，6/6 行吻合</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3><span class="ix">B</span>三种「自适应计算」的对照</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>做法</th><th>省什么</th><th>决策依据</th><th>需要训练吗</th><th>粒度</th></tr></thead>
+      <tbody>
+        <tr><td>特征缓存（TeaCache / AdaCache）</td><td>单步内部的计算</td><td>手工阈值 / 时间步嵌入的变化量</td><td>否（多为 training-free）</td><td>步 × 层</td></tr>
+        <tr class="me"><td><b>DSA</b></td><td>去噪步数</td><td>学到的置信度 vs 上一块</td><td><b>是</b>（与 DMD 联合训）</td><td>chunk（7 档 × 2 值）</td></tr>
+        <tr><td>可变 NFE 调度（常见做法）</td><td>去噪步数</td><td>预设的静态排程</td><td>否</td><td>任意</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="font-size:13px;color:var(--ink3)">第三行就是 §7.4 / D1 指出的缺失对照。它不需要训练，成本与 DSA 相同。</p>
+
+  <h3><span class="ix">C</span>术语速查</h3>
+  <div class="grid2">
+    <div class="card cB"><div class="mono">NFE</div>Number of Function Evaluations，模型前向次数。本文里 <b>包含每块结束时那次 t=0 的 KV 刷新</b>——这是论文没说但消融表隐含的定义。</div>
+    <div class="card cB"><div class="mono">DMD</div>Distribution Matching Distillation。用反向 KL 把少步学生的<b>输出分布</b>贴近教师/数据分布，梯度是「冻结教师分数 − 可训 critic 分数」。不需要真实视频。</div>
+    <div class="card cB"><div class="mono">real score / critic</div>DMD 的两个辅助网络：real score（f<sub>φ</sub>，冻结的预训练教师）估数据分布的分数；critic（f<sub>ψ</sub>，可训）估学生当前分布的分数。两者之差就是更新方向。</div>
+    <div class="card cB"><div class="mono">曝光偏差 exposure bias</div>训练时喂真值历史、推理时喂自己生成的历史，两者分布不同导致的误差累积。Self-Forcing 用训练期自 rollout 来消除。</div>
+    <div class="card cB"><div class="mono">Self-Forcing</div>本文的地基。训练时做自回归 rollout + rolling KV cache + 视频级分布匹配，只对每块最后一步回传梯度。</div>
+    <div class="card cB"><div class="mono">棘轮效应（本文用语）</div>指 <code>c<sub>i</sub> &lt; prev_c</code> 这个相对判据的副作用：一次满步抬高门槛 → 后续倾向连锁满步；连续早退拉低门槛 → 越省越敢省。见 §5.2 与 §06。</div>
+  </div>
+
+  <h3><span class="ix">D</span>如果你要在这上面接着做</h3>
+  <ol>
+    <li><b>先把 D1 补掉</b>（同成本静态排程 + 随机分配）。这是判断整条路线是否值得投入的分水岭，改几行推理代码，不需要训练。</li>
+    <li><b>把判据改成预算约束下的分配问题</b>：给定总 NFE 预算 B，用置信度做 7 块之间的排序，把额外步数分给最低置信度的若干块。这样既消除了棘轮，又给了实时系统确定的帧预算——对交互式世界模型来说这是必要改造。</li>
+    <li><b>把置信度信号拿去做别的事</b>：长程漂移的早期报警、触发局部重生成、向下游策略暴露不确定度。这可能比省步数更有价值。做之前先回答 D7。</li>
+    <li><b>和缓存类方法叠加</b>（TeaCache / AdaCache × DSA）。两者省的是不同的东西，论文自己把它们对立起来，但没有理由不能组合。</li>
+    <li><b>把 T 加大再看</b>。当前 T=4，二值分支只有 {1, 4}。如果 T=8 或 16，二值分支会变得非常粗糙，此时「连续步数」的机制才真正被需要——这也是检验 D2 的天然场景。</li>
+  </ol>
+</section>
+
+<div class="foot">
+  <p><b>这是什么</b>：对 arXiv:2606.04432v1 的方法精读 + 数字复核。所有公式、表格数值、超参均按论文正文与附录转写；标注为「我反推 / 我拟合 / 我估算」的内容是本文作者（非论文作者）的推断，已尽量标明推断链条与可证伪方式。</p>
+  <p><b>外部事实核对</b>：Self-Forcing 的 <code>num_frame_per_block: 3</code>、<code>image_or_video_shape: [1,21,16,60,104]</code>、<code>denoising_step_list: [1000,750,500,250]</code>、<code>num_frames: 81</code>、<code>lr: 2.0e-06 / lr_critic: 4.0e-07 / dfake_gen_update_ratio: 5</code> 来自其官方仓库 configs；Wan2.1-T2V-1.3B 的 <code>num_layers: 30, dim: 1536, num_heads: 12, vae_stride: (4,8,8), patch_size: (1,2,2)</code> 来自 Wan2.1 官方 config。</p>
+  <p>生成于 2026-09-20 · 本页为单文件 HTML，可离线打开 · 深浅色自适应</p>
+</div>
+
+</main>
+</div>
+
+<script>
+(function(){
+"use strict";
+var NS="http://www.w3.org/2000/svg";
+function $(s,r){return (r||document).querySelector(s);}
+function $$(s,r){return [].slice.call((r||document).querySelectorAll(s));}
+function el(t,a,txt){var e=document.createElementNS(NS,t);for(var k in a){if(a[k]!==null&&a[k]!==undefined)e.setAttribute(k,a[k]);}if(txt!==undefined&&txt!==null)e.textContent=txt;return e;}
+function clamp(v,a,b){return v<a?a:(v>b?b:v);}
+function fmt(v,n){return Number(v).toFixed(n===undefined?2:n);}
+
+/* ---------------------------------------------------------- theme */
+var tb=$("#themeBtn");
+try{var st=localStorage.getItem("dsa-theme"); if(st)document.documentElement.setAttribute("data-theme",st);}catch(e){}
+tb.addEventListener("click",function(){
+  var cur=document.documentElement.getAttribute("data-theme");
+  var next = cur==="dark" ? "light" : (cur==="light" ? "dark" : (matchMedia("(prefers-color-scheme: dark)").matches?"light":"dark"));
+  document.documentElement.setAttribute("data-theme",next);
+  try{localStorage.setItem("dsa-theme",next);}catch(e){}
+  redrawAll();
+});
+
+/* ---------------------------------------------------------- progress + scrollspy */
+var prog=$("#prog"), links=$$(".rail a"), secs=links.map(function(a){return $(a.getAttribute("href"));});
+function onScroll(){
+  var h=document.documentElement;
+  var p=h.scrollTop/Math.max(1,(h.scrollHeight-h.clientHeight));
+  prog.style.width=(p*100)+"%";
+  var best=0;
+  for(var i=0;i<secs.length;i++){ if(secs[i] && secs[i].getBoundingClientRect().top<140) best=i; }
+  links.forEach(function(a,i){a.classList.toggle("on",i===best);});
+}
+addEventListener("scroll",onScroll,{passive:true}); onScroll();
+
+/* ============================================================ shared numbers */
+var CHUNKS=7, T=4, FRAMES=81;
+var FIT_A=1.5296, FIT_B=0.09605;                       // time = a + b*NFE  (my fit)
+function fpsOf(nfe){ return FRAMES/(FIT_A+FIT_B*nfe); }
+// my reconstruction of the 23-NFE schedule: chunks 1,4,6 run full T steps
+var RECON=[
+ {c1:0.62, cf:0.86, full:true },
+ {c1:0.88, cf:0.88, full:false},
+ {c1:0.90, cf:0.90, full:false},
+ {c1:0.74, cf:0.91, full:true },
+ {c1:0.92, cf:0.92, full:false},
+ {c1:0.80, cf:0.89, full:true },
+ {c1:0.90, cf:0.90, full:false}
+];
+
+/* ============================================================ FIG 0 */
+var f0Panels={a:$("#f0a"),b:$("#f0b"),c:$("#f0c")};
+$$("#f0Tabs .tab").forEach(function(btn){
+  btn.addEventListener("click",function(){
+    $$("#f0Tabs .tab").forEach(function(b){b.setAttribute("aria-selected", b===btn?"true":"false");});
+    for(var k in f0Panels){
+      var show = (k===btn.dataset.k);
+      if(show){ f0Panels[k].removeAttribute("hidden"); f0Panels[k].style.display=""; }
+      else { f0Panels[k].setAttribute("hidden",""); f0Panels[k].style.display="none"; }
+    }
+  });
+});
+
+function drawF0(){
+  var g=$("#f0aChunks"); if(!g) return; g.textContent="";
+  var X0=76, W=100, GAP=12, step=W+GAP;
+  var yBase=176, yTop=76, H=yBase-yTop;
+  // axis
+  g.appendChild(el("line",{x1:X0-6,y1:yBase,x2:862,y2:yBase,class:"s-axis"}));
+  g.appendChild(el("text",{x:20,y:yBase+4,class:"s-sm"},"c = 0"));
+  g.appendChild(el("text",{x:20,y:yTop+4,class:"s-sm"},"c = 1"));
+  g.appendChild(el("text",{x:20,y:60,class:"s-sm"},"置信度"));
+  var prev=1.0, thr=[];
+  // stepped threshold polyline
+  var pts=[];
+  for(var i=0;i<CHUNKS;i++){
+    thr.push(prev);
+    var x=X0+i*step, y=yBase-prev*H;
+    pts.push(x+","+y); pts.push((x+W)+","+y);
+    prev = RECON[i].full ? RECON[i].cf : RECON[i].c1;
+  }
+  g.appendChild(el("polyline",{points:pts.join(" "),class:"l-A","stroke-dasharray":"5 4","stroke-width":"1.8"}));
+  for(i=0;i<CHUNKS;i++){
+    var r=RECON[i], x=X0+i*step;
+    var bw=30, bx=x+W/2-bw-4;
+    // 1-step bar
+    var h1=r.c1*H;
+    g.appendChild(el("rect",{x:bx,y:yBase-h1,width:bw,height:h1,rx:4,class:"f-C"}));
+    // refined bar
+    if(r.full){
+      var h2=r.cf*H;
+      g.appendChild(el("rect",{x:bx+bw+8,y:yBase-h2,width:bw,height:h2,rx:4,class:"f-D"}));
+    }
+    var hMax=Math.max(h1,r.full?r.cf*H:0);
+    g.appendChild(el("text",{x:x+W/2,y:yBase-hMax+16,"text-anchor":"middle",class:"s-mono","font-size":"10.5",fill:"var(--ink2)"},fmt(r.full?r.cf:r.c1)));
+    // chunk box
+    var by=194;
+    g.appendChild(el("rect",{x:x,y:by,width:W,height:54,rx:9,class:r.full?"f-Q":"f-S"}));
+    g.appendChild(el("text",{x:x+W/2,y:by+21,"text-anchor":"middle",class:"s-lb"},"块 "+(i+1)));
+    g.appendChild(el("text",{x:x+W/2,y:by+40,"text-anchor":"middle",class:"s-mono","font-size":"10.5"},r.full?"4 步 · 5 次":"1 步 · 2 次"));
+    g.appendChild(el("text",{x:x+W/2,y:by+70,"text-anchor":"middle",class:"s-sm"},r.full?"低于门槛→精炼":"高于门槛→早退"));
+  }
+  g.appendChild(el("text",{x:X0,y:yTop-14,class:"s-sm",fill:"var(--ar)"},"虚线 = prev_c 门槛（上一块收工时的置信度）　·　实心柱 = 本块 1 步后的置信度　·　紫柱 = 精炼 4 步后的置信度"));
+
+  // KV strip
+  var kv=$("#f0aKV"); kv.textContent="";
+  for(i=0;i<CHUNKS;i++){
+    var kx=80+i*111.5;
+    kv.appendChild(el("rect",{x:kx,y:289,width:104,height:16,rx:4,class:"f-A"}));
+    kv.appendChild(el("text",{x:kx+52,y:301,"text-anchor":"middle",class:"s-mono","font-size":"9.5"},"k"+(i+1)));
+  }
+  // NFE cumulative
+  var nf=$("#f0aNFE"); nf.textContent="";
+  var acc=0, total=0;
+  for(i=0;i<CHUNKS;i++) total += RECON[i].full?5:2;
+  var px=78;
+  for(i=0;i<CHUNKS;i++){
+    var cost=RECON[i].full?5:2;
+    var w=782*cost/35;
+    nf.appendChild(el("rect",{x:px,y:328,width:w-2,height:16,rx:3,class:RECON[i].full?"f-Q":"f-S"}));
+    if(w>26) nf.appendChild(el("text",{x:px+w/2-1,y:340,"text-anchor":"middle",class:"s-mono","font-size":"9.5"},String(cost)));
+    px+=w;
+  }
+  nf.appendChild(el("rect",{x:px,y:328,width:(78+782)-px,height:16,rx:3,fill:"url(#hatch)",opacity:"0.5"}));
+  nf.appendChild(el("text",{x:px+((78+782)-px)/2,y:340,"text-anchor":"middle",class:"s-mono","font-size":"9.5",fill:"var(--ink3)"},"省下 12"));
+}
+
+/* ============================================================ FIG 1 NFE accounting */
+var nfeK=$("#nfeK"), nfeKv=$("#nfeKv"), nfeMode="fix";
+$$("#nfeMode button").forEach(function(b){
+  b.addEventListener("click",function(){
+    $$("#nfeMode button").forEach(function(x){x.setAttribute("aria-pressed", x===b?"true":"false");});
+    nfeMode=b.dataset.m; nfeK.disabled=(nfeMode==="dsa"); drawNFE();
+  });
+});
+nfeK.addEventListener("input",function(){nfeKv.textContent=nfeK.value; drawNFE();});
+
+function drawNFE(){
+  var host=$("#nfeFig"); if(!host) return;
+  var k=parseInt(nfeK.value,10);
+  var svg=el("svg",{viewBox:"0 0 880 214",role:"img","aria-label":"NFE 记账"});
+  var X0=34, W=108, GAP=8, step=W+GAP, total=0;
+  for(var i=0;i<CHUNKS;i++){
+    var full = (nfeMode==="dsa") ? RECON[i].full : true;
+    var kk = (nfeMode==="dsa") ? (full?T:1) : k;
+    var cost=kk+1; total+=cost;
+    var x=X0+i*step;
+    svg.appendChild(el("rect",{x:x,y:40,width:W,height:74,rx:10,class:"s-box"}));
+    svg.appendChild(el("text",{x:x+W/2,y:132,"text-anchor":"middle",class:"s-lb"},"块 "+(i+1)));
+    svg.appendChild(el("text",{x:x+W/2,y:150,"text-anchor":"middle",class:"s-mono","font-size":"10",fill:"var(--ink3)"},cost+" 次前向"));
+    // denoise dots
+    for(var j=0;j<T;j++){
+      var dx=x+16+j*19, dy=68;
+      var on = j<kk;
+      svg.appendChild(el("circle",{cx:dx,cy:dy,r:7.5,class:on?"f-C":"s-box2",opacity:on?1:0.55}));
+    }
+    // kv dot
+    svg.appendChild(el("circle",{cx:x+16+3*19+26,cy:68,r:7.5,class:"f-A"}));
+    svg.appendChild(el("text",{x:x+W/2,y:100,"text-anchor":"middle",class:"s-mono","font-size":"9.5",fill:"var(--ink3)"},"去噪 + KV"));
+  }
+  svg.appendChild(el("text",{x:X0,y:28,class:"s-ttl"}, nfeMode==="dsa" ? "DSA 自适应（我反推的分配：3 块满步 + 4 块单步）" : ("固定 "+k+" 步 × 7 块")));
+  // total bar
+  svg.appendChild(el("text",{x:X0,y:184,class:"s-lb"},"总 NFE"));
+  svg.appendChild(el("rect",{x:X0+70,y:170,width:630,height:20,rx:6,class:"s-box"}));
+  svg.appendChild(el("rect",{x:X0+70,y:170,width:630*total/35,height:20,rx:6,class:nfeMode==="dsa"?"f-C":"f-A"}));
+  svg.appendChild(el("text",{x:X0+716,y:187,class:"s-big",fill:nfeMode==="dsa"?"var(--cf)":"var(--ink)"},String(total)));
+  svg.appendChild(el("text",{x:X0,y:208,class:"s-sm",fill:"var(--ink3)"},"公式：NFE = 7 × (步数 + 1)　→　"+(nfeMode==="dsa"?"自适应把 35 压到 23，省下 34%":("7 × ("+k+"+1) = "+total))+"　·　按 §7.3 的墙钟模型 ≈ "+fmt(fpsOf(total))+" FPS"));
+  host.textContent=""; host.appendChild(svg);
+}
+
+/* ============================================================ FIG 2 blocks */
+function drawF2(){
+  var g=$("#f2blocks"); if(!g) return; g.textContent="";
+  var taps={13:1,21:1,29:1};
+  for(var i=0;i<30;i++){
+    var x=30+i*27;
+    g.appendChild(el("rect",{x:x,y:64,width:24,height:32,rx:5,class:taps[i]?"f-C":"s-box"}));
+  }
+  [[0,"0"],[13,"13"],[21,"21"],[29,"29"]].forEach(function(p){
+    g.appendChild(el("text",{x:42+27*p[0],y:58,"text-anchor":"middle",class:"s-mono","font-size":"9.5",fill:taps[p[0]]?"var(--cf)":"var(--ink3)"},p[1]));
+  });
+}
+
+/* ============================================================ FIG 3 loss */
+var lamS=$("#lamS"), lamV=$("#lamV"), dS=$("#dS"), dV=$("#dV"), LAM=0.02;
+function lamFromSlider(v){ /* 0..100 -> 0.002..2 log */ return Math.pow(10, -2.7 + (v/100)*3.0); }
+function sliderFromLam(l){ return clamp(Math.round((Math.log(l)/Math.LN10 + 2.7)/3.0*100),0,100); }
+function dFromSlider(v){ return Math.pow(10, -2.3 + (v/100)*3.0); }
+function readLossCtl(){ LAM=lamFromSlider(+lamS.value); lamV.textContent=fmt(LAM,3); dV.textContent=fmt(dFromSlider(+dS.value),3); }
+[lamS,dS].forEach(function(s){s.addEventListener("input",function(){readLossCtl(); $$("#lamPreset button").forEach(function(b){b.setAttribute("aria-pressed","false");}); drawLoss();});});
+$$("#lamPreset button").forEach(function(b){
+  b.addEventListener("click",function(){
+    $$("#lamPreset button").forEach(function(x){x.setAttribute("aria-pressed", x===b?"true":"false");});
+    lamS.value=sliderFromLam(parseFloat(b.dataset.l)); readLossCtl(); drawLoss();
+  });
+});
+function drawLoss(){
+  var host=$("#lossFig"); if(!host) return;
+  var X0=90,X1=820,Y0=236,Y1=50, LO=-2.3, HI=0.7;
+  function xd(d){ return X0 + (Math.log(d)/Math.LN10 - LO)/(HI-LO)*(X1-X0); }
+  function yc(c){ return Y0 - c*(Y0-Y1); }
+  var svg=el("svg",{viewBox:"0 0 880 300",role:"img","aria-label":"最优置信度随教师残差的变化"});
+  // saturation region for active lambda
+  var dsat=LAM; var xs=clamp(xd(Math.max(dsat,Math.pow(10,LO))),X0,X1);
+  svg.appendChild(el("rect",{x:X0,y:Y1,width:Math.max(0,xs-X0),height:Y0-Y1,fill:"var(--tint)"}));
+  if(xs>X0+4) svg.appendChild(el("text",{x:(X0+xs)/2,y:Y1+18,"text-anchor":"middle",class:"s-sm",fill:"var(--ink3)"},"饱和区 c*≡1"));
+  // grid
+  [0,0.25,0.5,0.75,1].forEach(function(c){
+    svg.appendChild(el("line",{x1:X0,y1:yc(c),x2:X1,y2:yc(c),class:"s-grid"}));
+    svg.appendChild(el("text",{x:X0-10,y:yc(c)+4,"text-anchor":"end",class:"s-sm"},fmt(c,2)));
+  });
+  [0.005,0.01,0.05,0.1,0.5,1,5].forEach(function(d){
+    if(d<Math.pow(10,LO)||d>Math.pow(10,HI))return;
+    svg.appendChild(el("line",{x1:xd(d),y1:Y0,x2:xd(d),y2:Y0+6,class:"s-axis"}));
+    svg.appendChild(el("text",{x:xd(d),y:Y0+20,"text-anchor":"middle",class:"s-sm"},String(d)));
+  });
+  svg.appendChild(el("line",{x1:X0,y1:Y1,x2:X0,y2:Y0,class:"s-axis"}));
+  svg.appendChild(el("line",{x1:X0,y1:Y0,x2:X1,y2:Y0,class:"s-axis"}));
+  svg.appendChild(el("text",{x:X1,y:Y0+40,"text-anchor":"end",class:"s-sm"},"教师残差 d（对数刻度）"));
+  svg.appendChild(el("text",{x:30,y:40,class:"s-sm"},"最优置信度 c*"));
+  // curves
+  function curve(lam,cls,dash){
+    var pts=[];
+    for(var t=0;t<=200;t++){
+      var d=Math.pow(10, LO + (HI-LO)*t/200);
+      pts.push(xd(d)+","+yc(Math.min(1,lam/d)));
+    }
+    var p=el("polyline",{points:pts.join(" "),class:cls}); if(dash)p.setAttribute("stroke-dasharray",dash);
+    svg.appendChild(p);
+  }
+  curve(0.2,"l-D","6 4"); curve(0.02,"l-A","6 4"); curve(LAM,"l-C",null);
+  svg.appendChild(el("text",{x:xd(0.2)+6,y:yc(1)-8,class:"s-sm",fill:"var(--dm)"},"λ=0.2（正文）"));
+  svg.appendChild(el("text",{x:xd(0.02)+6,y:yc(1)-24,class:"s-sm",fill:"var(--ar)"},"λ=0.02（附录）"));
+  // marker
+  var d0=dFromSlider(+dS.value), c0=Math.min(1,LAM/d0);
+  svg.appendChild(el("line",{x1:xd(d0),y1:Y0,x2:xd(d0),y2:yc(c0),class:"l-C","stroke-dasharray":"3 3","stroke-width":"1.4"}));
+  svg.appendChild(el("circle",{cx:xd(d0),cy:yc(c0),r:7,class:"f-C","stroke-width":"2.2"}));
+  svg.appendChild(el("text",{x:clamp(xd(d0),X0+60,X1-60),y:yc(c0)-14,"text-anchor":"middle",class:"s-ttl",fill:"var(--cf)"},"c* = "+fmt(c0,3)));
+  var msg = c0>=0.999 ? "完全饱和：这一块和任何更容易的块输出同一个值，判据失效" :
+            (c0<0.05 ? "过低：sigmoid 另一端饱和，梯度同样消失" : "可用区间：不同难度的块能被区分开");
+  svg.appendChild(el("text",{x:X0,y:292,class:"s-sm",fill: c0>=0.999||c0<0.05 ? "var(--bad)":"var(--ok)"}, "λ = "+fmt(LAM,3)+" ，典型残差 d = "+fmt(d0,3)+" → "+msg));
+  host.textContent=""; host.appendChild(svg);
+}
+
+/* ============================================================ FIG 4 algorithm walker */
+var AG=[
+ {no:"R1",code:'<span class="cmt">Require: KV cache 容量 L 帧</span>',t:"缓存容量 L",tag:"Require",b:"论文从头到尾<b>没有给出 L 的数值</b>。它决定模型能看多远的历史，也决定长视频下的漂移速度。Self-Forcing 用的是滚动缓存（超出就淘汰最旧的），DSA 沿用。",kv:"缺失超参 · 见 §10"},
+ {no:"R2",code:'<span class="cmt">Require: 去噪时间步 {t₁, …, t_T}</span>',t:"时间步表",tag:"Require",b:"实际值来自 Self-Forcing 的 <code>denoising_step_list: [1000, 750, 500, 250]</code>，即 <b>T = 4</b>，并带 flow shift。注意这是<b>降序</b>列表，而伪代码的下标 t₁…t_T 是升序记法，两者方向相反——这是下面 off-by-one 的根源之一。",kv:"T = 4"},
+ {no:"R3",code:'<span class="cmt">Require: 生成帧数 M</span>',t:"M 其实是「块数」",tag:"Require",b:"循环变量 i 在第 15 行被用来写一个 KV 条目，在第 20 行被用来 append 一个 x̂₀。在 chunk-wise 生成里这两者都是<b>按块</b>发生的，所以 M = 7（块），而不是 81（像素帧）或 21（latent 帧）。论文在记号上把 frame 和 chunk 混用了，见 D8。",kv:"M = 7 块"},
+ {no:"R4",code:'<span class="cmt">Require: 模型 G_θ（一次前向同时返回 x̂₀ 与 c）· G^KV_θ</span>',t:"一次前向，两个输出",tag:"Require",b:"这是整套方案能提速的<b>前提</b>：x̂₀ 和 c 出自同一次前向，判断「要不要继续」不需要额外跑一次模型。对比需要独立判别器的做法（如 APT），这是明确的优势。",kv:"额外开销 ≈ 1% FLOPs"},
+ {no:"1",code:'Initialize 输出 X_θ ← [ ]',t:"输出缓冲",tag:"初始化",b:"按块累积最终的干净 latent，结束后一次性送 VAE 解码。VAE 解码 81 帧是墙钟里那 ~1.5 s 固定开销的主要成分。",kv:"固定开销 a ≈ 1.53 s"},
+ {no:"2",code:'Initialize KV cache K ← [ ]',t:"空缓存起步",tag:"初始化",b:"第一块没有任何历史上下文，只能靠文本条件。这也是第一块最该多花算力的客观理由。",kv:""},
+ {no:"3",code:'Initialize prev_c ← <b>1.0</b>',t:"⚑ 这一行决定了首块必然满步",tag:"关键初始化",b:"第 7 行的判据是<b>严格小于</b>，而 sigmoid 的值域是开区间 (0,1)，<b>恒小于 1.0</b>。于是第一块 100% 触发精炼分支。<br><br>这是个<b>好设计</b>（首块通过 KV cache 影响之后所有块），但它也意味着<b>首帧延迟无法被这个方法改善</b>——这就是表 1 里 0.91 s vs Self-Forcing 0.90 s 的由来。对交互式应用而言这是关键定位信息。",kv:"首块成本恒为 5 次前向",flag:true},
+ {no:"4",code:'<span class="kw">for</span> i = 1 <span class="kw">to</span> M <span class="kw">do</span>',t:"按块自回归",tag:"外层循环",b:"7 次迭代，每次生成 3 个 latent 帧（≈12 个像素帧 ≈ 0.75 秒视频）。块之间严格串行，无法并行——这是自回归路线换取低延迟流式输出所付的代价。",kv:"7 次迭代"},
+ {no:"5",code:'x^i_{t_T} ~ N(0, I)',t:"从纯噪声起步",tag:"采样",b:"注意<b>这个随机抽样会影响分支决策</b>：不同的噪声种子会让第 6 行的 c 不同，进而让这一块跑 1 步还是 4 步不同。所以 <b>NFE 不是确定值</b>，论文报的 23 是某种平均。方差从未报告（D13）。",kv:"⚠ 决策依赖随机种子"},
+ {no:"6",code:'x̂^i₀, c^i ← G_θ( x^i_{t_T} ; t_T, K )',t:"第一步：先出一个「一步图」",tag:"第 1 次前向",b:"从 t=1000 的纯噪声一步预测出干净 latent，同时挤出置信度。这一步<b>永远要跑</b>——也就是说，DSA 的下界是每块 1 次去噪 + 1 次 KV = 2 次前向，对应 NFE=14，正是消融表里「1-step」那一行。",kv:"累计 NFE：+1"},
+ {no:"7",code:'<span class="kw">if</span> sigmoid(c^i) &lt; prev_c <span class="kw">then</span>',t:"⚑ 全部的自适应就在这一行",tag:"分支判据",b:"<b>左边</b>：本块<b>只跑了 1 步</b>之后的置信度。<b>右边</b>：上一块<b>收工时</b>的置信度——如果上一块走了满步，这是 4 步精炼后的值。<b>两个数不在同一个精炼水平上。</b><br><br>后果是<b>棘轮效应</b>：一次满步抬高门槛 → 后续倾向连锁满步；连续早退拉低门槛 → 越省越敢省。论文否定了固定阈值（「threshold varies by frames and by videos」），但这个替代品同样是启发式，与摘要的「no heuristics」冲突（D4）。§06 可以直接玩到这个动力学。",kv:"这就是全部的「自适应」",flag:true},
+ {no:"8",code:'　<span class="kw">for</span> j = T−1 <span class="kw">downto</span> 1 <span class="kw">do</span>',t:"⚑ 进来就跑到底，没有 break",tag:"内层循环",b:"循环体内<b>没有任何提前退出判据</b>。所以步数只有 <b>1</b> 或 <b>T=4</b> 两种取值，中间的 2 步、3 步不存在。<br><br>这与 §3.3 的「continues denoising … <b>until the output stabilizes</b>」直接冲突，也让摘要的「dynamically adjusts the number of diffusion steps」在字面上失准（D2）。",kv:"步数 ∈ {1, 4}，二值",flag:true},
+ {no:"9",code:'　　ε ~ N(0, I)',t:"重新加噪用的噪声",tag:"采样",b:"少步 DMD 采样器的标准做法：把当前的干净预测再加噪到下一个更低的噪声水平，然后重新去噪。这里每一步都重抽一次 ε。",kv:""},
+ {no:"10",code:'　　x^i_{t_{j−1}} ← Ψ( x̂^i₀, ε, t_{j−1} )',t:"⚑ 这里的下标是错的",tag:"重新加噪",b:"Ψ(x, ε, t) = α_t·x + σ_t·ε，标准前向加噪。<br><br>但下标有问题：j 从 T−1 数到 1，用的是 t_{j−1}，即访问 t_{T−2} … <b>t₀</b>。而 Require 里声明的集合是 {t₁, …, t_T}——<b>t₀ 未定义，且 t_{T−1} 被跳过了</b>。按 T=4 与步表 {1000,750,500,250}，正确序列显然是 750→500→250。无害笔误，但说明伪代码未经仔细校对（D10）。",kv:"应为 t_j 而非 t_{j−1}",flag:true},
+ {no:"11",code:'　　x̂^i₀, c^i ← G_θ( x^i_{t_{j−1}} ; t_{j−1}, K )',t:"精炼，并顺手更新 c",tag:"第 2–4 次前向",b:"每一步都会重新产出 c，但<b>这些中间 c 不参与任何决策</b>——分支已经在第 7 行判完了。它们唯一的用途是最后一次的值被第 14 行写进 prev_c。<br><br>顺带一提：置信度头在这三步里也都跑了，属于可省而未省的开销（虽然只有 ~1%）。",kv:"累计 NFE：+3（满步分支）"},
+ {no:"12",code:'　<span class="kw">end for</span>',t:"精炼结束",tag:"",b:"走到这里这一块花了 4 次去噪前向。",kv:""},
+ {no:"13",code:'<span class="kw">end if</span>',t:"两条路在此汇合",tag:"",b:"早退路径：1 次去噪。精炼路径：4 次去噪。下面第 15 行两条路都要走。",kv:""},
+ {no:"14",code:'prev_c ← sigmoid(c^i)',t:"门槛被改写 —— 棘轮在这里成形",tag:"状态更新",b:"注意写进去的是<b>本块最终的</b> c：早退块写的是 1 步的值（偏低），满步块写的是 4 步的值（偏高）。<br><br>于是门槛在两个水平之间跳动，而下一块永远只拿「1 步的 c」去比。<b>满步之后的下一块处于系统性劣势</b>（要用 1 步的分去够 4 步的门槛），<b>早退之后的下一块处于系统性优势</b>。§06 的模拟器把这个不对称可视化了。",kv:"有状态判据 · 非无记忆",flag:true},
+ {no:"15",code:'k^i ← G^KV_θ( x̂^i₀ ; 0, K )',t:"那个被所有人漏掉的 +1",tag:"第 2 或第 5 次前向",b:"把这一块的<b>干净 latent 在 t=0 再过一遍模型</b>，取出 KV 嵌入写进缓存供后续块使用。这是一次<b>完整的前向</b>，无论这块跑了 1 步还是 4 步都省不掉。<br><br>它正是 NFE = 7×(k+1) 里那个 +1，也是为什么「1 步」档位的 NFE 是 14 而不是 7。理论加速上限因此从 4× 掉到 2.5×。Self-Forcing 的 Algorithm 1/2 里有同一行。",kv:"累计 NFE：+1（必付）",flag:true},
+ {no:"16",code:'<span class="kw">if</span> |K| = L <span class="kw">then</span>',t:"滚动缓存的淘汰判断",tag:"缓存管理",b:"缓存满了就淘汰最旧的条目——即固定长度的滑动窗口注意力。这是长视频漂移的结构性来源之一：超出窗口的历史彻底消失。",kv:"L 未给值"},
+ {no:"17",code:'　K.pop(0)　<span class="cmt">▷ 淘汰最旧条目</span>',t:"FIFO 淘汰",tag:"缓存管理",b:"没有任何选择性保留机制（不按重要性、不按置信度）。顺带一提：<b>用置信度来决定哪些历史块值得留在缓存里</b>，是这套信号一个很自然但论文没做的用法。",kv:""},
+ {no:"18",code:'<span class="kw">end if</span>',t:"",tag:"",b:"",kv:""},
+ {no:"19",code:'K.append(k^i)',t:"写入缓存",tag:"缓存管理",b:"注意这里写进去的是 <b>x̂₀ 的 KV 嵌入</b>，不是置信度。论文 §3.2 声称「both x^i₀ and c^i are employed as the autoregressive context, and their KV embeddings are stored in the cache」，但伪代码里<b>只有 x̂₀ 进去了</b>。这正是 D6 指出的问题：c 的「回流」缺少机制。",kv:"c 并未进入缓存",flag:true},
+ {no:"20",code:'X_θ.append( x̂^i₀ )',t:"收下这一块",tag:"输出",b:"块的结果一旦写出就<b>不会再被修改</b>——没有任何回溯或重生成机制。所以一次错误的早退是<b>不可逆的</b>，它的代价会通过 KV cache 传给后面所有块。",kv:"不可回溯"},
+ {no:"21",code:'<span class="kw">end for</span>',t:"",tag:"",b:"",kv:""},
+ {no:"22",code:'<span class="kw">return</span> X_θ',t:"送去 VAE 解码",tag:"返回",b:"21 个 latent 帧 → 81 个像素帧（VAE 时间下采样 4×，首帧独立）。这一步的耗时被计入拟合模型里那 1.53 s 的固定开销。",kv:""}
+];
+var agIdx=6;
+function renderAG(){
+  var code=$("#agCode"), pane=$("#agPane"); if(!code) return;
+  code.textContent="";
+  AG.forEach(function(L,i){
+    var d=document.createElement("div"); d.className="ln"+(i===agIdx?" on":"");
+    d.innerHTML='<span class="no">'+L.no+'</span><span class="tx">'+L.code+(L.flag?'  <span style="color:var(--warn)">⚑</span>':'')+'</span>';
+    d.addEventListener("click",function(){agIdx=i;renderAG();});
+    code.appendChild(d);
+  });
+  var L=AG[agIdx];
+  pane.innerHTML = (L.tag?'<div class="tagline">'+L.tag+'</div>':'')+'<h5>'+L.t+'</h5><div>'+(L.b||"—")+'</div>'+(L.kv?'<div class="kv">'+L.kv+'</div>':'');
+  var on=code.querySelector(".ln.on"); if(on&&on.scrollIntoView) on.scrollIntoView({block:"nearest"});
+}
+$("#agPrev").addEventListener("click",function(){agIdx=(agIdx-1+AG.length)%AG.length;renderAG();});
+$("#agNext").addEventListener("click",function(){agIdx=(agIdx+1)%AG.length;renderAG();});
+$$("#agJump button").forEach(function(b){
+  b.addEventListener("click",function(){
+    var map={dec:6,loop:7,kv:15};
+    agIdx=map[b.dataset.g]; renderAG();
+  });
+});
+
+/* ============================================================ FIG 5 simulator */
+var PRESETS={flat:[.22,.18,.24,.20,.22,.19,.23],rise:[.12,.20,.32,.46,.60,.74,.88],fall:[.88,.74,.60,.46,.32,.20,.12],burst:[.18,.22,.78,.88,.70,.26,.20]};
+var simD=PRESETS.flat.slice(), simSeed=11, simDelta=0;
+function rnd(i){ var x=Math.sin((i+1)*12.9898+simSeed*78.233)*43758.5453; return x-Math.floor(x); }
+function buildSliders(){
+  var host=$("#simSliders"); if(!host) return; host.textContent="";
+  simD.forEach(function(v,i){
+    var w=document.createElement("label"); w.style.cssText="display:block;font-family:var(--font-mono);font-size:10.5px;color:var(--ink3);text-align:center";
+    w.innerHTML='块 '+(i+1)+'<br><input type="range" min="0" max="100" step="1" value="'+Math.round(v*100)+'" style="width:100%;accent-color:var(--cf)"><br><span>'+fmt(v,2)+'</span>';
+    var inp=w.querySelector("input"), out=w.querySelector("span");
+    inp.addEventListener("input",function(){ simD[i]=+inp.value/100; out.textContent=fmt(simD[i],2); $$("#simPreset button").forEach(function(b){b.setAttribute("aria-pressed","false");}); drawSim(); });
+    host.appendChild(w);
+  });
+}
+$$("#simPreset button").forEach(function(b){
+  b.addEventListener("click",function(){
+    $$("#simPreset button").forEach(function(x){x.setAttribute("aria-pressed", x===b?"true":"false");});
+    simD=PRESETS[b.dataset.p].slice(); buildSliders(); drawSim();
+  });
+});
+$("#simDelta").addEventListener("input",function(){ simDelta=+this.value/100; $("#simDeltaV").textContent=fmt(simDelta,2); drawSim(); });
+$("#simNoise").addEventListener("click",function(){ simSeed=(simSeed*7+13)%997; drawSim(); });
+
+function runSim(){
+  var prev=1.0, acc=0, out=[], nfe=0;
+  for(var i=0;i<CHUNKS;i++){
+    var Deff=clamp(simD[i]+acc,0,1);
+    var c1=clamp(0.95-0.62*Deff+(rnd(i)-0.5)*0.11,0.03,0.985);
+    var c4=clamp(c1+(0.08+0.42*Deff)*(0.985-c1),0.03,0.985);
+    var full = c1 < prev;
+    var cFin = full? c4 : c1;
+    nfe += full?5:2;
+    out.push({i:i,D:simD[i],Deff:Deff,c1:c1,c4:c4,full:full,thr:prev,cFin:cFin,acc:acc});
+    prev=cFin;
+    acc = full ? Math.max(0, acc-simDelta*0.30) : Math.min(0.9, acc+simDelta*(0.35+0.55*Deff));
+  }
+  return {rows:out,nfe:nfe};
+}
+function drawSim(){
+  var host=$("#simFig"); if(!host) return;
+  var R=runSim();
+  var svg=el("svg",{viewBox:"0 0 880 268",role:"img","aria-label":"调度模拟"});
+  var X0=54,W=108,GAP=6,step=W+GAP, yB=150,yT=36,H=yB-yT;
+  svg.appendChild(el("line",{x1:X0-8,y1:yB,x2:850,y2:yB,class:"s-axis"}));
+  svg.appendChild(el("text",{x:20,y:yT+4,class:"s-sm"},"1.0"));
+  svg.appendChild(el("text",{x:20,y:yB+4,class:"s-sm"},"0.0"));
+  var pts=[];
+  R.rows.forEach(function(r,i){
+    var x=X0+i*step, y=yB-r.thr*H;
+    pts.push(x+","+y); pts.push((x+W)+","+y);
+  });
+  svg.appendChild(el("polyline",{points:pts.join(" "),class:"l-A","stroke-dasharray":"5 4","stroke-width":"1.8"}));
+  R.rows.forEach(function(r,i){
+    var x=X0+i*step, bw=30;
+    var h1=r.c1*H;
+    svg.appendChild(el("rect",{x:x+16,y:yB-h1,width:bw,height:h1,rx:4,class:"f-C"}));
+    if(r.full){ var h2=r.c4*H; svg.appendChild(el("rect",{x:x+16+bw+8,y:yB-h2,width:bw,height:h2,rx:4,class:"f-D"})); }
+    svg.appendChild(el("text",{x:x+W/2,y:yB-Math.max(h1,r.full?r.c4*H:0)-6,"text-anchor":"middle",class:"s-sm"},fmt(r.cFin)));
+    svg.appendChild(el("rect",{x:x,y:166,width:W,height:46,rx:9,class:r.full?"f-Q":"f-S"}));
+    svg.appendChild(el("text",{x:x+W/2,y:185,"text-anchor":"middle",class:"s-lb"},r.full?"4 步":"1 步"));
+    svg.appendChild(el("text",{x:x+W/2,y:203,"text-anchor":"middle",class:"s-mono","font-size":"10"},(r.full?5:2)+" 次前向"));
+    svg.appendChild(el("text",{x:x+W/2,y:228,"text-anchor":"middle",class:"s-sm"},"块 "+(i+1)));
+    if(r.acc>0.02) svg.appendChild(el("text",{x:x+W/2,y:245,"text-anchor":"middle",class:"s-sm",fill:"var(--bad)"},"难度 +"+fmt(r.acc,2)));
+  });
+  svg.appendChild(el("text",{x:X0,y:24,class:"s-sm",fill:"var(--ar)"},"虚线 = prev_c 门槛　·　黄柱 = 1 步后的 c　·　紫柱 = 4 步精炼后的 c"));
+  host.textContent=""; host.appendChild(svg);
+
+  var nFull=R.rows.filter(function(r){return r.full;}).length;
+  var lock = nFull===7 ? "已经锁死在全满步——自适应完全失效，成本等于固定 4 步。" :
+             (nFull===1 ? "只有首块满步（首块是被 prev_c=1.0 强制的），其余全部早退。" : nFull+" 块满步 / "+(7-nFull)+" 块早退。");
+  var html='<div class="grid3" style="margin:6px 0 0">'+
+   '<div class="card cS"><div class="mono">本次 NFE</div><h5 style="font-size:24px;color:var(--cf-ink)">'+R.nfe+'</h5>对比固定 4 步的 35 次　·　固定 1 步的 14 次</div>'+
+   '<div class="card cS"><div class="mono">估算吞吐</div><h5 style="font-size:24px;color:var(--sp-ink)">'+fmt(fpsOf(R.nfe))+' FPS</h5>按 §7.3 的墙钟模型 t = 1.53 + 0.096·NFE</div>'+
+   '<div class="card cB"><div class="mono">调度结果</div><h5 style="font-size:15px">'+lock+'</h5>论文报告的 23 NFE 对应 3 块满步</div>'+
+   '</div>';
+  var same='<div class="note" style="margin-top:14px"><div class="hd">同成本对照（论文缺的那个）</div>用同样 '+R.nfe+' 次前向的<b>静态排程</b>是：前 '+Math.max(1,nFull)+' 块跑满 4 步、其余跑 1 步。它不需要置信度头、不需要额外训练、结果完全确定、没有抖动。<b>论文没有测过它。</b></div>';
+  $("#simRead").innerHTML = html + same;
+}
+
+/* ============================================================ sortable table */
+(function(){
+  var tbl=$("#mainTbl"); if(!tbl) return;
+  var dir={};
+  $$("thead th",tbl).forEach(function(th){
+    th.addEventListener("click",function(){
+      var c=+th.dataset.c, txt=th.dataset.t==="s";
+      dir[c]=!dir[c];
+      var rows=$$("tbody tr",tbl);
+      rows.sort(function(a,b){
+        var x=a.children[c].textContent.trim(), y=b.children[c].textContent.trim();
+        if(txt) return dir[c]? x.localeCompare(y) : y.localeCompare(x);
+        var nx=parseFloat(x), ny=parseFloat(y);
+        if(isNaN(nx)) nx=-Infinity; if(isNaN(ny)) ny=-Infinity;
+        return dir[c]? nx-ny : ny-nx;
+      });
+      var tb=$("tbody",tbl); rows.forEach(function(r){tb.appendChild(r);});
+    });
+  });
+})();
+
+/* ============================================================ doubts */
+$$("#dvFilter button").forEach(function(b){
+  b.addEventListener("click",function(){
+    $$("#dvFilter button").forEach(function(x){x.setAttribute("aria-pressed", x===b?"true":"false");});
+    var s=b.dataset.s;
+    $$("#dvList .dt").forEach(function(d){ d.hidden = !(s==="all"||d.dataset.s===s); });
+  });
+});
+$("#dvAll").addEventListener("click",function(){
+  var items=$$("#dvList .dt").filter(function(d){return !d.hidden;});
+  var anyClosed=items.some(function(d){return !d.open;});
+  items.forEach(function(d){d.open=anyClosed;});
+});
+
+/* ============================================================ boot */
+function redrawAll(){ drawF0(); drawNFE(); drawF2(); drawLoss(); drawSim(); }
+readLossCtl(); buildSliders(); renderAG(); redrawAll();
+})();
+</script>
+</body>
+</html>

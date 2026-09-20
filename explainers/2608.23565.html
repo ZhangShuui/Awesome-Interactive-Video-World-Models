@@ -928,7 +928,125 @@ footer a{color:var(--ink2)}
     换句话说，Sec. 2.3 的召回机制是站在 Sec. 2.2 的位姿编码上的，两者不是独立部件。</figcaption>
   </figure>
 
-  <h3><span class="ix">3.2</span>和两遍式设计比：省在哪</h3>
+  <h3><span class="ix">3.2</span>拆开看：「位置」和「姿态」分别落在哪里</h3>
+  <p class="lead">「位姿」这个词把两样东西打包在一起：<span class="rL">姿态</span>（相机朝哪看，旋转 <i>R</i>）和
+  <span class="rO">位置</span>（相机在哪，平移 <i>t</i>）。它们在 ReWorld 里<b>并不是对称地被处理的</b>——
+  有的环节两者都用、有的只用平移、有的从不碰旋转。这一节把这条线索单独拉出来。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 5</span><span class="ti">位姿的两半进入 MRoPE 的路径：在哪里分开，在哪里合并</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 326" role="img" aria-label="SE(3) 位姿拆成 9 维旋转与 3 维平移，拼成 12 维描述子后经零初始化 MLP 压成单一相位偏移">
+      <text x="24" y="26" class="f-ink big">P<tspan dy="3" font-size="9">f</tspan><tspan dy="-3"> ∈ SE(3)，锚定在第一帧</tspan></text>
+
+      <!-- SE(3) matrix -->
+      <rect x="24" y="52" width="118" height="120" rx="12" class="f-surf2 s-rule1" stroke-width="1"/>
+      <rect x="42" y="70" width="54" height="54" rx="6" class="fs-L s-L" stroke-width="1.4"/>
+      <text x="69" y="102" class="f-Li lbl" text-anchor="middle">R</text>
+      <rect x="102" y="70" width="22" height="54" rx="6" class="fs-O s-O" stroke-width="1.4"/>
+      <text x="113" y="102" class="f-Oi lbl" text-anchor="middle">t</text>
+      <rect x="42" y="130" width="54" height="18" rx="5" class="f-surf3"/>
+      <text x="69" y="143" class="f-ink3 sml mono" text-anchor="middle">0 0 0</text>
+      <rect x="102" y="130" width="22" height="18" rx="5" class="f-surf3"/>
+      <text x="113" y="143" class="f-ink3 sml mono" text-anchor="middle">1</text>
+      <text x="83" y="164" class="f-ink3 sml mono" text-anchor="middle">4 × 4 齐次矩阵</text>
+
+      <!-- split arrows -->
+      <path d="M 148 90 C 166 90, 170 63, 184 63" class="nofill s-L" stroke-width="1.6" marker-end="url(#ar-l)"/>
+      <path d="M 148 134 C 166 134, 170 167, 184 167" class="nofill s-O" stroke-width="1.6" marker-end="url(#ar-o)"/>
+
+      <!-- rotation block -->
+      <text x="192" y="46" class="f-Li big">姿态 · vec(R<tspan dy="3" font-size="9">f</tspan><tspan dy="-3">) ∈ ℝ⁹</tspan></text>
+      <g id="f5-rot"></g>
+      <text x="192" y="94" class="f-ink3 sml">3×3 旋转矩阵直接展平成 9 个数</text>
+
+      <!-- translation block -->
+      <text x="192" y="150" class="f-Oi big">位置 · t<tspan dy="3" font-size="9">f</tspan><tspan dy="-3"> ∈ ℝ³</tspan></text>
+      <g id="f5-trans"></g>
+      <text x="192" y="196" class="f-ink3 sml">相机中心在世界坐标里的 x / y / z</text>
+
+      <!-- concat -->
+      <path d="M 352 63 C 366 63, 358 98, 368 112" class="nofill s-L" stroke-width="1.6" marker-end="url(#ar-l)"/>
+      <path d="M 258 167 C 310 167, 350 152, 368 136" class="nofill s-O" stroke-width="1.6" marker-end="url(#ar-o)"/>
+      <rect x="370" y="96" width="86" height="54" rx="11" class="f-surf2 s-rule" stroke-width="1.2"/>
+      <text x="413" y="119" class="f-ink lbl" text-anchor="middle" font-weight="600">c<tspan dy="3" font-size="9">f</tspan><tspan dy="-3"> ∈ ℝ¹²</tspan></text>
+      <text x="413" y="138" class="f-ink3 sml" text-anchor="middle">9 + 3 拼接</text>
+
+      <path d="M 460 123 L 482 123" class="nofill s-rule" stroke-width="1.5" marker-end="url(#ar-i)"/>
+      <rect x="486" y="96" width="104" height="54" rx="11" class="fs-M s-M" stroke-width="1.4"/>
+      <text x="538" y="118" class="f-Mi lbl" text-anchor="middle" font-weight="600">零初始化 MLP</text>
+      <text x="538" y="136" class="f-ink3 sml" text-anchor="middle">一个，不是两个</text>
+
+      <path d="M 594 123 L 616 123" class="nofill s-M" stroke-width="1.5" marker-end="url(#ar-m)"/>
+      <rect x="620" y="96" width="80" height="54" rx="11" class="f-surf2 s-rule" stroke-width="1.2"/>
+      <text x="660" y="119" class="f-ink lbl" text-anchor="middle" font-weight="600">相位 δ<tspan dy="3" font-size="9">f</tspan></text>
+      <text x="660" y="137" class="f-ink3 sml" text-anchor="middle">单一偏移量</text>
+
+      <!-- down to Q/K -->
+      <path d="M 660 156 L 660 186" class="nofill s-M" stroke-width="1.5" marker-end="url(#ar-m)"/>
+      <rect x="370" y="192" width="330" height="52" rx="11" class="fs-M s-M" stroke-width="1.3"/>
+      <text x="535" y="214" class="f-Mi lbl" text-anchor="middle">q̃ = RoPE(q)·e<tspan font-size="9" dy="-4">iδ</tspan><tspan dy="4"> ,　k̃ = RoPE(k)·e</tspan><tspan font-size="9" dy="-4">iδ</tspan></text>
+      <text x="535" y="234" class="f-ink2 sml" text-anchor="middle">注意力只看得到 δ 的差，看不到它由 R 还是 t 贡献</text>
+
+      <!-- warning -->
+      <rect x="24" y="252" width="676" height="62" rx="11" class="fs-B s-B" stroke-width="1.3"/>
+      <text x="40" y="272" class="f-Bi lbl" font-weight="600">⚠ 分离只到这一步为止</text>
+      <text x="40" y="291" class="f-ink2 lbl">「位置」与「姿态」<tspan font-weight="600">只在 12 维描述子的排布上是可分的</tspan>；进了同一个 MLP 之后就被压成同一个相位。</text>
+      <text x="40" y="308" class="f-ink2 lbl">论文没有给旋转和平移分配不同的频段、通道或独立权重，也没有做「只喂其中一半」的消融。</text>
+    </svg>
+    </div>
+    <figcaption>这是回答「位置和姿态分别体现在哪里」最直接的一张图：在 <b>MRoPE 的输入端</b>，两者是 9 维和 3 维两段；
+    在 <b>MRoPE 的输出端</b>，两者已经合成一个标量化的相位偏移。
+    这一点和标准 RoPE 把「时间」和「空间」放进<b>不同频率分量</b>的做法不一样——
+    MRoPE 没有为 R 和 t 保留可分的频率结构，而是交给那个零初始化 MLP 自己去学。
+    <b>论文对这个设计选择没有做消融</b>（比如「只喂 t 不喂 R」会怎样），所以两者各自贡献了多少，从文中读不出来。</figcaption>
+  </figure>
+
+  <h4>顺着这条线索把整套系统走一遍</h4>
+  <div class="tblwrap">
+    <table>
+      <caption>旋转 R 与平移 t 在 ReWorld 各个环节里的去向（<span style="color:var(--bad-ink)">红字</span> = 论文未明确说明）</caption>
+      <thead><tr><th style="text-align:left">环节</th><th style="text-align:left">姿态（旋转 R）</th><th style="text-align:left">位置（平移）</th><th style="text-align:left">备注</th></tr></thead>
+      <tbody>
+        <tr><td>MRoPE 描述子 <i>c<sub>f</sub></i></td><td style="text-align:left"><span class="rL">vec(R) 9 维</span></td><td style="text-align:left"><span class="rO">t 3 维</span></td><td style="text-align:left">拼成 ℝ¹² 后过<b>同一个</b>零初始化 MLP</td></tr>
+        <tr><td>MRoPE 的 V / O 残差</td><td colspan="2" style="text-align:left">整个刚体变换一起作用：<i>ṽ</i> = <i>v</i> + <i>W<sub>v</sub></i>(<i>P</i><sup>−1</sup>∘<i>v</i>)、out = <i>W<sub>o</sub>y</i> + <i>W<sub>p</sub></i>(<i>P</i>∘<i>y</i>)</td><td style="text-align:left">这里也不区分两者</td></tr>
+        <tr><td>米制尺度对齐 Eq.(4)</td><td style="text-align:left"><span style="color:var(--ink3)">从不缩放</span></td><td style="text-align:left"><span class="rO">除以逐源 σ<sub>s</sub></span></td><td style="text-align:left">原文：旋转是无量纲的弧度，<b>只有平移过这个除数</b></td></tr>
+        <tr><td>窗口归一化（A.3）</td><td style="text-align:left"><span style="color:var(--ink3)">不变</span></td><td style="text-align:left"><span class="rO">再除以窗口最大半径</span></td><td style="text-align:left">让位姿索引工作在有界、跨源一致的坐标里</td></tr>
+        <tr><td>动作 <i>a<sub>k</sub></i> ∈ ℝ⁶</td><td style="text-align:left"><span class="rL">3 个欧拉角增量</span></td><td style="text-align:left"><span class="rO">3 个平移增量</span></td><td style="text-align:left">逐 latent step 差分后按 chunk 分组</td></tr>
+        <tr><td>Plücker 射线图 [<i>d</i>, <i>o</i>×<i>d</i>]</td><td style="text-align:left"><span class="rL">方向 <i>d</i> 由旋转决定</span></td><td style="text-align:left"><span class="rO">相机中心 <i>o</i> 由平移决定</span></td><td style="text-align:left">矩 <i>o</i>×<i>d</i> 把两者<b>耦合</b>进同一个 6 维向量</td></tr>
+        <tr><td>bank 里 chunk 的位姿 <i>P<sub>k</sub></i></td><td style="text-align:left"><span class="rL">取该 chunk <b>第一帧</b>的旋转</span></td><td style="text-align:left"><span class="rO">取<b>块内平均</b>平移</span></td><td style="text-align:left">非对称：旋转不做平均（SO(3) 上算术平均会退化）</td></tr>
+        <tr><td>bank 准入（里程计）</td><td style="text-align:left"><span style="color:var(--bad-ink)">不参与</span></td><td style="text-align:left"><span class="rO">「走过的距离」，以中位步长计</span></td><td style="text-align:left">原文 <span style="color:var(--ink3)">"distance travelled … median step lengths"</span></td></tr>
+        <tr><td>bank 淘汰 / 召回</td><td colspan="2" style="text-align:left"><span style="color:var(--bad-ink)">只说「pose space 里最近邻」「距当前位姿最近的 6 个」，度量怎么定义没写</span></td><td style="text-align:left">是纯平移距离还是 SE(3) 距离，无法从文中确定</td></tr>
+        <tr><td>评测指标</td><td style="text-align:left"><span class="rL">RotErr（测地线，度）</span></td><td style="text-align:left"><span class="rO">TransErr</span></td><td style="text-align:left">另有 CamMC 作为综合的相机运动一致性</td></tr>
+      </tbody>
+    </table>
+    <p class="tnote">读这张表最省事的方式：<b>越靠近模型内部，两者越是被搅在一起；越靠近工程规则（尺度对齐、bank 管理），越是只剩下平移。</b></p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">▸ 我的读解一：旋转是所有方法共同的软肋</div>
+    <p>把 Tab. 3 按「平移主导 vs 旋转主导」重新分组会很清楚。ReWorld 自己：
+    dolly <b>2.69°</b>、strafe <b>1.07°</b>、palindrome <b>0.64°</b>（都是平移主导）；
+    而 arc_yaw <b>27.63°</b>、arc_pitch <b>23.61°</b>（旋转主导）——<b>差了一个数量级</b>。
+    七个方法在两条弧线上全部落在 20–44° 区间，没有例外。
+    也就是说：<b>位姿里「位置」这一半基本被解决了，「姿态」这一半还远没有。</b>
+    考虑到 MRoPE 单独用时 RotErr 高达 17.66°（Tab. 7 第一行，三个变体里最差），
+    把控制权重新拿回来的其实主要是<b>动作注入通道</b>，而不是位姿索引通道。</p>
+  </div>
+
+  <div class="call warn">
+    <div class="hd">▲ 我的读解二：里程计规则对「原地转身」是盲的</div>
+    <p>准入规则衡量的是<b>走过的距离</b>。那么一个<b>原地旋转</b>的相机——转开、再转回来——里程始终是 0，
+    <b>自第一个 landmark 之后 bank 不会再收进任何东西</b>。而 Sec. 4.3 的三条标准 palindrome 里，
+    恰好有一条就是 <b>yaw：rotate away, then back (in place)</b>。
+    在那条轨迹上，重访靠的其实是 sink chunk 和 recent 窗口，landmark bank 几乎不起作用
+    （反过来说，因为 needle 就在起点、而 sink 正好是第一个 chunk，这条轨迹本身对 bank 的区分度也最低）。</p>
+    <p>需要说清楚的是<b>这不是 MRoPE 的问题</b>：注意力索引里带着 vec(R)，朝向本来是可分辨的。
+    盲区只出现在 <b>bank 的管理规则</b>上——一个纯旋转的重访，在「该不该把这一刻存下来」这个问题上没有任何触发条件。
+    论文没有讨论这一点，我也没有在文中找到针对「纯旋转重访」的单独评测。</p>
+  </div>
+
+  <h3><span class="ix">3.3</span>和两遍式设计比：省在哪</h3>
   <div class="tblwrap">
     <table>
       <caption>Table 1 · 位姿如何进入注意力：四种设计对比（论文原表重排）</caption>
@@ -960,9 +1078,9 @@ footer a{color:var(--ink2)}
   <i>[d, o × d]</i>（<i>d</i> 是方向、<i>o</i> 是相机中心），坐标系与 MRoPE 的位姿共用同一个第一帧坐标系。</p>
 
   <figure class="fig">
-    <div class="fh"><span class="no">Figure 5</span><span class="ti">两个条件通道各自的分工</span></div>
+    <div class="fh"><span class="no">Figure 6</span><span class="ti">两个条件通道各自的分工</span></div>
     <div class="figbody">
-    <svg viewBox="0 0 720 300" role="img" aria-label="Plücker 射线图注入 patch embedding，MRoPE 位姿进入注意力索引，两者分工不同">
+    <svg viewBox="0 0 720 306" role="img" aria-label="Plücker 射线图注入 patch embedding，MRoPE 位姿进入注意力索引，两者分工不同">
       <!-- camera + rays -->
       <text x="24" y="28" class="f-Ci big">动作注入 · 指令通道</text>
       <path d="M 46 148 L 118 108 L 118 188 Z" class="fs-C s-C" stroke-width="1.6" stroke-linejoin="round"/>
@@ -973,6 +1091,9 @@ footer a{color:var(--ink2)}
       <line x1="46" y1="148" x2="176" y2="170" class="s-C" stroke-width="1.2" marker-end="url(#ar-c)"/>
       <line x1="46" y1="148" x2="176" y2="200" class="s-C" stroke-width="1.2" marker-end="url(#ar-c)"/>
       <text x="182" y="130" class="f-Ci sml mono">d</text>
+      <text x="150" y="84" class="f-Li sml">方向 d ← 旋转 R 决定</text>
+      <text x="24" y="210" class="f-Oi sml">相机中心 o ← 平移 t 决定</text>
+      <text x="24" y="278" class="f-ink3 sml">矩 o×d 把两者耦合成一个 6 维向量</text>
       <text x="24" y="228" class="f-ink2 lbl">每个空间位置一条射线</text>
       <text x="24" y="245" class="f-ink3 sml mono">[ d , o × d ] ∈ ℝ⁶</text>
       <text x="24" y="262" class="f-ink3 sml">Plücker 坐标：方向 + 矩</text>
@@ -999,7 +1120,7 @@ footer a{color:var(--ink2)}
       <text x="621" y="188" class="f-Mi sml" text-anchor="middle">缓存 token <tspan font-weight="600">是从哪看到的</tspan></text>
 
       <!-- MRoPE channel below -->
-      <text x="24" y="292" class="f-Mi big">记忆检索 · 索引通道</text>
+      <text x="24" y="296" class="f-Mi big">记忆检索 · 索引通道</text>
       <path d="M 150 286 C 300 286, 420 250, 546 208" class="nofill s-M" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#ar-m)"/>
       <text x="330" y="278" class="f-Mi sml">P<tspan dy="3" font-size="9">f</tspan><tspan dy="-3"> ∈ SE(3) → 相位偏移 δ</tspan><tspan dy="3" font-size="9">f</tspan><tspan dy="-3"> → Q/K</tspan></text>
     </svg>
@@ -1055,7 +1176,7 @@ footer a{color:var(--ink2)}
   </div>
 
   <figure class="fig">
-    <div class="fh"><span class="no">Figure 6</span><span class="ti">随机头路由推演器：拖动 optimizer step 看谁在当班</span></div>
+    <div class="fh"><span class="no">Figure 7</span><span class="ti">随机头路由推演器：拖动 optimizer step 看谁在当班</span></div>
     <div class="ctl">
       <label>Optimizer step</label>
       <div class="grow"><input type="range" id="rhSlider" min="1" max="12" step="1" value="1" aria-label="optimizer step"></div>
@@ -1129,6 +1250,8 @@ footer a{color:var(--ink2)}
       <h5>里程计规则</h5>
       <p>一个 chunk 滑出 recent 窗口时，<b>只有当相机自上一个 landmark 起已经走够 δ 的里程</b>（以中位步长为单位）才入库。
       中间那些 chunk 是路径上最密、最冗余的采样，直接丢弃。</p>
+      <p style="margin-top:9px;color:var(--ink3);font-size:13px">注意「里程」只由<b>平移</b>定义（原文 <span class="mono">distance travelled … median step lengths</span>）——
+      纯旋转不产生里程，见 <a href="#s-mrope">Sec. 3.2</a>。</p>
     </div>
     <div class="card bb">
       <p class="mono">WRITE · 淘汰</p>
@@ -1153,7 +1276,7 @@ footer a{color:var(--ink2)}
   </div>
 
   <figure class="fig">
-    <div class="fh"><span class="no">Figure 7</span><span class="ti">landmark bank 推演器：走一趟 out-and-back，看 12 格 cache 里发生了什么</span></div>
+    <div class="fh"><span class="no">Figure 8</span><span class="ti">landmark bank 推演器：走一趟 out-and-back，看 12 格 cache 里发生了什么</span></div>
     <div class="ctl">
       <label>缓存策略</label>
       <div class="seg" id="lbPolicy">
@@ -1191,7 +1314,9 @@ footer a{color:var(--ink2)}
   <div class="prose">
     <p>bank <i>ℳ</i>（|<i>ℳ</i>| ≤ K = 30）放在一个<b>分层存储</b>里：所有 K 个成员的主副本常驻 <b>pinned host memory</b>，
     只有被召回的工作集才 stage 到 device 上。每个 chunk 只带<b>一个</b>相机位姿 <i>P<sub>k</sub></i> ∈ SE(3)——
-    取该 chunk 第一帧的旋转，配上块内平均的平移。bank 完全按位姿管理，不看内容。</p>
+    <b>取该 chunk 第一帧的旋转，配上块内平均的平移</b>。这个定义是<b>非对称</b>的：平移做了平均、旋转没有——
+    大概率是为了回避 SO(3) 上算术平均会退化的问题（附录 A.3 在 palindrome 的位姿降采样里明确用了 slerp）。
+    bank 完全按位姿管理，不看内容。</p>
     <p>landmark 的传输走<b>独立 CUDA stream 预取</b>，与去噪计算重叠，因此不进入关键路径。
     这样 device 显存就是 O(B) 个 chunk，<b>与 rollout 长度无关</b>。</p>
   </div>
@@ -1236,7 +1361,7 @@ footer a{color:var(--ink2)}
   </div>
 
   <figure class="fig">
-    <div class="fh"><span class="no">Figure 8</span><span class="ti">训练看到的历史 vs 推理读到的历史</span></div>
+    <div class="fh"><span class="no">Figure 9</span><span class="ti">训练看到的历史 vs 推理读到的历史</span></div>
     <div class="figbody">
     <svg viewBox="0 0 720 240" role="img" aria-label="标准训练看到连续完整前缀，推理读到稀疏拼接的缓存，chunk-drop 训练把两者对齐">
       <text x="24" y="40" class="f-ink big">标准 teacher forcing</text>
@@ -1277,7 +1402,7 @@ footer a{color:var(--ink2)}
   走的是 LongLive 系列「先 AR 训练、再插上蒸馏 LoRA」的路线。</p>
 
   <figure class="fig">
-    <div class="fh"><span class="no">Figure 9</span><span class="ti">DMD LoRA：一套骨干，两个工作点</span></div>
+    <div class="fh"><span class="no">Figure 10</span><span class="ti">DMD LoRA：一套骨干，两个工作点</span></div>
     <div class="figbody">
     <svg viewBox="0 0 720 288" role="img" aria-label="冻结骨干加 rank128 LoRA 作为学生，DMD critic 也是 LoRA，控制路径不带 LoRA">
       <!-- teacher -->
@@ -1382,7 +1507,7 @@ footer a{color:var(--ink2)}
   </div>
 
   <figure class="fig">
-    <div class="fh"><span class="no">Figure 10</span><span class="ti">四阶段数据管线</span></div>
+    <div class="fh"><span class="no">Figure 11</span><span class="ti">四阶段数据管线</span></div>
     <div class="figbody">
     <svg viewBox="0 0 720 232" role="img" aria-label="八源采集、UE 自动渲染、curation 漏斗、统一到同一米制尺度、片段级采样">
       <!-- stage boxes -->
@@ -1622,7 +1747,7 @@ footer a{color:var(--ink2)}
   </div>
 
   <figure class="fig">
-    <div class="fh"><span class="no">Figure 11</span><span class="ti">三种构造 palindrome 与镜像对计分</span></div>
+    <div class="fh"><span class="no">Figure 12</span><span class="ti">三种构造 palindrome 与镜像对计分</span></div>
     <div class="figbody">
     <svg viewBox="0 0 720 210" role="img" aria-label="strafe、dolly、yaw 三种 palindrome 轨迹与镜像对的计分方式">
       <!-- strafe -->
@@ -1868,7 +1993,7 @@ footer a{color:var(--ink2)}
     <div class="card bb">
       <h5>固定池 |P| = 12 没有被消融</h5>
       <p>72 个「全局名额」摊到 24 个头，平均 3 次，但随机抽的 12 组不会均匀——
-      <a href="#s-split">Fig. 6</a> 的示意池里就有一个头 0 次、两个头 6 次。
+      <a href="#s-split">Fig. 7</a> 的示意池里就有一个头 0 次、两个头 6 次。
       论文没有说是否对池做过平衡，也没有 |P| 的敏感性实验。如果 |P| 很大（接近每步现抽）或很小（接近固定分组）结果差别很大，
       那这个超参就不像正文写的那么无关紧要。</p>
     </div>
@@ -1882,6 +2007,13 @@ footer a{color:var(--ink2)}
       <p>作者在结论里主动承认：记忆仍然只按相机位姿索引，扩展到<b>动态场景</b>与更丰富的非导航交互是下一步。
       我补一点：纯位姿键还有一个静态假设——<b>「同一个位姿必然对应同一个场景」</b>。
       在多层建筑、可破坏场景、或场景本身随时间改变的设定里，这个假设会直接失效，而里程计准入规则也无从区分。</p>
+    </div>
+    <div class="card bb">
+      <h5>位姿的两半被处理得不对称</h5>
+      <p>描述子里 <b>vec(R) 9 维 + t 3 维</b>，但过的是<b>同一个</b>零初始化 MLP，之后就分不开了，
+      论文也没做「只喂 t」之类的消融。更实际的问题在 bank 一侧：
+      <b>准入规则只由平移触发</b>，所以「原地转身再转回来」这种重访不会产生任何新 landmark；
+      而 Sec. 4.3 三条标准 palindrome 里恰好有一条就是 in-place 的 yaw。详见 <a href="#s-mrope">Sec. 3.2</a>。</p>
     </div>
     <div class="card bb">
       <h5>MRoPE 的成本优势是分析出来的</h5>
@@ -1917,7 +2049,7 @@ footer a{color:var(--ink2)}
 
   <h3><span class="ix">13.1</span>记忆机制谱系里的位置</h3>
   <figure class="fig">
-    <div class="fh"><span class="no">Figure 12</span><span class="ti">四类记忆机制，以及 ReWorld 站在哪</span></div>
+    <div class="fh"><span class="no">Figure 13</span><span class="ti">四类记忆机制，以及 ReWorld 站在哪</span></div>
     <div class="figbody">
     <svg viewBox="0 0 720 268" role="img" aria-label="context、compressive、spatial recon、retrieval 四类记忆机制的对比，以及 ReWorld 的混合位置">
       <!-- four columns -->
@@ -2002,6 +2134,7 @@ footer a{color:var(--ink2)}
         <tr><td>骨干</td><td>Wan2.2-TI2V-5B</td><td style="text-align:left">因果 VAE 隐空间上的 DiT</td></tr>
         <tr><td>训练分辨率</td><td>480p (384×640) → 720p (704×1280)</td><td style="text-align:left">720p 阶段对空间 RoPE 位置做插值 warm-start</td></tr>
         <tr><td>训练窗口</td><td>L = 12 chunk × 4 latent frame = 48</td><td style="text-align:left">对应 189 帧 @24fps ≈ 7.88 s</td></tr>
+        <tr><td>MRoPE 描述子</td><td>c<sub>f</sub> = [vec(R<sub>f</sub>); t<sub>f</sub>] ∈ ℝ<sup>12</sup></td><td style="text-align:left">9 维旋转（3×3 展平）+ 3 维平移 → 同一个零初始化 MLP → 相位 δ<sub>f</sub></td></tr>
         <tr><td>注意力头</td><td>H = 24（18 局部 + 6 全局）</td><td style="text-align:left">1:3 固定比例</td></tr>
         <tr><td>局部窗口</td><td>w = 12 latent frames</td><td style="text-align:left">= 3 个 chunk</td></tr>
         <tr><td>路由池</td><td>|P| = 12 组随机六头集</td><td style="text-align:left">每个 optimizer step 切换到下一组</td></tr>
@@ -2059,7 +2192,7 @@ footer a{color:var(--ink2)}
   <p><b>信息来源</b>：全部方法描述、公式、表格数值与超参均出自 arXiv:2608.23565v1（ReWorld, Chen &amp; Wang et al., 2026-08-24）正文与附录 A；
   项目主页链接见页首。文中凡标注「我的读解 / 推断 / 保留意见」的段落为本页作者的分析，不属于论文原文。</p>
   <p style="margin-top:10px">本页为方法精读的可视化整理，<b>未转载论文中的任何图片或视频帧</b>；所有图解均为按论文文字描述重绘的示意图。
-  Fig. 6 的头分区、Fig. 7 的轨迹与库容参数均为便于演示而构造，不是论文发布的实际配置。</p>
+  Fig. 7 的头分区、Fig. 8 的轨迹与库容参数均为便于演示而构造，不是论文发布的实际配置。</p>
   <p style="margin-top:10px; color:var(--ink3)">生成于 2026-08-27 · 单文件、无外部依赖（字体在离线时自动回退到系统字体）</p>
 </footer>
 
@@ -2187,6 +2320,21 @@ tabs.forEach(function(t){
     gb.appendChild(E('circle',{cx:59+j*38,cy:189,r:3.4,class:'f-L'}));
   }
   gb.appendChild(E('text',{x:44+9*38+8,y:193,class:'f-Li sml mono'},'… K = 30'));
+})();
+
+/* ---------------------------------------------------------- fig5 pose split */
+(function(){
+  var gr=$('#f5-rot'), gt=$('#f5-trans');
+  if(!gr||!gt) return;
+  var i;
+  for(i=0;i<9;i++){
+    gr.appendChild(E('rect',{x:192+i*17,y:56,width:14,height:14,rx:3,class:'fs-L s-L','stroke-width':1.3}));
+  }
+  gr.appendChild(E('text',{x:192+9*17+2,y:68,class:'f-Li sml mono'},'× 9'));
+  for(i=0;i<3;i++){
+    gt.appendChild(E('rect',{x:192+i*17,y:160,width:14,height:14,rx:3,class:'fs-O s-O','stroke-width':1.3}));
+  }
+  gt.appendChild(E('text',{x:192+3*17+2,y:172,class:'f-Oi sml mono'},'× 3'));
 })();
 
 /* ---------------------------------------------------------- fig8 chunk-drop rows */

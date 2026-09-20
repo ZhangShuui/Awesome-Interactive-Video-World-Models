@@ -1,0 +1,2393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OctWorld 八叉树三维记忆</title>
+<meta name="description" content="arXiv 2609.03919 · OctWorld: Long-Range World-Consistent Video Generation with Octree-based 3D Mapping 方法精读与图解">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   OctWorld 精读 — tokens. Dark is the default ground; light is a
+   fully designed second theme (OS setting or toggle).
+   角色色沿用论文自己的图例（Fig. 2 / Fig. 4）：
+     oct  = OctMap / 体素 / 三维记忆（蓝；Fig. 2 的 OctMap 框、Fig. 4 的「含表面体素」）
+     hist = 历史帧 / 打包上下文（橙；Fig. 2 的 encode & pack 通路）
+     tgt  = 目标帧 / 去噪 / 生成（绿；Fig. 2 的 target 通路）
+     cam  = 相机 / 轨迹 / Plücker（紫；本页自定）
+     srf  = 物体表面 / TSDF 零面（红；Fig. 4 的 object surface）；也用作「坏」
+     vx-seen / vx-surf = Fig. 4 图例里的「已观测体素」「含表面体素」
+   嵌套四分方格是本页的签名纹理（八叉树的二维剖面）。
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0f1114; --surf:#15181c; --surf2:#1b1f25; --surf3:#242a32;
+  --rule:#282d35; --rule2:#3a424d;
+  --ink:#eef1f4; --ink2:#b0b8c3; --ink3:#7f8894;
+  --oct:#4a8fe0;  --oct-ink:#74acf0;  --oct-soft:rgba(74,143,224,.18);
+  --hist:#c4742a; --hist-ink:#e6994a; --hist-soft:rgba(196,116,42,.18);
+  --tgt:#33a06a;  --tgt-ink:#5cc58f;  --tgt-soft:rgba(51,160,106,.18);
+  --cam:#8f74e6;  --cam-ink:#ad98f5;  --cam-soft:rgba(143,116,230,.20);
+  --srf:#e05a4c;  --srf-ink:#f08479;  --srf-soft:rgba(224,90,76,.16);
+  --ok:#2fb3a0;   --ok-ink:#5ed2c0;   --ok-soft:rgba(47,179,160,.15);
+  --vx-seen:rgba(51,160,106,.22); --vx-surf:rgba(74,143,224,.30); --vx-line:rgba(238,241,244,.10); --vx-line2:rgba(238,241,244,.22);
+  --grid:#232830; --axis:#3a424d;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.35);
+  --tint:rgba(255,255,255,.045);
+  --font-display:"Archivo","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f3f5; --surf:#fbfbfc; --surf2:#eceef1; --surf3:#e2e5ea;
+    --rule:#dde0e6; --rule2:#c4cad3;
+    --ink:#13161b; --ink2:#4c535e; --ink3:#747c89;
+    --oct:#2b6fc4;  --oct-ink:#1f57a0;  --oct-soft:rgba(43,111,196,.13);
+    --hist:#b8641a; --hist-ink:#8f4d12; --hist-soft:rgba(184,100,26,.14);
+    --tgt:#1f8f57;  --tgt-ink:#14743f;  --tgt-soft:rgba(31,143,87,.13);
+    --cam:#6a4fd0;  --cam-ink:#5a3fb5;  --cam-soft:rgba(106,79,208,.13);
+    --srf:#c8362f;  --srf-ink:#a92a24;  --srf-soft:rgba(200,54,47,.11);
+    --ok:#0f8a7a;   --ok-ink:#0b6d61;   --ok-soft:rgba(15,138,122,.12);
+    --vx-seen:rgba(31,143,87,.20); --vx-surf:rgba(43,111,196,.26); --vx-line:rgba(19,22,27,.10); --vx-line2:rgba(19,22,27,.24);
+    --grid:#e3e6eb; --axis:#c4cad3;
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+    --tint:rgba(16,20,28,.035);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f3f5; --surf:#fbfbfc; --surf2:#eceef1; --surf3:#e2e5ea;
+  --rule:#dde0e6; --rule2:#c4cad3;
+  --ink:#13161b; --ink2:#4c535e; --ink3:#747c89;
+  --oct:#2b6fc4;  --oct-ink:#1f57a0;  --oct-soft:rgba(43,111,196,.13);
+  --hist:#b8641a; --hist-ink:#8f4d12; --hist-soft:rgba(184,100,26,.14);
+  --tgt:#1f8f57;  --tgt-ink:#14743f;  --tgt-soft:rgba(31,143,87,.13);
+  --cam:#6a4fd0;  --cam-ink:#5a3fb5;  --cam-soft:rgba(106,79,208,.13);
+  --srf:#c8362f;  --srf-ink:#a92a24;  --srf-soft:rgba(200,54,47,.11);
+  --ok:#0f8a7a;   --ok-ink:#0b6d61;   --ok-soft:rgba(15,138,122,.12);
+  --vx-seen:rgba(31,143,87,.20); --vx-surf:rgba(43,111,196,.26); --vx-line:rgba(19,22,27,.10); --vx-line2:rgba(19,22,27,.24);
+  --grid:#e3e6eb; --axis:#c4cad3;
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  --tint:rgba(16,20,28,.035);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+h1,h2,h3,h4,h5{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--oct-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--cam-ink); outline-offset:3px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); border:1px solid var(--rule);
+  padding:.08em .36em; border-radius:5px; white-space:nowrap}
+strong{font-weight:600; color:var(--ink)}
+hr{border:0; border-top:1px solid var(--rule); margin:40px 0}
+ul,ol{margin:0; padding-left:1.35em}
+li{margin:.35em 0}
+li::marker{color:var(--ink3)}
+.m{font-family:var(--font-math); font-style:italic}
+.mono{font-family:var(--font-mono)}
+sub,sup{line-height:0; font-size:.72em}
+
+/* ============================================================ chrome */
+#prog{position:fixed; inset:0 auto auto 0; height:2px; width:0; z-index:200;
+  background:linear-gradient(90deg,var(--hist),var(--oct),var(--tgt),var(--cam)); transition:width .08s linear}
+.top{position:fixed; inset:0 0 auto 0; height:60px; z-index:150; display:flex; align-items:center; gap:18px;
+  padding:0 22px; background:color-mix(in srgb, var(--surf) 86%, transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2)}
+
+.shell{display:grid; grid-template-columns:236px minmax(0,1fr); gap:0; max-width:1240px; margin:0 auto; padding:84px 28px 120px}
+.rail{position:sticky; top:84px; align-self:start; max-height:calc(100vh - 100px); overflow:auto; padding-right:18px}
+.rail .rl{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); margin:0 0 10px}
+.rail ol{list-style:none; margin:0; padding:0; border-left:1px solid var(--rule)}
+.rail li{margin:0}
+.rail a{display:block; padding:5px 0 5px 14px; margin-left:-1px; font-size:12.5px; line-height:1.4; color:var(--ink3);
+  border-left:2px solid transparent; border-bottom:0; transition:.15s}
+.rail a:hover{color:var(--ink)}
+.rail a.on{color:var(--ink); border-left-color:var(--oct)}
+main{min-width:0; max-width:860px; padding-left:44px}
+@media (max-width:980px){
+  .shell{grid-template-columns:1fr; padding:76px 16px 90px}
+  .rail{display:none}
+  main{padding-left:0}
+}
+
+/* ============================================================ hero */
+.hero{padding:10px 0 34px; border-bottom:1px solid var(--rule); margin-bottom:56px; position:relative}
+.hero .quad{position:absolute; right:-10px; top:-6px; width:250px; height:250px; opacity:.55; pointer-events:none}
+@media (max-width:760px){.hero .quad{display:none}}
+.kicker{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px}
+.tag{font-family:var(--font-mono); font-size:11.5px; color:var(--ink2); background:var(--surf2); border:1px solid var(--rule);
+  padding:3px 9px; border-radius:6px; letter-spacing:.01em}
+.tag.hl{color:var(--oct-ink); border-color:color-mix(in srgb,var(--oct) 45%,transparent); background:var(--oct-soft)}
+.hero h1{font-size:clamp(40px,6vw,60px); font-weight:700; letter-spacing:-.025em; line-height:1.02}
+.hero .zh{font-size:clamp(18px,2.2vw,22px); color:var(--ink2); margin-top:14px; line-height:1.55; max-width:44ch; font-weight:500; text-wrap:balance}
+.hero .thesis{margin-top:22px; font-size:16.5px; color:var(--ink2); max-width:66ch}
+.hero .thesis b{color:var(--ink)}
+.authors{margin-top:20px; font-size:13.5px; color:var(--ink3); line-height:1.7}
+.authors b{color:var(--ink2); font-weight:500}
+.links{display:flex; flex-wrap:wrap; gap:10px; margin-top:16px}
+.links a,.links span{font-family:var(--font-mono); font-size:12.5px; padding:6px 12px; border:1px solid var(--rule); border-radius:8px; color:var(--ink2); background:var(--surf)}
+.links a:hover{color:var(--ink); border-color:var(--rule2)}
+.links span{color:var(--ink3); border-style:dashed}
+.stats{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:28px}
+.stat{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:14px 16px 12px}
+.stat .lb{font-family:var(--font-mono); font-size:11px; color:var(--ink3); letter-spacing:.06em; text-transform:uppercase}
+.stat .vl{font-family:var(--font-display); font-size:28px; font-weight:700; letter-spacing:-.02em; margin-top:6px}
+.stat .dl{font-size:12.5px; color:var(--ink3); margin-top:4px; line-height:1.5}
+.stat .dl b{color:var(--ink2); font-weight:500}
+@media (max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
+
+/* role text */
+.rO{color:var(--oct-ink); font-weight:600}
+.rH{color:var(--hist-ink); font-weight:600}
+.rT{color:var(--tgt-ink); font-weight:600}
+.rC{color:var(--cam-ink); font-weight:600}
+.rS{color:var(--srf-ink); font-weight:600}
+.rK{color:var(--ok-ink); font-weight:600}
+
+/* ============================================================ sections */
+.sec{margin:0 0 84px; scroll-margin-top:84px}
+.eyebrow{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.eyebrow .n{font-family:var(--font-mono); font-size:12px; color:var(--oct-ink); font-weight:600}
+.eyebrow .t{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); letter-spacing:.12em; text-transform:uppercase}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec h2{font-size:clamp(24px,3vw,31px); letter-spacing:-.02em; margin-bottom:16px}
+.sec h3{font-size:19px; margin:38px 0 12px; letter-spacing:-.01em; display:flex; align-items:baseline; gap:10px}
+.sec h3 .ix{font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-weight:500}
+.sec h4{font-size:15.5px; margin:22px 0 8px}
+.lead{font-size:17px; color:var(--ink2); max-width:68ch; margin-bottom:22px}
+.lead b{color:var(--ink)}
+.prose{max-width:70ch; color:var(--ink2)}
+.prose p{margin:0 0 14px}
+.prose b,.prose strong{color:var(--ink)}
+.prose ul,.prose ol{margin:0 0 14px}
+.note{font-size:13.5px; color:var(--ink3); max-width:70ch; margin-top:10px}
+
+/* ============================================================ figure */
+.fig{margin:26px 0 30px; background:var(--surf); border:1px solid var(--rule); border-radius:14px; box-shadow:var(--shadow); overflow:hidden}
+.fh{display:flex; align-items:baseline; gap:12px; padding:12px 18px 10px; border-bottom:1px solid var(--rule)}
+.fh .no{font-family:var(--font-mono); font-size:11.5px; color:var(--oct-ink); letter-spacing:.06em; white-space:nowrap}
+.fh .ti{font-family:var(--font-display); font-size:14px; font-weight:600; color:var(--ink)}
+.figbody{padding:16px 18px 12px; background:var(--surf)}
+.figbody svg{display:block; width:100%; height:auto; max-width:100%; font-family:var(--font-body)}
+figcaption{padding:12px 18px 14px; font-size:13.5px; line-height:1.65; color:var(--ink3); border-top:1px solid var(--rule)}
+figcaption b{color:var(--ink2); font-weight:500}
+.tabs{display:flex; flex-wrap:wrap; gap:6px; padding:10px 14px 0; background:var(--surf)}
+.tab{background:var(--surf2); border:1px solid var(--rule); color:var(--ink3); font-family:var(--font-body); font-size:12.5px;
+  padding:6px 12px; border-radius:8px 8px 0 0; cursor:pointer; transition:.15s; border-bottom:0}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--ink); background:var(--surf3); border-color:var(--rule2)}
+.tabpanel[hidden]{display:none}
+.scrollx{overflow-x:auto}
+
+/* svg utility classes (theme-aware) */
+.f-ink{fill:var(--ink)} .f-ink2{fill:var(--ink2)} .f-ink3{fill:var(--ink3)}
+.f-surf{fill:var(--surf)} .f-surf2{fill:var(--surf2)} .f-surf3{fill:var(--surf3)} .f-bg{fill:var(--bg)}
+.s-rule{stroke:var(--rule2)} .s-rule1{stroke:var(--rule)} .s-ink3{stroke:var(--ink3)} .s-ink2{stroke:var(--ink2)} .s-ink{stroke:var(--ink)}
+.nofill{fill:none}
+.f-O{fill:var(--oct)}  .f-Oi{fill:var(--oct-ink)}  .fs-O{fill:var(--oct-soft)}  .s-O{stroke:var(--oct)}
+.f-H{fill:var(--hist)} .f-Hi{fill:var(--hist-ink)} .fs-H{fill:var(--hist-soft)} .s-H{stroke:var(--hist)}
+.f-T{fill:var(--tgt)}  .f-Ti{fill:var(--tgt-ink)}  .fs-T{fill:var(--tgt-soft)}  .s-T{stroke:var(--tgt)}
+.f-C{fill:var(--cam)}  .f-Ci{fill:var(--cam-ink)}  .fs-C{fill:var(--cam-soft)}  .s-C{stroke:var(--cam)}
+.f-S{fill:var(--srf)}  .f-Si{fill:var(--srf-ink)}  .fs-S{fill:var(--srf-soft)}  .s-S{stroke:var(--srf)}
+.f-K{fill:var(--ok)}   .f-Ki{fill:var(--ok-ink)}   .fs-K{fill:var(--ok-soft)}   .s-K{stroke:var(--ok)}
+.f-vseen{fill:var(--vx-seen)} .f-vsurf{fill:var(--vx-surf)} .s-vline{stroke:var(--vx-line2)}
+.mk-O{fill:var(--oct)} .mk-H{fill:var(--hist)} .mk-T{fill:var(--tgt)} .mk-C{fill:var(--cam)} .mk-S{fill:var(--srf)} .mk-I{fill:var(--ink3)} .mk-K{fill:var(--ok)}
+svg text{font-family:var(--font-body)}
+svg .big{font-size:13px; font-weight:600}
+svg .lbl{font-size:12px}
+svg .sml{font-size:10.5px}
+svg .xs{font-size:9.5px}
+svg .mono{font-family:var(--font-mono)}
+svg .math{font-family:var(--font-math); font-style:italic; font-size:13px}
+svg .tab-num{font-variant-numeric:tabular-nums}
+
+/* ============================================================ cards & callouts */
+.grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:22px 0}
+.grid2{display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin:22px 0}
+@media (max-width:760px){.grid3,.grid2{grid-template-columns:1fr}}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:16px 18px; font-size:14px; color:var(--ink2); line-height:1.7}
+.card .mono{font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3); margin-bottom:6px}
+.card h5{font-size:15px; margin-bottom:8px; color:var(--ink)}
+.card b{color:var(--ink)}
+.card.co{border-top:3px solid var(--oct)}  .card.co .mono{color:var(--oct-ink)}
+.card.ch{border-top:3px solid var(--hist)} .card.ch .mono{color:var(--hist-ink)}
+.card.ct{border-top:3px solid var(--tgt)}  .card.ct .mono{color:var(--tgt-ink)}
+.card.cc{border-top:3px solid var(--cam)}  .card.cc .mono{color:var(--cam-ink)}
+.card.cs{border-top:3px solid var(--srf)}  .card.cs .mono{color:var(--srf-ink)}
+.call{border:1px solid var(--rule); border-left:3px solid var(--ink3); background:var(--surf); border-radius:10px; padding:14px 18px; margin:22px 0; font-size:14.5px; color:var(--ink2); max-width:78ch}
+.call .hd{font-family:var(--font-display); font-weight:600; font-size:14px; color:var(--ink); margin-bottom:6px}
+.call p{margin:0 0 6px} .call p:last-child{margin:0}
+.call b{color:var(--ink)}
+.call.key{border-left-color:var(--oct); background:color-mix(in srgb,var(--oct-soft) 55%,var(--surf))}
+.call.warn{border-left-color:var(--srf); background:color-mix(in srgb,var(--srf-soft) 60%,var(--surf))}
+.call.mine{border-left-color:var(--cam); background:color-mix(in srgb,var(--cam-soft) 45%,var(--surf))}
+.call.ok{border-left-color:var(--ok); background:color-mix(in srgb,var(--ok-soft) 55%,var(--surf))}
+
+.eq{font-family:var(--font-math); font-size:19px; text-align:center; padding:16px 18px; margin:18px 0; background:var(--surf); border:1px solid var(--rule); border-radius:10px; color:var(--ink); overflow-x:auto; line-height:1.6}
+.eq i{font-style:italic}
+.eq .r{font-style:normal}
+.eq .frac{display:inline-flex; flex-direction:column; vertical-align:middle; text-align:center; margin:0 .25em; line-height:1.25}
+.eq .frac span:first-child{border-bottom:1px solid var(--ink); padding:0 .25em}
+.eq .frac span:last-child{padding:0 .25em}
+.eq small{display:block; font-family:var(--font-body); font-style:normal; font-size:12.5px; color:var(--ink3); margin-top:8px; line-height:1.6}
+
+/* tables */
+table{border-collapse:collapse; width:100%; font-size:13.5px; margin:16px 0}
+th,td{padding:9px 10px; border-bottom:1px solid var(--rule); text-align:left; vertical-align:top; line-height:1.55}
+th{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); font-weight:500; border-bottom:1px solid var(--rule2)}
+td{color:var(--ink2)} td b{color:var(--ink)}
+td.num,th.num{font-family:var(--font-mono); font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right}
+tr.hl td{background:var(--tint)}
+td.best{color:var(--oct-ink); font-weight:600}
+.tbl{overflow-x:auto; border:1px solid var(--rule); border-radius:12px; background:var(--surf); padding:0 14px; margin:18px 0}
+.tbl table{margin:0}
+
+/* pills */
+.pill{display:inline-block; font-family:var(--font-mono); font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--rule2); color:var(--ink2); background:var(--surf2); white-space:nowrap}
+.pill.o{color:var(--oct-ink); border-color:color-mix(in srgb,var(--oct) 50%,transparent); background:var(--oct-soft)}
+.pill.h{color:var(--hist-ink); border-color:color-mix(in srgb,var(--hist) 50%,transparent); background:var(--hist-soft)}
+.pill.t{color:var(--tgt-ink); border-color:color-mix(in srgb,var(--tgt) 50%,transparent); background:var(--tgt-soft)}
+.pill.c{color:var(--cam-ink); border-color:color-mix(in srgb,var(--cam) 50%,transparent); background:var(--cam-soft)}
+.pill.s{color:var(--srf-ink); border-color:color-mix(in srgb,var(--srf) 50%,transparent); background:var(--srf-soft)}
+.pill.k{color:var(--ok-ink); border-color:color-mix(in srgb,var(--ok) 50%,transparent); background:var(--ok-soft)}
+
+/* ============================================================ interactive widgets */
+.ctl{display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; padding:10px 18px; border-bottom:1px solid var(--rule); background:var(--surf2); font-size:13px; color:var(--ink2)}
+.ctl label{display:inline-flex; align-items:center; gap:8px; white-space:nowrap}
+.ctl input[type=range]{width:140px; accent-color:var(--oct)}
+.ctl input[type=checkbox]{accent-color:var(--oct)}
+.ctl .val{font-family:var(--font-mono); font-size:12px; color:var(--ink); min-width:5ch; font-variant-numeric:tabular-nums}
+.seg{display:inline-flex; border:1px solid var(--rule2); border-radius:8px; overflow:hidden}
+.seg button{background:var(--surf); border:0; color:var(--ink3); font-family:var(--font-body); font-size:12.5px; padding:5px 11px; cursor:pointer; transition:.15s}
+.seg button + button{border-left:1px solid var(--rule2)}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--surf3); color:var(--ink); font-weight:600}
+.btn{background:var(--surf3); border:1px solid var(--rule2); color:var(--ink); font-family:var(--font-body); font-size:12.5px; padding:5px 12px; border-radius:8px; cursor:pointer}
+.btn:hover{border-color:var(--ink3)}
+.btn.primary{background:var(--oct); border-color:var(--oct); color:#fff}
+.readout{display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:10px; padding:12px 18px; border-top:1px solid var(--rule); background:var(--surf)}
+.readout .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3)}
+.readout .v{font-family:var(--font-display); font-size:19px; font-weight:600; letter-spacing:-.01em; font-variant-numeric:tabular-nums; margin-top:2px}
+.readout .v small{font-family:var(--font-mono); font-size:11px; color:var(--ink3); margin-left:4px; font-weight:400}
+.readout .v.ok{color:var(--ok-ink)} .readout .v.bad{color:var(--srf-ink)} .readout .v.oct{color:var(--oct-ink)}
+
+/* hero simulation */
+.sim{position:relative; border-radius:10px; overflow:hidden; border:1px solid var(--rule); background:var(--surf2)}
+.sim canvas{display:block; width:100%; height:auto}
+.sim .lab{position:absolute; top:10px; font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; padding:3px 8px; border-radius:6px; background:rgba(0,0,0,.55); color:#fff; pointer-events:none}
+.sim .lab.l{left:12px} .sim .lab.r{right:12px}
+.sim .toast{position:absolute; left:50%; top:14px; transform:translateX(-50%); font-family:var(--font-mono); font-size:11.5px; padding:5px 10px; border-radius:8px; background:var(--oct); color:#fff; opacity:0; transition:opacity .25s; pointer-events:none; white-space:nowrap}
+.sim .toast.show{opacity:1}
+.stripwrap{padding:10px 18px 4px; background:var(--surf); border-top:1px solid var(--rule)}
+.stripwrap .sl{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); display:flex; justify-content:space-between; margin-bottom:6px}
+.stripwrap canvas{display:block; width:100%; height:26px; border-radius:6px; border:1px solid var(--rule)}
+.legend{display:flex; flex-wrap:wrap; gap:6px 16px; padding:10px 18px; border-top:1px solid var(--rule); background:var(--surf); font-size:12.5px; color:var(--ink3)}
+.legend span{display:inline-flex; align-items:center; gap:6px}
+.legend i{display:inline-block; width:14px; height:14px; border-radius:3px; border:1px solid var(--rule2)}
+.legend i.seen{background:var(--vx-seen)} .legend i.surf{background:var(--vx-surf)} .legend i.gt{border:0; height:3px; border-radius:2px; background:var(--srf)}
+.legend i.mesh{border:0; height:3px; border-radius:2px; background:var(--oct)} .legend i.cam{border:0; background:var(--cam); border-radius:50%}
+.legend i.pc{border:0; width:6px; height:6px; border-radius:50%; background:var(--hist)}
+
+/* explorer */
+.explore{display:grid; grid-template-columns:minmax(0,1.35fr) minmax(240px,1fr); gap:0}
+@media (max-width:760px){.explore{grid-template-columns:1fr}}
+.explore .pane{border-left:1px solid var(--rule); padding:14px 18px; font-size:13.5px; color:var(--ink2); background:var(--surf)}
+@media (max-width:760px){.explore .pane{border-left:0; border-top:1px solid var(--rule)}}
+.pane h5{font-family:var(--font-display); font-size:15px; color:var(--ink); margin-bottom:8px}
+.pane .row{margin:8px 0}
+.pane .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); display:block}
+.pane ul{padding-left:1.1em; margin:2px 0 0}
+.pane li{margin:2px 0}
+.node{cursor:pointer}
+.node rect{transition:.15s}
+.node:hover rect{stroke-width:2.2}
+.node.on rect{stroke-width:2.6}
+
+/* stepper */
+.stepper{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+.stepper .st{font-family:var(--font-mono); font-size:12px; color:var(--ink2); min-width:6ch}
+.alg{font-family:var(--font-mono); font-size:12.5px; line-height:1.75; color:var(--ink2); padding:12px 18px; background:var(--surf2); border-top:1px solid var(--rule)}
+.alg div{padding:1px 8px; border-radius:6px; transition:.15s}
+.alg div.on{background:var(--oct-soft); color:var(--ink)}
+.alg .c{color:var(--ink3)}
+
+/* charts */
+.chart{padding:10px 18px 6px}
+.chart svg{display:block; width:100%; height:auto}
+.chart .ttip{position:absolute; pointer-events:none; background:var(--ink); color:var(--bg); font-family:var(--font-mono); font-size:11px; padding:5px 8px; border-radius:6px; opacity:0; transition:opacity .12s; white-space:nowrap}
+.cwrap{position:relative}
+.bars{display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:10px 14px; padding:10px 18px 14px}
+.bars .pnl{border:1px solid var(--rule); border-radius:10px; padding:10px 12px 8px; background:var(--surf)}
+.bars .pt{font-family:var(--font-mono); font-size:11px; letter-spacing:.02em; color:var(--ink2); margin-bottom:8px; display:flex; justify-content:space-between; gap:8px}
+.bars .pt span:last-child{color:var(--ink3)}
+.brow{display:grid; grid-template-columns:var(--labw,96px) 1fr auto; align-items:center; gap:8px; margin:4px 0}
+.brow .bl{font-size:11.5px; color:var(--ink2); text-align:right; line-height:1.3}
+.brow .bt{height:11px}
+.brow .bt i{display:block; height:100%; border-radius:3px; background:var(--ink3); opacity:.45; min-width:2px}
+.brow.hl .bl{color:var(--ink); font-weight:600}
+.brow.hl .bt i{background:var(--oct); opacity:1}
+.brow .bv{font-family:var(--font-mono); font-size:11px; color:var(--ink2); font-variant-numeric:tabular-nums; min-width:5ch}
+.brow.hl .bv{color:var(--oct-ink); font-weight:600}
+.bars svg{display:block; width:100%; height:auto}
+
+/* chips row */
+.chips{display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:10px 18px; border-top:1px solid var(--rule); background:var(--surf); font-size:12.5px; color:var(--ink3)}
+.chip{font-family:var(--font-mono); font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--rule2); color:var(--ink2); background:var(--surf2)}
+.chip.o{color:var(--oct-ink); border-color:color-mix(in srgb,var(--oct) 55%,transparent); background:var(--oct-soft)}
+.chip.h{color:var(--hist-ink); border-color:color-mix(in srgb,var(--hist) 55%,transparent); background:var(--hist-soft)}
+.chip.t{color:var(--tgt-ink); border-color:color-mix(in srgb,var(--tgt) 55%,transparent); background:var(--tgt-soft)}
+.chip.c{color:var(--cam-ink); border-color:color-mix(in srgb,var(--cam) 55%,transparent); background:var(--cam-soft)}
+.chip.sep{border:0; background:none; color:var(--ink3); padding:0 2px}
+
+/* appendix */
+.gloss dt{font-family:var(--font-display); font-weight:600; font-size:14.5px; margin-top:14px; color:var(--ink)}
+.gloss dd{margin:2px 0 0; font-size:14px; color:var(--ink2); max-width:72ch}
+pre{font-family:var(--font-mono); font-size:12px; line-height:1.6; background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:14px 16px; overflow-x:auto; color:var(--ink2); margin:14px 0; white-space:pre-wrap; word-break:break-word}
+.foot{margin-top:60px; padding-top:20px; border-top:1px solid var(--rule); font-size:12.5px; color:var(--ink3); line-height:1.7}
+
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{transition:none !important; animation:none !important}
+}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">OctWorld<em>八叉树三维记忆 · 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<!-- shared SVG defs (same document, referenced by fragment id) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <marker id="ar-i" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-I"/></marker>
+  <marker id="ar-o" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-O"/></marker>
+  <marker id="ar-h" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-H"/></marker>
+  <marker id="ar-t" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-T"/></marker>
+  <marker id="ar-c" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-C"/></marker>
+  <marker id="ar-s" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-S"/></marker>
+  <marker id="ar-k" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-K"/></marker>
+  <!-- 签名纹理：嵌套四分方格（八叉树剖面） -->
+  <pattern id="quadpat" width="64" height="64" patternUnits="userSpaceOnUse">
+    <rect width="64" height="64" fill="none" class="s-vline" stroke-width="1"/>
+    <rect x="32" width="32" height="32" fill="none" class="s-vline" stroke-width="1"/>
+    <rect x="48" width="16" height="16" fill="none" class="s-vline" stroke-width="1"/>
+    <rect x="56" width="8" height="8" fill="none" class="s-vline" stroke-width="1"/>
+    <rect x="60" width="4" height="4" fill="none" class="s-vline" stroke-width="1"/>
+  </pattern>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" class="s-rule" stroke-width="2.2"/>
+  </pattern>
+  <pattern id="hatch-s" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" class="s-S" stroke-width="2"/>
+  </pattern>
+</defs></svg>
+
+<div class="shell">
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-tldr">00 · 一图看懂</a></li>
+    <li><a href="#s-problem">01 · 长程生成为什么难</a></li>
+    <li><a href="#s-octmap">02 · OctMap 数据结构</a></li>
+    <li><a href="#s-alloc">03 · 逐像素自适应分配</a></li>
+    <li><a href="#s-fuse">04 · TSDF 融合与网格提取</a></li>
+    <li><a href="#s-extend">05 · 根扩展：无界场景</a></li>
+    <li><a href="#s-net">06 · 生成网络 1.0 / 1.5</a></li>
+    <li><a href="#s-train">07 · 噪声增强与训练数据</a></li>
+    <li><a href="#s-infer">08 · 推理闭环与开销</a></li>
+    <li><a href="#s-exp">09 · 实验与消融</a></li>
+    <li><a href="#s-crit">10 · 失败、局限与保留意见</a></li>
+    <li><a href="#s-repo">11 · 与本仓库的关联</a></li>
+    <li><a href="#s-appendix">12 · 附录速查</a></li>
+  </ol>
+</nav>
+<main>
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <svg class="quad" viewBox="0 0 250 250" aria-hidden="true">
+    <rect width="250" height="250" fill="url(#quadpat)"/>
+  </svg>
+  <div class="kicker">
+    <span class="tag">arXiv 2609.03919v1</span>
+    <span class="tag">cs.CV · 2026-09-03</span>
+    <span class="tag">ECCV 2026</span>
+    <span class="tag hl">显式三维记忆 / 八叉树 TSDF / 长程一致</span>
+  </div>
+  <h1>OctWorld</h1>
+  <p class="zh">用一棵会长大的稀疏八叉树，把生成过的世界「融合」成可回访的三维记忆</p>
+  <p class="thesis">OctWorld 回答的是一个具体问题：相机走很远、转很大的角度再<b>回到来过的地方</b>时，视频模型怎样把那里画得和上次一样？
+  它的答案不是检索旧帧，而是<span class="rO">OctMap</span>——一个用 <b>TSDF</b>（截断符号距离场）把每一块生成的 RGB-D 逐帧融合进去的全局三维地图，
+  存在一棵<b>按深度自适应细分、边界可以倍增</b>的稀疏八叉树里：近处小体素、远处大体素，走出边界就把根节点扩一倍。
+  每生成新一块之前，先把这张地图提取成网格、渲染到目标相机，得到带可见性掩码的部分观察，作为<span class="rT">扩散模型</span>的空间条件；
+  <span class="rH">FramePack 打包的历史帧</span>提供时间上下文，<span class="rC">Plücker 射线</span>提供相机控制。
+  主模型 OctWorld-1.0 在 FramePack（Hunyuan DiT，15B）上联合生成 RGB 与深度；1.5 版换到 Wan2.1 14B I2V，深度交给流式 Depth Anything 3。</p>
+  <p class="authors"><b>Zelong Lv</b><sup>1,2⋆</sup>, <b>Sicheng Xu</b><sup>2</sup>, <b>Jianfeng Xiang</b><sup>2,3⋆</sup>, <b>Ruicheng Wang</b><sup>1,2⋆</sup>, Yue Dong<sup>2</sup>, Yu Deng<sup>2</sup>, Guangzhong Sun<sup>1</sup>, <b>Jiaolong Yang</b><sup>2†</sup></p>
+  <p class="authors"><sup>1</sup>中国科学技术大学 · <sup>2</sup>微软亚洲研究院 · <sup>3</sup>清华大学　　<span style="opacity:.75">⋆ MSRA 实习期间完成　† 通讯作者</span></p>
+  <div class="links">
+    <a href="https://arxiv.org/abs/2609.03919" target="_blank" rel="noopener">arXiv 摘要 ↗</a>
+    <a href="https://arxiv.org/pdf/2609.03919" target="_blank" rel="noopener">PDF ↗</a>
+    <a href="https://maxtirerror.github.io/octworldpage/" target="_blank" rel="noopener">项目主页 ↗</a>
+    <span>代码：项目页写 Coming Soon（2026-09-05 查）</span>
+  </div>
+
+  <figure class="fig" style="margin-top:28px">
+    <div class="fh"><span class="no">Hero</span><span class="ti">OctMap 在线构建：二维剖面模拟（相机沿轨迹走一圈，地图边走边长）</span></div>
+    <div class="ctl">
+      <button class="btn primary" id="simPlay" type="button">❚❚ 暂停</button>
+      <button class="btn" id="simReset" type="button">↺ 重来</button>
+      <label>速度 <input type="range" id="simSpeed" min="1" max="8" value="3" step="1"><span class="val" id="simSpeedV">3×</span></label>
+      <div class="seg" id="simMode" role="group" aria-label="记忆表示">
+        <button type="button" data-mode="oct" aria-pressed="true">OctMap 自适应</button>
+        <button type="button" data-mode="fixed" aria-pressed="false">固定分辨率 TSDF</button>
+      </div>
+      <label id="simFixedWrap" hidden>固定层级 <input type="range" id="simFixed" min="4" max="8" value="6" step="1"><span class="val" id="simFixedV">d = 6</span></label>
+      <label>深度噪声 σ <input type="range" id="simNoise" min="0" max="6" value="2" step="1"><span class="val" id="simNoiseV">2%</span></label>
+    </div>
+    <div class="ctl" style="border-top:0">
+      <label><input type="checkbox" id="simRays" checked> 光线</label>
+      <label><input type="checkbox" id="simBand" checked> 截断带 ±τ<sub>d</sub></label>
+      <label><input type="checkbox" id="simMesh" checked> 提取的等值面（网格）</label>
+      <label><input type="checkbox" id="simGrid" checked> 体素边界</label>
+      <label><input type="checkbox" id="simPC"> 对照：原始点云</label>
+    </div>
+    <div class="figbody" style="padding:14px 18px 10px">
+      <div class="sim" id="sim">
+        <canvas id="simCanvas" width="1440" height="840" aria-label="二维 OctMap 模拟：相机沿轨迹移动，光线击中场景表面，按深度分配四叉树体素并做 TSDF 融合；走出根边界时根节点倍增"></canvas>
+        <span class="lab l">世界俯视剖面</span>
+        <span class="lab r" id="simRootLab">根边长 L = 2</span>
+        <div class="toast" id="simToast">根扩展：L → 2L，旧的 depth-1 节点变成新树 depth-2 的中央节点</div>
+      </div>
+    </div>
+    <div class="stripwrap">
+      <div class="sl"><span>当前相机的「世界记忆投影」（一维版）：有色 = 网格覆盖，斜纹 = 可见性掩码为 0（待生成）</span><span id="simCov">覆盖 —</span></div>
+      <canvas id="simStrip" width="1440" height="52" aria-label="当前视角下记忆投影的一维可见性条"></canvas>
+    </div>
+    <div class="legend">
+      <span><i class="gt"></i> 真实表面（模型看不到，只有带噪深度）</span>
+      <span><i class="surf"></i> 含表面的体素</span>
+      <span><i class="seen"></i> 已观测体素（截断带内）</span>
+      <span><i class="mesh"></i> 从 TSDF 提取的等值面</span>
+      <span><i class="cam"></i> 相机与视锥</span>
+      <span><i class="pc"></i> 原始点云（对照）</span>
+    </div>
+    <div class="readout">
+      <div><div class="k">叶节点</div><div class="v oct" id="rdLeaves">0</div></div>
+      <div><div class="k">总节点（含内部）</div><div class="v" id="rdNodes">0</div></div>
+      <div><div class="k">最细层级</div><div class="v" id="rdDepth">—</div></div>
+      <div><div class="k">最细体素边长</div><div class="v" id="rdEll">—</div></div>
+      <div><div class="k">根扩展次数</div><div class="v" id="rdExt">0</div></div>
+      <div><div class="k">已积分帧</div><div class="v" id="rdFrames">0</div></div>
+    </div>
+    <figcaption><b>示意模拟，非论文原图；把论文 Fig. 4 的二维剖面动起来。</b>相机（紫）沿预设轨迹前进，每一帧向前打出一排光线，击中场景表面得到带噪深度；
+    每条光线按 <span class="m">s = z / f</span> 决定体素层级（近处细、远处粗，Sec. 3.1），在 <span class="m">[z − τ<sub>d</sub>, z + τ<sub>d</sub>]</span> 内采样并分配节点，再按式 (1) 做加权 TSDF 融合；
+    蓝线是每帧从叶节点用 Marching Squares 提取的零等值面（三维里是 Marching Cubes 网格）。轨迹会走出初始根方框，触发论文附录 B.4 的<b>根扩展</b>；也会回到起点，此时下方的投影条几乎全被覆盖——这就是「回访时模型拿到的条件」。
+    切到「固定分辨率 TSDF」可对照论文 Sec. 3.1 的论点：统一体素要么远处浪费、要么近处糊。参数（α = 5、L = 2）取自论文，焦距与场景为本页自定。</figcaption>
+  </figure>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="lb">WorldScore · 3D 一致性</div>
+      <div class="vl">71.67</div>
+      <div class="dl">五个方法中最高；光度一致性 <b>77.01</b> 亦最高（Tab. 1，OctWorld-1.0）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">回访一致性 · Re10K 往返</div>
+      <div class="vl">0.163 / 0.035</div>
+      <div class="dl">LPIPS↓ / Chamfer↓；Gen3C 0.193 / 0.046，VMem 0.401 / 0.062（Tab. 2）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">长程轨迹</div>
+      <div class="vl">433–505 帧</div>
+      <div class="dl">≈ 30 s @ 15 fps；17 个户外场景，22 人用户研究偏好 <b>53.8%</b>（Tab. 3）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">代价</div>
+      <div class="vl">0.136 FPS</div>
+      <div class="dl">14.5B · 51 GB 显存（Tab. II）；A100 单步去噪 3.6 s；OctMap 1–10 GB、积分 4–6 FPS</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 00 TL;DR -->
+<section class="sec" id="s-tldr">
+  <div class="eyebrow"><span class="n">00</span><span class="t">TL;DR</span><span class="line"></span></div>
+  <h2>一图看懂：地图是主角，扩散模型是「按地图作画」的画师</h2>
+  <p class="lead">这篇论文的贡献结构很清楚：<b>生成网络是借来的</b>（FramePack / Wan2.1，加了条件通路），<b>记忆是自己造的</b>（OctMap）。
+  读它的正确姿势是把 OctMap 当作一个 SLAM 里的建图模块来读——只是它的「传感器」不是深度相机，而是上一块刚生成出来的 RGB 和深度；
+  它的「定位」也不用估计，因为相机轨迹是用户给定的。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 1</span><span class="ti">一条闭环、一条训练管线、三种记忆表示</span></div>
+    <div class="tabs" role="tablist" aria-label="总览">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="p1a" id="t1a">(a) 推理闭环（Algorithm 1）</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p1b" id="t1b">(b) 训练管线（Fig. 2）</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p1c" id="t1c">(c) 点云 / TSDF / OctMap</button>
+    </div>
+    <div class="figbody">
+    <!-- ---------------- panel a ---------------- -->
+    <div class="tabpanel" id="p1a" role="tabpanel" aria-labelledby="t1a">
+    <svg viewBox="0 0 720 342" role="img" aria-label="推理闭环：初始图与单目深度初始化 OctMap；每一块先从 OctMap 提取网格并渲染到目标视角，得到部分观察与可见性掩码；视频生成器结合打包历史和 Plücker 相机条件生成 RGB 块；深度由联合预测或流式估计得到；RGB-D 积分回 OctMap，历史帧更新，进入下一块">
+      <g transform="translate(0,12)">
+      <!-- init -->
+      <rect x="16" y="18" width="190" height="46" rx="8" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="111" y="37" class="f-ink big" text-anchor="middle">初始图 I₀ + 单目深度 D₀</text>
+      <text x="111" y="54" class="f-ink3 xs" text-anchor="middle">MoGe 估计；首帧点云归一到 [−0.5, 0.5]³</text>
+      <path d="M111 66 L111 104" class="nofill s-O" stroke-width="1.6" marker-end="url(#ar-o)"/>
+      <text x="118" y="90" class="f-Oi xs">M₀ ← Integrate(I₀, D₀)</text>
+      <!-- OctMap -->
+      <rect x="16" y="106" width="190" height="96" rx="12" class="fs-O s-O" stroke-width="1.8"/>
+      <text x="111" y="132" class="f-Oi big" text-anchor="middle">OctMap  M<tspan dy="3" font-size="9">k−1</tspan></text>
+      <text x="111" y="150" class="f-ink2 xs" text-anchor="middle">稀疏八叉树 · 叶节点 8 角存</text>
+      <text x="111" y="164" class="f-ink2 xs" text-anchor="middle">TSDF φ / 颜色 / 权重 w</text>
+      <text x="111" y="182" class="f-ink3 xs" text-anchor="middle">近处细、远处粗；越界则根倍增</text>
+      <!-- mesh + render -->
+      <path d="M208 154 L246 154" class="nofill s-O" stroke-width="1.6" marker-end="url(#ar-o)"/>
+      <rect x="248" y="106" width="176" height="96" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="336" y="128" class="f-ink big" text-anchor="middle">ExtractMesh → 渲染到 c<tspan dy="3" font-size="9">k</tspan></text>
+      <text x="336" y="146" class="f-ink2 xs" text-anchor="middle">逐叶节点 Marching Cubes，合并重复顶点</text>
+      <text x="336" y="162" class="f-ink2 xs" text-anchor="middle">输出 S<tspan dy="3" font-size="8">k</tspan><tspan dy="-3">：目标视角的部分 RGB / 深度</tspan></text>
+      <text x="336" y="178" class="f-ink2 xs" text-anchor="middle">+ 可见性掩码（没到过的地方 = 0）</text>
+      <text x="336" y="194" class="f-ink3 xs" text-anchor="middle">「世界记忆投影」</text>
+      <!-- generator -->
+      <path d="M426 154 L464 154" class="nofill s-T" stroke-width="1.6" marker-end="url(#ar-t)"/>
+      <rect x="466" y="96" width="238" height="116" rx="12" class="fs-T s-T" stroke-width="1.8"/>
+      <text x="585" y="120" class="f-Ti big" text-anchor="middle">VideoGenerator(S<tspan dy="3" font-size="9">k</tspan><tspan dy="-3">, H</tspan><tspan dy="3" font-size="9">k−1</tspan><tspan dy="-3">, c</tspan><tspan dy="3" font-size="9">k</tspan><tspan dy="-3">)</tspan></text>
+      <text x="585" y="140" class="f-ink2 xs" text-anchor="middle">1.0：FramePack 骨架 + 控制分支注入 S<tspan dy="3" font-size="8">k</tspan></text>
+      <text x="585" y="156" class="f-ink2 xs" text-anchor="middle">1.5：Wan2.1 I2V 原生 (x, m, y) 条件接口</text>
+      <text x="585" y="176" class="f-ink2 xs" text-anchor="middle">每块 36 帧 · 480×832 · 逐块自回归</text>
+      <text x="585" y="196" class="f-ink3 xs" text-anchor="middle">输出 RGB 块 G<tspan dy="3" font-size="8">k</tspan><tspan dy="-3">（1.0 同时输出深度）</tspan></text>
+      <!-- history input -->
+      <rect x="466" y="18" width="112" height="46" rx="8" class="fs-H s-H" stroke-width="1.4"/>
+      <text x="522" y="37" class="f-Hi big" text-anchor="middle">历史 H<tspan dy="3" font-size="9">k−1</tspan></text>
+      <text x="522" y="54" class="f-ink3 xs" text-anchor="middle">FramePack 打包为定长上下文</text>
+      <path d="M522 66 L522 94" class="nofill s-H" stroke-width="1.6" marker-end="url(#ar-h)"/>
+      <!-- camera input -->
+      <rect x="592" y="18" width="112" height="46" rx="8" class="fs-C s-C" stroke-width="1.4"/>
+      <text x="648" y="37" class="f-Ci big" text-anchor="middle">轨迹块 c<tspan dy="3" font-size="9">k</tspan></text>
+      <text x="648" y="54" class="f-ink3 xs" text-anchor="middle">Plücker 射线 → 卷积适配器</text>
+      <path d="M648 66 L648 94" class="nofill s-C" stroke-width="1.6" marker-end="url(#ar-c)"/>
+      <path d="M594 41 L582 41" class="nofill s-C" stroke-width="1" stroke-dasharray="3 2"/>
+      <!-- depth acquisition -->
+      <path d="M585 214 L585 246" class="nofill s-T" stroke-width="1.6" marker-end="url(#ar-t)"/>
+      <rect x="466" y="248" width="238" height="60" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="585" y="270" class="f-ink big" text-anchor="middle">DepthAcquisition(G<tspan dy="3" font-size="9">k</tspan><tspan dy="-3">) → G</tspan><tspan dy="-4" font-size="9">D</tspan><tspan dy="7" font-size="9">k</tspan></text>
+      <text x="585" y="290" class="f-ink2 xs" text-anchor="middle">1.0：与 RGB 联合预测　·　1.5：流式 Depth Anything 3</text>
+      <!-- integrate -->
+      <path d="M464 278 L426 278" class="nofill s-O" stroke-width="1.6" marker-end="url(#ar-o)"/>
+      <rect x="248" y="248" width="176" height="60" rx="10" class="fs-O s-O" stroke-width="1.4"/>
+      <text x="336" y="270" class="f-Oi big" text-anchor="middle">Integrate(M<tspan dy="3" font-size="9">k−1</tspan><tspan dy="-3">, G</tspan><tspan dy="3" font-size="9">k</tspan><tspan dy="-3">, G</tspan><tspan dy="-4" font-size="9">D</tspan><tspan dy="7" font-size="9">k</tspan><tspan dy="-3">)</tspan></text>
+      <text x="336" y="290" class="f-ink2 xs" text-anchor="middle">分配节点 → 逐顶点 TSDF 加权融合（式 1）</text>
+      <path d="M246 278 L111 278 L111 204" class="nofill s-O" stroke-width="1.6" marker-end="url(#ar-o)"/>
+      <text x="118" y="240" class="f-Oi xs">M<tspan dy="3" font-size="8">k</tspan></text>
+      <!-- history update -->
+      <path d="M706 278 L713 278 L713 -3 L522 -3 L522 15" class="nofill s-H" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#ar-h)"/>
+      <text x="640" y="10" class="f-Hi xs" text-anchor="middle">更新历史 H<tspan dy="3" font-size="7">k</tspan><tspan dy="-3"> ← H</tspan><tspan dy="3" font-size="7">k−1</tspan><tspan dy="-3"> ∪ G</tspan><tspan dy="3" font-size="7">k</tspan></text>
+      <text x="16" y="324" class="f-ink3 xs">论文 Algorithm 1；轨迹 T 事先按生成窗口切成 K 块。相机位姿是输入而非估计量——这是它与 SLAM 建图最大的不同。</text>
+    
+      </g>
+    </svg>
+    </div>
+    <!-- ---------------- panel b ---------------- -->
+    <div class="tabpanel" id="p1b" role="tabpanel" aria-labelledby="t1b" hidden>
+    <svg viewBox="0 0 720 330" role="img" aria-label="训练管线：训练 RGB-D 片段切成历史帧和目标帧；历史帧重投影融合成 OctMap，等值面提取后渲染到目标视角，编码并加噪声增强后进入控制块；历史帧编码打包并加噪声增强后进入 Transformer 块；目标帧编码后加去噪噪声，相机 Plücker 射线图相加，进入 Transformer 块">
+      <!-- inputs -->
+      <rect x="16" y="20" width="130" height="86" rx="10" class="fs-H s-H" stroke-width="1.4"/>
+      <text x="81" y="42" class="f-Hi big" text-anchor="middle">历史帧（RGB-D）</text>
+      <text x="81" y="60" class="f-ink2 xs" text-anchor="middle">训练时用真值 RGB-D</text>
+      <text x="81" y="76" class="f-ink2 xs" text-anchor="middle">Pi3 估计的深度与位姿</text>
+      <text x="81" y="94" class="f-ink3 xs" text-anchor="middle">同一片段的前半</text>
+      <rect x="16" y="212" width="130" height="70" rx="10" class="fs-T s-T" stroke-width="1.4"/>
+      <text x="81" y="236" class="f-Ti big" text-anchor="middle">目标帧（RGB-D）</text>
+      <text x="81" y="254" class="f-ink2 xs" text-anchor="middle">流匹配的去噪目标</text>
+      <text x="81" y="270" class="f-ink3 xs" text-anchor="middle">同一片段的后半</text>
+      <!-- octmap -->
+      <path d="M148 50 L186 50" class="nofill s-O" stroke-width="1.6" marker-end="url(#ar-o)"/>
+      <text x="167" y="42" class="f-Oi xs" text-anchor="middle">重投影</text>
+      <rect x="188" y="20" width="150" height="60" rx="10" class="fs-O s-O" stroke-width="1.6"/>
+      <text x="263" y="44" class="f-Oi big" text-anchor="middle">OctMap（融合）</text>
+      <text x="263" y="64" class="f-ink2 xs" text-anchor="middle">八叉树 TSDF + 颜色</text>
+      <path d="M263 82 L263 112" class="nofill s-O" stroke-width="1.6" marker-end="url(#ar-o)"/>
+      <text x="270" y="102" class="f-Oi xs">iso-surfacing</text>
+      <rect x="188" y="114" width="150" height="46" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="263" y="134" class="f-ink big" text-anchor="middle">网格 → 渲染到目标视角</text>
+      <text x="263" y="152" class="f-ink3 xs" text-anchor="middle">部分 RGB + 深度 + 可见性掩码</text>
+      <!-- encode + noise aug -->
+      <path d="M340 137 L378 137" class="nofill s-O" stroke-width="1.6" marker-end="url(#ar-o)"/>
+      <rect x="380" y="114" width="150" height="46" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="455" y="134" class="f-ink big" text-anchor="middle">编码 + 噪声增强 +ε<tspan dy="3" font-size="9">α</tspan></text>
+      <text x="455" y="152" class="f-ink3 xs" text-anchor="middle">Hunyuan VAE；α 随机采样</text>
+      <path d="M532 137 L570 137" class="nofill s-O" stroke-width="1.6" marker-end="url(#ar-o)"/>
+      <!-- hist pack -->
+      <path d="M148 80 L360 80 L378 80" class="nofill s-H" stroke-width="1.6" marker-end="url(#ar-h)"/>
+      <rect x="380" y="58" width="150" height="46" rx="10" class="fs-H s-H" stroke-width="1.4"/>
+      <text x="455" y="78" class="f-Hi big" text-anchor="middle">编码 + 打包 +ε<tspan dy="3" font-size="9">α</tspan></text>
+      <text x="455" y="96" class="f-ink3 xs" text-anchor="middle">FramePack：越久远压得越狠</text>
+      <path d="M532 81 L570 81" class="nofill s-H" stroke-width="1.6" marker-end="url(#ar-h)"/>
+      <!-- target -->
+      <path d="M148 247 L378 247" class="nofill s-T" stroke-width="1.6" marker-end="url(#ar-t)"/>
+      <rect x="380" y="212" width="150" height="70" rx="10" class="fs-T s-T" stroke-width="1.4"/>
+      <text x="455" y="234" class="f-Ti big" text-anchor="middle">编码 + 加噪 ε<tspan dy="3" font-size="9">t</tspan></text>
+      <text x="455" y="252" class="f-ink2 xs" text-anchor="middle">深度作为灰度图复制成 3 通道</text>
+      <text x="455" y="268" class="f-ink2 xs" text-anchor="middle">深度 latent 与 RGB latent 通道拼接</text>
+      <path d="M532 247 L570 247" class="nofill s-T" stroke-width="1.6" marker-end="url(#ar-t)"/>
+      <!-- camera -->
+      <rect x="188" y="180" width="150" height="20" rx="6" class="fs-C s-C" stroke-width="1"/>
+      <text x="263" y="194" class="f-Ci xs" text-anchor="middle">相机 → Plücker Raymap → 相加到目标 latent</text>
+      <path d="M340 190 L455 190 L455 210" class="nofill s-C" stroke-width="1.2" marker-end="url(#ar-c)"/>
+      <!-- network -->
+      <rect x="572" y="52" width="132" height="240" rx="12" class="f-surf2 s-rule" stroke-width="1"/>
+      <rect x="586" y="68" width="104" height="80" rx="8" class="fs-O s-O" stroke-width="1.4"/>
+      <text x="638" y="96" class="f-Oi big" text-anchor="middle">Control</text>
+      <text x="638" y="112" class="f-Oi big" text-anchor="middle">blocks ×4</text>
+      <text x="638" y="132" class="f-ink3 xs" text-anchor="middle">复制自骨架的 DiT 块</text>
+      <path d="M638 150 L638 166" class="nofill s-O" stroke-width="1.6" marker-end="url(#ar-o)"/>
+      <rect x="586" y="168" width="104" height="110" rx="8" class="fs-T s-T" stroke-width="1.4"/>
+      <text x="638" y="196" class="f-Ti big" text-anchor="middle">Transformer</text>
+      <text x="638" y="212" class="f-Ti big" text-anchor="middle">blocks ×M</text>
+      <text x="638" y="234" class="f-ink3 xs" text-anchor="middle">时间步 T + 噪声级 α</text>
+      <text x="638" y="248" class="f-ink3 xs" text-anchor="middle">→ 调制</text>
+      <text x="638" y="268" class="f-ink2 xs" text-anchor="middle">输出目标 latent</text>
+      <text x="16" y="316" class="f-ink3 xs">按论文 Fig. 2 与 Fig. IV 重绘（OctWorld-1.0）。ε_α 加在两条「历史」通路上（投影记忆与打包上下文），ε_t 是流匹配本身的噪声；深度生成是可选项。</text>
+    </svg>
+    </div>
+    <!-- ---------------- panel c ---------------- -->
+    <div class="tabpanel" id="p1c" role="tabpanel" aria-labelledby="t1c" hidden>
+    <svg viewBox="0 0 720 330" role="img" aria-label="三种世界记忆表示对比：点云缓存无界增长且累积噪声；固定分辨率 TSDF 平滑但分辨率统一，远处浪费、近处模糊、体素数按分辨率立方增长；OctMap 按深度分配分辨率、稀疏存储、可扩展">
+      <!-- column: point cloud -->
+      <rect x="16" y="16" width="220" height="250" rx="12" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="126" y="40" class="f-Hi big" text-anchor="middle">点云缓存（Gen3C / Voyager 路线）</text>
+      <g class="f-H">
+        <circle cx="60" cy="90" r="1.6"/><circle cx="68" cy="84" r="1.6"/><circle cx="76" cy="92" r="1.6"/><circle cx="84" cy="80" r="1.6"/><circle cx="92" cy="95" r="1.6"/><circle cx="100" cy="86" r="1.6"/><circle cx="108" cy="78" r="1.6"/><circle cx="116" cy="90" r="1.6"/><circle cx="124" cy="84" r="1.6"/><circle cx="132" cy="96" r="1.6"/><circle cx="140" cy="88" r="1.6"/><circle cx="148" cy="80" r="1.6"/><circle cx="156" cy="93" r="1.6"/><circle cx="164" cy="85" r="1.6"/><circle cx="172" cy="91" r="1.6"/><circle cx="180" cy="83" r="1.6"/><circle cx="188" cy="97" r="1.6"/>
+        <circle cx="64" cy="112" r="1.6"/><circle cx="90" cy="118" r="1.6"/><circle cx="118" cy="108" r="1.6"/><circle cx="150" cy="116" r="1.6"/><circle cx="176" cy="110" r="1.6"/><circle cx="72" cy="128" r="1.6"/><circle cx="130" cy="130" r="1.6"/><circle cx="184" cy="126" r="1.6"/>
+      </g>
+      <text x="126" y="160" class="f-ink2 xs" text-anchor="middle">每帧反投影后直接堆点</text>
+      <text x="126" y="176" class="f-ink2 xs" text-anchor="middle">✕ 无界增长　✕ 深度噪声原样累积</text>
+      <text x="126" y="192" class="f-ink2 xs" text-anchor="middle">✕ 深度不连续处碎片化（Fig. 3 中）</text>
+      <text x="126" y="214" class="f-ink3 xs" text-anchor="middle">Tab. 5：PSNR 19.89 · 6.11 GB · 18.6 s</text>
+      <text x="126" y="230" class="f-ink3 xs" text-anchor="middle">Tab. 4a：LPIPS 0.275（f16）</text>
+      <text x="126" y="252" class="f-ink3 xs" text-anchor="middle">即便照 Gen3C 做边缘与可见性过滤，仍漂</text>
+      <!-- column: tsdf -->
+      <rect x="250" y="16" width="220" height="250" rx="12" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="360" y="40" class="f-ink big" text-anchor="middle">固定分辨率 TSDF 体素</text>
+      <g class="nofill s-rule" stroke-width="1">
+        <path d="M290 64 H430 M290 80 H430 M290 96 H430 M290 112 H430 M290 128 H430 M290 144 H430"/>
+        <path d="M290 64 V144 M306 64 V144 M322 64 V144 M338 64 V144 M354 64 V144 M370 64 V144 M386 64 V144 M402 64 V144 M418 64 V144 M430 64 V144"/>
+      </g>
+      <path d="M296 120 C 330 84, 380 132, 424 92" class="nofill s-S" stroke-width="2.2"/>
+      <text x="360" y="160" class="f-ink2 xs" text-anchor="middle">Curless &amp; Levoy 1996：平滑、抗噪</text>
+      <text x="360" y="176" class="f-ink2 xs" text-anchor="middle">✕ 体素统一：远处浪费、近处糊</text>
+      <text x="360" y="192" class="f-ink2 xs" text-anchor="middle">✕ 网格数按 (1/λ)³ 增长</text>
+      <text x="360" y="214" class="f-ink3 xs" text-anchor="middle">Tab. 5：λ=0.002 → 22.08 dB · 9.66 GB</text>
+      <text x="360" y="230" class="f-ink3 xs" text-anchor="middle">λ=0.001 → OOM（80 GB A100）</text>
+      <text x="360" y="252" class="f-ink3 xs" text-anchor="middle">还得先估场景包围盒才能开辟体积</text>
+      <!-- column: octmap -->
+      <rect x="484" y="16" width="220" height="250" rx="12" class="fs-O s-O" stroke-width="1.6"/>
+      <text x="594" y="40" class="f-Oi big" text-anchor="middle">OctMap（本文）</text>
+      <g class="nofill s-vline" stroke-width="1">
+        <rect x="524" y="60" width="88" height="88"/>
+        <rect x="568" y="60" width="44" height="44"/><rect x="524" y="104" width="44" height="44"/>
+        <rect x="524" y="60" width="44" height="44"/>
+        <rect x="546" y="60" width="22" height="22"/><rect x="524" y="82" width="22" height="22"/>
+        <rect x="524" y="104" width="22" height="22"/><rect x="546" y="126" width="22" height="22"/>
+        <rect x="535" y="82" width="11" height="11"/><rect x="546" y="82" width="11" height="11"/>
+        <rect x="612" y="60" width="52" height="88"/>
+      </g>
+      <path d="M526 130 C 548 100, 570 96, 600 78 S 640 70, 662 66" class="nofill s-S" stroke-width="2.2"/>
+      <text x="594" y="160" class="f-ink2 xs" text-anchor="middle">近处细、远处粗（按像素足迹 z/f）</text>
+      <text x="594" y="176" class="f-ink2 xs" text-anchor="middle">✓ 稀疏：只在截断带内分配</text>
+      <text x="594" y="192" class="f-ink2 xs" text-anchor="middle">✓ 可扩展：越界则根倍增，O(1)</text>
+      <text x="594" y="214" class="f-ink3 xs" text-anchor="middle">Tab. 5：23.47 dB · 7.26 GB · 17.9 s</text>
+      <text x="594" y="230" class="f-ink3 xs" text-anchor="middle">Tab. 4a：LPIPS 0.141（f36，最优）</text>
+      <text x="594" y="252" class="f-ink3 xs" text-anchor="middle">代价与 λ=0.002 的 TSDF 相当，质量更高</text>
+      <text x="16" y="292" class="f-ink3 xs">三列对应论文 Sec. 3.1 的论证与 Fig. 3 / Tab. 4a / Tab. 5。「相当的代价、更高的质量」是论文对 OctMap 效率的真实措辞——不是「更省」。</text>
+      <text x="16" y="310" class="f-ink3 xs">注意 Tab. 5 的 OctMap 内存 7.26 GB 高于 TSDF λ=0.004 的 1.97 GB；它省的是「达到同等近处细节所需的」体素数，而非绝对内存。</text>
+    </svg>
+    </div>
+    </div>
+    <figcaption><b>三个面板按论文 Algorithm 1、Fig. 2 与 Sec. 3.1 / Tab. 5 重绘。</b>(a) 是推理时的闭环：OctMap 既是上一块的输出去处，也是下一块的条件来源；
+    (b) 是训练时同一结构的「离线版」：历史帧来自真值 RGB-D，但两条历史通路都要加噪声增强 ε<sub>α</sub>，以模拟推理时历史其实是生成出来的；
+    (c) 是论文为 OctMap 给出的理由——点云太碎、均匀 TSDF 太贵或太糊。</figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card co">
+      <p class="mono">MEMORY · OctMap</p>
+      <h5>会长大的八叉树 TSDF</h5>
+      <p>根体积 <span class="m">L</span> = 2（[−1, 1]³），最深 16 级；叶节点在 8 个角顶点存 TSDF、颜色、权重。每个像素按 <span class="m">s = z / √(f<sub>x</sub>f<sub>y</sub>)</span> 决定该去第几级，截断带 <span class="m">τ<sub>d</sub> = 5 ℓ<sub>d</sub></span> 随层级缩放。越界就把根扩一倍，旧节点整体降一级。</p>
+    </div>
+    <div class="card ct">
+      <p class="mono">GENERATOR · 1.0 / 1.5</p>
+      <h5>借来的骨架，加三条通路</h5>
+      <p>1.0：FramePack F1（Hunyuan DiT）扩通道联合出 RGB+深度；渲染的记忆投影经 VideoPainter 式控制分支注入；Plücker 相机经小卷积适配器加到目标 latent。1.5：Wan2.1 14B I2V 原生 (x, m, y) 接口直接吃部分渲染 + 掩码，深度改用流式 DA3。</p>
+    </div>
+    <div class="card ch">
+      <p class="mono">TRAINING · 噪声增强</p>
+      <h5>让模型习惯「历史是生成的」</h5>
+      <p>训练用真值 RGB-D 当历史，与推理有落差；于是对投影记忆与打包上下文都加噪 ε<sub>α</sub>，α 从 11 档 {0, 0.07, …, 0.70} 采样并作为条件输入。1.0 推理用第 3 档，1.5 用 0 档。数据来自 Re10K / DL3DV / SpatialVid 静态子集，深度与位姿由 Pi3 估计。</p>
+    </div>
+  </div>
+
+  <div class="call key">
+    <div class="hd">◆ 如果只记三件事</div>
+    <p><b>1.</b> 记忆是<b>融合</b>出来的，不是<b>存</b>出来的。点云缓存和帧库都是「把观察原样堆起来」；OctMap 用 TSDF 的加权平均把多次观察压成一个连续的距离场，噪声被平均、重复被合并，回访时渲染出的是一张干净的几何（Sec. 3.1、Tab. 4a/5）。</p>
+    <p><b>2.</b> 分辨率不是全局参数，而是<b>逐像素算出来的</b>：<span class="m">s = z/√(f<sub>x</sub>f<sub>y</sub>)</span> 就是一个像素在深度 <span class="m">z</span> 处的物理足迹；体素只需要跟这个足迹一样细。开放世界的尺度不确定问题由此绕开——地图从不需要事先知道场景多大（Sec. 3.1、附录 B.4）。</p>
+    <p><b>3.</b> 生成器只看两样东西：渲染出来的<b>部分观察 + 掩码</b>（空间条件）和<b>打包历史</b>（时间条件）。所以论文的消融很干净：去掉 OctMap，相机控制立刻失准；把 OctMap 换成点云或均匀 TSDF，LPIPS 从 0.141 掉到 0.200–0.275（Tab. 4a）。</p>
+  </div>
+</section>
+<!-- ============================================================ 01 PROBLEM -->
+<section class="sec" id="s-problem">
+  <div class="eyebrow"><span class="n">01</span><span class="t">The Problem</span><span class="line"></span></div>
+  <h2>长程生成为什么难：走得远、转得大，还要回得来</h2>
+  <p class="lead">论文把自己的目标场景定义为「长空间范围」（long spatial range）：<b>相机路径长</b>，<b>视角覆盖宽</b>。
+  难点不在生成本身，而在<b>回访</b>——走了很远之后回到先前生成过的区域，新生成的内容必须和旧的在几何与外观上都对得上。
+  这需要两件事：跨块（cross-chunk）生成，以及一个能把过去的观察真正「合并」起来的记忆机制。</p>
+
+  <h3><span class="ix">1.1</span>三条既有路线，各自缺什么</h3>
+  <div class="grid3">
+    <div class="card cc">
+      <p class="mono">相机控制路线</p>
+      <h5>Plücker 射线当条件</h5>
+      <p>CameraCtrl、Aether 这类方法把相机编码成射线嵌入交给模型学。论文的判断：从相机表示到画面的映射太复杂，控制常常不准、几何一致性有限（Sec. 2）。深度即便有，也只是辅助输出。</p>
+    </div>
+    <div class="card ct">
+      <p class="mono">几何感知路线</p>
+      <h5>联合预测深度 / XYZ</h5>
+      <p>WVD、Aether、DeepVerse、4DNeX、FantasyWorld 让模型顺带输出几何，短期一致性变好；但它们主要在<b>单个生成块内</b>工作，路径一长、视角一宽就没有机制保证回访一致（Sec. 1）。</p>
+    </div>
+    <div class="card ch">
+      <p class="mono">记忆路线</p>
+      <h5>点云缓存 / 帧库检索</h5>
+      <p>Gen3C 把点云堆成 3D cache；VMem、Context-as-Memory 存生成过的帧再按相机检索。论文认为它们「缺少有原则的记忆融合和全局整合」，长轨迹下仍会几何漂移（Sec. 1）。OctWorld 就是在这条路线上把「堆」换成「融合」。</p>
+    </div>
+  </div>
+
+  <h3><span class="ix">1.2</span>为什么不能直接搬 SLAM 的 TSDF</h3>
+  <div class="prose">
+    <p>OctMap 建立在 TSDF（Curless &amp; Levoy 1996）之上——这是 KinectFusion 一系 SLAM 系统的标准建图方法：把每帧深度转成「到表面的截断符号距离」，在体素网格里做加权平均，最后从零等值面提取网格。
+    但论文指出两种任务的前提不同：</p>
+  </div>
+  <div class="tbl"><table>
+    <thead><tr><th style="width:24%">前提</th><th>SLAM 重建</th><th>开放世界生成（本文）</th></tr></thead>
+    <tbody>
+      <tr><td><b>尺度</b></td><td>已知的度量尺度（真实传感器）</td><td>不确定：只有单目深度给的相对尺度，而且<b>会随生成演化</b></td></tr>
+      <tr><td><b>空间范围</b></td><td>有界（一个房间、一栋楼），可以预先开辟体积</td><td>潜在无界：相机可以一直往外走，事先不知道要多大的盒子</td></tr>
+      <tr><td><b>观察来源</b></td><td>物理传感器，噪声可建模</td><td>上一块<b>生成</b>的 RGB 与深度，误差来自模型本身</td></tr>
+      <tr><td><b>位姿</b></td><td>需要估计（定位）</td><td>用户给定的轨迹，无需估计</td></tr>
+      <tr><td><b>固定分辨率 TSDF 的后果</b></td><td>选一个合适的体素大小即可</td><td>高分辨率 → 体素数按立方增长、内存爆；低分辨率 → 近处细节全糊（Sec. 1）</td></tr>
+    </tbody>
+  </table></div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 2</span><span class="ti">均匀体素的两难：同一个 λ 在近处和远处意味着完全不同的「像素密度」</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 250" role="img" aria-label="示意：相机看向近处的物体和远处的墙。近处一个像素只覆盖很小的物理面积，远处一个像素覆盖很大面积；均匀体素在近处太粗导致模糊，在远处比像素足迹细得多导致浪费">
+      <!-- camera -->
+      <g transform="translate(40,125)">
+        <path d="M0 -14 L26 -14 L26 14 L0 14 Z" class="fs-C s-C" stroke-width="1.4"/>
+        <circle cx="30" cy="0" r="6" class="f-surf s-C" stroke-width="1.4"/>
+      </g>
+      <!-- frustum -->
+      <path d="M76 125 L680 20" class="nofill s-C" stroke-width="1" stroke-dasharray="4 3"/>
+      <path d="M76 125 L680 230" class="nofill s-C" stroke-width="1" stroke-dasharray="4 3"/>
+      <!-- pixel footprint near -->
+      <path d="M76 125 L200 103" class="nofill s-ink3" stroke-width="1"/>
+      <path d="M76 125 L200 111" class="nofill s-ink3" stroke-width="1"/>
+      <line x1="200" y1="103" x2="200" y2="111" class="s-S" stroke-width="3"/>
+      <text x="206" y="100" class="f-ink2 xs">近处：1 像素 ≈ z/f，很小</text>
+      <!-- pixel footprint far -->
+      <path d="M76 125 L640 26" class="nofill s-ink3" stroke-width="1"/>
+      <path d="M76 125 L640 58" class="nofill s-ink3" stroke-width="1"/>
+      <line x1="640" y1="26" x2="640" y2="58" class="s-S" stroke-width="3"/>
+      <text x="634" y="72" class="f-ink2 xs" text-anchor="end">远处：同一个像素覆盖 4 倍面积（同角度、4 倍深度）</text>
+      <!-- uniform voxels near: too coarse -->
+      <g class="nofill s-ink3" stroke-width="1">
+        <rect x="180" y="86" width="40" height="40"/><rect x="180" y="126" width="40" height="40"/>
+      </g>
+      <text x="200" y="182" class="f-Si xs" text-anchor="middle">均匀体素 λ：比近处的像素足迹粗</text>
+      <text x="200" y="196" class="f-Si xs" text-anchor="middle">→ 多个像素挤进一个体素，细节被平均掉</text>
+      <!-- uniform voxels far: too fine -->
+      <g class="nofill s-ink3" stroke-width="1">
+        <rect x="560" y="120" width="40" height="40"/><rect x="600" y="120" width="40" height="40"/>
+        <rect x="560" y="160" width="40" height="40"/><rect x="600" y="160" width="40" height="40"/>
+      </g>
+      <text x="600" y="216" class="f-Si xs" text-anchor="middle">同一个 λ 在远处远细于像素足迹</text>
+      <text x="600" y="230" class="f-Si xs" text-anchor="middle">→ 一个像素要摊到许多体素，纯粹浪费</text>
+      <!-- octmap answer -->
+      <rect x="300" y="200" width="140" height="40" rx="8" class="fs-O s-O" stroke-width="1.4"/>
+      <text x="370" y="217" class="f-Oi xs" text-anchor="middle" font-weight="600">OctMap 的答案</text>
+      <text x="370" y="231" class="f-ink2 xs" text-anchor="middle">让体素 ≈ 像素足迹：ℓ<tspan dy="3" font-size="7">d</tspan><tspan dy="-3"> ≤ z/f &lt; ℓ</tspan><tspan dy="3" font-size="7">d−1</tspan></text>
+    </svg>
+    </div>
+    <figcaption><b>示意图。</b>论文 Sec. 3.1 的原话：均匀 TSDF「对远处几何过度分配体素」，同时「前景几何受分辨率不足影响，融合结果模糊」。
+    OctMap 把体素大小锚定在像素在该深度的物理足迹上，于是同一帧里近处和远处各得其所。Fig. 3 里的对比正是这个效果：OctMap 保住了伞架的细杆，均匀 TSDF 把它糊成一团。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 02 OCTMAP STRUCTURE -->
+<section class="sec" id="s-octmap">
+  <div class="eyebrow"><span class="n">02</span><span class="t">OctMap · Data Structure</span><span class="line"></span></div>
+  <h2>OctMap 数据结构：一棵存在角顶点上的稀疏八叉树</h2>
+  <p class="lead">Sec. 3.1 用不到半页定义了整个数据结构，但每个常数都有含义。把它们摊开：</p>
+
+  <div class="grid2">
+    <div class="card co">
+      <p class="mono">树</p>
+      <h5>根体积 L，逐级八分</h5>
+      <p>根节点覆盖边长 <span class="m">L</span> 的立方体，每级把一个节点分成 8 个子节点。第 <span class="m">d</span> 级的体素边长 <span class="m">ℓ<sub>d</sub> = L / 2<sup>d</sup></span>。
+      初始化时 <span class="m">L</span> = 2（规范立方体 [−1, 1]³），最深 <span class="m">d<sub>max</sub></span> = 16（附录 B.4）。</p>
+    </div>
+    <div class="card co">
+      <p class="mono">叶节点</p>
+      <h5>8 个角顶点各存三样东西</h5>
+      <p>截断符号距离（TSDF）、RGB 颜色、积分权重。论文把 TSDF 与颜色合写为 <span class="m">φ</span>，权重记 <span class="m">w</span>。
+      注意是<b>每个叶节点自己存 8 个角</b>，相邻叶节点在共享角上各存一份——所以提取网格时要「合并重复顶点」。</p>
+    </div>
+    <div class="card co">
+      <p class="mono">截断</p>
+      <h5>τ<sub>d</sub> = α · ℓ<sub>d</sub>，α = 5</h5>
+      <p>TSDF 只在表面前后 <span class="m">τ<sub>d</sub></span> 范围内有意义；OctMap 让它随层级缩放，细体素配窄截断带，粗体素配宽截断带。α = 5 意味着截断带在每一级都是<b>正负 5 个体素</b>宽（附录 B.4）。</p>
+    </div>
+    <div class="card co">
+      <p class="mono">初始化</p>
+      <h5>首帧点云归一到 [−0.5, 0.5]³</h5>
+      <p>为了保证首帧的点都落在根内且留有余量，首帧点云先归一到根的中央一半。这也把「场景尺度」定成了首帧深度的尺度——因此首帧深度被论文当作<b>用户可控的输入</b>（附录 A.4）。</p>
+    </div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 3</span><span class="ti">层级尺：拖动 d，看第 d 级的体素有多小、截断带有多宽、跟基线 TSDF 的 λ 怎么对应</span></div>
+    <div class="ctl">
+      <label>层级 d <input type="range" id="lvD" min="0" max="16" value="12" step="1"><span class="val" id="lvDv">12</span></label>
+      <label>根边长 L <input type="range" id="lvL" min="1" max="4" value="1" step="1"><span class="val" id="lvLv">2</span></label>
+      <span class="chip o" id="lvExt">未扩展（初始 L = 2）</span>
+    </div>
+    <div class="figbody" style="padding:14px 18px 6px">
+      <svg viewBox="0 0 720 252" role="img" aria-label="左：二维嵌套四分示意，随层级加深；右：一个叶节点立方体及其 8 个角顶点，每个角存 TSDF、颜色、权重">
+        <g id="lvTree"></g>
+        <!-- leaf cube -->
+        <g transform="translate(430,30)">
+          <path d="M40 60 L160 60 L160 180 L40 180 Z" class="fs-O s-O" stroke-width="1.4"/>
+          <path d="M40 60 L80 20 L200 20 L160 60" class="fs-O s-O" stroke-width="1.4" opacity=".7"/>
+          <path d="M160 60 L200 20 L200 140 L160 180" class="fs-O s-O" stroke-width="1.4" opacity=".5"/>
+          <g class="f-surf s-O" stroke-width="1.6">
+            <circle cx="40" cy="60" r="5"/><circle cx="160" cy="60" r="5"/><circle cx="160" cy="180" r="5"/><circle cx="40" cy="180" r="5"/>
+            <circle cx="80" cy="20" r="5"/><circle cx="200" cy="20" r="5"/><circle cx="200" cy="140" r="5"/>
+          </g>
+          <circle cx="80" cy="140" r="5" class="f-surf s-O" stroke-width="1.6" stroke-dasharray="2 2"/>
+          <text x="100" y="212" class="f-ink2 xs" text-anchor="middle">叶节点：立方体的 8 个角各存 (TSDF, RGB, w)</text>
+          <text x="214" y="24" class="f-ink3 xs">角顶点</text>
+          <text x="214" y="146" class="f-ink3 xs">相邻叶共享角，</text>
+          <text x="214" y="160" class="f-ink3 xs">但各存各的</text>
+        </g>
+      </svg>
+    </div>
+    <div class="readout">
+      <div><div class="k">体素边长 ℓ<sub>d</sub> = L/2<sup>d</sup></div><div class="v oct" id="lvEll">—</div></div>
+      <div><div class="k">截断 τ<sub>d</sub> = 5 ℓ<sub>d</sub></div><div class="v" id="lvTau">—</div></div>
+      <div><div class="k">若填满：8<sup>d</sup> 个叶</div><div class="v" id="lvDense">—</div></div>
+      <div><div class="k">最接近的基线 λ</div><div class="v" id="lvBase">—</div></div>
+    </div>
+    <figcaption><b>按 Sec. 3.1 与附录 B.4 的常数计算。</b>左侧二维示意只画到第 5 级（再画就看不见了），右侧是论文对叶节点的描述。
+    「若填满」一栏是提醒：<span class="m">d</span> = 16 时全密网格有 2.8 × 10¹⁴ 个叶——稀疏性不是优化，是生存条件。
+    「最接近的基线 λ」把体素边长对到 Tab. 5 里均匀 TSDF 的 λ ∈ {0.007, 0.004, 0.002, 0.001}：λ = 0.002 大约相当于第 10 级，而 OctMap 在近处会走到第 13–14 级（下一节算给你看）。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 03 ALLOCATION -->
+<section class="sec" id="s-alloc">
+  <div class="eyebrow"><span class="n">03</span><span class="t">Adaptive Node Allocation</span><span class="line"></span></div>
+  <h2>逐像素自适应分配：体素应该跟像素足迹一样细，不多不少</h2>
+  <p class="lead">这是全文最核心的半页（Sec. 3.1「Adaptive Node Allocation」+ Fig. 4）。每来一帧 RGB-D <span class="m">(I, D)</span>，对每个像素做三步：
+  <b>算足迹 → 定层级 → 沿光线在截断带内采样并分配节点</b>。</p>
+
+  <h3><span class="ix">3.1</span>算足迹：一个像素在深度 z 处有多大</h3>
+  <div class="prose">
+    <p>像素 <span class="m">(u, v)</span> 的深度 <span class="m">z = D(u, v)</span>，反投影到相机坐标：</p>
+  </div>
+  <div class="eq"><i>x</i>(<i>u</i>, <i>v</i>) = ( (<i>u</i> − <i>c<sub>x</sub></i>) · <i>z</i> / <i>f<sub>x</sub></i>,  (<i>v</i> − <i>c<sub>y</sub></i>) · <i>z</i> / <i>f<sub>y</sub></i>,  <i>z</i> )
+    <small>针孔模型；<i>f<sub>x</sub></i>, <i>f<sub>y</sub></i> 是以像素计的焦距，<i>c<sub>x</sub></i>, <i>c<sub>y</sub></i> 是主点。</small></div>
+  <div class="prose">
+    <p>相邻像素在该深度上相距约 <span class="m">Δx ≈ z/f<sub>x</sub></span>、<span class="m">Δy ≈ z/f<sub>y</sub></span>——这就是「像素足迹」。论文取几何平均作为该像素<b>想要的体素大小</b>：</p>
+  </div>
+  <div class="eq"><i>s</i>(<i>u</i>, <i>v</i>, <i>z</i>) = <i>z</i> / √(<i>f<sub>x</sub></i> · <i>f<sub>y</sub></i>)
+    <small>近处 <i>z</i> 小 → <i>s</i> 小 → 体素细；远处反之。注意 <i>s</i> 与像素位置无关，只与深度和焦距有关。</small></div>
+
+  <h3><span class="ix">3.2</span>定层级：最细的、体素不大于足迹的那一级</h3>
+  <div class="eq"><i>d</i> = 满足 <i>ℓ<sub>d</sub></i> ≤ <i>s</i> &lt; <i>ℓ<sub>d−1</sub></i> 的最细层级 　⟺　 <i>d</i> = ⌈ log<sub>2</sub>(<i>L</i> / <i>s</i>) ⌉
+    <small>右边的闭式是我的改写（<i>L</i>/2<sup>d</sup> ≤ <i>s</i> ⇒ 2<sup>d</sup> ≥ <i>L</i>/<i>s</i>），论文只给了不等式。实际还要夹到 <i>d<sub>max</sub></i> = 16。</small></div>
+
+  <h3><span class="ix">3.3</span>沿光线采样、分配、分裂</h3>
+  <div class="prose">
+    <p>只更新表面点 <span class="m">x</span> 所在的体素不够——TSDF 是一个<b>场</b>，表面两侧的体素都需要拿到距离值。于是沿该像素的相机光线采样：</p>
+  </div>
+  <div class="eq"><i>x<sub>k</sub></i> = <i>o</i> + <i>t<sub>k</sub></i> · <i>r</i>(<i>u</i>, <i>v</i>),　<i>t<sub>k</sub></i> ∈ [<i>z</i> − <i>τ<sub>d</sub></i>, <i>z</i> + <i>τ<sub>d</sub></i>]
+    <small><i>o</i> 是相机中心，<i>r</i> 是光线方向。每个采样点经空间量化得到第 <i>d</i> 级的体素索引 <i>i<sub>k</sub></i>；从根往下遍历到第 <i>d</i> 级，路径上没初始化的节点就分配、该分裂的叶就分裂。分裂时子节点通过<b>空间插值</b>继承父节点属性（附录 B.4 写明是三维最近邻插值）。论文没有给采样间距。</small></div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 4</span><span class="ti">一条光线的分配：拖动深度与焦距，右侧「显微镜」按真实比例画出该像素周围的体素带</span></div>
+    <div class="ctl">
+      <label>像素深度 z <input type="range" id="alZ" min="0.05" max="3" value="0.6" step="0.01"><span class="val" id="alZv">0.60</span></label>
+      <label>焦距 f（像素）<input type="range" id="alF" min="300" max="1400" value="720" step="10"><span class="val" id="alFv">720</span></label>
+      <label>根边长 L <input type="range" id="alL" min="1" max="3" value="1" step="1"><span class="val" id="alLv">2</span></label>
+    </div>
+    <div class="figbody" style="padding:14px 18px 6px">
+      <svg viewBox="0 0 720 330" role="img" aria-label="左：相机、像平面、一条穿过像素的光线打到表面，表面前后是截断带；右：放大到像素足迹尺度的体素网格，光线在截断带内的采样点分配了一串第 d 级体素，含表面的体素高亮">
+        <!-- left schematic -->
+        <g id="alLeft"></g>
+        <!-- right microscope -->
+        <g id="alRight"></g>
+      </svg>
+    </div>
+    <div class="readout">
+      <div><div class="k">足迹 Δx = z/f</div><div class="v" id="alFoot">—</div></div>
+      <div><div class="k">层级 d = ⌈log₂(L/s)⌉</div><div class="v oct" id="alD">—</div></div>
+      <div><div class="k">体素 ℓ<sub>d</sub></div><div class="v" id="alEll">—</div></div>
+      <div><div class="k">截断带 ±τ<sub>d</sub></div><div class="v" id="alTau">—</div></div>
+      <div><div class="k">足迹 / 体素</div><div class="v" id="alRatio">—</div></div>
+    </div>
+    <figcaption><b>按 Sec. 3.1 与 Fig. 4 重绘并加了数字。</b>左图是示意（真实的单像素视锥只有 0.08° 宽，画不出来）；右图是「以像素足迹为单位」的真实比例：体素边长总在足迹的 1/2 到 1 倍之间（灰色两条线是该像素的视锥边），截断带沿光线长 2τ<sub>d</sub> = 10 个体素。
+    黑点是沿光线的采样点（间距为我的假定 ℓ<sub>d</sub>/2），绿色是它们分配到的体素，蓝色是被表面（红线）穿过的体素——三种颜色对应 Fig. 4 图例。
+    焦距 720 px 对应 832 宽画面约 60° 水平视场，是我的假设；论文未给内参。</figcaption>
+  </figure>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 5</span><span class="ti">层级随深度的阶梯：同一帧里，近处像素落在第 13–14 级，远处落在第 9–10 级</span></div>
+    <div class="figbody chart" style="padding:10px 18px 4px">
+      <svg id="alChart" viewBox="0 0 720 220" role="img" aria-label="层级 d 随像素深度 z 的阶梯曲线；横轴深度（对数），纵轴层级；虚线标出基线 TSDF 体素尺寸对应的等效层级"></svg>
+    </div>
+    <figcaption>横轴取对数：深度每翻一倍，层级降一级。三条虚线是 Tab. 5 里均匀 TSDF 的 λ ∈ {0.007, 0.002, 0.001} 折算成的等效层级（以 L = 2 计）——OctMap 在 z &lt; 0.35 的近处比「能放进 80 GB 显存的最细均匀 TSDF」（λ = 0.002 ≈ 第 10 级）细 8–16 倍（z ≈ 0.7 处约 4 倍），而 z &gt; 1.4 的远处反过来比它粗。
+    这就是「相当的代价、更高的质量」在数字上的来源。焦距随上图滑块联动。</figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">◇ 我的两点理解（论文没明说）</div>
+    <p><b>为什么用几何平均而不是取小的那个？</b> <span class="m">s = z/√(f<sub>x</sub>f<sub>y</sub>)</span> 是像素足迹面积 <span class="m">Δx·Δy</span> 的平方根，也就是「等面积正方形的边」。在 <span class="m">f<sub>x</sub> ≈ f<sub>y</sub></span> 的常见情形下它和 <span class="m">z/f</span> 没有区别；对非方形像素它折中了两个方向。</p>
+    <p><b>层级只看深度，不看内容。</b> 分辨率的依据是「相机离多近」，而不是「这里几何多复杂」——一面近处的白墙和一株近处的灌木会拿到同样细的体素。论文引用的 [8]（方差自适应体素）是按内容自适应的；OctMap 选了更简单的深度准则，这也是它能在 4–6 FPS 下积分的原因之一。</p>
+  </div>
+</section>
+<!-- ============================================================ 04 TSDF FUSION -->
+<section class="sec" id="s-fuse">
+  <div class="eyebrow"><span class="n">04</span><span class="t">TSDF Integration &amp; Mesh Extraction</span><span class="line"></span></div>
+  <h2>TSDF 融合与网格提取：把多次观察压成一个距离场，再从零面上抠出网格</h2>
+  <p class="lead">节点分配好之后，更新规则就是教科书式的 TSDF 融合（Curless &amp; Levoy 1996），唯一的改动是截断距离随层级变：<span class="m">τ<sub>d</sub></span> 而不是全局常数。</p>
+
+  <h3><span class="ix">4.1</span>逐顶点更新：式 (1)</h3>
+  <div class="prose">
+    <p>对当前帧「相交」到的每个体素，把它的角顶点投影到相机像平面，读出该像素的观测深度，与顶点自身的深度相减得到符号距离，再按 <span class="m">τ<sub>d</sub></span> 截断——这就是该顶点的观测值 <span class="m">φ<sub>obs</sub></span>（颜色同理取该像素的 RGB）。然后做加权滑动平均：</p>
+  </div>
+  <div class="eq">
+    <i>φ</i><sub>new</sub> = <span class="frac"><span><i>w</i><sub>old</sub> <i>φ</i><sub>old</sub> + <i>w</i><sub>obs</sub> <i>φ</i><sub>obs</sub></span><span><i>w</i><sub>old</sub> + <i>w</i><sub>obs</sub></span></span>,　　<i>w</i><sub>new</sub> = <i>w</i><sub>old</sub> + <i>w</i><sub>obs</sub>　　<span class="r">(1)</span>
+    <small>权重累加意味着越早、越多次被看到的顶点越「固执」，新观察对它的影响按 <i>w</i><sub>obs</sub>/(<i>w</i><sub>old</sub>+<i>w</i><sub>obs</sub>) 衰减。论文没有写 <i>w</i><sub>obs</sub> 取什么（标准做法是常数 1，或随视角 / 距离衰减）。</small>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 6</span><span class="ti">一条光线上的 TSDF 融合：观察越多，零交叉点越稳；原始点云只会越来越散</span></div>
+    <div class="ctl">
+      <label>已融合观察数 n <input type="range" id="fuN" min="0" max="16" value="1" step="1"><span class="val" id="fuNv">1</span></label>
+      <label>深度噪声 σ（体素单位）<input type="range" id="fuS" min="0" max="3" value="0.8" step="0.1"><span class="val" id="fuSv">0.8 ℓ</span></label>
+      <label>w<sub>obs</sub> <input type="range" id="fuW" min="0.25" max="2" value="1" step="0.25"><span class="val" id="fuWv">1.0</span></label>
+      <button class="btn" id="fuRe" type="button">↻ 换一组噪声</button>
+    </div>
+    <div class="figbody" style="padding:14px 18px 6px">
+      <svg viewBox="0 0 720 300" role="img" aria-label="横轴是沿光线的距离，以体素为单位；竖线是顶点；柱状显示每个顶点当前融合后的截断符号距离，正为表面前方、负为表面后方；红色虚线是真实表面，蓝色标记是从零交叉插值得到的估计表面；底部散点是每次观测的原始深度">
+        <g id="fuG"></g>
+      </svg>
+    </div>
+    <div class="readout">
+      <div><div class="k">估计表面（零交叉）</div><div class="v oct" id="fuEst">—</div></div>
+      <div><div class="k">估计误差</div><div class="v" id="fuErr">—</div></div>
+      <div><div class="k">原始观测平均误差</div><div class="v" id="fuRaw">—</div></div>
+      <div><div class="k">最近顶点的 w</div><div class="v" id="fuWv2">—</div></div>
+    </div>
+    <div class="alg" id="fuEq">选一个 n ≥ 1 看式 (1) 在离表面最近的顶点上怎么算。</div>
+    <figcaption><b>示意模拟。</b>沿一条光线取 21 个顶点 p = 0…20（间距 ℓ），真实表面在 10.0 ℓ 处，截断 τ = 5 ℓ（论文 α = 5）。每次观测的深度带噪；顶点观测值 <span class="m">φ<sub>obs</sub> = clip((z<sub>obs</sub> − p)/τ, −1, 1)</span>，表面后方超出 τ 的顶点不更新。
+    拖动 n 看融合后的距离场如何收敛到一条从 +1 到 −1 的干净斜坡、零交叉如何贴住真实表面；底部的橙色点是同样的观测「原样堆成点云」的样子——这就是 Tab. 5 里点云 PSNR 最低、Fig. 3 里点云碎片化的原因。</figcaption>
+  </figure>
+
+  <h3><span class="ix">4.2</span>网格提取：叶节点各自 Marching Cubes，再合并顶点</h3>
+  <div class="prose">
+    <p>每个叶节点是一个角上带 TSDF 值的立方体。因为叶节点彼此不重叠（只共享角），可以<b>并行</b>对每个叶跑 Marching Cubes，得到一堆互不相连的三角形（triangle soup）；再把共享角上重复的顶点合并，就得到最终网格。
+    网格被渲染到目标相机视角，输出三样东西：<b>部分 RGB</b>、<b>部分深度</b>、<b>可见性掩码</b>（网格没覆盖到的像素为 0）。这就是送给生成器的「世界记忆投影」（Sec. 3.1–3.2）。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 7</span><span class="ti">从叶节点到条件图：iso-surfacing → 合并 → 渲染 → RGB / 深度 / 掩码</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 250" role="img" aria-label="四步：叶节点立方体的角带正负 TSDF 值，Marching Cubes 在每个叶内独立产生三角形；相邻叶的三角形在共享角合并成连续网格；网格渲染到目标相机得到部分 RGB、部分深度和可见性掩码，未覆盖区域为空洞">
+      <!-- step 1: leaf with signs -->
+      <g transform="translate(20,40)">
+        <path d="M20 40 L100 40 L100 120 L20 120 Z" class="fs-O s-O" stroke-width="1.2"/>
+        <path d="M20 40 L50 14 L130 14 L100 40" class="fs-O s-O" stroke-width="1.2" opacity=".7"/>
+        <path d="M100 40 L130 14 L130 94 L100 120" class="fs-O s-O" stroke-width="1.2" opacity=".5"/>
+        <g class="xs mono">
+          <text x="12" y="36" class="f-Ti">+</text><text x="104" y="36" class="f-Ti">+</text>
+          <text x="12" y="132" class="f-Si">−</text><text x="104" y="132" class="f-Si">−</text>
+          <text x="44" y="10" class="f-Ti">+</text><text x="134" y="10" class="f-Ti">+</text><text x="134" y="98" class="f-Si">−</text>
+        </g>
+        <path d="M20 84 L100 76 L130 56" class="nofill s-S" stroke-width="2"/>
+        <path d="M20 84 L100 76 L100 120 L20 120 Z" class="f-S" opacity=".18"/>
+        <text x="70" y="160" class="f-ink2 xs" text-anchor="middle">① 每个叶：角上的正负号</text>
+        <text x="70" y="174" class="f-ink2 xs" text-anchor="middle">决定零面穿过哪些边</text>
+      </g>
+      <path d="M170 110 L196 110" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <!-- step 2: triangle soup -> merged -->
+      <g transform="translate(200,40)">
+        <g class="nofill s-vline" stroke-width="1">
+          <rect x="10" y="30" width="50" height="50"/><rect x="60" y="30" width="50" height="50"/><rect x="10" y="80" width="50" height="50"/><rect x="60" y="80" width="25" height="25"/><rect x="85" y="80" width="25" height="25"/><rect x="60" y="105" width="25" height="25"/><rect x="85" y="105" width="25" height="25"/>
+        </g>
+        <g class="nofill s-S" stroke-width="2">
+          <path d="M10 70 L60 58"/><path d="M60 58 L110 40"/><path d="M60 92 L85 88"/>
+        </g>
+        <g class="f-S">
+          <circle cx="60" cy="58" r="3.2"/><circle cx="60" cy="58" r="6" class="nofill s-S" stroke-width="1" stroke-dasharray="2 2"/>
+        </g>
+        <text x="60" y="160" class="f-ink2 xs" text-anchor="middle">② 逐叶并行 Marching Cubes</text>
+        <text x="60" y="174" class="f-ink2 xs" text-anchor="middle">共享角上的重复顶点合并</text>
+      </g>
+      <path d="M330 110 L356 110" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <!-- step 3: render -->
+      <g transform="translate(360,40)">
+        <path d="M0 -14 L22 -14 L22 14 L0 14 Z" transform="translate(0,110)" class="fs-C s-C" stroke-width="1.2"/>
+        <circle cx="26" cy="110" r="5" class="f-surf s-C" stroke-width="1.2"/>
+        <path d="M30 110 L110 40" class="nofill s-C" stroke-width="1" stroke-dasharray="3 2"/>
+        <path d="M30 110 L110 180" class="nofill s-C" stroke-width="1" stroke-dasharray="3 2"/>
+        <path d="M70 60 C 90 90, 90 130, 70 160" class="nofill s-S" stroke-width="2"/>
+        <text x="60" y="200" class="f-ink2 xs" text-anchor="middle">③ 渲染到目标相机 c<tspan dy="3" font-size="7">k</tspan></text>
+      </g>
+      <path d="M480 110 L506 110" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <!-- step 4: outputs -->
+      <g transform="translate(510,20)">
+        <rect x="0" y="0" width="90" height="56" rx="6" class="fs-O s-O" stroke-width="1.2"/>
+        <rect x="52" y="0" width="38" height="56" rx="0" fill="url(#hatch)"/>
+        <text x="45" y="70" class="f-ink2 xs" text-anchor="middle">部分 RGB</text>
+        <rect x="110" y="0" width="90" height="56" rx="6" class="f-surf3 s-rule" stroke-width="1"/>
+        <rect x="110" y="0" width="52" height="56" rx="6" class="f-ink3" opacity=".5"/>
+        <rect x="162" y="0" width="38" height="56" fill="url(#hatch)"/>
+        <text x="155" y="70" class="f-ink2 xs" text-anchor="middle">部分深度</text>
+        <rect x="0" y="92" width="90" height="56" rx="6" class="f-surf3 s-rule" stroke-width="1"/>
+        <rect x="0" y="92" width="52" height="56" rx="6" class="f-ink"/>
+        <text x="26" y="124" class="xs mono" text-anchor="middle" style="fill:var(--bg)">1</text>
+        <text x="71" y="124" class="f-ink3 xs mono" text-anchor="middle">0</text>
+        <text x="45" y="162" class="f-ink2 xs" text-anchor="middle">可见性掩码</text>
+        <text x="110" y="110" class="f-ink3 xs">斜纹 = 网格没覆盖的像素</text>
+        <text x="110" y="124" class="f-ink3 xs">= 掩码为 0 = 交给模型去</text>
+        <text x="110" y="138" class="f-ink3 xs">「想象」的区域</text>
+        <text x="100" y="196" class="f-ink2 xs" text-anchor="middle">④ 三张条件图进入生成器</text>
+      </g>
+      <text x="20" y="240" class="f-ink3 xs">1.0 把 RGB / 深度投影经控制分支注入，掩码经 Conv-3D + Linear 与之拼接（Fig. IV）；1.5 把渲染图编码成 Wan 的条件 latent y，掩码最小池化成 m（附录 E.2）。</text>
+    </svg>
+    </div>
+    <figcaption><b>按 Sec. 3.1「Mesh Extraction」与 Sec. 3.2「World Memory Projection」重绘。</b>论文没有说明渲染器（光栅化 / 分辨率）也没有讨论不同层级叶节点相邻处的 T 型接缝——多分辨率 Marching Cubes 在层级边界上通常会有裂缝，这对「作为条件图」影响不大（只是几个像素的空洞），但值得知道。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 05 ROOT EXTENSION -->
+<section class="sec" id="s-extend">
+  <div class="eyebrow"><span class="n">05</span><span class="t">Scene Scale Control</span><span class="line"></span></div>
+  <h2>根扩展：场景无界，地图就跟着长——代价 O(1)</h2>
+  <p class="lead">附录 B.4 藏着一个很漂亮的小机制。OctMap 一开始只覆盖 [−1, 1]³。相机一直往外走怎么办？答案是<b>不搬数据，只加一层根</b>。</p>
+
+  <div class="prose">
+    <p>当新一帧的点落到当前边界 [−L/2, L/2]³ 之外时，新建一棵根边长为 2L 的树，把旧树<b>第 1 级的 8 个节点</b>直接挂到新树<b>第 2 级中央的 8 个位置</b>上。所有旧节点的几何位置、特征、权重原封不动；只是每个节点的层级编号 +1，而根覆盖范围变为 [−L, L]³。
+    因为只动了树顶的 8 个指针，开销是 O(1)；与之相对，均匀 TSDF 遇到同样情况要么预先开一个巨大的体积，要么把整个体积重新分配并搬运。</p>
+    <p>配合上一节的规则看会更清楚：层级 <span class="m">d</span> 是按 <span class="m">ℓ<sub>d</sub> = L/2<sup>d</sup></span> 定义的，根扩展后 <span class="m">L</span> 翻倍、<span class="m">d</span> 加一，<span class="m">ℓ<sub>d</sub></span> 不变——所以「体素跟像素足迹一样细」这条准则在扩展前后保持一致。唯一的上限来自 <span class="m">d<sub>max</sub></span> = 16：每扩展一次，可用的细分层数就少一层。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 8</span><span class="ti">根扩展的二维版：点一下「扩展」，看旧树怎样整体成为新树的中央</span></div>
+    <div class="ctl">
+      <button class="btn primary" id="exBtn" type="button">⤢ 扩展根（L → 2L）</button>
+      <button class="btn" id="exReset" type="button">↺ 重置</button>
+      <span id="exNote" style="color:var(--ink3)">初始：L = 2，边界 [−1, 1]²</span>
+    </div>
+    <div class="figbody" style="padding:14px 18px 6px">
+      <svg viewBox="0 0 720 300" role="img" aria-label="左：空间视图，当前根方框与其四个象限；扩展后新根边长翻倍，旧根的四个象限成为新根 4×4 子格的中央四格。右：树视图，旧的 depth-1 节点挂到新根 depth-2 的中央位置">
+        <g id="exSpace"></g>
+        <g id="exTree"></g>
+      </svg>
+    </div>
+    <div class="readout">
+      <div><div class="k">根边长 L</div><div class="v oct" id="exL">2</div></div>
+      <div><div class="k">边界</div><div class="v" id="exB">[−1, 1]²</div></div>
+      <div><div class="k">扩展次数</div><div class="v" id="exN">0</div></div>
+      <div><div class="k">旧叶节点的层级</div><div class="v" id="exD">d → d</div></div>
+      <div><div class="k">剩余可细分层数</div><div class="v" id="exR">16</div></div>
+    </div>
+    <figcaption><b>按附录 B.4 重绘（二维：8 个节点变 4 个）。</b>橙色高亮的是旧树第 1 级的节点：扩展后它们原地不动，只是从「根的孩子」变成「根的孙子」。首帧点云被归一到 [−0.5, 0.5]³，即根的中央一半（虚线框），这就是留给相机「先走一会儿再扩展」的余量。
+    首页的模拟里相机走出方框时会实时触发这一步。</figcaption>
+  </figure>
+
+  <div class="call warn">
+    <div class="hd">△ 论文自己列出的 OctMap 局限（附录 D.2）</div>
+    <p><b>粗节点不保留特征</b>：只有叶节点有 TSDF / 颜色，所以做不了「远看用粗层、近看用细层」的视角相关 LOD 渲染。<b>没有体素剪枝</b>：没被观测到的、冗余的体素不会被丢弃。<b>全部节点常驻 GPU</b>：场景越大内存越涨——Tab. I 里 505 帧序列的峰值 CUDA 内存 22.93 GB、最终 3466 万个节点；作者把「视角相关的显存卸载」列为关键方向。</p>
+  </div>
+</section>
+<!-- ============================================================ 06 NETWORK -->
+<section class="sec" id="s-net">
+  <div class="eyebrow"><span class="n">06</span><span class="t">Generation Network</span><span class="line"></span></div>
+  <h2>生成网络：借来的骨架，加三条条件通路（1.0），或干脆用骨架原生的接口（1.5）</h2>
+  <p class="lead">论文对生成器的态度很务实：选一个「长时程上下文 + 抗漂移」的预训练模型，然后只加必要的东西。两个版本的取舍不同，值得并排看。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 9</span><span class="ti">架构探索器：点任一模块看它的输入、输出和论文给的细节</span></div>
+    <div class="tabs" role="tablist" aria-label="架构版本">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="p9a" id="t9a">(a) OctWorld-1.0 · FramePack / Hunyuan</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p9b" id="t9b">(b) OctWorld-1.5 · Wan2.1 14B I2V</button>
+    </div>
+    <div class="tabpanel" id="p9a" role="tabpanel" aria-labelledby="t9a">
+    <div class="explore">
+      <div class="figbody" style="padding:14px 14px 10px">
+        <svg viewBox="0 0 460 400" role="img" aria-label="OctWorld-1.0 架构：相机适配器把 Plücker 射线嵌入变成 token 加到目标 latent；Hunyuan 编码器编码历史帧、目标帧、渲染帧；历史帧加噪声增强后经 FramePack 打包嵌入；目标帧加去噪噪声后经 patch 嵌入；渲染帧加噪声增强后与可见性掩码特征拼接，经 patch 嵌入进入控制块；时间步与噪声级相加后调制两类块；文本和参考图编码后进入 Transformer；控制块输出注入 Transformer 块；线性层输出目标 latent">
+          <!-- inputs row -->
+          <g class="node" data-node="cam" tabindex="0" role="button" aria-label="相机适配器">
+            <rect x="8" y="8" width="118" height="92" rx="9" class="fs-C s-C" stroke-width="1.4"/>
+            <text x="67" y="28" class="f-Ci big" text-anchor="middle">相机适配器</text>
+            <text x="67" y="46" class="f-ink2 xs" text-anchor="middle">Plücker 射线嵌入</text>
+            <text x="67" y="60" class="f-ink2 xs" text-anchor="middle">Pixel-Unshuffle</text>
+            <text x="67" y="74" class="f-ink2 xs" text-anchor="middle">Conv-2D（带步长）</text>
+            <text x="67" y="88" class="f-ink2 xs" text-anchor="middle">残差块 ×n</text>
+          </g>
+          <g class="node" data-node="enc" tabindex="0" role="button" aria-label="Hunyuan 编码器">
+            <rect x="140" y="8" width="312" height="40" rx="9" class="f-surf2 s-rule" stroke-width="1.2"/>
+            <text x="296" y="26" class="f-ink big" text-anchor="middle">Hunyuan VAE 编码器（冻结）</text>
+            <text x="296" y="41" class="f-ink3 xs" text-anchor="middle">历史帧 · 目标帧 · 渲染帧 → latent；深度当灰度图复制 3 通道</text>
+          </g>
+          <!-- three latent paths -->
+          <g class="node" data-node="hist" tabindex="0" role="button" aria-label="历史通路">
+            <rect x="140" y="64" width="92" height="82" rx="9" class="fs-H s-H" stroke-width="1.4"/>
+            <text x="186" y="84" class="f-Hi big" text-anchor="middle">历史帧</text>
+            <text x="186" y="102" class="f-ink2 xs" text-anchor="middle">+ ε<tspan dy="3" font-size="7">α</tspan></text>
+            <text x="186" y="118" class="f-ink2 xs" text-anchor="middle">FramePack</text>
+            <text x="186" y="132" class="f-ink2 xs" text-anchor="middle">打包嵌入</text>
+          </g>
+          <g class="node" data-node="tgt" tabindex="0" role="button" aria-label="目标通路">
+            <rect x="248" y="64" width="92" height="82" rx="9" class="fs-T s-T" stroke-width="1.4"/>
+            <text x="294" y="84" class="f-Ti big" text-anchor="middle">目标帧</text>
+            <text x="294" y="102" class="f-ink2 xs" text-anchor="middle">+ ε<tspan dy="3" font-size="7">t</tspan>（流匹配）</text>
+            <text x="294" y="118" class="f-ink2 xs" text-anchor="middle">Patch 嵌入</text>
+            <text x="294" y="132" class="f-ink2 xs" text-anchor="middle">RGB ⊕ 深度通道</text>
+          </g>
+          <g class="node" data-node="rend" tabindex="0" role="button" aria-label="渲染记忆通路">
+            <rect x="356" y="64" width="96" height="82" rx="9" class="fs-O s-O" stroke-width="1.4"/>
+            <text x="404" y="84" class="f-Oi big" text-anchor="middle">渲染帧 + 掩码</text>
+            <text x="404" y="102" class="f-ink2 xs" text-anchor="middle">+ ε<tspan dy="3" font-size="7">α</tspan>；掩码经</text>
+            <text x="404" y="118" class="f-ink2 xs" text-anchor="middle">Conv-3D + Linear</text>
+            <text x="404" y="132" class="f-ink2 xs" text-anchor="middle">拼接 → Patch 嵌入</text>
+          </g>
+          <path d="M186 50 L186 62" class="nofill s-H" stroke-width="1.4" marker-end="url(#ar-h)"/>
+          <path d="M294 50 L294 62" class="nofill s-T" stroke-width="1.4" marker-end="url(#ar-t)"/>
+          <path d="M404 50 L404 62" class="nofill s-O" stroke-width="1.4" marker-end="url(#ar-o)"/>
+          <!-- modulation -->
+          <g class="node" data-node="mod" tabindex="0" role="button" aria-label="时间步与噪声级调制">
+            <rect x="8" y="116" width="118" height="54" rx="9" class="f-surf2 s-rule" stroke-width="1.2"/>
+            <text x="67" y="136" class="f-ink big" text-anchor="middle">T ⊕ α → 调制</text>
+            <text x="67" y="152" class="f-ink2 xs" text-anchor="middle">噪声级经专用条件层</text>
+            <text x="67" y="164" class="f-ink2 xs" text-anchor="middle">投影进时间步嵌入</text>
+          </g>
+          <!-- text/ref -->
+          <g class="node" data-node="txt" tabindex="0" role="button" aria-label="文本与参考图编码">
+            <rect x="8" y="186" width="118" height="54" rx="9" class="f-surf2 s-rule" stroke-width="1.2"/>
+            <text x="67" y="206" class="f-ink big" text-anchor="middle">文本 / 参考图</text>
+            <text x="67" y="222" class="f-ink2 xs" text-anchor="middle">Text Encoder</text>
+            <text x="67" y="234" class="f-ink2 xs" text-anchor="middle">Image Encoder</text>
+          </g>
+          <!-- plus camera into target -->
+          <circle cx="294" cy="176" r="9" class="f-surf s-C" stroke-width="1.4"/>
+          <text x="294" y="180" class="f-Ci xs" text-anchor="middle">+</text>
+          <path d="M126 54 L133 54 L133 176 L283 176" class="nofill s-C" stroke-width="1.3" marker-end="url(#ar-c)"/>
+          <path d="M294 148 L294 166" class="nofill s-T" stroke-width="1.4"/>
+          <!-- control block -->
+          <g class="node" data-node="ctrl" tabindex="0" role="button" aria-label="控制块">
+            <rect x="356" y="200" width="96" height="70" rx="9" class="fs-O s-O" stroke-width="1.6"/>
+            <text x="404" y="224" class="f-Oi big" text-anchor="middle">Control Block</text>
+            <text x="404" y="240" class="f-Oi big" text-anchor="middle">× 4</text>
+            <text x="404" y="258" class="f-ink2 xs" text-anchor="middle">复制自骨架，零初始化投影</text>
+          </g>
+          <path d="M404 148 L404 198" class="nofill s-O" stroke-width="1.4" marker-end="url(#ar-o)"/>
+          <!-- transformer block -->
+          <g class="node" data-node="main" tabindex="0" role="button" aria-label="Transformer 主干">
+            <rect x="140" y="200" width="200" height="110" rx="9" class="fs-T s-T" stroke-width="1.6"/>
+            <text x="240" y="224" class="f-Ti big" text-anchor="middle">Transformer Block × M</text>
+            <text x="240" y="242" class="f-ink2 xs" text-anchor="middle">FramePack F1（Hunyuan DiT，14B）</text>
+            <text x="240" y="258" class="f-ink2 xs" text-anchor="middle">历史 token + 目标 token + 文本 token</text>
+            <text x="240" y="274" class="f-ink2 xs" text-anchor="middle">← 控制块特征逐层注入（VideoPainter 式）</text>
+            <text x="240" y="296" class="f-ink3 xs" text-anchor="middle">总参数 15B（论文正文）/ 14.50B（Tab. II）</text>
+          </g>
+          <path d="M186 148 L186 198" class="nofill s-H" stroke-width="1.4" marker-end="url(#ar-h)"/>
+          <path d="M294 186 L294 198" class="nofill s-T" stroke-width="1.4" marker-end="url(#ar-t)"/>
+          <path d="M354 235 L342 235" class="nofill s-O" stroke-width="1.6" marker-end="url(#ar-o)"/>
+          <path d="M126 213 L138 213" class="nofill s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+          <path d="M126 143 L132 143 L132 250 L138 250" class="nofill s-ink3" stroke-width="1.2" stroke-dasharray="3 2" marker-end="url(#ar-i)"/>
+          <path d="M132 143 L132 120 L404 120" class="nofill s-ink3" stroke-width="0" />
+          <text x="130" y="330" class="f-ink3 xs">调制（T ⊕ α）同时送入 Transformer Block 与 Control Block</text>
+          <!-- output -->
+          <g class="node" data-node="out" tabindex="0" role="button" aria-label="输出">
+            <rect x="140" y="346" width="200" height="44" rx="9" class="f-surf2 s-rule" stroke-width="1.2"/>
+            <text x="240" y="365" class="f-ink big" text-anchor="middle">Linear → 目标 latent（RGB + 深度）</text>
+            <text x="240" y="381" class="f-ink3 xs" text-anchor="middle">输出投影扩通道；VAE 解码得帧与深度图</text>
+          </g>
+          <path d="M240 312 L240 344" class="nofill s-T" stroke-width="1.4" marker-end="url(#ar-t)"/>
+        </svg>
+      </div>
+      <div class="pane" id="netPane">
+        <h5>点击左图任一模块</h5>
+        <p>默认显示：全局说明。OctWorld-1.0 在 FramePack 上做了三处扩展（附录 B.1）：① 扩展 latent 通道以联合预测深度；② 增加接收渲染 RGB / 深度与可见性掩码的<b>控制分支</b>；③ 把噪声级 α 注入 Transformer 层。所有新增通路<b>零初始化</b>，训练开始时骨架行为不变（附录 B.2）。</p>
+      </div>
+    </div>
+    </div>
+    <div class="tabpanel" id="p9b" role="tabpanel" aria-labelledby="t9b" hidden>
+    <div class="figbody">
+      <svg viewBox="0 0 720 300" role="img" aria-label="OctWorld-1.5：从 OctMap 渲染的部分 RGB 经 Wan VAE 编码成条件 latent y，可见性掩码经空间最小池化成 m，与带噪目标 latent x_t 一起送入 Wan2.1 14B I2V 去噪网络；相机条件与历史条件沿用 1.0 的 Plücker 适配器和 FramePack 打包；噪声级按 token 类型分配：锚 token 0、历史 token α、目标 token t，产生逐 token 的 AdaLN 调制；深度由流式 Depth Anything 3 在生成后估计">
+        <!-- inputs -->
+        <rect x="16" y="20" width="150" height="54" rx="9" class="fs-O s-O" stroke-width="1.4"/>
+        <text x="91" y="41" class="f-Oi big" text-anchor="middle">OctMap 渲染的部分 RGB</text>
+        <text x="91" y="59" class="f-ink2 xs" text-anchor="middle">→ Wan VAE 编码 → 条件 latent y</text>
+        <rect x="16" y="86" width="150" height="54" rx="9" class="fs-O s-O" stroke-width="1.4"/>
+        <text x="91" y="107" class="f-Oi big" text-anchor="middle">可见性掩码</text>
+        <text x="91" y="125" class="f-ink2 xs" text-anchor="middle">空间最小池化到 latent 分辨率 → m</text>
+        <rect x="16" y="152" width="150" height="54" rx="9" class="fs-T s-T" stroke-width="1.4"/>
+        <text x="91" y="173" class="f-Ti big" text-anchor="middle">带噪目标 latent x<tspan dy="3" font-size="8">t</tspan></text>
+        <text x="91" y="191" class="f-ink2 xs" text-anchor="middle">扩散时间步 t</text>
+        <rect x="16" y="218" width="150" height="54" rx="9" class="fs-C s-C" stroke-width="1.4"/>
+        <text x="91" y="239" class="f-Ci big" text-anchor="middle">c<tspan dy="3" font-size="8">cam</tspan><tspan dy="-3"> · c</tspan><tspan dy="3" font-size="8">hist</tspan></text>
+        <text x="91" y="257" class="f-ink2 xs" text-anchor="middle">Plücker 适配器 · FramePack 打包（重新初始化）</text>
+        <path d="M168 47 L226 47" class="nofill s-O" stroke-width="1.4" marker-end="url(#ar-o)"/>
+        <path d="M168 113 L226 113" class="nofill s-O" stroke-width="1.4" marker-end="url(#ar-o)"/>
+        <path d="M168 179 L226 179" class="nofill s-T" stroke-width="1.4" marker-end="url(#ar-t)"/>
+        <path d="M168 245 L226 245" class="nofill s-C" stroke-width="1.4" marker-end="url(#ar-c)"/>
+        <!-- network -->
+        <rect x="228" y="20" width="250" height="252" rx="12" class="f-surf2 s-rule" stroke-width="1.2"/>
+        <text x="353" y="46" class="f-ink big" text-anchor="middle">Wan2.1 14B I2V 去噪网络 f<tspan dy="3" font-size="8">θ</tspan></text>
+        <text x="353" y="66" class="f-ink2 xs" text-anchor="middle">原生条件接口：(x, m, y) 预训练即支持</text>
+        <text x="353" y="80" class="f-ink2 xs" text-anchor="middle">I2V / 续写 / 首尾帧插值 → 现在是「按部分观察续写」</text>
+        <rect x="244" y="96" width="218" height="96" rx="8" class="fs-C s-C" stroke-width="1.2"/>
+        <text x="353" y="116" class="f-Ci big" text-anchor="middle">逐 token 噪声级 r<tspan dy="3" font-size="8">i</tspan><tspan dy="-3"> → AdaLN</tspan></text>
+        <text x="353" y="136" class="f-ink2 xs" text-anchor="middle">锚 token（干净首帧）：r = 0</text>
+        <text x="353" y="152" class="f-ink2 xs" text-anchor="middle">历史 token：r = α（噪声增强级）</text>
+        <text x="353" y="168" class="f-ink2 xs" text-anchor="middle">目标 token：r = t（扩散时间步）</text>
+        <text x="353" y="184" class="f-ink3 xs" text-anchor="middle">1.0 是把 α 全局加进时间步嵌入</text>
+        <text x="353" y="216" class="f-ink2 xs" text-anchor="middle">v̂ = f<tspan dy="3" font-size="8">θ</tspan><tspan dy="-3">(x</tspan><tspan dy="3" font-size="8">t</tspan><tspan dy="-3">, t; y, m, c</tspan><tspan dy="3" font-size="8">cam</tspan><tspan dy="-3">, c</tspan><tspan dy="3" font-size="8">hist</tspan><tspan dy="-3">)</tspan></text>
+        <text x="353" y="240" class="f-ink3 xs" text-anchor="middle">没有额外的控制分支——直接复用 Wan 预训练学到的条件机制</text>
+        <text x="353" y="256" class="f-ink3 xs" text-anchor="middle">单阶段联合训练所有条件模块（附录 E.2）</text>
+        <!-- outputs -->
+        <path d="M480 146 L538 146" class="nofill s-T" stroke-width="1.4" marker-end="url(#ar-t)"/>
+        <rect x="540" y="118" width="164" height="56" rx="9" class="fs-T s-T" stroke-width="1.4"/>
+        <text x="622" y="140" class="f-Ti big" text-anchor="middle">RGB 块（不含深度）</text>
+        <text x="622" y="158" class="f-ink2 xs" text-anchor="middle">Wan VAE 解码</text>
+        <path d="M622 176 L622 206" class="nofill s-H" stroke-width="1.4" marker-end="url(#ar-h)"/>
+        <rect x="540" y="208" width="164" height="64" rx="9" class="fs-H s-H" stroke-width="1.4"/>
+        <text x="622" y="230" class="f-Hi big" text-anchor="middle">流式 Depth Anything 3</text>
+        <text x="622" y="248" class="f-ink2 xs" text-anchor="middle">长程流式深度估计（附录 E.1）</text>
+        <text x="622" y="262" class="f-ink2 xs" text-anchor="middle">→ 与 RGB 一起积分进 OctMap</text>
+        <text x="16" y="292" class="f-ink3 xs">1.5 只在 DL3DV 上训练（15 fps，每段 ≤ 961 帧），16 张 H100 FSDP、batch 64、仅 7,000 步（附录 E.3）；项目页所有视频均来自 1.5。</text>
+      </svg>
+    </div>
+    </div>
+    <figcaption><b>(a) 按论文 Fig. IV 与附录 B.1–B.2 重绘；(b) 按附录 E 重绘。</b>两版最本质的区别是「记忆投影怎么进模型」：1.0 造了一条 VideoPainter 式的控制分支（4 个复制的 DiT 块）；1.5 发现 Wan2.1 的 I2V 接口天然就是「给一张部分观察和掩码，把剩下的补出来」，于是不再加分支。
+    第二个区别是深度：1.0 联合生成（要扩通道、要训练更久），1.5 交给外部流式估计器（附录 E.1 说这样「微调步数更少，也避免联合预测可能带来的性能下降」）。</figcaption>
+  </figure>
+
+  <h3><span class="ix">6.1</span>1.0 的四个条件细节</h3>
+  <div class="tbl"><table>
+    <thead><tr><th style="width:22%">条件</th><th>做法（Sec. 3.2）</th><th style="width:30%">我读到的用意</th></tr></thead>
+    <tbody>
+      <tr><td><b>世界记忆投影</b></td><td>OctMap → 网格 → 渲染到目标视角的部分 RGB / 深度 + 可见性掩码；经「骨架特有的条件通路」注入（1.0：复制的 DiT 块作控制分支，VideoPainter 式）</td><td>空间条件。可见区域告诉模型「必须画成这样」，掩码为 0 的区域告诉模型「随便画但要连得上」</td></tr>
+      <tr><td><b>历史帧打包</b></td><td>继承 FramePack：按时间远近分组，越久远的帧在时间维压得越狠，最终得到<b>定长</b>的 latent 上下文</td><td>时间条件。上下文长度不随历史增长，这是长程生成能跑下去的前提</td></tr>
+      <tr><td><b>深度归一化</b></td><td>用<b>历史帧的最大深度</b>归一化再乘常数，映射到 [0, 1]（大 = 远）；深度复制成 3 通道灰度图过 Hunyuan VAE；深度 latent 与 RGB latent 通道拼接，patch 嵌入与输出投影相应扩维</td><td>「用历史的最大深度」是为了和推理一致——推理时没有未来帧可用。这也是尺度传递的通道：新块深度的尺度锚在历史上</td></tr>
+      <tr><td><b>相机控制</b></td><td>内外参归一到<b>最后一个历史帧</b>的坐标系；每个生成窗口算 Plücker 射线嵌入；小卷积适配器（pixel-unshuffle → 带步长卷积 → 若干残差块）；结果<b>加到</b>目标 latent 上</td><td>相对位姿而非绝对位姿，让模型只需学「从这里往哪走」；相加而非拼接，保持 token 数不变</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============================================================ 07 TRAINING -->
+<section class="sec" id="s-train">
+  <div class="eyebrow"><span class="n">07</span><span class="t">Noise Augmentation &amp; Data</span><span class="line"></span></div>
+  <h2>噪声增强与训练数据：让模型在训练时就见过「不完美的历史」</h2>
+  <p class="lead">自回归生成有一个经典的训练–推理落差：训练时历史是真值，推理时历史是自己生成的。OctWorld 用 GameNGen 一系的<b>噪声条件</b>策略来缩小它，而且同时加在两条历史通路上。</p>
+
+  <h3><span class="ix">7.1</span>噪声增强：11 档 α</h3>
+  <div class="eq"><i>α</i> ∈ { <i>x</i> · 0.7 / 10 | <i>x</i> = 0, 1, …, 10 } = { 0, 0.07, 0.14, …, 0.70 }
+    <small>训练时随机采样一档，用它缩放加到「投影记忆」和「打包上下文」上的标准高斯噪声，同时把 α 作为条件送进网络（Sec. 3.2、附录 B.2）。推理时固定一档：1.0 用第 3 档，1.5 用第 0 档。</small></div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 10</span><span class="ti">推理噪声级的取舍：空间细节 vs 三维一致性（Tab. 4b / Tab. V）</span></div>
+    <div class="ctl">
+      <span>推理噪声级</span>
+      <div class="seg" id="nzSeg" role="group" aria-label="噪声级">
+        <button type="button" data-lv="0" aria-pressed="false">0</button>
+        <button type="button" data-lv="3" aria-pressed="true">3（1.0 默认）</button>
+        <button type="button" data-lv="5" aria-pressed="false">5</button>
+      </div>
+      <span id="nzAlpha" style="color:var(--ink3)">α ≈ 0.21（第 3 档 = 3 × 0.07；我的推算）</span>
+    </div>
+    <div class="bars" id="nzBars"></div>
+    <figcaption><b>数据来自 Tab. 4b（OctWorld-1.0，Re10K 往返 + WorldScore）与 Tab. V（Re10K LPIPS，1.0 vs 1.5）。</b>1.0 的曲线是一个真实的权衡：噪声级越低，LPIPS / CD 越好（细节保留），但 3D 一致性从 71.67 掉到 67.18；作者选第 3 档。
+    1.5 在每一档都有更低的 LPIPS，而且<b>不加噪声反而最好</b>——所以 1.5 的 WorldScore 实验全部用 0 档。「第 3 档 ⇒ α ≈ 0.21」是我按 11 档公式的推算，论文只说「level 3」。</figcaption>
+  </figure>
+
+  <h3><span class="ix">7.2</span>训练数据：三个来源，两级过滤</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 11</span><span class="ti">数据漏斗：从公开视频到「静态、几何可靠、光照稳定」的 RGB-D 训练段</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 340" role="img" aria-label="训练数据流程：来源 RealEstate10K、DL3DV 前十子集、SpatialVID HQ 子集；静态过滤用数据集元数据、Keye-VL 视觉语言模型和人脸检测；Pi3 估计深度置信度与轨迹并做片段级过滤；TransNetV2 过滤镜头切换；段级亮度过滤；GPT-4o 生成描述">
+      <!-- sources -->
+      <rect x="16" y="16" width="200" height="88" rx="10" class="fs-H s-H" stroke-width="1.4"/>
+      <text x="116" y="38" class="f-Hi big" text-anchor="middle">来源（Sec. 4.1，附录 B.3）</text>
+      <text x="116" y="58" class="f-ink2 xs" text-anchor="middle">RealEstate10K 训练集</text>
+      <text x="116" y="74" class="f-ink2 xs" text-anchor="middle">DL3DV 前 10 个子集（第 11 个留作验证）</text>
+      <text x="116" y="90" class="f-ink2 xs" text-anchor="middle">SpatialVID 的 HQ 子集</text>
+      <!-- static filter -->
+      <path d="M218 60 L250 60" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="252" y="16" width="220" height="88" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="362" y="38" class="f-ink big" text-anchor="middle">去动态、去人</text>
+      <text x="362" y="56" class="f-ink2 xs" text-anchor="middle">SpatialVID 元数据：dynamicRatio ≤ 0.2</text>
+      <text x="362" y="70" class="f-ink2 xs" text-anchor="middle">crowdDensity = desert（只留无人场景）</text>
+      <text x="362" y="84" class="f-ink2 xs" text-anchor="middle">Keye-VL-1.5 问答：动态 / 人 / 手 → 剔除</text>
+      <text x="362" y="98" class="f-ink2 xs" text-anchor="middle">RetinaFace：含人脸的片段剔除</text>
+      <!-- geometry -->
+      <path d="M474 60 L506 60" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="508" y="16" width="196" height="88" rx="10" class="fs-O s-O" stroke-width="1.4"/>
+      <text x="606" y="38" class="f-Oi big" text-anchor="middle">Pi3：深度 · 置信度 · 轨迹</text>
+      <text x="606" y="58" class="f-ink2 xs" text-anchor="middle">片段级：MCV ≥ 0.16</text>
+      <text x="606" y="72" class="f-ink2 xs" text-anchor="middle">HCPR ≥ 0.42（像素阈值 τ = 0.1）</text>
+      <text x="606" y="90" class="f-ink2 xs" text-anchor="middle">TransNetV2 最大转场分 ≤ 0.5</text>
+      <!-- segment -->
+      <path d="M606 106 L606 138" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="508" y="140" width="196" height="70" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="606" y="162" class="f-ink big" text-anchor="middle">采样训练段 + 段级过滤</text>
+      <text x="606" y="180" class="f-ink2 xs" text-anchor="middle">相邻帧平均亮度差的最大值 &gt; 22 → 丢弃</text>
+      <text x="606" y="196" class="f-ink2 xs" text-anchor="middle">段内切成历史帧 / 目标帧</text>
+      <!-- captions -->
+      <path d="M506 175 L474 175" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="252" y="140" width="220" height="70" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="362" y="162" class="f-ink big" text-anchor="middle">条件构造</text>
+      <text x="362" y="180" class="f-ink2 xs" text-anchor="middle">历史帧建 OctMap → 渲染到目标视角</text>
+      <text x="362" y="196" class="f-ink2 xs" text-anchor="middle">视频级文本描述：GPT-4o</text>
+      <!-- training -->
+      <path d="M250 175 L218 175" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="16" y="126" width="200" height="98" rx="10" class="fs-T s-T" stroke-width="1.4"/>
+      <text x="116" y="148" class="f-Ti big" text-anchor="middle">训练（OctWorld-1.0）</text>
+      <text x="116" y="166" class="f-ink2 xs" text-anchor="middle">阶段 1：16×480×832，80K 步</text>
+      <text x="116" y="180" class="f-ink2 xs" text-anchor="middle">阶段 2：36×480×832，30K 步</text>
+      <text x="116" y="194" class="f-ink2 xs" text-anchor="middle">AdamW，lr 2×10⁻⁵，batch 64</text>
+      <text x="116" y="208" class="f-ink2 xs" text-anchor="middle">32 × H100；总参数 15B</text>
+      <!-- 1.5 -->
+      <rect x="16" y="244" width="688" height="60" rx="10" class="f-surf2 s-rule" stroke-width="1" stroke-dasharray="5 4"/>
+      <text x="30" y="266" class="f-ink big">OctWorld-1.5 的数据（附录 E.3）</text>
+      <text x="30" y="286" class="f-ink2 xs">只用 DL3DV；每段视频统一到 15 fps、切成 ≤ 961 帧的片段；<tspan class="f-Oi" font-weight="600">训练时渲染部分观察与掩码的算法与推理完全相同</tspan>，消除空间条件的训练 / 测试差异。FSDP，16 × H100，batch 64，7,000 步。</text>
+      <text x="16" y="328" class="f-ink3 xs">所有阈值均为论文原文；MCV = 平均置信度，HCPR = 高置信像素比例（沿用 4DNeX 的定义）。</text>
+    </svg>
+    </div>
+    <figcaption><b>按 Sec. 4.1 与附录 B.2–B.3、E.3 整理。</b>值得注意的是数据被刻意做成<b>静态</b>的——去动态、去人、去手、去脸。这既是 OctMap 的前提（TSDF 融合假设场景不动），也是论文自认的边界：不支持动态物体（附录 D.2）。</figcaption>
+  </figure>
+
+  <div class="call key">
+    <div class="hd">◆ 零初始化：新通路一开始「不存在」</div>
+    <p>所有新增条件通路遵循零初始化（附录 B.2）：改动过的线性层 / 卷积层里新加的权重置零；控制分支在注入主干之前过一个零初始化的投影。这保证训练第 0 步时模型就是原来的 FramePack，条件是<b>渐进地</b>学进去的——和 ControlNet 的零卷积是同一个思路。</p>
+  </div>
+</section>
+<!-- ============================================================ 08 INFERENCE -->
+<section class="sec" id="s-infer">
+  <div class="eyebrow"><span class="n">08</span><span class="t">Inference Loop &amp; Cost</span><span class="line"></span></div>
+  <h2>推理闭环与开销：每 36 帧一圈，地图在圈里长，时间主要花在去噪上</h2>
+  <p class="lead">Algorithm 1 只有 13 行，但它决定了系统的交互粒度：<b>轨迹按生成窗口切块，一块 36 帧</b>；每块先渲染记忆、再生成、再把结果融回地图。下面逐步走一遍。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 12</span><span class="ti">Algorithm 1 逐步执行：按「下一步」推进，右侧同步高亮</span></div>
+    <div class="ctl">
+      <div class="stepper">
+        <button class="btn" id="stPrev" type="button">← 上一步</button>
+        <button class="btn primary" id="stNext" type="button">下一步 →</button>
+        <button class="btn" id="stAuto" type="button">▶ 自动</button>
+        <span class="st" id="stLab">块 k = 1 · 第 1 步</span>
+      </div>
+    </div>
+    <div class="explore">
+      <div class="figbody" style="padding:14px 14px 10px">
+        <svg viewBox="0 0 440 300" role="img" aria-label="推理闭环示意：OctMap、网格渲染、视频生成器、深度获取、积分、历史更新六个节点围成一圈，当前步骤高亮">
+          <g id="stG"></g>
+        </svg>
+      </div>
+      <div class="alg" id="stAlg" style="border-top:0; border-left:1px solid var(--rule)">
+        <div data-i="0"><span class="c">1–3</span>  M₀ ← Integrate(I₀, D₀)；H₀ ← I₀</div>
+        <div data-i="1"><span class="c">4</span>    把轨迹 T 切成 K 块 {c₁ … c_K}</div>
+        <div data-i="2"><span class="c">6</span>    G_mesh ← ExtractMesh(M_{k−1})</div>
+        <div data-i="3"><span class="c">7</span>    S_k ← MeshRendering(G_mesh, c_k)</div>
+        <div data-i="4"><span class="c">8</span>    G_k^RGB ← VideoGenerator(S_k, H_{k−1}, c_k)</div>
+        <div data-i="5"><span class="c">9</span>    G_k^D ← DepthAcquisition(G_k^RGB)</div>
+        <div data-i="6"><span class="c">10</span>   M_k ← Integrate(M_{k−1}, G_k^RGB, G_k^D)</div>
+        <div data-i="7"><span class="c">11</span>   H_k ← H_{k−1} ∪ G_k^RGB　→ k+1</div>
+        <div data-i="8"><span class="c">13</span>   return H_K</div>
+      </div>
+    </div>
+    <figcaption><b>按论文 Algorithm 1 重绘。</b>首帧深度 D₀ 来自单目估计（MoGe；附录 A.4 比较了 MoGe / Pi3 / 加噪 MoGe，模型在一块之内就能把噪声深度「纠正」过来）。
+    注意第 4 行：轨迹是<b>事先</b>切好的——论文的失败案例正与此有关（Sec. 10）。</figcaption>
+  </figure>
+
+  <h3><span class="ix">8.1</span>时间与显存都花在哪</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>项</th><th class="num">值</th><th>条件</th><th>出处</th></tr></thead>
+    <tbody>
+      <tr><td>单步去噪</td><td class="num">3.6 s</td><td>单张 A100</td><td>Sec. 4.1</td></tr>
+      <tr><td>OctMap 显存</td><td class="num">1–10 GB</td><td>随场景尺度与观察距离变化</td><td>Sec. 4.1</td></tr>
+      <tr><td>RGB-D 积分速度</td><td class="num">4–6 FPS</td><td>—</td><td>Sec. 4.1</td></tr>
+      <tr><td>每块积分时间</td><td class="num">7.36 s</td><td>36 帧 / 块，17 段 505 帧序列平均</td><td>Tab. I</td></tr>
+      <tr><td>每块网格提取</td><td class="num">4.60 s</td><td>同上</td><td>Tab. I</td></tr>
+      <tr><td>OctMap 峰值 CUDA 内存</td><td class="num">22.93 GB</td><td>整段 505 帧序列</td><td>Tab. I</td></tr>
+      <tr><td>最终节点总数</td><td class="num">34,659 K</td><td>含所有内部节点与叶节点</td><td>Tab. I</td></tr>
+      <tr class="hl"><td><b>整体推理速度</b></td><td class="num"><b>0.136 FPS</b></td><td>首块设定；14.50B 参数；运行显存 51 GB</td><td>Tab. II</td></tr>
+    </tbody>
+  </table></div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 13</span><span class="ti">一块要多久：把已知的分项加起来，再和 Tab. II 反推的每块时间对一对</span></div>
+    <div class="ctl">
+      <label>去噪步数 <input type="range" id="ccSteps" min="4" max="80" value="25" step="1"><span class="val" id="ccStepsV">25</span></label>
+      <label>单步 s <input type="range" id="ccStep" min="1" max="6" value="3.6" step="0.1"><span class="val" id="ccStepV">3.6</span></label>
+      <label>积分 s <input type="range" id="ccInt" min="0" max="15" value="7.36" step="0.01"><span class="val" id="ccIntV">7.36</span></label>
+      <label>网格 s <input type="range" id="ccMesh" min="0" max="10" value="4.6" step="0.1"><span class="val" id="ccMeshV">4.6</span></label>
+      <button class="btn" id="ccReset" type="button">↺ 论文值</button>
+    </div>
+    <div class="figbody chart" style="padding:10px 18px 4px">
+      <svg id="ccChart" viewBox="0 0 720 150" role="img" aria-label="一块 36 帧的时间分解条：去噪、OctMap 积分、网格提取，以及 Tab. II 反推的参考总时长"></svg>
+    </div>
+    <div class="readout">
+      <div><div class="k">每块合计</div><div class="v oct" id="ccTot">—</div></div>
+      <div><div class="k">等效 FPS（36 帧 / 块）</div><div class="v" id="ccFps">—</div></div>
+      <div><div class="k">433 帧需要</div><div class="v" id="cc433">—</div></div>
+      <div><div class="k">Tab. II 反推：36 / 0.136</div><div class="v" id="ccRef">≈ 265 s</div></div>
+    </div>
+    <figcaption><b>这是我的估算工具，不是论文的表。</b>论文没有给去噪步数，也没说 Tab. II 用的是哪块 GPU；已知的只有 A100 单步 3.6 s、每块积分 7.36 s、网格提取 4.60 s。按 25 步算，去噪 90 s + OctMap 12 s ≈ 102 s / 块，与 Tab. II 反推的 ≈ 265 s 差一倍多——差额可能来自 CFG（每步两次前向）、VAE 编解码、条件编码或不同硬件。
+    结论性的部分很清楚：<b>OctMap 只占每块时间的一成左右</b>（论文原话「只引入 4–6 FPS 的边际开销」），瓶颈在视频骨架。</figcaption>
+  </figure>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 14</span><span class="ti">与基线的效率对照（Tab. II，首块设定）</span></div>
+    <div class="bars" id="effBars"></div>
+    <figcaption>OctWorld 是五个方法里参数最多、显存最高的；速度居中（比 Voyager 快、比 Aether / VMem 慢）。作者的说法是「没有显著差距」——参数量确实与 Voyager 同量级，但 51 GB 显存意味着单卡 A100 40G 跑不了。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 09 EXPERIMENTS -->
+<section class="sec" id="s-exp">
+  <div class="eyebrow"><span class="n">09</span><span class="t">Experiments</span><span class="line"></span></div>
+  <h2>实验与消融：三维一致性最高，相机控制第二，「记忆表示」的消融最有说服力</h2>
+  <p class="lead">三组主实验分别回答三个问题：整体生成质量（WorldScore）、回访是否一致（Re10K 往返）、长轨迹下人更喜欢谁（用户研究）。消融则把「记忆表示」和「噪声级」单独拎出来。除 Tab. IV / V 外所有「Ours」均为 OctWorld-1.0。</p>
+
+  <h3><span class="ix">9.1</span>WorldScore：200 个静态写实场景，每场景 3 次转向、108 帧</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 15</span><span class="ti">Tab. 1 · 八个维度分开看（OctWorld 蓝色，其余灰色；数值越高越好）</span></div>
+    <div class="bars" id="wsBars"></div>
+    <figcaption><b>数据：Tab. 1。</b>协议（Sec. 4.2，附录 C.1）：WorldScore 静态 split 的写实子集，取相机转向次数 ≥ 3 的 200 个场景；每次转向生成 36 帧，共 108 帧/场景。基线各按自己的块长适配同一条轨迹：Gen3C 补到 121 帧一块；Voyager（49 帧）与 Aether（41 帧）不支持跨块，轨迹被插值压缩到一块内；VMem 在 109 帧设定下频繁失败，相机速度被调快 4 倍。
+    OctWorld 在 <b>3D 一致性</b>（重投影误差）和<b>光度一致性</b>（前后向光流）上最高，相机控制与风格一致性第二；内容对齐 6.37 与 Gen3C / VMem 同样低——这三者都是「按相机走」的模型，文本几乎不起作用（1.5 把它提到 35.45，见 9.5）。</figcaption>
+  </figure>
+
+  <h3><span class="ix">9.2</span>回访一致性：Re10K 往返轨迹</h3>
+  <div class="prose">
+    <p>取 Re10K 测试集里最长的 80 段视频，统一帧率后约 120 帧，再<b>接上它的反向轨迹</b>——先走过去，再原路退回。
+    评两件事：同一相机位姿上前向帧与后向帧的 <b>LPIPS</b>（外观是否一致），以及用 VGGT 分别从前半段和后半段重建点云、各取 65,536 个最远点采样、归一到 [−1, 1] 后的 <b>Chamfer 距离</b>（几何是否一致，式 I，L1 范数）。只有支持跨块生成的方法能参赛：Gen3C 与 VMem。</p>
+  </div>
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 16</span><span class="ti">Tab. 2 回访一致性（越低越好）· Tab. 3 用户研究偏好（越高越好）</span></div>
+    <div class="bars" id="memBars"></div>
+    <figcaption><b>数据：Tab. 2、Tab. 3。</b>用户研究：17 个开阔户外场景、两条长轨迹（正文写「各 433 帧」，附录 C.3 更正为 433 与 505 帧）、22 名参与者各做 20 组三选一（Fig. V 的界面：输入图 + 文本 + 相机路径描述，三段匿名等长视频随机排序）。
+    VMem 在长块设定下「难以生成合理结果」，几乎没人选它。</figcaption>
+  </figure>
+
+  <h3><span class="ix">9.3</span>消融：记忆表示与噪声级</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 17</span><span class="ti">Tab. 4a · 换掉 OctMap 会怎样（Re10K 往返，越低越好）</span></div>
+    <div class="bars" id="abBars"></div>
+    <figcaption><b>数据：Tab. 4a。</b>「f#」是每块推理帧数。三件事可以读出来：① 同为 16 帧，TSDF 优于点云（点云融合会产生噪声纹样，Fig. 6b）；② 36 帧一块比 16 帧好，说明块内的时间上下文本身就有用；③ 在 36 帧下，<b>完全去掉空间条件</b>（w/o OctMap）得到 0.213 / 0.053，比均匀 TSDF 的 0.200 / 0.035 差，而且定性上「无法提供精确的相机控制」（Fig. 6b）；OctMap 把 LPIPS 再压到 0.141、CD 到 0.025——比均匀 TSDF 好 30% 左右，这一步才是本文的贡献所在。
+    均匀 TSDF 这里用 λ = 0.007（附录 C.4）——这是它的「便宜档」，不是 Tab. 5 里的最细档。</figcaption>
+  </figure>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 18</span><span class="ti">Tab. 5 · 只看建图本身：把记忆投影回原视角的重投影质量 vs 代价</span></div>
+    <div class="figbody chart cwrap" style="padding:10px 18px 4px">
+      <svg id="t5Chart" viewBox="0 0 720 260" role="img" aria-label="散点图：横轴积分时的峰值显存 GB，纵轴重投影 PSNR dB；点云、四档均匀 TSDF、OctMap；TSDF 0.001 OOM 标在右侧"></svg>
+      <div class="ttip" id="t5Tip"></div>
+    </div>
+    <div class="tbl" style="margin:0; border:0; border-radius:0; border-top:1px solid var(--rule)"><table>
+      <thead><tr><th>记忆</th><th>体素</th><th class="num">PSNR↑</th><th class="num">SSIM↑</th><th class="num">LPIPS↓</th><th class="num">显存 GB↓</th><th class="num">时间 s↓</th></tr></thead>
+      <tbody>
+        <tr><td>点云</td><td>—</td><td class="num">19.89</td><td class="num">0.57</td><td class="num">0.38</td><td class="num">6.11</td><td class="num">18.58</td></tr>
+        <tr><td>TSDF</td><td>0.007</td><td class="num">20.47</td><td class="num">0.61</td><td class="num">0.44</td><td class="num">1.37</td><td class="num">1.42</td></tr>
+        <tr><td>TSDF</td><td>0.004</td><td class="num">21.32</td><td class="num">0.65</td><td class="num">0.39</td><td class="num">1.97</td><td class="num">3.15</td></tr>
+        <tr><td>TSDF</td><td>0.002</td><td class="num">22.08</td><td class="num">0.69</td><td class="num">0.33</td><td class="num">9.66</td><td class="num">16.97</td></tr>
+        <tr><td>TSDF</td><td>0.001</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">OOM</td><td class="num">—</td></tr>
+        <tr class="hl"><td><b>OctMap</b></td><td>自适应</td><td class="num best">23.47</td><td class="num best">0.74</td><td class="num best">0.27</td><td class="num">7.26</td><td class="num">17.94</td></tr>
+      </tbody>
+    </table></div>
+    <figcaption><b>数据：Tab. 5。</b>100 个随机 SpatialVID 场景，RGB-D 融合后投影回原相机与真值比（无效区域涂白），单张 80 GB A100；时间含积分 + 网格提取 + 渲染。
+    读法：均匀 TSDF 的 PSNR 随 λ 变小单调上升，但显存从 1.37 GB 跳到 9.66 GB 再 OOM——这就是立方增长；OctMap 用与 λ = 0.002 相当的显存和时间拿到高出 1.4 dB 的 PSNR、更好的 SSIM / LPIPS。点云则是「又贵又差」。
+    悬停看数值。</figcaption>
+  </figure>
+
+  <h3><span class="ix">9.4</span>基线设定（附录 Tab. III）</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>方法</th><th>分辨率 W×H</th><th class="num">每块帧数</th><th>自回归</th><th>相机控制层级</th><th>首帧深度</th></tr></thead>
+    <tbody>
+      <tr><td>Gen3C</td><td>1280 × 704</td><td class="num">121</td><td>✓</td><td>Warp 帧</td><td>MoGe</td></tr>
+      <tr><td>Voyager</td><td>768 × 512</td><td class="num">49</td><td>✗（无官方跨块管线；仅报单块）</td><td>Warp 帧</td><td>MoGe</td></tr>
+      <tr><td>Aether</td><td>720 × 480</td><td class="num">41</td><td>✗</td><td>相机嵌入</td><td>—</td></tr>
+      <tr><td>VMem</td><td>576 × 576</td><td class="num">4</td><td>✓</td><td>检索帧</td><td>—</td></tr>
+      <tr class="hl"><td><b>OctWorld</b></td><td>832 × 480</td><td class="num">36</td><td>✓</td><td>Warp 帧（OctMap 渲染）</td><td>MoGe</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">所有方法的输入先裁成 16:9、缩放到 1280 × 720，用同一个 MoGe 深度定义轨迹尺度，再各自适配到自己的输入格式；WorldScore 指标与分辨率无关，故按各自原生分辨率评测（附录 C.1）。附录 A.3 还定性比较了 InvisibleStitch（warp-inpaint）和动作条件模型 OASIS / Hunyuan-GameCraft（把「aaaddd」左右动作映射成近似轨迹）：前者长轨迹下难出合理结果，后两者分别漂移、控不准。</p>
+
+  <h3><span class="ix">9.5</span>1.0 vs 1.5：换骨架换来了什么</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 19</span><span class="ti">Tab. IV · WorldScore 八维（1.0 灰 → 1.5 蓝）</span></div>
+    <div class="bars" id="verBars"></div>
+    <figcaption><b>数据：Tab. IV。</b>1.5 在总分（50.31 → 56.02）、相机、物体、内容对齐、风格、主观质量上全面提高——内容对齐从 6.37 跳到 35.45 是 Wan2.1 文本能力带来的；但 <b>3D 一致性（71.67 → 64.93）和光度一致性（77.01 → 70.97）下降</b>。作者的解释：WorldScore 静态 split 的文本会在很短的相机运动里要求塞进很多内容，忠实执行文本就会生成「空间上不合理、过于紧凑」的布局，于是文本对齐与三维一致性之间出现了权衡。
+    我的补充：1.5 不预测深度、只训了 7,000 步、只用 DL3DV——这三点也都可能影响一致性指标，论文没有拆开。</figcaption>
+  </figure>
+</section>
+<!-- ============================================================ 10 LIMITATIONS -->
+<section class="sec" id="s-crit">
+  <div class="eyebrow"><span class="n">10</span><span class="t">Failure, Limitations &amp; My Reservations</span><span class="line"></span></div>
+  <h2>失败案例、局限，以及我读下来的保留意见</h2>
+  <p class="lead">附录 D 是全文写得最诚实的部分：一个具体的失败案例、三条 OctMap 的结构性局限、两条 OctWorld 的边界。先按原文整理，再补我的意见。</p>
+
+  <h3><span class="ix">10.1</span>论文自己的失败案例（Fig. VI）</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 20</span><span class="ti">轨迹撞上自己生成的墙：块内条件看不见块外的路</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 720 200" role="img" aria-label="示意：预设轨迹穿过一个门洞，但上一块把这里生成成了实心墙，于是下一块的相机条件与记忆投影冲突，产生漂移伪影">
+      <rect x="16" y="16" width="330" height="150" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="181" y="38" class="f-ink big" text-anchor="middle">块 k−1：这里被生成成一面实墙</text>
+      <rect x="60" y="60" width="240" height="26" class="f-ink3" opacity=".7"/>
+      <rect x="150" y="60" width="60" height="26" fill="url(#hatch-s)" opacity=".8"/>
+      <text x="180" y="108" class="f-Si xs" text-anchor="middle">真值里这是一个门洞</text>
+      <path d="M180 150 L180 92" class="nofill s-C" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#ar-c)"/>
+      <text x="196" y="140" class="f-Ci xs">预设轨迹 c<tspan dy="3" font-size="7">k</tspan><tspan dy="-3">：穿过去</tspan></text>
+      <rect x="374" y="16" width="330" height="150" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="539" y="38" class="f-ink big" text-anchor="middle">块 k：两个条件打架</text>
+      <text x="539" y="66" class="f-ink2 xs" text-anchor="middle">记忆投影说：前方是墙（OctMap 已经把它融合进去了）</text>
+      <text x="539" y="84" class="f-ink2 xs" text-anchor="middle">相机条件说：相机将穿过这个位置</text>
+      <text x="539" y="112" class="f-Si xs" text-anchor="middle" font-weight="600">→ 视觉漂移伪影</text>
+      <text x="539" y="140" class="f-ink3 xs" text-anchor="middle">作者给的方向：把「单块之外的全局轨迹」也注入模型，</text>
+      <text x="539" y="154" class="f-ink3 xs" text-anchor="middle">让它在生成第 k−1 块时就知道相机之后要穿过这里</text>
+      <text x="16" y="190" class="f-ink3 xs">按附录 D.1 的文字重绘（原图为真值帧与生成帧对照）。根因：模型「只在局部块内处理轨迹条件」——它没有长期的空间预见。</text>
+    </svg>
+    </div>
+    <figcaption>这个失败案例很能说明 OctMap 的性质：记忆一旦融合进去就<b>很难被推翻</b>——权重累加意味着后来的观察越来越难改变旧的表面（式 1）。这在回访时是优点（稳定），在需要「纠错」时是缺点。</figcaption>
+  </figure>
+
+  <h3><span class="ix">10.2</span>论文列出的局限（附录 D.2）</h3>
+  <div class="tbl"><table>
+    <thead><tr><th style="width:28%">局限</th><th>后果</th><th>作者给的方向</th></tr></thead>
+    <tbody>
+      <tr><td><b>粗节点不保留特征</b></td><td>无法做视角相关的 LOD 渲染（远看时把细体素聚合成粗表示）</td><td>为粗节点聚合特征</td></tr>
+      <tr><td><b>没有体素剪枝</b></td><td>未观测、冗余的体素一直占内存</td><td>设计剪枝策略</td></tr>
+      <tr><td><b>全部节点常驻 GPU</b></td><td>场景越大显存越涨（Tab. I：505 帧 → 22.93 GB 峰值）</td><td>视角相关的显存卸载</td></tr>
+      <tr><td><b>质量受限于数据与骨架</b></td><td>—</td><td>更大更好的数据、更强的长时程骨架</td></tr>
+      <tr><td><b>只支持静态场景</b></td><td>不能生成、也不能记忆动态物体；4D 与动态世界记忆是开放问题</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="ix">10.3</span>我的保留意见</h3>
+  <div class="prose">
+    <ol>
+      <li><b>「可探索」是离线意义上的。</b>轨迹由用户<b>事先</b>给定并切块（Algorithm 1 第 4 行）；虽然逐块自回归在原理上允许每块再给下一段轨迹，但 0.136 FPS（Tab. II 反推约 4.4 分钟一块）下这不是交互。摘要里的 explorable 应读作「可以离线生成任意轨迹」。</li>
+      <li><b>记忆只和深度一样好，而深度尺度的漂移没有被评估。</b>相机位姿是给定的，所以 OctMap 唯一的误差来源就是生成 / 估计的深度。附录 A.4 证明了模型能在一块内纠正<b>首帧</b>的噪声深度，但没有实验考察长轨迹上深度<b>尺度</b>缓慢漂移时融合会怎样——TSDF 的加权平均对随机噪声很鲁棒，对系统性偏移则会把两次观察融合成两层表面。1.0 用「历史最大深度」归一化来传递尺度、1.5 用流式 DA3，都是在管理这个风险，但没有量化。</li>
+      <li><b>Tab. 5 评的是建图，不是生成。</b>那 100 个场景用的是数据集的 RGB-D（重投影回原视角），所以它证明的是「同等代价下 OctMap 比均匀 TSDF 保真」，不是「用生成深度建出来的图有多准」。后者只能从 Tab. 2 / 4a 的端到端指标间接看。</li>
+      <li><b>效率的措辞要读准。</b>「相当的代价」是相对 λ = 0.002 的 TSDF 说的；相对 λ = 0.004（1.97 GB、3.15 s）OctMap 贵 3.7 倍显存、5.7 倍时间。另外 Sec. 4.1 说 OctMap「典型 1–10 GB」，Tab. I 的 505 帧序列峰值却是 22.93 GB——两处数字口径不同，读者应以 Tab. I 为准估长序列。</li>
+      <li><b>WorldScore 的优势集中在一致性两项。</b>相机控制 39.12 低于 Voyager 的 46.60，主观质量 31.17 是五者最低，内容对齐 6.37。总分 50.31 对 Voyager 49.93 的领先很小，而 Voyager 还是在单块、压缩轨迹的不利条件下跑的。把「outperforming prior methods」读成「在三维 / 光度一致性上明显领先、其余持平或落后」更准确。</li>
+      <li><b>基线协议对短块方法天然不利。</b>VMem 相机提速 4 倍、Voyager 与 Aether 把 108 帧轨迹压进一块——作者披露得很清楚，但这意味着 Tab. 1 比较的其实是「谁能处理这种长轨迹」，而非同等条件下的生成质量。用户研究也是：VMem 几乎无法生成合理结果，三选一实际上是 OctWorld 对 Gen3C 的 53.8% : 39.5%。</li>
+      <li><b>不少实现细节缺席。</b><span class="m">w<sub>obs</sub></span> 怎么取、光线采样间距、渲染器与渲染分辨率、去噪步数、Tab. II 的 GPU 型号、FramePack 的历史长度与打包配置、颜色如何存 / 渲染（顶点色？）、多分辨率叶节点之间的 T 型接缝如何处理——都没写。代码「Coming Soon」，这些暂时无法核对。</li>
+      <li><b>「第一个」的措辞。</b>贡献一称这是「第一个支持可扩展、全局融合的三维记忆」的长程生成框架。Voyager 的 world cache、Spatia 的可更新空间记忆、EvoWorld 的显式三维记忆都是显式三维记忆；OctWorld 的新意在于<b>TSDF 式的加权融合 + 自适应八叉树</b>，「第一」应限定在这个意义上。</li>
+      <li><b>1.0 与 1.5 的差异没有拆解。</b>1.5 同时改了骨架、深度来源、噪声注入方式、训练数据和步数（7,000 步 vs 110K 步），Tab. IV 的每一项变化都无法归因。项目页的视频全部来自 1.5，而正文所有比较都是 1.0——读者看到的演示和看到的数字不是同一个模型。</li>
+    </ol>
+  </div>
+
+  <div class="call ok">
+    <div class="hd">○ 尽管如此，值得记住的贡献</div>
+    <p><b>把 SLAM 建图的成熟工具正确地搬进了生成。</b>TSDF 融合、八叉树、Marching Cubes 都是二十年以上的技术；论文的贡献是想清楚了生成场景与传感器场景的两点差异（尺度未知、范围无界），并用「按像素足迹定层级」和「O(1) 根扩展」两个小而准的设计回应它们。</p>
+    <p><b>消融设计干净。</b>Tab. 4a 把「有没有空间条件」「用什么表示」「块多长」分开；Tab. 5 把「建图本身」从生成里剥离出来单测。这让「OctMap 优于点云与均匀 TSDF」成为一个可以被信任的结论，而不只是一个系统层面的整体提升。</p>
+    <p><b>1.5 的原生条件接口是一个值得推广的观察。</b>「部分观察 + 掩码 → 补全」本来就是 I2V / 插值骨架预训练时学过的任务；把记忆投影当作这种条件喂进去，比再造一条控制分支更省、也更能利用预训练先验。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 11 REPO -->
+<section class="sec" id="s-repo">
+  <div class="eyebrow"><span class="n">11</span><span class="t">In Context</span><span class="line"></span></div>
+  <h2>放回 Awesome-Interactive-Video-World-Models 的坐标系里</h2>
+  <p class="lead">按本仓库的三条严格标准逐条对照，OctWorld 三条都<b>沾边</b>，但交互粒度是块、速度是分钟级；它的贡献主轴在「长时程记忆与一致性」。</p>
+
+  <div class="tbl"><table>
+    <thead><tr><th style="width:26%">严格标准</th><th>OctWorld 的情况</th><th style="width:16%">判断</th></tr></thead>
+    <tbody>
+      <tr><td><b>1. 逐步动作条件</b></td><td>动作 = 相机轨迹（仓库明确接受相机 / 导航控制）。论文按「事先给定整条轨迹再切块」叙述，但 Algorithm 1 逐块消费 c<sub>k</sub>，每块的生成依赖上一块的结果，所以闭环在原理上可以在 36 帧粒度上闭合；论文没有演示交互式给轨迹。</td><td><span class="pill k">块级满足</span><br><span class="pill s">未演示交互</span></td></tr>
+      <tr><td><b>2. 因果 / 流式生成</b></td><td>逐块自回归（FramePack / Wan I2V 骨架，块内双向去噪，块间因果）；0.136 FPS，非实时。</td><td><span class="pill k">满足（块级）</span></td></tr>
+      <tr><td><b>3. 持久世界状态</b></td><td>OctMap：显式、全局融合的八叉树 TSDF，推理时每块都被查询（渲染为条件）；另有 FramePack 打包的隐式上下文。这是本文的贡献所在。</td><td><span class="pill k">满足</span></td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="prose">
+    <p>我的建议是放进 <code>memory</code>（Long-Horizon Memory &amp; Consistency）：它回答的正是「相机回来的时候世界还在不在」，而且是用<b>显式三维重建</b>回答的。若维护者沿用 WorldMem（0.89 FPS）、Context-as-Memory（0.97 FPS）入选 <code>systems</code> 的先例，把块级相机轨迹视为闭环动作，升入 <code>systems</code> 也说得通——但要注意这两个先例都<b>演示了逐步给动作</b>，而 OctWorld 没有。<code>control</code> 与 <code>realtime</code> 两轴它都不贡献：相机控制是继承的 Plücker 方案，速度是它的短板。</p>
+  </div>
+
+  <h3><span class="ix">11.1</span>与邻居的关系</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>工作</th><th>记忆是什么</th><th>怎么进模型</th><th>与 OctWorld 的关系</th></tr></thead>
+    <tbody>
+      <tr><td><b>Gen3C</b> (2503.03751，本库 <code>control</code>)</td><td>点云 3D cache（无显式深度融合）</td><td>warp 到目标视角的帧</td><td>OctWorld 的主要对照基线；Tab. 2 / 3 / 4a 都在说「堆点」不如「融合」；点云基线的过滤策略也照 Gen3C 做</td></tr>
+      <tr><td><b>Voyager</b> (2506.04225)</td><td>联合 RGB-D 生成 + 点云 world cache</td><td>warp 帧 + 深度</td><td>最相近的路线；OctWorld-1.0 同样联合预测深度，但把缓存换成八叉树 TSDF；WorldScore 总分 49.93 vs 50.31</td></tr>
+      <tr><td><b>VMem</b> (2506.18903，<code>memory</code>)</td><td>surfel 索引的视图记忆（存帧）</td><td>按相机检索参考帧</td><td>「记忆检索」路线的代表；论文认为它缺少全局整合，长块设定下几乎失效</td></tr>
+      <tr><td><b>WorldMem</b> (2504.12369，<code>systems</code>) / <b>Context as Memory</b> (2506.03141，<code>systems</code>)</td><td>带位姿的帧库 / 按 FOV 重叠检索的上下文帧</td><td>检索帧进入上下文</td><td>同为「记忆」轴，但存的是二维观察；OctWorld 存的是三维距离场</td></tr>
+      <tr><td><b>Spatia</b> (2512.15716，<code>systems</code>)</td><td>可更新的空间记忆（点云）</td><td>渲染 / 检索</td><td>「可更新」与 OctMap 的「可扩展」相近；Spatia 的数据过滤思路被本文引用（附录 B.3）</td></tr>
+      <tr><td><b>EvoWorld</b> (2510.01183，<code>systems</code>) / <b>Video World Models with Long-term Spatial Memory</b> (2506.05284，<code>systems</code>)</td><td>显式三维记忆（点云 / 重建）</td><td>渲染到目标视角</td><td>同属 explicit-spatial-reconstruction；区别在融合方式（点 vs TSDF）与自适应分辨率</td></tr>
+      <tr><td><b>Geometry Forcing</b> (2507.07982，<code>memory</code>) / <b>FantasyWorld</b> (2509.21657，<code>memory</code>)</td><td>几何作为训练信号 / 联合三维预测</td><td>特征对齐 / 联合头</td><td>OctWorld 引言归为「几何感知但短期」的一类：块内一致，无跨块记忆</td></tr>
+      <tr><td><b>MoVerse</b> (2606.13376，<code>systems</code>)</td><td>全景高斯支架 + 隐式上下文</td><td>渲染条件</td><td>同为 hybrid:explicit-spatial-reconstruction+implicit-context，但实时（8 FPS）；OctWorld 用离线换取更严格的几何一致</td></tr>
+      <tr><td><b>FramePack</b> (Zhang et al., NeurIPS 2025)</td><td>—</td><td>—</td><td>1.0 的骨架；提供打包历史与抗漂移；1.5 只借用其打包模块</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="ix">11.2</span>建议的 papers.jsonl 条目（供维护者审阅）</h3>
+  <pre>{"id": "2609.03919", "name": "OctWorld", "title": "OctWorld: Long-Range World-Consistent Video Generation with Octree-based 3D Mapping",
+ "venue": "ECCV 2026", "date": "2026-09-03", "section": "memory", "section_source": "curated",
+ "links": {"paper": "https://arxiv.org/abs/2609.03919", "website": "https://maxtirerror.github.io/octworldpage/"},
+ "attrs": {"backbone": "hybrid-AR-diffusion",
+           "action_space": "user-specified camera trajectory, consumed per 36-frame chunk as Plücker ray embeddings normalized to the last history frame (no keyboard/game actions); single input image; WorldScore static scenes, RealEstate10K, DL3DV, open outdoor scenes",
+           "fps": "0.136",
+           "horizon": "433- and 505-frame trajectories (~30 s at 15 fps) with revisits, 17 outdoor scenes, user study (Sec. 4.4, App. A.5, C.3); ~240-frame forward+reverse revisit test on RealEstate10K (Tab. 2)",
+           "memory": "hybrid:explicit-spatial-reconstruction+implicit-context",
+           "open_source": false},
+ "evidence": {"backbone": "Sec. 3.2 / App. B.1: OctWorld-1.0 = FramePack F1 (Hunyuan DiT) next-section prediction, chunk-wise autoregressive with bidirectional denoising inside a 36-frame chunk; OctWorld-1.5 = Wan2.1 14B I2V used the same chunk-wise way (App. E)",
+              "fps": "Tab. II, first-chunk setting: 0.136 FPS, 14.50B params, 51 GB; Sec. 4.1: 3.6 s per diffusion step on one A100",
+              "horizon": "Sec. 4.4 + App. C.3 (433 and 505 frames); App. A.5 (~30 s at 15 fps)",
+              "memory": "Sec. 3.1: OctMap = sparse octree TSDF fused from generated RGB-D, mesh-rendered to the target view as condition at every chunk (explicit-spatial-reconstruction); Sec. 3.2: FramePack packed history as temporal context (implicit-context)"}}</pre>
+  <p class="note"><code>open_source</code> 填 false：正文无代码链接，项目页写 Coming Soon（2026-09-05 查）。<code>venue</code> 取自 arXiv 评论栏「Accepted to ECCV 2026」。<code>fps</code> 按仓库规则填裸数字；它是离线推理吞吐而非交互帧率，这一点在 <code>evidence</code> 里注明。</p>
+</section>
+
+<!-- ============================================================ 12 APPENDIX -->
+<section class="sec" id="s-appendix">
+  <div class="eyebrow"><span class="n">12</span><span class="t">Appendix</span><span class="line"></span></div>
+  <h2>附录速查</h2>
+
+  <h3><span class="ix">A</span>全部数字</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>项</th><th>值</th><th>出处</th></tr></thead>
+    <tbody>
+      <tr><td>根体积 / 初始边界</td><td class="num">L = 2，[−1, 1]³；首帧点云归一到 [−0.5, 0.5]³</td><td>附录 B.4</td></tr>
+      <tr><td>最大八叉树深度</td><td class="num">d_max = 16</td><td>附录 B.4</td></tr>
+      <tr><td>截断系数</td><td class="num">τ_d = α · ℓ_d，α = 5</td><td>Sec. 3.1，附录 B.4</td></tr>
+      <tr><td>期望体素大小</td><td class="num">s = z / √(f_x f_y)；ℓ_d ≤ s &lt; ℓ_{d−1}</td><td>Sec. 3.1</td></tr>
+      <tr><td>光线采样区间</td><td class="num">t_k ∈ [z − τ_d, z + τ_d]</td><td>Sec. 3.1</td></tr>
+      <tr><td>分裂时子节点初始化</td><td class="num">父节点属性的三维最近邻插值</td><td>附录 B.4</td></tr>
+      <tr><td>根扩展</td><td class="num">depth-1 的 8 节点 → 新树 depth-2 中央 8 节点；L → 2L；O(1)</td><td>附录 B.4</td></tr>
+      <tr><td>骨架 / 参数量（1.0）</td><td class="num">FramePack F1 14B（Hunyuan DiT）+ 模块 = 15B（Tab. II 记 14.50B）</td><td>Sec. 4.1，Tab. II</td></tr>
+      <tr><td>骨架（1.5）</td><td class="num">Wan2.1 14B I2V；深度：流式 Depth Anything 3</td><td>Sec. 3.2，附录 E</td></tr>
+      <tr><td>生成分辨率 / 块长</td><td class="num">480 × 832，36 帧 / 块</td><td>Sec. 4.1，Tab. III</td></tr>
+      <tr><td>训练日程（1.0）</td><td class="num">16×480×832 80K 步 → 36×480×832 30K 步；AdamW 2e-5；32 H100；batch 64</td><td>Sec. 4.1</td></tr>
+      <tr><td>训练（1.5）</td><td class="num">仅 DL3DV，15 fps，≤ 961 帧 / 段；FSDP 16 H100；batch 64；7,000 步</td><td>附录 E.3</td></tr>
+      <tr><td>噪声增强档位</td><td class="num">α ∈ {x·0.07 | x = 0…10}；推理：1.0 用 3 档，1.5 用 0 档</td><td>附录 B.2，Tab. 4b，Tab. V</td></tr>
+      <tr><td>数据过滤阈值</td><td class="num">dynamicRatio ≤ 0.2；crowdDensity = desert；MCV ≥ 0.16；HCPR ≥ 0.42（τ = 0.1）；TransNetV2 ≤ 0.5；亮度差 ≤ 22</td><td>附录 B.3</td></tr>
+      <tr><td>推理速度</td><td class="num">单步去噪 3.6 s（A100）；整体 0.136 FPS，51 GB（Tab. II）</td><td>Sec. 4.1，Tab. II</td></tr>
+      <tr><td>OctMap 开销</td><td class="num">1–10 GB 典型；每块积分 7.36 s、网格 4.60 s；505 帧峰值 22.93 GB、34,659K 节点</td><td>Sec. 4.1，Tab. I</td></tr>
+      <tr><td>WorldScore（1.0）</td><td class="num">总 50.31 · 3D 71.67 · 光度 77.01 · 风格 78.17 · 相机 39.12 · 物体 48.69 · 内容 6.37 · 主观 31.17</td><td>Tab. 1</td></tr>
+      <tr><td>WorldScore（1.5）</td><td class="num">总 56.02 · 相机 42.06 · 物体 59.00 · 内容 35.45 · 3D 64.93 · 光度 70.97 · 风格 79.23 · 主观 40.52</td><td>Tab. IV</td></tr>
+      <tr><td>Re10K 往返</td><td class="num">LPIPS 0.1633 / CD 0.0345（Gen3C 0.1933 / 0.0457；VMem 0.4010 / 0.0620）</td><td>Tab. 2</td></tr>
+      <tr><td>用户研究</td><td class="num">Ours 53.8% · Gen3C 39.5% · VMem 0.9% · 不确定 5.8%；22 人 × 20 组；17 场景</td><td>Tab. 3，附录 C.3</td></tr>
+      <tr><td>消融：记忆表示</td><td class="num">TSDF_f16 0.2509/0.0556 · PC_f16 0.2749/0.0916 · w/o_f36 0.2128/0.0534 · TSDF_f36 0.1996/0.0345 · Ours_f36 0.1412/0.0252</td><td>Tab. 4a</td></tr>
+      <tr><td>消融：噪声级（1.0）</td><td class="num">0：0.1412/0.0252/50.22/67.18 · 3：0.1633/0.0274/50.31/71.67 · 5：0.1806/0.0340/50.07/71.09</td><td>Tab. 4b</td></tr>
+      <tr><td>Re10K LPIPS（1.5）</td><td class="num">0 档 0.1361 · 3 档 0.1413 · 5 档 0.1445</td><td>Tab. V</td></tr>
+      <tr><td>重投影质量</td><td class="num">见 Fig. 18 表</td><td>Tab. 5</td></tr>
+      <tr><td>均匀 TSDF 基线参数</td><td class="num">γ_renorm = 0.9（98 分位深度）；τ_depth = 1.0；λ = 0.002（Fig. 3）/ 0.007（Tab. 4）</td><td>附录 C.4</td></tr>
+      <tr><td>Chamfer 评测</td><td class="num">VGGT 重建，默认置信阈值，FPS 采样 65,536 点，归一到 [−1, 1]，Kaolin，L1</td><td>附录 C.2，式 (I)</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="ix">B</span>术语</h3>
+  <dl class="gloss">
+    <dt>TSDF（截断符号距离函数）</dt><dd>每个空间点到最近表面的带符号距离（前方为正、后方为负），超过截断距离 τ 就截到 ±τ（常再归一到 ±1）。多帧观察通过加权平均融合；表面就是零等值面。Curless &amp; Levoy 1996；KinectFusion 的核心。</dd>
+    <dt>八叉树（octree）</dt><dd>把立方体递归八分的树；第 d 级节点边长 L/2<sup>d</sup>。稀疏八叉树只为有内容的区域分配节点。OctMap 的属性只存在叶节点的 8 个角上。</dd>
+    <dt>截断带 / 截断距离 τ<sub>d</sub></dt><dd>表面前后需要维护 TSDF 的范围。OctMap 令它与层级绑定：τ<sub>d</sub> = 5 ℓ<sub>d</sub>，即每级都是 ±5 个体素。</dd>
+    <dt>像素足迹</dt><dd>一个像素在深度 z 处覆盖的物理尺寸，≈ z/f。OctMap 用它（几何平均 z/√(f<sub>x</sub>f<sub>y</sub>)）决定该像素周围体素应该多细。</dd>
+    <dt>Marching Cubes</dt><dd>Lorensen &amp; Cline 1987：按立方体 8 个角的正负号查表生成三角形，得到零等值面网格。OctMap 逐叶节点并行执行，再合并共享角上的重复顶点。</dd>
+    <dt>根扩展（root extension）</dt><dd>附录 B.4：把旧树 depth-1 的 8 个节点挂到新树 depth-2 的中央 8 个位置，根边长翻倍，O(1) 开销。</dd>
+    <dt>世界记忆投影</dt><dd>把 OctMap 的网格渲染到目标相机得到的部分 RGB / 深度与可见性掩码；生成器的空间条件。</dd>
+    <dt>FramePack</dt><dd>Zhang et al., NeurIPS 2025：下一帧（段）预测的视频扩散框架，把历史帧按远近逐级压缩打包成定长上下文，并有抗漂移设计。OctWorld-1.0 的骨架（F1 版，Hunyuan DiT）。</dd>
+    <dt>Plücker 射线嵌入</dt><dd>用（方向 d，矩 o × d）六维向量逐像素表示相机光线；CameraCtrl 一系的标准相机条件。OctWorld 把它归一到最后一个历史帧坐标系，经小卷积适配器加到目标 latent。</dd>
+    <dt>VideoPainter 式控制分支</dt><dd>复制预训练 DiT 的若干块作为控制分支处理条件图，输出经零初始化投影加进主干；OctWorld-1.0 用 4 个块接收渲染 RGB / 深度 + 掩码。</dd>
+    <dt>噪声增强（noise augmentation）</dt><dd>训练时给历史条件加可控噪声并把噪声级作为条件（GameNGen）；缩小「训练用真值历史、推理用生成历史」的差距。</dd>
+    <dt>逐 token AdaLN（1.5）</dt><dd>为锚 / 历史 / 目标三类 token 分别指定条件时间步 r<sub>i</sub> ∈ {0, α, t}，各自产生调制参数，避免 1.0 里 α 与扩散时间步的纠缠。</dd>
+    <dt>WorldScore</dt><dd>Duan et al. 2025：世界生成统一基准，含相机控制、物体控制、内容对齐、3D 一致性（重投影误差）、光度一致性（前后向光流）、风格一致性（首尾帧特征 Frobenius 范数）、主观质量等维度。</dd>
+    <dt>Chamfer 距离</dt><dd>两个点集互相取最近点距离的平均之和；本文用 L1 范数（式 I），点云由 VGGT 从生成视频重建。</dd>
+    <dt>Pi3 / MoGe / Depth Anything 3</dt><dd>训练数据的深度与位姿估计器（Pi3）；首帧深度初始化（MoGe，与基线一致）；1.5 的流式深度估计器（DA3 流式版）。</dd>
+  </dl>
+
+  <h3><span class="ix">C</span>关键依赖与相关工作（论文引用）</h3>
+  <div class="prose">
+    <ul>
+      <li>TSDF 融合 — Curless &amp; Levoy, SIGGRAPH 1996；Marching Cubes — Lorensen &amp; Cline 1987</li>
+      <li>自适应 / 多分辨率 TSDF 建图 — Vespa et al. 2018（八叉树 SLAM）；Funk et al. 2021（多分辨率建图）；De Rebotti et al. 2025（方差自适应体素）；GSFusion 2024</li>
+      <li>FramePack — Zhang et al., NeurIPS 2025；HunyuanVideo — Kong et al. 2024；Wan2.1 — Wan et al. 2025</li>
+      <li>VideoPainter — Bian et al. 2025（控制分支注入）；GameNGen — Valevski et al. 2024（噪声增强）；CameraCtrl — He et al., ICLR 2025（Plücker）</li>
+      <li>基线：Gen3C — Ren et al., CVPR 2025；Voyager — Huang et al. 2025；Aether — 2025；VMem — Li et al. 2025；InvisibleStitch；OASIS；Hunyuan-GameCraft</li>
+      <li>数据：RealEstate10K；DL3DV-10K；SpatialVID；Pi3 — Wang et al. 2025；MoGe / MoGe-2；Depth Anything 3 — Lin et al. 2025；Keye-VL-1.5；TransNetV2；RetinaFace</li>
+      <li>评测：WorldScore — Duan et al. 2025；VGGT — Wang et al., CVPR 2025；LPIPS；Kaolin</li>
+    </ul>
+  </div>
+
+  <div class="foot">
+    本页由我根据 arXiv 2609.03919v1（2026-09-03，ECCV 2026）全文（正文 + 附录 A–E）与 Fig. 2 / 4 / IV 整理；图解均为按理解重绘，交互模拟为示意，并在图注中区分「论文陈述」与「我的推断 / 假设」。
+    所有数字可在附录 A 的出处处核对。项目页（maxtirerror.github.io/octworldpage）于 2026-09-05 查看，代码尚未发布。
+  </div>
+</section>
+</main>
+</div>
+<script>
+(function(){
+'use strict';
+const $=(s,r)=>(r||document).querySelector(s);
+const $$=(s,r)=>Array.prototype.slice.call((r||document).querySelectorAll(s));
+const NS='http://www.w3.org/2000/svg';
+function el(tag,attrs,parent){
+  const e=document.createElementNS(NS,tag);
+  if(attrs){ for(const k in attrs){ if(k==='text') e.textContent=attrs[k]; else e.setAttribute(k,attrs[k]); } }
+  if(parent) parent.appendChild(e);
+  return e;
+}
+const reduced=window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+const fmt=(x,n)=>Number(x).toLocaleString('en-US',{maximumFractionDigits:n==null?2:n,minimumFractionDigits:n==null?0:n});
+function sci(x){ if(x===0) return '0'; const e=Math.floor(Math.log10(Math.abs(x))); if(e>=-2&&e<4) return x.toPrecision(3).replace(/\.?0+$/,''); const m=x/Math.pow(10,e); return m.toFixed(2)+'×10'+sup(e); }
+function sup(n){ const S={'-':'⁻','0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹'}; return String(n).split('').map(c=>S[c]||c).join(''); }
+const css=()=>getComputedStyle(document.documentElement);
+function cvar(n){ return css().getPropertyValue(n).trim(); }
+const themeListeners=[];
+
+/* ---------------- theme ---------------- */
+const root=document.documentElement;
+try{ const s=localStorage.getItem('octworld-theme'); if(s==='light'||s==='dark') root.setAttribute('data-theme',s); }catch(e){}
+$('#themeBtn').addEventListener('click',function(){
+  const cur=root.getAttribute('data-theme'); let next;
+  if(cur==='light') next='dark'; else if(cur==='dark') next='light';
+  else next=(window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches)?'dark':'light';
+  root.setAttribute('data-theme',next);
+  try{ localStorage.setItem('octworld-theme',next); }catch(e){}
+  themeListeners.forEach(f=>f());
+});
+if(window.matchMedia){ matchMedia('(prefers-color-scheme: light)').addEventListener('change',()=>themeListeners.forEach(f=>f())); }
+
+/* ---------------- progress + scrollspy ---------------- */
+const prog=$('#prog'), tocLinks=$$('#toc a');
+const secs=tocLinks.map(a=>document.querySelector(a.getAttribute('href')));
+function onScroll(){
+  const h=document.documentElement; const max=h.scrollHeight-h.clientHeight;
+  prog.style.width=(max>0?(h.scrollTop/max*100):0)+'%';
+  const y=h.scrollTop+130; let idx=0;
+  secs.forEach((s,i)=>{ if(s && s.offsetTop<=y) idx=i; });
+  tocLinks.forEach((a,i)=>a.classList.toggle('on',i===idx));
+}
+addEventListener('scroll',onScroll,{passive:true}); addEventListener('resize',onScroll); onScroll();
+
+/* ---------------- tabs ---------------- */
+$$('.tabs').forEach(tl=>{
+  const tabs=$$('.tab',tl);
+  tabs.forEach(t=>t.addEventListener('click',()=>{
+    tabs.forEach(o=>{ o.setAttribute('aria-selected',o===t?'true':'false'); const p=document.getElementById(o.getAttribute('aria-controls')); if(p) p.hidden=(o!==t); });
+  }));
+});
+
+/* ---------------- seeded rng ---------------- */
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function gauss(rng){ let u=0,v=0; while(u===0)u=rng(); while(v===0)v=rng(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+
+/* ======================================================================
+   HERO: 2-D OctMap simulation (quadtree TSDF, adaptive level by pixel footprint,
+   ray-band allocation, weighted fusion, marching squares, root extension)
+   ====================================================================== */
+(function(){
+  const cv=$('#simCanvas'); if(!cv) return;
+  const ctx=cv.getContext('2d'); const W=cv.width, H=cv.height;
+  const strip=$('#simStrip'), sctx=strip.getContext('2d');
+  /* ---- scene (world units; initial root [-1,1]^2) ---- */
+  const SEG=[];
+  const seg=(a,b)=>SEG.push([a[0],a[1],b[0],b[1]]);
+  const poly=(p,closed)=>{ for(let i=0;i<p.length-1;i++) seg(p[i],p[i+1]); if(closed) seg(p[p.length-1],p[0]); };
+  poly([[-0.6,-0.45],[-0.6,0.45],[-0.12,0.45]]);
+  poly([[0.12,0.45],[0.6,0.45],[0.6,-0.45],[-0.6,-0.45]]);
+  (function(){ const c=[0.22,-0.05], r=0.1, pts=[]; for(let k=0;k<20;k++){ const a=k/20*Math.PI*2; pts.push([c[0]+r*Math.cos(a),c[1]+r*Math.sin(a)]); } poly(pts,true); })();
+  poly([[-0.45,-0.25],[-0.25,-0.25],[-0.25,-0.05],[-0.45,-0.05]],true);
+  poly([[-0.12,0.45],[-0.12,1.0],[-0.6,1.0],[-0.6,1.5],[0.6,1.5],[0.6,1.0],[0.12,1.0],[0.12,0.45]]);
+  (function(){ const c=[0.28,1.25], r=0.08, pts=[]; for(let k=0;k<14;k++){ const a=k/14*Math.PI*2; pts.push([c[0]+r*Math.cos(a),c[1]+r*Math.sin(a)]); } poly(pts,true); })();
+  /* ---- camera path: Catmull-Rom through waypoints, arc-length parametrised ---- */
+  const WP=[[-0.35,-0.32],[-0.05,-0.34],[0.3,-0.33],[0.47,-0.15],[0.45,0.2],[0.2,0.32],[0.0,0.5],[0.0,0.75],[0.0,1.1],[0.32,1.12],[0.45,1.35],[-0.05,1.4],[-0.42,1.32],[-0.42,1.12],[-0.05,1.08],[0.0,0.8],[0.0,0.52],[-0.1,0.32],[-0.42,0.3],[-0.52,0.02],[-0.5,-0.33],[-0.3,-0.35],[0.0,-0.33]];
+  const PATH=[]; (function(){
+    const P=[WP[0]].concat(WP,[WP[WP.length-1]]);
+    for(let i=1;i<P.length-2;i++){ const p0=P[i-1],p1=P[i],p2=P[i+1],p3=P[i+2];
+      for(let k=0;k<40;k++){ const t=k/40, t2=t*t, t3=t2*t;
+        const x=0.5*((2*p1[0])+(-p0[0]+p2[0])*t+(2*p0[0]-5*p1[0]+4*p2[0]-p3[0])*t2+(-p0[0]+3*p1[0]-3*p2[0]+p3[0])*t3);
+        const y=0.5*((2*p1[1])+(-p0[1]+p2[1])*t+(2*p0[1]-5*p1[1]+4*p2[1]-p3[1])*t2+(-p0[1]+3*p1[1]-3*p2[1]+p3[1])*t3);
+        PATH.push([x,y]); } }
+    PATH.push(WP[WP.length-1]);
+  })();
+  const CUM=[0]; for(let i=1;i<PATH.length;i++){ CUM.push(CUM[i-1]+Math.hypot(PATH[i][0]-PATH[i-1][0],PATH[i][1]-PATH[i-1][1])); }
+  const TOTAL=CUM[CUM.length-1];
+  function pose(s){ // position + heading at arc length s
+    s=Math.max(0,Math.min(TOTAL,s)); let lo=0,hi=CUM.length-1; while(hi-lo>1){ const m=(lo+hi)>>1; if(CUM[m]<=s) lo=m; else hi=m; }
+    const a=PATH[lo], b=PATH[Math.min(hi,PATH.length-1)]; const u=(CUM[hi]-CUM[lo])>1e-9?(s-CUM[lo])/(CUM[hi]-CUM[lo]):0;
+    const x=a[0]+(b[0]-a[0])*u, y=a[1]+(b[1]-a[1])*u;
+    const la=PATH[Math.max(0,lo-3)], lb=PATH[Math.min(PATH.length-1,lo+4)];
+    return {x,y,h:Math.atan2(lb[1]-la[1],lb[0]-la[0])};
+  }
+  /* ---- camera model ---- */
+  const N=24, FOV=Math.PI/2, F=(N/2)/Math.tan(FOV/2), MAXR=3.6, ALPHA=5, NSTRIP=96;
+  /* ---- quadtree ---- */
+  let L=2, EXT=0, nodes=new Map(), leafCount=0, frames=0, PC=[], maxD=0, contours=[];
+  const key=(d,i,j)=>d+':'+i+':'+j;
+  const dmax=()=>9+EXT;
+  function mk(d,i,j,leaf){ const n={d,i,j,leaf,phi:new Float32Array(4),w:new Float32Array(4)}; nodes.set(key(d,i,j),n); if(leaf) leafCount++; return n; }
+  function cornerPos(n,c){ const l=L/Math.pow(2,n.d); return [-L/2+(n.i+(c&1))*l, -L/2+(n.j+(c>>1))*l]; }
+  function split(n){ // children inherit by bilinear interpolation of the parent's corners
+    n.leaf=false; leafCount--;
+    for(let c=0;c<4;c++){ const ci=n.i*2+(c&1), cj=n.j*2+(c>>1); const ch=mk(n.d+1,ci,cj,true);
+      for(let k=0;k<4;k++){ const u=((c&1)+(k&1))/2, v=((c>>1)+(k>>1))/2; // child corner in parent-local coords
+        const f00=(1-u)*(1-v), f10=u*(1-v), f01=(1-u)*v, f11=u*v;
+        ch.phi[k]=n.phi[0]*f00+n.phi[1]*f10+n.phi[2]*f01+n.phi[3]*f11;
+        ch.w[k]=n.w[0]*f00+n.w[1]*f10+n.w[2]*f01+n.w[3]*f11; } }
+  }
+  function leafAt(px,py,d){ // allocate path root→d, return the leaf containing (px,py)
+    const half=L/2; if(px<-half||px>=half||py<-half||py>=half) return null;
+    const l=L/Math.pow(2,d); const I=Math.floor((px+half)/l), J=Math.floor((py+half)/l);
+    let n=nodes.get(key(0,0,0)); if(!n) n=mk(0,0,0,d===0);
+    for(let lv=0; lv<d; lv++){
+      if(n.leaf) split(n);
+      const ci=I>>(d-lv-1), cj=J>>(d-lv-1);
+      let ch=nodes.get(key(lv+1,ci,cj)); if(!ch) ch=mk(lv+1,ci,cj,lv+1===d);
+      n=ch;
+    }
+    while(!n.leaf){ // already subdivided finer by a closer observation → descend
+      const l2=L/Math.pow(2,n.d+1); const ci=Math.floor((px+half)/l2), cj=Math.floor((py+half)/l2);
+      let ch=nodes.get(key(n.d+1,ci,cj)); if(!ch) ch=mk(n.d+1,ci,cj,true); n=ch; }
+    return n;
+  }
+  function extendRoot(){
+    const old=nodes; nodes=new Map(); leafCount=0;
+    mk(0,0,0,false); for(let c=0;c<4;c++) mk(1,c&1,c>>1,false);
+    old.forEach(n=>{ if(n.d===0) return; const off=1<<(n.d-1); const m={d:n.d+1,i:n.i+off,j:n.j+off,leaf:n.leaf,phi:n.phi,w:n.w}; nodes.set(key(m.d,m.i,m.j),m); if(m.leaf) leafCount++; });
+    L*=2; EXT++; if(maxD) maxD++;
+    const t=$('#simToast'); t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2600);
+    $('#simRootLab').textContent='根边长 L = '+L+'（已扩展 '+EXT+' 次）';
+  }
+  /* ---- ray casting ---- */
+  function castSegs(ox,oy,dx,dy,segs,maxr){ let best=maxr; for(let k=0;k<segs.length;k++){ const s=segs[k]; const ex=s[2]-s[0], ey=s[3]-s[1]; const den=dx*ey-dy*ex; if(Math.abs(den)<1e-12) continue; const wx=s[0]-ox, wy=s[1]-oy; const t=(wx*ey-wy*ex)/den; const u=(wx*dy-wy*dx)/den; if(t>1e-6&&t<best&&u>=0&&u<=1) best=t; } return best; }
+  /* ---- state ---- */
+  const P={mode:'oct',fixed:6,noise:0.02,speed:3,rays:true,band:true,mesh:true,grid:true,pc:false};
+  let s=0, playing=!reduced, rng=mulberry32(7), raf=null, done=false;
+  const view={scale:(H*0.94)/2, cx:0, cy:0}; let zoomFrom=null, zoomT=1;
+  function contentBox(){ let x0=-0.62,y0=-0.5,x1=0.62,y1=0.5; nodes.forEach(n=>{ if(!n.leaf) return; if(!(n.w[0]>0||n.w[1]>0||n.w[2]>0||n.w[3]>0)) return; const l=L/Math.pow(2,n.d); const ax=-L/2+n.i*l, ay=-L/2+n.j*l; if(ax<x0)x0=ax; if(ay<y0)y0=ay; if(ax+l>x1)x1=ax+l; if(ay+l>y1)y1=ay+l; }); if(lastObs){ const c=lastObs.cam; if(c.x<x0)x0=c.x; if(c.x>x1)x1=c.x; if(c.y<y0)y0=c.y; if(c.y>y1)y1=c.y; } return {x0,y0,x1,y1}; }
+  let lastObs=null; // {rays:[{ang,t,z,hit}], cam:{x,y,h}, level per ray}
+  function integrate(cam){
+    const cs=Math.cos(cam.h), sn=Math.sin(cam.h); const rays=[]; let out=false;
+    const updated=new Set();
+    for(let i=0;i<N;i++){
+      const a=(i/(N-1)-0.5)*FOV; const dx=Math.cos(cam.h+a), dy=Math.sin(cam.h+a);
+      const t=castSegs(cam.x,cam.y,dx,dy,SEG,MAXR); const hit=t<MAXR;
+      let tn=t; if(hit){ tn=t*(1+P.noise*gauss(rng)); if(tn<0.02) tn=0.02; }
+      const z=tn*Math.cos(a);
+      let d=0; if(hit){ if(P.mode==='fixed'){ d=P.fixed+EXT; } else { const sz=z/F; d=Math.ceil(Math.log2(L/sz)); d=Math.max(5+EXT,Math.min(dmax(),d)); } }
+      rays.push({a,dx,dy,t:tn,z,hit,d});
+      if(hit && P.pc){ PC.push([cam.x+dx*tn,cam.y+dy*tn]); if(PC.length>24000) PC.splice(0,2000); }
+    }
+    // allocation along bands + fusion
+    for(let i=0;i<N;i++){ const r=rays[i]; if(!r.hit) continue;
+      const l=L/Math.pow(2,r.d), tau=ALPHA*l; if(r.d>maxD) maxD=r.d;
+      for(let tk=r.t-tau; tk<=r.t+tau+1e-9; tk+=l/2){ if(tk<=0) continue;
+        const px=cam.x+r.dx*tk, py=cam.y+r.dy*tk;
+        if(px<-L/2||px>=L/2||py<-L/2||py>=L/2){ out=true; continue; }
+        const leaf=leafAt(px,py,r.d); if(!leaf) continue; const k=key(leaf.d,leaf.i,leaf.j); if(updated.has(k)) continue; updated.add(k);
+        const lt=L/Math.pow(2,leaf.d), tauL=ALPHA*lt;
+        for(let c=0;c<4;c++){ const q=cornerPos(leaf,c); const qx=q[0]-cam.x, qy=q[1]-cam.y; const qz=qx*cs+qy*sn; if(qz<=0.01) continue;
+          const lat=-qx*sn+qy*cs; const ang=Math.atan2(lat,qz); const ri=Math.round((ang/FOV+0.5)*(N-1)); if(ri<0||ri>N-1) continue; const rr=rays[ri]; if(!rr.hit) continue;
+          const sdf=rr.z-qz; if(sdf<-tauL) continue; const phi=Math.max(-1,Math.min(1,sdf/tauL));
+          const wo=leaf.w[c]; leaf.phi[c]=(wo*leaf.phi[c]+1*phi)/(wo+1); leaf.w[c]=wo+1; }
+      }
+    }
+    frames++; lastObs={rays,cam};
+    if(out) extendRoot();
+  }
+  /* ---- marching squares over leaves ---- */
+  function buildContours(){
+    contours=[]; nodes.forEach(n=>{ if(!n.leaf) return; if(n.w[0]<=0||n.w[1]<=0||n.w[2]<=0||n.w[3]<=0) return;
+      const p=n.phi; const s0=p[0]>0,s1=p[1]>0,s2=p[2]>0,s3=p[3]>0; if(s0===s1&&s1===s2&&s2===s3) return;
+      const l=L/Math.pow(2,n.d), x0=-L/2+n.i*l, y0=-L/2+n.j*l;
+      const ip=(a,b)=>a/(a-b);
+      const pts=[]; // edges: bottom(0-1), right(1-3), top(2-3), left(0-2)
+      if(s0!==s1) pts.push([x0+ip(p[0],p[1])*l, y0]);
+      if(s1!==s3) pts.push([x0+l, y0+ip(p[1],p[3])*l]);
+      if(s2!==s3) pts.push([x0+ip(p[2],p[3])*l, y0+l]);
+      if(s0!==s2) pts.push([x0, y0+ip(p[0],p[2])*l]);
+      if(pts.length===2) contours.push([pts[0][0],pts[0][1],pts[1][0],pts[1][1]]);
+      else if(pts.length===4){ contours.push([pts[0][0],pts[0][1],pts[3][0],pts[3][1]]); contours.push([pts[1][0],pts[1][1],pts[2][0],pts[2][1]]); }
+    });
+  }
+  /* ---- drawing ---- */
+  let C={};
+  function refreshColors(){ C={bg:cvar('--surf2'),seen:cvar('--vx-seen'),surf:cvar('--vx-surf'),line:cvar('--vx-line'),line2:cvar('--vx-line2'),srf:cvar('--srf'),oct:cvar('--oct'),cam:cvar('--cam'),hist:cvar('--hist'),ink:cvar('--ink'),ink3:cvar('--ink3'),rule:cvar('--rule2')}; }
+  refreshColors(); themeListeners.push(()=>{ refreshColors(); draw(); });
+  function toScreen(x,y){ const sc=view.scale; return [W/2+(x-view.cx)*sc, H/2-(y-view.cy)*sc]; }
+  function draw(){
+    const bb=contentBox(); const bw=(bb.x1-bb.x0)*1.12, bh=(bb.y1-bb.y0)*1.12; const fit=Math.min(W/bw, H/bh); const target=Math.min((H*0.94)/2, fit);
+    const tcx=(bb.x0+bb.x1)/2, tcy=(bb.y0+bb.y1)/2;
+    view.scale+= (target-view.scale)*0.12; view.cx+=(tcx-view.cx)*0.12; view.cy+=(tcy-view.cy)*0.12;
+    const sc=view.scale;
+    ctx.fillStyle=C.bg; ctx.fillRect(0,0,W,H);
+    // root boundary
+    const r0=toScreen(-L/2,L/2); ctx.setLineDash([8,6]); ctx.strokeStyle=C.line2; ctx.lineWidth=1.5; ctx.strokeRect(r0[0],r0[1],L*sc,L*sc); ctx.setLineDash([]);
+    // leaves
+    ctx.lineWidth=1;
+    nodes.forEach(n=>{ if(!n.leaf) return; const l=L/Math.pow(2,n.d); const p=toScreen(-L/2+n.i*l,-L/2+(n.j+1)*l); const sz=l*sc;
+      const any=n.w[0]>0||n.w[1]>0||n.w[2]>0||n.w[3]>0; if(!any){ if(P.grid&&sz>7){ ctx.strokeStyle=C.line; ctx.strokeRect(p[0],p[1],sz,sz); } return; }
+      const all=n.w[0]>0&&n.w[1]>0&&n.w[2]>0&&n.w[3]>0; const s0=n.phi[0]>0; const mixed=all&&!( (n.phi[1]>0)===s0 && (n.phi[2]>0)===s0 && (n.phi[3]>0)===s0 );
+      ctx.fillStyle=mixed?C.surf:C.seen; ctx.fillRect(p[0],p[1],sz,sz);
+      if(P.grid&&sz>7){ ctx.strokeStyle=C.line2; ctx.strokeRect(p[0],p[1],sz,sz); } });
+    // point cloud
+    if(P.pc&&PC.length){ ctx.fillStyle=C.hist; for(let i=0;i<PC.length;i++){ const p=toScreen(PC[i][0],PC[i][1]); ctx.fillRect(p[0]-1.2,p[1]-1.2,2.4,2.4); } }
+    // GT surface
+    ctx.strokeStyle=C.srf; ctx.lineWidth=2.2; ctx.beginPath(); SEG.forEach(s=>{ const a=toScreen(s[0],s[1]), b=toScreen(s[2],s[3]); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); }); ctx.stroke();
+    // contours (mesh)
+    if(P.mesh&&contours.length){ ctx.strokeStyle=C.oct; ctx.lineWidth=3; ctx.lineCap='round'; ctx.beginPath(); contours.forEach(s=>{ const a=toScreen(s[0],s[1]), b=toScreen(s[2],s[3]); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); }); ctx.stroke(); }
+    // rays + bands + camera
+    if(lastObs){ const cam=lastObs.cam, o=toScreen(cam.x,cam.y);
+      if(P.rays){ ctx.strokeStyle=C.cam; ctx.globalAlpha=.28; ctx.lineWidth=1; ctx.beginPath(); lastObs.rays.forEach(r=>{ const e=toScreen(cam.x+r.dx*r.t,cam.y+r.dy*r.t); ctx.moveTo(o[0],o[1]); ctx.lineTo(e[0],e[1]); }); ctx.stroke(); ctx.globalAlpha=1; }
+      if(P.band){ ctx.strokeStyle=C.cam; ctx.globalAlpha=.75; ctx.lineWidth=4; ctx.lineCap='butt'; ctx.beginPath(); lastObs.rays.forEach((r,i)=>{ if(!r.hit||i%2) return; const l=L/Math.pow(2,r.d), tau=ALPHA*l; const a=toScreen(cam.x+r.dx*Math.max(0.01,r.t-tau),cam.y+r.dy*Math.max(0.01,r.t-tau)), b=toScreen(cam.x+r.dx*(r.t+tau),cam.y+r.dy*(r.t+tau)); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); }); ctx.stroke(); ctx.globalAlpha=1; }
+      // fov edges
+      ctx.strokeStyle=C.cam; ctx.lineWidth=1.2; ctx.setLineDash([5,4]); ctx.beginPath(); [-FOV/2,FOV/2].forEach(a=>{ const e=toScreen(cam.x+Math.cos(cam.h+a)*0.5,cam.y+Math.sin(cam.h+a)*0.5); ctx.moveTo(o[0],o[1]); ctx.lineTo(e[0],e[1]); }); ctx.stroke(); ctx.setLineDash([]);
+      // trajectory trace
+      ctx.strokeStyle=C.cam; ctx.globalAlpha=.45; ctx.lineWidth=2; ctx.beginPath(); let first=true; for(let q=0;q<PATH.length;q++){ if(CUM[q]>s) break; const p=toScreen(PATH[q][0],PATH[q][1]); if(first){ctx.moveTo(p[0],p[1]); first=false;} else ctx.lineTo(p[0],p[1]); } ctx.stroke(); ctx.globalAlpha=1;
+      ctx.fillStyle=C.cam; ctx.beginPath(); ctx.arc(o[0],o[1],9,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle=C.bg; ctx.beginPath(); const hx=Math.cos(cam.h), hy=Math.sin(cam.h); ctx.moveTo(o[0]+hx*13,o[1]-hy*13); ctx.lineTo(o[0]-hy*5,o[1]-hx*5); ctx.lineTo(o[0]+hy*5,o[1]+hx*5); ctx.closePath(); ctx.fill();
+    }
+    drawStrip();
+    // readouts
+    $('#rdLeaves').textContent=fmt(leafCount,0); $('#rdNodes').textContent=fmt(nodes.size,0);
+    $('#rdDepth').innerHTML=maxD?('d = '+maxD+(EXT?'<small>含扩展 +'+EXT+'</small>':'')):'—';
+    $('#rdEll').innerHTML=maxD?sci(L/Math.pow(2,maxD)):'—';
+    $('#rdExt').textContent=EXT; $('#rdFrames').textContent=frames;
+  }
+  function drawStrip(){
+    const w=strip.width, h=strip.height; sctx.fillStyle=C.bg; sctx.fillRect(0,0,w,h);
+    if(!lastObs) return; const cam=lastObs.cam; let hits=0, gt=0; const cw=w/NSTRIP;
+    for(let i=0;i<NSTRIP;i++){ const a=(i/(NSTRIP-1)-0.5)*FOV; const dx=Math.cos(cam.h+a), dy=Math.sin(cam.h+a);
+      const tg=castSegs(cam.x,cam.y,dx,dy,SEG,MAXR); if(tg<MAXR) gt++;
+      const tm=contours.length?castSegs(cam.x,cam.y,dx,dy,contours,MAXR):MAXR;
+      const x=i*cw;
+      if(tm<MAXR){ hits++; const k=Math.min(1,tm/2.5); sctx.globalAlpha=0.35+0.6*(1-k); sctx.fillStyle=C.oct; sctx.fillRect(x,0,cw+0.5,h); sctx.globalAlpha=1; }
+      else { sctx.strokeStyle=C.ink3; sctx.globalAlpha=.5; sctx.lineWidth=1.2; sctx.beginPath(); for(let y=-h; y<h; y+=9){ sctx.moveTo(x,y+h); sctx.lineTo(x+cw+0.5,y+h-cw-0.5); } sctx.stroke(); sctx.globalAlpha=1; }
+    }
+    const cov=gt?Math.round(100*hits/gt):0; $('#simCov').textContent='覆盖 '+cov+'%'+(gt?'':'（视野内无表面）');
+  }
+  /* ---- loop ---- */
+  function step(){ for(let k=0;k<P.speed;k++){ if(s>=TOTAL){ done=true; break; } s+=0.0028; integrate(pose(s)); } buildContours(); draw(); }
+  function tick(){ if(!playing) { raf=null; return; } step(); if(done){ playing=false; $('#simPlay').textContent='▶ 播放'; raf=null; return; } raf=requestAnimationFrame(tick); }
+  function reset(){ L=2; EXT=0; nodes=new Map(); leafCount=0; frames=0; PC=[]; maxD=0; contours=[]; s=0; done=false; rng=mulberry32(7); lastObs=null; view.scale=(H*0.94)/2; view.cx=0; view.cy=0; $('#simRootLab').textContent='根边长 L = 2'; step(); }
+  $('#simPlay').addEventListener('click',()=>{ if(done){ reset(); } playing=!playing; $('#simPlay').textContent=playing?'❚❚ 暂停':'▶ 播放'; if(playing&&!raf) raf=requestAnimationFrame(tick); });
+  $('#simReset').addEventListener('click',()=>{ reset(); if(!playing){ /* stay paused */ } });
+  $('#simSpeed').addEventListener('input',e=>{ P.speed=+e.target.value; $('#simSpeedV').textContent=P.speed+'×'; });
+  $('#simNoise').addEventListener('input',e=>{ P.noise=(+e.target.value)/100; $('#simNoiseV').textContent=e.target.value+'%'; });
+  $('#simFixed').addEventListener('input',e=>{ P.fixed=+e.target.value; $('#simFixedV').textContent='d = '+P.fixed; });
+  $$('#simMode button').forEach(b=>b.addEventListener('click',()=>{ $$('#simMode button').forEach(o=>o.setAttribute('aria-pressed',o===b?'true':'false')); P.mode=b.getAttribute('data-mode'); $('#simFixedWrap').hidden=(P.mode!=='fixed'); reset(); if(!playing){ playing=true; $('#simPlay').textContent='❚❚ 暂停'; if(!raf) raf=requestAnimationFrame(tick); } }));
+  [['simRays','rays'],['simBand','band'],['simMesh','mesh'],['simGrid','grid'],['simPC','pc']].forEach(([id,k])=>{ $('#'+id).addEventListener('change',e=>{ P[k]=e.target.checked; if(k==='pc'&&!P.pc) PC=[]; draw(); }); });
+  reset(); if(playing) raf=requestAnimationFrame(tick); else { $('#simPlay').textContent='▶ 播放'; }
+})();
+
+/* ======================================================================
+   Fig. 3 level ruler
+   ====================================================================== */
+(function(){
+  const dI=$('#lvD'); if(!dI) return; const LI=$('#lvL'), g=$('#lvTree');
+  const BASE=[0.007,0.004,0.002,0.001];
+  function render(){
+    const d=+dI.value, L=Math.pow(2,+LI.value); $('#lvDv').textContent=d; $('#lvLv').textContent=L;
+    $('#lvExt').textContent=L===2?'未扩展（初始 L = 2）':('已扩展 '+(Math.log2(L)-1)+' 次：L = '+L);
+    const ell=L/Math.pow(2,d), tau=5*ell;
+    $('#lvEll').innerHTML=sci(ell)+'<small>场景单位</small>'; $('#lvTau').innerHTML=sci(tau);
+    const dense=Math.pow(8,d); $('#lvDense').innerHTML=d<=8?fmt(dense,0):sci(dense);
+    let best=null; BASE.forEach(b=>{ const dist=Math.abs(Math.log2(ell/b)); if(best==null||dist<best.dist) best={b,dist}; });
+    let txt; if(ell>0.014) txt='比最粗基线 λ=0.007 还粗 '+fmt(ell/0.007,1)+'×'; else if(ell<0.0007) txt='比 λ=0.001 还细 '+fmt(0.001/ell,1)+'×（该档均匀 TSDF 已 OOM）'; else txt='≈ λ = '+best.b+'（'+(ell>best.b?'粗':'细')+' '+fmt(Math.max(ell/best.b,best.b/ell),2)+'×）';
+    $('#lvBase').innerHTML='<span style="font-size:15px">'+txt+'</span>';
+    g.innerHTML=''; const S=200, X=20, Y=12, depth=Math.min(d,5);
+    el('rect',{x:X,y:Y,width:S,height:S,class:'nofill s-vline','stroke-width':1.4},g);
+    let x=X, y=Y, size=S;
+    for(let k=1;k<=depth;k++){ const h=size/2;
+      el('line',{x1:x+h,y1:y,x2:x+h,y2:y+size,class:'s-vline','stroke-width':1},g);
+      el('line',{x1:x,y1:y+h,x2:x+size,y2:y+h,class:'s-vline','stroke-width':1},g);
+      if(h>14) el('text',{x:x+h/2,y:y+size-h/2+4,class:'f-ink3 xs','text-anchor':'middle',text:'d='+k},g);
+      x=x+h; size=h; }
+    el('rect',{x:x,y:y,width:size,height:size,class:'f-vsurf s-O','stroke-width':1.4},g);
+    el('text',{x:X,y:Y+S+20,class:'f-ink2 xs',text:'二维示意：每级把一格分成 4 格（三维是 8 格）；蓝色格 = 第 '+depth+' 级'+(d>5?'（第 '+d+' 级已无法按比例画出）':'')},g);
+  }
+  dI.addEventListener('input',render); LI.addEventListener('input',render); render();
+})();
+
+/* ======================================================================
+   Fig. 4 + Fig. 5 allocation microscope and level staircase
+   ====================================================================== */
+(function(){
+  const zI=$('#alZ'); if(!zI) return; const fI=$('#alF'), LI=$('#alL'), gl=$('#alLeft'), gr=$('#alRight'), chart=$('#alChart');
+  function calc(z,f,L){ const s=z/f; let d=Math.ceil(Math.log2(L/s)); d=Math.max(0,Math.min(16,d)); const ell=L/Math.pow(2,d); return {s,d,ell,tau:5*ell,ratio:s/ell}; }
+  const SUB={'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉'}; const sub=n=>String(n).split('').map(c=>SUB[c]||c).join('');
+  function render(){
+    const z=+zI.value, f=+fI.value, L=Math.pow(2,+LI.value); $('#alZv').textContent=z.toFixed(2); $('#alFv').textContent=f; $('#alLv').textContent=L;
+    const r=calc(z,f,L);
+    $('#alFoot').innerHTML=sci(r.s); $('#alD').innerHTML=r.d+(r.d>=16?'<small>= d_max</small>':''); $('#alEll').innerHTML=sci(r.ell); $('#alTau').innerHTML='±'+sci(r.tau)+'<small>= 5 ℓ</small>'; $('#alRatio').innerHTML=r.ratio.toFixed(2)+'<small>∈ [1, 2)</small>';
+    /* left schematic */
+    gl.innerHTML='';
+    const cx=44, cy=286, ang=-Math.PI/3.3, ux=Math.cos(ang), uy=Math.sin(ang), nx=-uy, ny=ux;
+    const zmin=0.05, zmax=3, frac=Math.log(z/zmin)/Math.log(zmax/zmin), dist=80+frac*190;
+    el('text',{x:14,y:22,class:'f-ink2 sml',text:'示意：一条光线（沿光线的深度按对数刻度）'},gl);
+    el('rect',{x:cx-16,y:cy-10,width:24,height:20,rx:4,class:'fs-C s-C','stroke-width':1.2},gl);
+    el('circle',{cx:cx+12,cy:cy,r:5,class:'f-surf s-C','stroke-width':1.2},gl);
+    el('text',{x:cx+24,y:cy+4,class:'f-ink3 xs',text:'相机 o'},gl);
+    const px=cx+ux*40, py=cy+uy*40;
+    el('line',{x1:px-nx*44,y1:py-ny*44,x2:px+nx*44,y2:py+ny*44,class:'s-ink','stroke-width':2},gl);
+    el('rect',{x:px-3.5,y:py-3.5,width:7,height:7,class:'f-S',transform:'rotate('+(ang*180/Math.PI)+' '+px+' '+py+')'},gl);
+    el('text',{x:px+nx*50+2,y:py+ny*50+10,class:'f-ink3 xs',text:'像平面'},gl);
+    el('text',{x:px-14,y:py+17,class:'f-Si xs','text-anchor':'end',text:'像素 (u, v)'},gl);
+    const hx=cx+ux*dist, hy=cy+uy*dist, sp=5+frac*12;
+    el('path',{d:'M'+cx+' '+cy+' L'+(hx+nx*sp)+' '+(hy+ny*sp),class:'nofill s-ink3','stroke-width':1,'stroke-dasharray':'3 3'},gl);
+    el('path',{d:'M'+cx+' '+cy+' L'+(hx-nx*sp)+' '+(hy-ny*sp),class:'nofill s-ink3','stroke-width':1,'stroke-dasharray':'3 3'},gl);
+    el('line',{x1:cx,y1:cy,x2:cx+ux*292,y2:cy+uy*292,class:'s-C','stroke-width':1.3,'marker-end':'url(#ar-c)'},gl);
+    const bl=24+frac*12;
+    el('line',{x1:hx-ux*bl,y1:hy-uy*bl,x2:hx+ux*bl,y2:hy+uy*bl,class:'s-C','stroke-width':7,opacity:.5},gl);
+    el('path',{d:'M'+(hx-nx*62+ux*16)+' '+(hy-ny*62+uy*16)+' Q '+hx+' '+hy+' '+(hx+nx*62+ux*16)+' '+(hy+ny*62+uy*16),class:'nofill s-S','stroke-width':2.4},gl);
+    el('circle',{cx:hx,cy:hy,r:4,class:'f-ink'},gl);
+    el('text',{x:hx+16,y:hy-2,class:'f-ink2 xs',text:'x(u,v)  z = '+z.toFixed(2)},gl);
+    el('text',{x:hx-ux*bl+12,y:hy-uy*bl+6,class:'f-Ci xs',text:'z − τ'},gl);
+    el('text',{x:hx+ux*bl-10,y:hy+uy*bl+2,class:'f-Ci xs','text-anchor':'end',text:'z + τ'},gl);
+    el('text',{x:14,y:326,class:'f-ink3 xs',text:'单像素视锥被夸大画出；真实宽度 ≈ 1/f 弧度'},gl);
+    /* right microscope */
+    gr.innerHTML=''; const X0=330,Y0=14,WD=380,HT=306,Cp=26; const cols=Math.floor(WD/Cp), rows=Math.floor(HT/Cp); const ox=X0+(WD-cols*Cp)/2, oy=Y0+(HT-rows*Cp)/2;
+    el('rect',{x:ox,y:oy,width:cols*Cp,height:rows*Cp,class:'f-surf2 s-rule1','stroke-width':1},gr);
+    const rayX=ox+Math.floor(cols/2)*Cp+Cp/2; const sy=oy+Math.floor(rows/2)*Cp+Cp*0.5;
+    const wpx=r.ratio*Cp, xl=rayX-wpx/2, xr=rayX+wpx/2;
+    const surfY=xx=>sy+Math.sin((xx-rayX)/60)*10;
+    const touched=new Set(), samples=[];
+    for(let k=-10;k<=10;k++){ const yy=sy+k*Cp/2; samples.push(yy); const row=Math.floor((yy-oy)/Cp); if(row<0||row>=rows) continue;
+      for(let c=0;c<cols;c++){ const c0=ox+c*Cp, c1=c0+Cp; if(c1>xl&&c0<xr) touched.add(row+','+c); } }
+    touched.forEach(kk=>{ const [row,c]=kk.split(',').map(Number); const c0=ox+c*Cp, r0=oy+row*Cp; let mn=1e9,mx=-1e9; for(let t=0;t<=4;t++){ const yy=surfY(c0+t*Cp/4); mn=Math.min(mn,yy); mx=Math.max(mx,yy); }
+      const cross=mx>=r0&&mn<=r0+Cp; el('rect',{x:c0,y:r0,width:Cp,height:Cp,class:cross?'f-vsurf':'f-vseen'},gr); });
+    for(let c=0;c<=cols;c++) el('line',{x1:ox+c*Cp,y1:oy,x2:ox+c*Cp,y2:oy+rows*Cp,class:'s-vline','stroke-width':(c%2===0?1.4:0.6)},gr);
+    for(let rr=0;rr<=rows;rr++) el('line',{x1:ox,y1:oy+rr*Cp,x2:ox+cols*Cp,y2:oy+rr*Cp,class:'s-vline','stroke-width':(rr%2===0?1.4:0.6)},gr);
+    let dpath=''; for(let i=0;i<=40;i++){ const xx=ox+i/40*cols*Cp; dpath+=(i?' L':'M')+xx.toFixed(1)+' '+surfY(xx).toFixed(1); }
+    el('path',{d:dpath,class:'nofill s-S','stroke-width':2.4},gr);
+    el('line',{x1:xl,y1:oy,x2:xl,y2:oy+rows*Cp,class:'s-ink3','stroke-width':1,'stroke-dasharray':'3 3'},gr);
+    el('line',{x1:xr,y1:oy,x2:xr,y2:oy+rows*Cp,class:'s-ink3','stroke-width':1,'stroke-dasharray':'3 3'},gr);
+    el('line',{x1:rayX,y1:oy+rows*Cp,x2:rayX,y2:oy+6,class:'s-C','stroke-width':1.4,'marker-end':'url(#ar-c)'},gr);
+    samples.forEach(yy=>{ if(yy>=oy&&yy<=oy+rows*Cp) el('circle',{cx:rayX,cy:yy,r:2.6,class:'f-ink'},gr); });
+    el('rect',{x:ox+2,y:oy+2,width:236,height:18,rx:4,class:'f-surf',opacity:.85},gr);
+    el('text',{x:ox+8,y:oy+15,class:'f-ink2 xs',text:'显微镜：1 格 = ℓ'+sub(r.d)+' = '+sci(r.ell)+'；足迹 Δx = '+r.ratio.toFixed(2)+' 格'},gr);
+    el('text',{x:xr+6,y:sy-4*Cp,class:'f-ink3 xs',text:'单像素视锥'},gr);
+    el('rect',{x:ox+2,y:oy+rows*Cp-20,width:262,height:18,rx:4,class:'f-surf',opacity:.85},gr);
+    el('text',{x:ox+8,y:oy+rows*Cp-7,class:'f-ink3 xs',text:'带长 2τ = 10 格（α = 5）；采样间距 ℓ/2 为本页假定'},gr);
+    renderChart();
+  }
+  function renderChart(){
+    const f=+fI.value, L=Math.pow(2,+LI.value); chart.innerHTML='';
+    const X0=56,X1=700,Y0=18,Y1=180, zmin=0.05,zmax=4, dmin=4,dmax=16;
+    const xz=z=>X0+(Math.log(z/zmin)/Math.log(zmax/zmin))*(X1-X0), yd=d=>Y1-(d-dmin)/(dmax-dmin)*(Y1-Y0);
+    for(let d=dmin;d<=dmax;d+=2){ el('line',{x1:X0,y1:yd(d),x2:X1,y2:yd(d),class:'s-rule1','stroke-width':1},chart); el('text',{x:X0-8,y:yd(d)+4,class:'f-ink3 xs mono','text-anchor':'end',text:d},chart); }
+    [0.05,0.1,0.2,0.5,1,2,4].forEach(z=>{ el('line',{x1:xz(z),y1:Y0,x2:xz(z),y2:Y1,class:'s-rule1','stroke-width':1},chart); el('text',{x:xz(z),y:Y1+16,class:'f-ink3 xs mono','text-anchor':'middle',text:z},chart); });
+    el('text',{x:X1,y:Y1+32,class:'f-ink3 xs','text-anchor':'end',text:'像素深度 z（归一化场景单位，对数轴）'},chart);
+    el('text',{x:X0-8,y:Y0-4,class:'f-ink3 xs','text-anchor':'end',text:'层级 d'},chart);
+    [[0.007,'λ = 0.007'],[0.002,'λ = 0.002'],[0.001,'λ = 0.001（OOM）']].forEach(([lam,lab])=>{ const dd=Math.log2(2/lam); if(dd<dmin||dd>dmax) return; el('line',{x1:X0,y1:yd(dd),x2:X1,y2:yd(dd),class:'s-H','stroke-width':1,'stroke-dasharray':'5 4'},chart); el('text',{x:X1-4,y:yd(dd)-4,class:'f-Hi xs','text-anchor':'end',text:'均匀 TSDF '+lab+' ≈ 第 '+dd.toFixed(1)+' 级'},chart); });
+    let dpath='', prevD=null; const steps=200;
+    for(let i=0;i<=steps;i++){ const z=zmin*Math.pow(zmax/zmin,i/steps); const dd=Math.max(dmin,Math.min(dmax,calc(z,f,L).d)); if(prevD===null) dpath='M'+xz(z)+' '+yd(dd); else if(dd!==prevD) dpath+=' L'+xz(z)+' '+yd(prevD)+' L'+xz(z)+' '+yd(dd); prevD=dd; }
+    dpath+=' L'+X1+' '+yd(prevD);
+    el('path',{d:dpath,class:'nofill s-O','stroke-width':2.4},chart);
+    const z=+zI.value, r=calc(z,f,L), yy=yd(Math.max(dmin,Math.min(dmax,r.d)));
+    el('circle',{cx:xz(z),cy:yy,r:5,class:'f-O'},chart); el('circle',{cx:xz(z),cy:yy,r:9,class:'nofill s-O','stroke-width':1.2},chart);
+    el('text',{x:xz(z)+12,y:yy-8,class:'f-Oi xs',text:'z = '+z.toFixed(2)+' → d = '+r.d},chart);
+    el('text',{x:X0+6,y:Y0+12,class:'f-ink3 xs',text:'f = '+f+' px，L = '+L},chart);
+  }
+  [zI,fI,LI].forEach(i=>i.addEventListener('input',render)); render();
+})();
+
+/* ======================================================================
+   Fig. 6 1-D TSDF fusion
+   ====================================================================== */
+(function(){
+  const nI=$('#fuN'); if(!nI) return; const sI=$('#fuS'), wI=$('#fuW'), g=$('#fuG');
+  const NV=21, ZS=10, TAU=5; let seed=11, obs=[];
+  function regen(){ const rng=mulberry32(seed); obs=[]; for(let k=0;k<16;k++) obs.push(gauss(rng)); }
+  regen();
+  function render(){
+    const n=+nI.value, sg=+sI.value, wo=+wI.value; $('#fuNv').textContent=n; $('#fuSv').textContent=sg.toFixed(1)+' ℓ'; $('#fuWv').textContent=wo.toFixed(2);
+    const phi=new Array(NV).fill(0), w=new Array(NV).fill(0); let last=null, eq='';
+    const zs=[];
+    for(let k=0;k<n;k++){ const zk=ZS+sg*obs[k]; zs.push(zk); const cur=new Array(NV).fill(null);
+      for(let i=0;i<NV;i++){ const sdf=zk-i; if(sdf<-TAU) continue; const po=Math.max(-1,Math.min(1,sdf/TAU)); cur[i]=po;
+        if(i===10&&k===n-1) eq='第 '+n+' 次观测（z_obs = '+zk.toFixed(2)+'），顶点 p = 10：φ_old = '+phi[i].toFixed(3)+'，w_old = '+w[i].toFixed(2)+'，φ_obs = clip(('+zk.toFixed(2)+' − 10) / 5) = '+po.toFixed(3)+'，w_obs = '+wo.toFixed(2)+'　⇒　φ_new = ('+w[i].toFixed(2)+' × '+phi[i].toFixed(3)+' + '+wo.toFixed(2)+' × '+po.toFixed(3)+') / '+(w[i]+wo).toFixed(2)+' = '+(((w[i]*phi[i]+wo*po)/(w[i]+wo))).toFixed(3)+'，w_new = '+(w[i]+wo).toFixed(2);
+        phi[i]=(w[i]*phi[i]+wo*po)/(w[i]+wo); w[i]+=wo; }
+      last=cur; }
+    let est=null; for(let i=0;i<NV-1;i++){ if(w[i]>0&&w[i+1]>0&&phi[i]>0&&phi[i+1]<=0){ est=i+phi[i]/(phi[i]-phi[i+1]); break; } }
+    $('#fuEst').innerHTML=est==null?'—':(est.toFixed(2)+'<small>ℓ（真值 10.00）</small>'); $('#fuErr').innerHTML=est==null?'—':(Math.abs(est-ZS).toFixed(3)+'<small>ℓ</small>');
+    const raw=zs.length?zs.reduce((a,z)=>a+Math.abs(z-ZS),0)/zs.length:null; $('#fuRaw').innerHTML=raw==null?'—':(raw.toFixed(3)+'<small>ℓ</small>'); $('#fuWv2').textContent=w[10].toFixed(2);
+    $('#fuEq').textContent=eq||'把 n 调到 ≥ 1，看式 (1) 在离表面最近的顶点（p = 10）上怎么算。';
+    g.innerHTML=''; const X0=50,X1=690,Y0=150,AMP=70; const xp=p=>X0+p/(NV-1)*(X1-X0);
+    el('rect',{x:xp(ZS-TAU),y:Y0-AMP-12,width:xp(ZS+TAU)-xp(ZS-TAU),height:2*AMP+24,class:'fs-C',opacity:.5},g);
+    el('text',{x:xp(ZS-TAU)+4,y:Y0-AMP-2,class:'f-Ci xs',text:'截断带 [z − τ, z + τ]，τ = 5 ℓ'},g);
+    el('line',{x1:X0-10,y1:Y0,x2:X1+10,y2:Y0,class:'s-rule','stroke-width':1},g);
+    el('text',{x:X0-14,y:Y0-AMP+4,class:'f-ink3 xs mono','text-anchor':'end',text:'+1'},g); el('text',{x:X0-14,y:Y0+4,class:'f-ink3 xs mono','text-anchor':'end',text:'0'},g); el('text',{x:X0-14,y:Y0+AMP+4,class:'f-ink3 xs mono','text-anchor':'end',text:'−1'},g);
+    el('text',{x:X0-14,y:Y0-AMP-14,class:'f-ink3 xs','text-anchor':'end',text:'φ'},g);
+    for(let i=0;i<NV;i++){ const x=xp(i); el('line',{x1:x,y1:Y0-AMP-8,x2:x,y2:Y0+AMP+8,class:'s-rule1','stroke-width':1},g); el('text',{x:x,y:Y0+AMP+22,class:'f-ink3 xs mono','text-anchor':'middle',text:i},g);
+      if(w[i]>0){ const h=-phi[i]*AMP; el('rect',{x:x-6,y:h<0?Y0+h:Y0,width:12,height:Math.max(1,Math.abs(h)),rx:2,class:phi[i]>=0?'f-T':'f-S',opacity:.85},g); }
+      if(last&&last[i]!=null) el('circle',{cx:x,cy:Y0-last[i]*AMP,r:3.5,class:'nofill s-ink','stroke-width':1.4},g); }
+    el('text',{x:X1+10,y:Y0+AMP+36,class:'f-ink3 xs','text-anchor':'end',text:'沿光线的距离 p（体素单位 ℓ）'},g);
+    el('line',{x1:xp(ZS),y1:Y0-AMP-12,x2:xp(ZS),y2:Y0+AMP+12,class:'s-S','stroke-width':2,'stroke-dasharray':'5 3'},g);
+    el('text',{x:xp(ZS)+6,y:Y0-AMP-2,class:'f-Si xs',text:'真实表面 z* = 10'},g);
+    if(est!=null){ el('path',{d:'M'+xp(est)+' '+(Y0-12)+' l-6 -12 l12 0 z',class:'f-O'},g); el('text',{x:xp(est)+9,y:Y0-16,class:'f-Oi xs',text:'零交叉 '+est.toFixed(2)},g); }
+    const yb=Y0+AMP+62; el('line',{x1:X0-10,y1:yb,x2:X1+10,y2:yb,class:'s-rule1','stroke-width':1},g); el('text',{x:X0-14,y:yb+4,class:'f-ink3 xs','text-anchor':'end',text:'原始观测'},g);
+    zs.forEach((z,k)=>{ el('circle',{cx:xp(Math.max(0,Math.min(NV-1,z))),cy:yb-4-((k*7)%11),r:3.5,class:'f-H',opacity:.9},g); });
+    el('text',{x:X1+10,y:yb+16,class:'f-ink3 xs','text-anchor':'end',text:'同一组观测「原样堆成点云」（竖向抖动仅为可视）'},g);
+    el('rect',{x:X0,y:yb+8,width:10,height:10,class:'f-T'},g); el('text',{x:X0+14,y:yb+17,class:'f-ink3 xs',text:'φ > 0 前方'},g);
+    el('rect',{x:X0+84,y:yb+8,width:10,height:10,class:'f-S'},g); el('text',{x:X0+98,y:yb+17,class:'f-ink3 xs',text:'φ < 0 后方'},g);
+    el('circle',{cx:X0+180,cy:yb+13,r:3.5,class:'nofill s-ink','stroke-width':1.4},g); el('text',{x:X0+188,y:yb+17,class:'f-ink3 xs',text:'最新一次的 φ_obs'},g);
+  }
+  [nI,sI,wI].forEach(i=>i.addEventListener('input',render)); $('#fuRe').addEventListener('click',()=>{ seed+=1; regen(); render(); }); render();
+})();
+
+/* ======================================================================
+   Fig. 8 root extension
+   ====================================================================== */
+(function(){
+  const btn=$('#exBtn'); if(!btn) return; const gs=$('#exSpace'), gt=$('#exTree'); let n=0, anim=null;
+  function draw(prog){
+    gs.innerHTML=''; gt.innerHTML='';
+    const S=250, X=30, Y=24, L=Math.pow(2,n+1);
+    el('rect',{x:X,y:Y,width:S,height:S,class:'f-surf2 s-O','stroke-width':1.6},gs);
+    for(let k=1;k<4;k++){ el('line',{x1:X+k*S/4,y1:Y,x2:X+k*S/4,y2:Y+S,class:'s-vline','stroke-width':k===2?1.6:0.8},gs); el('line',{x1:X,y1:Y+k*S/4,x2:X+S,y2:Y+k*S/4,class:'s-vline','stroke-width':k===2?1.6:0.8},gs); }
+    const scEnd=1/Math.pow(2,n), scStart=(n>0)?1/Math.pow(2,n-1):1; const sc=(prog==null)?scEnd:(scStart+(scEnd-scStart)*prog);
+    const cs=S*sc, cx=X+S/2-cs/2, cy=Y+S/2-cs/2;
+    if(n>0){ el('rect',{x:cx,y:cy,width:cs,height:cs,class:'fs-H s-H','stroke-width':1.6},gs);
+      el('line',{x1:cx+cs/2,y1:cy,x2:cx+cs/2,y2:cy+cs,class:'s-H','stroke-width':1},gs); el('line',{x1:cx,y1:cy+cs/2,x2:cx+cs,y2:cy+cs/2,class:'s-H','stroke-width':1},gs);
+      el('text',{x:X+S/2,y:Y-8,class:'f-Hi xs','text-anchor':'middle',text:'橙：旧树的 4 个 depth-1 节点，现在是新树的 depth-'+(n+1)},gs); }
+    else el('text',{x:X+S/2,y:Y-8,class:'f-Oi xs','text-anchor':'middle',text:'当前根 [−1, 1]²，4 个 depth-1 节点'},gs);
+    const fs=S*sc/2; el('rect',{x:X+S/2-fs/2,y:Y+S/2-fs/2,width:fs,height:fs,class:'nofill s-ink3','stroke-width':1,'stroke-dasharray':'4 3'},gs);
+    if(fs>40) el('text',{x:X+S/2,y:Y+S/2+4,class:'f-ink3 xs','text-anchor':'middle',text:'首帧 [−0.5, 0.5]²'},gs);
+    el('text',{x:X,y:Y+S+18,class:'f-ink2 xs',text:'根边界 [−'+(L/2)+', '+(L/2)+']²，L = '+L},gs);
+    const TX=330, TY=30; el('text',{x:TX,y:TY,class:'f-ink2 sml',text:'树视图（只画一支）'},gt);
+    const maxLv=Math.min(n+1,3); let prevCenter=TX+160;
+    for(let d=0; d<=maxLv; d++){ const y=TY+34+d*60; const cnt=d===0?1:4; const w=cnt*46; const x0=TX+160-w/2;
+      for(let c=0;c<cnt;c++){ const x=x0+c*46+23; const old=(n>0&&d===n+1); const cls=d===0?'fs-O s-O':(old?'fs-H s-H':'f-surf2 s-rule');
+        if(d>0) el('line',{x1:prevCenter,y1:y-48,x2:x,y2:y-12,class:'s-rule','stroke-width':1},gt);
+        el('rect',{x:x-16,y:y-12,width:32,height:24,rx:5,class:cls,'stroke-width':1.2},gt); }
+      el('text',{x:TX+370,y:y+4,class:'f-ink3 xs','text-anchor':'end',text:'depth '+d+(d===0?'（根）':((n>0&&d===n+1)?'（旧 depth-1）':''))},gt);
+      prevCenter=(d===0)?(TX+160):(x0+46+23); }
+    if(n+1>3) el('text',{x:TX,y:TY+34+4*60,class:'f-ink3 xs',text:'（旧 depth-1 已在第 '+(n+1)+' 级，略）'},gt);
+    $('#exL').textContent=L; $('#exB').textContent='[−'+(L/2)+', '+(L/2)+']²'; $('#exN').textContent=n; $('#exD').textContent='d → d'+(n?' + '+n:''); $('#exR').textContent=16-n;
+    $('#exNote').textContent=n===0?'初始：L = 2，边界 [−1, 1]²':('第 '+n+' 次扩展后：L = '+L+'，边界 [−'+(L/2)+', '+(L/2)+']²；旧节点层级 +'+n+'，数据未搬动');
+  }
+  btn.addEventListener('click',()=>{ if(n>=6) return; n++; if(reduced){ draw(null); return; } let t0=null; if(anim) cancelAnimationFrame(anim); const run=ts=>{ if(!t0) t0=ts; const p=Math.min(1,(ts-t0)/520); draw(1-Math.pow(1-p,3)); if(p<1) anim=requestAnimationFrame(run); else anim=null; }; anim=requestAnimationFrame(run); });
+  $('#exReset').addEventListener('click',()=>{ n=0; draw(null); });
+  draw(null);
+})();
+
+/* ======================================================================
+   Fig. 9 architecture explorer
+   ====================================================================== */
+(function(){
+  const pane=$('#netPane'); if(!pane) return;
+  const D={
+    cam:{t:'相机适配器（OctWorld Camera Adapter）',c:'cam',role:'把每个生成窗口的相机参数变成与目标 latent 同形状的特征，再相加进去。',
+      i:['内外参归一到最后一个历史帧的坐标系','逐像素 Plücker 射线嵌入（6 通道）'],o:['与目标 token 同形状的相机特征 → 加到目标 latent（Fig. IV 的 ⊕）'],
+      d:['Pixel-Unshuffle → 带步长 Conv-2D → 若干残差块（Sec. 3.2）','相加而非拼接：不增加 token 数','1.5 沿用同一模块（附录 E.2）'],m:'和 CameraCtrl 一系一样是「学出来的」相机条件；论文认为单靠它控制不准，所以真正的几何约束来自记忆投影。'},
+    enc:{t:'Hunyuan VAE 编码器',c:'',role:'把历史帧、目标帧、渲染帧都压到 latent 空间；深度当灰度图处理。',
+      i:['历史 RGB(-D)、目标 RGB(-D)、OctMap 渲染的 RGB / 深度'],o:['各自的 latent'],
+      d:['深度用历史帧最大深度归一化再乘常数，线性映射到 [0, 1]，大 = 远','深度复制成 3 通道以适配预训练编码器的输入','深度 latent 与 RGB latent 沿通道拼接；patch 嵌入与输出投影扩维（Sec. 3.2）'],m:'「用历史最大深度归一化」意味着每一块的深度尺度都锚在历史上——这是跨块尺度一致性的传递通道。'},
+    hist:{t:'历史通路：噪声增强 + FramePack 打包',c:'hist',role:'提供时间上下文：过去生成了什么。',
+      i:['历史帧 latent'],o:['定长的打包上下文 token → Transformer Block'],
+      d:['训练时加 ε_α（α ∈ 11 档，随机）；推理时加第 3 档（1.0）','FramePack：按时间远近分组，越久远在时间维压得越狠（Sec. 3.2）','上下文长度固定，不随历史增长'],m:'这是骨架自带的能力；OctWorld 只在它前面加了噪声。'},
+    tgt:{t:'目标通路：流匹配的去噪目标',c:'tgt',role:'被去噪的对象：本块 36 帧的 RGB（+ 深度）latent。',
+      i:['目标帧 latent + 流匹配噪声 ε_t','相机特征（相加）'],o:['目标 token → Transformer Block'],
+      d:['Patch 嵌入扩维以容纳 RGB ⊕ 深度通道','训练目标是 Tgt. Latents（Fig. IV 的 Output）'],m:'深度是和 RGB 一起「生成」出来的，不是估计出来的——这也是 1.0 与 1.5 的核心差别。'},
+    rend:{t:'渲染记忆通路：世界记忆投影 + 可见性掩码',c:'oct',role:'提供空间条件：这里以前长什么样、哪里还没去过。',
+      i:['OctMap 网格渲染到目标视角的 RGB / 深度（latent）','可见性掩码'],o:['拼接后的 token → Control Block'],
+      d:['渲染 latent 加 ε_α（与历史同一噪声级）','掩码经 Conv-3D + Linear 变成特征，与渲染 latent 拼接（Fig. IV 的 C）','再过 Patch 嵌入'],m:'掩码的作用是把「没看过」和「看过但是黑的」区分开；没有它，空洞会被当成内容。'},
+    mod:{t:'时间步 T ⊕ 噪声级 α → 调制',c:'',role:'告诉网络当前的去噪时间步，以及历史被加了多少噪声。',
+      i:['扩散时间步 T','噪声增强级 α'],o:['AdaLN 调制参数 → Transformer Block 与 Control Block'],
+      d:['α 经专用条件层投影进时间步嵌入（附录 B.1）','1.5 改为逐 token 的 r_i ∈ {0, α, t}，避免 α 与 t 纠缠（附录 E.2）'],m:'1.0 的做法让所有 token 共享同一个 α 调制，即便目标 token 根本没被加 α——这是 1.5 要改的原因。'},
+    txt:{t:'文本 / 参考图编码',c:'',role:'骨架自带的文本与参考图条件。',
+      i:['GPT-4o 生成的视频级描述','参考图（首帧）'],o:['文本 token、图像 token → Transformer Block'],
+      d:['来自 FramePack / HunyuanVideo 的原生接口，论文未改动'],m:'WorldScore 内容对齐 6.37 说明 1.0 几乎不听文本；1.5 换 Wan 后升到 35.45。'},
+    ctrl:{t:'Control Block × 4',c:'oct',role:'处理渲染记忆通路，把结果逐层注入主干。',
+      i:['渲染记忆 token','调制参数'],o:['控制特征 → 加进 Transformer Block'],
+      d:['从预训练骨架复制的 DiT 块（VideoPainter 式，附录 B.1）','注入前过零初始化投影：训练开始时对主干无影响（附录 B.2）'],m:'ControlNet 思路的视频版；1.5 认为 Wan 原生的 (x, m, y) 接口已经够用，去掉了这条分支。'},
+    main:{t:'Transformer Block × M（FramePack F1 / Hunyuan DiT）',c:'tgt',role:'主干：在历史、文本、控制特征的条件下去噪目标 token。',
+      i:['历史 token、目标 token、文本 / 图像 token','控制特征（逐层加入）','调制参数'],o:['去噪后的目标表示 → Linear'],
+      d:['14B 骨架 + 条件模块 = 15B（Sec. 4.1；Tab. II 记 14.50B）','两阶段训练：16 帧 80K 步 → 36 帧 30K 步'],m:'选 FramePack 的理由是「长时程上下文 + 抗漂移」；论文没有和其他骨架做对照。'},
+    out:{t:'输出：Linear → 目标 latent',c:'',role:'输出 RGB 与深度的 latent，解码后得到本块的帧与深度图。',
+      i:['主干输出'],o:['RGB latent + 深度 latent → VAE 解码 → 36 帧 RGB + 深度'],
+      d:['输出投影扩维以支持深度通道','深度反归一化后与 RGB 一起积分进 OctMap'],m:'深度解码经过的是为 RGB 训练的 VAE——「深度当灰度图」是一个工程折中。'}
+  };
+  function show(k){ const d=D[k]; if(!d) return; const cls=d.c?('r'+({cam:'C',hist:'H',tgt:'T',oct:'O'}[d.c]||'')):'';
+    pane.innerHTML='<h5 class="'+cls+'">'+d.t+'</h5><p>'+d.role+'</p>'+
+      '<div class="row"><span class="k">输入</span><ul>'+d.i.map(x=>'<li>'+x+'</li>').join('')+'</ul></div>'+
+      '<div class="row"><span class="k">输出</span><ul>'+d.o.map(x=>'<li>'+x+'</li>').join('')+'</ul></div>'+
+      '<div class="row"><span class="k">论文细节</span><ul>'+d.d.map(x=>'<li>'+x+'</li>').join('')+'</ul></div>'+
+      '<div class="row"><span class="k">我的注</span><p>'+d.m+'</p></div>'; }
+  $$('#p9a .node').forEach(nd=>{ const act=()=>{ $$('#p9a .node').forEach(o=>o.classList.toggle('on',o===nd)); show(nd.getAttribute('data-node')); };
+    nd.addEventListener('click',act); nd.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); act(); } }); });
+})();
+
+/* ======================================================================
+   bar panels (shared)
+   ====================================================================== */
+function barPanel(container,o){
+  const pnl=document.createElement('div'); pnl.className='pnl'; if(o.labW) pnl.style.setProperty('--labw',o.labW+'px');
+  pnl.innerHTML='<div class="pt"><span>'+o.title+'</span><span>'+(o.unit||'')+'</span></div>';
+  const mx=o.max||Math.max.apply(null,o.rows.map(r=>r.value))*1.18;
+  o.rows.forEach(r=>{ const row=document.createElement('div'); row.className='brow'+(r.hl?' hl':''); const pct=Math.max(0.8,r.value/mx*100);
+    row.innerHTML='<span class="bl">'+r.label+'</span><span class="bt"><i style="width:'+pct.toFixed(2)+'%"></i></span><span class="bv">'+(o.fmt?o.fmt(r.value):r.value)+'</span>'; pnl.appendChild(row); });
+  container.appendChild(pnl); return pnl;
+}
+
+/* ---- Fig. 10 noise level panels ---- */
+(function(){
+  const box=$('#nzBars'); if(!box) return; let lv=3;
+  const data=[
+    {title:'LPIPS↓ · 1.0',unit:'Re10K 往返',vals:[0.1412,0.1633,0.1806],fmt:v=>v.toFixed(4),max:0.22},
+    {title:'LPIPS↓ · 1.5',unit:'Re10K 往返',vals:[0.1361,0.1413,0.1445],fmt:v=>v.toFixed(4),max:0.22},
+    {title:'Chamfer↓ · 1.0',unit:'Re10K 往返',vals:[0.0252,0.0274,0.0340],fmt:v=>v.toFixed(4),max:0.042},
+    {title:'WorldScore-Static↑ · 1.0',unit:'0–100',vals:[50.22,50.31,50.07],fmt:v=>v.toFixed(2),max:100},
+    {title:'3D 一致性↑ · 1.0',unit:'0–100',vals:[67.18,71.67,71.09],fmt:v=>v.toFixed(2),max:100}];
+  function render(){ box.innerHTML=''; data.forEach(p=>barPanel(box,{title:p.title,unit:p.unit,max:p.max,fmt:p.fmt,labW:70,rows:[0,3,5].map((l,i)=>({label:'噪声级 '+l,value:p.vals[i],hl:l===lv}))}));
+    $('#nzAlpha').textContent='α ≈ '+(lv*0.07).toFixed(2)+'（第 '+lv+' 档 = '+lv+' × 0.07；我的推算）'; }
+  $$('#nzSeg button').forEach(b=>b.addEventListener('click',()=>{ $$('#nzSeg button').forEach(o=>o.setAttribute('aria-pressed',o===b?'true':'false')); lv=+b.getAttribute('data-lv'); render(); }));
+  render();
+})();
+
+/* ---- Fig. 14 efficiency ---- */
+(function(){ const box=$('#effBars'); if(!box) return;
+  const M=['Voyager','Gen3C','Aether','VMem','OctWorld'];
+  const P=[13.31,7.24,5.57,1.26,14.50], F=[0.041,0.117,0.223,0.400,0.136], G=[48,41,34,19,51];
+  barPanel(box,{title:'参数量',unit:'B',fmt:v=>v.toFixed(2),rows:M.map((m,i)=>({label:m,value:P[i],hl:i===4}))});
+  barPanel(box,{title:'推理速度↑',unit:'FPS',fmt:v=>v.toFixed(3),rows:M.map((m,i)=>({label:m,value:F[i],hl:i===4}))});
+  barPanel(box,{title:'运行显存↓',unit:'GB',fmt:v=>v,rows:M.map((m,i)=>({label:m,value:G[i],hl:i===4}))});
+})();
+
+/* ---- Fig. 15 WorldScore ---- */
+(function(){ const box=$('#wsBars'); if(!box) return;
+  const M=['AETHER','Voyager','VMem','Gen3C','OctWorld-1.0'];
+  const K=['WorldScore-Static','3D 一致性','光度一致性','风格一致性','相机控制','物体控制','内容对齐','主观质量'];
+  const V=[[46.59,65.65,50.29,83.49,37.65,48.5,7.17,33.35],[49.93,66.35,43.38,67.89,46.60,58.09,35.97,31.21],[42.4,61.83,41.21,77.72,31.56,43.75,5.96,34.75],[45.48,70.52,68.46,78.06,12.57,50.12,6.24,32.36],[50.31,71.67,77.01,78.17,39.12,48.69,6.37,31.17]];
+  K.forEach((k,j)=>{ const best=Math.max.apply(null,V.map(r=>r[j])); barPanel(box,{title:k,unit:V[4][j]===best?'OctWorld 最高':'',max:100,labW:88,fmt:v=>v.toFixed(2),rows:M.map((m,i)=>({label:m,value:V[i][j],hl:i===4}))}); });
+})();
+
+/* ---- Fig. 16 memory + user study ---- */
+(function(){ const box=$('#memBars'); if(!box) return;
+  barPanel(box,{title:'LPIPS↓（往返对称帧）',unit:'Tab. 2',fmt:v=>v.toFixed(4),rows:[['OctWorld',0.1633,1],['Gen3C',0.1933,0],['VMem',0.4010,0]].map(r=>({label:r[0],value:r[1],hl:!!r[2]}))});
+  barPanel(box,{title:'Chamfer↓（VGGT 点云）',unit:'Tab. 2',fmt:v=>v.toFixed(4),rows:[['OctWorld',0.0345,1],['Gen3C',0.0457,0],['VMem',0.0620,0]].map(r=>({label:r[0],value:r[1],hl:!!r[2]}))});
+  barPanel(box,{title:'用户偏好↑',unit:'% · Tab. 3',max:100,fmt:v=>v.toFixed(1)+'%',rows:[['OctWorld',53.8,1],['Gen3C',39.5,0],['VMem',0.9,0],['不确定',5.8,0]].map(r=>({label:r[0],value:r[1],hl:!!r[2]}))});
+})();
+
+/* ---- Fig. 17 ablation ---- */
+(function(){ const box=$('#abBars'); if(!box) return;
+  const R=[['TSDF · f16',0.2509,0.0556],['点云 · f16',0.2749,0.0916],['w/o OctMap · f36',0.2128,0.0534],['TSDF · f36',0.1996,0.0345],['OctMap · f36',0.1412,0.0252]];
+  barPanel(box,{title:'LPIPS↓',unit:'Tab. 4a',labW:118,fmt:v=>v.toFixed(4),rows:R.map((r,i)=>({label:r[0],value:r[1],hl:i===4}))});
+  barPanel(box,{title:'Chamfer↓',unit:'Tab. 4a',labW:118,fmt:v=>v.toFixed(4),rows:R.map((r,i)=>({label:r[0],value:r[2],hl:i===4}))});
+})();
+
+/* ---- Fig. 19 versions ---- */
+(function(){ const box=$('#verBars'); if(!box) return;
+  const K=['WorldScore-Static','相机控制','物体控制','内容对齐','3D 一致性','光度一致性','风格一致性','主观质量'];
+  const A=[50.31,39.12,48.69,6.37,71.67,77.01,78.17,31.17], B=[56.02,42.06,59.00,35.45,64.93,70.97,79.23,40.52];
+  K.forEach((k,j)=>barPanel(box,{title:k,unit:(B[j]>A[j]?'↑ +':'↓ ')+(B[j]-A[j]).toFixed(2),max:100,labW:72,fmt:v=>v.toFixed(2),rows:[{label:'1.0',value:A[j],hl:false},{label:'1.5',value:B[j],hl:true}]}));
+})();
+
+/* ---- Fig. 18 Table 5 scatter ---- */
+(function(){ const svg=$('#t5Chart'); if(!svg) return; const tip=$('#t5Tip');
+  const PTS=[{n:'点云',mem:6.11,psnr:19.89,ssim:.57,lpips:.38,t:18.58,c:'H'},{n:'TSDF λ=0.007',mem:1.37,psnr:20.47,ssim:.61,lpips:.44,t:1.42,c:'C'},{n:'TSDF λ=0.004',mem:1.97,psnr:21.32,ssim:.65,lpips:.39,t:3.15,c:'C'},{n:'TSDF λ=0.002',mem:9.66,psnr:22.08,ssim:.69,lpips:.33,t:16.97,c:'C'},{n:'OctMap（自适应）',mem:7.26,psnr:23.47,ssim:.74,lpips:.27,t:17.94,c:'O'}];
+  const X0=56,X1=640,Y0=22,Y1=210; const xm=m=>X0+(m/11)*(X1-X0), yp=p=>Y1-(p-19)/(24.6-19)*(Y1-Y0);
+  for(let p=19;p<=24;p++){ el('line',{x1:X0,y1:yp(p),x2:X1,y2:yp(p),class:'s-rule1','stroke-width':1},svg); el('text',{x:X0-8,y:yp(p)+4,class:'f-ink3 xs mono','text-anchor':'end',text:p},svg); }
+  for(let m=0;m<=10;m+=2){ el('line',{x1:xm(m),y1:Y0,x2:xm(m),y2:Y1,class:'s-rule1','stroke-width':1},svg); el('text',{x:xm(m),y:Y1+16,class:'f-ink3 xs mono','text-anchor':'middle',text:m},svg); }
+  el('text',{x:X1,y:Y1+32,class:'f-ink3 xs','text-anchor':'end',text:'积分时峰值显存（GB，越左越好）'},svg); el('text',{x:X0+6,y:Y0+2,class:'f-ink3 xs',text:'PSNR（dB，越上越好）'},svg);
+  // OOM marker
+  el('rect',{x:X1+12,y:Y0,width:64,height:Y1-Y0,fill:'url(#hatch)',class:'s-rule','stroke-width':1,rx:6},svg);
+  el('text',{x:X1+44,y:Y0+18,class:'f-Si xs','text-anchor':'middle',text:'TSDF'},svg); el('text',{x:X1+44,y:Y0+32,class:'f-Si xs','text-anchor':'middle',text:'λ=0.001'},svg); el('text',{x:X1+44,y:Y0+46,class:'f-Si xs','text-anchor':'middle',text:'OOM'},svg); el('text',{x:X1+44,y:Y0+60,class:'f-ink3 xs','text-anchor':'middle',text:'(80 GB)'},svg);
+  // dashed line connecting TSDF series
+  const ts=PTS.filter(p=>p.c==='C'); el('path',{d:'M'+ts.map(p=>xm(p.mem)+' '+yp(p.psnr)).join(' L '),class:'nofill s-C','stroke-width':1.2,'stroke-dasharray':'4 3'},svg);
+  PTS.forEach((p,i)=>{ const x=xm(p.mem), y=yp(p.psnr); el('circle',{cx:x,cy:y,r:p.c==='O'?8:6,class:'f-'+p.c},svg); el('circle',{cx:x,cy:y,r:p.c==='O'?10:8,class:'nofill s-'+p.c,'stroke-width':1.2,opacity:.5},svg);
+    const lx=p.c==='O'?x+14:x+10, anchor='start'; const ly=p.n==='TSDF λ=0.004'?y-10:(p.n==='TSDF λ=0.007'?y+18:y+4);
+    el('text',{x:lx,y:ly,class:(p.c==='O'?'f-Oi':'f-ink2')+' xs','text-anchor':anchor,text:p.n+' · '+p.psnr.toFixed(2)+' dB'},svg);
+    const hit=el('circle',{cx:x,cy:y,r:16,fill:'transparent',style:'cursor:pointer'},svg);
+    hit.addEventListener('mousemove',e=>{ const b=svg.getBoundingClientRect(); tip.innerHTML='<b>'+p.n+'</b><br>PSNR '+p.psnr.toFixed(2)+' · SSIM '+p.ssim.toFixed(2)+' · LPIPS '+p.lpips.toFixed(2)+'<br>显存 '+p.mem.toFixed(2)+' GB · 时间 '+p.t.toFixed(2)+' s'; tip.style.left=(e.clientX-b.left+14)+'px'; tip.style.top=(e.clientY-b.top-10)+'px'; tip.style.opacity=1; });
+    hit.addEventListener('mouseleave',()=>{ tip.style.opacity=0; }); });
+  el('text',{x:X0+6,y:Y1-6,class:'f-ink3 xs',text:'紫：均匀 TSDF（λ 递减）· 橙：点云 · 蓝：OctMap'},svg);
+})();
+
+/* ======================================================================
+   Fig. 12 algorithm stepper
+   ====================================================================== */
+(function(){ const g=$('#stG'); if(!g) return; const K=3; let pos=0, timer=null;
+  const NODES={his:{x:80,y:44,w:120,h:48,t:'历史 H（打包上下文）',c:'H'},mesh:{x:240,y:44,w:132,h:48,t:'ExtractMesh → 渲染 S_k',c:''},gen:{x:380,y:44,w:108,h:48,t:'VideoGenerator',c:'T'},oct:{x:80,y:150,w:120,h:56,t:'OctMap M',c:'O'},dep:{x:380,y:150,w:108,h:56,t:'DepthAcquisition',c:'H'},int:{x:240,y:256,w:120,h:48,t:'Integrate',c:'O'}};
+  const R={}; Object.keys(NODES).forEach(k=>{ const n=NODES[k]; const grp=el('g',{},g); R[k]=el('rect',{x:n.x-n.w/2,y:n.y-n.h/2,width:n.w,height:n.h,rx:9,class:(n.c?'fs-'+n.c+' s-'+n.c:'f-surf2 s-rule'),'stroke-width':1.4},grp); el('text',{x:n.x,y:n.y+4,class:(n.c?'f-'+n.c+'i':'f-ink')+' xs','text-anchor':'middle','font-weight':600,text:n.t},grp); });
+  const A=(a,b,cls,dash)=>el('path',{d:'M'+a[0]+' '+a[1]+' L'+b[0]+' '+b[1],class:'nofill '+cls,'stroke-width':1.5,'marker-end':'url(#ar-i)','stroke-dasharray':dash||'none'},g);
+  A([120,124],[178,70],'s-ink3'); A([306,44],[324,44],'s-ink3'); A([380,68],[380,120],'s-ink3'); A([352,178],[300,230],'s-ink3'); A([180,256],[104,180],'s-ink3');
+  el('path',{d:'M380 20 L380 8 L80 8 L80 18',class:'nofill s-ink3','stroke-width':1.2,'stroke-dasharray':'4 3','marker-end':'url(#ar-i)'},g);
+  el('path',{d:'M110 68 L110 100 L356 100 L356 70',class:'nofill s-ink3','stroke-width':1.2,'stroke-dasharray':'2 3','marker-end':'url(#ar-i)'},g);
+  el('text',{x:236,y:110,class:'f-ink3 xs','text-anchor':'middle',text:'H_{k−1} 作为输入'},g);
+  el('text',{x:236,y:294,class:'f-ink3 xs','text-anchor':'middle',text:'上方虚线：H_k ← H_{k−1} ∪ G_k；Integrate 把新 RGB-D 融回 OctMap'},g);
+  const stepOf=p=>{ if(p===0) return {k:0,s:0}; if(p===1) return {k:0,s:1}; const q=p-2; if(q>=6*K) return {k:K,s:8}; return {k:Math.floor(q/6)+1,s:2+q%6}; };
+  const HL={0:['oct','his'],1:[],2:['mesh'],3:['mesh'],4:['gen'],5:['dep'],6:['int','oct'],7:['his'],8:['his']};
+  function render(){ const st=stepOf(pos); Object.keys(R).forEach(k=>R[k].setAttribute('stroke-width',(HL[st.s]||[]).indexOf(k)>=0?3.2:1.4));
+    $$('#stAlg div').forEach(d=>d.classList.toggle('on',+d.getAttribute('data-i')===st.s));
+    $('#stLab').textContent=st.s===0?'初始化':(st.s===1?'切块':(st.s===8?'结束：返回 H_K':('块 k = '+st.k+' / '+K+' · 第 '+(st.s-1)+' 步')));
+    $('#stPrev').disabled=pos===0; $('#stNext').disabled=pos>=2+6*K; }
+  const MAX=2+6*K;
+  $('#stNext').addEventListener('click',()=>{ if(pos<MAX) pos++; render(); }); $('#stPrev').addEventListener('click',()=>{ if(pos>0) pos--; render(); });
+  $('#stAuto').addEventListener('click',()=>{ if(timer){ clearInterval(timer); timer=null; $('#stAuto').textContent='▶ 自动'; return; } if(pos>=MAX) pos=0; $('#stAuto').textContent='❚❚ 停止'; timer=setInterval(()=>{ if(pos>=MAX){ clearInterval(timer); timer=null; $('#stAuto').textContent='▶ 自动'; return; } pos++; render(); }, reduced?1600:1100); });
+  render();
+})();
+
+/* ======================================================================
+   Fig. 13 cost calculator
+   ====================================================================== */
+(function(){ const S=$('#ccSteps'); if(!S) return; const T=$('#ccStep'), I=$('#ccInt'), M=$('#ccMesh'), svg=$('#ccChart');
+  function render(){ const n=+S.value, t=+T.value, it=+I.value, me=+M.value; $('#ccStepsV').textContent=n; $('#ccStepV').textContent=t.toFixed(1); $('#ccIntV').textContent=it.toFixed(2); $('#ccMeshV').textContent=me.toFixed(1);
+    const dn=n*t, tot=dn+it+me; const ref=36/0.136; const mx=Math.max(tot,ref)*1.12;
+    $('#ccTot').innerHTML=tot.toFixed(1)+'<small>s</small>'; $('#ccFps').innerHTML=(36/tot).toFixed(3)+'<small>FPS</small>'; $('#cc433').innerHTML=(433/36*tot/60).toFixed(1)+'<small>min</small>';
+    svg.innerHTML=''; const X0=20,X1=700,Y=40,H=34; const xs=v=>X0+v/mx*(X1-X0);
+    const parts=[[dn,'f-T','去噪 '+n+' × '+t.toFixed(1)+' s = '+dn.toFixed(0)+' s'],[it,'f-O','积分 '+it.toFixed(2)+' s'],[me,'f-Oi','网格 '+me.toFixed(1)+' s']]; let acc=0;
+    parts.forEach(([v,c,l],i)=>{ const w=Math.max(0,xs(acc+v)-xs(acc)-2); el('rect',{x:xs(acc),y:Y,width:w,height:H,rx:3,class:c,opacity:i===0?.85:1},svg); if(w>70) el('text',{x:xs(acc)+6,y:Y+21,class:'xs',style:'fill:#fff',text:l},svg); acc+=v; });
+    el('text',{x:xs(tot)+6,y:Y+21,class:'f-ink xs mono',text:tot.toFixed(0)+' s'},svg);
+    el('line',{x1:xs(ref),y1:Y-14,x2:xs(ref),y2:Y+H+14,class:'s-S','stroke-width':1.6,'stroke-dasharray':'5 3'},svg);
+    el('text',{x:xs(ref),y:Y-18,class:'f-Si xs','text-anchor':'middle',text:'Tab. II 反推 ≈ 265 s / 块'},svg);
+    el('text',{x:X0,y:Y+H+30,class:'f-ink3 xs',text:'每块 36 帧；分项时间为论文值（可拖动），去噪步数与硬件为假设'},svg);
+    el('text',{x:X0,y:Y+H+48,class:'f-ink3 xs',text:'图例：绿 = 去噪（骨架）　蓝 = OctMap 积分　浅蓝 = 网格提取'},svg);
+    el('text',{x:X1,y:Y+H+30,class:'f-ink3 xs mono','text-anchor':'end',text:'0 → '+mx.toFixed(0)+' s'},svg); }
+  [S,T,I,M].forEach(i=>i.addEventListener('input',render)); $('#ccReset').addEventListener('click',()=>{ S.value=25; T.value=3.6; I.value=7.36; M.value=4.6; render(); }); render();
+})();
+})();
+</script>
+</body>
+</html>
