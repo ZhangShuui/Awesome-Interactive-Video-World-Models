@@ -1,0 +1,2580 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Programmable World Model 精读</title>
+<meta name="description" content="arXiv 2609.10540 · Programmable World Model：把世界状态从视频模型里搬出来，用 state-augmented 3D OBB 当接口。方法精读与交互图解">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   Programmable World Model 精读 — design tokens
+   角色色：pg  = 世界程序 / coding agent / 规则
+           st  = 权威世界状态 / 轻量引擎 / 账本
+           cp  = 状态编译器 / 三张控制图
+           rd  = 生成渲染器 / 视频模型 / 冻结主干
+           cam = 相机 / 视锥 / 目标轨迹
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0e1013; --surf:#14171b; --surf2:#1a1e24; --surf3:#232931;
+  --rule:#262c34; --rule2:#39414c;
+  --ink:#ecf0f4; --ink2:#a9b2bd; --ink3:#7a8492;
+
+  --pg:#9d7bf0;  --pg-ink:#b79dff;  --pg-soft:rgba(157,123,240,.17);
+  --st:#e0a53a;  --st-ink:#f0bd5c;  --st-soft:rgba(224,165,58,.16);
+  --cp:#1fbfae;  --cp-ink:#4fd9c8;  --cp-soft:rgba(31,191,174,.16);
+  --rd:#5a9bf6;  --rd-ink:#82b6ff;  --rd-soft:rgba(90,155,246,.16);
+  --cam:#ec6a9c; --cam-ink:#ff8fb6; --cam-soft:rgba(236,106,156,.16);
+
+  --ok:#3fb27a; --ok-ink:#62cf95; --ok-soft:rgba(63,178,122,.14);
+  --bad:#e0605a; --bad-ink:#f0857f; --bad-soft:rgba(224,96,90,.14);
+  --warn:#e3b341; --warn-ink:#f0c766; --warn-soft:rgba(227,179,65,.14);
+
+  /* identity slot 色板（demo 用，故意与语义无关） */
+  --id1:#ff7a59; --id2:#4fd9c8; --id3:#b79dff; --id4:#f0c766; --id5:#82b6ff; --id6:#ff8fb6;
+  /* 语义类别色板 */
+  --sem-person:#7fd18c; --sem-crate:#c89a6a; --sem-car:#6aa8d8;
+  /* 七向方向色 */
+  --d-static:#7a8492; --d-fwd:#5a9bf6; --d-back:#ec6a9c; --d-left:#e0a53a; --d-right:#9d7bf0; --d-up:#3fb27a; --d-down:#e0605a;
+
+  --grid:#212730; --axis:#39414c; --tint:rgba(255,255,255,.03);
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 32px rgba(0,0,0,.36);
+  --font-display:"Bricolage Grotesque","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f3f5; --surf:#ffffff; --surf2:#eaedf1; --surf3:#dfe3e9;
+    --rule:#dcdfe5; --rule2:#c1c7d0;
+    --ink:#13171c; --ink2:#495159; --ink3:#717b88;
+    --pg:#6f4fd6;  --pg-ink:#5b3cc4;  --pg-soft:rgba(111,79,214,.12);
+    --st:#b07908;  --st-ink:#8d6106;  --st-soft:rgba(176,121,8,.13);
+    --cp:#0d8f81;  --cp-ink:#0a7469;  --cp-soft:rgba(13,143,129,.13);
+    --rd:#2b6fd6;  --rd-ink:#1f58b0;  --rd-soft:rgba(43,111,214,.12);
+    --cam:#c93a72; --cam-ink:#a72c5d; --cam-soft:rgba(201,58,114,.12);
+    --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+    --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+    --warn:#b98512; --warn-ink:#8f6608; --warn-soft:rgba(185,133,18,.14);
+    --id1:#d9532f; --id2:#0d8f81; --id3:#6f4fd6; --id4:#b08512; --id5:#2b6fd6; --id6:#c93a72;
+    --sem-person:#2f8c46; --sem-crate:#8a6234; --sem-car:#2c6d96;
+    --d-static:#717b88; --d-fwd:#2b6fd6; --d-back:#c93a72; --d-left:#b07908; --d-right:#6f4fd6; --d-up:#138a54; --d-down:#c8362f;
+    --grid:#e2e5ea; --axis:#c1c7d0; --tint:rgba(16,20,28,.028);
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f3f5; --surf:#ffffff; --surf2:#eaedf1; --surf3:#dfe3e9;
+  --rule:#dcdfe5; --rule2:#c1c7d0;
+  --ink:#13171c; --ink2:#495159; --ink3:#717b88;
+  --pg:#6f4fd6;  --pg-ink:#5b3cc4;  --pg-soft:rgba(111,79,214,.12);
+  --st:#b07908;  --st-ink:#8d6106;  --st-soft:rgba(176,121,8,.13);
+  --cp:#0d8f81;  --cp-ink:#0a7469;  --cp-soft:rgba(13,143,129,.13);
+  --rd:#2b6fd6;  --rd-ink:#1f58b0;  --rd-soft:rgba(43,111,214,.12);
+  --cam:#c93a72; --cam-ink:#a72c5d; --cam-soft:rgba(201,58,114,.12);
+  --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+  --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+  --warn:#b98512; --warn-ink:#8f6608; --warn-soft:rgba(185,133,18,.14);
+  --id1:#d9532f; --id2:#0d8f81; --id3:#6f4fd6; --id4:#b08512; --id5:#2b6fd6; --id6:#c93a72;
+  --sem-person:#2f8c46; --sem-crate:#8a6234; --sem-car:#2c6d96;
+  --d-static:#717b88; --d-fwd:#2b6fd6; --d-back:#c93a72; --d-left:#b07908; --d-right:#6f4fd6; --d-up:#138a54; --d-down:#c8362f;
+  --grid:#e2e5ea; --axis:#c1c7d0; --tint:rgba(16,20,28,.028);
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;}
+h1,h2,h3,h4,h5{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--cp-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--cp-ink); outline-offset:3px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); border:1px solid var(--rule);
+  padding:.08em .36em; border-radius:5px; white-space:nowrap}
+strong{font-weight:600; color:var(--ink)}
+hr{border:0; border-top:1px solid var(--rule); margin:40px 0}
+ul,ol{margin:0; padding-left:1.35em}
+li{margin:.35em 0}
+li::marker{color:var(--ink3)}
+.m{font-family:var(--font-math); font-style:italic}
+.mono{font-family:var(--font-mono)}
+sub,sup{line-height:0; font-size:.72em}
+
+/* ============================================================ chrome */
+#prog{position:fixed; inset:0 auto auto 0; height:2px; width:0; z-index:200;
+  background:linear-gradient(90deg,var(--pg),var(--st),var(--cp),var(--rd)); transition:width .08s linear}
+.top{position:fixed; inset:0 0 auto 0; height:60px; z-index:150; display:flex; align-items:center; gap:18px;
+  padding:0 22px; background:color-mix(in srgb, var(--surf) 86%, transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2)}
+@media (max-width:640px){
+  code{white-space:normal; word-break:break-word}
+  .top{padding:0 14px; gap:10px}
+  .brand{font-size:13px; min-width:0; overflow:hidden; text-overflow:ellipsis}
+  .brand em{display:none}
+}
+
+.shell{display:grid; grid-template-columns:250px minmax(0,1fr); gap:0; max-width:1270px; margin:0 auto; padding:84px 28px 120px}
+.rail{position:sticky; top:84px; align-self:start; max-height:calc(100vh - 100px); overflow:auto; padding-right:18px}
+.rail .rl{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); margin:0 0 10px}
+.rail ol{list-style:none; margin:0; padding:0; border-left:1px solid var(--rule)}
+.rail li{margin:0}
+.rail a{display:block; padding:5px 0 5px 14px; margin-left:-1px; font-size:12.5px; line-height:1.4; color:var(--ink3);
+  border-left:2px solid transparent; border-bottom:0; transition:.15s}
+.rail a:hover{color:var(--ink)}
+.rail a.on{color:var(--ink); border-left-color:var(--cp)}
+main{min-width:0; max-width:880px; padding-left:44px}
+@media (max-width:980px){
+  .shell{grid-template-columns:1fr; padding:76px 16px 90px}
+  .rail{display:none}
+  main{padding-left:0}
+}
+
+/* ============================================================ hero */
+.hero{padding:10px 0 34px; border-bottom:1px solid var(--rule); margin-bottom:56px; position:relative}
+.hero .fieldpat{position:absolute; right:-20px; top:112px; width:236px; height:236px; opacity:.34; pointer-events:none; z-index:0}
+.hero > *:not(.fieldpat){position:relative; z-index:1}
+@media (max-width:760px){.hero .fieldpat{display:none}}
+.kicker{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px}
+.tag{font-family:var(--font-mono); font-size:11.5px; color:var(--ink2); background:var(--surf2); border:1px solid var(--rule);
+  padding:3px 9px; border-radius:6px; letter-spacing:.01em}
+.tag.hl{color:var(--cp-ink); border-color:color-mix(in srgb,var(--cp) 45%,transparent); background:var(--cp-soft)}
+.hero h1{font-size:clamp(38px,5.6vw,58px); font-weight:700; letter-spacing:-.025em; line-height:1.03}
+.hero .zh{font-size:clamp(18px,2.2vw,22px); color:var(--ink2); margin-top:14px; line-height:1.55; max-width:48ch; font-weight:500; text-wrap:balance}
+.hero .thesis{margin-top:22px; font-size:16.5px; color:var(--ink2); max-width:68ch}
+.hero .thesis b{color:var(--ink)}
+.authors{margin-top:20px; font-size:13.5px; color:var(--ink3); line-height:1.7}
+.authors b{color:var(--ink2); font-weight:500}
+.links{display:flex; flex-wrap:wrap; gap:10px; margin-top:16px}
+.links a,.links span{font-family:var(--font-mono); font-size:12.5px; padding:6px 12px; border:1px solid var(--rule); border-radius:8px; color:var(--ink2); background:var(--surf)}
+.links a:hover{color:var(--ink); border-color:var(--rule2)}
+.links span{color:var(--ink3); border-style:dashed}
+.stats{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:28px}
+.stat{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:14px 16px 12px}
+.stat .lb{font-family:var(--font-mono); font-size:11px; color:var(--ink3); letter-spacing:.06em; text-transform:uppercase}
+.stat .vl{font-family:var(--font-display); font-size:27px; font-weight:700; letter-spacing:-.02em; margin-top:6px}
+.stat .dl{font-size:12.5px; color:var(--ink3); margin-top:4px; line-height:1.5}
+.stat .dl b{color:var(--ink2); font-weight:500}
+@media (max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
+
+/* role text */
+.rP{color:var(--pg-ink); font-weight:600}
+.rS{color:var(--st-ink); font-weight:600}
+.rC{color:var(--cp-ink); font-weight:600}
+.rR{color:var(--rd-ink); font-weight:600}
+.rV{color:var(--cam-ink); font-weight:600}
+.rB{color:var(--bad-ink); font-weight:600}
+.rK{color:var(--ok-ink); font-weight:600}
+
+/* ============================================================ sections */
+.sec{margin:0 0 84px; scroll-margin-top:84px}
+.eyebrow{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.eyebrow .n{font-family:var(--font-mono); font-size:12px; color:var(--cp-ink); font-weight:600}
+.eyebrow .t{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); letter-spacing:.12em; text-transform:uppercase}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec h2{font-size:clamp(24px,3vw,31px); letter-spacing:-.02em; margin-bottom:16px}
+.sec h3{font-size:19px; margin:38px 0 12px; letter-spacing:-.01em; display:flex; align-items:baseline; gap:10px}
+.sec h3 .ix{font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-weight:500}
+.sec h4{font-size:15.5px; margin:22px 0 8px}
+.lead{font-size:17px; color:var(--ink2); max-width:70ch; margin-bottom:22px}
+.lead b{color:var(--ink)}
+.prose{max-width:72ch; color:var(--ink2)}
+.prose p{margin:0 0 14px}
+.prose b,.prose strong{color:var(--ink)}
+.prose ul,.prose ol{margin:0 0 14px}
+.note{font-size:13.5px; color:var(--ink3); max-width:72ch; margin-top:10px}
+
+/* ============================================================ figure */
+.fig{margin:26px 0 30px; background:var(--surf); border:1px solid var(--rule); border-radius:14px; box-shadow:var(--shadow); overflow:hidden}
+.fh{display:flex; align-items:baseline; gap:12px; padding:12px 18px 10px; border-bottom:1px solid var(--rule)}
+.fh .no{font-family:var(--font-mono); font-size:11.5px; color:var(--cp-ink); letter-spacing:.06em; white-space:nowrap}
+.fh .ti{font-family:var(--font-display); font-size:14px; font-weight:600; color:var(--ink)}
+.figbody{padding:16px 18px 12px; background:var(--surf)}
+.figbody svg{display:block; width:100%; height:auto; max-width:100%; font-family:var(--font-body)}
+figcaption{padding:12px 18px 14px; font-size:13.5px; line-height:1.65; color:var(--ink3); border-top:1px solid var(--rule)}
+figcaption b{color:var(--ink2); font-weight:500}
+.tabs{display:flex; flex-wrap:wrap; gap:6px; padding:10px 14px 0; background:var(--surf)}
+.tab{background:var(--surf2); border:1px solid var(--rule); color:var(--ink3); font-family:var(--font-body); font-size:12.5px;
+  padding:6px 12px; border-radius:8px 8px 0 0; cursor:pointer; transition:.15s; border-bottom:0}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--ink); background:var(--surf3); border-color:var(--rule2)}
+.scrollx{overflow-x:auto}
+
+/* svg utility classes */
+.f-ink{fill:var(--ink)} .f-ink2{fill:var(--ink2)} .f-ink3{fill:var(--ink3)}
+.f-surf{fill:var(--surf)} .f-surf2{fill:var(--surf2)} .f-surf3{fill:var(--surf3)} .f-bg{fill:var(--bg)}
+.s-rule{stroke:var(--rule2)} .s-rule1{stroke:var(--rule)} .s-ink3{stroke:var(--ink3)} .s-ink2{stroke:var(--ink2)} .s-ink{stroke:var(--ink)}
+.nofill{fill:none}
+.f-P{fill:var(--pg)} .f-Pi{fill:var(--pg-ink)} .fs-P{fill:var(--pg-soft)} .s-P{stroke:var(--pg)}
+.f-S{fill:var(--st)} .f-Si{fill:var(--st-ink)} .fs-S{fill:var(--st-soft)} .s-S{stroke:var(--st)}
+.f-C{fill:var(--cp)} .f-Ci{fill:var(--cp-ink)} .fs-C{fill:var(--cp-soft)} .s-C{stroke:var(--cp)}
+.f-R{fill:var(--rd)} .f-Ri{fill:var(--rd-ink)} .fs-R{fill:var(--rd-soft)} .s-R{stroke:var(--rd)}
+.f-V{fill:var(--cam)} .f-Vi{fill:var(--cam-ink)} .fs-V{fill:var(--cam-soft)} .s-V{stroke:var(--cam)}
+.f-B{fill:var(--bad)} .f-Bi{fill:var(--bad-ink)} .fs-B{fill:var(--bad-soft)} .s-B{stroke:var(--bad)}
+.f-K{fill:var(--ok)} .f-Ki{fill:var(--ok-ink)} .fs-K{fill:var(--ok-soft)} .s-K{stroke:var(--ok)}
+.mk-P{fill:var(--pg)} .mk-S{fill:var(--st)} .mk-C{fill:var(--cp)} .mk-R{fill:var(--rd)} .mk-V{fill:var(--cam)} .mk-I{fill:var(--ink3)} .mk-B{fill:var(--bad)} .mk-K{fill:var(--ok)}
+svg text{font-family:var(--font-body)}
+svg .big{font-size:13px; font-weight:600}
+svg .lbl{font-size:12px}
+svg .sml{font-size:10.5px}
+svg .xs{font-size:9.5px}
+svg .mono{font-family:var(--font-mono)}
+svg .math{font-family:var(--font-math); font-style:italic; font-size:13px}
+svg .tab-num{font-variant-numeric:tabular-nums}
+.dash{stroke-dasharray:5 4}
+
+/* ============================================================ cards & callouts */
+.grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:22px 0}
+.grid2{display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin:22px 0}
+.grid4{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:22px 0}
+@media (max-width:760px){.grid3,.grid2,.grid4{grid-template-columns:1fr}}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:16px 18px; font-size:14px; color:var(--ink2); line-height:1.7}
+.card .mono{font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3); margin-bottom:6px}
+.card h5{font-size:15px; margin-bottom:8px; color:var(--ink)}
+.card b{color:var(--ink)}
+.card.cP{border-top:3px solid var(--pg)} .card.cP .mono{color:var(--pg-ink)}
+.card.cS{border-top:3px solid var(--st)} .card.cS .mono{color:var(--st-ink)}
+.card.cC{border-top:3px solid var(--cp)} .card.cC .mono{color:var(--cp-ink)}
+.card.cR{border-top:3px solid var(--rd)} .card.cR .mono{color:var(--rd-ink)}
+.card.cB{border-top:3px solid var(--bad)} .card.cB .mono{color:var(--bad-ink)}
+.card.cV{border-top:3px solid var(--cam)} .card.cV .mono{color:var(--cam-ink)}
+.call{border:1px solid var(--rule); border-left:3px solid var(--ink3); background:var(--surf); border-radius:10px; padding:14px 18px; margin:22px 0; font-size:14.5px; color:var(--ink2); max-width:80ch}
+.call .hd{font-family:var(--font-display); font-weight:600; font-size:14px; color:var(--ink); margin-bottom:6px}
+.call p{margin:0 0 6px} .call p:last-child{margin:0}
+.call b{color:var(--ink)}
+.call.key{border-left-color:var(--cp); background:color-mix(in srgb,var(--cp-soft) 55%,var(--surf))}
+.call.warn{border-left-color:var(--bad); background:color-mix(in srgb,var(--bad-soft) 60%,var(--surf))}
+.call.mine{border-left-color:var(--pg); background:color-mix(in srgb,var(--pg-soft) 48%,var(--surf))}
+.call.ok{border-left-color:var(--ok); background:color-mix(in srgb,var(--ok-soft) 55%,var(--surf))}
+
+.eq{font-family:var(--font-math); font-size:19px; text-align:center; padding:16px 18px; margin:18px 0; background:var(--surf); border:1px solid var(--rule); border-radius:10px; color:var(--ink); overflow-x:auto; line-height:1.7}
+.eq i{font-style:italic}
+.eq .r{font-style:normal}
+.eq .tagno{float:right; font-family:var(--font-mono); font-style:normal; font-size:12px; color:var(--ink3); padding-top:6px}
+.eq small{display:block; font-family:var(--font-body); font-style:normal; font-size:12.5px; color:var(--ink3); margin-top:8px; line-height:1.6; text-align:left}
+.eq small b{color:var(--ink2); font-weight:500}
+
+/* tables */
+table{border-collapse:collapse; width:100%; font-size:13.5px; margin:16px 0}
+th,td{padding:9px 10px; border-bottom:1px solid var(--rule); text-align:left; vertical-align:top; line-height:1.55}
+th{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); font-weight:500; border-bottom:1px solid var(--rule2)}
+td{color:var(--ink2)} td b{color:var(--ink)}
+td.num,th.num{font-family:var(--font-mono); font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right}
+tr.hl td{background:var(--tint)}
+td.best{color:var(--ok-ink); font-weight:600}
+td.worst{color:var(--bad-ink)}
+.tbl{overflow-x:auto; border:1px solid var(--rule); border-radius:12px; background:var(--surf); padding:0 14px; margin:18px 0}
+.tbl table{margin:0}
+
+/* pills */
+.pill{display:inline-block; font-family:var(--font-mono); font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--rule2); color:var(--ink2); background:var(--surf2); white-space:nowrap}
+.pill.P{color:var(--pg-ink); border-color:color-mix(in srgb,var(--pg) 50%,transparent); background:var(--pg-soft)}
+.pill.S{color:var(--st-ink); border-color:color-mix(in srgb,var(--st) 50%,transparent); background:var(--st-soft)}
+.pill.C{color:var(--cp-ink); border-color:color-mix(in srgb,var(--cp) 50%,transparent); background:var(--cp-soft)}
+.pill.R{color:var(--rd-ink); border-color:color-mix(in srgb,var(--rd) 50%,transparent); background:var(--rd-soft)}
+.pill.V{color:var(--cam-ink); border-color:color-mix(in srgb,var(--cam) 50%,transparent); background:var(--cam-soft)}
+.pill.B{color:var(--bad-ink); border-color:color-mix(in srgb,var(--bad) 50%,transparent); background:var(--bad-soft)}
+.pill.K{color:var(--ok-ink); border-color:color-mix(in srgb,var(--ok) 50%,transparent); background:var(--ok-soft)}
+
+/* ============================================================ interactive widgets */
+.ctl{display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; padding:10px 18px; border-bottom:1px solid var(--rule); background:var(--surf2); font-size:13px; color:var(--ink2)}
+.ctl label{display:inline-flex; align-items:center; gap:8px; white-space:nowrap}
+.ctl input[type=range]{width:130px; accent-color:var(--cp)}
+.ctl input[type=checkbox]{accent-color:var(--cp)}
+.ctl .val{font-family:var(--font-mono); font-size:12px; color:var(--ink); min-width:5ch; font-variant-numeric:tabular-nums}
+.seg{display:inline-flex; border:1px solid var(--rule2); border-radius:8px; overflow:hidden}
+.seg button{background:var(--surf); border:0; color:var(--ink3); font-family:var(--font-body); font-size:12.5px; padding:5px 11px; cursor:pointer; transition:.15s}
+.seg button + button{border-left:1px solid var(--rule2)}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--surf3); color:var(--ink); font-weight:600}
+.btn{background:var(--surf3); border:1px solid var(--rule2); color:var(--ink); font-family:var(--font-body); font-size:12.5px; padding:5px 12px; border-radius:8px; cursor:pointer}
+.btn:hover{border-color:var(--ink3)}
+.btn.primary{background:var(--cp); border-color:var(--cp); color:#03201d}
+.btn.danger{background:var(--bad-soft); border-color:color-mix(in srgb,var(--bad) 55%,transparent); color:var(--bad-ink)}
+.btn:disabled{opacity:.4; cursor:not-allowed}
+.readout{display:grid; grid-template-columns:repeat(auto-fit,minmax(124px,1fr)); gap:10px; padding:12px 18px; border-top:1px solid var(--rule); background:var(--surf)}
+.readout .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.04em; color:var(--ink3)}
+.readout .v{font-family:var(--font-display); font-size:19px; font-weight:600; letter-spacing:-.01em; font-variant-numeric:tabular-nums; margin-top:2px}
+.readout .v small{font-family:var(--font-mono); font-size:11px; color:var(--ink3); margin-left:4px; font-weight:400}
+.readout .v.ok{color:var(--ok-ink)} .readout .v.bad{color:var(--bad-ink)} .readout .v.c{color:var(--cp-ink)} .readout .v.s{color:var(--st-ink)} .readout .v.cam{color:var(--cam-ink)}
+
+.sim{position:relative; border-radius:10px; overflow:hidden; border:1px solid var(--rule); background:var(--surf2)}
+.sim canvas{display:block; width:100%; height:auto}
+.sim .lab{position:absolute; top:10px; font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; padding:3px 8px; border-radius:6px; background:rgba(0,0,0,.55); color:#fff; pointer-events:none}
+.sim .lab.l{left:12px} .sim .lab.r{right:12px}
+.legend{display:flex; flex-wrap:wrap; gap:6px 16px; padding:10px 18px; border-top:1px solid var(--rule); background:var(--surf); font-size:12.5px; color:var(--ink3)}
+.legend span{display:inline-flex; align-items:center; gap:6px}
+.legend i{display:inline-block; width:14px; height:14px; border-radius:3px; border:1px solid var(--rule2)}
+
+.explore{display:grid; grid-template-columns:minmax(0,1.45fr) minmax(230px,1fr); gap:0}
+@media (max-width:760px){.explore{grid-template-columns:1fr}}
+.explore .pane{border-left:1px solid var(--rule); padding:14px 18px; font-size:13.5px; color:var(--ink2); background:var(--surf)}
+@media (max-width:760px){.explore .pane{border-left:0; border-top:1px solid var(--rule)}}
+.pane h5{font-family:var(--font-display); font-size:15px; color:var(--ink); margin-bottom:8px}
+.pane .row{margin:8px 0}
+.pane .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); display:block}
+.pane ul{padding-left:1.1em; margin:2px 0 0}
+.pane li{margin:2px 0}
+
+/* entity ledger */
+.ledger{width:100%; border-collapse:collapse; font-size:12.5px; font-family:var(--font-mono)}
+.ledger th{font-size:10px; padding:6px 6px}
+.ledger td{padding:5px 6px; border-bottom:1px solid var(--rule); white-space:nowrap}
+.ledger tr.down td{opacity:.5; text-decoration:line-through}
+.ledger tr.offs td{color:var(--ink3)}
+.ledger .swatch{display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:6px; vertical-align:-1px}
+.hpbar{display:inline-block; width:44px; height:7px; border-radius:3px; background:var(--surf3); overflow:hidden; vertical-align:-1px}
+.hpbar i{display:block; height:100%; background:var(--ok)}
+.hpbar i.low{background:var(--warn)} .hpbar i.dead{background:var(--bad)}
+
+.logbox{font-family:var(--font-mono); font-size:11.5px; line-height:1.65; background:var(--surf2); border-top:1px solid var(--rule);
+  padding:10px 18px; max-height:150px; overflow-y:auto; color:var(--ink3)}
+.logbox b{color:var(--ink2); font-weight:500}
+.logbox .ev{color:var(--st-ink)} .logbox .rl{color:var(--pg-ink)} .logbox .no{color:var(--bad-ink)} .logbox .ok{color:var(--ok-ink)}
+
+/* bars */
+.bars{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:10px 14px; padding:12px 18px 14px}
+.bars .pnl{border:1px solid var(--rule); border-radius:10px; padding:10px 12px 8px; background:var(--surf)}
+.bars .pt{font-family:var(--font-mono); font-size:11px; color:var(--ink2); margin-bottom:8px; display:flex; justify-content:space-between; gap:8px}
+.bars .pt span:last-child{color:var(--ink3)}
+.brow{display:grid; grid-template-columns:var(--labw,146px) 1fr auto; align-items:center; gap:8px; margin:5px 0}
+.brow .bl{font-size:11.5px; color:var(--ink2); text-align:right; line-height:1.3}
+.brow .bt{height:11px; position:relative}
+.brow .bt i{display:block; height:100%; border-radius:3px; background:var(--ink3); opacity:.42; min-width:2px}
+.brow .bt u{position:absolute; top:0; height:11px; box-sizing:border-box; border:1px solid var(--ink2); border-radius:2px; opacity:.9}
+.brow.hl .bl{color:var(--ink); font-weight:600}
+.brow.hl .bt i{background:var(--ok); opacity:1}
+.brow.dim .bt i{background:var(--bad); opacity:.6}
+.brow .bv{font-family:var(--font-mono); font-size:11px; color:var(--ink2); font-variant-numeric:tabular-nums; min-width:5ch}
+.brow.hl .bv{color:var(--ok-ink); font-weight:600}
+
+/* doubts */
+.dfilter{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:18px 0 14px; font-size:13px; color:var(--ink3)}
+.dt{background:var(--surf); border:1px solid var(--rule); border-radius:12px; margin:10px 0; overflow:hidden}
+.dt > summary{list-style:none; cursor:pointer; padding:13px 16px; display:grid; grid-template-columns:auto auto 1fr auto; gap:10px; align-items:center; font-size:14.5px; color:var(--ink)}
+.dt > summary::-webkit-details-marker{display:none}
+.dt > summary:hover{background:var(--surf2)}
+.dt .sev{font-family:var(--font-mono); font-size:10.5px; padding:2px 8px; border-radius:999px; white-space:nowrap; letter-spacing:.04em}
+.dt .sev.hi{color:#fff; background:var(--bad)}
+.dt .sev.mid{color:var(--ink); background:color-mix(in srgb,var(--warn) 58%, var(--surf3))}
+.dt .sev.lo{color:var(--ink2); background:var(--surf3); border:1px solid var(--rule2)}
+.dt .dn{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3)}
+.dt .caret{color:var(--ink3); font-size:12px; transition:.15s}
+.dt[open] .caret{transform:rotate(90deg)}
+.dt .body{padding:2px 16px 16px; border-top:1px solid var(--rule); font-size:14px; color:var(--ink2); line-height:1.75}
+.dt .body .lb{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3); display:block; margin:14px 0 3px}
+.dt .body blockquote{margin:0; padding:8px 14px; border-left:2px solid var(--rule2); background:var(--surf2); border-radius:0 8px 8px 0; font-size:13px; color:var(--ink3); font-family:var(--font-math)}
+.dt .body b{color:var(--ink)}
+
+/* appendix */
+.gloss dt{font-family:var(--font-display); font-weight:600; font-size:14.5px; margin-top:14px; color:var(--ink)}
+.gloss dd{margin:2px 0 0; font-size:14px; color:var(--ink2); max-width:74ch}
+pre{font-family:var(--font-mono); font-size:12px; line-height:1.6; background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:14px 16px; overflow-x:auto; color:var(--ink2); margin:14px 0; white-space:pre-wrap; word-break:break-word}
+pre .cm{color:var(--ink3)} pre .kw{color:var(--pg-ink)} pre .sv{color:var(--cp-ink)} pre .nv{color:var(--st-ink)}
+.foot{margin-top:60px; padding-top:20px; border-top:1px solid var(--rule); font-size:12.5px; color:var(--ink3); line-height:1.7}
+
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{transition:none !important; animation:none !important}
+}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">Programmable World Model<em>把世界状态搬出视频模型 · 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <marker id="ar-i" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-I"/></marker>
+  <marker id="ar-p" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-P"/></marker>
+  <marker id="ar-s" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-S"/></marker>
+  <marker id="ar-c" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-C"/></marker>
+  <marker id="ar-r" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-R"/></marker>
+  <marker id="ar-v" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-V"/></marker>
+  <marker id="ar-b" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-B"/></marker>
+  <!-- 签名纹理：一格一个 OBB 俯视轮廓 -->
+  <pattern id="boxpat" width="36" height="36" patternUnits="userSpaceOnUse">
+    <rect x="1.5" y="1.5" width="33" height="33" fill="none" stroke="var(--cp)" stroke-width="1" opacity=".45"/>
+    <rect x="11" y="12" width="14" height="10" fill="none" stroke="var(--cp)" stroke-width="1.3" opacity=".8" transform="rotate(-18 18 17)"/>
+    <circle cx="18" cy="17" r="1.4" fill="var(--cp)" opacity=".9"/>
+  </pattern>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" class="s-rule" stroke-width="2.2"/>
+  </pattern>
+</defs></svg>
+
+<div class="shell">
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-tldr">00 · 一图看懂</a></li>
+    <li><a href="#s-gap">01 · 它到底在补哪三个洞</a></li>
+    <li><a href="#s-repr">02 · 表征取舍（可拖）</a></li>
+    <li><a href="#s-prog">03 · 世界程序与引擎（可玩）</a></li>
+    <li><a href="#s-comp">04 · 状态编译器：三张图（可玩）</a></li>
+    <li><a href="#s-rend">05 · 渲染器：冻主干 + ControlNet</a></li>
+    <li><a href="#s-long">06 · 长程：分块自回归与两种记忆</a></li>
+    <li><a href="#s-data">07 · 数据引擎与那条反向箭头</a></li>
+    <li><a href="#s-exp">08 · 94 / 98 到底量了什么</a></li>
+    <li><a href="#s-doubt">09 · 我的存疑清单</a></li>
+    <li><a href="#s-missing">10 · 复现清单（论文未给）</a></li>
+    <li><a href="#s-place">11 · 与本仓库的关联</a></li>
+    <li><a href="#s-appendix">12 · 附录速查</a></li>
+  </ol>
+</nav>
+<main>
+
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <svg class="fieldpat" viewBox="0 0 236 236" aria-hidden="true"><rect width="236" height="236" fill="url(#boxpat)"/></svg>
+  <div class="kicker">
+    <span class="tag">arXiv 2609.10540v1</span>
+    <span class="tag">cs.CV · 2026-09-09</span>
+    <span class="tag">Alaya Lab</span>
+    <span class="tag hl">可执行状态 / 3D OBB 接口 / 生成式渲染</span>
+  </div>
+  <h1>Programmable World Model</h1>
+  <p class="zh">与其教视频模型「记住」世界，不如把世界记在别处，只让它负责画</p>
+  <p class="thesis">现在的交互式视频世界模型有一个共同的软肋：<b>世界现在是什么样，只存在于生成上下文里</b>。
+  你没法点名某个实体，没法查一个已经转出画面的东西还在不在，更没法规定「门在什么条件下才开」。
+  这篇的做法很干脆——<b>把状态整体搬出去</b>：一个 <span class="rP">coding agent</span> 把自然语言写成可执行的世界程序，
+  一个<span class="rS">轻量引擎</span>按规则逐步推进一份权威世界状态（含离屏实体和 HP、阵营这类看不见的量），
+  一个<span class="rC">确定性编译器</span>把状态里可见的部分沿目标相机投影、光栅化成三张像素对齐的控制图，
+  最后交给一个<b>冻结的</b><span class="rR">视频模型当渲染器</span>。
+  代价也同样干脆：<b>这个「世界模型」不再预测世界，它渲染一个被写好的世界</b>——这既是它 94% / 98% 的来源，也是读这篇论文时最需要拿捏的地方。</p>
+  <p class="authors"><b>Zheng-Hui Huang</b><sup>△⋆</sup>, <b>Guixu Lin</b><sup>△⋆</sup>, Jiacheng Lin, Yi-Chuan Huang<sup>△</sup>, Ruihan Yu<sup>△</sup>, Muyao Niu<sup>△</sup>, Siqi Yang<sup>△</sup>, Yu-Lun Liu, Yung-Yu Chuang, <b>Kaipeng Zhang</b><sup>△†</sup>, <b>Zhixiang Wang</b><sup>△†</sup></p>
+  <p class="authors"><sup>△</sup> Alaya Lab　　<span style="opacity:.75">⋆ 共同一作　† 通讯（Zhixiang Wang 为 Project Lead）·  论文未列出 △ 之外的机构</span></p>
+  <div class="links">
+    <a href="https://arxiv.org/abs/2609.10540" target="_blank" rel="noopener">arXiv 摘要 ↗</a>
+    <a href="https://arxiv.org/pdf/2609.10540" target="_blank" rel="noopener">PDF ↗</a>
+    <a href="https://alaya-lab.github.io/pwm" target="_blank" rel="noopener">项目页 ↗</a>
+    <a href="https://github.com/AlayaLab/pwm" target="_blank" rel="noopener">GitHub ↗</a>
+    <span>代码与权重：GitHub roadmap 标注未发布（2026-09-10 查）</span>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="lb">Count Acc.</div><div class="vl" style="color:var(--ok-ink)">94<small style="font-size:15px">%</small></div><div class="dl">画面里「还活着的可见角色数」与引擎账本一致的帧比例。<b>基线 40.75 / 32.00</b></div></div>
+    <div class="stat"><div class="lb">State Acc.</div><div class="vl" style="color:var(--ok-ink)">98<small style="font-size:15px">%</small></div><div class="dl">50 次死亡事件里被画面真正兑现的比例。<b>基线 8.00 / 58.00</b></div></div>
+    <div class="stat"><div class="lb">最长 rollout</div><div class="vl">897<small style="font-size:15px"> 帧</small></div><div class="dl">项目页称约 <b>30 秒</b>，即 ≈30 fps 播放；<b>非</b>生成速度</div></div>
+    <div class="stat"><div class="lb">Benchmark</div><div class="vl">50<small style="font-size:15px"> clips</small></div><div class="dl">CombatStateBench，400 帧计数 / 50 次死亡事件。<b>无消融实验</b></div></div>
+  </div>
+</section>
+
+<!-- ============================================================ 00 TLDR -->
+<section class="sec" id="s-tldr">
+  <div class="eyebrow"><span class="n">00</span><span class="t">One Figure</span><span class="line"></span></div>
+  <h2>一图看懂：一次交互，三段流水线</h2>
+  <p class="lead">论文 Eq.(3) 把整个系统压成了一行。读懂这一行，方法部分就读完了一半：
+  <b>引擎推状态 → 编译器投影 → 渲染器出画</b>，三段里只有最后一段是神经网络，前两段是普通程序。</p>
+
+  <div class="eq">
+    <i>s</i><sub>t</sub> &nbsp;<span class="r" style="font-size:15px">——<i style="font-family:var(--font-math)">F</i>, <i>a</i><sub>t</sub> —▸</span>&nbsp;
+    <i>s</i><sub>t+1</sub> &nbsp;<span class="r" style="font-size:15px">——<i style="font-family:var(--font-math)">P</i>, <i>C</i><sub>t+1</sub> —▸</span>&nbsp;
+    <i>M</i><sup>ctrl</sup><sub>t+1</sub> &nbsp;<span class="r" style="font-size:15px">——<i style="font-family:var(--font-math)">G</i> —▸</span>&nbsp;
+    <i>I</i><sub>t+1</sub>
+    <span class="tagno">Eq.3</span>
+    <small><b>F</b>：轻量引擎的状态转移，纯程序，按规则执行，不学习。　<b>P</b>：确定性状态编译器，把世界状态在目标相机 <b>C<sub>t+1</sub></b> 下投影成控制图，不改变状态。　<b>G</b>：生成式渲染器，唯一的神经网络部分。　注意 <b>C<sub>t+1</sub> 是输入而不是输出</b>——相机轨迹由玩家/系统给定，模型不预测它。</small>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig.0</span><span class="ti">同一次交互的三段，点标签切换看每一段的输入输出</span></div>
+    <div class="tabs" role="tablist" aria-label="流水线阶段">
+      <button class="tab" role="tab" aria-selected="true" data-st="a">① 世界程序 · Agent + 引擎</button>
+      <button class="tab" role="tab" aria-selected="false" data-st="b">② 控制编译 · 确定性投影</button>
+      <button class="tab" role="tab" aria-selected="false" data-st="c">③ 生成渲染 · 冻结主干</button>
+      <button class="tab" role="tab" aria-selected="false" data-st="d">全景</button>
+    </div>
+    <div class="figbody scrollx">
+      <svg viewBox="0 0 1010 400" style="min-width:820px" role="img" aria-label="Programmable World Model 的三段流水线：世界程序与引擎、控制编译、生成渲染">
+        <!-- stage 1 -->
+        <g id="pl-a">
+          <rect x="14" y="40" width="300" height="316" rx="13" class="fs-P" stroke="var(--pg)" stroke-width="1.2"/>
+          <text x="30" y="64" class="big f-Pi">① 世界程序 · Agent-Orchestrated</text>
+          <text x="30" y="82" class="xs f-ink3">§4.2　这一段完全没有神经网络参与状态更新</text>
+
+          <rect x="30" y="96" width="128" height="52" rx="8" class="f-surf2" stroke="var(--rule2)" stroke-width="1"/>
+          <text x="94" y="116" text-anchor="middle" class="sml f-ink2">参考图 I₀</text>
+          <text x="94" y="132" text-anchor="middle" class="xs f-ink3">单张，任意来源</text>
+          <rect x="170" y="96" width="128" height="52" rx="8" class="f-surf2" stroke="var(--rule2)" stroke-width="1"/>
+          <text x="234" y="116" text-anchor="middle" class="sml f-ink2">自然语言描述 q</text>
+          <text x="234" y="132" text-anchor="middle" class="xs f-ink3">「做一个掩体射击」</text>
+
+          <path d="M94 148 L94 168 L164 168" class="s-P nofill" stroke-width="1.3" marker-end="url(#ar-p)"/>
+          <path d="M234 148 L234 168 L164 168" class="s-P nofill" stroke-width="1.3"/>
+          <text x="70" y="186" class="xs f-ink3">3D 检测器补 E₀</text>
+
+          <rect x="52" y="176" width="224" height="58" rx="9" class="fs-P" stroke="var(--pg)" stroke-width="1.3"/>
+          <text x="164" y="199" text-anchor="middle" class="big f-Pi">Coding Agent（VLM）</text>
+          <text x="164" y="216" text-anchor="middle" class="xs f-ink3">写出 engine-readable 世界程序</text>
+
+          <path d="M164 234 L164 254" class="s-P nofill" stroke-width="1.6" marker-end="url(#ar-p)"/>
+          <rect x="36" y="256" width="256" height="84" rx="9" class="f-surf" stroke="var(--rule2)" stroke-width="1"/>
+          <text x="48" y="275" class="xs mono f-Pi">rules R</text>
+          <text x="48" y="291" class="xs mono f-ink2">on_hit:      hp -= damage</text>
+          <text x="48" y="306" class="xs mono f-ink2">on_hp_zero:  status = down</text>
+          <text x="48" y="321" class="xs mono f-ink2">win: all_enemies_defeated</text>
+          <text x="48" y="335" class="xs mono f-ink3">lose: player.hp &lt;= 0</text>
+        </g>
+
+        <!-- state ledger, shared spine -->
+        <g id="pl-spine">
+          <path d="M314 198 L352 198" class="s-S nofill" stroke-width="1.8" marker-end="url(#ar-s)"/>
+          <rect x="354" y="40" width="196" height="316" rx="13" class="fs-S" stroke="var(--st)" stroke-width="1.2"/>
+          <text x="370" y="64" class="big f-Si">权威世界状态 s<tspan class="xs">t</tspan></text>
+          <text x="370" y="82" class="xs f-ink3">唯一真相来源 · 可读可写可验证</text>
+          <rect x="368" y="96" width="168" height="34" rx="7" class="f-surf" stroke="var(--rule2)" stroke-width="1"/>
+          <text x="378" y="112" class="xs mono f-Si">E</text><text x="396" y="112" class="xs f-ink2">实体 + 3D OBB 位姿</text>
+          <text x="396" y="124" class="xs f-ink3">position · extent · yaw · id</text>
+          <rect x="368" y="136" width="168" height="34" rx="7" class="f-surf" stroke="var(--rule2)" stroke-width="1"/>
+          <text x="378" y="152" class="xs mono f-Si">A</text><text x="396" y="152" class="xs f-ink2">属性（可不可见都算）</text>
+          <text x="396" y="164" class="xs f-ink3">hp · status · faction · 库存</text>
+          <rect x="368" y="176" width="168" height="34" rx="7" class="f-surf" stroke="var(--rule2)" stroke-width="1"/>
+          <text x="378" y="192" class="xs mono f-Si">Q</text><text x="396" y="192" class="xs f-ink2">实体间关系</text>
+          <text x="396" y="204" class="xs f-ink3">敌对 · 归属 · 可攻击</text>
+          <rect x="368" y="216" width="168" height="34" rx="7" class="f-surf" stroke="var(--pg)" stroke-width="1"/>
+          <text x="378" y="232" class="xs mono f-Pi">R</text><text x="396" y="232" class="xs f-ink2">可执行规则</text>
+          <text x="396" y="244" class="xs f-ink3">规则本身也能被改写</text>
+          <rect x="368" y="258" width="168" height="42" rx="7" class="f-surf2" stroke="var(--rule)" stroke-width="1"/>
+          <text x="452" y="275" text-anchor="middle" class="sml f-Si">F(s, a)：校验 → 应用 → 结算</text>
+          <text x="452" y="290" text-anchor="middle" class="xs f-ink3">动作非法就拒绝，不是「生成一个合理的结果」</text>
+          <text x="452" y="322" text-anchor="middle" class="xs f-ink3">离屏实体照样在账本里</text>
+          <text x="452" y="338" text-anchor="middle" class="xs f-ink3">HP / 阵营等永远不出现在画面上</text>
+        </g>
+
+        <!-- stage 2 -->
+        <g id="pl-b">
+          <path d="M550 198 L586 198" class="s-C nofill" stroke-width="1.8" marker-end="url(#ar-c)"/>
+          <rect x="588" y="40" width="196" height="316" rx="13" class="fs-C" stroke="var(--cp)" stroke-width="1.2"/>
+          <text x="604" y="64" class="big f-Ci">② 状态编译器 P</text>
+          <text x="604" y="82" class="xs f-ink3">§4.3　确定性、不可学、不改状态</text>
+          <path d="M686 96 L686 116" class="s-V nofill" stroke-width="1.4" marker-end="url(#ar-v)"/>
+          <text x="686" y="110" text-anchor="middle" class="xs f-Vi" dx="52">目标相机 C<tspan class="xs">t+1</tspan></text>
+          <rect x="604" y="118" width="164" height="30" rx="7" class="f-surf" stroke="var(--rule2)" stroke-width="1"/>
+          <text x="686" y="137" text-anchor="middle" class="xs f-ink2">OBB 8 角点 → 透视投影 → z-buffer</text>
+          <g>
+            <rect x="604" y="158" width="164" height="40" rx="7" class="f-surf" stroke="var(--id3)" stroke-width="1.2"/>
+            <text x="616" y="175" class="sml f-ink">M<tspan class="xs">id</tspan> 身份图</text>
+            <text x="616" y="190" class="xs f-ink3">K 个可学 slot，序列内固定不变</text>
+            <rect x="604" y="204" width="164" height="40" rx="7" class="f-surf" stroke="var(--sem-person)" stroke-width="1.2"/>
+            <text x="616" y="221" class="sml f-ink">M<tspan class="xs">sem</tspan> 语义图</text>
+            <text x="616" y="236" class="xs f-ink3">文本编码器嵌入类别标签 y<tspan class="xs">i</tspan></text>
+            <rect x="604" y="250" width="164" height="40" rx="7" class="f-surf" stroke="var(--cam)" stroke-width="1.2"/>
+            <text x="616" y="267" class="sml f-ink">M<tspan class="xs">dir</tspan> 方向图</text>
+            <text x="616" y="282" class="xs f-ink3">世界速度 → 相机系 → 7 档量化</text>
+          </g>
+          <text x="686" y="308" text-anchor="middle" class="xs mono f-Ci">M<tspan class="xs">ctrl</tspan> = Concat(id, sem, dir)</text>
+          <text x="686" y="326" text-anchor="middle" class="xs f-ink3">通道拼接，编码到视频 latent 的空间分辨率</text>
+          <text x="686" y="342" text-anchor="middle" class="xs f-Bi">注意：这里看不到 hp / status 的通道</text>
+        </g>
+
+        <!-- stage 3 -->
+        <g id="pl-c">
+          <path d="M784 198 L820 198" class="s-R nofill" stroke-width="1.8" marker-end="url(#ar-r)"/>
+          <rect x="822" y="40" width="176" height="316" rx="13" class="fs-R" stroke="var(--rd)" stroke-width="1.2"/>
+          <text x="838" y="64" class="big f-Ri">③ 生成渲染器 G</text>
+          <text x="838" y="82" class="xs f-ink3">§4.4　唯一的神经网络</text>
+          <rect x="838" y="96" width="144" height="46" rx="8" class="f-surf" stroke="var(--rd)" stroke-width="1"/>
+          <text x="910" y="115" text-anchor="middle" class="sml f-Ri">LingBot-World-v1 主干</text>
+          <text x="910" y="130" text-anchor="middle" class="xs f-ink3">❄ 冻结，含原生相机通路</text>
+          <rect x="838" y="150" width="144" height="46" rx="8" class="fs-C" stroke="var(--cp)" stroke-width="1.2"/>
+          <text x="910" y="169" text-anchor="middle" class="sml f-Ci">Structured Spatial</text>
+          <text x="910" y="184" text-anchor="middle" class="sml f-Ci">ControlNet 🔥</text>
+          <text x="910" y="212" text-anchor="middle" class="xs mono f-ink3">h ← h + r<tspan class="xs">(ℓ)</tspan></text>
+          <rect x="838" y="222" width="144" height="52" rx="8" class="f-surf2" stroke="var(--rule2)" stroke-width="1"/>
+          <text x="910" y="240" text-anchor="middle" class="xs f-ink2">时间历史（多尺度）</text>
+          <text x="910" y="256" text-anchor="middle" class="xs f-ink2">几何对齐空间记忆</text>
+          <text x="910" y="268" text-anchor="middle" class="xs f-ink3">来自 AlayaWorld</text>
+          <rect x="850" y="286" width="120" height="54" rx="8" class="f-surf" stroke="var(--rule2)" stroke-width="1"/>
+          <text x="910" y="308" text-anchor="middle" class="sml f-ink">下一段视频 I<tspan class="xs">t+1</tspan></text>
+          <text x="910" y="324" text-anchor="middle" class="xs f-ink3">形状/材质/关节/光照全靠先验补</text>
+        </g>
+
+        <!-- feedback -->
+        <g id="pl-fb">
+          <path d="M910 356 L910 380 L452 380" class="s-ink3 dash nofill" stroke-width="1.2" marker-end="url(#ar-i)"/>
+          <text x="700" y="394" text-anchor="middle" class="xs f-ink3">生成结果只回流到「记忆」，<tspan class="f-Si">不回流到世界状态</tspan>——账本永远不被画面反向修改</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption id="plCap"></figcaption>
+  </figure>
+
+  <div class="call key">
+    <div class="hd">一句话抓住这篇的取舍</div>
+    <p>其他世界模型是「让神经网络同时负责<b>记住</b>和<b>画出</b>」；这篇是「<b>记住</b>交给一段你能读懂的程序，神经网络只负责<b>画出</b>」。
+    于是状态一致性从「训练目标里希望它涌现出来的性质」变成了「工程上保证的性质」——
+    但世界的动力学也从「学出来的」变成了「你手写的规则」。<b>引擎不做物理，只做规则</b>。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 01 GAP -->
+<section class="sec" id="s-gap">
+  <div class="eyebrow"><span class="n">01</span><span class="t">Motivation</span><span class="line"></span></div>
+  <h2>它到底在补哪三个洞</h2>
+  <p class="lead">Introduction 列了三条，值得逐条落到具体场景上——因为后面所有设计都是这三条的直接产物。</p>
+
+  <div class="grid3">
+    <div class="card cB">
+      <div class="mono">洞 1 · 寻址</div>
+      <h5>你没法点名一个实体</h5>
+      现有控制接口给的是<b>相机、按键、整句 prompt</b>。「让左边第二个人倒下」这种指令，只能靠文本描述去撞，
+      撞中了也不是一个可复用的句柄——下一步你还是不知道该怎么再指到他。
+    </div>
+    <div class="card cB">
+      <div class="mono">洞 2 · 持久</div>
+      <h5>没有独立于当前视角的全局状态</h5>
+      转过身，刚才那三个人还在不在？他们的血量呢？<b>离屏实体</b>和 <b>hp / 库存 / 任务进度 / 交互历史</b>
+      这类根本不会出现在像素里的量，在纯生成式世界里只能寄希望于上下文没忘。多人场景下这条更致命。
+    </div>
+    <div class="card cB">
+      <div class="mono">洞 3 · 规则</div>
+      <h5>你写不了「规则」，只能写「愿望」</h5>
+      论文这句话说得很准：<b>prompt 一个想要的结果，并不等于确立了一条此后一直生效的可执行规则</b>。
+      「门在拿到钥匙后才开」不是一次生成，是一个约束，得在后面每一步都成立。
+    </div>
+  </div>
+
+  <div class="prose">
+    <p>三个洞指向同一件事：<b>缺一份账本</b>。而一旦决定把账本单独拿出来，立刻就有一个新问题——
+    账本长什么样，才能既让程序方便读写，又足够指挥得动一个视频生成模型？这就是全文的中心问题，也是下一节。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 02 REPR -->
+<section class="sec" id="s-repr">
+  <div class="eyebrow"><span class="n">02</span><span class="t">Representation</span><span class="line"></span></div>
+  <h2>表征取舍：为什么偏偏是 3D OBB</h2>
+  <p class="lead">论文 §2 花了整整两页只论证一件事：<b>接口该做多细</b>。这一节是全文最有价值的部分，
+  因为它给了一个我以前没见人这么讲清楚的判据——<b>训练和推理是从两个相反方向拿到同一个表征的</b>。</p>
+
+  <div class="eq">
+    <span class="r" style="font-family:var(--font-body);font-size:14px">训练：</span>
+    已实现的动态 &nbsp;<span class="r">—▸</span>&nbsp; 结构表征
+    <span class="tagno">Eq.1</span>
+  </div>
+  <div class="eq">
+    <span class="r" style="font-family:var(--font-body);font-size:14px">推理：</span>
+    高层状态转移 &nbsp;<span class="r">—▸</span>&nbsp; 结构表征 &nbsp;<span class="r">—▸</span>&nbsp; 生成的动态
+    <span class="tagno">Eq.2</span>
+    <small>训练时，视频里的动作<b>已经发生了</b>，你只是从像素里把它<b>测</b>出来（检测、跟踪、深度）。
+    推理时反过来：你只有一句「他中弹倒地」，必须<b>先造出</b>这条随时间变化的结构轨迹，生成模型才有东西可依。
+    表征越细，你在推理端要凭空造的自由度就越多。<b>「说他要倒下」很容易，「给出他每一帧的骨骼姿态」是另一个课题</b>。</small>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig.1</span><span class="ti">拖动滑块，看接口变细时四条曲线怎么走（论文 Fig.2 的可交互版）</span></div>
+    <div class="ctl">
+      <label>接口精细度
+        <input type="range" id="rpX" min="0" max="4" step="1" value="2">
+        <span class="val" id="rpXV">3D OBB</span>
+      </label>
+      <span class="seg" id="rpJump" role="group" aria-label="快速跳转">
+        <button type="button" data-j="0" aria-pressed="false">文本</button>
+        <button type="button" data-j="1" aria-pressed="false">2D 框/掩码</button>
+        <button type="button" data-j="2" aria-pressed="true">3D OBB</button>
+        <button type="button" data-j="3" aria-pressed="false">粗 3D 代理</button>
+        <button type="button" data-j="4" aria-pressed="false">完整 3D / G-buffer</button>
+      </span>
+    </div>
+    <div class="explore">
+      <div class="figbody">
+        <svg viewBox="0 0 560 300" role="img" aria-label="表征精细度与四个代价维度的关系曲线">
+          <!-- axes -->
+          <line x1="60" y1="248" x2="536" y2="248" class="s-rule" stroke-width="1"/>
+          <g class="f-ink3">
+            <text x="76" y="266" text-anchor="middle" class="xs">文本</text>
+            <text x="188" y="266" text-anchor="middle" class="xs">2D 框/掩码</text>
+            <text x="300" y="266" text-anchor="middle" class="xs">3D OBB</text>
+            <text x="412" y="266" text-anchor="middle" class="xs">粗 3D 代理</text>
+            <text x="512" y="266" text-anchor="middle" class="xs">完整 3D</text>
+            <text x="298" y="286" text-anchor="middle" class="xs">← 越左：留给生成先验的越多　　越右：你必须显式指定的越多 →</text>
+          </g>
+          <g id="rpTicks" class="s-rule1" stroke-width="1"></g>
+          <!-- curves -->
+          <path id="rpC1" class="nofill" stroke="var(--cp)" stroke-width="2.2"/>
+          <path id="rpC2" class="nofill" stroke="var(--bad)" stroke-width="2.2"/>
+          <path id="rpC3" class="nofill" stroke="var(--st)" stroke-width="2.2"/>
+          <path id="rpC4" class="nofill" stroke="var(--pg)" stroke-width="2.2" stroke-dasharray="6 4"/>
+          <g id="rpDots"></g>
+          <!-- marker -->
+          <line id="rpMk" y1="26" y2="248" class="s-ink2" stroke-width="1.4" stroke-dasharray="4 4"/>
+          <rect id="rpBand" y="26" height="222" fill="var(--tint)"/>
+          <g class="f-ink3">
+            <text x="66" y="22" class="xs">高</text>
+            <text x="66" y="244" class="xs">低</text>
+          </g>
+          <g id="rpLeg">
+            <rect x="92" y="14" width="212" height="72" rx="8" class="f-surf2" stroke="var(--rule)" stroke-width="1" opacity=".94"/>
+            <g><line x1="104" y1="30" x2="124" y2="30" stroke="var(--cp)" stroke-width="2.2"/><text x="130" y="34" class="xs f-ink2">显式控制力</text></g>
+            <g><line x1="104" y1="46" x2="124" y2="46" stroke="var(--bad)" stroke-width="2.2"/><text x="130" y="50" class="xs f-ink2">训练标注获取难度</text></g>
+            <g><line x1="104" y1="62" x2="124" y2="62" stroke="var(--st)" stroke-width="2.2"/><text x="130" y="66" class="xs f-ink2">推理端「造轨迹」成本</text></g>
+            <g><line x1="104" y1="78" x2="124" y2="78" stroke="var(--pg)" stroke-width="2.2" stroke-dasharray="6 4"/><text x="130" y="82" class="xs f-ink2">训练–推理错配风险</text></g>
+          </g>
+        </svg>
+      </div>
+      <div class="pane" id="rpPane"></div>
+    </div>
+    <figcaption>四条曲线是我按论文 §2 的论证画的<b>示意</b>，不是论文里的测量值——论文 Fig.2 本身也只给了三个箭头方向，没有任何量化。
+    值得注意的是紫色虚线（错配风险）：论文主张它在中段最低，但<b>全文没有任何实验支持这个形状</b>，这是我列在存疑清单里的第 10 条。</figcaption>
+  </figure>
+
+  <div class="prose">
+    <p>选定 OBB 之后，「什么归你管、什么归模型管」就有了一条清楚的分界线：</p>
+  </div>
+  <div class="grid2">
+    <div class="card cC">
+      <div class="mono">显式指定（编译器负责）</div>
+      <h5>实体级、世界系、可重投影的骨架</h5>
+      <ul>
+        <li><b>位置 / 尺寸 / 朝向</b>：共享世界坐标系下的一个 OBB，固定的一小组几何参数</li>
+        <li><b>持久身份</b>：跨遮挡、跨出画再入画都不变的 id</li>
+        <li><b>语义类别</b>与<b>相机系下的自身运动方向</b></li>
+        <li>不需要网格、材质、骨骼，也不需要预定义动画</li>
+      </ul>
+    </div>
+    <div class="card cR">
+      <div class="mono">交给生成先验（渲染器负责）</div>
+      <h5>盒子里面发生的一切</h5>
+      <ul>
+        <li>精确形状、纹理、材质、光照</li>
+        <li><b>关节运动与局部形变</b>——走路、举枪、倒地的具体姿态</li>
+        <li>次级动态：布料、尘土、阴影、抛壳</li>
+        <li>换句话说：<b>盒子说「他在这、他朝那、他在动」，模型说「他长什么样、动作怎么走完」</b></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">我的读法</div>
+    <p>这套论证是干净的，但注意它有一个隐含前提：<b>盒子能表达的状态变化，必须足够让生成模型猜对剩下的</b>。
+    「人在跑」和「人倒地」之间，盒子能给的差别只有姿态（立方体躺倒）和 7 档方向里的 <code>down</code>。
+    对「开门 / 关门」「拿起 / 放下」「装弹」这类交互，一个盒子加一个类别标签能不能撑住？论文没有测，也没有讨论。
+    我怀疑真实答案是：<b>语义标签字符串在偷偷承担很多工作</b>——见 §04 末尾和存疑第 1 条。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 03 PROGRAM -->
+<section class="sec" id="s-prog">
+  <div class="eyebrow"><span class="n">03</span><span class="t">World Program</span><span class="line"></span></div>
+  <h2>世界程序与引擎：账本长什么样</h2>
+  <p class="lead">这一段是纯软件工程，没有任何模型。理解它最快的方式是把它当成一个<b>只算规则、不算物理</b>的迷你游戏引擎。</p>
+
+  <div class="eq">
+    <i>s</i><sub>t</sub> = ( <i>E</i><sub>t</sub> , <i>A</i><sub>t</sub> , <i>Q</i><sub>t</sub> ; <i>R</i><sub>t</sub> )
+    <span class="tagno">Eq.4</span>
+    <small><b>E</b> 持久实体及其 3D 位姿　<b>A</b> 语义与功能属性（hp、status、faction、库存…）　<b>Q</b> 实体间关系（敌对、归属）　<b>R</b> 可执行规则。
+    分号很讲究：<b>R 和前三者是不同种类的东西</b>，但它同样存在于状态里，也就是说<b>规则本身可以在运行中被改写</b>（论文原话：「entities, attributes, relations, and potentially the rule set」）。</small>
+  </div>
+  <div class="eq">
+    <i>s</i><sub>t+1</sub> = <i>F</i>( <i>s</i><sub>t</sub> , <i>a</i><sub>t</sub> )
+    <span class="tagno">Eq.5</span>
+    <small>每一步引擎做三件事：<b>校验动作合法性 → 应用效果 → 结算被触发的事件</b>。
+    注意第一步——动作可以<b>被拒绝</b>。这是纯生成式世界给不了的：prompt 一个非法动作，模型总会画点什么出来。</small>
+  </div>
+
+  <h3><span class="ix">3.1</span>初始化：检测器给几何，agent 给其余一切</h3>
+  <div class="prose">
+    <p>给定首帧 <span class="mono">I₀</span>，一个现成的 3D 检测器先把可见实体和它们的 OBB 恢复出来，作为 <b>E₀</b> 和持久 id 的来源。
+    剩下的——属性、关系、规则、事件触发器、胜负目标——由 agent 结合用户那句话写成程序，
+    <b>通过 id 挂到检测出来的实体上</b>，再交给引擎实例化成 <span class="mono">s₀</span>。</p>
+    <p>论文举的例子就是战斗场景：把检测到的角色分成敌我阵营、初始化血量和战斗状态、规定谁可以打谁、定义「射击」的伤害/死亡/目标更新效果。
+    作者的原话很到位：这不是在造一个有完整 3D 资产和底层仿真逻辑的常规游戏，而是<b>编程一个轻量的「盒子世界」</b>。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig.2</span><span class="ti">可玩：开火、推进、大角度转身，看账本和「可见存活数」怎么变</span></div>
+    <div class="ctl">
+      <span class="seg" id="wgAct" role="group" aria-label="动作">
+        <button type="button" class="btn" id="wgFire2" style="border:0;background:transparent">开火 → entity_02</button>
+        <button type="button" class="btn" id="wgFire3" style="border:0;background:transparent">开火 → entity_03</button>
+        <button type="button" class="btn" id="wgFire4" style="border:0;background:transparent">开火 → entity_04</button>
+      </span>
+      <label>相机偏航
+        <input type="range" id="wgYaw" min="-180" max="60" step="2" value="0">
+        <span class="val" id="wgYawV">0°</span>
+      </label>
+      <button class="btn" id="wgPan">转身 −130°</button>
+      <button class="btn" id="wgReset">重置</button>
+    </div>
+    <div class="explore">
+      <div class="figbody" style="padding:14px">
+        <div class="sim">
+          <canvas id="wgCv" width="560" height="514"></canvas>
+          <div class="lab l">俯视世界 · 世界坐标系</div>
+          <div class="lab r" id="wgLabR">FOV 60°</div>
+        </div>
+      </div>
+      <div class="pane">
+        <h5>权威世界状态 s<sub>t</sub></h5>
+        <div style="overflow-x:auto"><table class="ledger" id="wgTbl"></table></div>
+        <div class="row" style="margin-top:14px">
+          <span class="k">规则 R（agent 写的）</span>
+          <pre style="margin:6px 0 0;font-size:11px;padding:10px 12px"><span class="cm"># 命中</span>
+<span class="kw">on_hit</span>(e): e.hp -= <span class="nv">damage</span>
+<span class="cm"># 归零即倒地，实体不删除</span>
+<span class="kw">on_hp_zero</span>(e): e.status = <span class="sv">down</span>
+<span class="cm"># 合法性：只能打敌对阵营</span>
+<span class="kw">valid</span>(a): Q[a.src,a.dst] == <span class="sv">hostile</span>
+<span class="kw">win</span>: all_enemies_defeated
+<span class="kw">lose</span>: player.hp &lt;= 0</pre>
+        </div>
+      </div>
+    </div>
+    <div class="readout">
+      <div><div class="k">引擎账本 · 存活总数</div><div class="v s" id="wgAlive">–</div></div>
+      <div><div class="k">当前视野内 · 可见存活</div><div class="v cam" id="wgVis">–</div></div>
+      <div><div class="k">离屏但仍在账本</div><div class="v" id="wgOff">–</div></div>
+      <div><div class="k">目标状态</div><div class="v" id="wgGoal">进行中</div></div>
+    </div>
+    <div class="logbox" id="wgLog"></div>
+    <figcaption>这是我按论文 §4.2 的描述实现的一个<b>示意引擎</b>，不是作者的代码——它只演示语义，不代表实现细节。
+    三个要点：<b>①</b> 打倒的实体 <span class="mono">status=down</span> 但<b>不从世界里删除</b>（论文明确说 death 后 target 留在场景里）；
+    <b>②</b> 转到 −130° 时 entity_04 从「离屏」变成「可见」，它的 hp 一直在账本里；
+    <b>③</b> 右上角那个「可见存活数」就是后面 Count Accuracy 的 ground truth ——注意它<b>依赖相机</b>，这一点在 §08 会变成一个大问题。</figcaption>
+  </figure>
+
+  <div class="call">
+    <div class="hd">一个容易被读漏的设计</div>
+    <p>论文特意点出：世界状态里<b>可以有完全不出现在观测里的变量</b>（hp、库存、阵营），它们不进渲染，但会决定后续的状态转移。
+    这句话是整个「解耦」的价值所在——一个纯生成式世界，<b>没有地方安放这种量</b>。
+    你可以把 hp 写进 prompt，但那不是状态，那是描述。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 04 COMPILER -->
+<section class="sec" id="s-comp">
+  <div class="eyebrow"><span class="n">04</span><span class="t">State Compiler</span><span class="line"></span></div>
+  <h2>状态编译器：把账本压成三张像素对齐的图</h2>
+  <p class="lead">这是全文技术含量最集中的一节，也是我认为最漂亮的一节。
+  编译器 <span class="m">P</span> 做的事听起来平平无奇——「投影 + 光栅化」——但三张图的<b>分工设计</b>非常讲究，
+  尤其第三张，解决了一个所有相机可控视频模型都躲不掉的歧义。</p>
+
+  <div class="eq">
+    <i>M</i><sup>ctrl</sup><sub>t+1</sub> = <i>P</i>( <i>s</i><sub>t+1</sub> , <i>C</i><sub>t+1</sub> )
+    <span class="tagno">Eq.6</span>
+    <small>关键词是 <b>without altering the underlying world state</b>：编译器是只读的。
+    它从状态里挑出「必须被空间定位」的那部分，其余（hp、库存）原封不动留在账本里。</small>
+  </div>
+
+  <h3><span class="ix">4.1</span>三张图各管一件事</h3>
+  <div class="grid3">
+    <div class="card" style="border-top:3px solid var(--id3)">
+      <div class="mono" style="color:var(--id3);text-transform:none">M<sup>id</sup> · 身份图</div>
+      <h5>「这块像素属于哪一个实例」</h5>
+      <p>维护一个 <b>K 个可学嵌入</b>的 bank <code>E<sup>id</sup>={q<sup>id</sup><sub>j</sub>}</code>，每个持久实体分到一个 slot，
+      <b>整段序列内固定</b>，光栅化到它 OBB 的可见投影上。</p>
+      <p>训练时 slot 在每个样本内<b>随机且互不重复</b>地分配、样本之间重新随机——
+      作者说这是为了防止某个 id 嵌入和特定类别/外观/视角绑死。这个细节很关键：
+      <b>slot 是「代词」不是「名字」</b>，它只保证「前后这两块像素是同一个东西」，不携带任何外观信息。</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--sem-person)">
+      <div class="mono" style="color:var(--sem-person);text-transform:none">M<sup>sem</sup> · 语义图</div>
+      <h5>「这块像素是什么类别」</h5>
+      <p>把账本里的类别标签 <span class="m">y<sub>i</sub></span> 过一个预训练文本编码器：
+      <code>q<sup>sem</sup><sub>i</sub> = E<sub>text</sub>(y<sub>i</sub>)</code>，同样光栅化到可见投影上，背景填零。
+      多个框重叠时用<b>深度感知光栅化</b>保留可见的那个。</p>
+      <p>同类实体共享同一个语义表示，靠 id slot 区分个体。论文点明它的主要用途：
+      <b>那些首帧里根本不存在、没有外观参考的实体</b>——比如刚从画面外走进来的 NPC。</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--cam)">
+      <div class="mono" style="color:var(--cam-ink);text-transform:none">M<sup>dir</sup> · 方向图</div>
+      <h5>「它自己在往哪动」</h5>
+      <p>取引擎维护的<b>世界系速度</b>，旋到目标相机坐标系，量化成 7 档：
+      <code>forward / backward / left / right / up / down / static</code>，各有一个可学嵌入。</p>
+      <p><b>这是整节的点睛之笔。</b>画面上一个框动了，可能是它在动，可能是相机在动，也可能两者都有。
+      因为方向是从<b>世界速度</b>算的而不是图像位移，<b>静止物体在相机横摇时依然被标为 static</b>，
+      于是渲染器能把「自身运动」和「相机带来的表观运动」分开——正好补上原生相机通路管不到的那一半。</p>
+    </div>
+  </div>
+
+  <div class="eq">
+    <i>M</i><sup>ctrl</sup><sub>t+1</sub> = Concat( <i>M</i><sup>id</sup><sub>t+1</sub> , <i>M</i><sup>sem</sup><sub>t+1</sub> , <i>M</i><sup>dir</sup><sub>t+1</sub> )
+    <span class="tagno">Eq.10</span>
+    <small>沿通道维拼接，编码到视频 latent 的空间分辨率后送进 ControlNet。
+    <b>请数一下这里有几个通道组：三个。</b>身份、语义、方向。<b>没有一个叫 status。</b>记住这一点。</small>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig.3</span><span class="ti">可玩：让相机动 vs 让实体动，看三张控制图分别怎么响应</span></div>
+    <div class="ctl">
+      <label>时间 t
+        <input type="range" id="cpT" min="0" max="100" step="1" value="0">
+        <span class="val" id="cpTV">0.00</span>
+      </label>
+      <button class="btn primary" id="cpPlay">▶ 播放</button>
+      <span class="seg" id="cpMode" role="group" aria-label="运动模式">
+        <button type="button" data-cm="cam" aria-pressed="true">只有相机在动</button>
+        <button type="button" data-cm="obj" aria-pressed="false">只有实体在动</button>
+        <button type="button" data-cm="both" aria-pressed="false">两者都动</button>
+      </span>
+      <label><input type="checkbox" id="cpWrong"> 改用<b style="color:var(--bad-ink)">图像位移</b>算方向（错误做法）</label>
+    </div>
+    <div class="figbody" style="padding:14px">
+      <div class="sim">
+        <canvas id="cpCv" width="880" height="452"></canvas>
+        <div class="lab l">左：俯视世界 + 视锥　右：目标相机视角下的三张控制图</div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--d-static)"></i>static</span>
+      <span><i style="background:var(--d-fwd)"></i>forward</span>
+      <span><i style="background:var(--d-back)"></i>backward</span>
+      <span><i style="background:var(--d-left)"></i>left</span>
+      <span><i style="background:var(--d-right)"></i>right</span>
+      <span><i style="background:var(--d-up)"></i>up</span>
+      <span><i style="background:var(--d-down)"></i>down</span>
+    </div>
+    <div class="readout">
+      <div><div class="k">可见控制区域（z-buffer 后）</div><div class="v c" id="cpVis">–</div></div>
+      <div><div class="k">被判为「自身在动」</div><div class="v" id="cpMov">–</div></div>
+      <div><div class="k">其中实际静止的</div><div class="v" id="cpErr">–</div></div>
+      <div><div class="k">方向来源</div><div class="v" id="cpSrc" style="font-size:15px">世界速度</div></div>
+    </div>
+    <figcaption id="cpCap"></figcaption>
+  </figure>
+
+  <div class="call warn">
+    <div class="hd">⚠ 全文最大的一处「说了但没说清」：status 是怎么进到控制信号里的</div>
+    <p>标题里写着 <b>state-augmented</b> 3D OBB，Fig.1 里画着 <span class="mono">status: active → down</span>，
+    实验的头号指标是 <b>State Accuracy 98%</b>——衡量「死亡事件有没有被画面兑现」。
+    可是 §4.3 从头到尾给出的控制信号只有 <span class="mono">Concat(M<sup>id</sup>, M<sup>sem</sup>, M<sup>dir</sup>)</span>，
+    <b>没有任何一路承载 hp / status</b>。那 98% 是怎么来的？只可能是下面两条之一，而论文一条都没写：</p>
+    <ul style="margin:8px 0 0">
+      <li><b>假设 A：语义标签被改写。</b>死亡时把 <span class="mono">y<sub>i</sub></span> 从 <code>soldier</code> 换成 <code>dead soldier</code>，
+      文本嵌入随之改变。<span class="rB">问题：</span>训练标签来自 SAM3，而 SAM3 的类别词表是 Qwen3-VL 从视频里发现的「离散可数物体类别」——
+      这种词表大概率给不出「dead soldier」这种状态化类别，于是训练期根本没有对应监督。</li>
+      <li><b>假设 B：纯靠 OBB 几何。</b>倒地就是盒子躺平（extent 与 orientation 变化）+ 方向图给一个 <code>down</code>。
+      <span class="rC">这条更可能是真的</span>，因为它不需要额外通道，而且训练数据（三款游戏的战斗镜头）里「人躺着」的先验极强。
+      <span class="rB">问题：</span>如果是这样，那么<b>所有「不改变几何的状态」都无法被渲染</b>——中毒、上膛、护盾开启、门锁上了没有——
+      而「hp 这类非视觉量也能影响渲染结果」正是论文自己在 §4.2 结尾许诺过的能力。</li>
+    </ul>
+    <p style="margin-top:8px">这不是吹毛求疵：<b>它决定了这套接口的能力边界到底在哪</b>。等代码放出来，这是我第一个要去读的文件。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 05 RENDERER -->
+<section class="sec" id="s-rend">
+  <div class="eyebrow"><span class="n">05</span><span class="t">Renderer</span><span class="line"></span></div>
+  <h2>渲染器：冻结主干 + 一条 ControlNet 支路</h2>
+  <p class="lead">这一段几乎没有惊喜，但有两个值得记住的工程判断：<b>主干全冻</b>，以及<b>两条条件通路各管一半</b>。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig.4</span><span class="ti">两条条件通路的分工：相机管「看哪」，控制图管「谁在哪、是谁、往哪动」</span></div>
+    <div class="figbody scrollx">
+      <svg viewBox="0 0 900 330" style="min-width:760px" role="img" aria-label="渲染器架构：冻结的 LingBot-World-v1 主干、原生相机通路、可训练的 Structured Spatial ControlNet">
+        <!-- inputs -->
+        <rect x="14" y="24" width="150" height="46" rx="9" class="fs-V" stroke="var(--cam)" stroke-width="1.2"/>
+        <text x="89" y="43" text-anchor="middle" class="sml f-Vi">目标相机轨迹 C</text>
+        <text x="89" y="59" text-anchor="middle" class="xs f-ink3">T 帧一窗，玩家给定</text>
+
+        <rect x="14" y="86" width="150" height="60" rx="9" class="fs-C" stroke="var(--cp)" stroke-width="1.2"/>
+        <text x="89" y="105" text-anchor="middle" class="sml f-Ci">M<tspan class="xs">ctrl</tspan><tspan class="xs">1:T</tspan></text>
+        <text x="89" y="121" text-anchor="middle" class="xs f-ink3">id ⊕ sem ⊕ dir</text>
+        <text x="89" y="136" text-anchor="middle" class="xs f-ink3">与 C 在同一条轨迹下构造</text>
+
+        <rect x="14" y="162" width="150" height="46" rx="9" class="f-surf2" stroke="var(--rule2)" stroke-width="1"/>
+        <text x="89" y="181" text-anchor="middle" class="sml f-ink2">首帧 I₀</text>
+        <text x="89" y="197" text-anchor="middle" class="xs f-ink3">外观上下文（I2V 通路）</text>
+
+        <rect x="14" y="224" width="150" height="60" rx="9" class="f-surf2" stroke="var(--rule2)" stroke-width="1"/>
+        <text x="89" y="243" text-anchor="middle" class="sml f-ink2">噪声 latent</text>
+        <text x="89" y="259" text-anchor="middle" class="xs f-ink3">窗内双向去噪</text>
+        <text x="89" y="274" text-anchor="middle" class="xs f-ink3">（不是逐帧因果）</text>
+
+        <!-- controlnet -->
+        <path d="M164 116 L216 116" class="s-C nofill" stroke-width="1.6" marker-end="url(#ar-c)"/>
+        <rect x="218" y="80" width="176" height="120" rx="11" class="fs-C" stroke="var(--cp)" stroke-width="1.4"/>
+        <text x="306" y="104" text-anchor="middle" class="big f-Ci">Structured Spatial</text>
+        <text x="306" y="122" text-anchor="middle" class="big f-Ci">ControlNet 🔥</text>
+        <text x="306" y="142" text-anchor="middle" class="xs f-ink3">与噪声 latent 一起处理</text>
+        <text x="306" y="158" text-anchor="middle" class="xs f-ink3">逐层输出 r<tspan class="xs">(ℓ)</tspan></text>
+        <text x="306" y="176" text-anchor="middle" class="xs f-ink3">投影到主干维度后逐层相加</text>
+        <text x="306" y="192" text-anchor="middle" class="xs mono f-Ci">论文未给层数 / 参数量</text>
+        <path d="M164 254 L216 200" class="s-ink3 nofill dash" stroke-width="1.1" marker-end="url(#ar-i)"/>
+
+        <!-- backbone -->
+        <path d="M394 140 L446 140" class="s-C nofill" stroke-width="2" marker-end="url(#ar-c)"/>
+        <text x="420" y="132" text-anchor="middle" class="xs mono f-Ci">h ← h + r</text>
+        <rect x="448" y="24" width="220" height="260" rx="12" class="fs-R" stroke="var(--rd)" stroke-width="1.4"/>
+        <text x="558" y="48" text-anchor="middle" class="big f-Ri">LingBot-World-v1 主干 ❄</text>
+        <text x="558" y="66" text-anchor="middle" class="xs f-ink3">预训练相机可控视频生成模型</text>
+        <g class="f-surf" stroke="var(--rule2)" stroke-width="1">
+          <rect x="470" y="80" width="176" height="34" rx="7"/>
+          <rect x="470" y="120" width="176" height="34" rx="7"/>
+          <rect x="470" y="160" width="176" height="34" rx="7"/>
+        </g>
+        <text x="558" y="102" text-anchor="middle" class="sml f-ink2">DiT Block × N</text>
+        <text x="558" y="142" text-anchor="middle" class="sml f-ink2">Camera Adapter（原生）</text>
+        <text x="558" y="182" text-anchor="middle" class="sml f-ink2">记忆增强自注意力</text>
+        <path d="M164 47 L440 47 L440 137 L470 137" class="s-V nofill dash" stroke-width="1.3" marker-end="url(#ar-v)"/>
+        <text x="558" y="216" text-anchor="middle" class="xs f-Bi">训练时 θ 全部冻结</text>
+        <text x="558" y="234" text-anchor="middle" class="xs f-ink3">只优化 ControlNet 的 φ（跨块条件另有 ψ）</text>
+        <text x="450" y="310" text-anchor="middle" class="xs f-ink3">好处：不破坏主干原有的视觉与动态先验；代价：控制强度受限于「逐层加性注入」这一形式，论文未讨论控制与先验冲突时谁赢</text>
+
+        <!-- output -->
+        <path d="M668 154 L706 154" class="s-R nofill" stroke-width="1.8" marker-end="url(#ar-r)"/>
+        <rect x="708" y="100" width="178" height="108" rx="11" class="f-surf" stroke="var(--rule2)" stroke-width="1.1"/>
+        <text x="797" y="126" text-anchor="middle" class="big f-ink">I<tspan class="xs">1:T</tspan></text>
+        <text x="797" y="146" text-anchor="middle" class="xs f-ink3">形状 · 纹理 · 材质</text>
+        <text x="797" y="162" text-anchor="middle" class="xs f-ink3">关节 · 局部形变 · 光照</text>
+        <text x="797" y="178" text-anchor="middle" class="xs f-ink3">次级运动</text>
+        <text x="797" y="196" text-anchor="middle" class="xs f-Ri">＝ 控制图<tspan style="font-weight:700">没有</tspan>指定的一切</text>
+        <text x="797" y="228" text-anchor="middle" class="xs mono f-ink3">Eq.13</text>
+        <text x="797" y="246" text-anchor="middle" class="xs mono f-ink3">I₁:T = G(I₀, C, M<tspan class="xs">ctrl</tspan>)</text>
+      </svg>
+    </div>
+    <figcaption><b>两条通路的分工是这套设计成立的关键：</b>相机 adapter 决定<b>视点怎么走</b>，ControlNet 决定<b>视点下每个实体在哪、是谁、往哪动</b>。
+    因为控制图本来就是在同一条相机轨迹下投影出来的，两者天然对齐，不需要额外的一致性约束。
+    但也正因为主干冻结、注入是逐层加性的，<b>当控制图和主干先验打架时谁赢，论文没有讨论</b>（例如让一个盒子做违反物理的运动）。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 06 LONG -->
+<section class="sec" id="s-long">
+  <div class="eyebrow"><span class="n">06</span><span class="t">Long Horizon</span><span class="line"></span></div>
+  <h2>长程：分块自回归 + 两种记忆</h2>
+  <p class="lead">窗内双向去噪，跨窗因果传播。第一块从 I₀ 起步（历史填零、无空间记忆），之后每一块多吃两样东西。</p>
+
+  <div class="eq">
+    <i>I</i><sup>(n)</sup> = <i>G</i><sub>θ,φ,ψ</sub>( <i>C</i><sup>(n)</sup> , <i>M</i><sup>ctrl,(n)</sup> , <i>H</i><sup>(n)</sup><sub>temp</sub> , <i>H</i><sup>(n)</sup><sub>spa</sub> ) , &nbsp; <i>n</i> ≥ 2
+    <span class="tagno">Eq.14</span>
+    <small>两路记忆<b>只由「生成当前块之前已有的观测」构成</b>——这保证了跨块的因果性，也意味着一块里的错误会顺着记忆往下传。</small>
+  </div>
+
+  <div class="grid2">
+    <div class="card cR">
+      <div class="mono" style="text-transform:none">H<sub>temp</sub> · 时间历史</div>
+      <h5>多尺度的近中远三档 + 一个永不过期的锚</h5>
+      <p>近处 latent 投成<b>更细</b>的时空 token，越远越粗——在固定 token 预算下把有效时间窗撑长。
+      另外<b>首帧 I₀ 的 latent 始终保留</b>作为持久锚点。</p>
+      <p>训练时故意把历史<b>弄脏</b>：加噪、特征腐蚀、随机丢弃部分历史，让渲染器学会容忍不完美的自回归上下文。
+      推理时每块把自己的生成 latent 交给历史，形成因果 rollout。<b>这是很实用的一招</b>——
+      训练用真实帧、推理用生成帧的分布差，靠人为退化去弥合。</p>
+    </div>
+    <div class="card cR">
+      <div class="mono" style="text-transform:none">H<sub>spa</sub> · 几何对齐空间记忆</div>
+      <h5>直接沿用 AlayaWorld 的机制</h5>
+      <p>把已完成的 RGB 帧用估计深度和相机参数<b>抬到世界空间</b>；生成新块前检索相关历史观测、
+      <b>重投影到目标视角</b>，编码成空间 latent token 参与条件。记忆只从已完成的块更新。</p>
+      <p>解决的问题很具体：时间历史窗口有限，大幅相机运动、遮挡、<b>回到走过的地方</b>时，
+      近期上下文里已经没有那段内容了。</p>
+    </div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig.5</span><span class="ti">拖动块序号，看第 n 块能看见什么</span></div>
+    <div class="ctl">
+      <label>当前块 n
+        <input type="range" id="lgN" min="1" max="9" step="1" value="5">
+        <span class="val" id="lgNV">5</span>
+      </label>
+      <label><input type="checkbox" id="lgSpa" checked> 启用空间记忆</label>
+      <label><input type="checkbox" id="lgAnchor" checked> 保留 I₀ 锚点</label>
+    </div>
+    <div class="figbody scrollx">
+      <svg id="lgSvg" viewBox="0 0 880 296" style="min-width:760px" role="img" aria-label="分块自回归的记忆结构示意"></svg>
+    </div>
+    <figcaption>三档分辨率的<b>具体比例、token 预算、窗口长度 L 与 T，论文一个数字都没给</b>。
+    图里的比例是示意。空间记忆的检索策略、容量上限也没给——这条整体指向 AlayaWorld，等于把一大块实现细节外包给了另一篇论文。</figcaption>
+  </figure>
+
+  <div class="call">
+    <div class="hd">留意一个方向性</div>
+    <p>记忆是<b>视觉的</b>，账本是<b>符号的</b>，而且<b>单向</b>：生成的画面会进记忆，但<b>永远不会反过来修改世界状态</b>。
+    好处是状态绝不会被幻觉污染；代价是<b>渲染失败没有任何反馈闭环</b>——
+    如果渲染器某一块没把一个实体画出来，引擎不知道，下一块照样按「他还在那」继续编译。
+    画面和账本一旦分叉，只能靠空间记忆自己纠回去。<b>论文没有讨论这种分叉。</b></p>
+  </div>
+</section>
+
+<!-- ============================================================ 07 DATA -->
+<section class="sec" id="s-data">
+  <div class="eyebrow"><span class="n">07</span><span class="t">Data Engine</span><span class="line"></span></div>
+  <h2>数据引擎：从无标注视频里把监督挖出来</h2>
+  <p class="lead">要训 ControlNet，就得有「视频 ↔ 三张控制图」的配对。野生视频里没有这种标注，
+  所以作者拼了一条五段式的自动管线。<b>这条管线的精度，就是整套监督的天花板。</b></p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig.6</span><span class="ti">五段式数据引擎，以及它与推理时的方向差</span></div>
+    <div class="tabs" role="tablist" aria-label="方向">
+      <button class="tab" role="tab" aria-selected="true" data-dg="train">训练：从像素里「测」出结构</button>
+      <button class="tab" role="tab" aria-selected="false" data-dg="infer">推理：从状态里「造」出结构</button>
+    </div>
+    <div class="figbody scrollx">
+      <svg viewBox="0 0 940 250" style="min-width:800px" role="img" aria-label="数据引擎流程与训练推理方向对比">
+        <g id="dg-train">
+          <rect x="10" y="18" width="920" height="82" rx="11" class="f-surf2" stroke="var(--rule)" stroke-width="1" stroke-dasharray="6 5"/>
+          <text x="26" y="38" class="sml f-ink3">Eq.1　已实现的动态 —▸ 结构表征</text>
+          <g>
+            <rect x="26" y="46" width="152" height="42" rx="8" class="f-surf" stroke="var(--rule2)" stroke-width="1"/>
+            <text x="102" y="63" text-anchor="middle" class="sml f-ink2">ViPE</text>
+            <text x="102" y="78" text-anchor="middle" class="xs f-ink3">内参 · 位姿 · metric depth</text>
+            <path d="M178 67 L200 67" class="s-ink3 nofill" stroke-width="1.3" marker-end="url(#ar-i)"/>
+            <rect x="202" y="46" width="152" height="42" rx="8" class="f-surf" stroke="var(--rule2)" stroke-width="1"/>
+            <text x="278" y="63" text-anchor="middle" class="sml f-ink2">Qwen3-VL agent</text>
+            <text x="278" y="78" text-anchor="middle" class="xs f-ink3">全局 caption + 可数类别词表</text>
+            <path d="M354 67 L376 67" class="s-ink3 nofill" stroke-width="1.3" marker-end="url(#ar-i)"/>
+            <rect x="378" y="46" width="152" height="42" rx="8" class="f-surf" stroke="var(--rule2)" stroke-width="1"/>
+            <text x="454" y="63" text-anchor="middle" class="sml f-ink2">SAM3</text>
+            <text x="454" y="78" text-anchor="middle" class="xs f-ink3">实例分割 + 跟踪 → 持久 track id</text>
+            <path d="M530 67 L552 67" class="s-ink3 nofill" stroke-width="1.3" marker-end="url(#ar-i)"/>
+            <rect x="554" y="46" width="164" height="42" rx="8" class="f-surf" stroke="var(--cp)" stroke-width="1.2"/>
+            <text x="636" y="63" text-anchor="middle" class="sml f-Ci">WildDet3D</text>
+            <text x="636" y="78" text-anchor="middle" class="xs f-ink3">2D框+深度+内参 → 每帧 3D OBB</text>
+            <path d="M718 67 L740 67" class="s-ink3 nofill" stroke-width="1.3" marker-end="url(#ar-i)"/>
+            <rect x="742" y="46" width="172" height="42" rx="8" class="f-surf" stroke="var(--rule2)" stroke-width="1"/>
+            <text x="828" y="63" text-anchor="middle" class="sml f-ink2">投影 + z-buffer 光栅化</text>
+            <text x="828" y="78" text-anchor="middle" class="xs f-ink3">→ id / sem / dir 三张图</text>
+          </g>
+          <text x="470" y="128" text-anchor="middle" class="sml f-ink2">bᵗᵢ = ( p , d , R , ℓᵢ , kᵢ )　中心 · 尺寸 · 朝向 · 类别 · 持久 track id　<tspan class="xs f-ink3">Eq.15</tspan></text>
+          <rect x="150" y="144" width="640" height="86" rx="10" class="fs-S" stroke="var(--st)" stroke-width="1.1"/>
+          <text x="470" y="166" text-anchor="middle" class="sml f-Si">关键一步：位姿把每帧的框搬到<tspan style="font-weight:600">共享世界坐标系</tspan></text>
+          <text x="470" y="186" text-anchor="middle" class="xs f-ink2">同一 track 的框连起来 = 世界系轨迹 → 相邻中心位移 = 物体自身运动</text>
+          <text x="470" y="204" text-anchor="middle" class="xs f-ink2">再旋进当前相机系 → 量化成 7 档（小于阈值判 static）</text>
+          <text x="470" y="222" text-anchor="middle" class="xs f-ink3">在世界系算位移，才把相机运动带来的表观位移<tspan class="f-Si">减掉</tspan>——这正是 M<tspan class="xs">dir</tspan> 的语义来源</text>
+        </g>
+        <g id="dg-infer" hidden>
+          <rect x="10" y="18" width="920" height="82" rx="11" class="fs-P" stroke="var(--pg)" stroke-width="1.1"/>
+          <text x="26" y="38" class="sml f-Pi">Eq.2　高层状态转移 —▸ 结构表征 —▸ 生成的动态</text>
+          <g>
+            <rect x="26" y="46" width="176" height="42" rx="8" class="f-surf" stroke="var(--pg)" stroke-width="1.2"/>
+            <text x="114" y="63" text-anchor="middle" class="sml f-Pi">一句话 / 一个动作</text>
+            <text x="114" y="78" text-anchor="middle" class="xs f-ink3">「entity_02 中弹倒地」</text>
+            <path d="M202 67 L226 67" class="s-P nofill" stroke-width="1.5" marker-end="url(#ar-p)"/>
+            <rect x="228" y="46" width="176" height="42" rx="8" class="fs-S" stroke="var(--st)" stroke-width="1.2"/>
+            <text x="316" y="63" text-anchor="middle" class="sml f-Si">引擎按规则改账本</text>
+            <text x="316" y="78" text-anchor="middle" class="xs f-ink3">hp→0, status→down, 位姿改写</text>
+            <path d="M404 67 L428 67" class="s-S nofill" stroke-width="1.5" marker-end="url(#ar-s)"/>
+            <rect x="430" y="46" width="200" height="42" rx="8" class="fs-C" stroke="var(--cp)" stroke-width="1.3"/>
+            <text x="530" y="63" text-anchor="middle" class="sml f-Ci">编译器<tspan style="font-weight:700">凭空造出</tspan>时变结构轨迹</text>
+            <text x="530" y="78" text-anchor="middle" class="xs f-ink3">这一步在训练里根本不存在</text>
+            <path d="M630 67 L654 67" class="s-C nofill" stroke-width="1.5" marker-end="url(#ar-c)"/>
+            <rect x="656" y="46" width="258" height="42" rx="8" class="fs-R" stroke="var(--rd)" stroke-width="1.2"/>
+            <text x="785" y="63" text-anchor="middle" class="sml f-Ri">渲染器把结构约束兑现成视觉动态</text>
+            <text x="785" y="78" text-anchor="middle" class="xs f-ink3">关节/形变/次级运动全部由先验补</text>
+          </g>
+          <rect x="150" y="128" width="640" height="102" rx="10" class="fs-B" stroke="var(--bad)" stroke-width="1.2"/>
+          <text x="470" y="150" text-anchor="middle" class="sml f-Bi">这就是「训练–推理错配」的具体形态</text>
+          <text x="470" y="172" text-anchor="middle" class="xs f-ink2">训练期的 OBB：来自单目 3D 检测，<tspan style="font-weight:600">带抖动、带误差、但服从真实动力学</tspan></text>
+          <text x="470" y="190" text-anchor="middle" class="xs f-ink2">推理期的 OBB：来自程序，<tspan style="font-weight:600">干净、平滑、可以完全违反物理</tspan></text>
+          <text x="470" y="212" text-anchor="middle" class="xs f-Bi">论文主张 OBB 这一层的错配「比更细的表征小」——合理，但<tspan style="font-weight:700">全文没有任何实验量化它</tspan></text>
+        </g>
+      </svg>
+    </div>
+    <figcaption id="dgCap"></figcaption>
+  </figure>
+
+  <div class="grid2">
+    <div class="card cS">
+      <div class="mono">训练数据</div>
+      <h5>三款游戏的无 HUD 实录</h5>
+      <p><b>Cyberpunk 2077</b>（第一人称）、<b>Forza Horizon 6</b>、<b>GTA V</b>（第三人称，多样视角）。
+      走上面那条管线产出配对数据。</p>
+      <p class="note" style="margin-top:6px">论文<b>没给</b>：时长、clip 数、分辨率、帧率、过滤后保留比例。也没有讨论素材许可问题。</p>
+    </div>
+    <div class="card cB">
+      <div class="mono">这条管线的脆弱点</div>
+      <h5>单目 3D 检测扛着全部重量</h5>
+      <p>整条监督的上界卡在 WildDet3D 的单目 3D OBB 精度 + ViPE 的 metric depth 精度上，
+      而论文<b>没有报告任何一环的误差</b>，也没做敏感性分析。</p>
+      <p><b>更要紧的是：CombatStateBench 的「真值世界状态」也是同一条管线产出的</b>——表征与评测同源，见存疑第 9 条。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 08 EXP -->
+<section class="sec" id="s-exp">
+  <div class="eyebrow"><span class="n">08</span><span class="t">Experiments</span><span class="line"></span></div>
+  <h2>94 / 98 到底量了什么</h2>
+  <p class="lead">先把数字原样摆出来，再一层层拆：<b>指标怎么定义的、真值从哪来、基线被怎么驱动的、样本够不够</b>。
+  我的结论提前说：<b>结论的方向我信，数字的含义比它看上去窄得多</b>。</p>
+
+  <h3><span class="ix">8.1</span>原表</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr>
+        <th>方法</th><th class="num">Imaging</th><th class="num">Subject Cons.</th><th class="num">Backgr. Cons.</th><th class="num">Temporal Stab.</th><th class="num">Count Acc.</th><th class="num">State Acc.</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>LingBot-World-V2 <span class="pill">2607.07534</span></td><td class="num">67.46</td><td class="num worst">81.87</td><td class="num worst">91.89</td><td class="num worst">96.85</td><td class="num">40.75</td><td class="num worst">8.00</td></tr>
+        <tr><td>YUME <span class="pill">2507.17744</span></td><td class="num worst">64.10</td><td class="num">92.35</td><td class="num">93.63</td><td class="num">98.76</td><td class="num worst">32.00</td><td class="num">58.00</td></tr>
+        <tr class="hl"><td><b>PWM（本文）</b></td><td class="num best">67.62</td><td class="num best">94.74</td><td class="num best">96.98</td><td class="num best">99.00</td><td class="num best">94.00</td><td class="num best">98.00</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">全部为百分数。Count Acc. 在 400 帧上评（50 clip × 8 帧），State Acc. 在 50 次死亡事件上评（每次事件后采 3 帧）。判官是 <b>Qwen3.6-27B</b>，只看 RGB，不给任何框/身份/期望计数等特权标注。质量指标用的是 VBench 那四项。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig.7</span><span class="ti">同样的数字，加上 95% Wilson 置信区间——切换「有效样本量」看差别</span></div>
+    <div class="ctl">
+      <span class="seg" id="exN" role="group" aria-label="有效样本量口径">
+        <button type="button" data-n="400" aria-pressed="true">按帧算 n=400（论文口径）</button>
+        <button type="button" data-n="50" aria-pressed="false">按 clip 算 n=50（保守）</button>
+      </span>
+      <span style="font-size:12.5px;color:var(--ink3)">State Acc. 两种口径下都是 n=50（每 clip 一次死亡事件）</span>
+    </div>
+    <div class="bars">
+      <div class="pnl">
+        <div class="pt"><span id="caTitle">Count Accuracy</span><span>越高越好</span></div>
+        <div id="caBars"></div>
+      </div>
+      <div class="pnl">
+        <div class="pt"><span>State Accuracy　n = 50</span><span>越高越好</span></div>
+        <div id="saBars"></div>
+      </div>
+    </div>
+    <figcaption>竖线是 95% Wilson 区间。<b>读法：</b>无论用哪种口径，PWM 与两个基线在状态类指标上的差距都远大于区间宽度——
+    <b>方向是稳的</b>。但同一张图也说明：论文把 94.00 / 98.00 写到小数点后两位，实际分辨率是 ±5~7 个百分点量级（保守口径下）。
+    另外注意 <b>Imaging 67.62 vs 67.46 的差距完全落在噪声里</b>，论文却写成「best across all four metrics」。</figcaption>
+  </figure>
+
+  <h3><span class="ix">8.2</span>两个指标的宽松程度，得亲眼看一遍</h3>
+  <div class="prose">
+    <p>先把定义抄准：</p>
+  </div>
+  <div class="eq" style="font-size:17px">
+    CountAcc = <span class="r" style="font-size:15px">(1/N) Σ</span> <b class="r">1</b>[ <i>n̂</i><sub>i</sub> = <i>n</i><sup>eng</sup><sub>i</sub> ]
+    <span class="tagno">Eq.17</span>
+    <small>随机采 8 帧，让 VLM <b>数一数画面里有几个「看得见的、活着的」角色</b>，跟引擎账本里的数字比。相等才算对。</small>
+  </div>
+  <div class="eq" style="font-size:17px">
+    StateAcc = <span class="frac r" style="font-size:14px">被画面兑现的死亡事件数 / 总死亡事件数</span>
+    <span class="tagno">Eq.18</span>
+    <small>每次死亡事件后<b>均匀采 3 帧</b>，问 VLM：<b>这三帧里至少有一帧出现了一个死掉的角色吗</b>？
+    论文自己也承认：<b>不要求判官指出是谁死了、也不要求指出死在哪</b>。</small>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig.8</span><span class="ti">指标显微镜：点一种「渲染失误」，看两个指标各自报什么</span></div>
+    <div class="tabs" id="mxTabs" role="tablist" aria-label="渲染失误类型">
+      <button class="tab" role="tab" aria-selected="true" data-mx="0">① 完美兑现</button>
+      <button class="tab" role="tab" aria-selected="false" data-mx="1">② 死者继续走动</button>
+      <button class="tab" role="tab" aria-selected="false" data-mx="2">③ 活人凭空消失</button>
+      <button class="tab" role="tab" aria-selected="false" data-mx="3">④ 全员倒地</button>
+      <button class="tab" role="tab" aria-selected="false" data-mx="4">⑤ 死错人（身份互换）</button>
+      <button class="tab" role="tab" aria-selected="false" data-mx="5">⑥ 倒地晚了半秒</button>
+    </div>
+    <div class="explore">
+      <div class="figbody" style="padding:14px">
+        <div class="sim"><canvas id="mxCv" width="700" height="240"></canvas></div>
+      </div>
+      <div class="pane" id="mxPane"></div>
+    </div>
+    <div class="readout">
+      <div><div class="k">Count Accuracy 判定</div><div class="v" id="mxCA">–</div></div>
+      <div><div class="k">State Accuracy 判定</div><div class="v" id="mxSA">–</div></div>
+      <div><div class="k">世界状态实际是否正确</div><div class="v" id="mxTruth">–</div></div>
+    </div>
+    <figcaption>结论：这两个指标<b>互相补了一部分漏</b>（比如「全员倒地」能骗过 State，但会被 Count 抓住），
+    但 <b>⑤ 死错人</b> 两个都骗得过——而它恰恰是「实体级可寻址」这个卖点最该被检验的失败模式。
+    换句话说，<b>论文用两个「全局、宽松」的指标，去证明一套「实例级、精确」的控制</b>。作者自己也这么承认了
+    （「both metrics evaluate only coarse, globally observable properties」），并把它当成保守性论据；
+    我的看法是：<b>保守的指标能证明差距存在，但证明不了差距有多大</b>。</figcaption>
+  </figure>
+
+  <h3><span class="ix">8.3</span>基线是怎么被驱动的——这一条最影响可比性</h3>
+  <div class="prose">
+    <p>两个基线都没有实例级状态接口，于是作者用<b>换 prompt</b> 来传达状态变化：</p>
+  </div>
+  <pre>{environment description}. {action description}.        <span class="cm">← Eq.16</span>
+<span class="cm">例：某个 NPC 被击杀时，把 action description 换成「让对应角色倒下」这类描述</span></pre>
+  <div class="call warn">
+    <div class="hd">⚠ 一个没被讨论的混淆：相机轨迹对齐了吗</div>
+    <p>Count Accuracy 的真值是「<b>引擎维护的、当前视野内的存活角色数</b>」——它<b>依赖相机</b>。
+    可是论文对基线的说法只有一句「retaining their native conditioning pathways」，
+    <b>没有说是否把同一条目标相机轨迹喂给了基线，也没有报告任何一方的相机轨迹跟随误差</b>。</p>
+    <p>如果基线的相机跑偏了，实体进出画面的时机就跟引擎账本对不上，于是它们会因为<b>相机误差</b>被记成<b>状态错误</b>。
+    而 PWM 这边，相机轨迹和投影框是<b>同一条轨迹下构造的、天然自洽的</b>。
+    这不是说 PWM 没有优势，而是说：<b>40.75 → 94.00 这个差值里，有多少来自「状态解耦」、有多少来自「相机对齐」，这篇论文没法回答。</b></p>
+    <p style="margin-top:8px">还有一个更小但同样实在的混淆：<b>PWM 的主干是 LingBot-World-<b style="color:var(--bad-ink)">v1</b>，基线之一是 LingBot-World-<b style="color:var(--bad-ink)">V2</b></b>。
+    骨干不同，做不了 apples-to-apples。真正能隔离贡献的实验只有一个——<b>在自己的主干上做消融</b>——而这篇论文<b>一个消融都没有</b>。</p>
+  </div>
+
+  <h3><span class="ix">8.4</span>定性结果里真正有信息量的两张</h3>
+  <div class="grid2">
+    <div class="card cC">
+      <div class="mono">Fig.5(b) · 大角度转身</div>
+      <h5>转过去，三个人在那儿</h5>
+      <p>相机大角度旋转（项目页写 −130°），揭示出三个<b>首帧视野之外</b>的角色。
+      这是「离屏持久化」最直观的证据，也是纯生成式模型最难做对的一类镜头。首帧取自训练未见的 GTA V 素材。</p>
+      <p class="note">但要清醒：<b>被持久化的是位置和身份，不是外观</b>。id slot 训练时故意与外观解绑，
+      从未被观测过的实体只能靠语义嵌入 + 生成先验「编」一个长相出来。见存疑第 12 条。</p>
+    </div>
+    <div class="card cR">
+      <div class="mono">Fig.5(e) · 897 帧</div>
+      <h5>大量 NPC 陆续进场，不崩</h5>
+      <p>单条自回归序列 897 帧，越到后面同屏实体越多，视觉与时间稳定性仍然「reasonable」。
+      项目页称约 30 秒，即 ≈30 fps 播放。</p>
+      <p class="note"><b>没有</b>逐段的漂移曲线，<b>没有</b>与更短 rollout 的定量对比，<b>没有</b>生成耗时。
+      「不崩」目前只有几张抽帧作为证据。</p>
+    </div>
+  </div>
+  <p class="note">另外三张：(a) 米诺陶场景（新外观/新环境泛化）、(c) 赛车（换游戏品类）、(d) 人与车混合渲染。
+  (a)(c)(d) 的首帧由 <b>GPT Image 2</b> 生成——意味着数据引擎那条管线（单目深度 + 3D 检测）也被用在了合成图上，
+  这本身是个值得关心的鲁棒性问题，论文没提。</p>
+</section>
+
+<!-- ============================================================ 09 DOUBTS -->
+<section class="sec" id="s-doubt">
+  <div class="eyebrow"><span class="n">09</span><span class="t">Open Questions</span><span class="line"></span></div>
+  <h2>我的存疑清单</h2>
+  <p class="lead">按「如果这条成立，会动摇论文多少结论」排的严重度。<b>需要说明的是：</b>
+  我认为这篇论文的<b>方向和主要结论是成立的</b>——把状态外置确实能拿到纯生成式方法拿不到的一致性。
+  下面这些质疑针对的是<b>证据强度和边界描述</b>，不是针对结论本身。另外，这是一份技术报告风格的 v1，
+  很多缺失可能只是还没写进来。</p>
+
+  <div class="dfilter">
+    <span>按严重度筛选：</span>
+    <span class="seg" id="dSev" role="group" aria-label="严重度筛选">
+      <button type="button" data-sev="all" aria-pressed="true">全部</button>
+      <button type="button" data-sev="hi" aria-pressed="false">高</button>
+      <button type="button" data-sev="mid" aria-pressed="false">中</button>
+      <button type="button" data-sev="lo" aria-pressed="false">低</button>
+    </span>
+    <button class="btn" id="dAll">全部展开</button>
+    <button class="btn" id="dNone">全部收起</button>
+  </div>
+
+  <details class="dt" data-sev="hi">
+    <summary><span class="dn">D01</span><span class="sev hi">高</span><span>「state-augmented」的 state 到底走哪个通道进渲染器，全文没有交代</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <span class="lb">论文说了什么</span>
+      <blockquote>M<sup>ctrl</sup><sub>t+1</sub> = Concat( M<sup>id</sup><sub>t+1</sub> , M<sup>sem</sup><sub>t+1</sub> , M<sup>dir</sup><sub>t+1</sub> ) —— Eq.10 / Eq.11</blockquote>
+      <span class="lb">问题</span>
+      <p>三路控制分别编码<b>实例身份</b>、<b>类别语义</b>、<b>相机系运动方向</b>。<b>没有一路是 status / hp。</b>
+      而全文的头号实验指标 State Accuracy 恰恰只衡量「死亡状态有没有被画出来」。
+      §4.2 还明确许诺过「hp 这类非视觉变量……可以影响后续的状态更新与<b>渲染结果</b>」。
+      渲染结果怎么被影响的，方法部分没有写。</p>
+      <span class="lb">两条可能的解释与各自的代价</span>
+      <p><b>A（语义标签改写）</b>：死亡时把 y<sub>i</sub> 从 <code>soldier</code> 换成 <code>dead soldier</code>。
+      代价：训练标签的类别词表由 Qwen3-VL 从视频里发现「离散可数物体类别」再喂给 SAM3，
+      这种词表通常给不出状态化类别，训练期缺乏对应监督。而且如果成立，
+      意味着<b>「可编程状态」在渲染这一端退化成了「实体级的文本提示」</b>——那和作者批评的 prompt 控制只差一个粒度。</p>
+      <p><b>B（纯几何）</b>：倒地 = OBB 躺平 + 方向图给 <code>down</code>。这条更可能是真的，也更自洽。
+      代价：<b>所有不改变几何的状态一律无法渲染</b>——中毒、上膛、护盾、门是否上锁、任务标记。
+      那么这套接口的表达力，其实就等于「盒子的姿态 + 一个类别词 + 七个方向」。</p>
+      <span class="lb">怎么验</span>
+      <p>看代码里 state compiler 的 <code>semantic_label</code> 是否随 status 改写；
+      或做一个只改 status、不改 OBB 姿态的对照序列，看渲染是否有任何变化。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="hi">
+    <summary><span class="dn">D02</span><span class="sev hi">高</span><span>Count Accuracy 的真值依赖相机，而基线的相机是否对齐没有交代</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <span class="lb">机制</span>
+      <p>真值是「引擎维护的<b>视野内</b>存活角色数」。视野由目标相机决定。
+      PWM 的相机轨迹与投影框由同一条轨迹构造，天然自洽；两个基线只被告知
+      <code>{environment}. {action}.</code> 这样一句 prompt，论文只说「retaining their native conditioning pathways」。</p>
+      <span class="lb">后果</span>
+      <p>若基线相机跑偏，实体进出画面的时机与账本对不上，它们会因<b>相机跟随误差</b>被判成<b>状态错误</b>。
+      40.75 → 94.00 这 53 个百分点里，有多少来自「状态外置」，有多少来自「相机对齐」，这篇论文回答不了。</p>
+      <span class="lb">最小修补</span>
+      <p>报告三个方法各自的相机轨迹跟随误差（相对目标位姿的 ATE/RPE），
+      或只在<b>静态相机</b>子集上再算一遍两个指标——Fig.4(a) 已经有静态相机设定，做这件事几乎是免费的。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="hi">
+    <summary><span class="dn">D03</span><span class="sev hi">高</span><span>零消融：三张控制图、id slot bank、两种记忆，没有一项被单独验证</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>论文引入的可训练组件与设计选择至少有：identity 图（含 K 个可学 slot 与随机分配策略）、semantic 图（文本编码器嵌入）、
+      direction 图（世界速度→相机系→7 档量化）、多尺度时间历史（三档分辨率 + I₀ 锚点 + 训练期历史退化）、几何对齐空间记忆。
+      <b>实验部分只有一张三行的对比表，没有任何一行是自己的变体。</b></p>
+      <p>最想看的三个消融，成本都很低：
+      <b>①</b> 去掉 M<sup>dir</sup>（直接检验「相机–物体运动歧义」这个卖点）；
+      <b>②</b> 去掉 M<sup>id</sup>（检验出画再入画的身份保持）；
+      <b>③</b> 去掉空间记忆（检验 Fig.5(b) 那种大角度回望）。
+      没有它们，读者无法判断 94/98 里哪一部分是这篇论文的贡献、哪一部分本来就来自 LingBot 主干和 AlayaWorld 的记忆。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="hi">
+    <summary><span class="dn">D04</span><span class="sev hi">高</span><span>最相关的三个对手一个都没比：StatePlay、MASS、Coarse-to-Real</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>§3.2 专门讨论了 <b>StatePlay</b>（联合预测观测与游戏状态变量）和 <b>MASS</b>（多人世界模型的权威类型化状态 + 学习式 Logic Engine），
+      并准确指出了它们的共同弱点：<b>状态本身由模型预测，因此转移误差会累积</b>。§3.3 讨论了 <b>Coarse-to-Real</b>（粗 3D 代理 → 生成式渲染），
+      它的渲染接口与本文几乎处在同一层。</p>
+      <p><b>但实验里一个都没有。</b>比的是两个「压根没有显式状态接口」的通用交互式世界模型。
+      这就像用「有没有账本」去证明「我的账本更好」——命题为真，但没有回答真正的科学问题：
+      <b>在都有显式状态的前提下，「规则驱动 + 确定性编译」相对「学习式状态转移」的收益有多大？</b></p>
+      <p class="note">公允地说：MASS / StatePlay 未必有可用的开源实现，Coarse-to-Real 的任务设定也不同。但这一点应该写进 limitation，而不是不提。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid">
+    <summary><span class="dn">D05</span><span class="sev mid">中</span><span>指标宽松到能被「死错人」完全绕过，而且缺一条 oracle 上限</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <span class="lb">宽松度</span>
+      <p>State Accuracy 只问「事件后 3 帧里有没有<b>某个</b>角色显得死了」，不问是谁、不问在哪。
+      §08 的显微镜里那条<b>「死错人」</b>——该死的还站着、旁边的倒下了——<b>两个指标同时判过</b>。
+      而实例级可寻址恰恰是这篇论文的核心卖点。</p>
+      <span class="lb">缺失的 oracle</span>
+      <p>Count Accuracy 94% 里，有多少是渲染器画漏/画多，有多少是 <b>Qwen3.6-27B 判官自己数错</b>？
+      VLM 在多目标计数上是有名的不稳。<b>论文没有给判官的上限对照</b>——
+      只要把同一批判官问题喂给<b>真实游戏视频</b>或<b>按 GT 状态渲染的视频</b>，就能读出这个天花板。没有它，94% 无法解释。</p>
+      <span class="lb">还有一个定义盲区</span>
+      <p>「visible alive characters」里的 <b>visible</b> 到底怎么算：只做视锥剔除，还是也做遮挡剔除？
+      半个身子出画算不算？被掩体挡到只剩一个头算不算？<b>论文没定义</b>，而这直接决定真值，也决定判官该怎么数。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid">
+    <summary><span class="dn">D06</span><span class="sev mid">中</span><span>样本量小、无置信区间，小数点后两位是虚的</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>50 clips；Count Acc 的 400 帧来自这 50 个 clip（<b>同 clip 内 8 帧高度相关</b>，有效样本量远小于 400）；
+      State Acc 的分母就是 50 次死亡事件——98.00% 即 <b>49/50</b>，8.00% 即 4/50。</p>
+      <p>用 Wilson 区间（§08 的 Fig.7 可以直接切换看）：保守口径下 94.00% 的 95% 区间约 <b>[83.8, 97.9]</b>，
+      98.00% 约 <b>[89.5, 99.6]</b>。<b>结论方向完全站得住</b>（与 40.75 / 32.00 / 8.00 的区间毫无重叠），
+      但「94.00」「98.00」这种写法暗示的精度是不存在的。</p>
+      <p>另外 <b>Imaging Quality 67.62 vs 67.46</b> 这 0.16 分被写进「best across all four metrics」，实质上是平手。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid">
+    <summary><span class="dn">D07</span><span class="sev mid">中</span><span>反复说「playable / 可玩」，却没有任何延迟或吞吐数字</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>摘要、引言、结论都在讲「users can create playable games」。但全文<b>没有一个 FPS、没有一个 ms、没有 GPU 型号</b>。
+      而这套推理路径并不轻：窗内<b>双向</b>去噪 + ControlNet 支路 + 多尺度时间历史 + 需要检索和重投影的空间记忆。</p>
+      <p>更值得玩味的是：同组的 <b>AlayaRenderer-Flash</b>（参考文献 [13]）专门解决实时生成式渲染的效率，
+      <b>却没有被用作这里的主干</b>；主干选的是 LingBot-World-v1。
+      在缺少延迟数据的情况下，「playable」目前只能理解为<b>「交互语义上可玩」</b>（有规则、有胜负、动作会被校验），
+      而不是<b>「时延上可玩」</b>。这两件事在世界模型这个领域经常被混着说，读的时候要分开。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid">
+    <summary><span class="dn">D08</span><span class="sev mid">中</span><span>Agent 那一环完全没有评估，而且它还兼任出题人</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>标题里的 <b>Programmable</b> 主要由「VLM coding agent 把自然语言翻成世界程序」这一环支撑。
+      但论文<b>没有报告</b>：程序生成的正确率、规则覆盖率、初始 3D 布局的解析成功率、
+      指令被误解时的失败模式、用户改一句话后规则改写的成功率。<b>一个用户研究也没有。</b></p>
+      <p>更需要注意的是 CombatStateBench 的构造：初始布局由数据引擎从首帧重建，
+      然后「一个 AI agent <b>自主演化</b>出一段简短的战斗场景，产出完整的盒子世界状态序列」，
+      再由一个自动校验器筛掉不满足一致性检查的序列。也就是说——
+      <b>出题的 agent、答题的系统、和被评估的表征，是同一套东西</b>。
+      能通过校验器的序列，天然就是这套表征能干净表达的序列。</p>
+      <p class="note">这不必然导致结论错误（毕竟基线在同样的序列上被评），但它意味着 CombatStateBench <b>不是一个中立的第三方基准</b>，
+      而更接近「本方法的能力边界内的一致性自检」。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid">
+    <summary><span class="dn">D09</span><span class="sev mid">中</span><span>训练标签与基准真值同源，且单目 3D 检测的误差从未被量化</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>训练数据的三张控制图，来自 ViPE（内参/位姿/metric depth）→ SAM3（实例与 track）→ WildDet3D（单目 3D OBB）这条链。
+      <b>整套监督的精度上界就是这条链的精度</b>，而论文没有报告任何一环的误差，也没有做敏感性分析
+      （比如：给 OBB 加多大的抖动会让渲染质量掉多少）。</p>
+      <p>同一条管线还被用来构造 CombatStateBench 的初始布局与「真值」状态。
+      于是 <b>训练表征、推理表征、评测真值三者同源</b>。这会系统性地让本方法显得更好：
+      任何被这条管线系统性漏掉或扭曲的东西，同时从训练集和测试集里消失了。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid">
+    <summary><span class="dn">D10</span><span class="sev mid">中</span><span>「训练–推理错配」是全篇立论，却从头到尾没有被测量过</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>§2 用了两页论证：表征越细，Eq.1（测出来）和 Eq.2（造出来）之间的差距越大，所以要选中等粒度。
+      这是我认为本文<b>最有价值的一段思辨</b>。但它<b>始终停留在思辨</b>。</p>
+      <p>OBB 这一层的错配其实是实打实存在的：训练期的框来自检测器，<b>带抖动、带尺度误差，但服从真实物理</b>；
+      推理期的框来自程序，<b>干净、平滑、可以完全违反物理</b>（比如让一个人 0.2 秒内平移 5 米）。
+      这个分布差有多大、渲染器对它有多敏感，一个实验都没有。</p>
+      <p>最容易做的验证：拿真实视频的检测框 vs 程序生成的等价轨迹，各渲染一遍，比较质量与状态一致性；
+      或者给程序轨迹注入不同幅度的抖动，看哪一档最接近训练分布。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="lo">
+    <summary><span class="dn">D11</span><span class="sev lo">低</span><span>identity slot bank 的 K 没给，实体数超过 K 怎么办也没说</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>Eq.7 定义了 K 个可学 identity 嵌入，但 <b>K 是多少没写</b>。
+      Fig.5(e) 明确展示「大量 NPC 陆续进场」的 897 帧序列——同屏实体数增长时，
+      slot 用尽了怎么办（复用？环形分配？合并？），复用会不会造成身份串味，论文都没有交代。</p>
+      <p>另外训练策略是「每个样本内均匀随机分配互不重复的 slot」，这意味着 slot 承载的是<b>纯粹的区分性</b>。
+      那么当同屏实体数超过训练时见过的最大值，泛化行为是什么？也没说。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="lo">
+    <summary><span class="dn">D12</span><span class="sev lo">低</span><span>「离屏持久化」持久化的是位置和身份，不是外观</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>这不算错误，而是一个容易被 Fig.5(b) 的演示带偏的边界。id slot 在训练时被<b>刻意</b>与类别/外观/视角解绑
+      （「preventing individual identity embeddings from becoming spuriously associated with a particular object category, appearance, or viewpoint」），
+      所以它只保证「这两块像素是同一个东西」。</p>
+      <p>对于<b>首帧从未出现过</b>的实体，渲染器手上只有：一个类别文本嵌入 + 一个无语义的 slot + 一个盒子。
+      长相完全由生成先验编。论文自己也承认语义图「对缺少可靠外观参考的实体尤其有用」——
+      换句话说，<b>它编得合理，但不是「那个人」</b>。如果你需要一个具名 NPC 在转身后长相一致，这套接口目前给不了。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="lo">
+    <summary><span class="dn">D13</span><span class="sev lo">低</span><span>四个 VBench 质量指标对「少动」有系统性偏好</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>Subject Consistency、Background Consistency、Temporal Flickering 本质上都在测<b>跨帧相似度</b>——
+      一个动得更少、更保守的视频天然得分更高。三个方法生成的<b>内容本身不同</b>（尤其基线的状态转移是靠换 prompt 触发的，
+      可能引发更剧烈的画面变化），因此这三项的差距<b>不能直接读成画质更好</b>。</p>
+      <p>要把这条排除掉，需要报告运动幅度（比如平均光流强度）作为协变量，或者用 VBench 的 Dynamic Degree 一起看。论文没有。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="lo">
+    <summary><span class="dn">D14</span><span class="sev lo">低</span><span>渲染失败没有回流路径：画面和账本分叉了，系统不知道</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>数据流是严格单向的：状态 → 控制图 → 画面 → 记忆。<b>画面永远不修改状态</b>。
+      好处很明确（账本不会被幻觉污染，这正是相对 StatePlay 的优势）。
+      但反过来：<b>如果渲染器某一块没把某个实体画出来，引擎完全不知情</b>，下一块照旧按「他还在那」继续编译，
+      而空间记忆里存的是<b>错误的那一帧</b>。</p>
+      <p>Count Accuracy 94% 意味着<b>大约每 16 帧就有 1 帧对不上账</b>——这种分叉是实际发生的。
+      论文既没有测量分叉的持续时间，也没有讨论任何纠正机制（比如用检测器回读生成帧、做闭环校验）。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="lo">
+    <summary><span class="dn">D15</span><span class="sev lo">低</span><span>若干小口径问题</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <ul>
+        <li><b>VBench 版本</b>：正文描述的 Imaging Quality / Subject Consistency / Background Consistency / Temporal Flickering 是 VBench-1.0 的指标名，引用挂的却是 <b>VBench-2.0</b>（参考文献 [24]）。</li>
+        <li><b>方向档位顺序不一致</b>：§4.3 写 <code>forward, backward, left, right, static, up, down</code>，§4.5 写 <code>static, left, right, up, down, forward, backward</code>。集合一致，只是不整齐。</li>
+        <li><b>日期</b>：论文页脚写 September 10, 2026，arXiv 时间戳是 <b>9 Sep 2026</b>。</li>
+        <li><b>机构</b>：只给了 △ = Alaya Lab；Jiacheng Lin、Yu-Lun Liu、Yung-Yu Chuang 三位没有任何机构标注。</li>
+        <li><b>阈值缺失</b>：SAM3 掩码的「可见面积不足」阈值、判 static 的位移阈值，都只说「a small threshold」。</li>
+        <li><b>代码</b>：GitHub 的 Release Roadmap 里 <code>Inference code</code> 与 <code>Pretrained weights</code> 两项均未勾选（2026-09-10 查）；项目页上的 Hugging Face 徽章指向的是 Daily Paper 页面，<b>不是权重</b>。</li>
+      </ul>
+    </div>
+  </details>
+
+  <div class="call ok">
+    <div class="hd">反过来说，我认为这篇站得住的地方</div>
+    <ul style="margin:6px 0 0">
+      <li><b>§2 的论证是真的好。</b>「训练是测出来的、推理是造出来的」这个不对称，是选表征时最容易被忽略、又最要命的一条判据。即使你不同意 OBB 是最优解，这个思考框架也值得抄走。</li>
+      <li><b>M<sup>dir</sup> 的设计是干净的正确。</b>用世界速度而非图像位移定义方向，把相机–物体运动歧义在<b>条件构造阶段</b>就消掉，而不是指望模型学会区分。这是那种「一看就对」的设计。</li>
+      <li><b>把 identity slot 训成「代词」而非「名字」</b>，通过样本内随机、序列内固定的分配防止 slot 与外观绑死——这个训练细节很有品味。</li>
+      <li><b>状态外置带来的能力是真实的</b>：动作可以被<b>拒绝</b>，hp/库存这类非视觉量有地方安放，离屏实体不靠记忆而靠账本存在。这三件事纯生成式方法目前确实做不到。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================================================ 10 MISSING -->
+<section class="sec" id="s-missing">
+  <div class="eyebrow"><span class="n">10</span><span class="t">Repro Checklist</span><span class="line"></span></div>
+  <h2>复现清单：论文没给的数</h2>
+  <p class="lead">这是一份 17 页的技术报告，<b>没有附录、没有超参表、没有 limitation 章节</b>。
+  下面这些是我读完之后仍然无法从论文里得到、但复现必需的量。等代码放出来可以拿这张表逐条对。</p>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th style="width:26%">项目</th><th style="width:20%">论文给了吗</th><th>为什么要紧</th></tr></thead>
+      <tbody>
+        <tr><td><b>窗口帧数 T / 块长 L</b></td><td><span class="pill B">未给</span></td><td>决定单次渲染的时间跨度与跨块拼接频率，直接影响漂移</td></tr>
+        <tr><td><b>生成分辨率 / 帧率</b></td><td><span class="pill B">未给</span></td><td>897 帧的成本、控制图光栅化的精度都跟它绑定</td></tr>
+        <tr><td><b>identity bank 大小 K</b></td><td><span class="pill B">未给</span></td><td>同屏实体上限；超出后的分配策略也没写（D11）</td></tr>
+        <tr><td><b>文本编码器型号</b></td><td><span class="pill B">未给</span></td><td>M<sup>sem</sup> 的语义空间由它决定，也决定「换标签能不能表达状态」（D01）</td></tr>
+        <tr><td><b>ControlNet 结构 / 层数 / 参数量</b></td><td><span class="pill B">未给</span></td><td>唯一可训练的主要模块，连规模量级都没有</td></tr>
+        <tr><td><b>训练步数 / 卡数 / 时长 / 优化器</b></td><td><span class="pill B">未给</span></td><td>整套训练配方缺失</td></tr>
+        <tr><td><b>训练数据规模</b></td><td><span class="pill B">未给</span></td><td>只说了三款游戏名，没有小时数、clip 数、过滤保留率</td></tr>
+        <tr><td><b>时间历史三档的分辨率与 token 预算</b></td><td><span class="pill B">未给</span></td><td>「多尺度」的具体形状完全未定义</td></tr>
+        <tr><td><b>历史退化的强度（噪声/腐蚀/丢弃率）</b></td><td><span class="pill B">未给</span></td><td>这是弥合「训练用真帧、推理用生成帧」的关键旋钮</td></tr>
+        <tr><td><b>空间记忆的检索策略与容量</b></td><td><span class="pill">指向 AlayaWorld</span></td><td>整块外包给另一篇论文，本文不自足</td></tr>
+        <tr><td><b>推理设置：去噪步数 / CFG / 采样器</b></td><td><span class="pill B">未给</span></td><td>无法比较速度与质量</td></tr>
+        <tr><td><b>推理延迟 / 吞吐</b></td><td><span class="pill B">未给</span></td><td>「playable」这个词的成色全靠它（D07）</td></tr>
+        <tr><td><b>3D 检测器在推理端的具体型号</b></td><td><span class="pill">只说 off-the-shelf</span></td><td>§4.5 用的是 WildDet3D，§4.2 只写「现成的 3D 检测器」，是否同一个未明</td></tr>
+        <tr><td><b>掩码面积阈值 / static 位移阈值</b></td><td><span class="pill B">未给</span></td><td>只说「insufficient」「small」，直接影响标注质量与 dir 分布</td></tr>
+        <tr><td><b>CombatStateBench 的自动校验器细则</b></td><td><span class="pill">只有条目名</span></td><td>它决定哪些序列进了基准，是 D08 那条循环性的关键（各项阈值全未给）</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ 11 PLACE -->
+<section class="sec" id="s-place">
+  <div class="eyebrow"><span class="n">11</span><span class="t">Positioning</span><span class="line"></span></div>
+  <h2>与本仓库的关联：它在这条线的哪一格</h2>
+  <p class="lead">把「世界状态由谁维护、由谁推进」当作一根轴，这几年的工作能排得很整齐。
+  PWM 站在最右端——<b>状态既不由模型表示，也不由模型推进</b>。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig.9</span><span class="ti">显式状态这条轴上的四格</span></div>
+    <div class="figbody scrollx">
+      <svg viewBox="0 0 940 230" style="min-width:820px" role="img" aria-label="按状态由谁维护和推进划分的四类工作">
+        <line x1="40" y1="196" x2="900" y2="196" class="s-rule" stroke-width="1"/>
+        <text x="40" y="218" class="xs f-ink3">状态只存在于生成上下文里</text>
+        <text x="900" y="218" text-anchor="end" class="xs f-ink3">状态是外部的、可执行的、可验证的</text>
+        <g>
+          <rect x="30" y="34" width="196" height="146" rx="11" class="f-surf2" stroke="var(--rule2)" stroke-width="1"/>
+          <text x="128" y="56" text-anchor="middle" class="big f-ink2">① 纯观测式</text>
+          <text x="128" y="76" text-anchor="middle" class="xs f-ink3">Genie 3 · YUME · LingBot-World</text>
+          <text x="128" y="92" text-anchor="middle" class="xs f-ink3">WorldPlay · Matrix-Game 3.0</text>
+          <text x="128" y="116" text-anchor="middle" class="xs f-ink2">像素级目标训练</text>
+          <text x="128" y="132" text-anchor="middle" class="xs f-ink2">状态隐含在上下文/记忆里</text>
+          <text x="128" y="156" text-anchor="middle" class="xs f-Bi">遮挡、长程、离屏都靠运气</text>
+          <circle cx="128" cy="196" r="5" class="f-ink3"/>
+        </g>
+        <g>
+          <rect x="242" y="34" width="196" height="146" rx="11" class="f-surf2" stroke="var(--rule2)" stroke-width="1"/>
+          <text x="340" y="56" text-anchor="middle" class="big f-ink2">② 记忆增强</text>
+          <text x="340" y="76" text-anchor="middle" class="xs f-ink3">AlayaWorld · WorldKV · RELIC</text>
+          <text x="340" y="100" text-anchor="middle" class="xs f-ink2">加时间/空间记忆</text>
+          <text x="340" y="116" text-anchor="middle" class="xs f-ink2">但记忆是为「画得像」优化的</text>
+          <text x="340" y="140" text-anchor="middle" class="xs f-Bi">保住的是视觉一致</text>
+          <text x="340" y="156" text-anchor="middle" class="xs f-Bi">不是可执行的世界事实</text>
+          <circle cx="340" cy="196" r="5" class="f-ink3"/>
+        </g>
+        <g>
+          <rect x="454" y="34" width="196" height="146" rx="11" class="fs-S" stroke="var(--st)" stroke-width="1.2"/>
+          <text x="552" y="56" text-anchor="middle" class="big f-Si">③ 显式但学习式</text>
+          <text x="552" y="76" text-anchor="middle" class="xs f-ink3">StatePlay · MASS</text>
+          <text x="552" y="100" text-anchor="middle" class="xs f-ink2">状态被显式表示出来</text>
+          <text x="552" y="116" text-anchor="middle" class="xs f-ink2">但仍由模型<tspan style="font-weight:600">预测/推进</tspan></text>
+          <text x="552" y="140" text-anchor="middle" class="xs f-Bi">转移预测错误会累积</text>
+          <text x="552" y="156" text-anchor="middle" class="xs f-ink3">MASS 的 Logic Engine 也是学出来的</text>
+          <circle cx="552" cy="196" r="5" class="f-S"/>
+        </g>
+        <g>
+          <rect x="666" y="34" width="240" height="146" rx="11" class="fs-C" stroke="var(--cp)" stroke-width="1.4"/>
+          <text x="786" y="56" text-anchor="middle" class="big f-Ci">④ 显式且规则式 ← 本文</text>
+          <text x="786" y="76" text-anchor="middle" class="xs f-ink3">Programmable World Model</text>
+          <text x="786" y="100" text-anchor="middle" class="xs f-ink2">状态由轻量引擎按<tspan style="font-weight:600">显式规则</tspan>推进</text>
+          <text x="786" y="116" text-anchor="middle" class="xs f-ink2">可编程 · 可编辑 · 可验证</text>
+          <text x="786" y="140" text-anchor="middle" class="xs f-Ki">状态转移不会「预测错」</text>
+          <text x="786" y="158" text-anchor="middle" class="xs f-Bi">代价：动力学不再是学出来的</text>
+          <circle cx="786" cy="196" r="6" class="f-C"/>
+        </g>
+      </svg>
+    </div>
+    <figcaption>另一条正交的线是<b>生成式渲染</b>：DiffusionRenderer（G-buffer）→ AlayaRenderer / AlayaRenderer-Flash（动态世界、实时）→ Coarse-to-Real（粗 3D 代理）。
+    PWM 的渲染接口就落在 Coarse-to-Real 附近，<b>但把「代理从哪来」换成了「由一段可编程的引擎生成」</b>——这才是它真正的新意所在。</figcaption>
+  </figure>
+
+  <div class="prose">
+    <p>如果你在维护这个列表，PWM 的几个字段大致是：
+    <b>Backbone</b> bidir. diffusion（LingBot-World-v1 主干 + ControlNet）；
+    <b>Action</b> 相机 + 实体级程序化动作（论文未定义按键映射）；
+    <b>FPS</b> —（未报告）；
+    <b>Memory</b> hybrid：时间历史（多尺度）+ 空间记忆（重建重投影，沿用 AlayaWorld）+ <b>外部符号状态</b>；
+    <b>Open</b> no（代码与权重均未发布）。
+    最后那一项——「外部符号状态」——是现有表格里还没有的一列，而这篇论文说明它值得单开一列。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 12 APPENDIX -->
+<section class="sec" id="s-appendix">
+  <div class="eyebrow"><span class="n">12</span><span class="t">Appendix</span><span class="line"></span></div>
+  <h2>附录速查</h2>
+
+  <h3><span class="ix">A</span>记号表</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th style="width:16%">符号</th><th style="width:26%">含义</th><th>备注</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">s<sub>t</sub> = (E,A,Q;R)</td><td>权威世界状态</td><td>实体+位姿 / 属性 / 关系 / 可执行规则（Eq.4）</td></tr>
+        <tr><td class="mono">F(s, a)</td><td>引擎状态转移</td><td>校验 → 应用 → 结算事件；<b>纯程序</b>（Eq.5）</td></tr>
+        <tr><td class="mono">P(s, C)</td><td>状态编译器</td><td>确定性、只读，投影到目标相机（Eq.6）</td></tr>
+        <tr><td class="mono">C<sub>t+1</sub></td><td>目标相机轨迹</td><td><b>输入</b>，不是模型输出</td></tr>
+        <tr><td class="mono">M<sup>id</sup> / M<sup>sem</sup> / M<sup>dir</sup></td><td>三张控制图</td><td>身份 slot / 类别文本嵌入 / 7 档相机系方向</td></tr>
+        <tr><td class="mono">E<sup>id</sup> = {q<sup>id</sup><sub>j</sub>}<sup>K</sup></td><td>身份嵌入 bank</td><td>K 未给；样本内随机分配、序列内固定（Eq.7）</td></tr>
+        <tr><td class="mono">E<sup>dir</sup> = {q<sup>dir</sup><sub>ℓ</sub>}<sup>7</sup></td><td>方向嵌入 bank</td><td>static/left/right/up/down/forward/backward（Eq.9）</td></tr>
+        <tr><td class="mono">θ / φ / ψ</td><td>参数分组</td><td>θ 冻结主干；φ 空间控制支路；ψ 跨块视觉条件</td></tr>
+        <tr><td class="mono">H<sub>temp</sub> / H<sub>spa</sub></td><td>两种记忆</td><td>多尺度时间历史 + 几何对齐空间记忆（Eq.14）</td></tr>
+        <tr><td class="mono">b<sup>t</sup><sub>i</sub> = (p,d,R,ℓ,k)</td><td>数据引擎产出的 3D OBB</td><td>中心/尺寸/朝向/类别/持久 track id（Eq.15）</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3><span class="ix">B</span>它依赖的外部组件</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th style="width:22%">组件</th><th style="width:20%">出处</th><th>在本文里干什么</th></tr></thead>
+      <tbody>
+        <tr><td><b>LingBot-World-v1</b></td><td class="mono">arXiv 2601.20540</td><td>预训练相机可控视频主干，<b>训练时全程冻结</b></td></tr>
+        <tr><td><b>AlayaWorld</b></td><td class="mono">arXiv 2607.18367</td><td>几何对齐空间记忆机制，整块沿用</td></tr>
+        <tr><td><b>ViPE</b></td><td class="mono">arXiv 2508.10934</td><td>数据引擎：内参、位姿、metric depth</td></tr>
+        <tr><td><b>Qwen3-VL</b></td><td class="mono">arXiv 2511.21631</td><td>数据引擎：全局 caption + 可数类别词表发现</td></tr>
+        <tr><td><b>SAM3</b></td><td class="mono">Segment Anything with Concepts</td><td>数据引擎：视频实例分割与跟踪，产出持久 track id</td></tr>
+        <tr><td><b>WildDet3D</b></td><td class="mono">2026</td><td>数据引擎：单目可提示 3D 检测，产出每帧 3D OBB</td></tr>
+        <tr><td><b>Qwen3.6-27B</b></td><td class="mono">—</td><td>评测判官，只看 RGB</td></tr>
+        <tr><td><b>GPT Image 2</b></td><td class="mono">—</td><td>Fig.5(a)(c)(d) 的首帧由它生成</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3><span class="ix">C</span>名词表</h3>
+  <dl class="gloss">
+    <dt>OBB（Oriented Bounding Box）</dt>
+    <dd>有朝向的三维包围盒。相对轴对齐盒（AABB）多了旋转，用固定的一小组参数（中心、尺寸、朝向）描述一个实体在世界系中占的空间。本文的核心接口。</dd>
+    <dt>state-augmented OBB</dt>
+    <dd>在几何 OBB 之上挂了持久身份、语义类别、动态状态和外观信息。<b>但注意：进入渲染条件的只有身份、语义、方向三路，status 走哪条通道论文没写（D01）。</b></dd>
+    <dt>确定性状态编译器</dt>
+    <dd>把世界状态 + 目标相机变成像素对齐控制图的一段普通程序。不学习、不改状态、给定输入必得同一输出——正是这个「确定性」把训练与推理的接口对齐了。</dd>
+    <dt>生成式渲染（Generative Rendering）</dt>
+    <dd>用生成模型代替传统图形管线，从结构化场景条件合成照片级观测。谱系上从 G-buffer（最显式）一路到粗 3D 代理（最轻），本文落在偏轻的一端。</dd>
+    <dt>分块自回归（Chunk-Autoregressive）</dt>
+    <dd>窗内双向去噪、跨窗因果传播。兼顾块内质量和长程可扩展，代价是块边界需要额外的记忆机制来缝。</dd>
+    <dt>相机–物体运动歧义</dt>
+    <dd>画面上一个物体的位移，可能来自它自己动、相机动、或两者叠加。本文用「世界系速度 → 相机系 → 7 档量化」的方向图，在<b>构造条件时</b>就把这个歧义消掉。</dd>
+  </dl>
+
+  <h3><span class="ix">D</span>如果只记三句话</h3>
+  <div class="grid3">
+    <div class="card cC"><div class="mono">机制</div>状态外置到一个按<b>显式规则</b>推进的轻量引擎，用<b>state-augmented 3D OBB</b> 当唯一接口，经确定性编译器变成三张像素对齐控制图，喂给一个<b>冻结</b>的视频主干。</div>
+    <div class="card cS"><div class="mono">收益</div>动作可被<b>拒绝</b>；hp/阵营这类非视觉量有地方安放；离屏实体靠<b>账本</b>存在而不是靠记忆。这三件事纯生成式方法目前给不了。</div>
+    <div class="card cB"><div class="mono">代价与未知</div>动力学从「学出来」变成「你写的规则」；status 如何进入渲染<b>未交代</b>；<b>零消融</b>、最相关的对手<b>全没比</b>、「playable」<b>无延迟数据</b>。</div>
+  </div>
+</section>
+
+<div class="foot">
+  <p><b>Programmable World Model</b> · Zheng-Hui Huang, Guixu Lin, Jiacheng Lin, Yi-Chuan Huang, Ruihan Yu, Muyao Niu, Siqi Yang, Yu-Lun Liu, Yung-Yu Chuang, Kaipeng Zhang, Zhixiang Wang · Alaya Lab · arXiv:2609.10540v1 [cs.CV]，2026-09-09 提交。</p>
+  <p>本页是我读这篇论文时的笔记与图解，<b>不是作者提供的材料</b>。所有图示中的曲线、示意引擎、示意光栅化都是我按论文文字重新实现的，
+  用于解释语义，<b>不代表作者的实现细节，也不含任何论文未报告的测量值</b>。表 1 的数字照抄论文；置信区间是我用 Wilson 方法算的。
+  存疑清单是我的判断，可能有误——尤其 D01 的两条假设，需要等代码放出才能证伪。任何要引用的内容，请以原文为准。</p>
+  <p>页面链接核对于 2026-09-10。</p>
+</div>
+
+</main>
+</div>
+<script>
+"use strict";
+/* ===================== theme ===================== */
+(function(){
+  var root=document.documentElement, btn=document.getElementById('themeBtn');
+  try{ var s=localStorage.getItem('pwm-theme'); if(s==='light'||s==='dark') root.setAttribute('data-theme',s); }catch(e){}
+  btn.addEventListener('click',function(){
+    var cur=root.getAttribute('data-theme');
+    if(!cur) cur = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light';
+    var next = cur==='dark' ? 'light':'dark';
+    root.setAttribute('data-theme',next);
+    try{ localStorage.setItem('pwm-theme',next); }catch(e){}
+    window.dispatchEvent(new Event('themechange'));
+  });
+})();
+
+/* ===================== progress + scrollspy ===================== */
+(function(){
+  var prog=document.getElementById('prog');
+  var links=[].slice.call(document.querySelectorAll('.rail a'));
+  var secs=links.map(function(a){ return document.getElementById(a.getAttribute('href').slice(1)); });
+  function tick(){
+    var h=document.documentElement, max=h.scrollHeight-h.clientHeight;
+    prog.style.width = (max>0 ? (h.scrollTop/max*100):0) + '%';
+    var y=h.scrollTop+140, cur=0;
+    for(var i=0;i<secs.length;i++){ if(secs[i] && secs[i].offsetTop<=y) cur=i; }
+    links.forEach(function(a,i){ a.classList.toggle('on', i===cur); });
+  }
+  addEventListener('scroll',tick,{passive:true}); addEventListener('resize',tick); tick();
+})();
+
+/* ===================== helpers ===================== */
+function seg(container, cb){
+  var btns=[].slice.call(container.querySelectorAll('button'));
+  btns.forEach(function(b){
+    b.addEventListener('click',function(){
+      btns.forEach(function(x){ x.setAttribute('aria-pressed', String(x===b)); });
+      cb(b);
+    });
+  });
+}
+function tabset(nodes, cb){
+  nodes.forEach(function(b){
+    b.addEventListener('click',function(){
+      nodes.forEach(function(x){ x.setAttribute('aria-selected', String(x===b)); });
+      cb(b);
+    });
+  });
+}
+function cssv(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function fit(cv,w,h){
+  var d=Math.min(2, window.devicePixelRatio||1);
+  if(cv.width!==Math.round(w*d)){ cv.width=Math.round(w*d); cv.height=Math.round(h*d); }
+  cv.style.aspectRatio=w+' / '+h;
+  var c=cv.getContext('2d'); c.setTransform(d,0,0,d,0,0); c.clearRect(0,0,w,h); return c;
+}
+function rr(c,x,y,w,h,r){ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
+/* Wilson score interval */
+function wilson(k,n,z){
+  z=z||1.96; if(n<=0) return [0,0];
+  var p=k/n, zz=z*z, den=1+zz/n;
+  var c=(p+zz/(2*n))/den;
+  var h=(z/den)*Math.sqrt(p*(1-p)/n + zz/(4*n*n));
+  return [Math.max(0,c-h), Math.min(1,c+h)];
+}
+/* convex hull (monotone chain) */
+function hull(pts){
+  if(pts.length<3) return pts.slice();
+  var P=pts.slice().sort(function(a,b){ return a[0]-b[0] || a[1]-b[1]; });
+  function cr(o,a,b){ return (a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]); }
+  var lo=[],i;
+  for(i=0;i<P.length;i++){ while(lo.length>=2 && cr(lo[lo.length-2],lo[lo.length-1],P[i])<=0) lo.pop(); lo.push(P[i]); }
+  var up=[];
+  for(i=P.length-1;i>=0;i--){ while(up.length>=2 && cr(up[up.length-2],up[up.length-1],P[i])<=0) up.pop(); up.push(P[i]); }
+  lo.pop(); up.pop(); return lo.concat(up);
+}
+function poly(c,pts){ if(!pts.length) return; c.beginPath(); c.moveTo(pts[0][0],pts[0][1]); for(var i=1;i<pts.length;i++) c.lineTo(pts[i][0],pts[i][1]); c.closePath(); }
+
+/* ===================== Fig.0 pipeline stage tabs ===================== */
+(function(){
+  var caps={
+    a:'<b>① 世界程序。</b>输入只有两样：一张参考图 I₀ 和一句话。现成的 3D 检测器负责把首帧里可见实体的 OBB 和持久 id 恢复出来（这是 E₀），'+
+      '剩下的<b>属性、关系、规则、事件触发器、胜负目标全部由 coding agent 写</b>，通过 id 挂到检测出来的实体上。'+
+      '注意这一段里<b>没有任何神经网络参与状态更新</b>——agent 只在「写程序」的时候出现一次，之后跑的是引擎。',
+    b:'<b>② 控制编译。</b>编译器 P 是只读的、确定性的：把状态里<b>需要被空间定位</b>的部分，沿目标相机 C 投影、z-buffer 光栅化成三张像素对齐的图。'+
+      'hp、库存这类没有空间实现的量原地留在账本里。这一步是整套设计的接缝——因为它是确定性的，'+
+      '<b>训练期从视频里「测」出来的控制图，和推理期从状态「造」出来的控制图，格式完全一样</b>。'+
+      '也正是在这里我发现了那个没被交代的问题：拼接式里只有 id / sem / dir 三路，<b>status 走哪条通道，论文没写</b>。',
+    c:'<b>③ 生成渲染。</b>主干是预训练的 LingBot-World-v1，<b>全程冻结</b>，包括它原生的相机条件通路；'+
+      '新增的只有一条 Structured Spatial ControlNet 支路，逐层把控制特征加到主干上。'+
+      '两条通路分工明确：相机管<b>视点怎么走</b>，控制图管<b>视点下谁在哪、是谁、往哪动</b>；'+
+      '盒子里面的一切——形状、纹理、关节、光照、次级运动——全部由生成先验补。',
+    d:'<b>全景。</b>请注意最下面那条虚线的方向：生成的画面只回流到<b>记忆</b>，<b>不回流到世界状态</b>。'+
+      '账本永远不会被画面反向修改，这是相对 StatePlay 那类「模型预测状态」方法的核心优势（状态转移不会预测错）。'+
+      '代价在 D14：如果渲染器某一块画漏了一个实体，引擎不知道，下一块照旧按「他还在那」继续编译。'
+  };
+  var cap=document.getElementById('plCap');
+  var ids=['pl-a','pl-b','pl-c'];
+  function apply(k){
+    var focus = {a:'pl-a', b:'pl-b', c:'pl-c'}[k];
+    ids.forEach(function(id){
+      var g=document.getElementById(id); if(!g) return;
+      g.setAttribute('opacity', (!focus || id===focus) ? '1' : '0.24');
+    });
+    var sp=document.getElementById('pl-spine');
+    if(sp) sp.setAttribute('opacity', (!focus || k==='a' || k==='b') ? '1' : '0.45');
+    var fb=document.getElementById('pl-fb');
+    if(fb) fb.setAttribute('opacity', (k==='d'||k==='c') ? '1':'0.3');
+    cap.innerHTML=caps[k];
+  }
+  tabset([].slice.call(document.querySelectorAll('[data-st]')),function(b){ apply(b.getAttribute('data-st')); });
+  apply('a');
+})();
+
+/* ===================== Fig.1 representation spectrum ===================== */
+(function(){
+  var X=[76,188,300,412,512], Y0=248, YH=222;
+  var D={
+    ctrl:[0.12,0.38,0.58,0.76,0.95],
+    anno:[0.05,0.28,0.52,0.74,0.97],
+    build:[0.06,0.22,0.42,0.72,0.98],
+    gap:[0.72,0.55,0.30,0.52,0.85]
+  };
+  var NAMES=['纯文本描述','2D 框 / 掩码','state-augmented 3D OBB','粗糙 3D 代理','完整 3D 场景 / G-buffer'];
+  var PANE=[
+    {you:'类别、属性、高层状态', model:'位置、尺寸、朝向、几何关系——<b>全部</b>',
+     note:'论文原话：文本「本身不对实体在共享世界坐标系里的位置、范围、朝向施加几何约束」。你能说「一辆红色跑车停在楼边」，但说不了「停在哪」。'},
+    {you:'图像空间的位置与可见区域', model:'世界系结构、跨视角一致性',
+     note:'代表工作 VLIPP。问题是它<b>绑在特定视角上</b>：位置、尺度、可见区域都随相机变。没有底层的世界结构，就不能被确定性地重投影到另一个视角。'},
+    {you:'实体级：位置 · 尺寸 · 朝向 · 身份 · 类别 · 7 档运动方向', model:'关节、局部形变、纹理、材质、光照、次级运动',
+     note:'<b>本文的选择。</b>视角无关、可重投影；不需要网格/材质/骨骼/预定义动画。作者的判据是：它刚好够表达「实体持久、世界系一致、状态相关的变化」，其余全部交给生成先验。'},
+    {you:'简化几何：布局、相机、物体轨迹的粗形状', model:'细几何、外观、关节、次级动态',
+     note:'代表工作 Coarse-to-Real。与本文处在同一层的邻居——差别在于本文的代理是<b>由一段可编程引擎生成的</b>，而不是人搭或从数据里拿的。'},
+    {you:'稠密表面属性：法向、深度、材质、反照率、完整动态几何', model:'主要是光照/渲染风格',
+     note:'代表工作 DiffusionRenderer / AlayaRenderer。控制最精确，但推理时你得<b>自己把角色的每一帧骨骼姿态算出来</b>——这就退回成了动画、运动生成或物理仿真问题，正是本文想避开的。'}
+  ];
+  var elX=document.getElementById('rpX'), lbl=document.getElementById('rpXV'), pane=document.getElementById('rpPane');
+  function path(vals){
+    var d='';
+    for(var i=0;i<5;i++){
+      var x=X[i], y=Y0-vals[i]*YH;
+      if(i===0) d='M'+x+' '+y.toFixed(1);
+      else{
+        var px=X[i-1], py=Y0-vals[i-1]*YH, mx=(px+x)/2;
+        d+=' C'+mx.toFixed(1)+' '+py.toFixed(1)+' '+mx.toFixed(1)+' '+y.toFixed(1)+' '+x+' '+y.toFixed(1);
+      }
+    }
+    return d;
+  }
+  document.getElementById('rpC1').setAttribute('d',path(D.ctrl));
+  document.getElementById('rpC2').setAttribute('d',path(D.anno));
+  document.getElementById('rpC3').setAttribute('d',path(D.build));
+  document.getElementById('rpC4').setAttribute('d',path(D.gap));
+  var tk='';
+  X.forEach(function(x){ tk+='<line x1="'+x+'" y1="244" x2="'+x+'" y2="250"/>'; });
+  document.getElementById('rpTicks').innerHTML=tk;
+
+  function upd(){
+    var i=+elX.value;
+    lbl.textContent=['文本','2D 框','3D OBB','粗 3D','完整 3D'][i];
+    document.getElementById('rpMk').setAttribute('x1',X[i]); document.getElementById('rpMk').setAttribute('x2',X[i]);
+    var band=document.getElementById('rpBand');
+    band.setAttribute('x',X[i]-26); band.setAttribute('width',52);
+    var dots='';
+    var cols=[cssv('--cp'),cssv('--bad'),cssv('--st'),cssv('--pg')];
+    [D.ctrl,D.anno,D.build,D.gap].forEach(function(v,j){
+      dots+='<circle cx="'+X[i]+'" cy="'+(Y0-v[i]*YH).toFixed(1)+'" r="4.5" fill="'+cols[j]+'"/>';
+    });
+    document.getElementById('rpDots').innerHTML=dots;
+    [].slice.call(document.querySelectorAll('#rpJump button')).forEach(function(b){
+      b.setAttribute('aria-pressed', String(+b.getAttribute('data-j')===i));
+    });
+    var p=PANE[i];
+    pane.innerHTML='<h5>'+NAMES[i]+(i===2?' <span class="pill C">本文</span>':'')+'</h5>'+
+      '<div class="row"><span class="k">你必须显式指定</span>'+p.you+'</div>'+
+      '<div class="row"><span class="k">交给生成先验补</span>'+p.model+'</div>'+
+      '<div class="row" style="margin-top:12px;font-size:13px;color:var(--ink3);line-height:1.7">'+p.note+'</div>';
+  }
+  elX.addEventListener('input',upd);
+  seg(document.getElementById('rpJump'),function(b){ elX.value=b.getAttribute('data-j'); upd(); });
+  addEventListener('themechange',upd);
+  upd();
+})();
+</script>
+<script>
+"use strict";
+/* ===================== Fig.2 world-program engine (playable) ===================== */
+(function(){
+  var cv=document.getElementById('wgCv'); if(!cv) return;
+  var W=560,H=514;
+  var CAM={x:0,z:-1.6,yaw:0,fovDeg:60};
+  var DAMAGE=60;
+  var BASE=[
+    {id:'entity_01',sem:'soldier',slot:1,fac:'player',x:0.3,z:0.8,yaw:0,   hp:100,w:0.7,d:0.5},
+    {id:'entity_02',sem:'soldier',slot:2,fac:'enemy', x:-2.6,z:6.4,yaw:200,hp:20, w:0.7,d:0.5},
+    {id:'entity_03',sem:'soldier',slot:3,fac:'enemy', x:3.2,z:5.0,yaw:165, hp:80, w:0.7,d:0.5},
+    {id:'entity_04',sem:'soldier',slot:4,fac:'enemy', x:-3.4,z:-2.6,yaw:30,hp:100,w:0.7,d:0.5},
+    {id:'cover_01', sem:'crate',  slot:5,fac:'prop',  x:-2.0,z:4.6,yaw:12, hp:null,w:1.6,d:0.9},
+    {id:'cover_02', sem:'crate',  slot:6,fac:'prop',  x:2.2,z:2.8,yaw:-8,  hp:null,w:1.6,d:0.9}
+  ];
+  var ENT, log=[];
+  function reset(){
+    ENT=BASE.map(function(e){ var o={}; for(var k in e) o[k]=e[k]; o.status=(o.hp===null?'prop':'active'); return o; });
+    log=[{t:'sys',s:'引擎实例化 s₀：6 个持久实体，4 个角色，2 个掩体。规则集 R 由 agent 写入。'}];
+    CAM.yaw=0; document.getElementById('wgYaw').value=0;
+    draw();
+  }
+  function slotCol(s){ return cssv('--id'+s); }
+  /* world -> canvas (top-down) */
+  var VX0=-6.5, VX1=6.5, VZ0=-4.2, VZ1=7.7;
+  function px(x){ return (x-VX0)/(VX1-VX0)*W; }
+  function pz(z){ return H - (z-VZ0)/(VZ1-VZ0)*H; }
+  function sx(){ return W/(VX1-VX0); }
+  function sz(){ return H/(VZ1-VZ0); }
+
+  function inFov(e){
+    var dx=e.x-CAM.x, dz=e.z-CAM.z, a=CAM.yaw*Math.PI/180;
+    var zc = dx*Math.sin(a)+dz*Math.cos(a);
+    var xc = dx*Math.cos(a)-dz*Math.sin(a);
+    if(zc<=0.35) return false;
+    return Math.abs(Math.atan2(xc,zc)) <= (CAM.fovDeg/2)*Math.PI/180;
+  }
+  function counts(){
+    var alive=0,vis=0,off=0,enemies=0,enemiesDown=0;
+    ENT.forEach(function(e){
+      if(e.hp===null) return;
+      if(e.fac==='enemy'){ enemies++; if(e.status==='down') enemiesDown++; }
+      if(e.status==='active'){ alive++; if(inFov(e)) vis++; else off++; }
+    });
+    return {alive:alive,vis:vis,off:off,win:(enemies>0&&enemies===enemiesDown)};
+  }
+  function fire(target){
+    var e=ENT.filter(function(x){return x.id===target;})[0];
+    var me=ENT[0];
+    if(!e) return;
+    if(e.fac===me.fac){ log.push({t:'no',s:'valid(a) 失败：'+target+' 与 player 非敌对关系 → <b>动作被拒绝</b>，状态不变。'}); return upd(); }
+    if(e.status==='down'){ log.push({t:'no',s:'valid(a) 失败：'+target+' 已 status=down → <b>动作被拒绝</b>。'}); return upd(); }
+    var visible=inFov(e);
+    log.push({t:'ev',s:'action = shoot('+target+')　校验通过（Q[player,'+target+'] = hostile）'+(visible?'':'　<b>⚠ 目标当前不在视野内</b>')});
+    var before=e.hp;
+    e.hp=Math.max(0,e.hp-DAMAGE);
+    log.push({t:'rl',s:'on_hit → '+target+'.hp: '+before+' → '+e.hp});
+    if(e.hp===0 && e.status!=='down'){
+      e.status='down'; e.yaw+=90;
+      log.push({t:'rl',s:'on_hp_zero → '+target+'.status: active → <b>down</b>　（实体保留在世界里，不删除）'});
+      if(!visible) log.push({t:'sys',s:'该实体不在视野内：账本已更新，<b>但这一步画面无从体现</b>——状态与观测在这里是解耦的。'});
+    }
+    var c=counts();
+    if(c.win) log.push({t:'ok',s:'win 条件满足：all_enemies_defeated ✓'});
+    upd();
+  }
+  function upd(){ draw(); paintTable(); paintLog(); paintRead(); }
+
+  function drawBox(c,e,alpha){
+    var a=e.yaw*Math.PI/180;
+    var hw=e.w/2*sx(), hd=e.d/2*sz();
+    c.save();
+    c.translate(px(e.x),pz(e.z));
+    c.rotate(-a);
+    var col = e.hp===null ? cssv('--sem-crate') : slotCol(e.slot);
+    c.globalAlpha=alpha;
+    if(e.status==='down'){
+      c.fillStyle=col; c.globalAlpha=alpha*0.28;
+      rr(c,-hd*2.4,-hw*0.9,hd*4.8,hw*1.8,3); c.fill();
+      c.globalAlpha=alpha; c.strokeStyle=col; c.setLineDash([3,3]); c.lineWidth=1.4;
+      rr(c,-hd*2.4,-hw*0.9,hd*4.8,hw*1.8,3); c.stroke(); c.setLineDash([]);
+    } else {
+      c.fillStyle=col; c.globalAlpha=alpha*(e.hp===null?0.30:0.42);
+      rr(c,-hw,-hd,hw*2,hd*2,3); c.fill();
+      c.globalAlpha=alpha; c.strokeStyle=col; c.lineWidth=1.6;
+      rr(c,-hw,-hd,hw*2,hd*2,3); c.stroke();
+      if(e.hp!==null){ c.beginPath(); c.moveTo(0,0); c.lineTo(0,-hd*2.1); c.stroke(); }
+    }
+    c.restore();
+    c.globalAlpha=1;
+  }
+
+  function draw(){
+    var c=fit(cv,W,H);
+    /* grid */
+    c.strokeStyle=cssv('--grid'); c.lineWidth=1;
+    for(var gx=-6;gx<=6;gx+=2){ c.beginPath(); c.moveTo(px(gx),0); c.lineTo(px(gx),H); c.stroke(); }
+    for(var gz=-4;gz<=6;gz+=2){ c.beginPath(); c.moveTo(0,pz(gz)); c.lineTo(W,pz(gz)); c.stroke(); }
+    /* fov wedge */
+    var a=CAM.yaw*Math.PI/180, half=(CAM.fovDeg/2)*Math.PI/180, R=17;
+    var cxp=px(CAM.x), czp=pz(CAM.z);
+    function ray(ang){ return [px(CAM.x+Math.sin(a+ang)*R), pz(CAM.z+Math.cos(a+ang)*R)]; }
+    var p1=ray(-half), p2=ray(half);
+    var g=c.createLinearGradient(cxp,czp,(p1[0]+p2[0])/2,(p1[1]+p2[1])/2);
+    g.addColorStop(0,cssv('--cam-soft')); g.addColorStop(1,'rgba(0,0,0,0)');
+    c.beginPath(); c.moveTo(cxp,czp); c.lineTo(p1[0],p1[1]); c.lineTo(p2[0],p2[1]); c.closePath();
+    c.fillStyle=g; c.fill();
+    c.strokeStyle=cssv('--cam'); c.lineWidth=1.3; c.setLineDash([5,4]);
+    c.beginPath(); c.moveTo(p1[0],p1[1]); c.lineTo(cxp,czp); c.lineTo(p2[0],p2[1]); c.stroke(); c.setLineDash([]);
+    /* camera */
+    c.fillStyle=cssv('--cam'); c.beginPath(); c.arc(cxp,czp,6,0,7); c.fill();
+    c.fillStyle=cssv('--cam-ink'); c.font='600 11px '+cssv('--font-mono');
+    c.fillText('camera C  yaw '+CAM.yaw.toFixed(0)+'°', cxp+12, czp+4);
+    /* entities */
+    ENT.forEach(function(e){
+      var vis = e.hp===null ? inFov(e) : inFov(e);
+      drawBox(c,e, vis?1:0.34);
+      var lx=px(e.x)+14, ly=pz(e.z)-8;
+      c.font='600 11px '+cssv('--font-mono');
+      c.fillStyle = vis? cssv('--ink') : cssv('--ink3');
+      c.fillText(e.id, lx, ly);
+      c.font='10px '+cssv('--font-mono');
+      c.fillStyle=cssv('--ink3');
+      if(e.hp!==null) c.fillText('hp '+e.hp+' · '+e.status+(vis?'':' · 离屏'), lx, ly+13);
+      else c.fillText('cover · collision solid', lx, ly+13);
+      if(vis && e.hp!==null && e.status==='active'){
+        c.strokeStyle=cssv('--ok'); c.lineWidth=1.2; c.setLineDash([2,3]);
+        c.beginPath(); c.arc(px(e.x),pz(e.z),15,0,7); c.stroke(); c.setLineDash([]);
+      }
+    });
+    /* legend */
+    c.font='10px '+cssv('--font-mono'); c.fillStyle=cssv('--ink3');
+    c.fillText('绿色虚线圈 = 当前「可见且存活」= Count Accuracy 的真值', 12, H-12);
+  }
+
+  function paintTable(){
+    var h='<thead><tr><th>id</th><th>阵营</th><th>hp</th><th>status</th><th>视野</th></tr></thead><tbody>';
+    ENT.forEach(function(e){
+      var vis=inFov(e);
+      var cls=(e.status==='down'?'down ':'')+(!vis?'offs':'');
+      h+='<tr class="'+cls+'"><td><span class="swatch" style="background:'+(e.hp===null?cssv('--sem-crate'):slotCol(e.slot))+'"></span>'+e.id.replace('entity_','e').replace('cover_','c')+'</td>';
+      h+='<td>'+(e.fac==='player'?'我方':(e.fac==='enemy'?'敌对':'掩体'))+'</td>';
+      if(e.hp===null) h+='<td>—</td><td>prop</td>';
+      else{
+        var pct=e.hp; var kk=pct===0?'dead':(pct<=40?'low':'');
+        h+='<td><span class="hpbar"><i class="'+kk+'" style="width:'+pct+'%"></i></span> '+e.hp+'</td>';
+        h+='<td>'+e.status+'</td>';
+      }
+      h+='<td>'+(vis?'✓':'离屏')+'</td></tr>';
+    });
+    document.getElementById('wgTbl').innerHTML=h+'</tbody>';
+  }
+  function paintLog(){
+    var el=document.getElementById('wgLog');
+    el.innerHTML=log.slice(-14).map(function(l){
+      var cl=l.t==='ev'?'ev':(l.t==='rl'?'rl':(l.t==='no'?'no':(l.t==='ok'?'ok':'')));
+      return '<div><span class="'+cl+'">›</span> <span class="'+cl+'">'+l.s+'</span></div>';
+    }).join('');
+    el.scrollTop=el.scrollHeight;
+  }
+  function paintRead(){
+    var c=counts();
+    document.getElementById('wgAlive').textContent=c.alive;
+    document.getElementById('wgVis').textContent=c.vis;
+    document.getElementById('wgOff').textContent=c.off;
+    var g=document.getElementById('wgGoal');
+    g.textContent=c.win?'胜利 · all_enemies_defeated':'进行中';
+    g.className='v '+(c.win?'ok':'');
+    document.getElementById('wgLabR').textContent='FOV '+CAM.fovDeg+'° · yaw '+CAM.yaw.toFixed(0)+'°';
+  }
+
+  document.getElementById('wgFire2').addEventListener('click',function(){ fire('entity_02'); });
+  document.getElementById('wgFire3').addEventListener('click',function(){ fire('entity_03'); });
+  document.getElementById('wgFire4').addEventListener('click',function(){ fire('entity_04'); });
+  document.getElementById('wgYaw').addEventListener('input',function(){
+    CAM.yaw=+this.value; document.getElementById('wgYawV').textContent=CAM.yaw+'°'; upd();
+  });
+  document.getElementById('wgPan').addEventListener('click',function(){
+    CAM.yaw=-130; document.getElementById('wgYaw').value=-130; document.getElementById('wgYawV').textContent='-130°';
+    log.push({t:'sys',s:'相机偏航 → −130°。entity_04 从「离屏」进入视野——它的 hp 和 status <b>一直在账本里</b>，渲染器现在才第一次需要把它画出来。'});
+    upd();
+  });
+  document.getElementById('wgReset').addEventListener('click',function(){ reset(); paintTable(); paintLog(); paintRead(); });
+  addEventListener('themechange',upd);
+  reset(); paintTable(); paintLog(); paintRead();
+})();
+
+/* ===================== Fig.3 state compiler ===================== */
+(function(){
+  var cv=document.getElementById('cpCv'); if(!cv) return;
+  var W=880,H=452;
+  var LW=420;                      /* left top-down panel width */
+  var MW=436, MH=120, MX=436, MY=[26,168,300];
+  var F=224, CY=38;                /* focal, principal point y offset inside map */
+  var CAMH=1.6;
+  var mode='cam', wrong=false, t=0, playing=false, raf=null;
+
+  var SCENE=[
+    {id:'A', sem:'person', slot:1, x0:-2.2, z0:5.0, h:1.8, w:0.7, d:0.5, vx:0, vz:0},
+    {id:'B', sem:'person', slot:2, x0:0.6,  z0:3.9, h:1.8, w:0.7, d:0.5, vx:2.0, vz:0},
+    {id:'C', sem:'person', slot:3, x0:3.6,  z0:7.2, h:1.8, w:0.7, d:0.5, vx:0, vz:0},
+    {id:'D', sem:'car',    slot:4, x0:-0.9, z0:8.4, h:1.5, w:4.0, d:1.9, vx:0, vz:3.0},
+    {id:'K', sem:'crate',  slot:5, x0:1.4,  z0:3.1, h:1.0, w:1.4, d:1.0, vx:0, vz:0}
+  ];
+  function state(tt){
+    var camYaw = (mode==='cam'||mode==='both') ? (-26 + 52*tt) : 0;
+    return SCENE.map(function(e){
+      var mov = (mode==='obj'||mode==='both');
+      return {id:e.id, sem:e.sem, slot:e.slot, h:e.h, w:e.w, d:e.d,
+        x: e.x0 + (mov? e.vx*tt : 0), z: e.z0 + (mov? e.vz*tt : 0),
+        vx: mov? e.vx:0, vz: mov? e.vz:0};
+    }).concat([{cam:true, yaw:camYaw}]);
+  }
+  function camOf(s){ return s[s.length-1]; }
+  var CAMX=0, CAMZ=-1.0;
+
+  function toCam(x,z,yaw){
+    var a=yaw*Math.PI/180, dx=x-CAMX, dz=z-CAMZ;
+    return { xc: dx*Math.cos(a)-dz*Math.sin(a), zc: dx*Math.sin(a)+dz*Math.cos(a) };
+  }
+  function proj(x,y,z,yaw){
+    var c=toCam(x,z,yaw); if(c.zc<0.4) return null;
+    return { u: MW/2 + F*c.xc/c.zc, v: CY - F*(y-CAMH)/c.zc, z: c.zc };
+  }
+  function cornersOf(e,yaw){
+    var pts=[], ok=true, zsum=0, n=0;
+    for(var i=0;i<8;i++){
+      var sxx=(i&1)?1:-1, syy=(i&2)?1:0, szz=(i&4)?1:-1;
+      var p=proj(e.x+sxx*e.w/2, syy*e.h, e.z+szz*e.d/2, yaw);
+      if(!p){ ok=false; break; }
+      pts.push([p.u,p.v]); zsum+=p.z; n++;
+    }
+    if(!ok||!pts.length) return null;
+    return {hull:hull(pts), z:zsum/n};
+  }
+  var DIRS=['static','forward','backward','left','right','up','down'];
+  var DIRCOL={static:'--d-static',forward:'--d-fwd',backward:'--d-back',left:'--d-left',right:'--d-right',up:'--d-up',down:'--d-down'};
+  function dirWorld(e,yaw){
+    var sp=Math.hypot(e.vx,e.vz);
+    if(sp<0.25) return 'static';
+    var a=yaw*Math.PI/180;
+    var vxc=e.vx*Math.cos(a)-e.vz*Math.sin(a);
+    var vzc=e.vx*Math.sin(a)+e.vz*Math.cos(a);
+    return Math.abs(vzc)>=Math.abs(vxc) ? (vzc>0?'forward':'backward') : (vxc>0?'right':'left');
+  }
+  function dirImage(e,yaw,prevYaw,prevE){
+    var p1=proj(prevE.x,prevE.h/2,prevE.z,prevYaw), p2=proj(e.x,e.h/2,e.z,yaw);
+    if(!p1||!p2) return 'static';
+    var du=p2.u-p1.u, dv=p2.v-p1.v;
+    if(Math.hypot(du,dv)<1.4) return 'static';
+    return Math.abs(du)>=Math.abs(dv) ? (du>0?'right':'left') : (dv>0?'down':'up');
+  }
+
+  function draw(){
+    var c=fit(cv,W,H);
+    var s=state(t), cam=camOf(s), ents=s.slice(0,-1);
+    var dt=0.012, sPrev=state(Math.max(0,t-dt)), camPrev=camOf(sPrev);
+
+    /* ---------- left: top-down ---------- */
+    var VX0=-6, VX1=6, VZ0=-2.6, VZ1=10.3;
+    function px(x){ return (x-VX0)/(VX1-VX0)*LW; }
+    function pz(z){ return H - (z-VZ0)/(VZ1-VZ0)*H; }
+    c.save(); c.beginPath(); c.rect(0,0,LW,H); c.clip();
+    c.strokeStyle=cssv('--grid'); c.lineWidth=1;
+    for(var gx=-6;gx<=6;gx+=2){ c.beginPath(); c.moveTo(px(gx),0); c.lineTo(px(gx),H); c.stroke(); }
+    for(var gz=-2;gz<=10;gz+=2){ c.beginPath(); c.moveTo(0,pz(gz)); c.lineTo(LW,pz(gz)); c.stroke(); }
+    /* frustum */
+    var half=Math.atan((MW/2)/F), a=cam.yaw*Math.PI/180, R=15;
+    var cxp=px(CAMX), czp=pz(CAMZ);
+    var q1=[px(CAMX+Math.sin(a-half)*R), pz(CAMZ+Math.cos(a-half)*R)];
+    var q2=[px(CAMX+Math.sin(a+half)*R), pz(CAMZ+Math.cos(a+half)*R)];
+    c.beginPath(); c.moveTo(cxp,czp); c.lineTo(q1[0],q1[1]); c.lineTo(q2[0],q2[1]); c.closePath();
+    c.fillStyle=cssv('--cam-soft'); c.fill();
+    c.strokeStyle=cssv('--cam'); c.lineWidth=1.2; c.setLineDash([5,4]);
+    c.beginPath(); c.moveTo(q1[0],q1[1]); c.lineTo(cxp,czp); c.lineTo(q2[0],q2[1]); c.stroke(); c.setLineDash([]);
+    c.fillStyle=cssv('--cam'); c.beginPath(); c.arc(cxp,czp,6,0,7); c.fill();
+    c.font='600 11px '+cssv('--font-mono'); c.fillStyle=cssv('--cam-ink');
+    c.fillText('C  yaw '+cam.yaw.toFixed(0)+'°', cxp+11, czp+4);
+    /* entities top-down */
+    ents.forEach(function(e){
+      var hw=e.w/2*(LW/(VX1-VX0)), hd=e.d/2*(H/(VZ1-VZ0));
+      var col = e.sem==='crate'? cssv('--sem-crate') : cssv('--id'+e.slot);
+      c.save(); c.translate(px(e.x),pz(e.z));
+      c.fillStyle=col; c.globalAlpha=.36; rr(c,-hw,-hd,hw*2,hd*2,3); c.fill();
+      c.globalAlpha=1; c.strokeStyle=col; c.lineWidth=1.6; rr(c,-hw,-hd,hw*2,hd*2,3); c.stroke();
+      c.restore();
+      /* world velocity arrow */
+      if(Math.hypot(e.vx,e.vz)>0.25){
+        var L=34, n=Math.hypot(e.vx,e.vz);
+        var ax=px(e.x)+e.vx/n*L, ay=pz(e.z)-e.vz/n*L;
+        c.strokeStyle=cssv('--ok'); c.lineWidth=2.6; c.beginPath(); c.moveTo(px(e.x),pz(e.z)); c.lineTo(ax,ay); c.stroke();
+        c.fillStyle=cssv('--ok'); c.beginPath(); c.arc(ax,ay,3,0,7); c.fill();
+      }
+      c.font='600 11px '+cssv('--font-mono'); c.fillStyle=cssv('--ink2');
+      c.fillText(e.id+' · '+e.sem, px(e.x)+11, pz(e.z)-9);
+    });
+    c.font='10px '+cssv('--font-mono'); c.fillStyle=cssv('--ink3');
+    c.fillText('绿色箭头 = 世界系速度（编译器读的就是它）', 12, H-12);
+    c.restore();
+    c.strokeStyle=cssv('--rule'); c.lineWidth=1; c.beginPath(); c.moveTo(LW+6,10); c.lineTo(LW+6,H-10); c.stroke();
+
+    /* ---------- right: three maps ---------- */
+    var vis=0, moving=0, wrongStatic=0;
+    var drawn=ents.map(function(e){
+      var cc=cornersOf(e,cam.yaw); if(!cc) return null;
+      var prev=sPrev.slice(0,-1).filter(function(p){return p.id===e.id;})[0];
+      var d = wrong ? dirImage(e,cam.yaw,camPrev.yaw,prev) : dirWorld(e,cam.yaw);
+      return {e:e, hull:cc.hull, z:cc.z, dir:d};
+    }).filter(function(x){ return x; })
+      .filter(function(x){
+        var any=x.hull.some(function(p){ return p[0]>-40 && p[0]<MW+40 && p[1]<MH+120; });
+        return any;
+      });
+    drawn.sort(function(a,b){ return b.z-a.z; });
+    drawn.forEach(function(x){
+      vis++;
+      if(x.dir!=='static'){ moving++; if(Math.hypot(x.e.vx,x.e.vz)<0.25) wrongStatic++; }
+    });
+
+    var titles=[['M','id','身份图 · K 个可学 slot，序列内固定'],['M','sem','语义图 · 文本编码器嵌入类别标签'],['M','dir','方向图 · 世界速度 → 相机系 → 7 档']];
+    for(var m=0;m<3;m++){
+      var Y=MY[m];
+      c.save();
+      c.fillStyle=cssv('--bg'); rr(c,MX,Y,MW,MH,8); c.fill();
+      c.strokeStyle=cssv('--rule2'); c.lineWidth=1; rr(c,MX,Y,MW,MH,8); c.stroke();
+      c.beginPath(); c.rect(MX,Y,MW,MH); c.clip();
+      c.translate(MX,Y);
+      drawn.forEach(function(x){
+        var col;
+        if(m===0) col = cssv('--id'+x.e.slot);
+        else if(m===1) col = x.e.sem==='person'?cssv('--sem-person'):(x.e.sem==='car'?cssv('--sem-car'):cssv('--sem-crate'));
+        else col = cssv(DIRCOL[x.dir]);
+        poly(c,x.hull); c.fillStyle=col; c.globalAlpha=.82; c.fill();
+        c.globalAlpha=1; c.strokeStyle=col; c.lineWidth=1.2; poly(c,x.hull); c.stroke();
+        /* label */
+        var cx=0, cy=0; x.hull.forEach(function(p){cx+=p[0];cy+=p[1];});
+        cx/=x.hull.length; cy/=x.hull.length;
+        c.font='600 9.5px '+cssv('--font-mono');
+        var lb = m===0? ('slot '+x.e.slot) : (m===1? x.e.sem : x.dir);
+        var tw=c.measureText(lb).width;
+        var ly=Math.min(Math.max(cy,14), MH-8);
+        c.lineWidth=2.6; c.lineJoin='round'; c.strokeStyle='rgba(0,0,0,.55)';
+        c.strokeText(lb, cx-tw/2, ly);
+        c.fillStyle='#fff'; c.fillText(lb, cx-tw/2, ly);
+      });
+      c.restore();
+      c.font='600 10.5px '+cssv('--font-mono');
+      c.fillStyle=cssv('--ink2');
+      c.fillText(titles[m][0]+'^'+titles[m][1], MX+8, Y-6);
+      c.font='10px '+cssv('--font-body'); c.fillStyle=cssv('--ink3');
+      c.fillText(titles[m][2], MX+58, Y-6);
+    }
+    c.font='10px '+cssv('--font-mono'); c.fillStyle=cssv('--ink3');
+    c.fillText('远→近 painter 顺序 ＝ 论文的 depth-aware rasterization（重叠时保留可见实体）', MX, MY[2]+MH+16);
+
+    document.getElementById('cpVis').textContent=vis;
+    document.getElementById('cpMov').textContent=moving;
+    var er=document.getElementById('cpErr');
+    er.textContent=wrongStatic; er.className='v '+(wrongStatic>0?'bad':'ok');
+    document.getElementById('cpSrc').textContent= wrong?'图像位移（错）':'世界速度（对）';
+    document.getElementById('cpSrc').className='v '+(wrong?'bad':'c');
+    cap();
+  }
+  function cap(){
+    var el=document.getElementById('cpCap');
+    var base='三张图都是把<b>同一批 OBB 在同一条目标相机轨迹下</b>投影、光栅化得到的，所以它们和主干的相机通路天然对齐。';
+    var txt;
+    if(wrong){
+      txt='<b style="color:var(--bad-ink)">你现在切到了「错误做法」：方向从图像位移算。</b>'+
+        (mode==='cam'? '相机在横摇，所有实体在画面上都在滑动，于是<b>连完全静止的人都被标成 left/right</b>——右上角的错误计数说明了一切。'
+        : (mode==='obj'? '相机不动时，图像位移恰好等于物体自身运动，两种算法一致——<b>问题只在相机也动的时候才暴露</b>，试试切到「只有相机在动」。'
+        : '相机和实体同时动，图像位移是两者的叠加，方向标签变得不可信。')) +
+        ' 这正是论文特意强调「direction state is computed from the entity’s world-space velocity rather than from its image-space displacement」的原因。';
+    } else if(mode==='cam'){
+      txt=base+' <b>注意方向图（第三张）：相机在横摇，但所有静止实体依然是 static。</b>'+
+        '因为方向是从世界系速度算的，相机运动带来的表观位移被完全排除。把上面的复选框勾上，看错误做法会发生什么。';
+    } else if(mode==='obj'){
+      txt=base+' 相机固定，B 沿世界系 +x 移动（<span style="color:var(--d-right)">right</span>），D 沿 +z 移动（<span style="color:var(--d-fwd)">forward</span>）。'+
+        '身份图和语义图完全不受运动影响——<b>id slot 在整段序列内固定</b>，这就是实体出画再入画还能对上号的机制。';
+    } else {
+      txt=base+' 两者同时动是最难的情况：画面上的位移是相机与物体运动的<b>叠加</b>，'+
+        '但方向图仍然只报告物体<b>自己</b>的运动，把「表观运动」留给相机通路去解释。两条通路的分工在这里最清楚。';
+    }
+    el.innerHTML=txt+'<br><span style="opacity:.8">（本图是我按论文 §4.3 重新实现的示意光栅化，用真实的透视投影与凸包，但不是作者的代码。）</span>';
+  }
+  var elT=document.getElementById('cpT');
+  elT.addEventListener('input',function(){ t=+this.value/100; document.getElementById('cpTV').textContent=t.toFixed(2); draw(); });
+  seg(document.getElementById('cpMode'),function(b){ mode=b.getAttribute('data-cm'); draw(); });
+  document.getElementById('cpWrong').addEventListener('change',function(){ wrong=this.checked; draw(); });
+  var pb=document.getElementById('cpPlay');
+  pb.addEventListener('click',function(){
+    playing=!playing; pb.textContent= playing? '⏸ 暂停':'▶ 播放';
+    if(playing){
+      var last=performance.now();
+      (function loop(now){
+        if(!playing) return;
+        var dt=(now-last)/1000; last=now;
+        t+=dt*0.35; if(t>1) t=0;
+        elT.value=Math.round(t*100); document.getElementById('cpTV').textContent=t.toFixed(2);
+        draw(); raf=requestAnimationFrame(loop);
+      })(last);
+    } else if(raf) cancelAnimationFrame(raf);
+  });
+  addEventListener('themechange',draw);
+  draw();
+})();
+</script>
+<script>
+"use strict";
+/* ===================== Fig.5 chunk-AR memory ===================== */
+(function(){
+  var svg=document.getElementById('lgSvg'); if(!svg) return;
+  var elN=document.getElementById('lgN'), elSpa=document.getElementById('lgSpa'), elAnc=document.getElementById('lgAnchor');
+  var X0=136, BW=70, GAP=12, Y=126, BH=50;
+  function cx(i){ return X0+(i-1)*(BW+GAP)+BW/2; }
+  function draw(){
+    var n=+elN.value, useSpa=elSpa.checked, useAnc=elAnc.checked;
+    var h='';
+    /* --- spatial memory band (top) --- */
+    if(useSpa && n>=3){
+      var sx=cx(1), tx=cx(n);
+      h+='<path d="M'+sx+' '+Y+' C'+sx+' 46 '+tx+' 46 '+tx+' '+Y+'" stroke="var(--pg)" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#ar-p)"/>';
+      h+='<rect x="266" y="8" width="330" height="36" rx="9" fill="var(--pg-soft)" stroke="var(--pg)" stroke-width="1.1"/>';
+      h+='<text x="431" y="24" text-anchor="middle" class="sml f-Pi">H_spa　几何对齐空间记忆（沿用 AlayaWorld）</text>';
+      h+='<text x="431" y="37" text-anchor="middle" class="xs f-ink3">已完成帧 → 估计深度 → 世界点 → 检索并重投影到当前视角</text>';
+    } else {
+      h+='<rect x="266" y="8" width="330" height="36" rx="9" fill="var(--surf2)" stroke="var(--rule)" stroke-width="1" stroke-dasharray="5 4"/>';
+      h+='<text x="431" y="30" text-anchor="middle" class="sml f-ink3">空间记忆已关闭：只剩有限的时间窗口</text>';
+    }
+    /* --- anchor --- */
+    h+='<g opacity="'+(useAnc?1:0.2)+'">'+
+       '<rect x="30" y="'+Y+'" width="66" height="'+BH+'" rx="9" fill="var(--st-soft)" stroke="var(--st)" stroke-width="1.4"/>'+
+       '<text x="63" y="'+(Y+22)+'" text-anchor="middle" class="sml f-Si">I₀ 锚点</text>'+
+       '<text x="63" y="'+(Y+38)+'" text-anchor="middle" class="xs f-ink3">永不过期</text>'+
+       '<path d="M96 '+(Y+BH/2)+' L128 '+(Y+BH/2)+'" stroke="var(--st)" stroke-width="1.4" fill="none" marker-end="url(#ar-s)"/></g>';
+    /* --- chunks --- */
+    for(var i=1;i<=9;i++){
+      var x=X0+(i-1)*(BW+GAP);
+      var isCur=(i===n), isPast=(i<n), isFut=(i>n);
+      var age=n-i, band = age<=2?'recent':(age<=4?'mid':'long');
+      var col = isCur? 'var(--cp)' : (isPast? (band==='long'?'var(--ink3)':'var(--rd)') : 'var(--rule2)');
+      var op  = isFut? 0.25 : (isPast? (band==='recent'?1:(band==='mid'?0.8:0.55)) : 1);
+      var fill= isCur? 'var(--cp-soft)' : (isPast? 'var(--rd-soft)':'var(--surf2)');
+      h+='<g opacity="'+op+'">';
+      h+='<rect x="'+x+'" y="'+Y+'" width="'+BW+'" height="'+BH+'" rx="9" fill="'+fill+'" stroke="'+col+'" stroke-width="'+(isCur?1.9:1.1)+'"/>';
+      h+='<text x="'+(x+BW/2)+'" y="'+(Y+17)+'" text-anchor="middle" class="sml" fill="'+(isCur?'var(--cp-ink)':'var(--ink2)')+'">块 '+i+'</text>';
+      if(isPast){
+        var cols = band==='recent'?5:(band==='mid'?3:2), rows = band==='recent'?3:(band==='mid'?2:1);
+        for(var r=0;r<rows;r++) for(var q=0;q<cols;q++){
+          var dx=x+11+q*((BW-22)/(cols-1||1)), dy=Y+27+r*7;
+          h+='<circle cx="'+dx.toFixed(1)+'" cy="'+dy+'" r="1.7" fill="'+col+'"/>';
+        }
+      } else if(isCur){
+        h+='<text x="'+(x+BW/2)+'" y="'+(Y+36)+'" text-anchor="middle" class="xs f-Ci">正在生成</text>';
+      } else {
+        h+='<text x="'+(x+BW/2)+'" y="'+(Y+36)+'" text-anchor="middle" class="xs f-ink3">未来</text>';
+      }
+      h+='</g>';
+      if(i<9){
+        var ax=x+BW, ay=Y+BH/2;
+        h+='<path d="M'+ax+' '+ay+' L'+(ax+GAP-2)+' '+ay+'" stroke="var(--rule2)" stroke-width="1" fill="none" opacity="'+(i<n?0.9:0.25)+'"/>';
+      }
+    }
+    /* --- brackets under the row --- */
+    function bracket(from,to,label,color,yy){
+      if(from>to||from<1) return '';
+      var x1=X0+(from-1)*(BW+GAP), x2=X0+(to-1)*(BW+GAP)+BW;
+      return '<g><path d="M'+x1+' '+yy+' L'+x1+' '+(yy+7)+' L'+x2+' '+(yy+7)+' L'+x2+' '+yy+'" stroke="'+color+'" stroke-width="1.1" fill="none"/>'+
+        '<text x="'+((x1+x2)/2)+'" y="'+(yy+21)+'" text-anchor="middle" class="xs" fill="'+color+'">'+label+'</text></g>';
+    }
+    var yy=Y+BH+10;
+    h+=bracket(Math.max(1,n-2),n-1,'近期 · 细粒度 token','var(--rd-ink)',yy);
+    h+=bracket(Math.max(1,n-4),Math.min(n-3,8),'中期 · 中粒度','var(--rd)',yy+30);
+    h+=bracket(1,Math.min(n-5,8),'远期 · 粗粒度','var(--ink3)',yy+60);
+    /* --- left caption for H_temp --- */
+    h+='<text x="30" y="'+(yy+14)+'" class="sml f-Ri">H_temp</text>';
+    h+='<text x="30" y="'+(yy+29)+'" class="xs f-ink3">时间历史</text>';
+    h+='<text x="30" y="'+(yy+42)+'" class="xs f-ink3">越远压得越狠</text>';
+    h+='<text x="30" y="'+(yy+55)+'" class="xs f-ink3">固定预算下</text>';
+    h+='<text x="30" y="'+(yy+68)+'" class="xs f-ink3">撑长有效时间窗</text>';
+    h+='<text x="136" y="284" class="xs f-ink3">两路记忆都<tspan class="f-ink2">只由「生成当前块之前已有的观测」构成</tspan>——跨块因果得以保持，但一块里的错误也会顺着记忆往下传。</text>';
+    svg.innerHTML=h;
+  }
+  elN.addEventListener('input',function(){ document.getElementById('lgNV').textContent=this.value; draw(); });
+  elSpa.addEventListener('change',draw); elAnc.addEventListener('change',draw);
+  addEventListener('themechange',draw);
+  draw();
+})();
+
+/* ===================== Fig.6 data engine tabs ===================== */
+(function(){
+  var caps={
+    train:'<b>训练方向（Eq.1）：动作已经发生了，你只是把它测出来。</b>五段全自动：ViPE 给内参/位姿/metric depth；'+
+      'Qwen3-VL agent 看一遍视频，产出全局 caption 和「离散可数物体类别」词表；SAM3 按这个词表做视频实例分割与跟踪，给出持久 track id；'+
+      'WildDet3D 拿 2D 框 + 深度 + 内参估出每帧 3D OBB；最后投影 + z-buffer 光栅化成三张控制图。'+
+      '<b>整套监督的精度上界就卡在 ViPE 的深度和 WildDet3D 的单目 3D 检测上，而论文没有报告任何一环的误差。</b>',
+    infer:'<b>推理方向（Eq.2）：你只有一句「他中弹倒地」，必须先造出结构轨迹。</b>'+
+      '这才是本文表征论证的真正落点——训练期那条链在推理期<b>整条不存在</b>，取而代之的是引擎按规则改账本、编译器凭空造出时变 OBB。'+
+      '两端的 OBB 分布是不同的：一边带检测噪声但服从真实物理，另一边干净平滑但可以完全违反物理。'+
+      '论文主张 OBB 这一层的错配比更细的表征小——<b>合理，但全文没有任何实验量化它</b>（存疑 D10）。'
+  };
+  var cap=document.getElementById('dgCap');
+  tabset([].slice.call(document.querySelectorAll('[data-dg]')),function(b){
+    var k=b.getAttribute('data-dg');
+    document.getElementById('dg-train').toggleAttribute('hidden', k!=='train');
+    document.getElementById('dg-infer').toggleAttribute('hidden', k!=='infer');
+    cap.innerHTML=caps[k];
+  });
+  cap.innerHTML=caps.train;
+})();
+
+/* ===================== Fig.7 experiment bars with Wilson CI ===================== */
+(function(){
+  var NC=400;
+  var CA=[['LingBot-World-V2',40.75],['YUME',32.00],['PWM（本文）',94.00]];
+  var SA=[['LingBot-World-V2',8.00],['YUME',58.00],['PWM（本文）',98.00]];
+  function render(el,rows,n){
+    var best=Math.max.apply(null,rows.map(function(r){return r[1];}));
+    var worst=Math.min.apply(null,rows.map(function(r){return r[1];}));
+    el.innerHTML=rows.map(function(r){
+      var p=r[1]/100, k=Math.round(p*n), ci=wilson(k,n);
+      var cls=r[1]===best?' hl':(r[1]===worst?' dim':'');
+      var w=Math.max(2,r[1]);
+      var lo=ci[0]*100, hi=ci[1]*100;
+      return '<div class="brow'+cls+'"><div class="bl">'+r[0]+'</div>'+
+        '<div class="bt"><i style="width:'+w.toFixed(1)+'%"></i>'+
+        '<u style="left:'+lo.toFixed(1)+'%;width:'+Math.max(1,(hi-lo)).toFixed(1)+'%"></u></div>'+
+        '<div class="bv">'+r[1].toFixed(2)+'</div></div>'+
+        '<div class="brow" style="margin-top:-2px"><div class="bl"></div><div class="bt" style="height:auto"><span style="font-family:var(--font-mono);font-size:10px;color:var(--ink3)">95% CI ['+lo.toFixed(1)+', '+hi.toFixed(1)+']</span></div><div class="bv"></div></div>';
+    }).join('');
+  }
+  function paint(){
+    document.getElementById('caTitle').textContent='Count Accuracy　n = '+NC;
+    render(document.getElementById('caBars'),CA,NC);
+    render(document.getElementById('saBars'),SA,50);
+  }
+  seg(document.getElementById('exN'),function(b){ NC=+b.getAttribute('data-n'); paint(); });
+  addEventListener('themechange',paint);
+  paint();
+})();
+
+/* ===================== Fig.8 metric microscope ===================== */
+(function(){
+  var cv=document.getElementById('mxCv'); if(!cv) return;
+  var W=700,H=240;
+  /* engine truth: A alive, B down, C alive  → visible alive = 2 */
+  var SC=[
+    {name:'① 完美兑现', r:['up','down','up'], ca:true, sa:true, truth:'ok',
+     txt:'画面与账本完全一致：A、C 站着，B 倒下。两个指标都判过，世界状态也确实正确。<b>这是唯一一种「判过且真的对」的情况。</b>'},
+    {name:'② 死者继续走动', r:['up','up','up'], ca:false, sa:false, truth:'bad',
+     txt:'状态没被兑现。判官数出 3 个活人，账本说 2 → <b>Count 判错</b>；三帧里都没有死者 → <b>State 判错</b>。'+
+       '这正是 prompt-switching 基线最典型的失败模式，也是 LingBot-World-V2 只有 8% State Acc 的原因。'},
+    {name:'③ 活人凭空消失', r:['up','down','gone'], ca:false, sa:true, truth:'bad',
+     txt:'C 被渲染器弄丢了。Count 数到 1 ≠ 2 → <b>判错</b>；但死亡事件确实被画出来了 → <b>State 判过</b>。'+
+       '两个指标在这里互补，抓住了一半。'},
+    {name:'④ 全员倒地', r:['down','down','down'], ca:false, sa:true, truth:'bad',
+     txt:'一个只会画尸体的模型可以拿到 <b>100% State Accuracy</b>——因为 State 只问「有没有出现一个死掉的角色」。'+
+       '好在 Count 会抓住它（可见存活数 0 ≠ 2）。<b>这说明两个指标必须一起读，单看 State Acc 98% 是没有意义的。</b>'},
+    {name:'⑤ 死错人（身份互换）', r:['down','up','up'], ca:true, sa:true, truth:'bad',
+     txt:'<b>两个指标同时被骗过。</b>该死的 B 还站着，无辜的 A 倒下了：可见存活数仍是 2 ✓，三帧里确实有个死人 ✓。'+
+       '而这恰恰是「实例级可寻址」这个核心卖点最该被检验的失败模式——论文的指标对它<b>完全失明</b>。'+
+       '要抓它，需要按实例做对应（例如用检测器回读生成帧、比对身份），论文明确说这类评估对基线不公平因而没做。'},
+    {name:'⑥ 倒地晚了半秒', r:['up','up','up'], ca:false, sa:false, truth:'late',
+     txt:'状态最终会被兑现，但落在事件后均匀采的那 3 帧之外。<b>两个指标都判错。</b>'+
+       '这说明 State Accuracy 其实隐含了一个<b>时序窗口</b>要求，而论文没有讨论这个窗口有多宽、对结果有多敏感。'}
+  ];
+  var cur=0;
+  function figure(c,x,y,kind,col,label){
+    c.save();
+    if(kind==='gone'){
+      c.strokeStyle=cssv('--rule2'); c.lineWidth=1.2; c.setLineDash([4,4]);
+      rr(c,x-16,y-52,32,58,6); c.stroke(); c.setLineDash([]);
+      c.font='10px '+cssv('--font-mono'); c.fillStyle=cssv('--ink3');
+      c.fillText('缺失', x-13, y-20);
+    } else if(kind==='up'){
+      c.fillStyle=col; c.globalAlpha=.5; rr(c,x-11,y-50,22,50,6); c.fill();
+      c.globalAlpha=1; c.strokeStyle=col; c.lineWidth=1.6; rr(c,x-11,y-50,22,50,6); c.stroke();
+      c.beginPath(); c.arc(x,y-58,7,0,7); c.fillStyle=col; c.globalAlpha=.5; c.fill();
+      c.globalAlpha=1; c.stroke();
+    } else {
+      c.fillStyle=col; c.globalAlpha=.28; rr(c,x-26,y-16,52,16,5); c.fill();
+      c.globalAlpha=1; c.strokeStyle=col; c.lineWidth=1.4; c.setLineDash([3,3]);
+      rr(c,x-26,y-16,52,16,5); c.stroke(); c.setLineDash([]);
+      c.beginPath(); c.arc(x-32,y-8,6,0,7); c.globalAlpha=.28; c.fillStyle=col; c.fill();
+      c.globalAlpha=1; c.stroke();
+    }
+    c.font='600 11px '+cssv('--font-mono'); c.fillStyle=cssv('--ink2');
+    c.fillText(label, x-8, y+18);
+    c.restore();
+  }
+  function draw(){
+    var c=fit(cv,W,H);
+    var s=SC[cur];
+    /* left panel: engine */
+    c.strokeStyle=cssv('--rule'); c.lineWidth=1;
+    c.beginPath(); c.moveTo(W/2,16); c.lineTo(W/2,H-16); c.stroke();
+    var truth=['up','down','up'], names=['A','B','C'], cols=[cssv('--id1'),cssv('--id2'),cssv('--id3')];
+    for(var i=0;i<3;i++) figure(c, 70+i*100, 150, truth[i], cols[i], names[i]);
+    c.font='11px '+cssv('--font-mono'); c.fillStyle=cssv('--st-ink');
+    c.fillText('可见存活 = 2　死亡事件 = 1（B）', 44, 198);
+    c.fillStyle=cssv('--ink3'); c.font='10px '+cssv('--font-mono');
+    c.fillText('这是唯一的真值来源', 44, 214);
+    /* right panel: rendered */
+    for(i=0;i<3;i++) figure(c, 420+i*100, 150, s.r[i], cols[i], names[i]);
+    var vis=s.r.filter(function(k){return k==='up';}).length;
+    c.font='11px '+cssv('--font-mono'); c.fillStyle=cssv('--ink2');
+    c.fillText('判官数出的可见存活 = '+vis, 394, 198);
+    c.fillStyle=cssv('--ink3'); c.font='10px '+cssv('--font-mono');
+    c.fillText('判官只看 RGB，不给框、不给身份、不给期望计数', 394, 214);
+    c.font='600 12px '+cssv('--font-display'); c.fillStyle=cssv('--ink');
+    c.fillText(s.name, 394, 34);
+    c.fillStyle=cssv('--st-ink'); c.fillText('引擎账本（不变）', 44, 34);
+    c.fillStyle=cssv('--ink3'); c.font='10px '+cssv('--font-mono'); c.fillText('渲染出的画面 ↓', 394, 50);
+
+    var ca=document.getElementById('mxCA'), sa=document.getElementById('mxSA'), tr=document.getElementById('mxTruth');
+    ca.textContent=s.ca?'判过 ✓':'判错 ✗'; ca.className='v '+(s.ca?'ok':'bad');
+    sa.textContent=s.sa?'判过 ✓':'判错 ✗'; sa.className='v '+(s.sa?'ok':'bad');
+    tr.textContent = s.truth==='ok'?'正确':(s.truth==='late'?'时序错':'错误');
+    tr.className='v '+(s.truth==='ok'?'ok':'bad');
+    document.getElementById('mxPane').innerHTML=
+      '<h5>'+s.name+'</h5><div class="row" style="font-size:13.5px;line-height:1.75">'+s.txt+'</div>'+
+      (cur===4? '<div class="row" style="margin-top:12px"><span class="k">为什么这条最要紧</span>'+
+        '两个指标都是<b>全局的、计数式的</b>，而这篇论文的卖点是<b>实例级的、可寻址的</b>。用前者去证明后者，只能证明「差距存在」，证明不了「差距有多大」。</div>':'');
+  }
+  tabset([].slice.call(document.querySelectorAll('[data-mx]')),function(b){ cur=+b.getAttribute('data-mx'); draw(); });
+  addEventListener('themechange',draw);
+  draw();
+})();
+
+/* ===================== doubts filter ===================== */
+(function(){
+  var items=[].slice.call(document.querySelectorAll('.dt'));
+  seg(document.getElementById('dSev'),function(b){
+    var s=b.getAttribute('data-sev');
+    items.forEach(function(d){ d.toggleAttribute('hidden', s!=='all' && d.getAttribute('data-sev')!==s); });
+  });
+  document.getElementById('dAll').addEventListener('click',function(){ items.forEach(function(d){ if(!d.hasAttribute('hidden')) d.open=true; }); });
+  document.getElementById('dNone').addEventListener('click',function(){ items.forEach(function(d){ d.open=false; }); });
+})();
+</script>
+</body>
+</html>

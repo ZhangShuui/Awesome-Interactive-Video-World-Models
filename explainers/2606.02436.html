@@ -1,0 +1,2513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GIM-World 把几何写进记忆里</title>
+<meta name="description" content="arXiv 2606.02436 · Geometry-Aware Implicit Memory for Video World Models 方法精读与图解">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   GIM-World 精读 — tokens. Dark 是默认底，light 是完整设计过的第二主题。
+   角色色对应论文 Fig. 2 的通路：
+     M   = 记忆 token / 隐式记忆状态（蓝）——本文的主角，一切收益都归到它身上
+     H   = 历史帧 / 历史 latent / 剪枝（橙）——被压缩的那一侧
+     D   = DiT / 目标 latent / 流匹配（绿）——生成器
+     G   = 几何监督 / VGGT 教师 / ray map（紫）——只在训练时存在
+     bad = 漂移 / 崩坏 / 我的存疑（红）
+     ok  = 本文结果 / 好（青）
+   签名纹理是 ray map：一格一格的 patch，每格一条射线。
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0e1114; --surf:#14181c; --surf2:#1a1f25; --surf3:#232a32;
+  --rule:#272d35; --rule2:#39424d;
+  --ink:#eef1f4; --ink2:#b0b8c3; --ink3:#7e8794;
+  --m:#4a8fe0;   --m-ink:#74acf0;   --m-soft:rgba(74,143,224,.18);
+  --h:#c47a26;   --h-ink:#e8a04c;   --h-soft:rgba(196,122,38,.18);
+  --d:#33a06a;   --d-ink:#5cc58f;   --d-soft:rgba(51,160,106,.18);
+  --g:#9070ea;   --g-ink:#b096f8;   --g-soft:rgba(144,112,234,.20);
+  --bad:#e05a4c; --bad-ink:#f08479; --bad-soft:rgba(224,90,76,.16);
+  --ok:#2fb3a0;  --ok-ink:#5ed2c0;  --ok-soft:rgba(47,179,160,.15);
+  --grid:#212630; --axis:#39414c; --field:rgba(238,241,244,.13);
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.35);
+  --tint:rgba(255,255,255,.045);
+  --font-display:"Archivo","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f0f3f5; --surf:#fbfbfc; --surf2:#eaeef1; --surf3:#e0e5ea;
+    --rule:#dbe0e6; --rule2:#c2c9d3;
+    --ink:#111519; --ink2:#4a525e; --ink3:#727b89;
+    --m:#2b6fc4;   --m-ink:#1f57a0;   --m-soft:rgba(43,111,196,.13);
+    --h:#a95f0f;   --h-ink:#8a4c0b;   --h-soft:rgba(169,95,15,.14);
+    --d:#1f8f57;   --d-ink:#14743f;   --d-soft:rgba(31,143,87,.13);
+    --g:#6a4bd4;   --g-ink:#5739ba;   --g-soft:rgba(106,75,212,.13);
+    --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+    --ok:#0f8a7a;  --ok-ink:#0b6d61;  --ok-soft:rgba(15,138,122,.12);
+    --grid:#e1e6eb; --axis:#c2c9d3; --field:rgba(17,21,25,.16);
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+    --tint:rgba(16,20,28,.035);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f0f3f5; --surf:#fbfbfc; --surf2:#eaeef1; --surf3:#e0e5ea;
+  --rule:#dbe0e6; --rule2:#c2c9d3;
+  --ink:#111519; --ink2:#4a525e; --ink3:#727b89;
+  --m:#2b6fc4;   --m-ink:#1f57a0;   --m-soft:rgba(43,111,196,.13);
+  --h:#a95f0f;   --h-ink:#8a4c0b;   --h-soft:rgba(169,95,15,.14);
+  --d:#1f8f57;   --d-ink:#14743f;   --d-soft:rgba(31,143,87,.13);
+  --g:#6a4bd4;   --g-ink:#5739ba;   --g-soft:rgba(106,75,212,.13);
+  --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+  --ok:#0f8a7a;  --ok-ink:#0b6d61;  --ok-soft:rgba(15,138,122,.12);
+  --grid:#e1e6eb; --axis:#c2c9d3; --field:rgba(17,21,25,.16);
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  --tint:rgba(16,20,28,.035);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+h1,h2,h3,h4,h5{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--m-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--g-ink); outline-offset:3px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); border:1px solid var(--rule);
+  padding:.08em .36em; border-radius:5px; white-space:nowrap}
+strong{font-weight:600; color:var(--ink)}
+hr{border:0; border-top:1px solid var(--rule); margin:40px 0}
+ul,ol{margin:0; padding-left:1.35em}
+li{margin:.35em 0}
+li::marker{color:var(--ink3)}
+.m{font-family:var(--font-math); font-style:italic}
+.mono{font-family:var(--font-mono)}
+sub,sup{line-height:0; font-size:.72em}
+
+/* ============================================================ chrome */
+#prog{position:fixed; inset:0 auto auto 0; height:2px; width:0; z-index:200;
+  background:linear-gradient(90deg,var(--h),var(--m),var(--g),var(--d)); transition:width .08s linear}
+.top{position:fixed; inset:0 0 auto 0; height:60px; z-index:150; display:flex; align-items:center; gap:18px;
+  padding:0 22px; background:color-mix(in srgb, var(--surf) 86%, transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2)}
+
+.shell{display:grid; grid-template-columns:246px minmax(0,1fr); gap:0; max-width:1250px; margin:0 auto; padding:84px 28px 120px}
+.rail{position:sticky; top:84px; align-self:start; max-height:calc(100vh - 100px); overflow:auto; padding-right:18px}
+.rail .rl{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); margin:0 0 10px}
+.rail ol{list-style:none; margin:0; padding:0; border-left:1px solid var(--rule)}
+.rail li{margin:0}
+.rail a{display:block; padding:5px 0 5px 14px; margin-left:-1px; font-size:12.5px; line-height:1.4; color:var(--ink3);
+  border-left:2px solid transparent; border-bottom:0; transition:.15s}
+.rail a:hover{color:var(--ink)}
+.rail a.on{color:var(--ink); border-left-color:var(--m)}
+main{min-width:0; max-width:860px; padding-left:44px}
+@media (max-width:980px){
+  .shell{grid-template-columns:1fr; padding:76px 16px 90px}
+  .rail{display:none}
+  main{padding-left:0}
+}
+
+/* ============================================================ hero */
+.hero{padding:10px 0 34px; border-bottom:1px solid var(--rule); margin-bottom:56px; position:relative}
+.hero .fieldpat{position:absolute; right:-14px; top:-8px; width:250px; height:250px; opacity:.62; pointer-events:none}
+@media (max-width:760px){.hero .fieldpat{display:none}}
+.kicker{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px}
+.tag{font-family:var(--font-mono); font-size:11.5px; color:var(--ink2); background:var(--surf2); border:1px solid var(--rule);
+  padding:3px 9px; border-radius:6px; letter-spacing:.01em}
+.tag.hl{color:var(--m-ink); border-color:color-mix(in srgb,var(--m) 45%,transparent); background:var(--m-soft)}
+.hero h1{font-size:clamp(40px,6vw,60px); font-weight:700; letter-spacing:-.025em; line-height:1.02}
+.hero .zh{font-size:clamp(18px,2.2vw,22px); color:var(--ink2); margin-top:14px; line-height:1.55; max-width:46ch; font-weight:500; text-wrap:balance}
+.hero .thesis{margin-top:22px; font-size:16.5px; color:var(--ink2); max-width:66ch}
+.hero .thesis b{color:var(--ink)}
+.authors{margin-top:20px; font-size:13.5px; color:var(--ink3); line-height:1.7}
+.authors b{color:var(--ink2); font-weight:500}
+.links{display:flex; flex-wrap:wrap; gap:10px; margin-top:16px}
+.links a,.links span{font-family:var(--font-mono); font-size:12.5px; padding:6px 12px; border:1px solid var(--rule); border-radius:8px; color:var(--ink2); background:var(--surf)}
+.links a:hover{color:var(--ink); border-color:var(--rule2)}
+.links span{color:var(--ink3); border-style:dashed}
+.stats{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:28px}
+.stat{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:14px 16px 12px}
+.stat .lb{font-family:var(--font-mono); font-size:11px; color:var(--ink3); letter-spacing:.06em; text-transform:uppercase}
+.stat .vl{font-family:var(--font-display); font-size:28px; font-weight:700; letter-spacing:-.02em; margin-top:6px}
+.stat .dl{font-size:12.5px; color:var(--ink3); margin-top:4px; line-height:1.5}
+.stat .dl b{color:var(--ink2); font-weight:500}
+@media (max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
+
+/* role text */
+.rM{color:var(--m-ink); font-weight:600}
+.rH{color:var(--h-ink); font-weight:600}
+.rD{color:var(--d-ink); font-weight:600}
+.rG{color:var(--g-ink); font-weight:600}
+.rB{color:var(--bad-ink); font-weight:600}
+.rK{color:var(--ok-ink); font-weight:600}
+
+/* ============================================================ sections */
+.sec{margin:0 0 84px; scroll-margin-top:84px}
+.eyebrow{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.eyebrow .n{font-family:var(--font-mono); font-size:12px; color:var(--m-ink); font-weight:600}
+.eyebrow .t{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); letter-spacing:.12em; text-transform:uppercase}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec h2{font-size:clamp(24px,3vw,31px); letter-spacing:-.02em; margin-bottom:16px}
+.sec h3{font-size:19px; margin:38px 0 12px; letter-spacing:-.01em; display:flex; align-items:baseline; gap:10px}
+.sec h3 .ix{font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-weight:500}
+.sec h4{font-size:15.5px; margin:22px 0 8px}
+.lead{font-size:17px; color:var(--ink2); max-width:68ch; margin-bottom:22px}
+.lead b{color:var(--ink)}
+.prose{max-width:70ch; color:var(--ink2)}
+.prose p{margin:0 0 14px}
+.prose b,.prose strong{color:var(--ink)}
+.prose ul,.prose ol{margin:0 0 14px}
+.note{font-size:13.5px; color:var(--ink3); max-width:70ch; margin-top:10px}
+
+/* ============================================================ figure */
+.fig{margin:26px 0 30px; background:var(--surf); border:1px solid var(--rule); border-radius:14px; box-shadow:var(--shadow); overflow:hidden}
+.fh{display:flex; align-items:baseline; gap:12px; padding:12px 18px 10px; border-bottom:1px solid var(--rule)}
+.fh .no{font-family:var(--font-mono); font-size:11.5px; color:var(--m-ink); letter-spacing:.06em; white-space:nowrap}
+.fh .ti{font-family:var(--font-display); font-size:14px; font-weight:600; color:var(--ink)}
+.figbody{padding:16px 18px 12px; background:var(--surf)}
+.figbody svg{display:block; width:100%; height:auto; max-width:100%; font-family:var(--font-body)}
+figcaption{padding:12px 18px 14px; font-size:13.5px; line-height:1.65; color:var(--ink3); border-top:1px solid var(--rule)}
+figcaption b{color:var(--ink2); font-weight:500}
+.tabs{display:flex; flex-wrap:wrap; gap:6px; padding:10px 14px 0; background:var(--surf)}
+.tab{background:var(--surf2); border:1px solid var(--rule); color:var(--ink3); font-family:var(--font-body); font-size:12.5px;
+  padding:6px 12px; border-radius:8px 8px 0 0; cursor:pointer; transition:.15s; border-bottom:0}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--ink); background:var(--surf3); border-color:var(--rule2)}
+.scrollx{overflow-x:auto}
+
+/* svg utility classes (theme-aware) */
+.f-ink{fill:var(--ink)} .f-ink2{fill:var(--ink2)} .f-ink3{fill:var(--ink3)}
+.f-surf{fill:var(--surf)} .f-surf2{fill:var(--surf2)} .f-surf3{fill:var(--surf3)} .f-bg{fill:var(--bg)}
+.s-rule{stroke:var(--rule2)} .s-rule1{stroke:var(--rule)} .s-ink3{stroke:var(--ink3)} .s-ink2{stroke:var(--ink2)} .s-ink{stroke:var(--ink)}
+.nofill{fill:none}
+.f-M{fill:var(--m)} .f-Mi{fill:var(--m-ink)} .fs-M{fill:var(--m-soft)} .s-M{stroke:var(--m)}
+.f-H{fill:var(--h)} .f-Hi{fill:var(--h-ink)} .fs-H{fill:var(--h-soft)} .s-H{stroke:var(--h)}
+.f-D{fill:var(--d)} .f-Di{fill:var(--d-ink)} .fs-D{fill:var(--d-soft)} .s-D{stroke:var(--d)}
+.f-G{fill:var(--g)} .f-Gi{fill:var(--g-ink)} .fs-G{fill:var(--g-soft)} .s-G{stroke:var(--g)}
+.f-B{fill:var(--bad)} .f-Bi{fill:var(--bad-ink)} .fs-B{fill:var(--bad-soft)} .s-B{stroke:var(--bad)}
+.f-K{fill:var(--ok)} .f-Ki{fill:var(--ok-ink)} .fs-K{fill:var(--ok-soft)} .s-K{stroke:var(--ok)}
+.mk-M{fill:var(--m)} .mk-H{fill:var(--h)} .mk-D{fill:var(--d)} .mk-G{fill:var(--g)} .mk-B{fill:var(--bad)} .mk-I{fill:var(--ink3)} .mk-K{fill:var(--ok)}
+svg text{font-family:var(--font-body)}
+svg .big{font-size:13px; font-weight:600}
+svg .lbl{font-size:12px}
+svg .sml{font-size:10.5px}
+svg .xs{font-size:9.5px}
+svg .mono{font-family:var(--font-mono)}
+svg .math{font-family:var(--font-math); font-style:italic; font-size:13px}
+svg .tab-num{font-variant-numeric:tabular-nums}
+.dash{stroke-dasharray:5 4}
+
+/* ============================================================ cards & callouts */
+.grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:22px 0}
+.grid2{display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin:22px 0}
+.grid4{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:22px 0}
+@media (max-width:760px){.grid3,.grid2,.grid4{grid-template-columns:1fr}}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:16px 18px; font-size:14px; color:var(--ink2); line-height:1.7}
+.card .mono{font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3); margin-bottom:6px}
+.card h5{font-size:15px; margin-bottom:8px; color:var(--ink)}
+.card b{color:var(--ink)}
+.card.cM{border-top:3px solid var(--m)} .card.cM .mono{color:var(--m-ink)}
+.card.cH{border-top:3px solid var(--h)} .card.cH .mono{color:var(--h-ink)}
+.card.cD{border-top:3px solid var(--d)} .card.cD .mono{color:var(--d-ink)}
+.card.cG{border-top:3px solid var(--g)} .card.cG .mono{color:var(--g-ink)}
+.card.cB{border-top:3px solid var(--bad)} .card.cB .mono{color:var(--bad-ink)}
+.call{border:1px solid var(--rule); border-left:3px solid var(--ink3); background:var(--surf); border-radius:10px; padding:14px 18px; margin:22px 0; font-size:14.5px; color:var(--ink2); max-width:78ch}
+.call .hd{font-family:var(--font-display); font-weight:600; font-size:14px; color:var(--ink); margin-bottom:6px}
+.call p{margin:0 0 6px} .call p:last-child{margin:0}
+.call b{color:var(--ink)}
+.call.key{border-left-color:var(--m); background:color-mix(in srgb,var(--m-soft) 55%,var(--surf))}
+.call.warn{border-left-color:var(--bad); background:color-mix(in srgb,var(--bad-soft) 60%,var(--surf))}
+.call.mine{border-left-color:var(--g); background:color-mix(in srgb,var(--g-soft) 45%,var(--surf))}
+.call.ok{border-left-color:var(--ok); background:color-mix(in srgb,var(--ok-soft) 55%,var(--surf))}
+
+.eq{font-family:var(--font-math); font-size:19px; text-align:center; padding:16px 18px; margin:18px 0; background:var(--surf); border:1px solid var(--rule); border-radius:10px; color:var(--ink); overflow-x:auto; line-height:1.7}
+.eq i{font-style:italic}
+.eq .r{font-style:normal}
+.eq .tagno{float:right; font-family:var(--font-mono); font-style:normal; font-size:12px; color:var(--ink3); padding-top:6px}
+.eq .frac{display:inline-flex; flex-direction:column; vertical-align:middle; text-align:center; margin:0 .25em; line-height:1.25}
+.eq .frac span:first-child{border-bottom:1px solid var(--ink); padding:0 .25em}
+.eq .frac span:last-child{padding:0 .25em}
+.eq small{display:block; font-family:var(--font-body); font-style:normal; font-size:12.5px; color:var(--ink3); margin-top:8px; line-height:1.6; text-align:left}
+.eq small b{color:var(--ink2); font-weight:500}
+
+/* tables */
+table{border-collapse:collapse; width:100%; font-size:13.5px; margin:16px 0}
+th,td{padding:9px 10px; border-bottom:1px solid var(--rule); text-align:left; vertical-align:top; line-height:1.55}
+th{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); font-weight:500; border-bottom:1px solid var(--rule2)}
+td{color:var(--ink2)} td b{color:var(--ink)}
+td.num,th.num{font-family:var(--font-mono); font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right}
+tr.hl td{background:var(--tint)}
+td.best{color:var(--ok-ink); font-weight:600}
+td.worst{color:var(--bad-ink)}
+.tbl{overflow-x:auto; border:1px solid var(--rule); border-radius:12px; background:var(--surf); padding:0 14px; margin:18px 0}
+.tbl table{margin:0}
+.grp th{color:var(--ink2); font-family:var(--font-body); text-transform:none; letter-spacing:0; font-size:12.5px; border-bottom:0; padding-top:14px}
+
+/* pills */
+.pill{display:inline-block; font-family:var(--font-mono); font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--rule2); color:var(--ink2); background:var(--surf2); white-space:nowrap}
+.pill.M{color:var(--m-ink); border-color:color-mix(in srgb,var(--m) 50%,transparent); background:var(--m-soft)}
+.pill.H{color:var(--h-ink); border-color:color-mix(in srgb,var(--h) 50%,transparent); background:var(--h-soft)}
+.pill.D{color:var(--d-ink); border-color:color-mix(in srgb,var(--d) 50%,transparent); background:var(--d-soft)}
+.pill.G{color:var(--g-ink); border-color:color-mix(in srgb,var(--g) 50%,transparent); background:var(--g-soft)}
+.pill.B{color:var(--bad-ink); border-color:color-mix(in srgb,var(--bad) 50%,transparent); background:var(--bad-soft)}
+.pill.K{color:var(--ok-ink); border-color:color-mix(in srgb,var(--ok) 50%,transparent); background:var(--ok-soft)}
+
+/* ============================================================ interactive widgets */
+.ctl{display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; padding:10px 18px; border-bottom:1px solid var(--rule); background:var(--surf2); font-size:13px; color:var(--ink2)}
+.ctl label{display:inline-flex; align-items:center; gap:8px; white-space:nowrap}
+.ctl input[type=range]{width:126px; accent-color:var(--m)}
+.ctl input[type=checkbox]{accent-color:var(--m)}
+.ctl .val{font-family:var(--font-mono); font-size:12px; color:var(--ink); min-width:5ch; font-variant-numeric:tabular-nums}
+.seg{display:inline-flex; border:1px solid var(--rule2); border-radius:8px; overflow:hidden}
+.seg button{background:var(--surf); border:0; color:var(--ink3); font-family:var(--font-body); font-size:12.5px; padding:5px 11px; cursor:pointer; transition:.15s}
+.seg button + button{border-left:1px solid var(--rule2)}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--surf3); color:var(--ink); font-weight:600}
+.btn{background:var(--surf3); border:1px solid var(--rule2); color:var(--ink); font-family:var(--font-body); font-size:12.5px; padding:5px 12px; border-radius:8px; cursor:pointer}
+.btn:hover{border-color:var(--ink3)}
+.btn.primary{background:var(--m); border-color:var(--m); color:#fff}
+.readout{display:grid; grid-template-columns:repeat(auto-fit,minmax(122px,1fr)); gap:10px; padding:12px 18px; border-top:1px solid var(--rule); background:var(--surf)}
+.readout .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.04em; color:var(--ink3)}
+.readout .v{font-family:var(--font-display); font-size:19px; font-weight:600; letter-spacing:-.01em; font-variant-numeric:tabular-nums; margin-top:2px}
+.readout .v small{font-family:var(--font-mono); font-size:11px; color:var(--ink3); margin-left:4px; font-weight:400}
+.readout .v.ok{color:var(--ok-ink)} .readout .v.bad{color:var(--bad-ink)} .readout .v.g{color:var(--g-ink)} .readout .v.m{color:var(--m-ink)}
+
+/* canvas sandbox */
+.sim{position:relative; border-radius:10px; overflow:hidden; border:1px solid var(--rule); background:var(--surf2)}
+.sim canvas{display:block; width:100%; height:auto}
+.sim .lab{position:absolute; top:10px; font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; padding:3px 8px; border-radius:6px; background:rgba(0,0,0,.55); color:#fff; pointer-events:none}
+.sim .lab.l{left:12px} .sim .lab.r{right:12px}
+.legend{display:flex; flex-wrap:wrap; gap:6px 16px; padding:10px 18px; border-top:1px solid var(--rule); background:var(--surf); font-size:12.5px; color:var(--ink3)}
+.legend span{display:inline-flex; align-items:center; gap:6px}
+.legend i{display:inline-block; width:14px; height:14px; border-radius:3px; border:1px solid var(--rule2)}
+.legend i.dotM{border:0; width:9px; height:9px; border-radius:50%; background:var(--m)}
+.legend i.dotI{border:0; width:6px; height:6px; border-radius:50%; background:var(--ink3)}
+.legend i.lnH{border:0; height:3px; border-radius:2px; background:var(--h)}
+.legend i.ramp{background:linear-gradient(90deg,var(--ok),#c9a227,var(--bad))}
+
+/* explorer / side pane */
+.explore{display:grid; grid-template-columns:minmax(0,1.5fr) minmax(220px,1fr); gap:0}
+@media (max-width:760px){.explore{grid-template-columns:1fr}}
+.explore .pane{border-left:1px solid var(--rule); padding:14px 18px; font-size:13.5px; color:var(--ink2); background:var(--surf)}
+@media (max-width:760px){.explore .pane{border-left:0; border-top:1px solid var(--rule)}}
+.pane h5{font-family:var(--font-display); font-size:15px; color:var(--ink); margin-bottom:8px}
+.pane .row{margin:8px 0}
+.pane .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); display:block}
+.pane ul{padding-left:1.1em; margin:2px 0 0}
+.pane li{margin:2px 0}
+
+/* bars */
+.bars{display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:10px 14px; padding:12px 18px 14px}
+.bars .pnl{border:1px solid var(--rule); border-radius:10px; padding:10px 12px 8px; background:var(--surf)}
+.bars .pt{font-family:var(--font-mono); font-size:11px; letter-spacing:.02em; color:var(--ink2); margin-bottom:8px; display:flex; justify-content:space-between; gap:8px}
+.bars .pt span:last-child{color:var(--ink3)}
+.brow{display:grid; grid-template-columns:var(--labw,132px) 1fr auto; align-items:center; gap:8px; margin:5px 0}
+.brow .bl{font-size:11.5px; color:var(--ink2); text-align:right; line-height:1.3}
+.brow .bt{height:11px}
+.brow .bt i{display:block; height:100%; border-radius:3px; background:var(--ink3); opacity:.42; min-width:2px}
+.brow.hl .bl{color:var(--ink); font-weight:600}
+.brow.hl .bt i{background:var(--ok); opacity:1}
+.brow.dim .bt i{background:var(--bad); opacity:.65}
+.brow .bv{font-family:var(--font-mono); font-size:11px; color:var(--ink2); font-variant-numeric:tabular-nums; min-width:5ch}
+.brow.hl .bv{color:var(--ok-ink); font-weight:600}
+
+/* doubts */
+.dfilter{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:18px 0 14px; font-size:13px; color:var(--ink3)}
+.dt{background:var(--surf); border:1px solid var(--rule); border-radius:12px; margin:10px 0; overflow:hidden}
+.dt > summary{list-style:none; cursor:pointer; padding:13px 16px; display:grid; grid-template-columns:auto auto 1fr auto; gap:10px; align-items:center; font-size:14.5px; color:var(--ink)}
+.dt > summary::-webkit-details-marker{display:none}
+.dt > summary:hover{background:var(--surf2)}
+.dt .sev{font-family:var(--font-mono); font-size:10.5px; padding:2px 8px; border-radius:999px; white-space:nowrap; letter-spacing:.04em}
+.dt .sev.hi{color:#fff; background:var(--bad)}
+.dt .sev.mid{color:var(--ink); background:color-mix(in srgb,var(--h) 55%, var(--surf3))}
+.dt .sev.lo{color:var(--ink2); background:var(--surf3); border:1px solid var(--rule2)}
+.dt .dn{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3)}
+.dt .caret{color:var(--ink3); font-size:12px; transition:.15s}
+.dt[open] .caret{transform:rotate(90deg)}
+.dt .body{padding:2px 16px 16px; border-top:1px solid var(--rule); font-size:14px; color:var(--ink2); line-height:1.75}
+.dt .body .lb{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3); display:block; margin:14px 0 3px}
+.dt .body blockquote{margin:0; padding:8px 14px; border-left:2px solid var(--rule2); background:var(--surf2); border-radius:0 8px 8px 0; font-size:13px; color:var(--ink3); font-family:var(--font-math)}
+.dt .body b{color:var(--ink)}
+
+/* appendix */
+.gloss dt{font-family:var(--font-display); font-weight:600; font-size:14.5px; margin-top:14px; color:var(--ink)}
+.gloss dd{margin:2px 0 0; font-size:14px; color:var(--ink2); max-width:72ch}
+pre{font-family:var(--font-mono); font-size:12px; line-height:1.6; background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:14px 16px; overflow-x:auto; color:var(--ink2); margin:14px 0; white-space:pre-wrap; word-break:break-word}
+.foot{margin-top:60px; padding-top:20px; border-top:1px solid var(--rule); font-size:12.5px; color:var(--ink3); line-height:1.7}
+
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{transition:none !important; animation:none !important}
+}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">GIM-World<em>把几何写进记忆里 · 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <marker id="ar-i" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-I"/></marker>
+  <marker id="ar-m" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-M"/></marker>
+  <marker id="ar-h" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-H"/></marker>
+  <marker id="ar-d" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-D"/></marker>
+  <marker id="ar-g" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-G"/></marker>
+  <marker id="ar-b" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-B"/></marker>
+  <marker id="ar-k" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-K"/></marker>
+  <!-- 签名纹理：ray map（一格一格的 patch，每格一条射线） -->
+  <pattern id="fieldpat" width="34" height="34" patternUnits="userSpaceOnUse">
+    <rect x="1.5" y="1.5" width="31" height="31" fill="none" stroke="var(--field)" stroke-width="1"/>
+    <line x1="17" y1="17" x2="27" y2="9" stroke="var(--field)" stroke-width="1.3"/>
+    <circle cx="17" cy="17" r="1.6" fill="var(--field)"/>
+  </pattern>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" class="s-rule" stroke-width="2.2"/>
+  </pattern>
+  <pattern id="hatch-b" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" class="s-B" stroke-width="2"/>
+  </pattern>
+</defs></svg>
+
+<div class="shell">
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-tldr">00 · 一图看懂</a></li>
+    <li><a href="#s-fork">01 · 三种记忆的分岔</a></li>
+    <li><a href="#s-enc">02 · 记忆编码器</a></li>
+    <li><a href="#s-geo">03 · 相机可查询的几何监督</a></li>
+    <li><a href="#s-prune">04 · 信息引导剪枝（可玩）</a></li>
+    <li><a href="#s-loop">05 · 训练与推理循环</a></li>
+    <li><a href="#s-exp">06 · 实验：数字怎么读</a></li>
+    <li><a href="#s-abl">07 · 消融：收益来自哪</a></li>
+    <li><a href="#s-cost">08 · 0.3% 究竟量了什么</a></li>
+    <li><a href="#s-doubt">09 · 我的存疑清单</a></li>
+    <li><a href="#s-missing">10 · 复现清单（论文未给）</a></li>
+    <li><a href="#s-repo">11 · 与本仓库的关联</a></li>
+    <li><a href="#s-appendix">12 · 附录速查</a></li>
+  </ol>
+</nav>
+<main>
+
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <svg class="fieldpat" viewBox="0 0 250 250" aria-hidden="true"><rect width="250" height="250" fill="url(#fieldpat)"/></svg>
+  <div class="kicker">
+    <span class="tag">arXiv 2606.02436v1</span>
+    <span class="tag">cs.CV · 2026-06-01</span>
+    <span class="tag">南京大学 × 快手可灵 × 清华</span>
+    <span class="tag hl">隐式记忆 / 几何蒸馏 / 长程一致性</span>
+  </div>
+  <h1>GIM-World</h1>
+  <p class="zh">几何不该只是喂给生成器的又一路条件，它应该是「被记住的世界」自带的属性</p>
+  <p class="thesis">世界模型跑长了会崩，崩的方式很具体：<b>回到走过的地方，那里已经不是原来的样子了</b>。
+  现有做法要么把过去<span class="rH">原样存下来</span>（存帧、存 KV、存在线三维重建），要么把过去<span class="rM">压成一个定长状态</span>。
+  前者受检索启发式和重建误差的拖累，后者——这是本文的切入点——<b>压完之后没人规定里面必须装什么</b>：
+  只用流匹配损失训练，定长状态完全可以把容量花在跨视角高度冗余的外观信息上，而不是场景结构。
+  作者的解法是给记忆加一道<span class="rG">训练期的问答题</span>：拿一个历史相机的位姿生成 ray map 去<b>查询</b>记忆，
+  要求查出来的东西能对上 VGGT 在那一帧上的特征。答得上，说明记忆里存的是跨视角的场景结构而不是某几张图的外观。
+  推理时几何头和 VGGT 一起丢掉，只剩一个占 DiT 0.26% 时间的编码器。</p>
+  <p class="authors"><b>Zhengxuan Wei</b><sup>1,2∗</sup>, <b>Xu Guo</b><sup>3,2∗</sup>, <b>Xinghui Li</b><sup>2∗†</sup>, Xunzhi Xiang<sup>1</sup>, Min Wei<sup>2</sup>, Yiran Zhu<sup>2</sup>, Qiulin Wang<sup>2</sup>, Xintao Wang<sup>2</sup>, Pengfei Wan<sup>2</sup>, Xiangwang Hou<sup>3</sup>, <b>Qi Fan</b><sup>1†</sup></p>
+  <p class="authors"><sup>1</sup>南京大学 智能科学与技术学院 · <sup>2</sup>快手科技 可灵团队 · <sup>3</sup>清华大学　　<span style="opacity:.75">∗ 共同一作　† 通讯作者</span></p>
+  <div class="links">
+    <a href="https://arxiv.org/abs/2606.02436" target="_blank" rel="noopener">arXiv 摘要 ↗</a>
+    <a href="https://arxiv.org/pdf/2606.02436" target="_blank" rel="noopener">PDF ↗</a>
+    <a href="https://gim-world.github.io/" target="_blank" rel="noopener">项目页 ↗</a>
+    <span>代码：项目页与正文均未给出仓库（2026-09-09 查）</span>
+  </div>
+
+  <figure class="fig" style="margin-top:28px">
+    <div class="fh"><span class="no">Hero</span><span class="ti">同一条流水线，四种「记忆算子 M」——差别只在中间那一块</span></div>
+    <div class="tabs" role="tablist" aria-label="记忆类型">
+      <button class="tab" role="tab" aria-selected="false" data-mm="a">显式 · 帧检索</button>
+      <button class="tab" role="tab" aria-selected="false" data-mm="b">显式 · 在线三维重建</button>
+      <button class="tab" role="tab" aria-selected="false" data-mm="c">隐式 · 无几何监督</button>
+      <button class="tab" role="tab" aria-selected="true" data-mm="d">隐式 + 几何监督（本文）</button>
+    </div>
+    <div class="figbody scrollx">
+      <svg viewBox="0 0 1000 360" style="min-width:800px" role="img" aria-label="四种记忆算子的对比图：显式帧检索、显式三维重建、无几何监督的隐式记忆、以及本文带相机可查询几何监督的隐式记忆，共用同样的历史输入与 DiT 生成器">
+        <!-- shared: history -->
+        <g>
+          <rect x="16" y="76" width="176" height="196" rx="12" class="fs-H" stroke="var(--h)" stroke-width="1.2"/>
+          <text x="104" y="98" text-anchor="middle" class="big f-Hi">历史观测 H</text>
+          <text x="104" y="114" text-anchor="middle" class="xs f-ink3 mono">{(x_i , c_i)} , i = 1..t</text>
+          <g class="s-H nofill" stroke-width="1.1">
+            <rect x="34" y="128" width="60" height="40" rx="4"/><rect x="34" y="176" width="60" height="40" rx="4"/><rect x="34" y="224" width="60" height="34" rx="4"/>
+          </g>
+          <g class="f-ink3">
+            <text x="64" y="152" text-anchor="middle" class="xs">帧 1</text><text x="64" y="200" text-anchor="middle" class="xs">帧 2</text><text x="64" y="245" text-anchor="middle" class="xs">…帧 t</text>
+          </g>
+          <g class="s-H" stroke-width="1.3" fill="none" marker-end="url(#ar-h)">
+            <path d="M104 148 L150 148"/><path d="M104 196 L150 196"/><path d="M104 241 L150 241"/>
+          </g>
+          <g class="f-Hi"><text x="172" y="152" text-anchor="middle" class="xs mono">c₁</text><text x="172" y="200" text-anchor="middle" class="xs mono">c₂</text><text x="172" y="245" text-anchor="middle" class="xs mono">c_t</text></g>
+          <path d="M192 174 L226 174" class="s-H" stroke-width="1.6" fill="none" marker-end="url(#ar-h)"/>
+        </g>
+        <!-- shared: right -->
+        <g>
+          <path d="M700 174 L742 174" class="s-M" stroke-width="1.8" fill="none" marker-end="url(#ar-m)"/>
+          <text x="721" y="164" text-anchor="middle" class="xs f-Mi mono">m_t</text>
+          <rect x="744" y="112" width="122" height="124" rx="11" class="fs-D" stroke="var(--d)" stroke-width="1.2"/>
+          <text x="805" y="160" text-anchor="middle" class="big f-Di">DiT</text>
+          <text x="805" y="178" text-anchor="middle" class="xs f-ink3">Wan2.1 骨干</text>
+          <text x="805" y="196" text-anchor="middle" class="xs f-ink3">流匹配去噪</text>
+          <path d="M805 62 L805 108" class="s-ink3" stroke-width="1.4" fill="none" marker-end="url(#ar-i)"/>
+          <text x="805" y="52" text-anchor="middle" class="sml f-ink3">动作 a<tspan class="xs">t+1:t+K</tspan></text>
+          <path d="M866 174 L906 174" class="s-D" stroke-width="1.6" fill="none" marker-end="url(#ar-d)"/>
+          <rect x="908" y="132" width="76" height="84" rx="8" class="fs-D" stroke="var(--d)" stroke-width="1.1"/>
+          <text x="946" y="168" text-anchor="middle" class="sml f-Di">新帧</text>
+          <text x="946" y="186" text-anchor="middle" class="xs f-ink3">x̂</text>
+          <path d="M946 216 L946 300 L104 300 L104 276" class="s-ink3 dash" stroke-width="1.2" fill="none" marker-end="url(#ar-i)"/>
+          <text x="520" y="316" text-anchor="middle" class="xs f-ink3">生成结果连同它的相机一起追加回历史 —— 自回归闭环</text>
+        </g>
+
+        <!-- mode A: explicit frame retrieval -->
+        <g id="mm-a" hidden>
+          <rect x="230" y="60" width="466" height="226" rx="12" class="f-surf2" stroke="var(--rule2)" stroke-width="1.1" stroke-dasharray="6 5"/>
+          <text x="248" y="82" class="big f-ink">M = 检索规则 + 保留的帧</text>
+          <text x="248" y="100" class="sml f-ink3">WorldMem · Context-as-Memory · FramePack · RELIC</text>
+          <g class="fs-H" stroke="var(--h)" stroke-width="1.1">
+            <rect x="252" y="120" width="52" height="38" rx="4"/><rect x="314" y="120" width="52" height="38" rx="4"/><rect x="376" y="120" width="52" height="38" rx="4"/>
+            <rect x="252" y="168" width="52" height="38" rx="4"/><rect x="314" y="168" width="52" height="38" rx="4"/><rect x="376" y="168" width="52" height="38" rx="4"/>
+          </g>
+          <rect x="314" y="120" width="52" height="38" rx="4" fill="none" stroke="var(--ok)" stroke-width="2.4"/>
+          <rect x="376" y="168" width="52" height="38" rx="4" fill="none" stroke="var(--bad)" stroke-width="2.4"/>
+          <text x="340" y="228" text-anchor="middle" class="xs f-Ki">选对了</text>
+          <text x="402" y="228" text-anchor="middle" class="xs f-Bi">选错了</text>
+          <path d="M436 162 L486 162" class="s-ink3" stroke-width="1.4" fill="none" marker-end="url(#ar-i)"/>
+          <text x="461" y="152" text-anchor="middle" class="xs f-ink3">按视野重叠 / 相似度</text>
+          <rect x="492" y="118" width="188" height="92" rx="10" class="fs-B" stroke="var(--bad)" stroke-width="1.1"/>
+          <text x="586" y="142" text-anchor="middle" class="sml f-Bi">两处代价</text>
+          <text x="586" y="162" text-anchor="middle" class="xs f-ink2">① 启发式选错 → 直接变成不一致</text>
+          <text x="586" y="180" text-anchor="middle" class="xs f-ink2">② 保留帧之间外观高度冗余，</text>
+          <text x="586" y="196" text-anchor="middle" class="xs f-ink2">定长预算装不下多少场景信息</text>
+          <text x="586" y="236" text-anchor="middle" class="xs f-ink3">几何：只隐含在像素里，没人显式约束</text>
+        </g>
+
+        <!-- mode B: explicit 3D reconstruction -->
+        <g id="mm-b" hidden>
+          <rect x="230" y="60" width="466" height="226" rx="12" class="f-surf2" stroke="var(--rule2)" stroke-width="1.1" stroke-dasharray="6 5"/>
+          <text x="248" y="82" class="big f-ink">M = 在线三维重建（点云 / surfel / 3D cache）</text>
+          <text x="248" y="100" class="sml f-ink3">GEN3C · VMem · Long-term Spatial Memory · UCM</text>
+          <rect x="250" y="116" width="128" height="96" rx="9" class="fs-M" stroke="var(--m)" stroke-width="1.1"/>
+          <text x="314" y="136" text-anchor="middle" class="sml f-Mi">重建管线</text>
+          <g class="f-Mi">
+            <circle cx="276" cy="160" r="2.4"/><circle cx="292" cy="152" r="2.4"/><circle cx="308" cy="166" r="2.4"/><circle cx="324" cy="154" r="2.4"/>
+            <circle cx="340" cy="172" r="2.4"/><circle cx="284" cy="180" r="2.4"/><circle cx="312" cy="188" r="2.4"/><circle cx="344" cy="192" r="2.4"/>
+          </g>
+          <text x="314" y="206" text-anchor="middle" class="xs f-ink3">与生成器并行常驻</text>
+          <path d="M380 164 L424 164" class="s-M" stroke-width="1.4" fill="none" marker-end="url(#ar-m)"/>
+          <text x="402" y="154" text-anchor="middle" class="xs f-ink3">渲染回投</text>
+          <rect x="430" y="118" width="250" height="94" rx="10" class="fs-B" stroke="var(--bad)" stroke-width="1.1"/>
+          <text x="555" y="140" text-anchor="middle" class="sml f-Bi">代价</text>
+          <text x="555" y="159" text-anchor="middle" class="xs f-ink2">推理时多一整条重建管线（延迟 + 工程复杂度）</text>
+          <text x="555" y="177" text-anchor="middle" class="xs f-ink2">动态物体 / 遮挡 / 弱纹理处容易错</text>
+          <text x="555" y="195" text-anchor="middle" class="xs f-ink2">长 rollout 上重建误差会累积</text>
+          <text x="463" y="236" text-anchor="middle" class="xs f-ink3">几何：显式且可读，但也显式地会错</text>
+        </g>
+
+        <!-- mode C: plain implicit -->
+        <g id="mm-c" hidden>
+          <rect x="230" y="60" width="466" height="226" rx="12" class="f-surf2" stroke="var(--rule2)" stroke-width="1.1" stroke-dasharray="6 5"/>
+          <text x="248" y="82" class="big f-ink">M = 学出来的定长状态</text>
+          <text x="248" y="100" class="sml f-ink3">StateSpaceDiffuser · VideoSSM · Pack-and-Force · Infinite-World</text>
+          <rect x="252" y="122" width="150" height="86" rx="9" class="fs-M" stroke="var(--m)" stroke-width="1.2"/>
+          <text x="327" y="146" text-anchor="middle" class="sml f-Mi">定长记忆状态</text>
+          <g class="f-M" opacity=".72">
+            <rect x="266" y="158" width="16" height="16" rx="3"/><rect x="288" y="158" width="16" height="16" rx="3"/><rect x="310" y="158" width="16" height="16" rx="3"/>
+            <rect x="332" y="158" width="16" height="16" rx="3"/><rect x="354" y="158" width="16" height="16" rx="3"/><rect x="376" y="158" width="16" height="16" rx="3"/>
+          </g>
+          <text x="327" y="196" text-anchor="middle" class="xs f-ink3">大小不随历史增长 ✔</text>
+          <path d="M404 164 L448 164" class="s-ink3" stroke-width="1.4" fill="none" marker-end="url(#ar-i)"/>
+          <rect x="454" y="112" width="226" height="106" rx="10" class="fs-B" stroke="var(--bad)" stroke-width="1.1"/>
+          <text x="567" y="134" text-anchor="middle" class="sml f-Bi">缺的那一环</text>
+          <text x="567" y="154" text-anchor="middle" class="xs f-ink2">训练信号只有「下一段视频要生成得像」</text>
+          <text x="567" y="172" text-anchor="middle" class="xs f-ink2">没有任何一处规定这个状态里必须</text>
+          <text x="567" y="190" text-anchor="middle" class="xs f-ink2">装的是<tspan class="f-ink" font-weight="600">跨视角的场景结构</tspan></text>
+          <text x="567" y="208" text-anchor="middle" class="xs f-ink2">→ 容量可能被冗余外观吃掉</text>
+          <text x="463" y="248" text-anchor="middle" class="xs f-ink3">这就是本文全篇要补的那个洞</text>
+        </g>
+
+        <!-- mode D: GIM-World -->
+        <g id="mm-d">
+          <rect x="230" y="60" width="466" height="226" rx="12" class="f-surf2" stroke="var(--m)" stroke-width="1.4"/>
+          <text x="248" y="82" class="big f-ink">M = 定长状态 <tspan class="f-Gi">+ 训练期的一道问答题</tspan></text>
+          <text x="248" y="100" class="sml f-ink3">GIM-World（本文）</text>
+          <rect x="248" y="118" width="150" height="80" rx="9" class="fs-M" stroke="var(--m)" stroke-width="1.4"/>
+          <text x="323" y="140" text-anchor="middle" class="sml f-Mi">记忆 token m</text>
+          <g class="f-M" opacity=".78">
+            <rect x="262" y="152" width="16" height="16" rx="3"/><rect x="284" y="152" width="16" height="16" rx="3"/><rect x="306" y="152" width="16" height="16" rx="3"/>
+            <rect x="328" y="152" width="16" height="16" rx="3"/><rect x="350" y="152" width="16" height="16" rx="3"/><rect x="372" y="152" width="16" height="16" rx="3"/>
+          </g>
+          <text x="323" y="188" text-anchor="middle" class="xs f-ink3">N_m 固定</text>
+          <!-- geometry branch -->
+          <path d="M390 198 L390 220" class="s-M" stroke-width="1.6" fill="none" marker-end="url(#ar-g)"/>
+          <text x="402" y="214" class="xs f-Gi">K, V</text>
+          <rect x="238" y="224" width="98" height="54" rx="9" class="fs-G" stroke="var(--g)" stroke-width="1.2"/>
+          <text x="287" y="244" text-anchor="middle" class="sml f-Gi">ray map q_i</text>
+          <text x="287" y="262" text-anchor="middle" class="xs f-ink3">来自历史相机 c_i</text>
+          <path d="M336 251 L350 251" class="s-G" stroke-width="1.5" fill="none" marker-end="url(#ar-g)"/>
+          <text x="343" y="238" text-anchor="middle" class="xs f-Gi">Q</text>
+          <rect x="354" y="224" width="118" height="54" rx="9" class="fs-G" stroke="var(--g)" stroke-width="1.4"/>
+          <text x="413" y="244" text-anchor="middle" class="sml f-Gi">几何头</text>
+          <text x="413" y="262" text-anchor="middle" class="xs f-ink3">Cross → Self → FFN</text>
+          <path d="M472 251 L486 251" class="s-G" stroke-width="1.5" fill="none" marker-end="url(#ar-g)"/>
+          <rect x="488" y="224" width="96" height="54" rx="9" class="fs-G" stroke="var(--g)" stroke-width="1.1"/>
+          <text x="536" y="244" text-anchor="middle" class="sml f-Gi">余弦损失</text>
+          <text x="536" y="262" text-anchor="middle" class="xs f-ink3">L_geo</text>
+          <path d="M602 251 L588 251" class="s-G" stroke-width="1.5" fill="none" marker-end="url(#ar-g)"/>
+          <rect x="604" y="224" width="90" height="54" rx="9" class="f-surf3" stroke="var(--g)" stroke-width="1.2" stroke-dasharray="4 3"/>
+          <text x="649" y="244" text-anchor="middle" class="sml f-Gi">VGGT</text>
+          <text x="649" y="262" text-anchor="middle" class="xs f-ink3">冻结 · 只做教师</text>
+          <!-- discarded note -->
+          <rect x="430" y="112" width="252" height="72" rx="10" class="fs-K" stroke="var(--ok)" stroke-width="1.1"/>
+          <text x="556" y="134" text-anchor="middle" class="sml f-Ki">推理时整条紫色支路删掉</text>
+          <text x="556" y="154" text-anchor="middle" class="xs f-ink2">几何头 + VGGT 都不参与 rollout</text>
+          <text x="556" y="172" text-anchor="middle" class="xs f-ink2">留下的只有编码器（0.26% DiT 时间）</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption id="mmCap"><b>本文的位置：几何不进生成器，进记忆。</b>四个标签页共用左边的历史输入和右边的 DiT——差别全部集中在中间那一块「记忆算子 <span class="m">M</span>」。
+    前两种是<b>显式记忆</b>：把过去当作可枚举的条目留下来（帧、KV、点云），代价分别是检索启发式和重建管线。第三种是<b>隐式记忆</b>：压成定长状态，尺寸不随历史增长，
+    但训练信号只有「下一段视频生成得像不像」，<b>没有任何一处约束这个状态里装的是场景结构</b>。本文补的正是这一处：在训练期挂一条紫色支路，
+    用历史相机的 ray map 去查询记忆，要求查出来的特征对上冻结 VGGT 的特征。<b>这条支路推理时整条删掉</b>，所以它不改变部署形态，只改变记忆被训练成什么样。</figcaption>
+  </figure>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="lb">3D 重投影分数 · 第一人称</div>
+      <div class="vl">81.70</div>
+      <div class="dl">最强显式基线 FramePack <b>73.97</b>、隐式 SSM <b>53.95</b>（Tab. 1）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">几何监督带来的增量</div>
+      <div class="vl">+22.90</div>
+      <div class="dl">58.80 → 81.70；同一组里 MSE 只从 0.0628 → <b>0.0614</b>（Tab. 2）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">记忆编码器耗时</div>
+      <div class="vl">0.26%</div>
+      <div class="dl">相对 DiT；全注意力版 <b>2.80%</b>，s=4 版 0.10%（Tab. 4）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">训练预算</div>
+      <div class="vl">8K 步</div>
+      <div class="dl">batch 32、lr 1e−5、单阶段端到端，λ<sub>geo</sub> = <b>0.05</b>（§4.1）</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 00 TL;DR -->
+<section class="sec" id="s-tldr">
+  <div class="eyebrow"><span class="n">00</span><span class="t">TL;DR</span><span class="line"></span></div>
+  <h2>三件套：一个编码器、一道训练期问答题、一条剪枝规则</h2>
+  <p class="lead">论文的方法部分只有三块，而且互相独立到可以分开评价。<b>真正新的只有中间那一块</b>——把 3D 基础模型的监督
+  从「贴在生成器的中间层上」挪到「贴在记忆状态上」，并且用<b>相机 ray map 作为查询</b>来绕开「压缩后的 token 和输入帧不再一一对应」这个障碍。
+  另外两块都是成熟零件的合理组装。</p>
+
+  <div class="grid3">
+    <div class="card cM">
+      <div class="mono">① §3.2 编码器</div>
+      <h5>把变长历史压成 N<sub>m</sub> 个槽</h5>
+      一组可学习的 memory query 去 attend 历史 token，两层 block 就结束。注意力在 <span class="mono">s×s</span> 池化后的低分辨率上做（<b>s = 2</b>），FFN 保持全分辨率。
+      记忆尺寸不随历史长度变化，推理开销 0.26% DiT。
+    </div>
+    <div class="card cG">
+      <div class="mono">② §3.3 几何监督</div>
+      <h5>用历史相机去「考」记忆</h5>
+      随机抽一个历史帧 <span class="m">i</span>，把它的位姿变成逐 patch 的射线查询，cross-attend 记忆，要求输出对齐冻结 VGGT 在该帧的特征（逐 patch 余弦）。
+      <b>训练期存在，推理期删除。</b>这是全文唯一的原创机制。
+    </div>
+    <div class="card cH">
+      <div class="mono">③ §3.4 剪枝</div>
+      <h5>编码之前先扔掉冗余帧</h5>
+      在「位置 + 朝向 + 时间」的高斯过程下，按 Krause 等人的传感器布点准则挑 <span class="mono">K = 200</span> 帧，使保留集对被丢掉的帧最有预测力，贪心求解。
+      记忆是定长的，但<b>建记忆的成本仍随历史增长</b>，这块专治这个。
+    </div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 1</span><span class="ti">全流程：训练时多两个模块，推理时它们整块消失</span></div>
+    <div class="tabs" role="tablist" aria-label="阶段">
+      <button class="tab" role="tab" aria-selected="true" data-ph="train">训练时</button>
+      <button class="tab" role="tab" aria-selected="false" data-ph="infer">推理时（自回归 rollout）</button>
+    </div>
+    <div class="figbody scrollx">
+      <svg viewBox="0 0 1000 440" style="min-width:840px" role="img" aria-label="GIM-World 全流程图：历史帧经 VAE 编码与信息引导剪枝后送入记忆编码器得到定长记忆，记忆沿时间轴拼接给 DiT 生成下一段；训练时额外有一条 ray map 查询几何头并对齐 VGGT 特征的支路">
+        <!-- main chain -->
+        <g>
+          <rect x="18" y="76" width="96" height="92" rx="10" class="fs-H" stroke="var(--h)" stroke-width="1.2"/>
+          <text x="66" y="112" text-anchor="middle" class="sml f-Hi">历史帧</text>
+          <text x="66" y="130" text-anchor="middle" class="xs f-ink3">x₁ … x_t</text>
+          <text x="66" y="148" text-anchor="middle" class="xs f-ink3">+ 位姿 c_i</text>
+          <path d="M114 122 L142 122" class="s-H" stroke-width="1.5" fill="none" marker-end="url(#ar-h)"/>
+
+          <rect x="144" y="86" width="72" height="72" rx="9" class="f-surf3" stroke="var(--rule2)" stroke-width="1.1"/>
+          <text x="180" y="116" text-anchor="middle" class="sml f-ink2">VAE</text>
+          <text x="180" y="133" text-anchor="middle" class="xs f-ink3">Encoder</text>
+          <path d="M216 122 L244 122" class="s-H" stroke-width="1.5" fill="none" marker-end="url(#ar-h)"/>
+
+          <rect x="246" y="86" width="86" height="72" rx="9" class="fs-H" stroke="var(--h)" stroke-width="1.1"/>
+          <text x="289" y="116" text-anchor="middle" class="sml f-Hi">历史 latent</text>
+          <text x="289" y="133" text-anchor="middle" class="xs f-ink3">patch token</text>
+          <path d="M332 122 L360 122" class="s-H" stroke-width="1.5" fill="none" marker-end="url(#ar-h)"/>
+
+          <rect x="362" y="80" width="96" height="84" rx="9" class="fs-H" stroke="var(--h)" stroke-width="1.5"/>
+          <text x="410" y="104" text-anchor="middle" class="sml f-Hi">信息引导剪枝</text>
+          <text x="410" y="122" text-anchor="middle" class="xs f-ink3">GP + 互信息贪心</text>
+          <text x="410" y="140" text-anchor="middle" class="xs f-ink3 mono">|S| ≤ K = 200</text>
+          <text x="410" y="156" text-anchor="middle" class="xs f-ink3">§3.4</text>
+          <path d="M458 122 L486 122" class="s-M" stroke-width="1.5" fill="none" marker-end="url(#ar-m)"/>
+
+          <rect x="488" y="76" width="112" height="92" rx="10" class="fs-M" stroke="var(--m)" stroke-width="1.5"/>
+          <text x="544" y="100" text-anchor="middle" class="sml f-Mi">记忆编码器</text>
+          <text x="544" y="118" text-anchor="middle" class="xs f-ink3">2 × [Compact-Attn</text>
+          <text x="544" y="133" text-anchor="middle" class="xs f-ink3">+ 全分辨率 FFN]</text>
+          <text x="544" y="152" text-anchor="middle" class="xs f-ink3">§3.2</text>
+          <path d="M600 122 L628 122" class="s-M" stroke-width="1.5" fill="none" marker-end="url(#ar-m)"/>
+
+          <rect x="630" y="86" width="86" height="72" rx="9" class="fs-M" stroke="var(--m)" stroke-width="1.6"/>
+          <text x="673" y="112" text-anchor="middle" class="sml f-Mi">记忆 m</text>
+          <text x="673" y="130" text-anchor="middle" class="xs f-ink3 mono">N_m 个 token</text>
+          <text x="673" y="147" text-anchor="middle" class="xs f-ink3">定长</text>
+
+          <path d="M716 122 L746 122" class="s-M" stroke-width="1.6" fill="none" marker-end="url(#ar-m)"/>
+          <text x="731" y="112" text-anchor="middle" class="xs f-ink3">沿时间轴拼接</text>
+
+          <rect x="748" y="80" width="96" height="84" rx="10" class="fs-D" stroke="var(--d)" stroke-width="1.4"/>
+          <text x="796" y="116" text-anchor="middle" class="big f-Di">DiT</text>
+          <text x="796" y="136" text-anchor="middle" class="xs f-ink3">Wan2.1</text>
+          <path d="M796 40 L796 76" class="s-ink3" stroke-width="1.3" fill="none" marker-end="url(#ar-i)"/>
+          <text x="796" y="32" text-anchor="middle" class="xs f-ink3">动作嵌入 → 加进 timestep embedding</text>
+          <path d="M844 122 L874 122" class="s-D" stroke-width="1.5" fill="none" marker-end="url(#ar-d)"/>
+          <rect x="876" y="86" width="100" height="72" rx="9" class="fs-D" stroke="var(--d)" stroke-width="1.1"/>
+          <text x="926" y="112" text-anchor="middle" class="sml f-Di">下一段 latent</text>
+          <text x="926" y="130" text-anchor="middle" class="xs f-ink3">x̂_{t+1:t+K}</text>
+        </g>
+
+        <!-- training-only: flow matching loss -->
+        <g id="ph-train">
+          <path d="M796 164 L796 196" class="s-D" stroke-width="1.4" fill="none" marker-end="url(#ar-d)"/>
+          <rect x="742" y="198" width="108" height="38" rx="8" class="fs-D" stroke="var(--d)" stroke-width="1.1"/>
+          <text x="796" y="222" text-anchor="middle" class="sml f-Di">流匹配 L_FM</text>
+
+          <!-- geometry branch -->
+          <path d="M673 158 L673 258" class="s-G" stroke-width="1.6" fill="none" marker-end="url(#ar-g)"/>
+          <text x="686" y="206" class="xs f-Gi">K, V</text>
+          <rect x="418" y="262" width="150" height="72" rx="10" class="fs-G" stroke="var(--g)" stroke-width="1.2"/>
+          <text x="493" y="286" text-anchor="middle" class="sml f-Gi">ray map 查询 q_i</text>
+          <text x="493" y="304" text-anchor="middle" class="xs f-ink3">逐 patch [o_i , d_{i,u,v}]</text>
+          <text x="493" y="321" text-anchor="middle" class="xs f-ink3">+ 可学习 2D 位置嵌入</text>
+          <path d="M568 298 L600 298" class="s-G" stroke-width="1.5" fill="none" marker-end="url(#ar-g)"/>
+          <text x="584" y="288" text-anchor="middle" class="xs f-Gi">Q</text>
+          <rect x="602" y="262" width="142" height="72" rx="10" class="fs-G" stroke="var(--g)" stroke-width="1.4"/>
+          <text x="673" y="284" text-anchor="middle" class="sml f-Gi">几何头</text>
+          <text x="673" y="301" text-anchor="middle" class="xs f-ink3">CrossAttn → SelfAttn</text>
+          <text x="673" y="317" text-anchor="middle" class="xs f-ink3">→ FFN → Ĝ_i</text>
+          <path d="M744 298 L776 298" class="s-G" stroke-width="1.5" fill="none" marker-end="url(#ar-g)"/>
+          <rect x="778" y="266" width="118" height="64" rx="10" class="fs-G" stroke="var(--g)" stroke-width="1.2"/>
+          <text x="837" y="290" text-anchor="middle" class="sml f-Gi">逐 patch 余弦</text>
+          <text x="837" y="308" text-anchor="middle" class="xs f-ink3">L_geo</text>
+          <path d="M837 378 L837 334" class="s-G" stroke-width="1.4" fill="none" marker-end="url(#ar-g)"/>
+          <rect x="778" y="380" width="118" height="46" rx="9" class="f-surf3" stroke="var(--g)" stroke-width="1.2" stroke-dasharray="4 3"/>
+          <text x="837" y="400" text-anchor="middle" class="sml f-Gi">VGGT（冻结）</text>
+          <text x="837" y="416" text-anchor="middle" class="xs f-ink3">G_i</text>
+          <path d="M66 168 L66 402 L772 402" class="s-G dash" stroke-width="1.2" fill="none" marker-end="url(#ar-g)"/>
+          <text x="330" y="394" class="xs f-Gi">均匀抽 1 帧 i，把它的图送 VGGT、把它的位姿变成 ray map</text>
+          <path d="M418 298 L360 298" class="s-G" stroke-width="1.3" fill="none" marker-end="url(#ar-g)" transform="translate(0,0)" opacity="0"/>
+          <rect x="18" y="252" width="330" height="60" rx="10" class="fs-K" stroke="var(--ok)" stroke-width="1.2"/>
+          <text x="183" y="274" text-anchor="middle" class="sml f-Ki">总目标 L = L_FM + λ · L_geo，λ = 0.05</text>
+          <text x="183" y="294" text-anchor="middle" class="xs f-ink2">编码器 / 几何头 / DiT 一起训，单阶段，无预热无微调</text>
+        </g>
+
+        <!-- inference-only -->
+        <g id="ph-infer" hidden>
+          <path d="M926 158 L926 372 L66 372 L66 172" class="s-D dash" stroke-width="1.5" fill="none" marker-end="url(#ar-d)"/>
+          <text x="500" y="364" text-anchor="middle" class="sml f-Di">生成结果 + 它的相机 → 追加进历史 → 下一轮重新剪枝、重新编码</text>
+          <rect x="418" y="238" width="478" height="92" rx="11" class="fs-K" stroke="var(--ok)" stroke-width="1.3" stroke-dasharray="7 5"/>
+          <text x="657" y="266" text-anchor="middle" class="big f-Ki">几何头与 VGGT 在这里整块删除</text>
+          <text x="657" y="288" text-anchor="middle" class="sml f-ink2">rollout 时只剩：剪枝 → 记忆编码器 → DiT</text>
+          <text x="657" y="310" text-anchor="middle" class="sml f-ink2">几何知识已经被「烤」进编码器的权重里，不再需要教师</text>
+          <rect x="18" y="238" width="380" height="92" rx="11" class="f-surf2" stroke="var(--rule2)" stroke-width="1.1"/>
+          <text x="208" y="264" text-anchor="middle" class="sml f-ink2">注意：记忆<tspan class="f-ink" font-weight="600">不是循环状态</tspan></text>
+          <text x="208" y="286" text-anchor="middle" class="xs f-ink3">每一步都从「当前剪枝后的历史」重新编码一遍</text>
+          <text x="208" y="304" text-anchor="middle" class="xs f-ink3">被剪掉的帧不会以任何形式留在 m 里</text>
+          <text x="208" y="322" text-anchor="middle" class="xs f-ink3">（据 Fig. 2 的数据流推断，论文未明说）</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption id="phCap"><b>训练时：</b>一次前向里同时算两个损失。流匹配管「下一段像不像」，几何损失管「记忆里装的是不是场景结构」，权重 λ = 0.05，端到端一起更新，没有分阶段。
+    VGGT 全程冻结，只当教师用。<b>切到「推理时」看差别：</b>紫色的两块整体消失——这是这个设计最实用的一点，几何监督不改变部署形态，只改变权重被训成什么样。</figcaption>
+  </figure>
+
+  <div class="call key">
+    <div class="hd">一句话概括这篇论文的赌注</div>
+    <p>Geometry Forcing 把 VGGT 特征对齐到<b>生成器的中间层</b>，本文把同样的教师对齐到<b>记忆状态</b>。
+    在同一套骨干、同一份数据、同一个训练预算下，这个位置的差别把 3D 重投影分数从 <span class="mono">63.40</span> 拉到 <span class="mono">81.70</span>（Tab. 2）。
+    如果这个数字站得住，那么它说明的东西比方法本身更有意思：<b>长程一致性的瓶颈不在生成器懂不懂几何，而在被压缩的那个状态里到底留下了什么。</b></p>
+  </div>
+</section>
+
+<!-- ============================================================ 01 三种记忆 -->
+<section class="sec" id="s-fork">
+  <div class="eyebrow"><span class="n">01</span><span class="t">Problem</span><span class="line"></span></div>
+  <h2>观测离开上下文窗口之后，还剩下什么</h2>
+  <p class="lead">世界模型的长程一致性问题可以精确地重述一次：<b>当一帧观测滑出模型的原生上下文窗口之后，它以什么形式继续影响生成？</b>
+  这个问题的答案就是「记忆算子 <span class="m">M</span>」的设计空间。论文把它切成两族，并且给出了各自的失效模式。</p>
+
+  <div class="tbl">
+  <table>
+    <thead><tr><th>族</th><th>记忆里存的是</th><th>代表工作</th><th>论文点名的失效模式</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="2"><b>显式</b><br><span class="pill H">Explicit</span></td>
+        <td>历史帧 / 压缩 token / KV cache，按规则检索</td>
+        <td>WorldMem、Context-as-Memory、FramePack、RELIC、WorldPack</td>
+        <td>① 检索靠视觉相似度或视野重叠等启发式，<b>选错就直接变成不一致</b>；② 保留帧之间外观冗余，定长预算下真正装进去的场景信息有限</td></tr>
+      <tr><td>在线三维重建（点云 / surfel / 3D cache / 位置编码 warp）</td>
+        <td>GEN3C、VMem、Long-term Spatial Memory、UCM、Memory Forcing</td>
+        <td>要在生成器旁边常驻一条重建管线（<b>延迟 + 工程复杂度</b>）；对动态物体、遮挡、弱纹理敏感；长 rollout 上<b>重建误差会累积</b></td></tr>
+      <tr class="hl"><td><b>隐式</b><br><span class="pill M">Implicit</span></td>
+        <td>一个定长的、与生成器解耦的世界状态</td>
+        <td>StateSpaceDiffuser、VideoSSM、Pack-and-Force、Infinite-World</td>
+        <td><b>没有几何训练信号</b>。被压缩的外观信号跨视角高度冗余，压出来的状态没有任何机制被要求去编码跨视角结构</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="prose">
+    <p>把这张表读一遍就能看出本文的落点：它<b>不打算修复显式记忆</b>，而是接受隐式记忆「尺寸不随历史增长」这个优点，
+    然后专门去补它唯一的缺口——训练信号。这是一个很干净的论证结构，值得给分。</p>
+    <p>另一条相关的线是「把几何塞进视频生成器」。论文把它归纳成三条轴，并且明确说自己不走这三条：</p>
+    <ul>
+      <li><b>直接条件化</b>：把几何 token / point-map 投影拼进生成器输入（Uni3C、Geometry-as-Context、GEN3C、CineScene、LaVR）；</li>
+      <li><b>特征监督</b>：训练时把生成器骨干的中间特征对齐到 3D 特征（Geometry Forcing、REPA）；</li>
+      <li><b>后训练对齐</b>：从 3D 特征里导出奖励或偏好，再跑一轮 DPO / RL（VideoGPA、Epipolar-DPO、VGGRPO）。</li>
+    </ul>
+    <p>三条轴的共同点是<b>几何最终作用在生成器或它的输出上</b>。论文原文的表述是 “We take the opposite view. Geometry is best treated as a property of the
+    remembered world rather than only as an additional signal on the generator.” 这句话是全文的支点，后面所有设计都是它的推论。</p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">读到这里我的第一个疑问</div>
+    <p>「记忆 vs 生成器」这个二分法在<b>本文的架构下其实是滑动的</b>：记忆 <span class="m">m</span> 最终是沿时间轴拼进 DiT 的输入序列的（照搬 Context-as-Memory 的做法），
+    也就是说它是 DiT 的一段 context token。那么「监督记忆」和「监督生成器的输入端 token」的边界在哪？
+    我倾向于认为本文真正的对照不是「记忆 vs 生成器」，而是<b>「监督一组无帧序对应的抽象槽位」vs「监督一组与帧/patch 一一对应的特征」</b>——
+    这也正是 §3.3 里作者自己给出的技术理由。这个区别是实在的，但它比论文摘要里那句口号要窄。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 02 编码器 -->
+<section class="sec" id="s-enc">
+  <div class="eyebrow"><span class="n">02</span><span class="t">§3.2 Memory Encoder</span><span class="line"></span></div>
+  <h2>编码器：两层 block，注意力在池化后的分辨率上做</h2>
+  <p class="lead">这一块几乎没有新东西，但有两个设计决定值得单独拎出来：<b>相机信息只加在历史 token 上，memory query 保持 pose-free</b>；
+  以及 <b>Compact 只作用在注意力分支，FFN 留在全分辨率</b>。后者在消融里是全表最敏感的一个开关。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 2</span><span class="ti">编码器内部：可学习 query + 相机感知的历史 token，两轮 block 后取前 N<sub>m</sub> 个</span></div>
+    <div class="figbody scrollx">
+      <svg viewBox="0 0 1000 400" style="min-width:820px" role="img" aria-label="记忆编码器结构图：历史 patch token 加上线性相机嵌入，与 Nm 个可学习 memory query 拼接，经两层 Compact 自注意力与全分辨率前馈网络，取前 Nm 个 token 作为记忆">
+        <!-- inputs -->
+        <rect x="16" y="52" width="150" height="86" rx="10" class="fs-M" stroke="var(--m)" stroke-width="1.4"/>
+        <text x="91" y="76" text-anchor="middle" class="sml f-Mi">可学习 memory query</text>
+        <text x="91" y="94" text-anchor="middle" class="xs f-ink3 mono">Q₀ ∈ R^(N_m × d)</text>
+        <g class="f-M" opacity=".72"><rect x="36" y="106" width="14" height="14" rx="3"/><rect x="56" y="106" width="14" height="14" rx="3"/><rect x="76" y="106" width="14" height="14" rx="3"/><rect x="96" y="106" width="14" height="14" rx="3"/><rect x="116" y="106" width="14" height="14" rx="3"/></g>
+        <text x="91" y="133" text-anchor="middle" class="xs f-ink3">不加位姿 · pose-free</text>
+
+        <rect x="16" y="168" width="150" height="120" rx="10" class="fs-H" stroke="var(--h)" stroke-width="1.4"/>
+        <text x="91" y="190" text-anchor="middle" class="sml f-Hi">历史 patch token</text>
+        <text x="91" y="207" text-anchor="middle" class="xs f-ink3 mono">h_{i,p} , 网格 H_p × W_p</text>
+        <g class="f-H" opacity=".6"><rect x="36" y="218" width="14" height="14" rx="3"/><rect x="56" y="218" width="14" height="14" rx="3"/><rect x="76" y="218" width="14" height="14" rx="3"/><rect x="96" y="218" width="14" height="14" rx="3"/><rect x="116" y="218" width="14" height="14" rx="3"/></g>
+        <text x="91" y="253" text-anchor="middle" class="xs f-Hi">+ E_c(c_i)　线性相机嵌入</text>
+        <text x="91" y="271" text-anchor="middle" class="xs f-ink3">整帧共享一个向量，广播到全部 patch</text>
+
+        <path d="M166 95 L206 95 L206 150" class="s-M" stroke-width="1.5" fill="none" marker-end="url(#ar-m)"/>
+        <path d="M166 228 L206 228 L206 178" class="s-H" stroke-width="1.5" fill="none" marker-end="url(#ar-h)"/>
+        <rect x="182" y="150" width="48" height="28" rx="7" class="f-surf3" stroke="var(--rule2)"/>
+        <text x="206" y="169" text-anchor="middle" class="sml f-ink2">拼接</text>
+        <path d="M230 164 L262 164" class="s-ink3" stroke-width="1.5" fill="none" marker-end="url(#ar-i)"/>
+        <text x="246" y="154" text-anchor="middle" class="xs f-ink3 mono">Z₀</text>
+
+        <!-- block -->
+        <rect x="264" y="40" width="410" height="252" rx="12" class="f-surf2" stroke="var(--rule2)" stroke-width="1.2"/>
+        <text x="282" y="62" class="sml f-ink2">× 2 层 block（只有两层）</text>
+
+        <rect x="284" y="80" width="86" height="58" rx="9" class="fs-M" stroke="var(--m)" stroke-width="1.1"/>
+        <text x="327" y="104" text-anchor="middle" class="sml f-Mi">Compact</text>
+        <text x="327" y="122" text-anchor="middle" class="xs f-ink3">s × s 池化</text>
+        <path d="M370 109 L396 109" class="s-M" stroke-width="1.4" fill="none" marker-end="url(#ar-m)"/>
+        <rect x="398" y="80" width="102" height="58" rx="9" class="fs-M" stroke="var(--m)" stroke-width="1.1"/>
+        <text x="449" y="104" text-anchor="middle" class="sml f-Mi">自注意力</text>
+        <text x="449" y="122" text-anchor="middle" class="xs f-ink3">token 数 ÷ s²</text>
+        <path d="M500 109 L526 109" class="s-M" stroke-width="1.4" fill="none" marker-end="url(#ar-m)"/>
+        <rect x="528" y="80" width="86" height="58" rx="9" class="fs-M" stroke="var(--m)" stroke-width="1.1"/>
+        <text x="571" y="104" text-anchor="middle" class="sml f-Mi">Expand</text>
+        <text x="571" y="122" text-anchor="middle" class="xs f-ink3">线性还原</text>
+        <path d="M614 109 L642 109 L642 176 L620 176" class="s-M" stroke-width="1.4" fill="none" marker-end="url(#ar-m)"/>
+        <path d="M278 109 L278 176 L344 176" class="s-ink3 dash" stroke-width="1.2" fill="none" marker-end="url(#ar-i)"/>
+        <text x="300" y="196" class="xs f-ink3">残差</text>
+        <circle cx="356" cy="176" r="11" class="f-surf" stroke="var(--rule2)"/><text x="356" y="181" text-anchor="middle" class="sml f-ink2">+</text>
+        <path d="M368 176 L420 176" class="s-ink3" stroke-width="1.4" fill="none" marker-end="url(#ar-i)"/>
+        <rect x="422" y="152" width="196" height="48" rx="9" class="fs-D" stroke="var(--d)" stroke-width="1.4"/>
+        <text x="520" y="172" text-anchor="middle" class="sml f-Di">前馈网络 FFN</text>
+        <text x="520" y="190" text-anchor="middle" class="xs f-ink3">保持<tspan class="f-ink" font-weight="600">全分辨率</tspan>，不池化</text>
+        <text x="470" y="228" text-anchor="middle" class="xs f-ink3">Z ← Z + Expand(Attn(Compact(Z)))　　Z ← Z + FFN(Z)</text>
+        <text x="470" y="252" text-anchor="middle" class="xs f-ink3">query 段与 history 段使用<tspan class="f-ink2">各自独立的 RoPE 网格</tspan></text>
+        <text x="470" y="274" text-anchor="middle" class="xs f-ink3">消融结论：把 FFN 也一起池化（Global Compact），重投影分数从 81.70 掉到 62.45</text>
+
+        <!-- output -->
+        <path d="M674 164 L708 164" class="s-M" stroke-width="1.6" fill="none" marker-end="url(#ar-m)"/>
+        <rect x="710" y="120" width="122" height="88" rx="10" class="fs-M" stroke="var(--m)" stroke-width="1.6"/>
+        <text x="771" y="146" text-anchor="middle" class="sml f-Mi">取前 N_m 个 token</text>
+        <text x="771" y="166" text-anchor="middle" class="xs f-ink3">= 记忆 m</text>
+        <text x="771" y="186" text-anchor="middle" class="xs f-ink3">历史 token 段丢弃</text>
+        <path d="M832 164 L866 164" class="s-M" stroke-width="1.6" fill="none" marker-end="url(#ar-m)"/>
+        <rect x="868" y="120" width="118" height="88" rx="10" class="fs-D" stroke="var(--d)" stroke-width="1.2"/>
+        <text x="927" y="146" text-anchor="middle" class="sml f-Di">拼到目标 latent</text>
+        <text x="927" y="164" text-anchor="middle" class="xs f-ink3">沿<tspan class="f-ink2">时间轴</tspan>拼接</text>
+        <text x="927" y="182" text-anchor="middle" class="xs f-ink3">照搬 CaM 的做法</text>
+
+        <!-- compact detail -->
+        <g transform="translate(0,300)">
+          <text x="16" y="14" class="sml f-ink2">Compact 具体做什么（s = 2）：</text>
+          <g class="s-H nofill" stroke-width="1">
+            <rect x="204" y="0" width="16" height="16"/><rect x="220" y="0" width="16" height="16"/><rect x="236" y="0" width="16" height="16"/><rect x="252" y="0" width="16" height="16"/>
+            <rect x="204" y="16" width="16" height="16"/><rect x="220" y="16" width="16" height="16"/><rect x="236" y="16" width="16" height="16"/><rect x="252" y="16" width="16" height="16"/>
+            <rect x="204" y="32" width="16" height="16"/><rect x="220" y="32" width="16" height="16"/><rect x="236" y="32" width="16" height="16"/><rect x="252" y="32" width="16" height="16"/>
+            <rect x="204" y="48" width="16" height="16"/><rect x="220" y="48" width="16" height="16"/><rect x="236" y="48" width="16" height="16"/><rect x="252" y="48" width="16" height="16"/>
+          </g>
+          <rect x="204" y="0" width="32" height="32" fill="none" stroke="var(--m)" stroke-width="2"/>
+          <text x="236" y="80" text-anchor="middle" class="xs f-ink3">H_p × W_p 个 token</text>
+          <path d="M280 32 L322 32" class="s-M" stroke-width="1.5" fill="none" marker-end="url(#ar-m)"/>
+          <text x="301" y="22" text-anchor="middle" class="xs f-Mi">共享线性层</text>
+          <text x="301" y="50" text-anchor="middle" class="xs f-ink3">2×2 展平后投影</text>
+          <g class="s-M nofill" stroke-width="1.2">
+            <rect x="334" y="8" width="24" height="24"/><rect x="358" y="8" width="24" height="24"/>
+            <rect x="334" y="32" width="24" height="24"/><rect x="358" y="32" width="24" height="24"/>
+          </g>
+          <text x="358" y="80" text-anchor="middle" class="xs f-ink3">(H_p/2) × (W_p/2)，token 数 ÷ 4</text>
+          <path d="M400 32 L442 32" class="s-ink3" stroke-width="1.4" fill="none" marker-end="url(#ar-i)"/>
+          <text x="421" y="22" text-anchor="middle" class="xs f-ink3">注意力</text>
+          <path d="M470 32 L512 32" class="s-M" stroke-width="1.5" fill="none" marker-end="url(#ar-m)"/>
+          <text x="491" y="22" text-anchor="middle" class="xs f-Mi">Expand</text>
+          <text x="491" y="50" text-anchor="middle" class="xs f-ink3">另一个共享线性层</text>
+          <g class="s-H nofill" stroke-width="1">
+            <rect x="524" y="0" width="16" height="16"/><rect x="540" y="0" width="16" height="16"/><rect x="556" y="0" width="16" height="16"/><rect x="572" y="0" width="16" height="16"/>
+            <rect x="524" y="16" width="16" height="16"/><rect x="540" y="16" width="16" height="16"/><rect x="556" y="16" width="16" height="16"/><rect x="572" y="16" width="16" height="16"/>
+            <rect x="524" y="32" width="16" height="16"/><rect x="540" y="32" width="16" height="16"/><rect x="556" y="32" width="16" height="16"/><rect x="572" y="32" width="16" height="16"/>
+            <rect x="524" y="48" width="16" height="16"/><rect x="540" y="48" width="16" height="16"/><rect x="556" y="48" width="16" height="16"/><rect x="572" y="48" width="16" height="16"/>
+          </g>
+          <text x="556" y="80" text-anchor="middle" class="xs f-ink3">还原回全分辨率</text>
+          <text x="640" y="20" class="xs f-ink3">注意：Compact 对 <tspan class="f-Mi">query 段</tspan>和 <tspan class="f-Hi">history 段</tspan>用<tspan class="f-ink2">同一个</tspan>线性层，</text>
+          <text x="640" y="38" class="xs f-ink3">注意力实际跑在 (N_m + T·H_p·W_p) / s² 个 token 上。</text>
+          <text x="640" y="60" class="xs f-ink3">s = 4 更省（0.10% DiT），但 LPIPS 与重投影都退化 → s = 2 是折中点。</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption><b>唯一需要停下来想一下的是 E_c(c_i) 的形态。</b>相机嵌入是<b>整帧一个向量</b>再广播到该帧全部 patch 上的，
+    也就是说历史 token 只拿到<b>帧级</b>的位姿，逐像素的射线几何要靠编码器自己从内容里推。
+    而后面 §3.3 的几何查询用的却是<b>逐 patch 的射线</b>。这个不对称是有意的（查询要细、写入可以粗），但它也意味着
+    「写入端的位姿分辨率」比「读取端」低了整整一个网格，论文没有对此做消融。</figcaption>
+  </figure>
+
+  <h3><span class="ix">2.1</span>「定长」不等于「小」：一次 token 预算的推算</h3>
+  <div class="prose">
+    <p>论文对记忆大小只给了一句话：<b>「N<sub>m</sub> 设置为与 20 个 latent 帧的 patch token 数相同」</b>。这句话信息量比看上去大，
+    但要把它变成数字需要补两个论文没给的前提：训练分辨率，以及 Wan2.1 的哪个规格。下面这张表按 Wan2.1 VAE 的常见配置
+    （空间 8× 下采样、时间 4× 下采样、DiT patch (1,2,2)）推算，<b>是我的估算，不是论文数字</b>。</p>
+  </div>
+  <div class="tbl">
+  <table>
+    <thead><tr><th>量</th><th class="num">若训练在 480p (832×480)</th><th class="num">若训练在 720p (1280×720)</th><th>依据</th></tr></thead>
+    <tbody>
+      <tr><td>每个 latent 帧的 patch token 数</td><td class="num">1 560</td><td class="num">3 600</td><td>(W/8/2) × (H/8/2)</td></tr>
+      <tr class="hl"><td><b>记忆 N<sub>m</sub> = 20 latent 帧</b></td><td class="num">≈ 31 200</td><td class="num">≈ 72 000</td><td>§4.1 原话</td></tr>
+      <tr><td>20 latent 帧对应的原始帧数</td><td class="num" colspan="2">≈ 80 帧 ≈ 3.3 秒 @24fps</td><td>时间 4× 压缩</td></tr>
+      <tr><td>剪枝后历史（K=200 帧）的 token 数</td><td class="num">≈ 78 000</td><td class="num">≈ 180 000</td><td>200/4 = 50 个 latent 帧</td></tr>
+      <tr><td><b>记忆相对剪枝后历史的压缩比</b></td><td class="num" colspan="2">≈ <b>2.5×</b></td><td>31 200 / 78 000</td></tr>
+      <tr><td>相对完整历史（约 3 200 帧预测段）</td><td class="num" colspan="2">≈ 40×</td><td>其中 16× 来自剪枝</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="call warn">
+    <div class="hd">这张表让「隐式记忆很紧凑」这个叙事变了味</div>
+    <p>如果推算大致成立，那么<b>学出来的那一步压缩只有 2.5 倍左右</b>，从几千帧到 200 帧的那 16 倍是<b>剪枝规则</b>干的，而剪枝是一条不含学习成分的启发式（GP 核 + 贪心）。
+    换句话说，论文标题里的「implicit memory」在数量级上更接近<b>「一段被压了 2.5 倍的、经过挑选的上下文」</b>，而不是一个把整个场景抽象进去的小状态。
+    这不否定方法有效，但它确实改变了它和显式记忆的距离——记忆 token 数和一整段被生成的视频块是同一量级，和 Context-as-Memory 检索回来的上下文预算也是同一量级（论文也确实说了基线共享同样的 memory-token 预算）。
+    <b>真正的争议点因此不是「压得多小」，而是「同样大小的一块 context，被训练成装几何还是装外观」。</b>论文的实验恰好也是在回答后者。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 03 几何监督 -->
+<section class="sec" id="s-geo">
+  <div class="eyebrow"><span class="n">03</span><span class="t">§3.3 Camera-Queryable Geometry Supervision</span><span class="line"></span></div>
+  <h2>核心：为什么不能照抄 Geometry Forcing，以及绕过去的那一步</h2>
+  <p class="lead">这是全文唯一的原创机制，而它的动机是一个非常具体的技术障碍。
+  <b>Geometry Forcing 那种「逐 token 对齐」有一个隐含前提：学生的表示仍然按「帧 × 空间位置」索引</b>，所以才能一格对一格地贴上去。
+  记忆 token 恰好没有这个性质——压缩之后，第 k 个槽位不对应任何一帧、任何一个 patch。</p>
+
+  <div class="prose">
+    <p>论文对这一点的表述很清楚，我原样抄下来因为它是整个设计的逻辑起点：<b>“its tokens carry no one-to-one correspondence with input frames or patches,
+    and direct token matching would impose an artificial ordering on the memory slots and collapse the representation back toward a frame-indexed cache.”</b></p>
+    <p>这句话里藏着两层意思。第一层是<b>技术上做不到</b>：没有对应关系就没法算逐 token 损失。第二层更重要，是<b>不应该做</b>：
+    如果硬给记忆槽位安排一个「第 k 个槽对应第 k 帧」的顺序，那这个记忆就退化回一个按帧索引的 cache，隐式记忆的全部意义就没了。
+    所以作者需要一种<b>与槽位顺序无关</b>的读取方式——他们选的是<b>用相机去查询</b>：不问「第 k 个槽里是什么」，而问「从这个位姿看出去，应该是什么」。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 3</span><span class="ti">同一个 VGGT 教师，贴在两个不同的地方</span></div>
+    <div class="figbody scrollx">
+      <svg viewBox="0 0 1000 372" style="min-width:840px" role="img" aria-label="对比图：Geometry Forcing 把 VGGT 特征逐 token 对齐到扩散骨干的中间层；GIM-World 无法逐 token 对齐记忆槽位，改为用相机射线查询记忆再与 VGGT 特征比较">
+        <!-- left: geometry forcing -->
+        <rect x="14" y="26" width="470" height="330" rx="12" class="f-surf2" stroke="var(--rule2)" stroke-width="1.1"/>
+        <text x="34" y="50" class="big f-ink2">Geometry Forcing（对照组）</text>
+        <text x="34" y="68" class="xs f-ink3">几何信号贴在生成器骨干的中间层上</text>
+
+        <rect x="34" y="86" width="112" height="176" rx="9" class="fs-D" stroke="var(--d)" stroke-width="1.2"/>
+        <text x="90" y="106" text-anchor="middle" class="sml f-Di">扩散骨干</text>
+        <g class="s-D nofill" stroke-width="1"><rect x="48" y="118" width="84" height="24" rx="4"/><rect x="48" y="148" width="84" height="24" rx="4"/><rect x="48" y="178" width="84" height="24" rx="4"/><rect x="48" y="208" width="84" height="24" rx="4"/></g>
+        <rect x="48" y="148" width="84" height="24" rx="4" fill="none" stroke="var(--g)" stroke-width="2.4"/>
+        <text x="90" y="164" text-anchor="middle" class="xs f-Gi">中间层</text>
+        <text x="90" y="252" text-anchor="middle" class="xs f-ink3">特征仍按 帧×位置 索引</text>
+
+        <g transform="translate(176,110)">
+          <g class="s-D nofill" stroke-width=".9">
+            <rect x="0" y="0" width="15" height="15"/><rect x="15" y="0" width="15" height="15"/><rect x="30" y="0" width="15" height="15"/><rect x="45" y="0" width="15" height="15"/>
+            <rect x="0" y="15" width="15" height="15"/><rect x="15" y="15" width="15" height="15"/><rect x="30" y="15" width="15" height="15"/><rect x="45" y="15" width="15" height="15"/>
+            <rect x="0" y="30" width="15" height="15"/><rect x="15" y="30" width="15" height="15"/><rect x="30" y="30" width="15" height="15"/><rect x="45" y="30" width="15" height="15"/>
+            <rect x="0" y="45" width="15" height="15"/><rect x="15" y="45" width="15" height="15"/><rect x="30" y="45" width="15" height="15"/><rect x="45" y="45" width="15" height="15"/>
+          </g>
+          <text x="30" y="76" text-anchor="middle" class="xs f-Di">学生 h</text>
+        </g>
+        <g transform="translate(320,110)">
+          <g class="s-G nofill" stroke-width=".9">
+            <rect x="0" y="0" width="15" height="15"/><rect x="15" y="0" width="15" height="15"/><rect x="30" y="0" width="15" height="15"/><rect x="45" y="0" width="15" height="15"/>
+            <rect x="0" y="15" width="15" height="15"/><rect x="15" y="15" width="15" height="15"/><rect x="30" y="15" width="15" height="15"/><rect x="45" y="15" width="15" height="15"/>
+            <rect x="0" y="30" width="15" height="15"/><rect x="15" y="30" width="15" height="15"/><rect x="30" y="30" width="15" height="15"/><rect x="45" y="30" width="15" height="15"/>
+            <rect x="0" y="45" width="15" height="15"/><rect x="15" y="45" width="15" height="15"/><rect x="30" y="45" width="15" height="15"/><rect x="45" y="45" width="15" height="15"/>
+          </g>
+          <text x="30" y="76" text-anchor="middle" class="xs f-Gi">VGGT y</text>
+        </g>
+        <g class="s-G" stroke-width="1.1" opacity=".85">
+          <line x1="238" y1="118" x2="318" y2="118"/><line x1="238" y1="148" x2="318" y2="148"/><line x1="238" y1="163" x2="318" y2="163"/><line x1="238" y1="133" x2="318" y2="133"/>
+        </g>
+        <text x="278" y="106" text-anchor="middle" class="xs f-Gi">一格对一格</text>
+        <rect x="176" y="212" width="264" height="52" rx="9" class="fs-G" stroke="var(--g)" stroke-width="1.1"/>
+        <text x="308" y="232" text-anchor="middle" class="sml f-Gi">逐 token 余弦（+ scale 对齐）</text>
+        <text x="308" y="250" text-anchor="middle" class="xs f-ink3">前提：学生表示保持帧序 / 位置对应</text>
+        <text x="34" y="292" class="xs f-ink3">在本文的复现里（Tab. 2），这一路把重投影分数从 58.80 提到 63.40。</text>
+        <text x="34" y="312" class="xs f-ink3">它改善的是「生成器懂不懂几何」，而不是「记忆里留下了什么」。</text>
+        <text x="34" y="340" class="xs f-ink3 mono">Wu et al., ICLR 2026, arXiv:2507.07982</text>
+
+        <!-- right: GIM -->
+        <rect x="500" y="26" width="486" height="330" rx="12" class="fs-M" stroke="var(--m)" stroke-width="1.4"/>
+        <text x="520" y="50" class="big f-ink">GIM-World（本文）</text>
+        <text x="520" y="68" class="xs f-ink3">几何信号贴在记忆状态上，读取方式换成「相机提问」</text>
+
+        <rect x="520" y="86" width="122" height="72" rx="9" class="fs-M" stroke="var(--m)" stroke-width="1.3"/>
+        <text x="581" y="106" text-anchor="middle" class="sml f-Mi">记忆 m</text>
+        <g class="f-M" opacity=".7"><rect x="534" y="118" width="15" height="15" rx="3"/><rect x="556" y="118" width="15" height="15" rx="3"/><rect x="578" y="118" width="15" height="15" rx="3"/><rect x="600" y="118" width="15" height="15" rx="3"/><rect x="622" y="118" width="15" height="15" rx="3"/></g>
+        <text x="581" y="150" text-anchor="middle" class="xs f-ink3">槽位不对应任何帧 / patch</text>
+        <!-- crossed naive matching -->
+        <g opacity=".5">
+          <path d="M646 122 L700 122" class="s-ink3 dash" stroke-width="1.1" fill="none"/>
+          <path d="M660 108 L688 136 M688 108 L660 136" class="s-B" stroke-width="2.2" fill="none"/>
+        </g>
+        <text x="712" y="118" class="xs f-Bi">逐 token 对齐在这里无从谈起</text>
+        <text x="712" y="136" class="xs f-ink3">硬配对 = 给槽位强加顺序 = 退回帧缓存</text>
+
+        <path d="M581 158 L581 190" class="s-M" stroke-width="1.5" fill="none" marker-end="url(#ar-m)"/>
+        <text x="592" y="178" class="xs f-Mi">K, V</text>
+        <rect x="520" y="192" width="122" height="66" rx="9" class="fs-G" stroke="var(--g)" stroke-width="1.4"/>
+        <text x="581" y="214" text-anchor="middle" class="sml f-Gi">Cross-Attn</text>
+        <text x="581" y="232" text-anchor="middle" class="xs f-ink3">→ SelfAttn → FFN</text>
+        <text x="581" y="249" text-anchor="middle" class="xs f-ink3">几何头</text>
+        <path d="M430 225 L516 225" class="s-G" stroke-width="1.5" fill="none" marker-end="url(#ar-g)" opacity="0"/>
+        <path d="M520 292 L520 262" class="s-G" stroke-width="1.5" fill="none" marker-end="url(#ar-g)" opacity="0"/>
+        <rect x="520" y="278" width="122" height="62" rx="9" class="fs-G" stroke="var(--g)" stroke-width="1.1"/>
+        <text x="581" y="300" text-anchor="middle" class="sml f-Gi">ray map q_i</text>
+        <text x="581" y="318" text-anchor="middle" class="xs f-ink3">来自历史相机 c_i</text>
+        <text x="581" y="334" text-anchor="middle" class="xs f-ink3">逐 patch 的 [o, d]</text>
+        <path d="M581 278 L581 262" class="s-G" stroke-width="1.5" fill="none" marker-end="url(#ar-g)"/>
+        <text x="596" y="272" class="xs f-Gi">Q</text>
+
+        <path d="M642 225 L682 225" class="s-G" stroke-width="1.5" fill="none" marker-end="url(#ar-g)"/>
+        <g transform="translate(686,196)">
+          <g class="s-G nofill" stroke-width=".9">
+            <rect x="0" y="0" width="14" height="14"/><rect x="14" y="0" width="14" height="14"/><rect x="28" y="0" width="14" height="14"/><rect x="42" y="0" width="14" height="14"/>
+            <rect x="0" y="14" width="14" height="14"/><rect x="14" y="14" width="14" height="14"/><rect x="28" y="14" width="14" height="14"/><rect x="42" y="14" width="14" height="14"/>
+            <rect x="0" y="28" width="14" height="14"/><rect x="14" y="28" width="14" height="14"/><rect x="28" y="28" width="14" height="14"/><rect x="42" y="28" width="14" height="14"/>
+            <rect x="0" y="42" width="14" height="14"/><rect x="14" y="42" width="14" height="14"/><rect x="28" y="42" width="14" height="14"/><rect x="42" y="42" width="14" height="14"/>
+          </g>
+          <text x="28" y="72" text-anchor="middle" class="xs f-Gi">Ĝ_i（预测）</text>
+        </g>
+        <g transform="translate(830,196)">
+          <g class="s-ink3 nofill" stroke-width=".9">
+            <rect x="0" y="0" width="14" height="14"/><rect x="14" y="0" width="14" height="14"/><rect x="28" y="0" width="14" height="14"/><rect x="42" y="0" width="14" height="14"/>
+            <rect x="0" y="14" width="14" height="14"/><rect x="14" y="14" width="14" height="14"/><rect x="28" y="14" width="14" height="14"/><rect x="42" y="14" width="14" height="14"/>
+            <rect x="0" y="28" width="14" height="14"/><rect x="14" y="28" width="14" height="14"/><rect x="28" y="28" width="14" height="14"/><rect x="42" y="28" width="14" height="14"/>
+            <rect x="0" y="42" width="14" height="14"/><rect x="14" y="42" width="14" height="14"/><rect x="28" y="42" width="14" height="14"/><rect x="42" y="42" width="14" height="14"/>
+          </g>
+          <text x="28" y="72" text-anchor="middle" class="xs f-ink3">G_i（VGGT）</text>
+        </g>
+        <g class="s-G" stroke-width="1.1" opacity=".8">
+          <line x1="748" y1="203" x2="828" y2="203"/><line x1="748" y1="217" x2="828" y2="217"/><line x1="748" y1="231" x2="828" y2="231"/><line x1="748" y1="245" x2="828" y2="245"/>
+        </g>
+        <text x="788" y="192" text-anchor="middle" class="xs f-Gi">逐 patch 余弦</text>
+        <text x="712" y="300" class="xs f-ink3">对应关系由<tspan class="f-ink" font-weight="600">相机</tspan>建立，</text>
+        <text x="712" y="318" class="xs f-ink3">而不是由 token 顺序建立。</text>
+        <text x="712" y="336" class="xs f-ink3">槽位可以随便排列。</text>
+      </svg>
+    </div>
+    <figcaption><b>这张图就是本文的全部新意。</b>左右两侧的教师完全一样（冻结的 VGGT），损失形式也几乎一样（逐 patch 余弦），
+    差的只是<b>「贴在哪里」以及「用什么建立对应关系」</b>。左边用 token 顺序建立对应，因此只能贴在保留帧序的表示上；
+    右边用相机建立对应，因此可以贴在一组无序槽位上。<b>这个替换让「监督一个压缩状态」第一次变得可操作</b>——在此之前，
+    隐式记忆没有除了生成损失以外的任何训练信号可用。</figcaption>
+  </figure>
+
+  <h3><span class="ix">3.1</span>查询是怎么造出来的：ray map 的六个通道</h3>
+  <div class="eq">
+    ρ(<i>c</i><sub>i</sub>)<sub>u,v</sub> = [ <i>o</i><sub>i</sub> , <i>d</i><sub>i,u,v</sub> ] ∈ ℝ<sup>6</sup><span class="tagno">(11)</span>
+    <small>每个 patch (u, v) 对应一条<b>世界坐标系下的射线</b>：相机光心 <b>o</b>（3 维）拼上归一化的射线方向 <b>d</b>（3 维）。
+    注意 <b>o 对整张图是同一个值</b>，所以这 6 个通道里真正随 patch 变化的只有 3 个。</small>
+  </div>
+  <div class="eq">
+    <i>q</i><sub>i,u,v</sub> = MLP<sub class="r">ray</sub>( ρ(<i>c</i><sub>i</sub>)<sub>u,v</sub> ) + <i>e</i><sub>u,v</sub><span class="tagno">(12)</span>
+    <small>射线经一个小 MLP 嵌入，再加上一个<b>跨帧共享的可学习 2D 网格位置嵌入</b> e。后面这一项很关键：它给了查询一个「我是第几号 patch」的身份，
+    补上了射线本身不含的网格结构信息。</small>
+  </div>
+  <div class="eq">
+    <span class="r">Ĝ</span><sub>i</sub> = FFN( SelfAttn( CrossAttn( <i>q</i><sub>i</sub> , <i>m</i> ) ) )<span class="tagno">(13)</span>
+    <small><b>Cross-attention 负责「从记忆里取出回答这条射线所需的信息」</b>（Q 来自射线，K/V 来自记忆），
+    <b>self-attention 负责在 patch 网格内互通有无</b>，FFN 把维度投到 VGGT 的特征维 d<sub>g</sub>。</small>
+  </div>
+  <div class="eq">
+    <i>L</i><sub class="r">geo</sub> = 1 − <span class="frac"><span>1</span><span>H<sub>g</sub>W<sub>g</sub></span></span> Σ<sub>u,v</sub> cos( <span class="r">Ĝ</span><sub>i,u,v</sub> , <i>G</i><sub>i,u,v</sub> )<span class="tagno">(14)</span>
+    <small>纯角度对齐，<b>不含 Geometry Forcing 里的 scale alignment 项</b>。论文没有解释为什么省掉这一半——
+    而 Geometry Forcing 的消融里，Angular 单独用是 FVD 253，加上 Scale 是 243，作者认为「两者缺一不可」。这是一处可追问的取舍。</small>
+  </div>
+  <div class="prose">
+    <p>每一步<b>只均匀采样一个历史帧</b> <span class="m">i</span> 来算这个损失。论文给的理由是无偏性：因为 i 每步重采，单帧估计对「全帧对齐目标」是无偏的，
+    而每步的蒸馏开销与历史长度无关。<b>这个说法在数学上是对的</b>（对帧求平均的目标，均匀采样一项即为无偏估计），而且按 batch 32 × 8K 步算，
+    总共约 26 万次帧级查询，覆盖不是问题。真正的代价在别处：<b>每步只有一帧的梯度流回记忆，而这块记忆是由 200 帧压出来的</b>——
+    也就是说单步里 99.5% 的输入内容拿不到几何梯度，只能靠训练全程去平均。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 4</span><span class="ti">交互：转动相机，看 ray map 的六个通道怎么变</span></div>
+    <div class="ctl">
+      <label>偏航 yaw <input type="range" id="ryYaw" min="-180" max="180" value="35" step="1"><span class="val" id="ryYawV">35°</span></label>
+      <label>俯仰 pitch <input type="range" id="ryPit" min="-60" max="60" value="-12" step="1"><span class="val" id="ryPitV">−12°</span></label>
+      <label>光心 x <input type="range" id="ryOx" min="-8" max="8" value="2.4" step="0.1"><span class="val" id="ryOxV">2.4</span></label>
+      <label>视场 fov <input type="range" id="ryFov" min="30" max="100" value="62" step="1"><span class="val" id="ryFovV">62°</span></label>
+      <label>网格 <input type="range" id="ryN" min="8" max="24" value="16" step="2"><span class="val" id="ryNV">16²</span></label>
+    </div>
+    <div class="figbody" style="padding:12px 18px 8px">
+      <div class="sim"><canvas id="rayCv" width="1760" height="720" aria-label="ray map 可视化：左侧是按射线方向着色的 patch 网格，右侧是六个通道各自的灰度图，其中三个原点通道是常数"></canvas></div>
+    </div>
+    <div class="readout">
+      <div><div class="k">通道 o_x / o_y / o_z</div><div class="v" id="ryO">2.40 / 1.60 / 0.00</div></div>
+      <div><div class="k">随 patch 变化的通道</div><div class="v g">3 / 6</div></div>
+      <div><div class="k">中心 patch 的 d</div><div class="v" id="ryD">—</div></div>
+      <div><div class="k">查询 token 数</div><div class="v" id="ryCnt">256</div></div>
+    </div>
+    <figcaption><b>示意图，用于理解式 (11)–(12)，不是论文的可视化。</b>左边把每个 patch 的世界系射线方向映射成颜色，右边把 6 个通道拆开看：
+    <b>上排 o<sub>x</sub>, o<sub>y</sub>, o<sub>z</sub> 是三张纯色图</b>——光心对整帧是常数；<b>下排 d<sub>x</sub>, d<sub>y</sub>, d<sub>z</sub> 才有空间结构</b>。
+    拖「光心 x」只会改变上排的亮度，下排纹丝不动；拖 yaw / pitch 则相反。
+    这解释了为什么式 (12) 必须再加一个可学习的 2D 位置嵌入 <span class="m">e<sub>u,v</sub></span>：
+    在窄视场下相邻 patch 的方向差异极小，光靠 <span class="m">ρ</span> 很难把网格位置分辨开。
+    也解释了一个隐患：<b>o 是原始世界坐标</b>，论文没有提到任何归一化，这个量的尺度和原点是随数据集（UE5 场景）走的。</figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">我在这一节最想追问的两点</div>
+    <p><b>① 「VGGT encoder feature」到底取的是哪一层？</b>论文写的是 “the VGGT encoder feature map <span class="m">G<sub>i</sub></span>”。
+    VGGT 的结构是：DINOv2 patch encoder → 交替注意力聚合器（帧内 + 全局）→ 各任务头。
+    如果取的是<b>聚合器</b>输出，那是几何特征（Geometry Forcing 明确说取 “features from the Transformer backbone of VGGT”，并且聚合了全部 block）；
+    如果取的是<b>DINOv2 编码器</b>，那基本是语义特征——Geometry Forcing 自己的消融里，对齐 DINOv2 只能到 FVD 297，对齐 VGGT 是 243。
+    这个词的歧义直接决定「几何蒸馏」这个说法有多硬。</p>
+    <p><b>② VGGT 是<u>逐帧</u>跑的还是<u>多帧一起</u>跑的？</b>论文说 “dense per-frame geometric features”，并且每步只采一帧。
+    但 VGGT 的全局注意力是跨帧的：单帧输入时它退化成单目估计，<b>尺度与全局对齐都无从谈起</b>，不同帧的特征也就不在同一个坐标系里。
+    Geometry Forcing 恰好做过这个消融（Tab. 9）：对齐上下文长度 4 → 8 → 16 帧，FVD 从 261 单调降到 243，结论是「上下文越长几何信息越完整」。
+    如果 GIM-World 真的每步只送一帧进 VGGT，那么它蒸馏的「几何」其实是<b>单目、相对、每帧各自一套</b>的东西，
+    而它却指望记忆据此建立<b>跨视角一致</b>的结构——这中间是有缝的。论文没有交代这个细节。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 04 剪枝 -->
+<section class="sec" id="s-prune">
+  <div class="eyebrow"><span class="n">04</span><span class="t">§3.4 Information-Guided Pruning</span><span class="line"></span></div>
+  <h2>剪枝：记忆是定长的，但「建记忆」的成本不是</h2>
+  <p class="lead">这一块解决的问题很朴素：编码器要读完所有历史 token，而历史会一直变长。
+  论文的做法是<b>在编码之前先挑 K = 200 帧</b>，挑的准则不是「均匀」也不是「离得远」，而是
+  <b>「留下的这一批，对被扔掉的那一批最有预测力」</b>——直接搬的是 Krause 等人 2008 年的传感器布点准则。</p>
+
+  <div class="eq">
+    <i>S</i><sup>⋆</sup> = arg max<sub><i>S</i></sub> &nbsp;<i>I</i>( <i>S</i> ; <i>H</i> \ <i>S</i> ) &nbsp;&nbsp; s.t. |<i>S</i>| ≤ <i>K</i><span class="tagno">(15)</span>
+    <small>选一个子集，让它和「补集」之间的<b>互信息</b>最大。直觉：如果留下的帧能高度预测被扔掉的帧，那扔掉它们就没损失多少信息。
+    <b>注意这不是「覆盖最广」</b>——覆盖最广的解会去挑那些谁也预测不了的离群帧，而这个准则会主动避开它们。</small>
+  </div>
+  <div class="eq" style="font-size:17px">
+    <i>k</i>(<i>c</i><sub>i</sub>, <i>c</i><sub>j</sub>) = exp( − <span class="frac"><span>‖<i>p</i><sub>i</sub> − <i>p</i><sub>j</sub>‖²</span><span>2σ<sub>p</sub>²</span></span>
+    − <span class="frac"><span>∠(<i>f</i><sub>i</sub>, <i>f</i><sub>j</sub>)²</span><span>2σ<sub>r</sub>²</span></span>
+    − <span class="frac"><span>(<i>t</i><sub>i</sub> − <i>t</i><sub>j</sub>)²</span><span>2σ<sub>t</sub>²</span></span> )<span class="tagno">(16)</span>
+    <small>高斯过程的核：<b>位置近、朝向近、时间近</b>的两帧被认为高度相关。<span class="rB">三个带宽 σ<sub>p</sub>, σ<sub>r</sub>, σ<sub>t</sub> 的取值论文一个也没给</span>，
+    但下面这个玩具会告诉你它们决定了整个算法的行为。</small>
+  </div>
+  <div class="eq" style="font-size:17px">
+    σ²(<i>h</i> | <i>A</i>) = <i>k</i>(<i>h</i>,<i>h</i>) − <i>k</i><sub>hA</sub><sup>⊤</sup> <i>K</i><sub>AA</sub><sup>−1</sup> <i>k</i><sub>Ah</sub>
+    &nbsp;&nbsp;&nbsp;&nbsp;
+    <i>s</i><sub>t</sub> = arg max<sub><i>h</i></sub> <span class="frac"><span>1</span><span>2</span></span> log
+    <span class="frac"><span>σ²(<i>h</i> | <i>S</i><sub>t−1</sub>)</span><span>σ²(<i>h</i> | <span class="r">S̄</span><sub>t−1</sub> \ {<i>h</i>})</span></span><span class="tagno">(17)(18)</span>
+    <small><b>分子大</b> = 已选集合预测不了这一帧 → 加进来能带来新信息。<b>分母小</b> = 剩下那些没选的帧已经能预测它 → 它是有代表性的，不是离群点。
+    两者相除，挑的就是「<b>对我方是新的、对敌方是典型的</b>」那一帧。互信息在这个准则下是次模的，所以贪心有近最优保证。</small>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 5</span><span class="ti">交互沙盘：同一条会「走回头路」的轨迹，三种剪枝规则各自留下哪些帧</span></div>
+    <div class="ctl">
+      <div class="seg" id="prMode" role="group" aria-label="剪枝规则">
+        <button type="button" data-pm="uni" aria-pressed="false">均匀采样</button>
+        <button type="button" data-pm="fps" aria-pressed="false">Camera FPS</button>
+        <button type="button" data-pm="mi" aria-pressed="true">MI 贪心（本文）</button>
+      </div>
+      <label>预算 K <input type="range" id="prK" min="6" max="44" value="18" step="1"><span class="val" id="prKV">18</span></label>
+    </div>
+    <div class="ctl" style="border-top:0">
+      <label>σ<sub>p</sub> 位置带宽 <input type="range" id="prSp" min="0.4" max="6" value="1.8" step="0.1"><span class="val" id="prSpV">1.8</span></label>
+      <label>σ<sub>r</sub> 朝向带宽 <input type="range" id="prSr" min="0.1" max="3.14" value="0.7" step="0.05"><span class="val" id="prSrV">0.70</span></label>
+      <label>σ<sub>t</sub> 时间带宽 <input type="range" id="prSt" min="5" max="400" value="70" step="5"><span class="val" id="prStV">70</span></label>
+      <label><input type="checkbox" id="prVar" checked> 用颜色显示未选帧的残余不确定度</label>
+    </div>
+    <div class="figbody" style="padding:12px 18px 8px">
+      <div class="sim">
+        <canvas id="prCv" width="1760" height="860" aria-label="剪枝沙盘：俯视的相机轨迹上标出被保留的帧，未保留的帧按残余不确定度着色，底部时间条显示保留帧在时间轴上的分布"></canvas>
+        <span class="lab l">俯视图 · 相机轨迹（示意）</span>
+        <span class="lab r" id="prLab">MI 贪心</span>
+      </div>
+    </div>
+    <div class="readout">
+      <div><div class="k">互信息目标 I(S ; H\S) ↑</div><div class="v ok" id="prAvg">—</div></div>
+      <div><div class="k">平均残余不确定度 σ̄² ↓</div><div class="v" id="prMax">—</div></div>
+      <div><div class="k">保留帧的时间中位间隔</div><div class="v" id="prGap">—</div></div>
+      <div><div class="k">重访段被保留的比例</div><div class="v m" id="prRev">—</div></div>
+    </div>
+    <div class="bars">
+      <div class="pnl">
+        <div class="pt"><span>同一预算下三种规则的互信息目标（越高越好）</span><span id="prBarsK">K = 18</span></div>
+        <div class="brow" id="prB-uni"><div class="bl">均匀采样</div><div class="bt"><i style="width:40%"></i></div><div class="bv">—</div></div>
+        <div class="brow" id="prB-fps"><div class="bl">Camera FPS</div><div class="bt"><i style="width:40%"></i></div><div class="bv">—</div></div>
+        <div class="brow" id="prB-mi"><div class="bl">MI 贪心</div><div class="bt"><i style="width:40%"></i></div><div class="bv">—</div></div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i class="lnH"></i> 相机轨迹（含一段折返重访）</span>
+      <span><i class="dotM"></i> 被保留的帧（含朝向短线）</span>
+      <span><i class="dotI"></i> 被丢弃的帧</span>
+      <span><i class="ramp"></i> 残余不确定度 σ²(h | S)：低 → 高</span>
+    </div>
+    <figcaption><b>这是一个二维玩具，不是论文的实现</b>；用它把式 (16)–(18) 变成可以拨的旋钮。轨迹是一条走出去再折回来的路线，
+    最后一段会<b>从相反方向经过起点附近</b>——这正是世界模型里「重访」的典型情形。
+    <b>值得试的三件事：</b>
+    ① 把 σ<sub>t</sub> 拉到最小（5），MI 贪心会退化得非常接近均匀采样——时间核一旦主导，位置和朝向就不说话了；
+    ② 把 σ<sub>t</sub> 拉到最大（400），时间项失效，MI 会开始按空间结构选点，重访段的保留比例明显变化；
+    ③ 对比 Camera FPS：FPS 专挑<b>离得最远</b>的点，所以偏爱轨迹端点和离群帧；MI 会主动避开离群帧，因为它们的分母（被别人预测的程度）太小。
+    <b>一个反直觉但正确的现象：</b>MI 贪心在「互信息目标」上一定最高（那是它优化的东西），但它的<b>平均残余不确定度未必最低</b>，有时还输给均匀采样。
+    这不是 bug——式 (15) 优化的是互信息而不是覆盖度，它会<b>主动避开那些谁也预测不了的离群帧</b>，代价就是那些帧的残余方差留在那里。
+    读 Tab. 3 时值得记住这一点：论文用的是 MI 准则，不是覆盖准则。
+    <b>实现说明：</b>式 (18) 的分母严格算是 O(N³)/候选，这里按 Krause 等人的 local-kernel 做法截断到 14 个最近邻，并在核矩阵对角加了 10⁻⁶ 的抖动项——
+    <b>这两个必要的数值细节论文都没提</b>，见 §09 存疑 D-06。</figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">这条核函数只看位姿和时间，不看内容</div>
+    <p>式 (16) 的三项全是<b>几何/时序的代理量</b>。这带来两个已知的盲区：
+    <b>① 遮挡</b>——两台相机位置相近、朝向相同，但中间隔了一堵墙，核函数认为它们高度相关，实际上看到的是两个不同的场景；
+    <b>② 动态内容</b>——同一位姿在不同时刻看到的东西可能完全不同（角色走过、门开了），时间核会把它们当成「不相关」而各留一帧，这恰好是对的；
+    但如果 σ<sub>t</sub> 很大，它们又会被当成冗余而只留一帧，这就错了。
+    论文既没给 σ 的取值，也没做 σ 的敏感性分析，而上面的沙盘显示<b>σ<sub>t</sub> 单独一个旋钮就能让 MI 贪心在「等价于均匀采样」和「纯空间选点」之间滑动</b>。
+    Tab. 3 里 MI 贪心比均匀采样好 4.65 个重投影分——这个增量到底是准则本身的功劳，还是一组恰好调好的带宽的功劳，从论文里看不出来。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 05 训练推理 -->
+<section class="sec" id="s-loop">
+  <div class="eyebrow"><span class="n">05</span><span class="t">§3.5 Training &amp; Inference</span><span class="line"></span></div>
+  <h2>一个损失，一个阶段，推理时删掉一半模块</h2>
+  <div class="eq">
+    <i>L</i> = <i>L</i><sub class="r">FM</sub> + λ · <i>L</i><sub class="r">geo</sub> ，　λ = 0.05<span class="tagno">(19)(20)</span>
+    <small><i>L</i><sub class="r">FM</sub> 是条件在记忆与未来动作上的流匹配损失。<b>记忆编码器、几何头、DiT 骨干三者联合优化</b>，
+    没有预训练、没有蒸馏、没有分阶段微调——这在工程上是个真实的优点，值得给分。</small>
+  </div>
+  <div class="prose">
+    <p>推理时几何头和 VGGT 都不再需要，直接丢弃。这意味着<b>几何监督对部署形态零成本</b>：一个已经上线的世界模型，
+    换成这套训练方式重训之后，推理代码不需要动。这是它相对「在线三维重建」类方案最实际的优势。</p>
+  </div>
+  <div class="call warn">
+    <div class="hd">两个论文没写、但决定这套东西能不能用的问题</div>
+    <p><b>① rollout 时生成帧的相机位姿从哪来？</b>记忆编码器要求每一帧都带 <span class="m">c<sub>i</sub></span>，而自回归时新帧是模型生成的。
+    在 MIND 的设定里位姿可以从动作序列（Δ<sub>p</sub>、Δ<sub>r</sub> 是已知常数）直接积分出来，所以这个问题在<b>基准内</b>不存在。
+    但这也意味着：<b>方法依赖一个精确的「动作 → 位姿」映射</b>，换到没有这种映射的真实视频上就没法用。
+    更微妙的是，RPE 指标本身说明<b>生成内容并不严格跟随指令位姿</b>（第一人称旋转 RPE 0.4126），
+    也就是说写进记忆的位姿标签会随 rollout 逐渐偏离画面真正的视角——这是一条论文完全没有讨论的误差通路。</p>
+    <p><b>② 记忆不是循环状态。</b>按 Fig. 2 的数据流，每一步是「把新帧追加进历史 → 重新剪枝 → 重新编码」。
+    也就是说<b>被剪掉的帧不会以任何压缩形式残留</b>，记忆的有效感受野严格等于当前保留的那 K 帧。
+    这和「把无界历史压进定长状态」的叙事有出入：真正处理无界历史的是剪枝规则，记忆只是对剪枝结果做了一次编码。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 06 实验 -->
+<section class="sec" id="s-exp">
+  <div class="eyebrow"><span class="n">06</span><span class="t">Experiments</span><span class="line"></span></div>
+  <h2>实验：数字要连着「它们在什么量级上」一起读</h2>
+  <p class="lead">评测在 MIND 上做。这是 2026 年 2 月的一个基准：UE5 渲染的 1080p/24fps 开放域视频，
+  统一动作空间 <span class="mono">W A S D</span> + 四个相机旋转键，第一人称与第三人称各 100 条约三分钟的片段，50/50 分训练与评测。
+  每条评测片段前四分之一作为上下文，模型在<b>相同动作序列</b>下自回归生成剩下四分之三，评测只在预测段上做，720p。</p>
+
+  <div class="grid2">
+    <div class="card cM">
+      <div class="mono">重训基线（同骨干同预算）</div>
+      <h5>FramePack · Context-as-Memory · SSM</h5>
+      三者与本文共享 <b>Wan2.1 骨干、同样的 memory-token 预算、同样的数据与训练 schedule</b>。这一段是本文最扎实的对照，
+      因为它把「记忆设计」和「骨干容量 / 算力」分开了。<br>
+      <span class="note">（正文写的是「四个重训基线」，但按上下文只描述了三个——一处小笔误。）</span>
+    </div>
+    <div class="card cB">
+      <div class="mono">直接抄自 MIND 榜单</div>
+      <h5>Matrix-Game 2.0 · MIND-World</h5>
+      这两行不是本文重训的，指标只有 MSE 和 RPE，其余列是「–」。骨干不同（MIND-World 是 SkyReels-V2-I2V-1.3B + 4 步因果蒸馏学生），
+      推理形态也不同（实时流式 vs 本文的多步扩散）。<br>
+      <b>更要注意：</b>Matrix-Game 2.0 在 MIND 表里属于 <b>“w/o Context Memory (Image-to-World)”</b> 那一栏，
+      即<b>它是在没有上下文记忆的设定下测的</b>，却被本文列进了「显式记忆」组。
+    </div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Tab. 1</span><span class="ti">MIND 测试集主表（绿色 = 该列最优）</span></div>
+    <div class="tabs" role="tablist" aria-label="视角">
+      <button class="tab" role="tab" aria-selected="true" data-vw="fp">第一人称</button>
+      <button class="tab" role="tab" aria-selected="false" data-vw="tp">第三人称</button>
+    </div>
+    <div class="figbody scrollx" style="padding:0 14px">
+      <table id="vw-fp">
+        <thead><tr><th>方法</th><th class="num">MSE ↓</th><th class="num">PSNR ↑</th><th class="num">SSIM ↑</th><th class="num">LPIPS ↓</th><th class="num">Trans ↓</th><th class="num">Rot ↓</th><th class="num">Reproj ↑</th></tr></thead>
+        <tbody>
+          <tr class="grp"><th colspan="8">显式记忆</th></tr>
+          <tr><td>Matrix-Game 2.0 <span class="pill B">抄榜 · 无上下文记忆</span></td><td class="num">0.1188</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">0.0265</td><td class="num">0.6914</td><td class="num">–</td></tr>
+          <tr><td>MIND-World <span class="pill B">抄榜 · 异骨干</span></td><td class="num">0.1035</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">0.0384</td><td class="num">0.5534</td><td class="num">–</td></tr>
+          <tr><td>FramePack <span class="pill">重训</span></td><td class="num">0.0764</td><td class="num">12.04</td><td class="num">0.3763</td><td class="num">0.7062</td><td class="num">0.0269</td><td class="num">0.6536</td><td class="num">73.97</td></tr>
+          <tr><td>Context-as-Memory <span class="pill">重训</span></td><td class="num">0.0706</td><td class="num">12.50</td><td class="num">0.3917</td><td class="num">0.6953</td><td class="num best">0.0235</td><td class="num">0.5697</td><td class="num">66.14</td></tr>
+          <tr class="grp"><th colspan="8">隐式记忆</th></tr>
+          <tr><td>SSM (VideoSSM) <span class="pill">复现</span></td><td class="num">0.0796</td><td class="num">11.96</td><td class="num">0.3953</td><td class="num">0.7439</td><td class="num">0.0379</td><td class="num">0.6702</td><td class="num worst">53.95</td></tr>
+          <tr class="hl"><td><b>GIM-World</b></td><td class="num best">0.0614</td><td class="num best">13.40</td><td class="num best">0.4135</td><td class="num best">0.6304</td><td class="num">0.0247</td><td class="num best">0.4126</td><td class="num best">81.70</td></tr>
+        </tbody>
+      </table>
+      <table id="vw-tp" hidden>
+        <thead><tr><th>方法</th><th class="num">MSE ↓</th><th class="num">PSNR ↑</th><th class="num">SSIM ↑</th><th class="num">LPIPS ↓</th><th class="num">Trans ↓</th><th class="num">Rot ↓</th><th class="num">Reproj ↑</th></tr></thead>
+        <tbody>
+          <tr class="grp"><th colspan="8">显式记忆</th></tr>
+          <tr><td>Matrix-Game 2.0 <span class="pill B">抄榜 · 无上下文记忆</span></td><td class="num">0.1404</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">0.0622</td><td class="num">0.9031</td><td class="num">–</td></tr>
+          <tr><td>MIND-World <span class="pill B">抄榜 · 异骨干</span></td><td class="num">0.1042</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">0.0321</td><td class="num">0.3328</td><td class="num">–</td></tr>
+          <tr><td>FramePack <span class="pill">重训</span></td><td class="num">0.0735</td><td class="num">12.23</td><td class="num">0.3957</td><td class="num">0.6770</td><td class="num">0.0145</td><td class="num">0.2852</td><td class="num">70.82</td></tr>
+          <tr><td>Context-as-Memory <span class="pill">重训</span></td><td class="num">0.0671</td><td class="num">12.81</td><td class="num">0.4051</td><td class="num">0.6480</td><td class="num">0.0241</td><td class="num">0.4385</td><td class="num">69.17</td></tr>
+          <tr class="grp"><th colspan="8">隐式记忆</th></tr>
+          <tr><td>SSM (VideoSSM) <span class="pill">复现</span></td><td class="num">0.0928</td><td class="num">11.76</td><td class="num">0.4037</td><td class="num">0.6830</td><td class="num">0.0201</td><td class="num">0.2971</td><td class="num">61.26</td></tr>
+          <tr class="hl"><td><b>GIM-World</b></td><td class="num best">0.0605</td><td class="num best">13.58</td><td class="num best">0.4303</td><td class="num best">0.5974</td><td class="num best">0.0106</td><td class="num best">0.1588</td><td class="num best">87.10</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="bars">
+      <div class="pnl">
+        <div class="pt"><span>3D 重投影分数（0–100，越高越好）</span><span id="rpTitle">第一人称</span></div>
+        <div id="rpBars"></div>
+      </div>
+      <div class="pnl">
+        <div class="pt"><span>LPIPS（越低越好）· 注意全都在 0.6 附近</span><span id="lpTitle">第一人称</span></div>
+        <div id="lpBars"></div>
+      </div>
+    </div>
+    <figcaption><b>三个指标组各自量的是不同的东西。</b>Memory 组（MSE/PSNR/SSIM/LPIPS）是逐帧和真值比；
+    Action 组是把生成视频用 ViPE 还原相机轨迹、Sim(3) Umeyama 对齐后算相对位姿误差；
+    3D Geometry 组是用 Depth Anything 3 估每帧深度与位姿，算跨帧循环重投影误差，再归一化到 0–100。
+    <b>训练教师（VGGT）和评测工具（Depth Anything 3 / ViPE）是不同的模型，这一点降低了循环论证的嫌疑</b>，值得肯定。</figcaption>
+  </figure>
+
+  <h3><span class="ix">6.1</span>先说这张表最值得肯定的地方</h3>
+  <div class="prose">
+    <p><b>重投影分数上的差距是真的大。</b>第一人称 81.70 vs 最强显式基线 73.97、隐式 SSM 53.95；第三人称 87.10 vs 70.82 / 61.26。
+    而且旋转 RPE 的改善同样显著（0.4126 vs 0.5697 最好基线；第三人称 0.1588 vs 0.2852）。
+    <b>旋转误差和几何一致性一起改善，这在机制上是自洽的</b>——记忆里如果真的存了跨视角结构，模型对「转过去应该看到什么」会更有把握。</p>
+    <p>另外，把「几何记忆」和「动作可控性」分开看是重要的：论文声称动作精度「至少与最强基线持平」。
+    <b>严格说这句话在第一人称平移上不成立</b>——Context-as-Memory 的 0.0235 好于本文的 0.0247，本文是第二。
+    但差距在千分之一量级，而且其余七个动作指标本文都最好，所以这只是措辞不够精确，不是结论问题。</p>
+  </div>
+
+  <h3><span class="ix">6.2</span>再说这张表必须打折的地方</h3>
+  <div class="call warn">
+    <div class="hd">绝对值告诉你：所有方法都在「基本对不上」的区间里</div>
+    <p>PSNR 全场 <b>11.76 – 13.58 dB</b>，LPIPS <b>0.60 – 0.74</b>。这不是排版错误，这是长程自回归逐帧对齐比较的常态
+    （Geometry Forcing 在 RealEstate10K 上 256 帧的 PSNR 也只有 11.4–11.9）。但它的含义要说清楚：
+    <b>在这个量级上，逐帧重建指标已经几乎不携带「看起来像同一个场景」的信息了</b>，
+    它主要在量「漂移得多快」。所以 MSE 从 0.0706 降到 0.0614、PSNR 从 12.50 涨到 13.40，方向是对的，但<b>不足以支撑「视觉上与真值一致」这类表述</b>——
+    那部分结论实际上是靠 Fig. 3–5 的定性图撑起来的。真正拉开差距的是重投影分数，而它是个<b>归一化到 0–100 的自定义分数，论文没有给出归一化公式</b>。</p>
+  </div>
+  <div class="call warn">
+    <div class="hd">MIND 自带的那个「重访一致性」指标，恰好没被报告</div>
+    <p>MIND 定义了五个评测维度，本文只用了其中两个（Long Context Memory 的 MSE、Action Accuracy 的 RPE），
+    <b>没有报告 Generated Scene Consistency</b>——那是 MIND 专门为「场景一致性」设计的指标：让模型沿 10 条对称路径走过去再原路返回，
+    比较去程帧与回程帧的 MSE。这恰恰是<b>最直接衡量「回到走过的地方还一样吗」的量</b>，也正是本文全篇要解决的问题。
+    同时被略过的还有 Action Space Generalization、Aesthetic Quality、Imaging Quality。
+    我不认为这是刻意隐瞒（本文自己加了重投影分数，工作量并不小），但<b>在一个自带专用指标的基准上不报告那个指标，需要一句解释，而论文没有给</b>。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 07 消融 -->
+<section class="sec" id="s-abl">
+  <div class="eyebrow"><span class="n">07</span><span class="t">Ablations</span><span class="line"></span></div>
+  <h2>消融：三张表里，第一张是全文的支点</h2>
+
+  <h3><span class="ix">7.1</span>几何监督贴在哪里（Tab. 2，第一人称）</h3>
+  <div class="tbl">
+  <table>
+    <thead><tr><th>变体</th><th class="num">MSE ↓</th><th class="num">LPIPS ↓</th><th class="num">Trans ↓</th><th class="num">Rot ↓</th><th class="num">Reproj ↑</th></tr></thead>
+    <tbody>
+      <tr><td>w/o geometry（只有流匹配）</td><td class="num">0.0628</td><td class="num">0.6485</td><td class="num">0.0252</td><td class="num">0.5028</td><td class="num worst">58.80</td></tr>
+      <tr><td>Geometry Forcing（贴在生成器中间层）</td><td class="num">0.0623</td><td class="num">0.6452</td><td class="num">0.0251</td><td class="num">0.4823</td><td class="num">63.40</td></tr>
+      <tr class="hl"><td><b>Ours（相机可查询，贴在记忆上）</b></td><td class="num best">0.0614</td><td class="num best">0.6304</td><td class="num best">0.0247</td><td class="num best">0.4126</td><td class="num best">81.70</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 6</span><span class="ti">同一张消融表，换成「相对 w/o geometry 的变化幅度」来看</span></div>
+    <div class="figbody">
+      <svg viewBox="0 0 900 300" role="img" aria-label="条形图：相对无几何监督基线，Geometry Forcing 与本文方法在五个指标上的相对变化幅度，其中重投影分数变化幅度远大于像素指标">
+        <line x1="330" y1="30" x2="330" y2="272" class="s-rule" stroke-width="1.2"/>
+        <text x="330" y="22" text-anchor="middle" class="xs f-ink3">0%</text>
+        <text x="200" y="22" text-anchor="middle" class="xs f-ink3">−20%</text>
+        <text x="610" y="22" text-anchor="middle" class="xs f-ink3">+40%</text>
+        <line x1="200" y1="30" x2="200" y2="272" class="s-rule1 dash" stroke-width="1"/>
+        <line x1="610" y1="30" x2="610" y2="272" class="s-rule1 dash" stroke-width="1"/>
+
+        <g class="f-ink2">
+          <text x="150" y="52" text-anchor="end" class="sml">MSE ↓</text>
+          <text x="150" y="98" text-anchor="end" class="sml">LPIPS ↓</text>
+          <text x="150" y="144" text-anchor="end" class="sml">Trans RPE ↓</text>
+          <text x="150" y="190" text-anchor="end" class="sml">Rot RPE ↓</text>
+          <text x="150" y="236" text-anchor="end" class="sml" font-weight="600">Reproj ↑</text>
+        </g>
+        <g class="f-ink3">
+          <text x="150" y="66" text-anchor="end" class="xs">像素级</text>
+          <text x="150" y="112" text-anchor="end" class="xs">感知级</text>
+          <text x="150" y="158" text-anchor="end" class="xs">平移可控性</text>
+          <text x="150" y="204" text-anchor="end" class="xs">旋转可控性</text>
+          <text x="150" y="250" text-anchor="end" class="xs">跨帧几何一致</text>
+        </g>
+
+        <!-- rows: GF (violet, upper), Ours (teal, lower). scale 7px per % -->
+        <g>
+          <rect x="324.4" y="38" width="5.6" height="14" rx="2" class="f-G" opacity=".85"/>
+          <rect x="314.4" y="56" width="15.6" height="14" rx="2" class="f-K"/>
+          <text x="310" y="49" text-anchor="end" class="xs f-Gi">−0.8%</text>
+          <text x="310" y="67" text-anchor="end" class="xs f-Ki">−2.2%</text>
+        </g>
+        <g>
+          <rect x="326.4" y="84" width="3.6" height="14" rx="2" class="f-G" opacity=".85"/>
+          <rect x="310.5" y="102" width="19.5" height="14" rx="2" class="f-K"/>
+          <text x="322" y="95" text-anchor="end" class="xs f-Gi">−0.5%</text>
+          <text x="306" y="113" text-anchor="end" class="xs f-Ki">−2.8%</text>
+        </g>
+        <g>
+          <rect x="327.2" y="130" width="2.8" height="14" rx="2" class="f-G" opacity=".85"/>
+          <rect x="316.1" y="148" width="13.9" height="14" rx="2" class="f-K"/>
+          <text x="323" y="141" text-anchor="end" class="xs f-Gi">−0.4%</text>
+          <text x="312" y="159" text-anchor="end" class="xs f-Ki">−2.0%</text>
+        </g>
+        <g>
+          <rect x="301.4" y="176" width="28.6" height="14" rx="2" class="f-G" opacity=".85"/>
+          <rect x="204.4" y="194" width="125.6" height="14" rx="2" class="f-K"/>
+          <text x="297" y="187" text-anchor="end" class="xs f-Gi">−4.1%</text>
+          <text x="200" y="205" text-anchor="end" class="xs f-Ki">−17.9%</text>
+        </g>
+        <g>
+          <rect x="330" y="222" width="54.7" height="14" rx="2" class="f-G" opacity=".85"/>
+          <rect x="330" y="240" width="272.7" height="14" rx="2" class="f-K"/>
+          <text x="390" y="233" class="xs f-Gi">+7.8%</text>
+          <text x="608" y="251" class="xs f-Ki" font-weight="600">+38.9%</text>
+        </g>
+        <g transform="translate(660,40)">
+          <rect x="0" y="0" width="12" height="12" rx="3" class="f-G" opacity=".85"/><text x="18" y="10" class="xs f-ink2">Geometry Forcing</text>
+          <rect x="0" y="20" width="12" height="12" rx="3" class="f-K"/><text x="18" y="30" class="xs f-ink2">本文</text>
+          <text x="0" y="58" class="xs f-ink3">条越长 = 相对无几何基线</text>
+          <text x="0" y="74" class="xs f-ink3">的改善越大（已按指标方向</text>
+          <text x="0" y="90" class="xs f-ink3">统一为「向右/向左都是变好」）</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption><b>这张图是本文最强也最脆的地方，取决于你怎么解释这个悬殊。</b>
+    换到记忆上之后，像素类指标只动了 2% 出头，旋转 RPE 动了 18%，而重投影分数动了 <b>39%</b>。
+    <b>善意的解释</b>（也是论文的解释）：重投影分数是唯一直接量「跨帧几何是否自洽」的指标，其他指标本来就不是几何敏感的，所以差异悬殊恰恰说明改动打在了点上。
+    <b>需要警惕的解释</b>：这个分数是作者自定义的、归一化到 0–100 的量，<b>归一化函数论文没有给</b>。
+    一个未知的非线性映射完全可能把小的原始误差差异放大成几十分的差距。<b>在归一化公式公开之前，81.70 vs 63.40 这个差距无法被独立解读。</b>
+    一个支持「分数本身是稳的」的旁证：Tab. 4 里 Full attention 拿 81.85、本文 81.70（几乎相同），而把 FFN 也池化掉之后掉到 62.45——说明它确实能区分不同的架构质量，不是纯噪声。</figcaption>
+  </figure>
+
+  <div class="call warn">
+    <div class="hd">这张表缺了一个对照，而那个对照是关键</div>
+    <p>Tab. 2 变的是<b>两件事而不是一件</b>：监督的<b>位置</b>（生成器 → 记忆）和监督的<b>读取方式</b>（token 配对 → 相机查询）。
+    因此我们无法判断 81.70 里有多少来自「几何」，有多少只是来自<b>「记忆被迫要能被解码」这件事本身</b>。
+    最该补的一行是：<b>保持同一个相机可查询的几何头，把监督目标从 VGGT 特征换成别的东西</b>——
+    比如换成该帧的 RGB / VAE latent（纯外观重建），或者换成 DINOv2 特征（纯语义）。
+    如果换成 RGB 重建也能拿到 75+，那本文真正的贡献就不是「几何」，而是「给隐式记忆加一个与生成损失正交的可查询解码任务」——
+    那依然是有价值的发现，但故事完全不同。<b>这是我认为审稿最应该要的一个实验。</b></p>
+  </div>
+
+  <h3><span class="ix">7.2</span>剪枝规则（Tab. 3，K = 200）</h3>
+  <div class="tbl">
+  <table>
+    <thead><tr><th>剪枝规则</th><th class="num">MSE ↓</th><th class="num">LPIPS ↓</th><th class="num">Trans ↓</th><th class="num">Rot ↓</th><th class="num">Reproj ↑</th></tr></thead>
+    <tbody>
+      <tr><td>均匀时间采样</td><td class="num">0.0658</td><td class="num">0.6582</td><td class="num">0.0269</td><td class="num">0.4475</td><td class="num">77.05</td></tr>
+      <tr><td>Camera FPS（位姿-时间空间最远点采样）</td><td class="num">0.0664</td><td class="num">0.6553</td><td class="num">0.0258</td><td class="num">0.4598</td><td class="num">77.52</td></tr>
+      <tr class="hl"><td><b>MI 贪心（本文）</b></td><td class="num best">0.0614</td><td class="num best">0.6304</td><td class="num best">0.0247</td><td class="num best">0.4126</td><td class="num best">81.70</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="prose">
+    <p>结论干净：MI 贪心在<b>每一个</b>指标上都最好，均匀与 FPS 互有胜负。这与 §04 沙盘里的直觉一致——
+    FPS 会去挑离群帧，MI 会挑「新的但典型的」帧。<b>但同时注意：均匀采样已经能到 77.05，而无几何监督只有 58.80。</b>
+    也就是说 <b>剪枝规则贡献约 4.6 分，几何监督贡献约 23 分</b>，两者不在一个量级上，论文的重心放对了。</p>
+  </div>
+
+  <h3><span class="ix">7.3</span>Compact 注意力（Tab. 4）</h3>
+  <div class="tbl">
+  <table>
+    <thead><tr><th>变体</th><th class="num">相对 DiT 耗时 ↓</th><th class="num">MSE ↓</th><th class="num">LPIPS ↓</th><th class="num">Reproj ↑</th></tr></thead>
+    <tbody>
+      <tr><td>Full attention（原分辨率）</td><td class="num">2.80%</td><td class="num best">0.0608</td><td class="num">0.6512</td><td class="num best">81.85</td></tr>
+      <tr><td>Global Compact (s = 2)：注意力 + FFN 都池化</td><td class="num">0.20%</td><td class="num worst">0.0696</td><td class="num worst">0.6892</td><td class="num worst">62.45</td></tr>
+      <tr class="hl"><td><b>Attention Compact (s = 2)：只池化注意力</b></td><td class="num">0.26%</td><td class="num">0.0614</td><td class="num best">0.6304</td><td class="num">81.70</td></tr>
+      <tr><td>Attention Compact (s = 4)</td><td class="num">0.10%</td><td class="num">0.0651</td><td class="num">0.6498</td><td class="num">76.18</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="prose">
+    <p>这张表的信息量比看上去大。<b>Global Compact 只比默认省 0.06 个百分点，却把重投影从 81.70 砸到 62.45</b>——
+    池化 FFN 几乎不省时间，却把质量打回「相当于没有几何监督」的水平。作者的解读是「FFN 容量是记忆输不起的那部分」，这个解读合理。
+    我更愿意这样读：<b>Compact 是在牺牲 token 之间的分辨率，FFN 是唯一逐 token 恢复容量的地方</b>，两个一起砍就没有任何地方能承载细节了。</p>
+    <p>一处小矛盾值得记下：论文说 Full attention 是「质量上界」，但 Attention Compact 的 <b>LPIPS 0.6304 反而好于 Full attention 的 0.6512</b>。
+    可能是单次运行的噪声，也可能是池化带来的正则效应。论文没提。<b>全文没有任何多种子/误差棒</b>，所以这类反直觉的小差异没法判断。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 08 成本 -->
+<section class="sec" id="s-cost">
+  <div class="eyebrow"><span class="n">08</span><span class="t">Cost</span><span class="line"></span></div>
+  <h2>「0.26% DiT 时间」量的是什么，没量什么</h2>
+  <p class="lead">这个数字是真的，而且是好数字。但它的分母和范围需要说清楚，否则很容易被读成「这套记忆几乎不要钱」。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 7</span><span class="ti">一次 rollout 步的成本拆解：被计时的、没被计时的、以及只在训练期存在的</span></div>
+    <div class="figbody scrollx">
+      <svg viewBox="0 0 1000 330" style="min-width:820px" role="img" aria-label="成本拆解图：记忆编码器仅占 DiT 的 0.26%，但 DiT 本身因记忆 token 变长、剪枝的高斯过程贪心未计时、训练期 VGGT 前向未计时">
+        <text x="16" y="26" class="sml f-ink2">论文报告的比值</text>
+        <rect x="16" y="38" width="800" height="46" rx="8" class="fs-D" stroke="var(--d)" stroke-width="1.3"/>
+        <text x="416" y="66" text-anchor="middle" class="big f-Di">DiT 一次完整去噪（= 100% 分母）</text>
+        <rect x="818" y="38" width="6" height="46" rx="2" class="f-M"/>
+        <path d="M840 46 L830 61" class="s-M" stroke-width="1.2" fill="none"/>
+        <text x="844" y="52" class="sml f-Mi">记忆编码器</text>
+        <text x="844" y="70" class="xs f-ink3">0.26%（约 1/385）</text>
+
+        <text x="16" y="118" class="sml f-ink2">但这个分母本身已经被记忆撑大了</text>
+        <rect x="16" y="130" width="380" height="42" rx="8" class="fs-D" stroke="var(--d)" stroke-width="1.1"/>
+        <text x="206" y="156" text-anchor="middle" class="sml f-Di">目标 latent（要生成的那一段）</text>
+        <rect x="398" y="130" width="380" height="42" rx="8" class="fs-M" stroke="var(--m)" stroke-width="1.4"/>
+        <text x="588" y="150" text-anchor="middle" class="sml f-Mi">记忆 token N_m ≈ 20 个 latent 帧</text>
+        <text x="588" y="166" text-anchor="middle" class="xs f-ink3">沿时间轴拼进同一个注意力序列</text>
+        <text x="790" y="156" class="xs f-ink3">→ 序列长度约翻倍</text>
+        <text x="16" y="192" class="xs f-ink3">注意力是序列长度的二次项，所以「有记忆」本身的代价远不止 0.26%——只是这一部分<tspan class="f-ink2">所有基线共享同样的 token 预算</tspan>，因此对比是公平的，</text>
+        <text x="16" y="210" class="xs f-ink3">被夸大的只是「本方法几乎免费」这个印象。</text>
+
+        <rect x="16" y="230" width="310" height="86" rx="10" class="fs-H" stroke="var(--h)" stroke-width="1.3"/>
+        <text x="171" y="252" text-anchor="middle" class="sml f-Hi">未被计时 ①：GP 互信息贪心</text>
+        <text x="171" y="272" text-anchor="middle" class="xs f-ink2">全文<tspan class="f-ink" font-weight="600">唯一随 rollout 长度增长</tspan>的模块</text>
+        <text x="171" y="290" text-anchor="middle" class="xs f-ink3">K=200 次贪心 × 全体候选帧 ×</text>
+        <text x="171" y="306" text-anchor="middle" class="xs f-ink3">两次后验方差（含矩阵求逆）</text>
+
+        <rect x="342" y="230" width="310" height="86" rx="10" class="fs-B" stroke="var(--bad)" stroke-width="1.2"/>
+        <text x="497" y="252" text-anchor="middle" class="sml f-Bi">未被报告 ②：端到端延迟与显存</text>
+        <text x="497" y="272" text-anchor="middle" class="xs f-ink2">与显式记忆基线的实际 rollout 速度对比</text>
+        <text x="497" y="290" text-anchor="middle" class="xs f-ink3">论文只给了编码器的相对耗时，</text>
+        <text x="497" y="306" text-anchor="middle" class="xs f-ink3">没有 fps / 显存 / 单帧延迟</text>
+
+        <rect x="668" y="230" width="316" height="86" rx="10" class="fs-G" stroke="var(--g)" stroke-width="1.2"/>
+        <text x="826" y="252" text-anchor="middle" class="sml f-Gi">只在训练期 ③：VGGT 前向</text>
+        <text x="826" y="272" text-anchor="middle" class="xs f-ink2">每步只跑<tspan class="f-ink" font-weight="600">一帧</tspan>，比 GF 的 16 帧便宜得多</text>
+        <text x="826" y="290" text-anchor="middle" class="xs f-ink3">作为参照：GF 报告 VGGT 占其训练步</text>
+        <text x="826" y="306" text-anchor="middle" class="xs f-ink3">53.4% 时间 / 60.4% FLOPs（16 帧）</text>
+      </svg>
+    </div>
+    <figcaption><b>结论不变，措辞需要收紧。</b>「几何监督推理零开销」这句话完全成立，这是本方法相对在线三维重建类方案最硬的优势。
+    「记忆几乎免费」这句话则只对<b>编码器</b>成立；记忆 token 本身要走完 DiT 的全部注意力，这部分成本和任何一个同预算的显式记忆方案是一样的。
+    真正没被交代的是剪枝：它是<b>唯一一个成本随 rollout 长度增长的模块</b>，而整篇论文引入剪枝的理由恰恰就是「控制随历史增长的成本」。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 09 存疑 -->
+<section class="sec" id="s-doubt">
+  <div class="eyebrow"><span class="n">09</span><span class="t">Open questions</span><span class="line"></span></div>
+  <h2>我的存疑清单：20 条，按「会不会动摇结论」排序</h2>
+  <p class="lead">先说结论：<b>我认为这篇论文的核心主张是站得住的</b>——把 3D 教师的监督从生成器挪到记忆状态上，在同一套对照下带来了大幅提升，
+  而且机制解释（旋转 RPE 与重投影一起改善）是自洽的。下面的疑问不是要推翻它，而是标出<b>「哪些数字目前无法被独立验证」</b>以及
+  <b>「哪一个实验能把话说死」</b>。前四条如果得不到回答，主结论的强度要打折；后面的多数是可修复的表述与细节问题。</p>
+
+  <div class="dfilter">
+    <span>筛选严重度：</span>
+    <div class="seg" id="dSev" role="group" aria-label="严重度筛选">
+      <button type="button" data-sev="all" aria-pressed="true">全部 20</button>
+      <button type="button" data-sev="hi" aria-pressed="false">高 4</button>
+      <button type="button" data-sev="mid" aria-pressed="false">中 9</button>
+      <button type="button" data-sev="lo" aria-pressed="false">低 7</button>
+    </div>
+    <button class="btn" id="dAll" type="button">全部展开</button>
+    <button class="btn" id="dNone" type="button">全部收起</button>
+  </div>
+
+  <details class="dt" data-sev="hi"><summary><span class="dn">D-01</span><span class="sev hi">高</span><span>「几何蒸馏」这个说法有多硬，取决于两个论文没写的词</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <span class="lb">论文怎么写的</span>
+      <blockquote>“we supervise against the VGGT encoder feature map <i>G<sub>i</sub></i> of the same frame” · “3D foundation models recover <b>dense per-frame</b> geometric features”</blockquote>
+      <span class="lb">为什么可疑</span>
+      <p><b>① “encoder” 指哪一层？</b>VGGT = DINOv2 patch encoder → 交替注意力聚合器 → 任务头。取聚合器 = 几何特征；取 DINOv2 = 语义特征。
+      Geometry Forcing 明确写了取 “features from the Transformer backbone of VGGT” 并聚合了全部 block，还专门做过消融：
+      对齐 DINOv2 只到 FVD 297，对齐 VGGT 是 243。本文用的词恰好是最含糊的那个。</p>
+      <p><b>② 是不是逐帧单独跑 VGGT？</b>“per-frame” + 每步只采一帧，读起来像是单帧输入。但 VGGT 的跨帧全局注意力在单帧下失效，
+      输出退化为单目、相对尺度、各帧一套坐标系的表示。而记忆被要求学的是<b>跨视角一致</b>的结构——用一堆互不对齐的单帧特征去教跨视角一致性，中间是有逻辑缝隙的。
+      Geometry Forcing 的 Tab. 9 正好显示对齐上下文 4→8→16 帧单调变好。</p>
+      <span class="lb">怎么一句话验证</span>
+      <p>作者公布：取的是聚合器第几层（或哪些层的聚合）、VGGT 每次前向送几帧。若是「聚合器 + 多帧」，D-01 直接消解；若是「DINOv2 + 单帧」，那这篇的贡献要重新表述为「可查询的表示蒸馏」而非「几何蒸馏」。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="hi"><summary><span class="dn">D-02</span><span class="sev hi">高</span><span>缺一个对照：收益来自「几何」，还是来自「记忆被迫可解码」？</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <span class="lb">问题</span>
+      <p>Tab. 2 一次改了两件事：监督<b>位置</b>（生成器→记忆）和监督<b>接口</b>（token 配对→相机查询）。
+      因此 58.80 → 81.70 里，无法区分以下两种机制：<br>
+      (a) 记忆里真的被写进了三维结构；<br>
+      (b) 记忆多了一个<b>与流匹配正交的辅助解码任务</b>，任何这样的任务都会迫使它保留更多可复原的信息（类似自编码正则）。</p>
+      <span class="lb">缺的那一行</span>
+      <p>保持<b>完全相同</b>的相机可查询几何头，只把监督目标换掉：<br>
+      · 换成该帧的 VAE latent / RGB（纯外观重建）<br>
+      · 换成 DINOv2 特征（纯语义）<br>
+      如果 RGB 版也能到 75+，那论文的标题就该改。这是<b>我认为审稿最应该要的一个实验</b>，成本也最低（改一个 target，重跑 8K 步）。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="hi"><summary><span class="dn">D-03</span><span class="sev hi">高</span><span>主结论最依赖的那个数字，没有给出定义</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <span class="lb">论文怎么写的</span>
+      <blockquote>“we estimate per-frame depth and camera pose with Depth Anything 3, compute cross-frame cycle reprojection error, and <b>normalize it to a 0–100 score</b> where higher is better.”</blockquote>
+      <span class="lb">为什么可疑</span>
+      <p>归一化函数是什么、用哪些帧对、循环长度多少、误差以像素还是相对单位计——<b>一条也没说</b>。
+      而全文最大的差距（81.70 vs 63.40 vs 53.95）全部落在这个分数上。一个未知的非线性映射可以把很小的原始误差差异放大成几十分。
+      <b>没有这个公式，任何第三方都无法复现这一列，也无法把本文与其他论文的「几何一致性」横向比较。</b></p>
+      <span class="lb">反方证据（对论文有利）</span>
+      <p>Tab. 4 里 Full attention 81.85 与本文 81.70 几乎相同，而 Global Compact 掉到 62.45——说明这个分数确实能稳定地区分架构质量，不是纯噪声放大器。所以我的判断是「不可验证」而不是「有问题」。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="hi"><summary><span class="dn">D-04</span><span class="sev hi">高</span><span>从头到尾没有直接检查过记忆里到底有没有几何</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <span class="lb">问题</span>
+      <p>论文的全部证据都是<b>下游的</b>：生成结果的重投影分数高、旋转误差低、定性图看起来稳。
+      但「记忆状态编码了跨视角场景几何」是一个<b>关于表示的</b>断言，而它从未被直接测过。</p>
+      <span class="lb">同行是怎么做的</span>
+      <p>Geometry Forcing 做了：冻结模型、在中间特征上训一个 DPT 头回归深度，直接展示「基线的特征重建不出有意义的三维，我们的可以」（其 Fig. 1c），这是一个线性探针式的证据。
+      本文有一个<b>现成的、更好的</b>探针——几何头本身就是「相机 → 特征」的解码器，只要把它接上 VGGT 的 DPT 头，就能从记忆里渲出深度图/点云。
+      <b>这个实验几乎不要额外成本，却是全文最有说服力的一张图，作者没做。</b></p>
+      <span class="lb">附带的问题</span>
+      <p>训练时查询的一律是<b>历史帧的相机</b>。从没测过<b>没见过的视角</b>。「记忆是一个可从任意视角查询的世界状态」这个更强的说法，目前没有实验支持。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid"><summary><span class="dn">D-05</span><span class="sev mid">中</span><span>基准自带的「重访一致性」指标恰好没被报告</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>MIND 定义了 Long Context Memory、<b>Generated Scene Consistency</b>、Action Space Generalization、Action Accuracy、Aesthetic/Imaging Quality。
+      本文只报了第一和第四。其中 <b>Generated Scene Consistency</b> 是让模型沿 10 条对称路径走过去再原路返回、比较去程与回程帧的 MSE——
+      这是最直接量「回到走过的地方还一样吗」的指标，也正是本文的问题定义。
+      本文另起炉灶做了自己的重投影分数（工作量不小，不像是回避），但<b>在自带专用指标的基准上略过那个指标，需要一句解释</b>。
+      同时被略过的 Aesthetic / Imaging Quality 也意味着：<b>无法判断几何监督有没有牺牲单帧画质</b>。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid"><summary><span class="dn">D-06</span><span class="sev mid">中</span><span>剪枝那一节的数值细节一条都没给，而它们决定行为</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <span class="lb">缺什么</span>
+      <p>① 三个带宽 σ<sub>p</sub>, σ<sub>r</sub>, σ<sub>t</sub> 的取值；② GP 的噪声项/nugget（没有它 K<sub>AA</sub> 在近重复帧上会奇异）；
+      ③ 式 (18) 分母 σ²(h | S̄\{h}) 的实现——严格算是每个候选一次 O(N³) 求逆，Krause 等人靠 local kernel 截断，本文只字未提；
+      ④ K = 200 指的是原始帧还是 latent 帧；⑤ 剪枝本身的耗时。</p>
+      <span class="lb">为什么要紧</span>
+      <p>§04 的沙盘里，<b>只拨 σ<sub>t</sub> 一个旋钮</b>，MI 贪心就能在「几乎等于均匀采样」和「纯空间选点」之间滑动。
+      Tab. 3 里 MI 比均匀好 4.65 分——这个增量是准则的功劳还是一组恰好调好的带宽的功劳，论文里看不出来。
+      另外 ⑤ 尤其讽刺：引入剪枝的理由就是「控制随历史增长的成本」，而它自己是全流程唯一随历史增长的模块，却是唯一没被计时的。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid"><summary><span class="dn">D-07</span><span class="sev mid">中</span><span>抄来的两行基线，设定与本文不可比</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p><b>Matrix-Game 2.0</b> 在 MIND 原表里位于 <b>“w/o Context Memory (Image-to-World)”</b> 一栏，即在<b>没有上下文记忆</b>的设定下测得，
+      却在本文 Tab. 1 中被归入「显式记忆」组，成为该组表现最差的一行（MSE 0.1188 / 0.1404）。这会让「显式记忆很弱」的印象被放大。<br>
+      <b>MIND-World</b> 的骨干是 SkyReels-V2-I2V-1.3B，且是 4 步因果蒸馏的实时流式学生；本文是 Wan2.1 多步扩散。
+      两者的 MSE 差距里有多少来自记忆设计、多少来自「实时 4 步 vs 非实时多步」，无法分离。<br>
+      <b>公允地说</b>，论文确实标注了这两行是直接引用、且用「–」标出缺失列，没有隐瞒。问题只在于它们和重训的三行被放进了同一张表、同一个分组标题下。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid"><summary><span class="dn">D-08</span><span class="sev mid">中</span><span>8K 步 / batch 32 的预算，对重训基线是否足够</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>「同骨干、同预算、同数据」是本文对照设计里最值得肯定的部分，但它有一个副作用：
+      FramePack 与 Context-as-Memory 各自原本有专门的训练配方（FramePack 的 anti-drifting 采样、CaM 的检索式上下文构造与训练课程），
+      被统一成 8K 步、lr 1e-5、同一个 memory-token 预算之后，<b>它们是不是被训到了各自的水平，无从判断</b>。
+      对本方法而言 8K 步够用（它只是给 Wan2.1 加模块微调），但对结构差异更大的基线未必。
+      <b>能消解这条的最小实验：</b>给每个基线画一条 4K/8K/16K 步的曲线，证明大家都收敛了。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid"><summary><span class="dn">D-09</span><span class="sev mid">中</span><span>只在一个合成数据集上验证，且训练场景只有 50 个</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>MIND 全部是 UE5 渲染的，共享同一套 <span class="mono">WASD</span> + 四方向旋转的动作空间；训练用 50 条第一人称 + 50 条第三人称片段。
+      按每条约 3 分钟 / 24fps 算，训练视频总量约 <b>4.3 小时</b>。没有真实视频实验，没有跨数据集迁移，没有换动作空间的测试
+      （MIND 自带的 Action Space Generalization 子集也没用）。
+      对一个声称学到「场景几何」的方法，<b>合成渲染的几何过于干净</b>——真实视频里 VGGT 教师本身的可靠性会显著下降，而这正是 Geometry Forcing 自陈的局限（VGGT 主要在静态场景上训练）。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid"><summary><span class="dn">D-10</span><span class="sev mid">中</span><span>rollout 时的位姿从哪来，以及位姿标签会漂移</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>编码器要求每帧带 <span class="m">c<sub>i</sub></span>，但自回归生成的新帧没有真实位姿。在 MIND 里可以从动作序列积分出来（Δ<sub>p</sub>、Δ<sub>r</sub> 是常数），
+      所以基准内没问题——但这<b>把方法绑死在「存在精确动作→位姿映射」的环境里</b>。<br>
+      更细的一层：RPE 不为零说明<b>生成画面并不严格执行指令位姿</b>。于是写进记忆的位姿标签会随 rollout 与画面真实视角逐渐脱节，
+      而几何头恰恰是靠位姿建立对应关系的。<b>这是一条会随时间放大的误差通路，论文没有讨论，也没有做「位姿加噪」的鲁棒性实验。</b></p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid"><summary><span class="dn">D-11</span><span class="sev mid">中</span><span>「把无界历史压成定长状态」——压缩主要是剪枝干的</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>见 §02 的推算：N<sub>m</sub> = 20 个 latent 帧的 token，而剪枝后的历史是 50 个 latent 帧（K=200 原始帧）——
+      <b>学出来的那一步压缩约 2.5 倍</b>，从几千帧到 200 帧的那 16 倍是不含学习成分的启发式规则做的。
+      同时记忆不是循环状态（每步重新编码），<b>被剪掉的帧不留任何残迹</b>，有效感受野严格等于保留的 K 帧。
+      这不影响实验结论，但让摘要里 “compresses variable-length history into fixed-size memory tokens” 这句话听起来比实际做的事更强。</p>
+      <p class="note">前提：这里假设 Wan2.1 VAE 为空间 8× / 时间 4× 压缩、patch (1,2,2)，且 K=200 计的是原始帧。论文没给训练分辨率与骨干规格，所以这是推算而非事实。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid"><summary><span class="dn">D-12</span><span class="sev mid">中</span><span>没有敏感性分析，没有误差棒，单次运行</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>λ = 0.05、N<sub>m</sub> = 20 latent 帧、K = 200、s = 2、几何头的层数与宽度——<b>除了 s 之外一个都没有扫过</b>。
+      全文没有多种子、没有方差、没有置信区间。这在视频生成领域是常态，但它让某些细小的反直觉结果（比如 Tab. 4 里 Attention Compact 的 LPIPS 反而好于 Full attention）无法判断是信号还是噪声。
+      考虑到主表里几个方法在 MSE 上的差距只有 0.005–0.01 量级，<b>至少给主表加一组种子是值得的</b>。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="lo"><summary><span class="dn">D-13</span><span class="sev lo">低</span><span>省掉了 scale alignment，没解释</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>式 (14) 只有角度项。Geometry Forcing 的做法是 Angular + Scale 两项，并且它的 Tab. 3 显示：Angular 单独 FVD 253，加 Scale 是 243，直接 MSE 则崩到 1648。
+      本文继承了「角度」但丢掉了「尺度」，也没说为什么。<b>合理的猜测</b>是记忆 token 与 VGGT 特征的尺度差异更大、加 scale 项不稳定；
+      但既然对照组就是 Geometry Forcing，这个取舍值得一句说明——否则「本文赢了 GF」里有一部分可能只是「本文的 GF 复现少了一半」。
+      <span class="note">（论文说 Geometry Forcing 那一行是「reproduces Wu et al. by distilling VGGT features into intermediate diffusion layers」，没写是否含 scale 项。）</span></p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="lo"><summary><span class="dn">D-14</span><span class="sev lo">低</span><span>符号冲突：K 有两个意思</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>§3.1 里 <span class="m">K</span> 是一次生成的未来帧数（<span class="m">x<sub>t+1:t+K</sub></span>, <span class="m">a<sub>t+1:t+K</sub></span>）；
+      §3.4 里 <span class="m">K</span> 是剪枝预算（|S| ≤ K），§4.1 写「K = 200」。两者在同一篇里没有区分。
+      读到 §4.1 时会真的产生歧义：200 是生成块长度还是保留帧数？（按上下文是后者。）</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="lo"><summary><span class="dn">D-15</span><span class="sev lo">低</span><span>「四个重训基线」，但只描述了三个</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>§4.1 原文：重训 FramePack 与 Context-as-Memory，复现 VideoSSM 的 SSM 模块——共三个；紧接着写
+      “The <b>four</b> retrained baselines share the same Wan2.1 backbone…”。要么少描述了一个基线，要么把本方法也算进去了。小笔误，但读者会数一遍。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="lo"><summary><span class="dn">D-16</span><span class="sev lo">低</span><span>一处抄录偏差：0.3328 vs 0.3338</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>Tab. 1 第三人称 MIND-World 的 Rot RPE 写作 <span class="mono">0.3328</span>；MIND 原论文 Tab. 3（w Context Memory 行）是 <span class="mono">0.3338</span>。
+      其余抄录的数字（0.1188 / 0.0265 / 0.6914 / 0.1035 / 0.0384 / 0.5534 / 0.1404 / 0.0622 / 0.9031 / 0.1042 / 0.0321）我逐个核对过，都一致。
+      <b>纯排版级问题，不影响任何结论</b>，列在这里只是为了说明其余数字是核对过的。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="lo"><summary><span class="dn">D-17</span><span class="sev lo">低</span><span>“I(S; H\S) is submodular” 说得比原文强</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>Krause、Singh、Guestrin (JMLR 2008) 的结果是：互信息目标在<b>足够细的离散化</b>下是<b>近似</b>次模的（带一个 ε 项），并且它<b>不是单调的</b>，
+      贪心的 (1−1/e) 型保证需要附加条件。本文写成「I(S; H\S) is submodular, and the standard greedy rule is near-optimal」，
+      把「近似次模 + 条件性保证」压成了「次模 + 近最优」。<b>工程上无所谓</b>（贪心本来就是当启发式用的），但理论表述不够严谨。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="lo"><summary><span class="dn">D-18</span><span class="sev lo">低</span><span>「动作精度至少与最强基线持平」有一个反例</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>第一人称平移 RPE：Context-as-Memory <span class="mono">0.0235</span> 优于本文 <span class="mono">0.0247</span>，本文第二。
+      其余七个动作指标（第一人称旋转、第三人称平移与旋转，及与其他基线的比较）本文都最好。
+      所以这只是措辞问题——写成「除第一人称平移外均最优」会更准确。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="lo"><summary><span class="dn">D-19</span><span class="sev lo">低</span><span>ray map 用的是原始世界坐标，没提归一化</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>式 (11) 里 <span class="m">o<sub>i</sub></span> 是世界系光心。论文没有提到任何中心化或尺度归一化。
+      在 UE5 里不同场景的坐标原点和量纲各不相同，MLP<sub>ray</sub> 拿到的输入分布会随场景平移。
+      训练集 50 个场景、评测集是<b>另外</b>的场景，所以这不会造成泄漏，但会影响泛化，也几乎肯定挡住向真实数据集的迁移
+      （真实数据的位姿由 SfM 恢复，尺度是任意的）。见 §03 Fig. 4 的交互——拖「光心 x」时，6 个通道里有 3 个整体平移。</p>
+    </div>
+  </details>
+
+  <details class="dt" data-sev="mid"><summary><span class="dn">D-20</span><span class="sev mid">中</span><span>相关工作把「显式三维重建」立为对照族，实验里却一个都没比</span><span class="caret">▸</span></summary>
+    <div class="body">
+      <p>§1 和 §2.2 花了不少篇幅论证「在线三维重建类记忆」的缺点（重建管线开销、对动态/遮挡/弱纹理敏感、误差累积），
+      并把 GEN3C、VMem、Long-term Spatial Memory、UCM 等列为该族代表。<b>但 Tab. 1 里一个都没有出现。</b>
+      实际比较的显式基线全是「存帧/存 token」类（FramePack、CaM）。
+      这在工程上可以理解（重训一套在线重建管线到同一骨干上代价很大），但它意味着<b>本文最直接的几何竞争者从未被量化对比过</b>——
+      而重投影分数恰恰是显式三维记忆最可能占优的指标。</p>
+    </div>
+  </details>
+
+  <div class="call ok">
+    <div class="hd">如果只做一件事来加固这篇论文</div>
+    <p>做 <b>D-02</b>：保持相机可查询的几何头不变，把监督目标换成 RGB / VAE latent 再跑一遍 8K 步。
+    这一个实验同时回答三件事——收益是不是来自「几何」而不是「任何可解码任务」、这套查询接口本身有多大价值、以及标题该不该叫 Geometry-Aware。
+    第二件事做 <b>D-04</b>：把几何头接上 VGGT 的 DPT 头，从记忆里直接渲一张深度图出来。这是全文最应该有却没有的那张图。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 10 复现清单 -->
+<section class="sec" id="s-missing">
+  <div class="eyebrow"><span class="n">10</span><span class="t">Reproducibility</span><span class="line"></span></div>
+  <h2>复现清单：想动手的话，这些数字论文里没有</h2>
+  <p class="lead">全文没有附录，没有补充材料，项目页只有视频。下面这张表是我按「照着论文写代码时会卡在哪」整理的，
+  <b>分成「必须问作者」和「可以合理猜」两档</b>。</p>
+  <div class="tbl">
+  <table>
+    <thead><tr><th>缺失项</th><th>影响</th><th>能不能猜</th></tr></thead>
+    <tbody>
+      <tr><td><b>VGGT 取哪一层特征</b>、d<sub>g</sub> 是多少</td><td>决定「几何」还是「语义」——见 D-01</td><td class="worst">必须问</td></tr>
+      <tr><td><b>VGGT 每次前向送几帧</b></td><td>决定教师特征是否跨帧对齐——见 D-01</td><td class="worst">必须问</td></tr>
+      <tr><td><b>重投影分数的归一化公式</b>、帧对选择、循环长度</td><td>主结论那一列无法复现——见 D-03</td><td class="worst">必须问</td></tr>
+      <tr><td><b>σ<sub>p</sub> / σ<sub>r</sub> / σ<sub>t</sub></b> 及 GP 噪声项</td><td>剪枝行为完全由它们决定——见 D-06</td><td class="worst">必须问</td></tr>
+      <tr><td>式 (18) 分母的实现（是否截断邻域）</td><td>不截断则复杂度不可接受</td><td>可猜（local kernel）</td></tr>
+      <tr><td>K = 200 是原始帧还是 latent 帧</td><td>历史 token 数差 4 倍</td><td>可猜（原始帧）</td></tr>
+      <tr><td>训练分辨率、Wan2.1 规格（1.3B / 14B）</td><td>N<sub>m</sub> 的绝对值、显存与吞吐</td><td>可猜（480p / 1.3B）</td></tr>
+      <tr><td>推理去噪步数、一次生成的块长</td><td>端到端速度、与实时基线的可比性</td><td>可猜</td></tr>
+      <tr><td>几何头的层数 / 宽度 / 头数，H<sub>g</sub> × W<sub>g</sub></td><td>影响「头做了多少活 vs 记忆做了多少活」</td><td>可猜（对齐 VGGT 网格）</td></tr>
+      <tr><td>E<sub>c</sub> 的输入参数化（外参矩阵？四元数？Plücker？）</td><td>相机嵌入的表达能力</td><td>可猜</td></tr>
+      <tr><td>剪枝耗时、端到端 fps、显存占用</td><td>唯一随 rollout 增长的成本——见 §08</td><td class="worst">必须问</td></tr>
+      <tr><td>硬件、训练时长、种子数</td><td>复现成本估计</td><td>可猜</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ============================================================ 11 仓库关联 -->
+<section class="sec" id="s-repo">
+  <div class="eyebrow"><span class="n">11</span><span class="t">Repo context</span><span class="line"></span></div>
+  <h2>放回 Awesome-Interactive-Video-World-Models 的坐标系里</h2>
+  <p class="lead">这篇在仓库里位于 <b>Long-Horizon Memory &amp; Consistency</b> 一节（README 第 426 行）。
+  它的直接邻居里有几篇值得放在一起读——尤其是几篇同月、思路互补甚至对撞的。</p>
+
+  <div class="grid2">
+    <div class="card cM">
+      <div class="mono">先读这两篇再回来</div>
+      <h5>本文的两个直接前提</h5>
+      <ul>
+        <li><b>Geometry Forcing</b>（<a href="https://arxiv.org/abs/2507.07982" target="_blank" rel="noopener">2507.07982</a>，README 485 行）——本文 Tab. 2 的唯一对照组，也是「VGGT 当教师」这条路的原始版本。它的附录里有 GIM-World 缺的全部细节：取哪层、送几帧、scale 项为什么必要、VGGT 前向占多少算力。</li>
+        <li><b>MIND</b>（<a href="https://arxiv.org/abs/2602.08025" target="_blank" rel="noopener">2602.08025</a>，README 527 行）——评测协议与两行抄来的基线都出自这里。想核对 Tab. 1 的引用是否公允，必须翻它的 Tab. 2/Tab. 3。</li>
+      </ul>
+    </div>
+    <div class="card cG">
+      <div class="mono">同月同题，值得对读</div>
+      <h5>2026.06 这一批「记忆」论文</h5>
+      <ul>
+        <li><b>Retrieve What's Missing: Coverage-Maximizing Retrieval</b>（<a href="https://arxiv.org/abs/2606.02479" target="_blank" rel="noopener">2606.02479</a>）——和本文 §3.4 撞题：同样是「选一个覆盖/信息最大的子集」，但用在检索侧。两者的准则值得放一起比。</li>
+        <li><b>Compression and Retrieval: Implicit Memory Retrieval</b>（<a href="https://arxiv.org/abs/2606.23105" target="_blank" rel="noopener">2606.23105</a>）——同样是隐式记忆，但把「检索」也做成隐式的。</li>
+        <li><b>MemLearner: Learning to Query Context Memory</b>（<a href="https://arxiv.org/abs/2606.31734" target="_blank" rel="noopener">2606.31734</a>）——「学习如何查询记忆」，和本文的「用相机查询记忆」是同一个母题的两种解法。</li>
+        <li><b>Latent Spatial Memory</b>（<a href="https://arxiv.org/abs/2606.09828" target="_blank" rel="noopener">2606.09828</a>）· <b>Echo-Memory: 记忆的受控研究</b>（<a href="https://arxiv.org/abs/2606.09803" target="_blank" rel="noopener">2606.09803</a>）</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">如果要给这篇写一句仓库里的定位</div>
+    <p>「<b>第一次给隐式记忆找到了除生成损失以外的训练信号</b>，办法是把 3D 基础模型的监督接口从『逐 token 配对』换成『相机查询』。」
+    这个接口本身比它蒸馏的内容更有复用价值——任何「压缩后失去索引结构」的表示（不只是几何，也可以是语义、物体身份、可供性）都可以用同一套查询范式去监督。
+    如果 D-02 的对照实验做出来发现 RGB 目标也管用，那这篇的真正贡献就正是这个接口，而不是几何。<b>无论哪种结果，这个接口都值得记住。</b></p>
+  </div>
+
+  <div class="call warn">
+    <div class="hd">仓库维护角度的一条备注</div>
+    <p>README 里 GIM-World 那一行目前只有 Paper + Website 两个链接，<b>没有 Code</b>——项目页与正文我都查过（2026-09-09），确实未见仓库。
+    如果后续放出代码，最值得第一时间看的三个文件是：VGGT 特征提取那一段（回答 D-01）、重投影分数的评测脚本（回答 D-03）、以及剪枝的实现（回答 D-06）。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 12 附录 -->
+<section class="sec" id="s-appendix">
+  <div class="eyebrow"><span class="n">12</span><span class="t">Appendix</span><span class="line"></span></div>
+  <h2>附录速查</h2>
+
+  <h3><span class="ix">A</span>全部超参与配置（§4.1 逐字整理）</h3>
+  <div class="tbl">
+  <table>
+    <thead><tr><th>项</th><th>值</th><th>出处</th></tr></thead>
+    <tbody>
+      <tr><td>扩散骨干</td><td>Wan2.1（规格未说明）</td><td>§4.1</td></tr>
+      <tr><td>动作注入</td><td>动作嵌入加进 timestep embedding（照搬 MIND-World）</td><td>§4.1</td></tr>
+      <tr><td>记忆大小 N<sub>m</sub></td><td>= 20 个 latent 帧的 patch token 数</td><td>§4.1</td></tr>
+      <tr><td>Compact 步长 s</td><td>2（注意力 token 数降为 1/4）</td><td>§4.1 / Tab. 4</td></tr>
+      <tr><td>编码器层数</td><td>2 个 block</td><td>§3.2</td></tr>
+      <tr><td>剪枝预算 K</td><td>200</td><td>§4.1</td></tr>
+      <tr><td>几何损失权重 λ</td><td>0.05</td><td>§4.1</td></tr>
+      <tr><td>几何损失形式</td><td>逐 patch 余弦（仅角度，无 scale 项）</td><td>式 (14)</td></tr>
+      <tr><td>每步采样的历史帧数</td><td>1（均匀采样）</td><td>§3.3</td></tr>
+      <tr><td>训练步数 / batch / lr</td><td>8 000 步 / 32 / 1e−5</td><td>§4.1</td></tr>
+      <tr><td>训练方式</td><td>单阶段端到端，编码器 + 几何头 + 骨干联合优化</td><td>§3.5</td></tr>
+      <tr><td>教师模型</td><td>VGGT，全程冻结，推理时丢弃</td><td>§3.3 / §3.5</td></tr>
+      <tr><td>数据 / 评测</td><td>MIND，1080p·24fps UE5；100+100 片段，50/50 分；前 1/4 作上下文；评测 720p</td><td>§4.1</td></tr>
+      <tr><td>动作精度工具</td><td>ViPE 还原轨迹 → Sim(3) Umeyama 对齐 → RPE</td><td>§4.1</td></tr>
+      <tr><td>几何一致性工具</td><td>Depth Anything 3 估深度与位姿 → 跨帧循环重投影 → 归一化 0–100</td><td>§4.1</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3><span class="ix">B</span>符号表</h3>
+  <div class="tbl">
+  <table>
+    <thead><tr><th>符号</th><th>含义</th><th>注</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">H_t = {(x_i, c_i)}</td><td>到时刻 t 的观测历史：帧（或其 VAE latent）+ 相机位姿</td><td>式 (1)</td></tr>
+      <tr><td class="mono">m_t = M(H_t)</td><td>记忆状态；M 是记忆算子，定义了整个设计空间</td><td>式 (3)</td></tr>
+      <tr><td class="mono">h_{i,p}</td><td>第 i 帧第 p 个 patch token</td><td>式 (5)</td></tr>
+      <tr><td class="mono">E_c(c_i)</td><td>线性相机嵌入，<b>整帧一个向量</b>，只加在历史 token 上</td><td>式 (6)</td></tr>
+      <tr><td class="mono">Q₀ ∈ R^{N_m×d}</td><td>可学习的 memory query，pose-free</td><td>§3.2</td></tr>
+      <tr><td class="mono">s</td><td>Compact 的池化步长</td><td>式 (9)(10)</td></tr>
+      <tr><td class="mono">ρ(c_i)_{u,v} = [o, d]</td><td>逐 patch 的世界系射线：光心 + 归一化方向，6 维</td><td>式 (11)</td></tr>
+      <tr><td class="mono">e_{u,v}</td><td>跨帧共享的可学习 2D 网格位置嵌入</td><td>式 (12)</td></tr>
+      <tr><td class="mono">Ĝ_i / G_i</td><td>几何头预测的特征图 / VGGT 的特征图</td><td>式 (13)(14)</td></tr>
+      <tr><td class="mono">k(c_i, c_j)</td><td>位姿-时间核：位置 + 朝向夹角 + 时间的三项 RBF</td><td>式 (16)</td></tr>
+      <tr><td class="mono">σ²(h | A)</td><td>观测过 A 之后，对帧 h 的剩余不确定度</td><td>式 (17)</td></tr>
+      <tr><td class="mono">K</td><td><b>两个意思</b>：§3.1 是生成块长度，§3.4 是剪枝预算</td><td>见 D-14</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3><span class="ix">C</span>术语</h3>
+  <dl class="gloss">
+    <dt>显式记忆 / 隐式记忆</dt>
+    <dd>前者把过去保留为<b>可枚举的条目</b>（帧、KV、点云），读取靠检索或渲染；后者把过去压成<b>一个定长状态</b>，读取靠网络自己。二者的分界不在「有没有几何」，而在「记忆里的东西能不能被逐条指认」。</dd>
+    <dt>相机可查询（camera-queryable）</dt>
+    <dd>本文的关键词。不问「记忆的第 k 个槽是什么」，而问「从这个位姿看出去应该是什么」。作用是<b>绕开压缩后失去的 token 对应关系</b>，让一个无序槽集合也能被逐 patch 地监督。</dd>
+    <dt>VGGT</dt>
+    <dd>Visual Geometry Grounded Transformer（CVPR 2025）。前馈式 3D 基础模型，一次前向输出相机参数、深度图、点图。结构是 DINOv2 编码器 → 交替注意力聚合器 → 任务头。<b>本文只用它当冻结教师，取其特征。</b></dd>
+    <dt>互信息传感器布点准则</dt>
+    <dd>Krause 等人 2008 年提出：选一批测点使其与未测点的互信息最大。与「覆盖最大化」的关键区别是<b>它会主动避开离群点</b>——离群点信息量大但没有代表性。</dd>
+    <dt>3D 重投影分数</dt>
+    <dd>本文自定义指标：用 Depth Anything 3 估每帧深度与位姿，把同一三维点在不同帧之间来回投影，测偏移，归一化到 0–100。<b>归一化公式论文未给</b>。</dd>
+    <dt>MIND</dt>
+    <dd>2026 年 2 月的世界模型基准。特点是「开放域 + 闭环 + 重访」：路径会绕回起点，因此能测「回到走过的地方还一样吗」。共 250 条 UE5 视频。</dd>
+  </dl>
+
+  <h3><span class="ix">D</span>如果要复现，我会按这个顺序读</h3>
+  <ol class="prose">
+    <li><b>§3.3 + 式 (11)–(14)</b>：全文唯一的新机制，先把它读透，其余都是组装。</li>
+    <li><b>Geometry Forcing 的正文 §4.2 与附录 C</b>：把本文含糊的地方（取哪层、送几帧、scale 项）对照着补上。</li>
+    <li><b>MIND 的 §3.5 与 Tab. 2/3</b>：核对抄来的基线数字与评测协议，顺便看看哪些指标本文没报。</li>
+    <li><b>§3.2 + Tab. 4</b>：编码器与 Compact 的取舍，工程上最容易踩坑的一块（FFN 千万别一起池化）。</li>
+    <li><b>§3.4 + Krause et al. 2008 的 §4</b>：剪枝准则的原始定义，以及本文没提的 local kernel 截断。</li>
+    <li>最后回到 <b>Tab. 2</b>，带着 D-02 的问题重新看那 22.9 分。</li>
+  </ol>
+</section>
+
+<div class="foot">
+  <p><b>关于这份精读。</b>基于 arXiv:2606.02436v1 全文（含全部公式、表格与参考文献），并交叉核对了 Geometry Forcing（arXiv:2507.07982v2）与 MIND（arXiv:2602.08025v2）的原文与原表。
+  Tab. 1 中抄自 MIND 的 11 个数字已逐个核对（见 D-16）。文中所有<b>标注为「推算」的数字</b>（§02 的 token 预算表）不是论文数据，前提已在原处写明。
+  §03 Fig. 4 与 §04 Fig. 5 是为理解公式而做的示意玩具，<b>不是论文的实验，也不是论文的可视化</b>。
+  存疑清单是我的阅读意见，不代表论文有错——其中多数是「无法从论文验证」而非「论文写错了」。</p>
+  <p>制作日期 2026-09-09 · 属于 Awesome-Interactive-Video-World-Models / docs</p>
+</div>
+
+</main>
+</div>
+
+<script>
+"use strict";
+/* ===================== theme ===================== */
+(function(){
+  var root=document.documentElement, btn=document.getElementById('themeBtn');
+  try{ var s=localStorage.getItem('gimworld-theme'); if(s==='light'||s==='dark') root.setAttribute('data-theme',s); }catch(e){}
+  btn.addEventListener('click',function(){
+    var cur=root.getAttribute('data-theme');
+    if(!cur) cur = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light';
+    var next = cur==='dark' ? 'light':'dark';
+    root.setAttribute('data-theme',next);
+    try{ localStorage.setItem('gimworld-theme',next); }catch(e){}
+    window.dispatchEvent(new Event('themechange'));
+  });
+})();
+
+/* ===================== progress + scrollspy ===================== */
+(function(){
+  var prog=document.getElementById('prog');
+  var links=[].slice.call(document.querySelectorAll('.rail a'));
+  var secs=links.map(function(a){ return document.getElementById(a.getAttribute('href').slice(1)); });
+  function tick(){
+    var h=document.documentElement, max=h.scrollHeight-h.clientHeight;
+    prog.style.width = (max>0 ? (h.scrollTop/max*100):0) + '%';
+    var y=h.scrollTop+140, cur=0;
+    for(var i=0;i<secs.length;i++){ if(secs[i] && secs[i].offsetTop<=y) cur=i; }
+    links.forEach(function(a,i){ a.classList.toggle('on', i===cur); });
+  }
+  addEventListener('scroll',tick,{passive:true}); addEventListener('resize',tick); tick();
+})();
+
+/* ===================== generic segmented / tab helpers ===================== */
+function seg(container, cb){
+  var btns=[].slice.call(container.querySelectorAll('button'));
+  btns.forEach(function(b){
+    b.addEventListener('click',function(){
+      btns.forEach(function(x){ x.setAttribute('aria-pressed', String(x===b)); });
+      cb(b);
+    });
+  });
+}
+function tabset(nodes, cb){
+  nodes.forEach(function(b){
+    b.addEventListener('click',function(){
+      nodes.forEach(function(x){ x.setAttribute('aria-selected', String(x===b)); });
+      cb(b);
+    });
+  });
+}
+
+/* ===================== hero: memory-type tabs ===================== */
+(function(){
+  var caps={
+    a:'<b>显式 · 帧检索。</b>把过去保留成一批可枚举的条目，生成时按规则取回来。规则通常是视野重叠或视觉相似度这类<b>启发式</b>——选对了很有效，选错了就直接变成画面里的不一致，而且错误会沿 rollout 传播。第二个代价更隐蔽：保留下来的帧彼此外观高度冗余，<b>在同样的 token 预算下真正装进去的场景信息有限</b>。',
+    b:'<b>显式 · 在线三维重建。</b>不靠启发式选帧，而是直接维护一份场景的三维表示（点云 / surfel / 3D cache），需要时渲染回投给生成器。几何是显式的、可读的，但代价是要在生成器旁边<b>常驻一整条重建管线</b>：推理延迟、工程复杂度，以及对动态物体、遮挡、弱纹理的敏感——重建错了，错误同样会沿长 rollout 累积。',
+    c:'<b>隐式 · 无几何监督。</b>把历史压成一个定长状态，尺寸不随历史增长，这是它相对前两者最大的优点。但训练信号只有「下一段视频生成得像不像」，<b>没有任何一处规定这个状态里必须装什么</b>。而外观信号跨视角是高度冗余的，于是压出来的状态很可能把容量花在冗余外观上，而不是跨视角的场景结构。<b>这就是本文全篇要补的那个洞。</b>',
+    d:'<b>本文的位置：几何不进生成器，进记忆。</b>结构上和上一页完全一样，只是在训练期多挂一条紫色支路：取一个历史相机的位姿，生成逐 patch 的 ray map 去<b>查询</b>记忆，要求查出来的特征对上冻结 VGGT 在该帧的特征。答得上，说明记忆里存的是能被任意视角复原的结构，而不是某几张图的外观。<b>这条支路推理时整条删掉</b>，所以它不改变部署形态，只改变记忆被训练成什么样。'
+  };
+  var cap=document.getElementById('mmCap');
+  var btns=[].slice.call(document.querySelectorAll('[data-mm]'));
+  tabset(btns,function(b){
+    var k=b.getAttribute('data-mm');
+    ['a','b','c','d'].forEach(function(x){ document.getElementById('mm-'+x).toggleAttribute('hidden', x!==k); });
+    cap.innerHTML=caps[k];
+  });
+})();
+
+/* ===================== fig1: phase tabs ===================== */
+(function(){
+  var caps={
+    train:'<b>训练时：</b>一次前向里同时算两个损失。流匹配管「下一段像不像」，几何损失管「记忆里装的是不是场景结构」，权重 λ = 0.05，端到端一起更新，没有分阶段。VGGT 全程冻结，只当教师用。每步<b>只均匀采样一个历史帧</b>来算几何损失，所以蒸馏开销与历史长度无关。<b>切到「推理时」看差别。</b>',
+    infer:'<b>推理时：</b>紫色的两块整体消失——这是这个设计最实用的一点，几何监督不改变部署形态，只改变权重被训成什么样。还要注意左边那个方框：<b>记忆不是循环状态</b>，每一步都是「追加新帧 → 重新剪枝 → 重新编码」，被剪掉的帧不会以任何压缩形式残留。所以记忆的有效感受野严格等于当前保留的那 K 帧。'
+  };
+  var cap=document.getElementById('phCap');
+  tabset([].slice.call(document.querySelectorAll('[data-ph]')),function(b){
+    var k=b.getAttribute('data-ph');
+    document.getElementById('ph-train').toggleAttribute('hidden', k!=='train');
+    document.getElementById('ph-infer').toggleAttribute('hidden', k!=='infer');
+    cap.innerHTML=caps[k];
+  });
+})();
+
+/* ===================== tab1: view tabs + bars ===================== */
+(function(){
+  var D={
+    fp:{ label:'第一人称',
+      reproj:[['FramePack',73.97],['Context-as-Memory',66.14],['SSM (VideoSSM)',53.95],['GIM-World',81.70]],
+      lpips:[['FramePack',0.7062],['Context-as-Memory',0.6953],['SSM (VideoSSM)',0.7439],['GIM-World',0.6304]] },
+    tp:{ label:'第三人称',
+      reproj:[['FramePack',70.82],['Context-as-Memory',69.17],['SSM (VideoSSM)',61.26],['GIM-World',87.10]],
+      lpips:[['FramePack',0.6770],['Context-as-Memory',0.6480],['SSM (VideoSSM)',0.6830],['GIM-World',0.5974]] }
+  };
+  function render(el,rows,max,better,fmt){
+    var vals=rows.map(function(r){return r[1];});
+    var best = better==='hi' ? Math.max.apply(null,vals) : Math.min.apply(null,vals);
+    var worst= better==='hi' ? Math.min.apply(null,vals) : Math.max.apply(null,vals);
+    el.innerHTML = rows.map(function(r){
+      var cls = r[1]===best ? ' hl' : (r[1]===worst ? ' dim' : '');
+      var w = Math.max(2, r[1]/max*100);
+      return '<div class="brow'+cls+'"><div class="bl">'+r[0]+'</div><div class="bt"><i style="width:'+w.toFixed(1)+'%"></i></div><div class="bv">'+fmt(r[1])+'</div></div>';
+    }).join('');
+  }
+  function paint(k){
+    var d=D[k];
+    document.getElementById('rpTitle').textContent=d.label;
+    document.getElementById('lpTitle').textContent=d.label;
+    render(document.getElementById('rpBars'), d.reproj, 100, 'hi', function(v){return v.toFixed(2);});
+    render(document.getElementById('lpBars'), d.lpips, 0.80, 'lo', function(v){return v.toFixed(4);});
+  }
+  tabset([].slice.call(document.querySelectorAll('[data-vw]')),function(b){
+    var k=b.getAttribute('data-vw');
+    document.getElementById('vw-fp').toggleAttribute('hidden', k!=='fp');
+    document.getElementById('vw-tp').toggleAttribute('hidden', k!=='tp');
+    paint(k);
+  });
+  paint('fp');
+})();
+
+/* ===================== doubts filter ===================== */
+(function(){
+  var items=[].slice.call(document.querySelectorAll('.dt'));
+  seg(document.getElementById('dSev'),function(b){
+    var s=b.getAttribute('data-sev');
+    items.forEach(function(d){ d.toggleAttribute('hidden', s!=='all' && d.getAttribute('data-sev')!==s); });
+  });
+  document.getElementById('dAll').addEventListener('click',function(){ items.forEach(function(d){ if(!d.hasAttribute('hidden')) d.open=true; }); });
+  document.getElementById('dNone').addEventListener('click',function(){ items.forEach(function(d){ d.open=false; }); });
+})();
+
+/* ===================== color helpers ===================== */
+function cssv(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function hex2rgb(h){
+  h=h.replace('#','');
+  if(h.length===3) h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];
+}
+function mix(a,b,t){ return [Math.round(a[0]+(b[0]-a[0])*t),Math.round(a[1]+(b[1]-a[1])*t),Math.round(a[2]+(b[2]-a[2])*t)]; }
+function rgbs(c,al){ return 'rgba('+c[0]+','+c[1]+','+c[2]+','+(al===undefined?1:al)+')'; }
+</script>
+
+<script>
+"use strict";
+/* ===================== Fig.4 ray map ===================== */
+(function(){
+  var cv=document.getElementById('rayCv'); if(!cv) return;
+  var ctx=cv.getContext('2d');
+  var el={yaw:document.getElementById('ryYaw'),pit:document.getElementById('ryPit'),ox:document.getElementById('ryOx'),
+          fov:document.getElementById('ryFov'),n:document.getElementById('ryN')};
+  var lab={yaw:document.getElementById('ryYawV'),pit:document.getElementById('ryPitV'),ox:document.getElementById('ryOxV'),
+           fov:document.getElementById('ryFovV'),n:document.getElementById('ryNV')};
+  var out={o:document.getElementById('ryO'),d:document.getElementById('ryD'),c:document.getElementById('ryCnt')};
+
+  function rays(N,fovDeg,yawDeg,pitDeg,ox){
+    var t=Math.tan(fovDeg*Math.PI/360), yaw=yawDeg*Math.PI/180, pit=pitDeg*Math.PI/180;
+    var cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pit),sp=Math.sin(pit);
+    var o=[ox,1.6,0], D=new Float64Array(N*N*3);
+    for(var v=0;v<N;v++)for(var u=0;u<N;u++){
+      var x=((u+0.5)/N*2-1)*t, y=-((v+0.5)/N*2-1)*t, z=1;
+      var y1=y*cp - z*sp, z1=y*sp + z*cp;
+      var x2=x*cy + z1*sy, z2=-x*sy + z1*cy;
+      var L=Math.hypot(x2,y1,z2), k=(v*N+u)*3;
+      D[k]=x2/L; D[k+1]=y1/L; D[k+2]=z2/L;
+    }
+    return {o:o,d:D};
+  }
+  function draw(){
+    var N=+el.n.value, fov=+el.fov.value, yaw=+el.yaw.value, pit=+el.pit.value, ox=+el.ox.value;
+    lab.yaw.textContent=yaw+'°'; lab.pit.textContent=(pit<0?'−':'')+Math.abs(pit)+'°';
+    lab.ox.textContent=ox.toFixed(1); lab.fov.textContent=fov+'°'; lab.n.textContent=N+'²';
+    var R=rays(N,fov,yaw,pit,ox);
+    var ink=cssv('--ink'), ink2=cssv('--ink2'), ink3=cssv('--ink3'), surf=cssv('--surf2'), rule=cssv('--rule2');
+    ctx.fillStyle=surf; ctx.fillRect(0,0,cv.width,cv.height);
+
+    // big color map
+    var X0=64,Y0=110,SZ=560, cell=SZ/N;
+    ctx.font='600 22px "IBM Plex Sans",sans-serif'; ctx.fillStyle=ink; ctx.textAlign='left';
+    ctx.fillText('ray map（按世界系方向 d 着色）', X0, 80);
+    for(var v=0;v<N;v++)for(var u=0;u<N;u++){
+      var k=(v*N+u)*3;
+      ctx.fillStyle='rgb('+Math.round((R.d[k]+1)*127.5)+','+Math.round((R.d[k+1]+1)*127.5)+','+Math.round((R.d[k+2]+1)*127.5)+')';
+      ctx.fillRect(X0+u*cell, Y0+v*cell, cell+0.6, cell+0.6);
+    }
+    ctx.strokeStyle=rule; ctx.lineWidth=1;
+    for(var i=0;i<=N;i++){
+      ctx.beginPath(); ctx.moveTo(X0+i*cell,Y0); ctx.lineTo(X0+i*cell,Y0+SZ); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(X0,Y0+i*cell); ctx.lineTo(X0+SZ,Y0+i*cell); ctx.stroke();
+    }
+    // centre highlight
+    var cu=Math.floor(N/2), cvv=Math.floor(N/2);
+    ctx.strokeStyle=cssv('--g'); ctx.lineWidth=3;
+    ctx.strokeRect(X0+cu*cell, Y0+cvv*cell, cell, cell);
+    ctx.font='18px "IBM Plex Mono",monospace'; ctx.fillStyle=ink3;
+    ctx.fillText('每格 = 一个 patch 查询 q_{i,u,v}，共 '+(N*N)+' 个', X0, Y0+SZ+34);
+
+    // 6 channels
+    var names=['o_x（常数）','o_y（常数）','o_z（常数）','d_x','d_y','d_z'];
+    var TW=200, GX=40, GY=60, BX=770, BY=140;
+    for(var c=0;c<6;c++){
+      var col=c%3, row=(c/3)|0, px=BX+col*(TW+GX), py=BY+row*(TW+GY);
+      ctx.font='600 19px "IBM Plex Mono",monospace'; ctx.fillStyle=(c<3?ink3:cssv('--g-ink'));
+      ctx.fillText(names[c], px, py-14);
+      var img=ctx.createImageData(N,N);
+      for(var q=0;q<N*N;q++){
+        var val;
+        if(c<3){ val = (R.o[c]/10+1)/2; }
+        else { val = (R.d[q*3+(c-3)]+1)/2; }
+        val=Math.max(0,Math.min(1,val));
+        var g=Math.round(30+val*205);
+        img.data[q*4]=g; img.data[q*4+1]=g; img.data[q*4+2]=g; img.data[q*4+3]=255;
+      }
+      var tmp=document.createElement('canvas'); tmp.width=N; tmp.height=N;
+      tmp.getContext('2d').putImageData(img,0,0);
+      ctx.imageSmoothingEnabled=false;
+      ctx.drawImage(tmp,px,py,TW,TW);
+      ctx.strokeStyle=(c<3?rule:cssv('--g')); ctx.lineWidth=(c<3?1.5:2.5);
+      ctx.strokeRect(px,py,TW,TW);
+    }
+    ctx.font='19px "IBM Plex Sans",sans-serif'; ctx.fillStyle=ink2;
+    ctx.fillText('上排三张是纯色 —— 光心 o 对整帧是同一个值，', BX, BY+2*TW+GY+4);
+    ctx.fillText('6 个通道里只有下排 3 个带空间结构。', BX, BY+2*TW+GY+32);
+    ctx.fillStyle=ink3; ctx.font='18px "IBM Plex Sans",sans-serif';
+    ctx.fillText('这就是式 (12) 还要再加一个可学习 2D 位置嵌入 e_{u,v} 的原因。', BX, BY+2*TW+GY+64);
+
+    var ck=(cvv*N+cu)*3;
+    out.o.textContent=R.o[0].toFixed(2)+' / '+R.o[1].toFixed(2)+' / '+R.o[2].toFixed(2);
+    out.d.textContent=R.d[ck].toFixed(2)+' / '+R.d[ck+1].toFixed(2)+' / '+R.d[ck+2].toFixed(2);
+    out.c.textContent=N*N;
+  }
+  Object.keys(el).forEach(function(k){ el[k].addEventListener('input',draw); });
+  addEventListener('themechange',draw);
+  draw();
+})();
+</script>
+
+<script>
+"use strict";
+/* ===================== Fig.5 information-guided pruning sandbox ===================== */
+(function(){
+  var cv=document.getElementById('prCv'); if(!cv) return;
+  var ctx=cv.getContext('2d');
+  var elK=document.getElementById('prK'), elSp=document.getElementById('prSp'), elSr=document.getElementById('prSr'), elSt=document.getElementById('prSt');
+  var lK=document.getElementById('prKV'), lSp=document.getElementById('prSpV'), lSr=document.getElementById('prSrV'), lSt=document.getElementById('prStV');
+  var cVar=document.getElementById('prVar'), lab=document.getElementById('prLab');
+  var oAvg=document.getElementById('prAvg'), oMax=document.getElementById('prMax'), oGap=document.getElementById('prGap'), oRev=document.getElementById('prRev');
+  var mode='mi', NBR_M=14, NUG=1e-6;
+
+  /* ---- trajectory ---- */
+  var seed=987654321;
+  function rnd(){ seed=(seed*1103515245+12345)&0x7fffffff; return seed/0x7fffffff; }
+  var P=[],HD=[];
+  function walk(x0,y0,x1,y1,n,h){ for(var i=0;i<n;i++){ var t=i/n; P.push([x0+(x1-x0)*t+(rnd()-0.5)*0.06, y0+(y1-y0)*t+(rnd()-0.5)*0.06]); HD.push(h+(rnd()-0.5)*0.06);} }
+  function turn(x,y,h0,h1,n){ for(var i=0;i<n;i++){ var t=i/n; P.push([x+(rnd()-0.5)*0.05,y+(rnd()-0.5)*0.05]); HD.push(h0+(h1-h0)*t);} }
+  var PI=Math.PI;
+  walk(0.6,0.6,10.4,0.6,30,0); turn(10.4,0.6,0,PI/2,8);
+  walk(10.4,0.6,10.4,7.0,20,PI/2); turn(10.4,7.0,PI/2,PI,6);
+  walk(10.4,7.0,1.8,7.0,26,PI); turn(1.8,7.0,PI,1.5*PI,6);
+  walk(1.8,7.0,1.8,1.7,18,1.5*PI); turn(1.8,1.7,1.5*PI,2*PI,6);
+  walk(1.8,1.7,9.4,1.7,24,0);
+  var N=P.length;
+
+  /* revisit region: close in space, far in time */
+  var isRev=new Uint8Array(N), revTotal=0;
+  for(var i=0;i<N;i++){ for(var j=0;j<N;j++){ if(Math.abs(i-j)<=40) continue;
+      var dx=P[i][0]-P[j][0], dy=P[i][1]-P[j][1];
+      if(dx*dx+dy*dy < 1.44){ isRev[i]=1; break; } } if(isRev[i]) revTotal++; }
+
+  /* ---- linear algebra ---- */
+  function angd(a,b){ var d=a-b; while(d>PI)d-=2*PI; while(d<-PI)d+=2*PI; return Math.abs(d); }
+  function chol(A,n){
+    var L=new Float64Array(n*n);
+    for(var i=0;i<n;i++)for(var j=0;j<=i;j++){
+      var s=A[i*n+j];
+      for(var k=0;k<j;k++) s-=L[i*n+k]*L[j*n+k];
+      if(i===j){ if(s<1e-12) s=1e-12; L[i*n+i]=Math.sqrt(s); } else L[i*n+j]=s/L[j*n+j];
+    }
+    return L;
+  }
+  function normSolve(L,n,b){ // returns ||L^{-1} b||^2
+    var y=new Float64Array(n), s=0;
+    for(var i=0;i<n;i++){ var t=b[i]; for(var k=0;k<i;k++) t-=L[i*n+k]*y[k]; y[i]=t/L[i*n+i]; s+=y[i]*y[i]; }
+    return s;
+  }
+
+  /* ---- kernel cache ---- */
+  var KM=null, NBR=null, keyOld='';
+  function buildKernel(sp,sr,st){
+    var key=sp+'|'+sr+'|'+st; if(key===keyOld) return; keyOld=key;
+    KM=new Float64Array(N*N);
+    for(var i=0;i<N;i++)for(var j=i;j<N;j++){
+      var dx=P[i][0]-P[j][0], dy=P[i][1]-P[j][1], da=angd(HD[i],HD[j]), dt=i-j;
+      var v=Math.exp(-(dx*dx+dy*dy)/(2*sp*sp) - da*da/(2*sr*sr) - dt*dt/(2*st*st));
+      KM[i*N+j]=v; KM[j*N+i]=v;
+    }
+    NBR=[];
+    for(var h=0;h<N;h++){
+      var ord=[]; for(var q=0;q<N;q++) if(q!==h) ord.push(q);
+      ord.sort(function(a,b){ return KM[h*N+b]-KM[h*N+a]; });
+      NBR.push(ord.slice(0,60));
+    }
+  }
+
+  function varsGiven(S){
+    var n=S.length, out=new Float64Array(N);
+    if(n===0){ out.fill(1); return out; }
+    var A=new Float64Array(n*n);
+    for(var a=0;a<n;a++)for(var b=0;b<n;b++) A[a*n+b]=KM[S[a]*N+S[b]]+(a===b?NUG:0);
+    var L=chol(A,n), kv=new Float64Array(n), inS=new Uint8Array(N);
+    S.forEach(function(s){ inS[s]=1; });
+    for(var h=0;h<N;h++){
+      if(inS[h]){ out[h]=0; continue; }
+      for(var a2=0;a2<n;a2++) kv[a2]=KM[h*N+S[a2]];
+      out[h]=Math.max(0, 1-normSolve(L,n,kv));
+    }
+    return out;
+  }
+
+  function miGreedy(budget){
+    var inS=new Uint8Array(N), S=[];
+    for(var step=0;step<budget;step++){
+      var n=S.length, L=null, A;
+      if(n>0){ A=new Float64Array(n*n);
+        for(var a=0;a<n;a++)for(var b=0;b<n;b++) A[a*n+b]=KM[S[a]*N+S[b]]+(a===b?NUG:0);
+        L=chol(A,n); }
+      var best=-1e18, bi=-1, kv=n>0?new Float64Array(n):null;
+      for(var h=0;h<N;h++){
+        if(inS[h]) continue;
+        var num=1;
+        if(n>0){ for(var a2=0;a2<n;a2++) kv[a2]=KM[h*N+S[a2]];
+          num=Math.max(1e-9, 1-normSolve(L,n,kv)); }
+        var idx=[], ord=NBR[h];
+        for(var t=0;t<ord.length && idx.length<NBR_M;t++){ var j=ord[t]; if(!inS[j]) idx.push(j); }
+        var m=idx.length, den=1;
+        if(m>0){
+          var B=new Float64Array(m*m);
+          for(var a3=0;a3<m;a3++)for(var b3=0;b3<m;b3++) B[a3*m+b3]=KM[idx[a3]*N+idx[b3]]+(a3===b3?NUG:0);
+          var Lb=chol(B,m), kb=new Float64Array(m);
+          for(var a4=0;a4<m;a4++) kb[a4]=KM[h*N+idx[a4]];
+          den=Math.max(1e-6, 1-normSolve(Lb,m,kb));
+        }
+        var g=0.5*Math.log(num/den);
+        if(g>best){ best=g; bi=h; }
+      }
+      if(bi<0) break;
+      inS[bi]=1; S.push(bi);
+    }
+    return S.sort(function(a,b){return a-b;});
+  }
+  function uniformSel(budget){
+    var S=[]; for(var i=0;i<budget;i++) S.push(Math.round(i*(N-1)/(budget-1))); return S;
+  }
+  function fpsSel(budget,sp,sr,st){
+    function dd(i,j){ var dx=P[i][0]-P[j][0],dy=P[i][1]-P[j][1],da=angd(HD[i],HD[j]),dt=i-j;
+      return Math.sqrt((dx*dx+dy*dy)/(sp*sp)+da*da/(sr*sr)+dt*dt/(st*st)); }
+    var S=[0], dmin=new Float64Array(N);
+    for(var i=0;i<N;i++) dmin[i]=dd(i,0);
+    dmin[0]=-1;
+    for(var s=1;s<budget;s++){
+      var bi=-1,bv=-1;
+      for(var i2=0;i2<N;i2++) if(dmin[i2]>bv){bv=dmin[i2];bi=i2;}
+      if(bi<0) break;
+      S.push(bi); dmin[bi]=-1;
+      for(var i3=0;i3<N;i3++){ if(dmin[i3]<0) continue; var d=dd(i3,bi); if(d<dmin[i3]) dmin[i3]=d; }
+    }
+    return S.sort(function(a,b){return a-b;});
+  }
+
+  /* ---- drawing ---- */
+  var MINX=-0.6, MAXY=8.2, SC=70.5, OX=124, OY=110;
+  function tx(x){ return OX+(x-MINX)*SC; }
+  function ty(y){ return OY+(MAXY-y)*SC; }
+  function ramp(t,ok,bad){
+    var amb=[201,162,39];
+    return t<0.5 ? mix(ok,amb,t*2) : mix(amb,bad,(t-0.5)*2);
+  }
+
+  function draw(S,vars){
+    var ink=cssv('--ink'), ink2=cssv('--ink2'), ink3=cssv('--ink3'), surf=cssv('--surf2'), surf1=cssv('--surf'),
+        rule=cssv('--rule'), rule2=cssv('--rule2'), M=cssv('--m'), H=cssv('--h');
+    var okC=hex2rgb(cssv('--ok')), badC=hex2rgb(cssv('--bad')), ink3C=hex2rgb(cssv('--ink3'));
+    ctx.fillStyle=surf; ctx.fillRect(0,0,cv.width,cv.height);
+    var inS=new Uint8Array(N); S.forEach(function(s){ inS[s]=1; });
+
+    // trajectory
+    ctx.strokeStyle=H; ctx.globalAlpha=.45; ctx.lineWidth=5; ctx.lineJoin='round';
+    ctx.beginPath(); ctx.moveTo(tx(P[0][0]),ty(P[0][1]));
+    for(var i=1;i<N;i++) ctx.lineTo(tx(P[i][0]),ty(P[i][1]));
+    ctx.stroke(); ctx.globalAlpha=1;
+
+    // start / end
+    ctx.font='600 19px "IBM Plex Sans",sans-serif'; ctx.fillStyle=ink3; ctx.textAlign='center';
+    ctx.fillText('起点', tx(P[0][0]), ty(P[0][1])+34);
+    ctx.fillText('终点', tx(P[N-1][0]), ty(P[N-1][1])-20);
+    ctx.fillStyle=ink2; ctx.font='19px "IBM Plex Sans",sans-serif';
+    ctx.fillText('↑ 最后一段从相反方向经过起点附近 = 重访', tx(5.6), ty(1.7)+42);
+
+    // unselected dots
+    for(var j=0;j<N;j++){
+      if(inS[j]) continue;
+      var c = cVar.checked ? ramp(Math.max(0,Math.min(1,vars[j])), okC, badC) : ink3C;
+      ctx.fillStyle=rgbs(c, cVar.checked?0.95:0.5);
+      ctx.beginPath(); ctx.arc(tx(P[j][0]),ty(P[j][1]),5,0,6.2832); ctx.fill();
+    }
+    // selected
+    for(var k=0;k<S.length;k++){
+      var s=S[k], X=tx(P[s][0]), Y=ty(P[s][1]);
+      ctx.strokeStyle=M; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.moveTo(X,Y); ctx.lineTo(X+Math.cos(HD[s])*22, Y-Math.sin(HD[s])*22); ctx.stroke();
+      ctx.fillStyle=M; ctx.beginPath(); ctx.arc(X,Y,9,0,6.2832); ctx.fill();
+      ctx.fillStyle=surf; ctx.beginPath(); ctx.arc(X,Y,3.4,0,6.2832); ctx.fill();
+    }
+
+    // ---- right panels ----
+    var RX=1120, RW=580;
+    ctx.textAlign='left'; ctx.font='600 21px "IBM Plex Sans",sans-serif'; ctx.fillStyle=ink;
+    ctx.fillText('保留帧在时间轴上的分布', RX, 140);
+    ctx.strokeStyle=rule2; ctx.lineWidth=2;
+    ctx.strokeRect(RX, 160, RW, 46);
+    ctx.strokeStyle=M; ctx.lineWidth=3;
+    for(var a=0;a<S.length;a++){ var px=RX+S[a]/(N-1)*RW;
+      ctx.beginPath(); ctx.moveTo(px,162); ctx.lineTo(px,204); ctx.stroke(); }
+    ctx.font='17px "IBM Plex Mono",monospace'; ctx.fillStyle=ink3;
+    ctx.fillText('帧 0', RX, 232); ctx.textAlign='right'; ctx.fillText('帧 '+(N-1), RX+RW, 232); ctx.textAlign='left';
+
+    ctx.font='600 21px "IBM Plex Sans",sans-serif'; ctx.fillStyle=ink;
+    ctx.fillText('残余不确定度 σ²(h | S) 随帧序', RX, 300);
+    var CY0=320, CH=170;
+    ctx.strokeStyle=rule; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(RX,CY0+CH); ctx.lineTo(RX+RW,CY0+CH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(RX,CY0); ctx.lineTo(RX+RW,CY0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(RX,CY0+CH); 
+    for(var b=0;b<N;b++){ ctx.lineTo(RX+b/(N-1)*RW, CY0+CH-Math.max(0,Math.min(1,vars[b]))*CH); }
+    ctx.lineTo(RX+RW,CY0+CH); ctx.closePath();
+    ctx.fillStyle=rgbs(badC,0.28); ctx.fill();
+    ctx.strokeStyle=rgbs(badC,0.9); ctx.lineWidth=2; ctx.beginPath();
+    for(var b2=0;b2<N;b2++){ var X2=RX+b2/(N-1)*RW, Y2=CY0+CH-Math.max(0,Math.min(1,vars[b2]))*CH;
+      if(b2===0) ctx.moveTo(X2,Y2); else ctx.lineTo(X2,Y2); }
+    ctx.stroke();
+    ctx.font='17px "IBM Plex Mono",monospace'; ctx.fillStyle=ink3;
+    ctx.fillText('1.0', RX+RW+8, CY0+6); ctx.fillText('0', RX+RW+8, CY0+CH+6);
+
+    ctx.font='600 21px "IBM Plex Sans",sans-serif'; ctx.fillStyle=ink;
+    ctx.fillText('朝向覆盖（16 个方向分箱）', RX, 570);
+    var CX=RX+RW/2, CYp=700, R0=40, R1=118, bins=16;
+    var allB=new Array(bins).fill(0), selB=new Array(bins).fill(0);
+    for(var c2=0;c2<N;c2++){ var bidx=(((HD[c2]%(2*PI))+2*PI)%(2*PI))/(2*PI)*bins|0; allB[bidx]++; if(inS[c2]) selB[bidx]++; }
+    var mx=Math.max.apply(null,allB)||1, ms=Math.max.apply(null,selB)||1;
+    for(var g2=0;g2<bins;g2++){
+      var a0=g2/bins*2*PI, a1=(g2+1)/bins*2*PI;
+      ctx.beginPath(); ctx.arc(CX,CYp,R0+(R1-R0)*(allB[g2]/mx),-a1,-a0); ctx.arc(CX,CYp,R0,-a0,-a1,true); ctx.closePath();
+      ctx.fillStyle=rgbs(ink3C,0.28); ctx.fill();
+      if(selB[g2]>0){
+        ctx.beginPath(); ctx.arc(CX,CYp,R0+(R1-R0)*(selB[g2]/ms)*0.85,-a1+0.02,-a0-0.02); ctx.arc(CX,CYp,R0,-a0-0.02,-a1+0.02,true); ctx.closePath();
+        ctx.fillStyle=M; ctx.globalAlpha=.9; ctx.fill(); ctx.globalAlpha=1;
+      }
+    }
+    ctx.strokeStyle=rule2; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(CX,CYp,R0,0,6.2832); ctx.stroke();
+    ctx.font='17px "IBM Plex Mono",monospace'; ctx.fillStyle=ink3; ctx.textAlign='center';
+    ctx.fillText('0°',CX+R1+22,CYp+6); ctx.fillText('90°',CX,CYp-R1-14);
+    ctx.fillText('180°',CX-R1-30,CYp+6); ctx.fillText('270°',CX,CYp+R1+26);
+    ctx.textAlign='left';
+    ctx.font='18px "IBM Plex Sans",sans-serif'; ctx.fillStyle=ink3;
+    ctx.fillText('灰 = 全部帧　蓝 = 保留帧', RX, 830);
+  }
+
+  /* ---- metrics ---- */
+  function logdet(A,n){ var L=chol(A,n), s=0; for(var i=0;i<n;i++) s+=Math.log(L[i*n+i]); return {ld:s, L:L}; }
+  function miValue(S){
+    var inS=new Uint8Array(N); S.forEach(function(x){ inS[x]=1; });
+    var Sb=[]; for(var i=0;i<N;i++) if(!inS[i]) Sb.push(i);
+    var m=Sb.length, n=S.length;
+    if(m===0||n===0) return 0;
+    var A=new Float64Array(m*m);
+    for(var a=0;a<m;a++)for(var b=0;b<m;b++) A[a*m+b]=KM[Sb[a]*N+Sb[b]]+(a===b?NUG:0);
+    var r1=logdet(A,m);
+    var B=new Float64Array(n*n);
+    for(var c=0;c<n;c++)for(var d=0;d<n;d++) B[c*n+d]=KM[S[c]*N+S[d]]+(c===d?NUG:0);
+    var Lb=chol(B,n);
+    var Y=new Float64Array(n*m);
+    for(var col=0;col<m;col++){
+      for(var i2=0;i2<n;i2++){
+        var t=KM[S[i2]*N+Sb[col]];
+        for(var k=0;k<i2;k++) t-=Lb[i2*n+k]*Y[k*m+col];
+        Y[i2*m+col]=t/Lb[i2*n+i2];
+      }
+    }
+    var C=new Float64Array(m*m);
+    for(var a2=0;a2<m;a2++)for(var b2=a2;b2<m;b2++){
+      var sc=0; for(var k2=0;k2<n;k2++) sc+=Y[k2*m+a2]*Y[k2*m+b2];
+      var v=A[a2*m+b2]-sc; C[a2*m+b2]=v; C[b2*m+a2]=v;
+    }
+    var r2=logdet(C,m);
+    return r1.ld-r2.ld;
+  }
+  function stats(S,vars){
+    var sum=0,cnt=0,mx=0;
+    for(var i=0;i<N;i++){ if(vars[i]===0) continue; sum+=vars[i]; cnt++; if(vars[i]>mx) mx=vars[i]; }
+    var gaps=[]; for(var k=1;k<S.length;k++) gaps.push(S[k]-S[k-1]);
+    gaps.sort(function(a,b){return a-b;});
+    var med = gaps.length ? gaps[gaps.length>>1] : 0;
+    var rev=0; S.forEach(function(s){ if(isRev[s]) rev++; });
+    return { avg: cnt?sum/cnt:0, max: mx, med: med, rev: S.length? rev/S.length*100 : 0, mi: miValue(S) };
+  }
+  function setBar(id,val,scaleMax,best){
+    var row=document.getElementById(id);
+    var w = scaleMax>0 ? Math.max(3, val/scaleMax*100) : 3;
+    row.querySelector('i').style.width=w.toFixed(1)+'%';
+    row.querySelector('.bv').textContent=val.toFixed(2);
+    row.classList.toggle('hl', Math.abs(val-best)<1e-9);
+  }
+
+  var pending=false;
+  function update(){
+    if(pending) return; pending=true;
+    requestAnimationFrame(function(){
+      pending=false;
+      var K=+elK.value, sp=+elSp.value, sr=+elSr.value, st=+elSt.value;
+      lK.textContent=K; lSp.textContent=sp.toFixed(1); lSr.textContent=sr.toFixed(2); lSt.textContent=st;
+      document.getElementById('prBarsK').textContent='K = '+K;
+      buildKernel(sp,sr,st);
+      var Smi=miGreedy(K), Sun=uniformSel(K), Sfp=fpsSel(K,sp,sr,st);
+      var Vmi=varsGiven(Smi), Vun=varsGiven(Sun), Vfp=varsGiven(Sfp);
+      var smi=stats(Smi,Vmi), sun=stats(Sun,Vun), sfp=stats(Sfp,Vfp);
+      var top=Math.max(smi.mi,sun.mi,sfp.mi), best=top;
+      setBar('prB-uni',sun.mi,top,best); setBar('prB-fps',sfp.mi,top,best); setBar('prB-mi',smi.mi,top,best);
+      var S = mode==='mi'?Smi : (mode==='uni'?Sun:Sfp);
+      var V = mode==='mi'?Vmi : (mode==='uni'?Vun:Vfp);
+      var st2 = mode==='mi'?smi : (mode==='uni'?sun:sfp);
+      lab.textContent = mode==='mi'?'MI 贪心':(mode==='uni'?'均匀采样':'Camera FPS');
+      oAvg.textContent=st2.mi.toFixed(2)+' ';
+      oAvg.className='v '+(Math.abs(st2.mi-best)<1e-9?'ok':'');
+      oMax.textContent=st2.avg.toFixed(4);
+      oGap.textContent=st2.med+' 帧';
+      oRev.innerHTML=st2.rev.toFixed(0)+'%<small>基准 '+(revTotal/N*100).toFixed(0)+'%</small>';
+      draw(S,V);
+    });
+  }
+  seg(document.getElementById('prMode'),function(b){ mode=b.getAttribute('data-pm'); update(); });
+  [elK,elSp,elSr,elSt].forEach(function(e){ e.addEventListener('input',update); });
+  cVar.addEventListener('change',update);
+  addEventListener('themechange',update);
+  update();
+})();
+</script>
+</body>
+</html>

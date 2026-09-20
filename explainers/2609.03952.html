@@ -1,0 +1,2557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldReward 相机条件世界模型奖励建模</title>
+<meta name="description" content="arXiv 2609.03952 · WorldReward: Reward Modeling for Camera-Conditioned World Models 方法精读与图解">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   WorldReward 精读 — tokens. Dark is the default ground; light is a
+   fully designed second theme (OS setting or toggle).
+   角色色沿用论文 / 代码自己的约定：
+     A   = Video A（代码里 frame_grid 的 A 行是蓝色 #1a4fa0）
+     B   = Video B（B 行是红色 #c0281a）
+     act = 动作一致性 / Action Control（琥珀，也是本页强调色）
+     vis = 视觉质量 / Visual Quality（绿）
+     vlm = 闭源 VLM（Gemini / GPT-5.5）与蒸馏 / 审计（紫）
+     hum = 人工标注 / 人工校准（玫红）；结果图里也给 HY-WorldPlay 1.5 基座
+     tie = Tie / 中性
+   四个动作槽位的边框色（红 / 绿 / 蓝 / 橙）来自 render.py 的 ACTION_COLORS，
+   是这一页的签名纹理。
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0f1114; --surf:#15181c; --surf2:#1b1f25; --surf3:#242a32;
+  --rule:#282d35; --rule2:#3a424d;
+  --ink:#eef1f4; --ink2:#b0b8c3; --ink3:#7f8894;
+  --A:#4a86dd;  --A-ink:#6aa3f2;  --A-soft:rgba(74,134,221,.18);
+  --B:#d9534a;  --B-ink:#f08a80;  --B-soft:rgba(217,83,74,.17);
+  --act:#b8891a; --act-ink:#e0b34a; --act-soft:rgba(184,137,26,.18);
+  --vis:#2fa274; --vis-ink:#5ccb9a; --vis-soft:rgba(47,162,116,.17);
+  --vlm:#8c70e0; --vlm-ink:#b39cf7; --vlm-soft:rgba(140,112,224,.20);
+  --hum:#d4608a; --hum-ink:#ec8ab0; --hum-soft:rgba(212,96,138,.18);
+  --tie:#6b7480; --tie-ink:#9aa3ae; --tie-soft:rgba(107,116,128,.22);
+  --bad:#e06a63; --bad-ink:#ef8a83; --bad-soft:rgba(224,106,99,.15);
+  --ok:#3fb27a;  --ok-ink:#5fc994;  --ok-soft:rgba(63,178,122,.15);
+  --sl1:#d84a4a; --sl2:#43b04a; --sl3:#4f78e0; --sl4:#d9961a;
+  --grid:#232830; --axis:#3a424d;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.35);
+  --tint:rgba(255,255,255,.045);
+  --font-display:"Archivo","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f3f5; --surf:#fbfbfc; --surf2:#eceef1; --surf3:#e2e5ea;
+    --rule:#dde0e6; --rule2:#c4cad3;
+    --ink:#13161b; --ink2:#4c535e; --ink3:#747c89;
+    --A:#2b62cc;  --A-ink:#1f4fa8;  --A-soft:rgba(43,98,204,.13);
+    --B:#c0392b;  --B-ink:#a12c21;  --B-soft:rgba(192,57,43,.12);
+    --act:#ad7a00; --act-ink:#7f5a00; --act-soft:rgba(173,122,0,.14);
+    --vis:#1a8a66; --vis-ink:#136b4f; --vis-soft:rgba(26,138,102,.13);
+    --vlm:#6f52d0; --vlm-ink:#563db0; --vlm-soft:rgba(111,82,208,.13);
+    --hum:#c14a78; --hum-ink:#9c355e; --hum-soft:rgba(193,74,120,.13);
+    --tie:#9aa3ae; --tie-ink:#5f6873; --tie-soft:rgba(154,163,174,.22);
+    --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+    --ok:#0f8a52;  --ok-ink:#0b7043;  --ok-soft:rgba(15,138,82,.12);
+    --sl1:#c93c3c; --sl2:#2e9a36; --sl3:#3b64d0; --sl4:#c48400;
+    --grid:#e3e6eb; --axis:#c4cad3;
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+    --tint:rgba(16,20,28,.035);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f3f5; --surf:#fbfbfc; --surf2:#eceef1; --surf3:#e2e5ea;
+  --rule:#dde0e6; --rule2:#c4cad3;
+  --ink:#13161b; --ink2:#4c535e; --ink3:#747c89;
+  --A:#2b62cc;  --A-ink:#1f4fa8;  --A-soft:rgba(43,98,204,.13);
+  --B:#c0392b;  --B-ink:#a12c21;  --B-soft:rgba(192,57,43,.12);
+  --act:#ad7a00; --act-ink:#7f5a00; --act-soft:rgba(173,122,0,.14);
+  --vis:#1a8a66; --vis-ink:#136b4f; --vis-soft:rgba(26,138,102,.13);
+  --vlm:#6f52d0; --vlm-ink:#563db0; --vlm-soft:rgba(111,82,208,.13);
+  --hum:#c14a78; --hum-ink:#9c355e; --hum-soft:rgba(193,74,120,.13);
+  --tie:#9aa3ae; --tie-ink:#5f6873; --tie-soft:rgba(154,163,174,.22);
+  --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+  --ok:#0f8a52;  --ok-ink:#0b7043;  --ok-soft:rgba(15,138,82,.12);
+  --sl1:#c93c3c; --sl2:#2e9a36; --sl3:#3b64d0; --sl4:#c48400;
+  --grid:#e3e6eb; --axis:#c4cad3;
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  --tint:rgba(16,20,28,.035);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+h1,h2,h3,h4,h5{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--A-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--vlm-ink); outline-offset:3px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); border:1px solid var(--rule);
+  padding:.08em .36em; border-radius:5px; white-space:nowrap}
+pre{font-family:var(--font-mono); font-size:12.5px; line-height:1.6; background:var(--surf2); border:1px solid var(--rule);
+  border-radius:10px; padding:14px 16px; overflow-x:auto; color:var(--ink2); margin:14px 0}
+pre b{color:var(--ink); font-weight:600}
+pre .c{color:var(--ink3)} pre .k{color:var(--act-ink)} pre .a{color:var(--A-ink)} pre .bb{color:var(--B-ink)} pre .g{color:var(--vis-ink)}
+strong{font-weight:600; color:var(--ink)}
+hr{border:0; border-top:1px solid var(--rule); margin:40px 0}
+ul,ol{margin:0; padding-left:1.35em}
+li{margin:.35em 0}
+li::marker{color:var(--ink3)}
+.m{font-family:var(--font-math); font-style:italic}
+.mono{font-family:var(--font-mono)}
+sub,sup{line-height:0; font-size:.72em}
+@media (prefers-reduced-motion: reduce){ *{transition:none !important; animation:none !important} html{scroll-behavior:auto} }
+
+/* ============================================================ chrome */
+#prog{position:fixed; inset:0 auto auto 0; height:2px; width:0; z-index:200;
+  background:linear-gradient(90deg,var(--A),var(--act),var(--vis),var(--B)); transition:width .08s linear}
+.top{position:fixed; inset:0 0 auto 0; height:60px; z-index:150; display:flex; align-items:center; gap:18px;
+  padding:0 22px; background:color-mix(in srgb, var(--surf) 86%, transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2)}
+
+.shell{display:grid; grid-template-columns:236px minmax(0,1fr); gap:0; max-width:1240px; margin:0 auto; padding:84px 28px 120px}
+.rail{position:sticky; top:84px; align-self:start; max-height:calc(100vh - 100px); overflow:auto; padding-right:18px}
+.rail .rl{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); margin:0 0 10px}
+.rail ol{list-style:none; margin:0; padding:0; border-left:1px solid var(--rule)}
+.rail li{margin:0}
+.rail a{display:block; padding:5px 0 5px 14px; margin-left:-1px; font-size:12.5px; line-height:1.4; color:var(--ink3);
+  border-left:2px solid transparent; border-bottom:0; transition:.15s}
+.rail a:hover{color:var(--ink)}
+.rail a.on{color:var(--ink); border-left-color:var(--act)}
+main{min-width:0; max-width:860px; padding-left:44px}
+@media (max-width:980px){
+  .shell{grid-template-columns:1fr; padding:76px 16px 90px}
+  .rail{display:none}
+  main{padding-left:0}
+}
+
+/* ============================================================ hero */
+.hero{padding:10px 0 34px; border-bottom:1px solid var(--rule); margin-bottom:56px}
+.kicker{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px}
+.tag{font-family:var(--font-mono); font-size:11.5px; color:var(--ink2); background:var(--surf2); border:1px solid var(--rule);
+  padding:3px 9px; border-radius:6px; letter-spacing:.01em}
+.tag.hl{color:var(--act-ink); border-color:color-mix(in srgb,var(--act) 45%,transparent); background:var(--act-soft)}
+.hero h1{font-size:clamp(40px,6vw,60px); font-weight:700; letter-spacing:-.025em; line-height:1.02}
+.hero .zh{font-size:clamp(18px,2.2vw,22px); color:var(--ink2); margin-top:14px; line-height:1.55; max-width:44ch; font-weight:500; text-wrap:balance}
+.hero .thesis{margin-top:22px; font-size:16.5px; color:var(--ink2); max-width:66ch}
+.hero .thesis b{color:var(--ink)}
+.authors{margin-top:20px; font-size:13.5px; color:var(--ink3); line-height:1.7}
+.authors b{color:var(--ink2); font-weight:500}
+.links{display:flex; flex-wrap:wrap; gap:10px; margin-top:16px}
+.links a{font-family:var(--font-mono); font-size:12.5px; padding:6px 12px; border:1px solid var(--rule); border-radius:8px; color:var(--ink2); background:var(--surf)}
+.links a:hover{color:var(--ink); border-color:var(--rule2)}
+.stats{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:28px}
+.stat{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:14px 16px 12px}
+.stat .lb{font-family:var(--font-mono); font-size:11px; color:var(--ink3); letter-spacing:.06em; text-transform:uppercase}
+.stat .vl{font-family:var(--font-display); font-size:28px; font-weight:700; letter-spacing:-.02em; margin-top:6px}
+.stat .dl{font-size:12.5px; color:var(--ink3); margin-top:4px; line-height:1.5}
+.stat .dl b{color:var(--ink2); font-weight:500}
+@media (max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
+
+/* role text */
+.rA{color:var(--A-ink); font-weight:600}
+.rB{color:var(--B-ink); font-weight:600}
+.rT{color:var(--act-ink); font-weight:600}
+.rV{color:var(--vis-ink); font-weight:600}
+.rL{color:var(--vlm-ink); font-weight:600}
+.rH{color:var(--hum-ink); font-weight:600}
+.rX{color:var(--bad-ink); font-weight:600}
+.rO{color:var(--ok-ink); font-weight:600}
+
+/* ============================================================ sections */
+.sec{margin:0 0 84px; scroll-margin-top:84px}
+.eyebrow{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.eyebrow .n{font-family:var(--font-mono); font-size:12px; color:var(--act-ink); font-weight:600}
+.eyebrow .t{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); letter-spacing:.12em; text-transform:uppercase}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec h2{font-size:clamp(24px,3vw,31px); letter-spacing:-.02em; margin-bottom:16px}
+.sec h3{font-size:19px; margin:38px 0 12px; letter-spacing:-.01em; display:flex; align-items:baseline; gap:10px}
+.sec h3 .ix{font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-weight:500}
+.sec h4{font-size:15.5px; margin:22px 0 8px}
+.lead{font-size:17px; color:var(--ink2); max-width:68ch; margin-bottom:22px}
+.lead b{color:var(--ink)}
+.prose{max-width:70ch; color:var(--ink2)}
+.prose p{margin:0 0 14px}
+.prose b,.prose strong{color:var(--ink)}
+.prose ul,.prose ol{margin:0 0 14px}
+.note{font-size:13.5px; color:var(--ink3); max-width:70ch; margin-top:10px}
+
+/* ============================================================ figure */
+.fig{margin:26px 0 30px; background:var(--surf); border:1px solid var(--rule); border-radius:14px; box-shadow:var(--shadow); overflow:hidden}
+.fh{display:flex; align-items:baseline; gap:12px; padding:12px 18px 10px; border-bottom:1px solid var(--rule)}
+.fh .no{font-family:var(--font-mono); font-size:11.5px; color:var(--act-ink); letter-spacing:.06em; white-space:nowrap}
+.fh .ti{font-family:var(--font-display); font-size:14px; font-weight:600; color:var(--ink)}
+.figbody{padding:16px 18px 12px; background:var(--surf)}
+.figbody svg{display:block; width:100%; height:auto; max-width:100%; font-family:var(--font-body)}
+figcaption{padding:12px 18px 14px; font-size:13.5px; line-height:1.65; color:var(--ink3); border-top:1px solid var(--rule)}
+figcaption b{color:var(--ink2); font-weight:500}
+.tabs{display:flex; flex-wrap:wrap; gap:6px; padding:10px 14px 0; background:var(--surf)}
+.tab{background:var(--surf2); border:1px solid var(--rule); color:var(--ink3); font-family:var(--font-body); font-size:12.5px;
+  padding:6px 12px; border-radius:8px 8px 0 0; cursor:pointer; transition:.15s; border-bottom:0}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--ink); background:var(--surf3); border-color:var(--rule2)}
+.tabpanel[hidden]{display:none}
+.scrollx{overflow-x:auto}
+
+/* svg utility classes (theme-aware) */
+.f-ink{fill:var(--ink)} .f-ink2{fill:var(--ink2)} .f-ink3{fill:var(--ink3)}
+.f-surf{fill:var(--surf)} .f-surf2{fill:var(--surf2)} .f-surf3{fill:var(--surf3)} .f-bg{fill:var(--bg)}
+.s-rule{stroke:var(--rule2)} .s-rule1{stroke:var(--rule)} .s-ink3{stroke:var(--ink3)} .s-ink2{stroke:var(--ink2)} .s-ink{stroke:var(--ink)}
+.s-grid{stroke:var(--grid)} .s-axis{stroke:var(--axis)}
+.nofill{fill:none}
+.f-A{fill:var(--A)} .f-Ai{fill:var(--A-ink)} .fs-A{fill:var(--A-soft)} .s-A{stroke:var(--A)}
+.f-B{fill:var(--B)} .f-Bi{fill:var(--B-ink)} .fs-B{fill:var(--B-soft)} .s-B{stroke:var(--B)}
+.f-T{fill:var(--act)} .f-Ti{fill:var(--act-ink)} .fs-T{fill:var(--act-soft)} .s-T{stroke:var(--act)}
+.f-V{fill:var(--vis)} .f-Vi{fill:var(--vis-ink)} .fs-V{fill:var(--vis-soft)} .s-V{stroke:var(--vis)}
+.f-L{fill:var(--vlm)} .f-Li{fill:var(--vlm-ink)} .fs-L{fill:var(--vlm-soft)} .s-L{stroke:var(--vlm)}
+.f-H{fill:var(--hum)} .f-Hi{fill:var(--hum-ink)} .fs-H{fill:var(--hum-soft)} .s-H{stroke:var(--hum)}
+.f-N{fill:var(--tie)} .f-Ni{fill:var(--tie-ink)} .fs-N{fill:var(--tie-soft)} .s-N{stroke:var(--tie)}
+.f-X{fill:var(--bad)} .f-Xi{fill:var(--bad-ink)} .fs-X{fill:var(--bad-soft)} .s-X{stroke:var(--bad)}
+.f-O{fill:var(--ok)} .f-Oi{fill:var(--ok-ink)} .fs-O{fill:var(--ok-soft)} .s-O{stroke:var(--ok)}
+.s-s1{stroke:var(--sl1)} .s-s2{stroke:var(--sl2)} .s-s3{stroke:var(--sl3)} .s-s4{stroke:var(--sl4)}
+.f-s1{fill:var(--sl1)} .f-s2{fill:var(--sl2)} .f-s3{fill:var(--sl3)} .f-s4{fill:var(--sl4)}
+svg text{font-family:var(--font-body)}
+svg .big{font-size:13px; font-weight:600}
+svg .lbl{font-size:12px}
+svg .sml{font-size:10.5px}
+svg .xs{font-size:9.5px}
+svg .mono{font-family:var(--font-mono)}
+svg .math{font-family:var(--font-math); font-style:italic; font-size:13px}
+svg .tab-num{font-variant-numeric:tabular-nums}
+
+/* ============================================================ cards & callouts */
+.grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:22px 0}
+.grid2{display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin:22px 0}
+@media (max-width:760px){.grid3,.grid2{grid-template-columns:1fr}}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:16px 18px; font-size:14px; color:var(--ink2); line-height:1.7}
+.card .mono{font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3); margin-bottom:6px}
+.card h5{font-size:15px; margin-bottom:8px; color:var(--ink)}
+.card b{color:var(--ink)}
+.card.cA{border-top:3px solid var(--A)} .card.cA .mono{color:var(--A-ink)}
+.card.cB{border-top:3px solid var(--B)} .card.cB .mono{color:var(--B-ink)}
+.card.cT{border-top:3px solid var(--act)} .card.cT .mono{color:var(--act-ink)}
+.card.cV{border-top:3px solid var(--vis)} .card.cV .mono{color:var(--vis-ink)}
+.card.cL{border-top:3px solid var(--vlm)} .card.cL .mono{color:var(--vlm-ink)}
+.card.cH{border-top:3px solid var(--hum)} .card.cH .mono{color:var(--hum-ink)}
+.card.cN{border-top:3px solid var(--tie)} .card.cN .mono{color:var(--tie-ink)}
+.call{border:1px solid var(--rule); border-left:3px solid var(--ink3); background:var(--surf); border-radius:10px; padding:14px 18px; margin:22px 0; font-size:14.5px; color:var(--ink2); max-width:78ch}
+.call .hd{font-family:var(--font-display); font-weight:600; font-size:14px; color:var(--ink); margin-bottom:6px}
+.call p{margin:0 0 6px} .call p:last-child{margin:0}
+.call b{color:var(--ink)}
+.call.key{border-left-color:var(--act); background:color-mix(in srgb,var(--act-soft) 55%,var(--surf))}
+.call.warn{border-left-color:var(--bad); background:color-mix(in srgb,var(--bad-soft) 60%,var(--surf))}
+.call.mine{border-left-color:var(--vlm); background:color-mix(in srgb,var(--vlm-soft) 45%,var(--surf))}
+.call.ok{border-left-color:var(--ok); background:color-mix(in srgb,var(--ok-soft) 55%,var(--surf))}
+
+.eq{font-family:var(--font-math); font-size:19px; text-align:center; padding:16px 18px; margin:18px 0; background:var(--surf); border:1px solid var(--rule); border-radius:10px; color:var(--ink); overflow-x:auto; line-height:1.7}
+.eq i{font-style:italic}
+.eq .r{font-style:normal}
+.eq .frac{display:inline-flex; flex-direction:column; align-items:center; vertical-align:middle; margin:0 .2em; line-height:1.15}
+.eq .frac > span:first-child{border-bottom:1px solid currentColor; padding:0 .25em}
+.eq .frac > span:last-child{padding:0 .25em}
+.eq .cases{display:inline-grid; grid-template-columns:auto auto; column-gap:14px; row-gap:4px; text-align:left; vertical-align:middle; border-left:1.5px solid currentColor; padding-left:12px; margin-left:6px}
+.eq small{display:block; font-family:var(--font-body); font-style:normal; font-size:12.5px; color:var(--ink3); margin-top:8px; line-height:1.6}
+.eq .no{float:right; font-family:var(--font-mono); font-style:normal; font-size:12px; color:var(--ink3)}
+
+/* tables */
+table{border-collapse:collapse; width:100%; font-size:13.5px; margin:16px 0}
+th,td{padding:9px 10px; border-bottom:1px solid var(--rule); text-align:left; vertical-align:top; line-height:1.55}
+th{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); font-weight:500; border-bottom:1px solid var(--rule2)}
+td{color:var(--ink2)} td b{color:var(--ink)}
+td.num,th.num{font-family:var(--font-mono); font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right}
+tr.hl td{background:var(--tint)}
+.tbl{overflow-x:auto; border:1px solid var(--rule); border-radius:12px; background:var(--surf); padding:0 14px; margin:18px 0}
+.tbl table{margin:0}
+td.best{color:var(--act-ink); font-weight:600}
+td.second{text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--ink3)}
+
+/* pills */
+.pill{display:inline-block; font-family:var(--font-mono); font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--rule2); color:var(--ink2); background:var(--surf2); white-space:nowrap}
+.pill.a{color:var(--A-ink); border-color:color-mix(in srgb,var(--A) 50%,transparent); background:var(--A-soft)}
+.pill.b{color:var(--B-ink); border-color:color-mix(in srgb,var(--B) 50%,transparent); background:var(--B-soft)}
+.pill.t{color:var(--act-ink); border-color:color-mix(in srgb,var(--act) 50%,transparent); background:var(--act-soft)}
+.pill.v{color:var(--vis-ink); border-color:color-mix(in srgb,var(--vis) 50%,transparent); background:var(--vis-soft)}
+.pill.l{color:var(--vlm-ink); border-color:color-mix(in srgb,var(--vlm) 50%,transparent); background:var(--vlm-soft)}
+.pill.h{color:var(--hum-ink); border-color:color-mix(in srgb,var(--hum) 50%,transparent); background:var(--hum-soft)}
+.pill.n{color:var(--tie-ink); border-color:color-mix(in srgb,var(--tie) 60%,transparent); background:var(--tie-soft)}
+.pill.x{color:var(--bad-ink); border-color:color-mix(in srgb,var(--bad) 50%,transparent); background:var(--bad-soft)}
+.pill.o{color:var(--ok-ink); border-color:color-mix(in srgb,var(--ok) 50%,transparent); background:var(--ok-soft)}
+
+/* ============================================================ interactive widgets */
+.ctl{display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; padding:10px 18px; border-bottom:1px solid var(--rule); background:var(--surf2); font-size:13px; color:var(--ink2)}
+.ctl label{display:inline-flex; align-items:center; gap:8px; white-space:nowrap}
+.ctl input[type=range]{width:150px; accent-color:var(--act)}
+.ctl input[type=number]{width:64px; background:var(--surf); border:1px solid var(--rule2); color:var(--ink); border-radius:6px; padding:3px 6px; font-family:var(--font-mono); font-size:12px}
+.ctl .val{font-family:var(--font-mono); font-size:12px; color:var(--ink); min-width:5ch; font-variant-numeric:tabular-nums}
+.seg{display:inline-flex; flex-wrap:wrap; border:1px solid var(--rule2); border-radius:8px; overflow:hidden}
+.seg button{background:var(--surf); border:0; color:var(--ink3); font-family:var(--font-body); font-size:12.5px; padding:5px 11px; cursor:pointer; transition:.15s}
+.seg button + button{border-left:1px solid var(--rule2)}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--surf3); color:var(--ink); font-weight:600}
+.btn{background:var(--surf3); border:1px solid var(--rule2); color:var(--ink); font-family:var(--font-body); font-size:12.5px; padding:5px 12px; border-radius:8px; cursor:pointer}
+.btn:hover{border-color:var(--ink3)}
+.btn[aria-pressed="true"]{background:var(--act-soft); border-color:var(--act); color:var(--ink)}
+.readout{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; padding:12px 18px; border-top:1px solid var(--rule); background:var(--surf)}
+.readout .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3)}
+.readout .v{font-family:var(--font-display); font-size:20px; font-weight:600; margin-top:2px; color:var(--ink)}
+.readout .v small{font-family:var(--font-body); font-size:12px; font-weight:400; color:var(--ink3); margin-left:4px}
+.readout .d{font-size:12px; color:var(--ink3); line-height:1.5; margin-top:2px}
+
+/* chunk splitter (hero) */
+.slots{display:flex; flex-wrap:wrap; gap:14px 10px; padding:6px 0 4px}
+.chunk{display:flex; flex-direction:column; gap:6px}
+.chunk .ch{font-family:var(--font-mono); font-size:10.5px; color:var(--ink3); letter-spacing:.06em}
+.chunk .row{display:flex; gap:4px; padding:5px; border:1px solid var(--rule2); border-radius:8px; background:var(--surf2)}
+.slot{width:38px; height:30px; border-radius:5px; display:grid; place-items:center; font-family:var(--font-mono); font-size:11px; color:var(--ink); border:2px solid var(--rule2); background:var(--surf); font-variant-numeric:tabular-nums}
+.slot.s1{border-color:var(--sl1)} .slot.s2{border-color:var(--sl2)} .slot.s3{border-color:var(--sl3)} .slot.s4{border-color:var(--sl4)}
+.slot.idle{background:var(--surf3); color:var(--ink3); font-size:9.5px; letter-spacing:.04em}
+.slot.pad{background:repeating-linear-gradient(135deg,var(--surf) 0 4px,var(--surf3) 4px 8px); color:var(--ink3); font-size:9.5px}
+.chunk.sel .row{outline:2px solid var(--act); outline-offset:1px}
+.chunk .row{cursor:pointer}
+
+/* six-image explorer */
+.six{display:grid; grid-template-columns:150px 1fr; gap:14px; align-items:start}
+@media (max-width:760px){.six{grid-template-columns:1fr}}
+.six .pick{display:flex; flex-direction:column; gap:6px}
+.six .pick button{text-align:left; background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); font-family:var(--font-body); font-size:12.5px; padding:7px 10px; border-radius:8px; cursor:pointer; line-height:1.35}
+.six .pick button b{display:block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; color:var(--ink3); font-weight:500}
+.six .pick button[aria-pressed="true"]{border-color:var(--act); background:var(--act-soft); color:var(--ink)}
+.six .pick button[aria-pressed="true"] b{color:var(--act-ink)}
+.sixinfo{padding:12px 18px 14px; border-top:1px solid var(--rule); background:var(--surf); font-size:13.5px; color:var(--ink2); line-height:1.7}
+.sixinfo b{color:var(--ink)}
+.sixinfo .kk{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--act-ink); margin-bottom:4px}
+
+/* camera-motion simulator */
+.cam{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+@media (max-width:760px){.cam{grid-template-columns:1fr}}
+.cam .pane{border:1px solid var(--rule2); border-radius:10px; overflow:hidden; background:var(--surf2)}
+.cam .pane .cap{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); padding:6px 10px; border-bottom:1px solid var(--rule)}
+.exp{padding:12px 18px 14px; border-top:1px solid var(--rule); background:var(--surf); font-size:13.5px; color:var(--ink2); line-height:1.7}
+.exp b{color:var(--ink)}
+.exp .kk{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--act-ink); margin-bottom:4px}
+.exp ul{margin:6px 0 0}
+
+/* verdict card (Figure 1 example) */
+.verdict{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+@media (max-width:760px){.verdict{grid-template-columns:1fr}}
+.vcol{border:1px solid var(--rule); border-radius:10px; overflow:hidden; background:var(--surf)}
+.vcol .vh{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px; border-bottom:1px solid var(--rule); font-family:var(--font-display); font-size:13px; font-weight:600}
+.vcol.vt .vh{background:var(--act-soft); color:var(--act-ink)}
+.vcol.vv .vh{background:var(--vis-soft); color:var(--vis-ink)}
+.vitem{padding:9px 12px; border-bottom:1px solid var(--rule); font-size:12.5px; line-height:1.55; color:var(--ink2)}
+.vitem:last-child{border-bottom:0}
+.vitem .lab{font-family:var(--font-mono); font-size:11px; color:var(--ink); margin-bottom:3px; display:flex; justify-content:space-between; gap:8px; align-items:center}
+.vitem .va{color:var(--ink2)} .vitem .va b{color:var(--A-ink); font-weight:600}
+.vitem .vb{color:var(--ink2)} .vitem .vb b{color:var(--B-ink); font-weight:600}
+.vitem .sum{color:var(--ink2); font-style:italic}
+.win{font-family:var(--font-mono); font-size:10.5px; padding:1px 7px; border-radius:999px; border:1px solid; white-space:nowrap}
+.win.A{color:var(--A-ink); border-color:var(--A); background:var(--A-soft)}
+.win.B{color:var(--B-ink); border-color:var(--B); background:var(--B-soft)}
+.win.Tie{color:var(--tie-ink); border-color:var(--tie); background:var(--tie-soft)}
+
+/* vote simulator */
+.votes{width:100%; border-collapse:separate; border-spacing:0; margin:0}
+.votes th{padding:6px 4px; text-align:center; border-bottom:1px solid var(--rule2)}
+.votes th:first-child{text-align:left}
+.votes th .pill{font-size:10px; padding:2px 6px}
+.votes td{padding:5px 4px; text-align:center; border-bottom:1px solid var(--rule); vertical-align:middle}
+.votes td:first-child{text-align:left; font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); white-space:nowrap}
+.cyc{min-width:44px; height:28px; border-radius:6px; border:1px solid var(--rule2); background:var(--surf2); font-family:var(--font-mono); font-size:12px; cursor:pointer; color:var(--ink)}
+.cyc[data-v="A"]{color:var(--A-ink); border-color:var(--A); background:var(--A-soft)}
+.cyc[data-v="B"]{color:var(--B-ink); border-color:var(--B); background:var(--B-soft)}
+.cyc[data-v="Tie"]{color:var(--tie-ink); border-color:var(--tie); background:var(--tie-soft)}
+.cyc[disabled]{cursor:default; opacity:.85}
+.tally{display:flex; flex-wrap:wrap; gap:10px; padding:12px 18px; border-top:1px solid var(--rule); background:var(--surf)}
+.tally .t{flex:1 1 160px; border:1px solid var(--rule); border-radius:10px; padding:10px 12px}
+.tally .t .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3)}
+.tally .t .bar{display:flex; height:10px; border-radius:5px; overflow:hidden; margin:8px 0 6px; background:var(--surf3); gap:2px}
+.tally .t .bar i{display:block; height:100%}
+.tally .t .bar i.a{background:var(--A)} .tally .t .bar i.b{background:var(--B)} .tally .t .bar i.n{background:var(--tie)}
+.tally .t .r{font-family:var(--font-mono); font-size:12px; color:var(--ink2)}
+.tally .t .w{font-family:var(--font-display); font-size:18px; font-weight:600; margin-top:2px}
+
+/* RL calculator */
+.mat{border-collapse:separate; border-spacing:3px; margin:0}
+.mat th{font-family:var(--font-mono); font-size:11px; color:var(--ink3); text-align:center; padding:2px 4px; border:0; text-transform:none; letter-spacing:0}
+.mat td{padding:0; border:0}
+.mat .cell{width:54px; height:34px; border-radius:6px; border:1px solid var(--rule2); background:var(--surf2); font-family:var(--font-mono); font-size:11.5px; cursor:pointer; color:var(--ink); display:grid; place-items:center}
+.mat .cell.diag{background:repeating-linear-gradient(135deg,var(--surf2) 0 4px,var(--surf3) 4px 8px); cursor:default; color:var(--ink3)}
+.mat .cell.win{background:var(--act-soft); border-color:var(--act); color:var(--act-ink)}
+.mat .cell.lose{background:var(--surf); color:var(--ink3)}
+.mat .cell.tie{background:var(--tie-soft); border-color:var(--tie); color:var(--tie-ink)}
+.mat .cell.mirror{cursor:default; opacity:.75}
+.rlgrid{display:grid; grid-template-columns:auto 1fr; gap:18px; align-items:start}
+@media (max-width:760px){.rlgrid{grid-template-columns:1fr}}
+.rlout table{margin:0}
+.rlout td,.rlout th{padding:6px 8px}
+.pbar{display:flex; align-items:center; gap:8px}
+.pbar .trk{flex:1; height:8px; background:var(--surf3); border-radius:4px; overflow:hidden; position:relative}
+.pbar .trk i{position:absolute; left:0; top:0; bottom:0; background:var(--act); border-radius:4px}
+.pbar .trk i.neg{background:var(--vlm)}
+
+/* algorithm stepper */
+.steps{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+@media (max-width:760px){.steps{grid-template-columns:1fr}}
+.steps ol{list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px}
+.steps li{border:1px solid var(--rule); border-radius:8px; padding:8px 12px; font-size:13px; color:var(--ink3); cursor:pointer; line-height:1.5; transition:.15s}
+.steps li b{color:var(--ink2); font-family:var(--font-mono); font-size:11px; margin-right:6px}
+.steps li.on{border-color:var(--vlm); background:var(--vlm-soft); color:var(--ink)}
+.steps li.on b{color:var(--vlm-ink)}
+.hist{border:1px solid var(--rule2); border-radius:10px; background:var(--surf2); padding:10px 12px; min-height:200px; font-size:12.5px; color:var(--ink2)}
+.hist .hh{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); margin-bottom:8px}
+.hist .it{display:flex; gap:8px; align-items:flex-start; padding:5px 0; border-bottom:1px dashed var(--rule)}
+.hist .it:last-child{border-bottom:0}
+.hist .ic{width:22px; height:22px; border-radius:5px; display:grid; place-items:center; font-family:var(--font-mono); font-size:10px; flex:none; border:1px solid var(--rule2); background:var(--surf)}
+.hist .ic.img{border-color:var(--A); color:var(--A-ink)}
+.hist .ic.txt{border-color:var(--vlm); color:var(--vlm-ink)}
+.hist .ic.dif{border-color:var(--act); color:var(--act-ink)}
+.hist .ic.hum{border-color:var(--hum); color:var(--hum-ink)}
+
+/* charts */
+.legend{display:flex; flex-wrap:wrap; gap:8px 16px; padding:8px 18px 0; font-size:12.5px; color:var(--ink2)}
+.legend span{display:inline-flex; align-items:center; gap:6px}
+.legend i{width:12px; height:12px; border-radius:3px; display:inline-block}
+.legend i.hatch{background:repeating-linear-gradient(135deg,var(--tie) 0 2px,transparent 2px 4px); border:1px solid var(--tie)}
+.tip{position:absolute; pointer-events:none; background:var(--surf3); color:var(--ink); border:1px solid var(--rule2); border-radius:8px; padding:6px 9px; font-size:12px; line-height:1.45; box-shadow:var(--shadow); z-index:20; white-space:nowrap; opacity:0; transition:opacity .1s}
+.tip b{color:var(--ink); font-weight:600}
+.tip .k{color:var(--ink3); font-family:var(--font-mono); font-size:10.5px}
+.chartwrap{position:relative}
+.bar-hit{fill:transparent}
+.bar-hit:hover + rect, .bar-hit:focus + rect{opacity:.85}
+.tview[hidden]{display:none}
+.tview{padding:0 18px 12px}
+.tview table{font-size:12.5px}
+
+/* glossary & footer */
+.gloss{display:grid; grid-template-columns:200px 1fr; gap:8px 16px; font-size:14px; color:var(--ink2); margin:14px 0}
+.gloss dt{font-weight:600; color:var(--ink); font-family:var(--font-mono); font-size:12.5px; padding-top:2px}
+.gloss dd{margin:0; padding-bottom:8px; border-bottom:1px solid var(--rule)}
+@media (max-width:640px){.gloss{grid-template-columns:1fr} .gloss dt{padding-top:10px}}
+.foot{margin-top:40px; padding-top:18px; border-top:1px solid var(--rule); font-size:12.5px; color:var(--ink3); line-height:1.7}
+kbd{font-family:var(--font-mono); font-size:11px; border:1px solid var(--rule2); border-bottom-width:2px; border-radius:5px; padding:1px 6px; background:var(--surf2); color:var(--ink2)}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">WorldReward<em>相机条件世界模型的奖励建模 · 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<!-- shared SVG defs (same document, referenced by fragment id) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ar-i" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--ink3)"/></marker>
+    <marker id="ar-A" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--A)"/></marker>
+    <marker id="ar-B" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--B)"/></marker>
+    <marker id="ar-T" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--act)"/></marker>
+    <marker id="ar-V" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--vis)"/></marker>
+    <marker id="ar-L" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--vlm)"/></marker>
+    <marker id="ar-H" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--hum)"/></marker>
+    <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="var(--tie)" stroke-width="1.6"/></pattern>
+    <pattern id="hatchA" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="var(--A)" stroke-width="1.4"/></pattern>
+    <pattern id="hatchN" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(135)"><line x1="0" y1="0" x2="0" y2="6" stroke="var(--tie)" stroke-width="1.4"/></pattern>
+    <pattern id="newc" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="var(--vis-soft)"/><line x1="0" y1="0" x2="0" y2="8" stroke="var(--vis)" stroke-width="1.5"/></pattern>
+  </defs>
+</svg>
+
+<div class="shell">
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-tldr">00 · 一图看懂</a></li>
+    <li><a href="#s-problem">01 · 三类奖励各缺一半</a></li>
+    <li><a href="#s-form">02 · 形式化：一对视频，两个偏好</a></li>
+    <li><a href="#s-chunk">03 · 动作—视频分块</a></li>
+    <li><a href="#s-evidence">04 · 六图证据与动作的视觉指纹</a></li>
+    <li><a href="#s-reason">05 · 块级推理：VLM 到底输出什么</a></li>
+    <li><a href="#s-vote">06 · 投票聚合</a></li>
+    <li><a href="#s-data">07 · 推理增强偏好数据管线</a></li>
+    <li><a href="#s-train">08 · 训练与推理设置</a></li>
+    <li><a href="#s-rl">09 · 作为 RL 奖励：DiffusionNFT</a></li>
+    <li><a href="#s-bench">10 · WorldReward-Bench</a></li>
+    <li><a href="#s-results">11 · 结果</a></li>
+    <li><a href="#s-crit">12 · 局限与保留意见</a></li>
+    <li><a href="#s-repo">13 · 与本仓库的关联</a></li>
+    <li><a href="#s-appendix">14 · 附录速查</a></li>
+  </ol>
+</nav>
+<main>
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <div class="kicker">
+    <span class="tag">arXiv 2609.03952v1</span>
+    <span class="tag">cs.CV · 2026-09-03</span>
+    <span class="tag">Preprint · 奖励模型 + Benchmark</span>
+    <span class="tag hl">相机条件世界模型 / VLM-as-judge / RL 后训练</span>
+  </div>
+  <h1>WorldReward</h1>
+  <p class="zh">面向相机条件世界模型的奖励建模：把长视频切成「动作对齐的块」，让 VLM 从六张图里同时裁决「动作执行了没有」与「画面好不好」</p>
+  <p class="thesis">世界模型生成的交互视频有两件事要对：<span class="rT">指令动作要引起预期的画面变化</span>，<span class="rV">外观、几何与时间动态要保持连贯</span>。
+  过去这两件事由两套异构系统分别打分——几何模型估轨迹、图像奖励模型看单帧。WorldReward 用<b>一个</b> VLM（Qwen3.5-9B 微调）在<b>同一份证据</b>上同时给出两个偏好：
+  它不看整段视频，而是把每对视频按<b>四个动作一块</b>切开，每块只看六张图（源图 + 帧网格 + 四张动作面板），逐动作比较 A / B，再把各块的裁决<b>投票</b>成视频级的动作偏好与视觉偏好。
+  训练数据来自 Gemini 3.1 Pro 的块级推理蒸馏，再经 GPT-5.5 工具型 agent 多轮审计与人工校准；在 760 对人工标注的 WorldReward-Bench 上三个维度全部第一，用作 HY-WorldPlay 1.5 的 RL 奖励时在短 / 中 / 长时程上同时提升动作执行与视觉质量。</p>
+  <p class="authors"><b>Yibin Wang</b>, <b>Zehan Wang</b><sup>‡</sup>, Junshu Tang, Zhimin Li, Yujie Zhou, Jiazi Bu, Pengyang Ling, Feng Han, Zhixiong Zhang, Long Xing, Shengyuan Ding, Ziang Li, <b>Cheng Jin</b><sup>†</sup>, <b>Yuhang Zang</b><sup>†</sup>, <b>Jiaqi Wang</b><sup>†</sup>, <b>Tianyu Pang</b><sup>†</sup></p>
+  <p class="authors">复旦大学 · 腾讯混元 · 上海创智学院 · 上海交通大学 · 上海人工智能实验室 · 独立研究者　　<span style="opacity:.75">‡项目负责人　†通讯作者</span></p>
+  <div class="links">
+    <a href="https://arxiv.org/abs/2609.03952" target="_blank" rel="noopener">arXiv 摘要 ↗</a>
+    <a href="https://arxiv.org/pdf/2609.03952" target="_blank" rel="noopener">PDF ↗</a>
+    <a href="https://codegoat24.github.io/WorldReward" target="_blank" rel="noopener">项目主页 ↗</a>
+    <a href="https://github.com/CodeGoat24/WorldReward" target="_blank" rel="noopener">GitHub ↗</a>
+    <a href="https://huggingface.co/collections/CodeGoat24/worldreward" target="_blank" rel="noopener">HF 模型 ↗</a>
+    <a href="https://huggingface.co/datasets/CodeGoat24/WorldReward-Bench" target="_blank" rel="noopener">HF Bench ↗</a>
+  </div>
+
+  <figure class="fig" style="margin-top:28px">
+    <div class="fh"><span class="no">Hero</span><span class="ti">分块器：一条动作轨迹怎样变成「K 次 VLM 调用」</span></div>
+    <div class="ctl">
+      <label>动作步数 <span class="m">N</span> <input type="range" id="nAct" min="1" max="40" value="23" aria-label="动作步数"> <span class="val" id="nActV">23</span></label>
+      <label>每动作帧数 <input type="number" id="fpa" min="1" max="64" value="8" aria-label="每个动作占的帧数"></label>
+      <div class="seg" role="group" aria-label="预设">
+        <button type="button" data-n="11" data-f="8">训练库 · 11 步</button>
+        <button type="button" data-n="23" data-f="8" aria-pressed="true">Bench · 23 步</button>
+      </div>
+    </div>
+    <div class="figbody">
+      <div class="slots" id="slots"></div>
+    </div>
+    <div class="readout">
+      <div><div class="k">块数 K = ⌈(N+1)/4⌉</div><div class="v" id="roK">6</div><div class="d">前置一个 IDLE 槽位；最后一块不足四槽用 PAD（复制末帧）补齐</div></div>
+      <div><div class="k">VLM 调用 / 图片数</div><div class="v" id="roCalls">6<small>次 · 36 张图</small></div><div class="d">每块 6 张图：源图 + 帧网格 + 4 张动作面板</div></div>
+      <div><div class="k">视频长度</div><div class="v" id="roFrames">184<small>帧</small></div><div class="d" id="roSec">15 fps 下约 12.3 s；Bench 每对视频正是 184 帧</div></div>
+      <div><div class="k">选中块的动作标签</div><div class="v" id="roSel" style="font-size:14px;font-family:var(--font-mono);font-weight:500">—</div><div class="d">点击任一块查看它的四个槽位</div></div>
+    </div>
+    <figcaption><b>按 <code>worldreward/render.py</code> 的 <code>build_chunks()</code> 重绘。</b>轨迹前面先插入一个与源帧绑定的 IDLE 槽位，然后每 4 个槽位切一块（Sec. 3.2）；
+    所以 Chunk 0 永远是「IDLE + 3 个真实动作」，之后每块 4 个真实动作。训练用的 11 步轨迹得到 12 槽 = 3 块，Bench 用的 23 步轨迹得到 24 槽 = 6 块（与论文 Fig. 1 一致）。
+    四种边框色（红 / 绿 / 蓝 / 橙）就是代码里帧网格与动作面板的槽位边框色 <code>ACTION_COLORS</code>。</figcaption>
+  </figure>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="lb">Bench 三维一致率</div>
+      <div class="vl">77.6 / 81.3 / 73.0</div>
+      <div class="dl">动作 / 外观 / 运动（%），全部第一；超过 GPT-5.5 <b>+3.42 / +1.45 / +3.56</b>（Tab. 3）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">WorldReward-Bench</div>
+      <div class="vl">760 对</div>
+      <div class="dl">同源图 / 同 caption / 同 23 步轨迹；9 个世界模型；三人独立标注 × 3 维（Sec. 3.7）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">训练数据</div>
+      <div class="vl">124,942</div>
+      <div class="dl">块级样本（≈10 万经 A/B 互换增强）；来自 5 万对视频 × 3 块（Sec. 4.1, Tab. 7）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">RL 后训练增益</div>
+      <div class="vl">+1.6 ~ +5.8</div>
+      <div class="dl">动作准确率相对 WorldCompass 的提升（点），三种时程；HPSv3 同时提升（Tab. 4）</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 00 TL;DR -->
+<section class="sec" id="s-tldr">
+  <div class="eyebrow"><span class="n">00</span><span class="t">TL;DR</span><span class="line"></span></div>
+  <h2>一图看懂：局部证据 → 块级裁决 → 投票成全局偏好</h2>
+  <p class="lead">这篇论文的核心不是一个新网络，而是一套<b>「怎样把一对长视频喂给 VLM 评判」的输入组织方式</b>，外加一条配套的数据管线和一个人工标注 benchmark。
+  下图把论文 Fig. 1 的五个步骤压成一张：同一条件下生成的两段视频，被切成动作对齐的块；每块只看六张图，由 WorldReward 写出结构化的裁决；再按块投票。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 1</span><span class="ti">从一对 23 步视频到两个视频级偏好（对应论文 Fig. 1 的 ①—⑤）</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 860 560" role="img" aria-label="WorldReward 总流程：共享条件生成视频 A 与 B，切成六个动作对齐的块，每块六张图交给 VLM 得到动作与视觉裁决，再投票成视频级偏好">
+      <!-- ---------- row 1: inputs -> videos ---------- -->
+      <text x="20" y="18" class="mono sml f-ink3">① 输入：共享条件 + 一对视频</text>
+      <rect x="20" y="30" width="185" height="118" rx="10" class="f-surf2 s-rule1" stroke-width="1"/>
+      <rect x="30" y="40" width="46" height="34" rx="4" class="fs-A s-A" stroke-width="1"/>
+      <path d="M33 70 L44 56 L52 64 L60 52 L73 70 Z" class="f-A" opacity=".8"/>
+      <circle cx="41" cy="48" r="3.5" class="f-Ti"/>
+      <text x="84" y="49" class="lbl f-ink">源图 <tspan class="math">x</tspan><tspan class="xs" dy="3">0</tspan></text>
+      <text x="84" y="66" class="sml f-ink3">+ caption <tspan class="math">d</tspan></text>
+      <text x="30" y="96" class="sml f-ink2">轨迹 <tspan class="math">a</tspan><tspan class="xs" dy="3">1:N</tspan><tspan dy="-3">，N = 23</tspan></text>
+      <g id="trajTicks"></g>
+      <text x="30" y="138" class="xs f-ink3">Forward / Left / YawLeft / PitchUp …（8 平移 + 4 旋转原子，可组合）</text>
+
+      <line x1="205" y1="66" x2="236" y2="66" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+      <line x1="205" y1="118" x2="236" y2="118" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+      <rect x="238" y="50" width="96" height="32" rx="7" class="f-surf3 s-rule" stroke-width="1"/>
+      <text x="286" y="70" text-anchor="middle" class="lbl f-ink">世界模型 ①</text>
+      <rect x="238" y="102" width="96" height="32" rx="7" class="f-surf3 s-rule" stroke-width="1"/>
+      <text x="286" y="122" text-anchor="middle" class="lbl f-ink">世界模型 ②</text>
+      <text x="286" y="150" text-anchor="middle" class="xs f-ink3">同图、同 caption、同轨迹</text>
+
+      <line x1="334" y1="66" x2="360" y2="66" class="s-A" stroke-width="1.4" marker-end="url(#ar-A)"/>
+      <line x1="334" y1="118" x2="360" y2="118" class="s-B" stroke-width="1.4" marker-end="url(#ar-B)"/>
+      <!-- video strips: 23 segments from x=372 to x=832 (460px) -->
+      <text x="372" y="44" class="sml f-Ai">Video A</text>
+      <text x="372" y="146" class="sml f-Bi">Video B</text>
+      <g id="stripA"></g>
+      <g id="stripB"></g>
+      <!-- chunk brackets over strips -->
+      <g id="chunkBrackets"></g>
+      <text x="838" y="44" text-anchor="end" class="xs f-ink3">② 前置 IDLE 槽，按 4 槽切块 → 6 块</text>
+
+      <!-- ---------- row 2: per-chunk input -> VLM -> JSON ---------- -->
+      <text x="20" y="196" class="mono sml f-ink3">③ 对第 k 块：六图输入（这里画 Chunk 1：动作 4–7）</text>
+      <!-- source image -->
+      <rect x="20" y="210" width="62" height="46" rx="4" class="fs-A s-A" stroke-width="1"/>
+      <path d="M24 252 L38 232 L48 242 L58 228 L78 252 Z" class="f-A" opacity=".8"/>
+      <text x="51" y="272" text-anchor="middle" class="xs f-ink3">图 1 · 源图</text>
+      <!-- frame grid 2 x 13 -->
+      <g id="miniGrid"></g>
+      <text x="215" y="272" text-anchor="middle" class="xs f-ink3">图 2 · 帧网格：参考列 + 4 动作 × (首/中/末)，上行 A 下行 B</text>
+      <!-- 4 panels -->
+      <g id="miniPanels"></g>
+      <text x="470" y="272" text-anchor="middle" class="xs f-ink3">图 3–6 · 动作面板：每动作 2×2（A/B × 首/末）</text>
+      <!-- text prompt -->
+      <rect x="20" y="284" width="540" height="30" rx="6" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="30" y="303" class="xs f-ink2">+ 文本：caption <tspan class="math">d</tspan>、本块 4 个动作标签（<tspan class="mono">Forward | IDLE</tspan> …）及每个分量「旧内容往哪走 / 新内容从哪边进」的预期描述</text>
+
+      <line x1="566" y1="262" x2="596" y2="262" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+      <rect x="600" y="222" width="96" height="80" rx="10" class="fs-T s-T" stroke-width="1.2"/>
+      <text x="648" y="252" text-anchor="middle" class="big f-ink">WorldReward</text>
+      <text x="648" y="269" text-anchor="middle" class="xs f-ink2">Qwen3.5-9B · SFT</text>
+      <text x="648" y="284" text-anchor="middle" class="xs f-ink3">温度 0 · 1 次生成 / 块</text>
+      <line x1="696" y1="262" x2="722" y2="262" class="s-T" stroke-width="1.4" marker-end="url(#ar-T)"/>
+      <!-- JSON output -->
+      <rect x="726" y="196" width="114" height="132" rx="8" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="734" y="212" class="mono xs f-Ti">action_control</text>
+      <text x="734" y="226" class="xs f-ink2">A1 Tie · A2 A · A3 A · A4 Tie</text>
+      <text x="734" y="239" class="xs f-ink3">每动作：A 分析 / B 分析 / 胜者</text>
+      <text x="734" y="253" class="xs f-ink">overall_winner: <tspan class="mono f-Ai">A</tspan></text>
+      <line x1="734" y1="260" x2="832" y2="260" class="s-rule1" stroke-width="1"/>
+      <text x="734" y="275" class="mono xs f-Vi">visual_quality</text>
+      <text x="734" y="289" class="xs f-ink2">时间一致 · 动态生成 · 伪影/结构</text>
+      <text x="734" y="302" class="xs f-ink3">每项：A 分析 / B 分析 / 胜者</text>
+      <text x="734" y="317" class="xs f-ink">overall_winner: <tspan class="mono f-Ai">A</tspan></text>
+      <text x="783" y="344" text-anchor="middle" class="xs f-ink3">④ 一次输出两个裁决</text>
+
+      <!-- ---------- row 3: voting ---------- -->
+      <text x="20" y="384" class="mono sml f-ink3">⑤ 按块投票（Eq. 3）：只数 A 与 B，票数相等记 Tie</text>
+      <g id="voteRowAct"></g>
+      <g id="voteRowVis"></g>
+      <text x="20" y="418" class="lbl f-Ti">动作</text>
+      <text x="20" y="470" class="lbl f-Vi">视觉</text>
+      <!-- tallies -->
+      <rect x="520" y="396" width="150" height="32" rx="7" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="595" y="416" text-anchor="middle" class="mono sml f-ink">A : B : Tie = 4 : 2 : 0</text>
+      <rect x="520" y="448" width="150" height="32" rx="7" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="595" y="468" text-anchor="middle" class="mono sml f-ink">A : B : Tie = 6 : 0 : 0</text>
+      <line x1="672" y1="412" x2="700" y2="412" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+      <line x1="672" y1="464" x2="700" y2="464" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+      <rect x="704" y="396" width="136" height="32" rx="7" class="fs-T s-T" stroke-width="1.2"/>
+      <text x="772" y="416" text-anchor="middle" class="lbl f-ink"><tspan class="math">R</tspan><tspan class="xs" dy="-5">act</tspan><tspan dy="5"> = </tspan><tspan class="mono f-Ai">A</tspan></text>
+      <rect x="704" y="448" width="136" height="32" rx="7" class="fs-V s-V" stroke-width="1.2"/>
+      <text x="772" y="468" text-anchor="middle" class="lbl f-ink"><tspan class="math">R</tspan><tspan class="xs" dy="-5">vis</tspan><tspan dy="5"> = </tspan><tspan class="mono f-Ai">A</tspan></text>
+      <text x="20" y="516" class="xs f-ink3">Bench 评测时把三个视觉子维度再拆成「外观」（时间一致 + 伪影/结构）与「运动」（动态生成质量）两票；RL 时用的是两个 overall_winner（Sec. 4.1, 3.6）。</text>
+      <text x="20" y="534" class="xs f-ink3">动作票的 4:2:0 与视觉票的 6:0:0 取自论文 Fig. 1 的示例（SUV 停在沙漠岩地的场景，23 步 yaw / forward 轨迹）。</text>
+    </svg>
+    </div>
+    <figcaption><b>按论文 Fig. 1 与 Sec. 3.1–3.3 重绘；帧网格与面板的布局按开源代码 <code>render.py</code> 校对。</b>
+    要点：VLM 从不接触整段视频——它每次只看一块的六张图，逐动作比 A / B（动作维度），再看整块的三个视觉子维度；块级结论都是「A 或 B」，Tie 只在动作级和子维度级允许，全局层面 Tie 来自票数相等。</figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card cT">
+      <p class="mono">ACTION</p>
+      <h5>动作一致性：逐动作对比</h5>
+      <p>每个动作的指令是「平移 | 旋转」两轴，VLM 被要求对<b>每个指令分量</b>核对方向（旧内容往哪个边走、新内容从哪个边进）、幅度、<b>纯净度</b>（有没有多余的缩放 / 漂移 / 倾斜）、平滑度与 3D 合理性；四个动作各出一个胜者，再汇总成本块的动作胜者。</p>
+    </div>
+    <div class="card cV">
+      <p class="mono">VISUAL</p>
+      <h5>视觉质量：三个互补子维度</h5>
+      <p><b>时间一致性</b>（块内帧间稳定：闪烁、跳变、细节漂移），<b>动态生成质量</b>（是真的在生成运动，还是静止 / 贴图滑动 / 破坏性形变），<b>伪影与结构完整性</b>（模糊、重影、融化、撕裂、身份漂移、以及相对源图的场景漂移）。</p>
+    </div>
+    <div class="card cN">
+      <p class="mono">AGGREGATE</p>
+      <h5>投票：局部到全局</h5>
+      <p>K 块各投一票，只数 A 与 B，多者胜、相等为 Tie（Eq. 3）。目的有二：把短暂的局部失败放大到能被看见；同时不让某一块特别强或特别弱的表现单独决定整段视频的偏好。</p>
+    </div>
+  </div>
+
+  <div class="call key">
+    <div class="hd">◆ 如果只记三件事</div>
+    <p><b>1.</b> 「统一」的含义是<b>同一模型、同一份证据、两个独立偏好</b>：动作偏好与视觉偏好从同一次推理里产出，但作为 RL 信号仍然分开、可加权（Sec. 3.6）。它取代的是 WorldCompass 里「DepthAnything3 估轨迹 + HPSv3 打单帧」的两套系统。</p>
+    <p><b>2.</b> 输入组织是全部技巧所在：前置 IDLE 槽 → 4 槽一块 → 每块 6 张图。消融显示去掉源图主要伤外观（−2.37），去掉帧网格伤最大（平均 −2.48），去掉动作面板主要伤动作（−2.82）（Tab. 6）。</p>
+    <p><b>3.</b> 超过老师的原因不在蒸馏而在<b>标注精修</b>：直接蒸馏 Gemini 只有 68.69 平均一致率（≈ Gemini 自己的 68.90），GPT-5.5 agent 审计后跳到 75.94，人工校准再 +1.39 到 77.33（Tab. 5）。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 01 PROBLEM -->
+<section class="sec" id="s-problem">
+  <div class="eyebrow"><span class="n">01</span><span class="t">The Problem</span><span class="line"></span></div>
+  <h2>三类奖励各缺一半，整段直接喂给 VLM 又太长太吵</h2>
+  <p class="lead">相机条件世界模型（camera-conditioned world models）的输出有没有用，取决于两件耦合的事：指令的相机动作是否被忠实执行，以及执行过程中几何、外观、时间动态是否保持连贯。
+  论文引言把这个奖励建模问题的难点归为三条，并逐一指出现有奖励为什么不够。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 2</span><span class="ti">三个挑战：耦合、局部、长时归因</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 860 250" role="img" aria-label="三个挑战的示意：同一画面变化在不同指令下对错相反；一个动作只占长视频的很小一段；失败随生成累积需要归因到动作段">
+      <!-- panel 1: coupled -->
+      <rect x="10" y="10" width="270" height="228" rx="10" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="24" y="32" class="big f-ink">1 · 耦合的要求</text>
+      <text x="24" y="50" class="xs f-ink3">同一个画面变化，对错取决于指令</text>
+      <!-- two mini viewports -->
+      <rect x="24" y="64" width="110" height="66" rx="4" class="f-surf s-rule" stroke-width="1"/>
+      <rect x="150" y="64" width="110" height="66" rx="4" class="f-surf s-rule" stroke-width="1"/>
+      <rect x="40" y="80" width="26" height="34" rx="2" class="fs-A s-A" stroke-width="1"/>
+      <rect x="86" y="80" width="26" height="34" rx="2" class="fs-A s-A" stroke-width="1"/>
+      <line x1="70" y1="97" x2="82" y2="97" class="s-ink2" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="166" y="80" width="26" height="34" rx="2" class="fs-A s-A" stroke-width="1"/>
+      <rect x="212" y="80" width="26" height="34" rx="2" class="fs-A s-A" stroke-width="1"/>
+      <line x1="196" y1="97" x2="208" y2="97" class="s-ink2" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <text x="79" y="146" text-anchor="middle" class="xs f-ink2">画面内容向右移</text>
+      <text x="205" y="146" text-anchor="middle" class="xs f-ink2">画面内容向右移</text>
+      <text x="79" y="166" text-anchor="middle" class="sml f-ink">指令 YawLeft</text>
+      <text x="205" y="166" text-anchor="middle" class="sml f-ink">指令 YawRight</text>
+      <rect x="49" y="176" width="60" height="20" rx="10" class="fs-O s-O" stroke-width="1"/>
+      <text x="79" y="190" text-anchor="middle" class="xs f-Oi">正确</text>
+      <rect x="175" y="176" width="60" height="20" rx="10" class="fs-X s-X" stroke-width="1"/>
+      <text x="205" y="190" text-anchor="middle" class="xs f-Xi">错误</text>
+      <text x="24" y="222" class="xs f-ink3">→ 动作与质量要从同一份对视频的理解里判断</text>
+
+      <!-- panel 2: localized -->
+      <rect x="296" y="10" width="270" height="228" rx="10" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="310" y="32" class="big f-ink">2 · 局部的证据</text>
+      <text x="310" y="50" class="xs f-ink3">一个动作只活在长序列的几帧里</text>
+      <!-- timeline 184 frames -->
+      <rect x="310" y="72" width="240" height="18" rx="3" class="f-surf s-rule" stroke-width="1"/>
+      <g id="tl23"></g>
+      <rect x="380" y="70" width="10.4" height="22" rx="2" class="nofill s-T" stroke-width="2"/>
+      <text x="310" y="112" class="xs f-ink2">184 帧 / 23 个动作 → 每个动作 8 帧（≈0.53 s @15 fps）</text>
+      <text x="310" y="128" class="xs f-ink2">一次 Forward 或 YawLeft 只占整段的 <tspan class="f-Ti" font-weight="600">4.3%</tspan></text>
+      <!-- sparse sampling -->
+      <text x="310" y="156" class="xs f-ink3">整段稀疏采样（比如 8 帧）：</text>
+      <rect x="310" y="164" width="240" height="12" rx="3" class="f-surf s-rule" stroke-width="1"/>
+      <g id="sparse8"></g>
+      <text x="310" y="196" class="xs f-ink3">采样点之间隔 23 帧，一个 8 帧的动作可能一帧也采不到；</text>
+      <text x="310" y="210" class="xs f-ink3">采密了上下文又膨胀，且局部失败被整体印象稀释。</text>
+      <text x="310" y="228" class="xs f-ink2">→ 评判要围绕每个动作附近的几帧来组织</text>
+
+      <!-- panel 3: long-horizon attribution -->
+      <rect x="582" y="10" width="268" height="228" rx="10" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="596" y="32" class="big f-ink">3 · 长时程归因</text>
+      <text x="596" y="50" class="xs f-ink3">失败会累积，得记到产生它的那一段头上</text>
+      <!-- degradation curve -->
+      <line x1="600" y1="150" x2="836" y2="150" class="s-axis" stroke-width="1"/>
+      <line x1="600" y1="70" x2="600" y2="150" class="s-axis" stroke-width="1"/>
+      <text x="836" y="163" text-anchor="end" class="xs f-ink3">生成时间 →</text>
+      <text x="604" y="80" class="xs f-ink3">质量</text>
+      <path d="M602 84 C 660 86, 700 96, 730 112 S 800 146, 834 148" class="nofill s-B" stroke-width="2"/>
+      <path d="M602 84 C 660 85, 720 88, 834 96" class="nofill s-A" stroke-width="2"/>
+      <text x="700" y="128" class="xs f-Bi">漂移 / 结构崩坏累积</text>
+      <text x="740" y="90" class="xs f-Ai">保持</text>
+      <!-- chunk brackets under axis -->
+      <g id="chunkAttr"></g>
+      <text x="596" y="200" class="xs f-ink3">按块裁决：哪一段开始变差、是哪个动作段引起的，</text>
+      <text x="596" y="214" class="xs f-ink3">都能落到具体的 chunk 上；并且要产出</text>
+      <text x="596" y="228" class="xs f-ink2">→ 分开的动作 / 视觉两个偏好，才能当 RL 信号</text>
+    </svg>
+    </div>
+    <figcaption><b>按 Sec. 1 的三条挑战整理，帧数与动作数取自 Sec. 4.1 的 Bench 设定。</b>面板 2 的稀疏采样是我用来说明论文论点的示意：若对 184 帧均匀采 8 帧，采样间隔 23 帧，而一个动作只有 8 帧，
+    因此绝大多数动作在采样中最多出现一帧，无法从「首→末」的变化里核对方向；论文原话是「稀疏采样漏掉短暂的转变，稠密采样又让上下文膨胀」。</figcaption>
+  </figure>
+
+  <h3><span class="ix">1.1</span>现有奖励的盲区</h3>
+  <div class="tbl"><table>
+    <thead><tr><th style="width:24%">奖励家族</th><th>代表</th><th>能看见什么</th><th>看不见什么</th></tr></thead>
+    <tbody>
+      <tr><td><b>几何奖励</b></td><td>DepthAnything3、WorldMirror（3D 基础模型从帧序列恢复相机轨迹，再与指令比对）</td><td>轨迹执行的几何一致性</td><td>执行过程的<b>视觉质量</b>：时间稳定性、动态是否合理、生成伪影</td></tr>
+      <tr><td><b>图像奖励</b></td><td>HPSv3、LAION Aesthetic（逐帧打分）</td><td>单帧好看不好看</td><td><b>动作有没有执行</b>，以及闪烁、运动不连续、外观漂移、动态不一致这类跨帧问题</td></tr>
+      <tr><td><b>通用视频偏好模型</b></td><td>VideoAlign、UnifiedReward-Flex / -Think</td><td>感知质量</td><td>不以指令动作为条件，<b>不验证动作是否被遵循</b></td></tr>
+      <tr><td><b>组合奖励</b></td><td>WorldCompass（几何 + HPSv3）</td><td>两边都有</td><td>由两套异构、解耦的系统各自评估，没有共同的解释</td></tr>
+      <tr><td><b>直接整段 VLM 评判</b></td><td>把全部帧 + 全部动作序列一次给 Gemini / GPT</td><td>理论上都能看</td><td>上下文又长又吵：稀疏采样漏转变、稠密采样撑爆上下文、局部失败被整体印象稀释</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="prose">
+    <p>WorldReward 的立场是：<b>VLM 提供了一个把动作和它的视觉后果放在一起推理的共享空间</b>，问题只在于怎样喂。它的解法是「local-to-global」：先把长视频对切成时间对齐的、每块四个连续动作的块，每块从结构化的视觉证据里做判断，再把块级决策投票成分开的全局动作偏好与视觉偏好。</p>
+    <p>论文对 Table 3 的解读也呼应了这张表：几何估计器（DAv3 70.53）的动作信号有竞争力但完全没有视觉维度；图像 / 视频偏好模型有外观信号但动作维度是空的；WorldReward 是唯一在三个维度上都给出判断、且都最高的模型（Sec. 4.2）。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 02 FORMULATION -->
+<section class="sec" id="s-form">
+  <div class="eyebrow"><span class="n">02</span><span class="t">Formulation</span><span class="line"></span></div>
+  <h2>形式化：一对视频、一个条件、两个维度的偏好</h2>
+  <p class="lead">论文把奖励建模放在<b>成对比较</b>的设定里：同一条件下生成的两段视频，模型对每个维度给出「A 更好 / B 更好 / 平」。这与 UnifiedReward 系列的 VLM-as-judge 范式一脉相承，只是多了「必须验证每个指令动作引起的局部转变」这一层。</p>
+
+  <div class="eq"><span class="no">(1)</span>
+    <i>p</i><sub class="r"><i>θ</i></sub><sup class="r"><i>m</i></sup><span class="r">(</span><i>A</i> ≻ <i>B</i> | <i>x</i><sub class="r">0</sub>, <i>d</i>, <i>a</i><sub class="r">1:<i>N</i></sub>, <i>V</i><sub class="r"><i>A</i></sub>, <i>V</i><sub class="r"><i>B</i></sub><span class="r">)</span>,　<i>m</i> ∈ {act, vis}
+    <small>条件 = 源图 <i>x</i><sub>0</sub> + 其 caption <i>d</i> + <i>N</i> 步相机 / 动作轨迹 <i>a</i><sub>1:N</sub>；<i>V<sub>A</sub></i>、<i>V<sub>B</sub></i> 是同条件、同轨迹下两个候选视频。维度 <i>m</i> 取动作一致性或视觉质量。</small>
+  </div>
+
+  <div class="prose">
+    <p>关键的一步是：模型<b>不</b>把 Eq. 1 里的整段视频当一个无结构的输入，而是评估一串块级比较输入：</p>
+  </div>
+  <div class="eq"><span class="no">(2)</span>
+    <i>z</i><sub class="r"><i>k</i></sub> = <span class="r">(</span><i>d</i>, <i>a</i><sub class="r"><i>s<sub>k</sub></i>:<i>e<sub>k</sub></i></sub>, <i>ℐ</i><sub class="r"><i>k</i></sub><span class="r">)</span>,　<i>k</i> = 1, …, <i>K</i>
+    <small><i>a<sub>s_k:e_k</sub></i> 是第 <i>k</i> 块的局部动作段；<i>ℐ<sub>k</sub></i> 是本块的结构化视觉输入——由源图 <i>x</i><sub>0</sub>、一张成对的帧网格总览、以及从 <i>V<sub>A</sub></i>、<i>V<sub>B</sub></i> 中与 <i>a<sub>s_k:e_k</sub></i> 对应的解码帧块做成的动作级比较面板组成（Sec. 3.1, Fig. 1）。</small>
+  </div>
+
+  <div class="grid2">
+    <div class="card cT">
+      <p class="mono">PER CHUNK · ACTION</p>
+      <h5>动作偏好来自块内逐动作比较</h5>
+      <p>对块内每个动作，判断两段视频的局部场景转变是否遵循了指令的相机 / 动作方向，再把动作级决策汇总成本块的动作胜者（Sec. 3.3）。</p>
+    </div>
+    <div class="card cV">
+      <p class="mono">PER CHUNK · VISUAL</p>
+      <h5>视觉偏好来自三项联合考虑</h5>
+      <p>时间一致性（跨帧稳定）、动态生成质量（观察到的运动是否像合理的相机条件 3D 动态）、伪影 / 结构完整性（伪影、结构退化、源场景保持）。</p>
+    </div>
+  </div>
+  <p class="note">这两个块级偏好最后跨 <span class="m">K</span> 块聚合成全局动作偏好与全局视觉偏好（Sec. 3.3 的 Eq. 3，见 §06）。注意 Eq. 1 写的是概率 <span class="m">p<sub>θ</sub></span>，但 WorldReward 实际输出的是<b>类别</b>（A / B / Tie），并没有校准的概率分数——RL 里用的是成对胜率（§09）。</p>
+</section>
+
+<!-- ============================================================ 03 CHUNK -->
+<section class="sec" id="s-chunk">
+  <div class="eyebrow"><span class="n">03</span><span class="t">Action-Video Chunk Construction</span><span class="line"></span></div>
+  <h2>动作—视频分块：前置 IDLE，四槽一块，帧按动作段对齐</h2>
+  <p class="lead">Sec. 3.2 先列出「整段直接喂 VLM」的三个困难：上下文太长（两段视频的很多帧）、一次跟踪全部动作让「局部动作 ↔ 验证它的视觉证据」关联变弱、局部运动错误或伪影被整体印象稀释而难以归因。
+  解法是把动作轨迹切成 <span class="m">K</span> 个时间有序的块，每块含一小段连续动作和两个候选视频对应的解码帧块。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 3</span><span class="ti">选一块，看它到底取了哪些帧（Bench 设定：23 步 × 8 帧 = 184 帧）</span></div>
+    <div class="ctl">
+      <span>块</span>
+      <div class="seg" id="chunkSeg" role="group" aria-label="选择块">
+        <button type="button" data-k="0">Chunk 0</button>
+        <button type="button" data-k="1" aria-pressed="true">Chunk 1</button>
+        <button type="button" data-k="2">Chunk 2</button>
+        <button type="button" data-k="3">Chunk 3</button>
+        <button type="button" data-k="4">Chunk 4</button>
+        <button type="button" data-k="5">Chunk 5</button>
+      </div>
+    </div>
+    <div class="figbody">
+      <svg id="frameSvg" viewBox="0 0 860 200" role="img" aria-label="184 帧时间线上高亮所选块的四个动作段，以及每个动作取的首、中、末三帧和帧网格的参考帧"></svg>
+    </div>
+    <div class="readout" id="frameRO"></div>
+    <figcaption><b>按 <code>render.py</code> 的 <code>extract_action_frames()</code> 与 <code>reference_frame()</code> 重绘。</b>每个动作段取首帧、中帧（<code>(start+end)//2</code>）、末帧；
+    IDLE 槽三张都是视频第 0 帧，PAD 槽三张都是末帧。帧网格最左边的「参考列」：Chunk 0 用第 0 帧，之后各块用<b>上一块最后一个真实动作的末帧</b>——这样每块的网格自带「进入本块时的画面」。
+    论文正文只说「从对应解码帧块构造」，这些取帧规则来自开源代码。</figcaption>
+  </figure>
+
+  <div class="prose">
+    <p><b>为什么要前置一个 IDLE 槽？</b>论文说它「与源帧 <span class="m">x<sub>0</sub></span> 关联」（Sec. 3.2）。从代码看，IDLE 槽的面板比较的是两段视频各自的第 0 帧——对图生视频而言这通常就是源图本身，
+    于是 Chunk 0 得到一个天然的锚点：VLM 能先确认两段视频都从同一个场景出发，再看后面三个动作。代价是 Chunk 0 只覆盖 3 个真实动作，而且 IDLE 槽的「动作胜者」几乎总是 Tie。</p>
+    <p><b>为什么是四个动作？</b>论文没有做块大小的消融。可以从两端理解：块太小则每次调用看不到跨动作的时间趋势（帧网格失去意义），块太大则动作面板数增加、回到「长上下文」的老问题。四槽让帧网格恰好是 1 + 4×3 = 13 列，
+    与 Fig. 1 的版式一致；训练轨迹 11 步恰好切成 3 整块，Bench 的 23 步恰好 6 整块——两个库的步数显然是按 4 槽反推设计的。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 04 EVIDENCE -->
+<section class="sec" id="s-evidence">
+  <div class="eyebrow"><span class="n">04</span><span class="t">Structured Visual Evidence</span><span class="line"></span></div>
+  <h2>六图证据，以及每种相机动作留下的「视觉指纹」</h2>
+  <p class="lead">论文对块级输入的设计动机是一句话：<b>相机动作会留下方向特定的证据</b>——前进时可见内容逐渐放大；上仰时已有内容向下移、新内容从顶部进入。
+  这种证据最适合用「动作前后几帧的对比」来核对，于是每块的输入被做成六张图外加文本。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 4</span><span class="ti">六图输入：点一张，看它负责什么、去掉它会掉多少</span></div>
+    <div class="figbody">
+      <div class="six">
+        <div class="pick" id="sixPick" role="group" aria-label="选择输入">
+          <button type="button" data-i="src" aria-pressed="true"><b>IMAGE 1</b>源图 <span class="m">x<sub>0</sub></span></button>
+          <button type="button" data-i="grid"><b>IMAGE 2</b>帧网格总览</button>
+          <button type="button" data-i="panel"><b>IMAGES 3–6</b>动作面板 × 4</button>
+          <button type="button" data-i="text"><b>TEXT</b>caption + 动作段 + 预期描述</button>
+        </div>
+        <svg id="sixSvg" viewBox="0 0 640 300" role="img" aria-label="一块的六张输入图：源图、2 行 13 列的帧网格、四张 2 行 2 列的动作面板"></svg>
+      </div>
+    </div>
+    <div class="sixinfo" id="sixInfo"></div>
+    <figcaption><b>按论文 Fig. 1、Sec. 3.2 与代码 <code>save_frame_grid()</code> / <code>save_action_pair()</code> 重绘。</b>帧网格：上行 Video A、下行 Video B，第 1 列是参考帧，之后每个动作 3 列（首 / 中 / 末），每列边框按槽位着色，中帧上方写「A1: Forward | IDLE」这样的标签；
+    动作面板：每个动作一张 2×2 图，行 A / B，列首 / 末，大标题写动作标签。消融数字来自 Tab. 6（去掉某一图时训练与推理同时去掉）。</figcaption>
+  </figure>
+
+  <h3><span class="ix">4.1</span>动作的视觉指纹：旧内容往哪走，新内容从哪边进</h3>
+  <div class="prose">
+    <p>这是全文最值得记住的一个设计细节，来自开源代码的 prompt（<code>actions.py</code> 的 <code>COMPONENT_EXPECTATION</code>）：对每个指令分量，prompt 都用<b>两个锚点</b>描述预期——<b>已有内容</b>会往哪个边移动（并可能从那边退出），<b>新内容</b>会从哪个边进入。
+    论文说这种双锚点「让没有天空 / 地面的场景也能判断俯仰方向」：室内特写没有地平线可参考，但「新东西从顶边进、旧东西从底边出」依然成立。下面的模拟器把八个原子动作的指纹画出来。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 5</span><span class="ti">相机动作模拟器：选一个（或两个）指令分量，看首帧到末帧的变化与判定规则</span></div>
+    <div class="ctl">
+      <span>平移</span>
+      <div class="seg" id="camT" role="group" aria-label="平移分量">
+        <button type="button" data-v="IDLE">IDLE</button>
+        <button type="button" data-v="Forward" aria-pressed="true">Forward</button>
+        <button type="button" data-v="Backward">Backward</button>
+        <button type="button" data-v="Left">Left</button>
+        <button type="button" data-v="Right">Right</button>
+      </div>
+      <span>旋转</span>
+      <div class="seg" id="camR" role="group" aria-label="旋转分量">
+        <button type="button" data-v="IDLE" aria-pressed="true">IDLE</button>
+        <button type="button" data-v="YawLeft">YawLeft</button>
+        <button type="button" data-v="YawRight">YawRight</button>
+        <button type="button" data-v="PitchUp">PitchUp</button>
+        <button type="button" data-v="PitchDown">PitchDown</button>
+      </div>
+      <label>进度 <input type="range" id="camT_t" min="0" max="100" value="100" aria-label="动作进度"> <span class="val" id="camTv">末帧</span></label>
+      <button type="button" class="btn" id="camPlay">▶ 播放</button>
+      <button type="button" class="btn" id="camImpure" aria-pressed="false">加入未指令的缩放</button>
+    </div>
+    <div class="figbody">
+      <div class="cam">
+        <div class="pane"><div class="cap">动作首帧（面板左列）</div><svg id="camStart" viewBox="0 0 360 220" role="img" aria-label="动作开始时的画面"></svg></div>
+        <div class="pane"><div class="cap" id="camEndCap">动作末帧（面板右列）· 叠加预期的移动方向</div><svg id="camEnd" viewBox="0 0 360 220" role="img" aria-label="动作结束时的画面，叠加旧内容移动方向与新内容进入的边"></svg></div>
+      </div>
+    </div>
+    <div class="exp" id="camExp"></div>
+    <figcaption><b>示意图，非论文原图。</b>场景是我画的简化 2.5D 布景（远景山 / 太阳，近景楼与树），平移带视差（近景移动更多）、旋转不带视差，前进 / 后退按中心缩放——这正是 prompt 要求的「3D 合理性：视差、尺度变化、场景移动应像相机运动」。
+    绿色斜纹带表示「新内容进入」的边。文字面板里的预期与判定条件按 <code>expand_action_expectation()</code> 翻译，其中「纯净度」一条要求未指令的轴<b>不能</b>出现运动。</figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">◇ 我的解读：为什么这套输入能让 9B 模型赢过 GPT-5.5</div>
+    <p>论文自己的归因是数据精修（§07、Tab. 5），但输入组织同样关键：六张图里，<b>帧网格</b>回答「这一块的整体走势」（时间一致性、动态强弱），<b>动作面板</b>回答「这个动作的首→末到底变了什么」，<b>源图</b>回答「世界身份有没有换」。
+    Tab. 6 的消融恰好呈现这种分工：去帧网格伤运动与动作（−3.29 / −2.71），去面板主要伤动作（−2.82），去源图主要伤外观（−2.37）。
+    再加上 prompt 把每个分量的方向预期写成了可核对的两条锚点，模型要做的更像「对照清单逐项核对」而不是「看视频谈感受」。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 05 REASONING -->
+<section class="sec" id="s-reason">
+  <div class="eyebrow"><span class="n">05</span><span class="t">Chunk-Level Reward Reasoning</span><span class="line"></span></div>
+  <h2>块级推理：VLM 到底要写出什么</h2>
+  <p class="lead">每块一次生成，输出一个 JSON：<span class="rT">action_control</span> 里是四个动作的逐个比较与本块动作胜者，<span class="rV">visual_quality</span> 里是三个子维度的比较与本块视觉胜者。
+  每个比较都要先分别写 A 的分析、B 的分析，再给胜者——这个「先各自分析、再比较」的层次不是修辞，Tab. 6 的消融显示它值 +2.39 个点。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 6</span><span class="ti">一块的裁决（论文 Fig. 1 示例，中文意译）</span></div>
+    <div class="figbody">
+      <p class="note" style="margin:0 0 12px">Caption：一辆坚固的丰田 SUV 停在岩石地面上，背后是层叠岩层构成的壮观沙漠景观，天空多云。　本块动作：<code>IDLE | YawLeft</code> ×3，然后 <code>Forward | IDLE</code>。</p>
+      <div class="verdict">
+        <div class="vcol vt">
+          <div class="vh"><span>action_control</span><span class="win A">overall_winner: A</span></div>
+          <div class="vitem"><div class="lab"><span>Action 1 · IDLE | YawLeft</span><span class="win Tie">Tie</span></div>
+            <div class="va"><b>A</b>：平移保持静止、无缩放；左偏航正确地把车辆和背景推向右边缘。</div>
+            <div class="vb"><b>B</b>：平移静止、无缩放；左偏航成功地把场景内容移向右侧。</div></div>
+          <div class="vitem"><div class="lab"><span>Action 2 · IDLE | YawLeft</span><span class="win A">A</span></div>
+            <div class="va"><b>A</b>：平移静止，左偏航继续平滑地把已有物体向右移动。</div>
+            <div class="vb"><b>B</b>：平移静止，左偏航把场景向右移，但运动感觉有点「平」。</div></div>
+          <div class="vitem"><div class="lab"><span>Action 3 · IDLE | YawLeft</span><span class="win A">A</span></div>
+            <div class="va"><b>A</b>：平移静止，左偏航保持一致的向右移动。</div>
+            <div class="vb"><b>B</b>：平移静止，内容向右移，但缺少明显的 3D 深度感。</div></div>
+          <div class="vitem"><div class="lab"><span>Action 4 · Forward | IDLE</span><span class="win Tie">Tie</span></div>
+            <div class="va"><b>A</b>：前进正确地推进场景、物体放大；旋转保持静止，没有多余的转动。</div>
+            <div class="vb"><b>B</b>：前进推近并放大了车辆；旋转静止，没有多余的平摇。</div></div>
+          <div class="vitem"><div class="lab"><span>overall_summary</span></div>
+            <div class="sum">两段视频都准确执行了指令方向；A 在偏航段展现出更一致的 3D 运动纯净度与深度，整体获胜。</div></div>
+        </div>
+        <div class="vcol vv">
+          <div class="vh"><span>visual_quality</span><span class="win A">overall_winner: A</span></div>
+          <div class="vitem"><div class="lab"><span>temporal_consistency</span><span class="win A">A</span></div>
+            <div class="va"><b>A</b>：纹理、光照与物体身份在整段保持稳定，无明显闪烁。</div>
+            <div class="vb"><b>B</b>：总体稳定，但移动时车辆上有轻微的纹理滑动和形状变形。</div></div>
+          <div class="vitem"><div class="lab"><span>dynamic_generation_quality</span><span class="win A">A</span></div>
+            <div class="va"><b>A</b>：有令人信服的 3D 相机动态，前景车辆与背景之间有自然视差。</div>
+            <div class="vb"><b>B</b>：运动偏平，更像 2D 平摇加缩放，而非真正的 3D 空间导航。</div></div>
+          <div class="vitem"><div class="lab"><span>artifacts_and_structure_integrity</span><span class="win A">A</span></div>
+            <div class="va"><b>A</b>：很好地保持了原场景的白天光照、岩地与车辆结构。</div>
+            <div class="vb"><b>B</b>：严重的源场景漂移——时间莫名变成日落，背景地貌也被改变。</div></div>
+          <div class="vitem"><div class="lab"><span>overall_summary</span></div>
+            <div class="sum">A 在全部视觉指标上明显优于 B：结构完整、3D 动态真实、严格贴合源场景；B 有重大的环境漂移。</div></div>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>内容按论文 Fig. 1 意译；字段名按开源 prompt 模板。</b>注意两个「分工」：动作分析里只许描述观察到的运动（prompt 明令禁止出现 blur / artifact / distortion 这类质量词），视觉分析里则尽量忽略动作对错；
+    但两边的<b>事实陈述必须一致</b>——比如动作侧说某视频几乎静止，视觉侧就不能说它「运动平滑自然」。</figcaption>
+  </figure>
+
+  <h3><span class="ix">5.1</span>输出 schema 与胜者的取值范围</h3>
+  <pre><span class="c">// worldreward/prompt_template.txt · PART VII（节选，字段名原样）</span>
+{
+  <span class="k">"action_control"</span>: {
+    <span class="k">"actions"</span>: [ { <span class="k">"action_id"</span>: 1, <span class="k">"action_label"</span>: <span class="a">"IDLE | YawLeft"</span>,
+                  <span class="k">"video_a_analysis"</span>: "...", <span class="k">"video_b_analysis"</span>: "...", <span class="k">"winner"</span>: <span class="g">"A|B|Tie"</span> }, <span class="c">×4</span> ],
+    <span class="k">"overall_summary"</span>: "...",
+    <span class="k">"overall_winner"</span>: <span class="g">"A|B"</span>                        <span class="c">← 块级不允许 Tie</span>
+  },
+  <span class="k">"visual_quality"</span>: {
+    <span class="k">"temporal_consistency"</span>:              { ..., <span class="k">"winner"</span>: <span class="g">"A|B|Tie"</span> },
+    <span class="k">"dynamic_generation_quality"</span>:        { ..., <span class="k">"winner"</span>: <span class="g">"A|B|Tie"</span> },
+    <span class="k">"artifacts_and_structure_integrity"</span>: { ..., <span class="k">"winner"</span>: <span class="g">"A|B|Tie"</span> },
+    <span class="k">"overall_summary"</span>: "...",
+    <span class="k">"overall_winner"</span>: <span class="g">"A|B"</span>                        <span class="c">← 3:0 必须跟随；2:1 通常跟随，否则要在 summary 里解释</span>
+  }
+}</pre>
+  <div class="prose">
+    <p>这里有一个论文正文与代码之间的小出入：Sec. 3.3 写「每个胜者 <span class="m">r<sub>k</sub><sup>act</sup>, r<sub>k</sub><sup>vis</sup></span> 属于 {A, B, Tie}」，但开源 prompt 明确要求两个 <code>overall_winner</code> 只能是 A 或 B（「若三个子维度全平，也要按更小但具体的优势选出 A 或 B」）。
+    因此 Eq. 3 里「Tie 的块不投票」这一分支在实际运行中<b>几乎不会触发</b>——Fig. 1 示例的票数 4:2:0 与 6:0:0 里 Tie 都是 0，与此一致。全局 Tie 只会由票数相等产生。</p>
+  </div>
+
+  <h3><span class="ix">5.2</span>prompt 里值得记住的规则</h3>
+  <div class="grid2">
+    <div class="card cT">
+      <p class="mono">ACTION CONTROL · 11 条规则中的要点</p>
+      <ul>
+        <li>逐动作独立评判，A / B 各赢几个很正常；用图 2 与图 3–6 判断运动，<b>图 1 与本块首帧的差异不算动作失败</b>（前面的块已经移动过相机）。</li>
+        <li>模糊、有伪影的视频<b>仍然可以</b>动作正确——只看运动证据。</li>
+        <li>复合动作必须逐分量写：平移一句、每个旋转子轴一句；只做对一个分量不算正确。</li>
+        <li>「正确」= 每个指令分量方向都对 <b>且</b> 没有明显的未指令运动（纯旋转时的缩放、纯平移时的倾斜、纯俯仰时的横向漂移）。</li>
+        <li>块级胜者要与逐动作结果一致：赢的动作多者通常胜；平局时看正确性、幅度与纯净度的细节。</li>
+      </ul>
+    </div>
+    <div class="card cV">
+      <p class="mono">VISUAL QUALITY · 10 条规则中的要点</p>
+      <ul>
+        <li>图 1 是全局的源场景参考；本块首帧不必逐像素等于图 1，但两段视频都应仍像「同一个世界」。</li>
+        <li><b>源场景漂移</b>的定义：场景类别翻转（室内↔室外、城市↔森林）、主体被替换、材质 / 颜色 / 语义的强烈不兼容变化、块首帧已像另一个世界且无法用相机运动解释——主要记在「伪影与结构」下。</li>
+        <li>静止或近乎静止是「动态生成质量」的重罚项，但若另一段视频崩坏得厉害，静止的也不自动整体获胜。</li>
+        <li>大量像素变化若来自扭曲、融化、幻觉重塑，<b>不是</b>好的动态。</li>
+        <li>视觉胜者须尊重子维度证据：3:0 必须跟随，2:1 通常跟随，否则要在 summary 里明确说明覆盖理由。</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3><span class="ix">5.3</span>推理监督的价值（Tab. 6 下半）</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 7</span><span class="ti">只监督标签 → 加整体比较摘要 → 加每视频分析（完整模型）</span></div>
+    <div class="figbody">
+      <div class="chartwrap"><svg id="reasonSvg" viewBox="0 0 860 230" role="img" aria-label="推理监督消融：三种监督设置在动作、外观、运动三个维度上的一致率，完整模型最高"></svg><div class="tip" id="tipReason"></div></div>
+    </div>
+    <div class="legend"><span><i style="background:var(--act)"></i>动作一致性</span><span><i style="background:var(--vis)"></i>外观质量</span><span><i style="background:var(--A)"></i>运动质量</span></div>
+    <figcaption><b>数据：Tab. 6「Reasoning supervision」块。</b>训练样本与最终偏好标签固定，只改变推理目标：仅标签 71.84 / 77.96 / 67.61（均值 72.47）；加两段视频块的整体比较 74.93 / 79.52 / 70.38（74.94）；再加每视频分析 77.63 / 81.32 / 73.03（77.33）。
+    论文的解释：每视频分析强迫模型在比较之前分别检查每个块，局部动作失败或运动伪影更难被一句简短的成对判断掩盖。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 06 VOTING -->
+<section class="sec" id="s-vote">
+  <div class="eyebrow"><span class="n">06</span><span class="t">Local-to-Global Voting</span><span class="line"></span></div>
+  <h2>投票聚合：只数 A 和 B，相等即 Tie</h2>
+  <p class="lead">记第 <span class="m">k</span> 块预测的动作胜者与视觉胜者为 <span class="m">r<sub>k</sub><sup>act</sup></span>、<span class="m">r<sub>k</sub><sup>vis</sup></span>，
+  <span class="m">n<sub>c</sub><sup>m</sup> = Σ<sub>k</sub> 𝟙[r<sub>k</sub><sup>m</sup> = c]</span> 是偏向候选 <span class="m">c ∈ {A, B}</span> 的块数。视频级偏好由投票决定：</p>
+
+  <div class="eq"><span class="no">(3)</span>
+    <i>R</i><sup class="r"><i>m</i></sup> = <span class="cases">
+      <span><i>A</i>,</span><span class="r"><i>n<sub>A</sub><sup>m</sup></i> &gt; <i>n<sub>B</sub><sup>m</sup></i></span>
+      <span><i>B</i>,</span><span class="r"><i>n<sub>B</sub><sup>m</sup></i> &gt; <i>n<sub>A</sub><sup>m</sup></i></span>
+      <span>Tie,</span><span class="r"><i>n<sub>A</sub><sup>m</sup></i> = <i>n<sub>B</sub><sup>m</sup></i></span>
+    </span>,　<i>m</i> ∈ {act, vis}
+    <small>预测为 Tie 的块不偏向任何一方；A 与 B 票数相等则全局为 Tie。论文称之为 local-to-global 原则：先把决策落在时间局部的证据上，再把细粒度判断合成视频级奖励（Sec. 3.3）。</small>
+  </div>
+
+  <div class="prose">
+    <p>Bench 评测时需要三个维度（动作 / 外观 / 运动），而模型输出的是「动作 + 三个视觉子维度」。Sec. 4.1 给出映射：<b>时间一致性与伪影 / 结构完整性决定外观，动态生成质量决定运动</b>；
+    若两个外观子维度在一块内偏向不同的视频，该块的外观预测记 Tie，再按块投票。开源代码 <code>aggregate.py</code> 的实现略有不同：它把每块的两张外观票<b>直接合并进同一个票池</b>（每块 2 票），动作维度则在块级票数相等时再用「全部逐动作胜者」的多数破平。下面的模拟器按代码实现计算。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 8</span><span class="ti">投票模拟器：点格子切换每块的裁决，看全局偏好怎样变化</span></div>
+    <div class="ctl">
+      <label>块数 <span class="m">K</span> <input type="range" id="voteK" min="2" max="8" value="6" aria-label="块数"> <span class="val" id="voteKv">6</span></label>
+      <button type="button" class="btn" id="votePreset">重置为 Fig. 1 示例</button>
+      <button type="button" class="btn" id="voteSplit">预设：外观子维度分歧</button>
+      <button type="button" class="btn" id="voteRand">随机</button>
+    </div>
+    <div class="figbody scrollx">
+      <table class="votes" id="voteTable">
+        <thead><tr>
+          <th>块</th>
+          <th><span class="pill t">action overall</span></th>
+          <th><span class="pill v">temporal (TC)</span></th>
+          <th><span class="pill v">dynamic (DGQ)</span></th>
+          <th><span class="pill v">artifacts (ASI)</span></th>
+          <th><span class="pill v">visual overall</span><br><span style="color:var(--ink3);font-size:10.5px;font-weight:400;letter-spacing:0;text-transform:none">三子维度多数</span></th>
+        </tr></thead>
+        <tbody id="voteBody"></tbody>
+      </table>
+    </div>
+    <div class="tally" id="voteTally"></div>
+    <figcaption><b>按 Eq. 3 与 <code>aggregate.py</code> 实现。</b>「动作」「视觉 overall」两栏是 RL 后训练用的两个偏好（每块一票，Tie 只在票数相等时出现）；「外观」「运动」两栏是 Bench 评测用的映射（外观 = 每块两票合并，运动 = 动态生成质量一票）。
+    块级 overall 在代码里只允许 A / B，模拟器里点击可循环 A → B → Tie 以对应论文 Eq. 3 的写法；子维度三票全平时，视觉 overall 显示为「模型二选一」。</figcaption>
+  </figure>
+
+  <div class="call">
+    <div class="hd">投票的两个效果，与一个代价</div>
+    <p><b>放大局部失败。</b>一次明显的动作错误哪怕只在一块里，也会以整票的形式进入计数，而不是被 23 个动作的平均印象冲淡。</p>
+    <p><b>抑制单块主导。</b>某一块特别糟（比如结尾崩坏）只能贡献一票；论文明说投票「防止一个特别强或特别弱的片段主导视频级偏好」。</p>
+    <p><b>代价是粒度。</b>K = 6 时全局偏好只有 4:2、5:1 这类离散结果，「差多少」的信息被丢掉；RL 里通过成对胜率（§09）部分补回，但 Bench 上的一致率也只能是三分类准确率。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 07 DATA -->
+<section class="sec" id="s-data">
+  <div class="eyebrow"><span class="n">07</span><span class="t">Reasoning-Augmented Preference Data</span><span class="line"></span></div>
+  <h2>数据管线：蒸馏一个前沿 VLM，再用另一个前沿 VLM 的 agent 去审它</h2>
+  <p class="lead">训练这样一个模型需要「带推理过程」的规模化监督，还要覆盖多样的生成分布与轨迹、并捕捉时间局部的失败。论文的三阶段管线（Fig. 2）：准备多样的世界模型输入 → 成对生成 → 块级推理标注 + agent 质检 + 人工复核。
+  Tab. 5 表明：<b>最后一段的标注精修，而不是蒸馏本身，才是超过闭源 VLM 的主要来源。</b></p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 9</span><span class="ti">三阶段管线（对应论文 Fig. 2）</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 860 300" role="img" aria-label="数据管线：输入准备（图像、caption、轨迹）、八个世界模型变体成对生成、Gemini 块级推理标注、GPT-5.5 agent 审计、人工校准">
+      <!-- stage 1 -->
+      <rect x="10" y="10" width="250" height="280" rx="10" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="24" y="32" class="mono sml f-ink3">1 · 输入准备</text>
+      <rect x="24" y="44" width="222" height="64" rx="7" class="f-surf s-rule" stroke-width="1"/>
+      <text x="34" y="62" class="lbl f-ink">图像 + caption（来自 WorldPlay）</text>
+      <text x="34" y="80" class="xs f-ink2">内容：场景 41.4% · 建筑 35.0% · 自然 23.6%</text>
+      <text x="34" y="96" class="xs f-ink2">风格：照片 75.2% · 动漫/游戏 15.3% · 艺术 9.5%</text>
+      <rect x="24" y="118" width="222" height="94" rx="7" class="f-surf s-rule" stroke-width="1"/>
+      <text x="34" y="136" class="lbl f-ink">轨迹库：224 条 × 11 步</text>
+      <text x="34" y="154" class="xs f-ink2">纯平移 34.0% · 纯旋转 34.0% · 复合 32.0%</text>
+      <text x="34" y="170" class="xs f-ink3">Basic/Diag_Move · Loop_Return · Yaw/Pitch/Diag_View</text>
+      <text x="34" y="186" class="xs f-ink3">Mixed_Basic · Mixed_Full · Move_View</text>
+      <text x="34" y="204" class="xs f-ink2">条件三元组 = (图, caption, 轨迹)</text>
+      <text x="24" y="240" class="xs f-ink3">两个模型收到完全相同的条件，</text>
+      <text x="24" y="254" class="xs f-ink3">控制住内容与动作难度后再取偏好。</text>
+      <text x="24" y="276" class="xs f-ink3">兼容性感知分配：只在两模型都支持的动作上比。</text>
+
+      <line x1="260" y1="150" x2="288" y2="150" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+
+      <!-- stage 2 -->
+      <rect x="292" y="10" width="220" height="280" rx="10" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="306" y="32" class="mono sml f-ink3">2 · 成对生成</text>
+      <g id="wmBars"></g>
+      <text x="306" y="232" class="xs f-ink2">50,000 对视频 · 15 fps · seed = 1</text>
+      <text x="306" y="248" class="xs f-ink2">保留各模型默认分辨率与宽高比</text>
+      <text x="306" y="266" class="xs f-ink3">Matrix-Game 只支持部分轨迹族，</text>
+      <text x="306" y="280" class="xs f-ink3">配对频率因此更低（3.3%）。</text>
+
+      <line x1="512" y1="150" x2="540" y2="150" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+
+      <!-- stage 3 -->
+      <rect x="544" y="10" width="306" height="280" rx="10" class="f-surf2 s-rule1" stroke-width="1"/>
+      <text x="558" y="32" class="mono sml f-ink3">3 · 块级推理标注</text>
+      <rect x="558" y="44" width="278" height="44" rx="7" class="f-surf s-rule" stroke-width="1"/>
+      <text x="568" y="62" class="lbl f-ink">切块：12 槽 → 3 块 / 对 → 150,000 候选块</text>
+      <text x="568" y="80" class="xs f-ink2">下采样到约 100,000 块做标注与训练</text>
+      <line x1="697" y1="88" x2="697" y2="102" class="s-L" stroke-width="1.4" marker-end="url(#ar-L)"/>
+      <rect x="558" y="106" width="278" height="44" rx="7" class="fs-L s-L" stroke-width="1"/>
+      <text x="568" y="124" class="lbl f-ink">Gemini 3.1 Pro · 按块级协议蒸馏结构化推理</text>
+      <text x="568" y="142" class="xs f-ink2">偏好 + 基于证据的理由（比纯标签更丰富）</text>
+      <line x1="697" y1="150" x2="697" y2="164" class="s-L" stroke-width="1.4" marker-end="url(#ar-L)"/>
+      <rect x="558" y="168" width="278" height="44" rx="7" class="fs-L s-L" stroke-width="1"/>
+      <text x="568" y="186" class="lbl f-ink">GPT-5.5 agent harness · 多轮工具型审计</text>
+      <text x="568" y="204" class="xs f-ink2">保留原判 57.9% / 提出修订 42.1%（Tab. 1）</text>
+      <line x1="697" y1="212" x2="697" y2="226" class="s-H" stroke-width="1.4" marker-end="url(#ar-H)"/>
+      <rect x="558" y="230" width="278" height="44" rx="7" class="fs-H s-H" stroke-width="1"/>
+      <text x="568" y="248" class="lbl f-ink">人工校准 · 只看 agent 修订过的样本</text>
+      <text x="568" y="266" class="xs f-ink2">确认 87.0% / 驳回 13.0% 的修订（Tab. 1）</text>
+    </svg>
+    </div>
+    <figcaption><b>按论文 Fig. 2 与 Sec. 3.4、4.1 重绘。</b>阶段 2 的柱是训练集里各模型变体的覆盖率（Fig. 2b）。「兼容性感知分配」防止不支持的控制制造出平凡的偏好，「平衡分配」减少对特定模型身份的偏置（Sec. 3.4）。</figcaption>
+  </figure>
+
+  <h3><span class="ix">7.1</span>轨迹分类学：从原子控制到耦合控制</h3>
+  <div class="tbl"><table>
+    <thead><tr><th style="width:14%">族</th><th style="width:16%">子族</th><th>定义</th><th class="num">训练 / Bench 库条数</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="3"><b>纯平移</b><br><span class="xs" style="font-size:11.5px;color:var(--ink3)">位置变、不旋转</span></td><td>Basic_Move</td><td>单轴平移：前 / 后 / 左 / 右</td><td class="num">24 / 30</td></tr>
+      <tr><td>Diag_Move</td><td>两个平移轴同时，如 forward+left、backward+right</td><td class="num">34 / 30</td></tr>
+      <tr><td>Loop_Return</td><td>先离开起点，再沿对称的反向路径返回，形成闭合的去—回轨迹；暴露累积漂移与「回不到源视角」</td><td class="num">12 / 18</td></tr>
+      <tr><td rowspan="3"><b>纯旋转</b><br><span class="xs" style="font-size:11.5px;color:var(--ink3)">位置固定、视角变</span></td><td>Yaw_View</td><td>水平左右转，俯仰不变</td><td class="num">16 / 16</td></tr>
+      <tr><td>Pitch_View</td><td>上下转，偏航不变</td><td class="num">16 / 18</td></tr>
+      <tr><td>Diag_View</td><td>偏航与俯仰同时变，如 yaw-left + pitch-up</td><td class="num">30 / 18</td></tr>
+      <tr><td rowspan="3"><b>复合</b><br><span class="xs" style="font-size:11.5px;color:var(--ink3)">平移 + 旋转</span></td><td>Mixed_Basic</td><td>先一段平移、再一段旋转，<b>顺序</b>执行、不同时</td><td class="num">14 / 28</td></tr>
+      <tr><td>Mixed_Full</td><td>一个平移轴与一个旋转轴<b>同时</b>，如 forward + yaw-left</td><td class="num">10 / 30</td></tr>
+      <tr><td>Move_View</td><td>更强的同时组合：多轴平移 + 多轴旋转，如 forward-right + yaw-left + pitch-up</td><td class="num">68 / 36</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">数据来自 Sec. 3.4 与 Tab. 2。两个库各 224 条，但 Bench 库是<b>独立重建</b>的（23 步而非 11 步），并刻意改变了子族分布——训练库 Move_View 占 68 条，Bench 库只有 36 条，而 Mixed_Basic / Mixed_Full 分别从 14 / 10 增加到 28 / 30。目的是测试模型学到的是可迁移的「动作—视频关系」，而不是记住特定提示或轨迹（Sec. 4.1）。</p>
+
+  <h3><span class="ix">7.2</span>Agent 审计：为什么不用一次 API 调用做质检</h3>
+  <div class="prose">
+    <p>论文的理由（Sec. 3.4）：基于 API 的 critic 通常一次收到一组固定图片，必须在一次响应里完成检查。而 agent harness 可以<b>自适应地多轮调用读图工具</b>：先看源图和帧网格，根据观察决定下一张要看的动作面板，需要交叉核对时回看之前的证据。
+    这让每次检查聚焦在有争议的块上，局部证据不会被无关的帧稀释。审计结果要么保留原判，要么返回一个<b>把每处修改定位到（块，维度）</b>的 diff——便于追溯，也便于后面的人工复核。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 10</span><span class="ti">Algorithm 1 · Agent-Harness Quality Control（点步骤，看检查历史 ℋ 怎样增长）</span></div>
+    <div class="figbody">
+      <div class="steps">
+        <ol id="algSteps">
+          <li data-s="0" class="on"><b>输入</b>Gemini 的判决 <span class="m">y</span>、caption <span class="m">d</span>、局部动作序列 <span class="m">a</span>、视觉证据 <span class="m">ℰ</span> = {<span class="m">x</span><sub>0</sub>, 帧网格, 动作面板}；初始化 <span class="m">ŷ ← y</span>、历史 <span class="m">ℋ ← ∅</span></li>
+          <li data-s="1"><b>2</b>调用读图工具检查 <span class="m">x</span><sub>0</sub> 与帧网格总览，把观察追加到 <span class="m">ℋ</span></li>
+          <li data-s="2"><b>3a</b>对照 <span class="m">ℋ</span> 审计当前判决，找出仍不确定、或与观察到的证据不一致的（块，维度）对</li>
+          <li data-s="3"><b>3b/3c</b>若还需要证据：选相关的动作面板，调用读图工具，追加观察到 <span class="m">ℋ</span>；可回看已检查过的面板做交叉核对；否则终止循环（<span class="m">t</span> = 1 … <span class="m">T</span>）</li>
+          <li data-s="4"><b>4</b>没有记录到不一致 → 返回 <span class="m">ŷ = y</span>；否则从完整的检查历史生成并应用一个<b>局部化的 diff</b> Δ 得到 <span class="m">ŷ</span></li>
+          <li data-s="5"><b>5</b>被 agent 修订过的样本转交人工校准：复核者对照视觉证据与 diff，逐条判断修订是否成立</li>
+        </ol>
+        <div class="hist" id="algHist"></div>
+      </div>
+    </div>
+    <figcaption><b>按 Algorithm 1 逐条转写。</b>右侧的检查历史是我按算法逻辑构造的示意（真实运行时每轮读哪张面板由 agent 决定）。
+    人力被集中在 agent 认为可能有标注错误的记录上：Tab. 1 显示 42.1% 的块级标注被提出修订，其中 87.0% 被人工确认。</figcaption>
+  </figure>
+
+  <h3><span class="ix">7.3</span>质检的产出与位置互换增强</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 11</span><span class="ti">Tab. 1 的修订分布 · Tab. 7 的 A/B 互换增强</span></div>
+    <div class="figbody">
+      <div class="chartwrap"><svg id="qcSvg" viewBox="0 0 860 300" role="img" aria-label="左：agent 修订类型的分布（仅推理文本 67.4%，仅维度胜者 23.8%，仅块级胜者 0.9%，两类胜者都改 7.9%）；右：四种偏好组合的训练样本数在互换增强前后的变化"></svg></div>
+    </div>
+    <figcaption><b>数据：Tab. 1 与 Tab. 7。</b>修订里三分之二只改推理文本，但仍有 23.8% 改了某个维度的胜者、7.9% 连块级胜者一起改——agent 在多个粒度上修正了监督。
+    右图的组合 XY 里第一个字母是动作胜者、第二个是视觉胜者：原始数据偏向 A（AA 37,107 对 BB 20,164），作者把多数组合的一部分样本 A/B 互换并改写标注，使 BB ≈ AA、BA ≈ AB，总量从 99,954 增到 124,942；§11 的 Tab. 8 检验了它对候选顺序偏置的效果。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 08 TRAINING -->
+<section class="sec" id="s-train">
+  <div class="eyebrow"><span class="n">08</span><span class="t">Training &amp; Inference</span><span class="line"></span></div>
+  <h2>训练：普通的 SFT，目标是「解释证据并给出偏好」</h2>
+  <p class="lead">没有 RL、没有特殊损失。WorldReward 就是在块级训练集 <span class="m">𝒟 = {(z<sub>i</sub>, s<sub>i</sub>)}</span> 上做多模态大模型的监督微调：输入是结构化的多模态 <span class="m">z<sub>i</sub></span>，目标 <span class="m">s<sub>i</sub></span> 是那个含推理与偏好的 JSON。</p>
+
+  <div class="eq"><span class="no">(4)</span>
+    <i>ℒ</i><sub class="r">SFT</sub>(<i>θ</i>) = − <span class="frac"><span>1</span><span>Σ<sub><i>i</i>=1</sub><sup><i>M</i></sup> <i>L<sub>i</sub></i></span></span> Σ<sub><i>i</i>=1</sub><sup><i>M</i></sup> Σ<sub><i>t</i>=1</sub><sup><i>L<sub>i</sub></i></sup> log <i>p<sub>θ</sub></i>(<i>s</i><sub><i>i</i>,<i>t</i></sub> | <i>z<sub>i</sub></i>, <i>s</i><sub><i>i</i>,&lt;<i>t</i></sub>)
+    <small>教师强制下的标准自回归语言建模目标；损失只算在目标回复的 token 上，caption、局部动作序列与视觉输入只作条件。归一化用的是全部目标 token 总数（token 级平均，而非样本级平均）。</small>
+  </div>
+
+  <div class="grid2">
+    <div class="card cT">
+      <p class="mono">TRAINING · Sec. 4.1</p>
+      <ul>
+        <li>初始化：<b>Qwen3.5-9B</b>（Qwen3.5 是 2026-02 发布的原生多模态模型）</li>
+        <li>3 个 epoch，全局 batch 128</li>
+        <li>学习率 8×10<sup>−6</sup>，余弦调度，warm-up 比例 0.03</li>
+        <li>开启序列打包（sequence packing）以减少 padding</li>
+        <li>训练样本 124,942 个块（含互换增强）</li>
+      </ul>
+    </div>
+    <div class="card cN">
+      <p class="mono">INFERENCE · 开源代码 infer.py（论文未列）</p>
+      <ul>
+        <li>vLLM，温度 <b>0.0</b>，每块最多 4,096 个输出 token，<code>max_model_len</code> 49,152</li>
+        <li>每个 prompt 恰好 6 张图；长边超过 2,048 的图先缩到 2,048（JPEG q=92）</li>
+        <li>发布权重 <code>CodeGoat24/WorldReward-qwen35-9b</code>；同仓库还提供了 Qwen3.5-9B 版的 UnifiedReward-Flex / -Think 作基线</li>
+        <li>输出解析失败的块会被跳过并在下次运行重试；schema 校验要求 4 个动作条目、3 个视觉子维度、胜者取值合法</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="prose">
+    <p>值得注意的是，论文没有报告推理成本。按代码的布局，帧网格一张图就是 2 行 × 13 格的宽图（200 dpi 保存），动作面板是 2×2 的大图；六张图进 Qwen3.5 的视觉编码器后，再加约 3,000 词的英文 prompt 与最多 4k 的输出，
+    一个块的调用远比「打一个分数」的判别式奖励模型重。RL 训练时（§09）作者用独立的 vLLM 集群来服务它——16 个训练 rank 配 16 个 reward 副本。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 09 RL -->
+<section class="sec" id="s-rl">
+  <div class="eyebrow"><span class="n">09</span><span class="t">World-Model Post-Training</span><span class="line"></span></div>
+  <h2>作为 RL 奖励：成对胜率 → 组内标准化 → 最优概率 → DiffusionNFT</h2>
+  <p class="lead">论文没有发明新的优化算法：它沿用 WorldCompass 的<b>片段级 rollout + DiffusionNFT</b> 框架和 Pref-GRPO 的<b>成对胜率</b>奖励形式，只把奖励换成 WorldReward 的两个偏好。
+  两个偏好仍是分开的优化信号（可显式加权），但来自同一个模型对同一份动作对齐证据的解释。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 12</span><span class="ti">一次迭代：共享前缀 → G 个候选片段 → 所有无序对 → 两个胜率 → 一个最优概率</span></div>
+    <div class="figbody">
+    <svg viewBox="0 0 860 300" role="img" aria-label="RL 迭代流程：EMA 策略生成共享前缀，采样 G 个候选目标片段，每对候选构造块级输入交给 WorldReward，得到动作与视觉两个胜率，标准化后按 λ 合成最优概率 p_i，进入负样本感知的流匹配损失">
+      <!-- prefix -->
+      <rect x="10" y="60" width="150" height="56" rx="8" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="85" y="82" text-anchor="middle" class="lbl f-ink">共享前缀 <tspan class="math">x</tspan><tspan class="xs" dy="3">1:n−1</tspan></text>
+      <text x="85" y="100" text-anchor="middle" class="xs f-ink2">EMA 策略 π̄<tspan class="xs" dy="3">φ</tspan><tspan dy="-3"> 生成一次</tspan></text>
+      <text x="85" y="134" text-anchor="middle" class="xs f-ink3">条件：<tspan class="math">a</tspan><tspan class="xs" dy="3">1:n−1</tspan><tspan dy="-3">, </tspan><tspan class="math">x</tspan><tspan class="xs" dy="3">0</tspan><tspan dy="-3">, </tspan><tspan class="math">d</tspan></text>
+      <!-- candidates -->
+      <g id="rlCands"></g>
+      <text x="270" y="30" text-anchor="middle" class="sml f-ink2">目标片段 <tspan class="math">n</tspan>：<tspan class="math">G</tspan> 个候选（独立初始噪声）</text>
+      <text x="270" y="44" text-anchor="middle" class="xs f-ink3">条件：前缀, <tspan class="math">a</tspan><tspan class="xs" dy="3">n</tspan><tspan dy="-3">, </tspan><tspan class="math">x</tspan><tspan class="xs" dy="3">0</tspan><tspan dy="-3">, </tspan><tspan class="math">d</tspan>　· 从前缀末帧开始分叉</text>
+      <!-- pairs -->
+      <line x1="332" y1="120" x2="368" y2="120" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+      <rect x="372" y="62" width="150" height="116" rx="8" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="447" y="84" text-anchor="middle" class="lbl f-ink">每个无序对 {<tspan class="math">i</tspan>, <tspan class="math">j</tspan>}</text>
+      <text x="447" y="102" text-anchor="middle" class="xs f-ink2">构造同样的块级输入：</text>
+      <text x="447" y="117" text-anchor="middle" class="xs f-ink2">源图（整段首帧）+ caption</text>
+      <text x="447" y="132" text-anchor="middle" class="xs f-ink2">+ 本片段动作 + 帧网格 + 面板</text>
+      <text x="447" y="154" text-anchor="middle" class="xs f-ink3">目标片段与 WorldReward 的块</text>
+      <text x="447" y="168" text-anchor="middle" class="xs f-ink3">在时间上对齐</text>
+      <line x1="522" y1="120" x2="558" y2="120" class="s-T" stroke-width="1.4" marker-end="url(#ar-T)"/>
+      <!-- WorldReward -->
+      <rect x="562" y="80" width="110" height="80" rx="10" class="fs-T s-T" stroke-width="1.2"/>
+      <text x="617" y="112" text-anchor="middle" class="big f-ink">WorldReward</text>
+      <text x="617" y="130" text-anchor="middle" class="xs f-ink2"><tspan class="math">y</tspan><tspan class="xs" dy="3">ij</tspan><tspan dy="-3" class="xs" > act</tspan>, <tspan class="math">y</tspan><tspan class="xs" dy="3">ij</tspan><tspan dy="-3" class="xs"> vis</tspan> ∈ {<tspan class="math">i</tspan>, <tspan class="math">j</tspan>, Tie}</text>
+      <text x="617" y="146" text-anchor="middle" class="xs f-ink3">一次推理，两个裁决</text>
+      <line x1="672" y1="100" x2="706" y2="88" class="s-T" stroke-width="1.4" marker-end="url(#ar-T)"/>
+      <line x1="672" y1="140" x2="706" y2="152" class="s-V" stroke-width="1.4" marker-end="url(#ar-V)"/>
+      <rect x="710" y="66" width="140" height="42" rx="8" class="fs-T s-T" stroke-width="1"/>
+      <text x="780" y="84" text-anchor="middle" class="lbl f-ink">胜率 <tspan class="math">R</tspan><tspan class="xs" dy="3">i</tspan><tspan class="xs" dy="-8">act</tspan><tspan dy="5"> → </tspan><tspan class="math">A</tspan><tspan class="xs" dy="3">i</tspan><tspan class="xs" dy="-8">act</tspan></text>
+      <text x="780" y="100" text-anchor="middle" class="xs f-ink2">Eq. 6–8</text>
+      <rect x="710" y="132" width="140" height="42" rx="8" class="fs-V s-V" stroke-width="1"/>
+      <text x="780" y="150" text-anchor="middle" class="lbl f-ink">胜率 <tspan class="math">R</tspan><tspan class="xs" dy="3">i</tspan><tspan class="xs" dy="-8">vis</tspan><tspan dy="5"> → </tspan><tspan class="math">A</tspan><tspan class="xs" dy="3">i</tspan><tspan class="xs" dy="-8">vis</tspan></text>
+      <text x="780" y="166" text-anchor="middle" class="xs f-ink2">Eq. 6–8</text>
+      <!-- combine -->
+      <line x1="780" y1="108" x2="780" y2="132" class="nofill" stroke="none"/>
+      <path d="M780 174 L780 200" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+      <path d="M850 87 L856 87 L856 214 L780 214" class="nofill s-ink3" stroke-width="1"/>
+      <rect x="560" y="204" width="290" height="40" rx="8" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="705" y="222" text-anchor="middle" class="lbl f-ink"><tspan class="math">p</tspan><tspan class="xs" dy="3">i</tspan><tspan dy="-3"> = ½ + ½ clip((λ</tspan><tspan class="math">A</tspan><tspan class="xs" dy="-5">act</tspan><tspan dy="5"> + (1−λ)</tspan><tspan class="math">A</tspan><tspan class="xs" dy="-5">vis</tspan><tspan dy="5">) / </tspan><tspan class="math">Z</tspan>, −1, 1)</text>
+      <text x="705" y="238" text-anchor="middle" class="xs f-ink3">Eq. 9 · λ 平衡动作执行与视觉质量，Z 控制归一化尺度</text>
+      <line x1="560" y1="224" x2="530" y2="224" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+      <rect x="372" y="204" width="154" height="40" rx="8" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="449" y="222" text-anchor="middle" class="lbl f-ink">DiffusionNFT 损失</text>
+      <text x="449" y="238" text-anchor="middle" class="xs f-ink3">Eq. 10–11 · 正 / 负速度场加权</text>
+      <line x1="372" y1="224" x2="342" y2="224" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+      <rect x="180" y="204" width="158" height="40" rx="8" class="fs-L s-L" stroke-width="1"/>
+      <text x="259" y="222" text-anchor="middle" class="lbl f-ink">更新策略 π<tspan class="xs" dy="3">φ</tspan></text>
+      <text x="259" y="238" text-anchor="middle" class="xs f-ink3">EMA 副本 π̄<tspan class="xs" dy="3">φ</tspan><tspan dy="-3"> 用于下一轮 rollout</tspan></text>
+      <text x="10" y="284" class="xs f-ink3">与 WorldCompass 的唯一差别：奖励从「DAv3 轨迹误差 + HPSv3 单帧分」换成上面两个胜率；rollout、片段选择、NFT 配置均不变（Sec. 4.3）。</text>
+    </svg>
+    </div>
+    <figcaption><b>按 Sec. 3.6 与 Eq. 5–11 重绘。</b>所有候选共享同一个前缀，只在前缀末帧之后分叉，这个末帧定义了它们共同的时间起点；奖励模型看到的「源图」是整段视频的第一帧而非前缀末帧（Sec. 3.6）。</figcaption>
+  </figure>
+
+  <h3><span class="ix">9.1</span>七个公式</h3>
+  <div class="eq"><span class="no">(5)</span>
+    <i>x</i><sub class="r">1:<i>n</i>−1</sub> ∼ π̄<sub class="r"><i>φ</i></sub>(· | <i>a</i><sub class="r">1:<i>n</i>−1</sub>, <i>x</i><sub class="r">0</sub>, <i>d</i>),　<i>x</i><sub class="r"><i>n</i></sub><sup class="r">(<i>i</i>)</sup> ∼ π̄<sub class="r"><i>φ</i></sub>(· | <i>x</i><sub class="r">1:<i>n</i>−1</sub>, <i>a</i><sub class="r"><i>n</i></sub>, <i>x</i><sub class="r">0</sub>, <i>d</i>),　<i>i</i> = 1, …, <i>G</i>
+    <small>片段级 rollout：每次迭代选一个目标片段索引 <i>n</i>，用 EMA 策略生成一次共享的自回归前缀，再从独立初始噪声采 <i>G</i> 个候选目标片段。</small>
+  </div>
+  <div class="eq"><span class="no">(6) (7)</span>
+    <i>ω<sub>i</sub></i>(<i>y<sub>ij</sub><sup>m</sup></i>) = <span class="cases"><span>1,</span><span class="r"><i>y<sub>ij</sub><sup>m</sup></i> = <i>i</i></span><span>½,</span><span class="r"><i>y<sub>ij</sub><sup>m</sup></i> = Tie</span><span>0,</span><span class="r"><i>y<sub>ij</sub><sup>m</sup></i> = <i>j</i></span></span>
+    　　<i>R<sub>i</sub><sup>m</sup></i> = <span class="frac"><span>1</span><span><i>G</i> − 1</span></span> Σ<sub><i>j</i>≠<i>i</i></sub> <i>ω<sub>i</sub></i>(<i>y<sub>ij</sub><sup>m</sup></i>),　<i>m</i> ∈ {act, vis}
+    <small>候选 <i>i</i> 的奖励是它对其余 <i>G</i>−1 个候选的归一化胜率（Pref-GRPO 的形式，UnifiedReward-Flex 的多维用法）。</small>
+  </div>
+  <div class="eq"><span class="no">(8) (9)</span>
+    <i>A<sub>i</sub><sup>m</sup></i> = <span class="frac"><span><i>R<sub>i</sub><sup>m</sup></i> − <i>μ<sup>m</sup></i></span><span><i>σ<sup>m</sup></i> + <i>ε</i></span></span>　　<i>p<sub>i</sub></i> = ½ + ½ clip<span class="r">(</span><span class="frac"><span><i>λA<sub>i</sub></i><sup class="r">act</sup> + (1 − <i>λ</i>)<i>A<sub>i</sub></i><sup class="r">vis</sup></span><span><i>Z</i></span></span>, −1, 1<span class="r">)</span>
+    <small>两个胜率各自在 rollout 组内标准化（μ、σ 为组均值与标准差），再按 WorldCompass 的方式合成最优概率；λ 平衡动作与视觉，Z 控制归一化尺度。论文未给出 λ、Z 的取值。</small>
+  </div>
+  <div class="eq"><span class="no">(10) (11)</span>
+    <i>v</i><sub class="r"><i>φ</i></sub><sup class="r">+</sup> = (1 − <i>β</i>)<i>v̄<sub>φ</sub></i> + <i>βv<sub>φ</sub></i>,　<i>v</i><sub class="r"><i>φ</i></sub><sup class="r">−</sup> = (1 + <i>β</i>)<i>v̄<sub>φ</sub></i> − <i>βv<sub>φ</sub></i><br>
+    <i>ℒ</i><sub class="r">RL</sub>(<i>φ</i>) = 𝔼<sub><i>i</i>,<i>t</i></sub><span class="r">[</span> <i>p<sub>i</sub></i> ‖<i>v</i><sub class="r"><i>φ</i></sub><sup class="r">+</sup> − <i>u</i><sup class="r">(<i>i</i>)</sup>‖² + (1 − <i>p<sub>i</sub></i>) ‖<i>v</i><sub class="r"><i>φ</i></sub><sup class="r">−</sup> − <i>u</i><sup class="r">(<i>i</i>)</sup>‖² <span class="r">]</span>
+    <small>负样本感知的流匹配（DiffusionNFT）：对 rollout latent <i>x<sub>n</sub><sup>(i)</sup></i>、噪声 ε、时间 <i>t</i>，取 <i>z<sub>t</sub></i> = (1−<i>t</i>)<i>x</i> + <i>t</i>ε，目标速度 <i>u</i> = <i>x</i> − ε；隐式的正 / 负速度预测都以 <i>z<sub>t</sub></i>、共享前缀、局部动作与生成条件为条件。<i>p<sub>i</sub></i> 越接近 1，越把候选 <i>i</i> 当正样本拟合；越接近 0 越当负样本推开。</small>
+  </div>
+
+  <h3><span class="ix">9.2</span>胜率计算器：把 Eq. 6–9 走一遍</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 13</span><span class="ti">G = 4 个候选的成对裁决 → 胜率 → 组内标准化 → 最优概率 p<sub>i</sub></span></div>
+    <div class="ctl">
+      <label>λ（动作权重） <input type="range" id="rlLam" min="0" max="100" value="50" aria-label="λ"> <span class="val" id="rlLamV">0.50</span></label>
+      <label>Z（尺度） <input type="range" id="rlZ" min="50" max="300" value="100" aria-label="Z"> <span class="val" id="rlZV">1.00</span></label>
+      <span class="xs" style="color:var(--ink3)">点上三角格子循环：<span class="mono">i 胜 → Tie → j 胜</span></span>
+    </div>
+    <div class="figbody">
+      <div class="rlgrid">
+        <div>
+          <p class="mono" style="font-size:11px;letter-spacing:.08em;color:var(--act-ink);margin:0 0 6px">ACTION · y<sup>act</sup><sub>ij</sub></p>
+          <table class="mat" id="matAct"></table>
+          <p class="mono" style="font-size:11px;letter-spacing:.08em;color:var(--vis-ink);margin:14px 0 6px">VISUAL · y<sup>vis</sup><sub>ij</sub></p>
+          <table class="mat" id="matVis"></table>
+        </div>
+        <div class="rlout scrollx">
+          <table id="rlTable"></table>
+          <p class="note" id="rlNote"></p>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>示意计算。</b>格子 (i, j) 表示候选 i 对 j 的裁决；胜记 1、平记 ½、负记 0，对其余 3 个候选平均得 <span class="m">R<sub>i</sub></span>（Eq. 7）；组内标准化得 <span class="m">A<sub>i</sub></span>（Eq. 8，ε 取 10<sup>−6</sup>）；按 λ 合成并除以 Z 后裁剪到 [−1, 1]，映射到 [0, 1] 得 <span class="m">p<sub>i</sub></span>（Eq. 9）。
+    真实训练里 G 更大（仓库默认 12，对应 66 个无序对），每对都是一次完整的六图 VLM 调用。</figcaption>
+  </figure>
+
+  <h3><span class="ix">9.3</span>仓库配置里的实际数字（论文未写，来自 <code>diffusion_nft/configs</code>）</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>项</th><th>值</th><th>含义</th></tr></thead>
+    <tbody>
+      <tr><td>基座</td><td class="num">HunyuanVideo-1.5 480p + HY-WorldPlay AR 动作模型</td><td>因果、动作条件；<code>window_frames</code> 64、latent 片段大小 4</td></tr>
+      <tr><td>候选数 <span class="m">G</span></td><td class="num">12（<code>grpo_generation_num</code>）</td><td><code>bestofn: 6</code>：每组只有得分最高 3 个 + 最低 3 个进入更新</td></tr>
+      <tr><td>成对模式</td><td class="num"><code>vlm_pair_mode: all</code></td><td>全部 C(12,2) = 66 个无序对都送 WorldReward</td></tr>
+      <tr><td>片段选择</td><td class="num">min2max，<code>chunk_id</code> 1…16，各重复 3 次</td><td>目标片段深度逐步循环，覆盖短到长时程</td></tr>
+      <tr><td>采样 / 训练</td><td class="num">30 步采样；<code>train_timestep_fraction</code> 0.5；<code>adv_clip_max</code> 2.0</td><td>SDE 采样（η = 0.3）；优势裁剪</td></tr>
+      <tr><td>优化</td><td class="num">lr 1×10<sup>−5</sup>，常数调度，bf16，100 步</td><td>梯度裁剪 2.0；EMA 衰减 0.4 → 0.9</td></tr>
+      <tr><td>奖励权重</td><td class="num">action 2.0 · hpsv3_quality_drift 1.0 · vlm_action 2.0 · vlm_vq 1.0</td><td><b>注意</b>：发布配置同时开着几何动作奖励（DAv3）与 HPSv3 漂移奖励，见 §12 的保留意见</td></tr>
+      <tr><td>Reward 服务</td><td class="num">16 个 vLLM 副本（每 GPU 一个）配 16 个训练 rank</td><td><code>max-model-len</code> 32,768，开启前缀缓存；README 建议专用节点</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">论文正文（Sec. 4.3）：训练用 4,000 个多样的图—caption 条件配随机构造的轨迹（强调八个基本平移 / 旋转控制的组合），评测用 WorldPlay 的 600 例划分，短 / 中 / 长时程分别约 125 / 253 / 381 帧。</p>
+</section>
+
+<!-- ============================================================ 10 BENCH -->
+<section class="sec" id="s-bench">
+  <div class="eyebrow"><span class="n">10</span><span class="t">WorldReward-Bench</span><span class="line"></span></div>
+  <h2>WorldReward-Bench：760 对、三维独立、Tie 是显式标签</h2>
+  <p class="lead">Benchmark 衡量的是「奖励模型多大程度上复现人类偏好」。每对的两段视频来自同一源图、caption 与轨迹，所以比较把生成条件固定住，只剩轨迹执行与生成内容的差异。生成条件相对训练集<b>全部保留</b>：未见过的图—caption 对，独立重建的 224 条 23 步轨迹库，每段 184 帧 @ 15 fps。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 14</span><span class="ti">Bench 的构成（对应论文 Fig. 3）</span></div>
+    <div class="figbody">
+      <div class="chartwrap"><svg id="benchSvg" viewBox="0 0 860 330" role="img" aria-label="WorldReward-Bench 构成：轨迹族与子族占比、视觉风格占比、来源世界模型占比"></svg><div class="tip" id="tipBench"></div></div>
+    </div>
+    <figcaption><b>数据：Fig. 3 与 Sec. 3.7。</b>纯平移 38.4%、复合 37.1%、纯旋转 24.5%；风格照片 48.0%、游戏 / 动漫 43.9%、艺术 8.0%（≈61 对——注意这个桶很小）；
+    来源模型 9 个，其中 GameCrafter2（Hunyuan-GameCraft 系）<b>只出现在 Bench、不在训练池里</b>，是唯一完全未见过的生成器。子族占比里 Diag_View 仅 3.2%。</figcaption>
+  </figure>
+
+  <h3><span class="ix">10.1</span>标注协议</h3>
+  <div class="grid3">
+    <div class="card cT">
+      <p class="mono">ACTION CONSISTENCY</p>
+      <h5>动作一致性</h5>
+      <p>场景变化多忠实地遵循了规定的相机 / 动作轨迹；标注者检查执行控制的<b>方向与时间顺序</b>。</p>
+    </div>
+    <div class="card cV">
+      <p class="mono">APPEARANCE QUALITY</p>
+      <h5>外观质量</h5>
+      <p>视觉保真度、时间一致性、场景内容与结构的保持。</p>
+    </div>
+    <div class="card cA">
+      <p class="mono">MOTION QUALITY</p>
+      <h5>运动质量</h5>
+      <p>生成动态的合理性与平滑度，包括不连续或不足的运动。</p>
+    </div>
+  </div>
+  <div class="prose">
+    <p>每对由<b>三名标注者独立评判</b>，模型身份全程隐藏，候选顺序逐对随机。标注前有一轮校准，示例覆盖常见的相机控制错误、外观退化、不合理运动与真正模糊的比较。
+    只有当一方在该准则下有<b>清晰可观察的优势</b>时才选 A 或 B，否则记 Tie；三个维度各自独立——外观更好不意味着动作更准，运动更大不意味着运动更合理。最终标签按维度取多数；无多数（含 A / B / Tie 三方分歧）的样本交由额外标注者在同一准则下复核。</p>
+  </div>
+  <div class="eq"><span class="no">(12)</span>
+    Acc<sup class="r"><i>m</i></sup> = <span class="frac"><span>1</span><span>|<i>ℬ</i>|</span></span> Σ<sub><i>j</i>∈<i>ℬ</i></sub> 𝟙[<i>ŷ<sub>j</sub><sup>m</sup></i> = <i>y<sub>j</sub><sup>m</sup></i>],　<i>m</i> ∈ {act, app, mot}
+    <small>三分类偏好准确率，Tie 是显式标签：预测 A 而人类标 Tie 同样算错。这比「只在非平局样本上算二分类准确率」更严格，也要求模型学会何时不站队。</small>
+  </div>
+  <p class="note">论文没有报告 Bench 里 A / B / Tie 三类标签的比例，也没有报告标注者间一致性（如 Fleiss' κ）——这两个数字会直接影响 Tab. 3 各方法数字的可比性，见 §12。</p>
+</section>
+
+<!-- ============================================================ 11 RESULTS -->
+<section class="sec" id="s-results">
+  <div class="eyebrow"><span class="n">11</span><span class="t">Results</span><span class="line"></span></div>
+  <h2>结果：Bench 上三维第一，RL 里动作与质量同时涨</h2>
+  <p class="lead">四组实验回答四个问题：奖励模型与人类偏好的一致率如何（Tab. 3）；这种一致率从哪里来（Tab. 5、6、8）；作为 RL 信号有没有用（Tab. 4、9）；RL 的收益是否只是「奖励自己说好」（Fig. 6、Tab. 10）。</p>
+
+  <h3><span class="ix">11.1</span>与人类偏好的一致率（Tab. 3）</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 15</span><span class="ti">按维度与子集浏览 Tab. 3（%，三分类准确率；「–」表示该方法不建模此维度）</span></div>
+    <div class="ctl">
+      <div class="seg" id="t3dim" role="group" aria-label="维度">
+        <button type="button" data-d="0" aria-pressed="true">动作一致性</button>
+        <button type="button" data-d="1">外观质量</button>
+        <button type="button" data-d="2">运动质量</button>
+      </div>
+      <div class="seg" id="t3grp" role="group" aria-label="子集">
+        <button type="button" data-g="0" aria-pressed="true">全部 760 对</button>
+        <button type="button" data-g="1">平移</button>
+        <button type="button" data-g="2">旋转</button>
+        <button type="button" data-g="3">复合</button>
+        <button type="button" data-g="4">照片</button>
+        <button type="button" data-g="5">游戏/动漫</button>
+        <button type="button" data-g="6">艺术</button>
+      </div>
+      <button type="button" class="btn" id="t3tv" aria-pressed="false">表格视图</button>
+    </div>
+    <div class="figbody">
+      <div class="chartwrap"><svg id="t3Svg" viewBox="0 0 860 420" role="img" aria-label="Tab. 3 条形图：所选维度与子集下各奖励模型与人类偏好的一致率，WorldReward 高亮"></svg><div class="tip" id="tipT3"></div></div>
+      <div class="tview" id="t3Table" hidden></div>
+    </div>
+    <div class="legend"><span><i style="background:var(--act)"></i>WorldReward</span><span><i style="background:var(--vlm)"></i>闭源 VLM</span><span><i style="background:var(--tie)"></i>其他基线（图像 / 视频奖励、几何估计、Qwen3.5 基座）</span></div>
+    <figcaption><b>数据：Tab. 3。</b>WorldReward 在「全部」上 77.63 / 81.32 / 73.03，三维均第一。但分子集看并非处处最高：平移子集的外观 GPT-5.5（81.16）与 Gemini（82.19）高于 WorldReward（77.74）；照片子集的外观 Gemini 82.74 略高；
+    艺术子集（约 61 对）里 GPT-5.5 在动作（75.41 vs 73.77）与运动（77.05 vs 65.57）上更高。论文的表述「在旋转与复合轨迹上外观最高、在照片上动作与运动最高、在艺术上外观最高」是准确的。</figcaption>
+  </figure>
+
+  <div class="prose">
+    <p>几个值得单独看的对照：<b>Qwen3.5-9B 基座</b>几乎是随机水平（48.42 / 48.29 / 43.82，三分类随机为 33.3%，但 Tie 的存在让「总选 A」之类的策略也能拿到不低的分），微调后动作 +29 点；
+    <b>27B 基座</b>的动作与运动更好（63.68 / 62.76）但外观反而更差（44.34）；<b>几何估计器</b> DAv3 的动作一致率 70.53 只比 GPT-5.5 低 3.7 点，说明「用 3D 基础模型估轨迹」仍是很强的动作信号，只是它在艺术风格图上崩了（39.34）；
+    <b>HPSv3</b> 的外观 73.68 是纯图像奖励里最好的，但离 81 仍有距离。</p>
+  </div>
+
+  <h3><span class="ix">11.2</span>一致率从哪里来：标注精修、结构化证据、候选顺序</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 16</span><span class="ti">Tab. 5：直接用 Gemini 判 → 蒸馏 → + agent 审计 → + 人工复核</span></div>
+    <div class="figbody">
+      <div class="chartwrap"><svg id="t5Svg" viewBox="0 0 860 250" role="img" aria-label="Tab. 5 折线：四个阶段在动作、外观、运动、平均上的一致率；agent 审计带来最大跳升"></svg><div class="tip" id="tipT5"></div></div>
+    </div>
+    <div class="legend"><span><i style="background:var(--act)"></i>动作</span><span><i style="background:var(--vis)"></i>外观</span><span><i style="background:var(--A)"></i>运动</span><span><i style="background:var(--ink2)"></i>平均</span></div>
+    <figcaption><b>数据：Tab. 5。</b>Gemini 3.1 Pro 直接评判 65.79 / 80.13 / 60.79（均 68.90）；用它的标注蒸馏出的 9B 模型 66.84 / 78.92 / 60.31（68.69）——动作略升、外观与运动略降，<b>蒸馏本身不带来提升</b>；
+    加 GPT-5.5 agent 审计后 75.84 / 80.46 / 71.52（75.94），动作 +9.0、运动 +11.2；人工复核再到 77.63 / 81.32 / 73.03（77.33）。论文据此断言：相对直接 VLM 评判的优势主要来自标注精修而非蒸馏。</figcaption>
+  </figure>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 17</span><span class="ti">Tab. 6 上半：去掉一种视觉证据（训练与推理同时去掉），相对完整模型的变化</span></div>
+    <div class="figbody">
+      <div class="chartwrap"><svg id="t6Svg" viewBox="0 0 860 240" role="img" aria-label="Tab. 6 结构化证据消融：去源图、去帧网格、去动作面板各自在动作、外观、运动上相对完整模型的下降"></svg><div class="tip" id="tipT6"></div></div>
+    </div>
+    <div class="legend"><span><i style="background:var(--act)"></i>动作</span><span><i style="background:var(--vis)"></i>外观</span><span><i style="background:var(--A)"></i>运动</span></div>
+    <figcaption><b>数据：Tab. 6。</b>去源图：76.84 / 78.95 / 72.41（外观 −2.37 最大——失去了识别物体、布局、场景内容漂移的参照）；去帧网格：74.92 / 79.88 / 69.74（平均 −2.48 最大，动作 −2.71、运动 −3.29）；
+    去动作面板：74.81 / 80.56 / 71.68（动作 −2.82 最大，运动 −1.35）。帧网格捕捉块的演化，面板把每个控制直接对应到它的局部视觉变化——两者互补，所以完整输入在三个维度都最好。</figcaption>
+  </figure>
+
+  <div class="tbl"><table>
+    <thead><tr><th>Tab. 8 · 候选顺序鲁棒性</th><th class="num">动作</th><th class="num">外观</th><th class="num">运动</th></tr></thead>
+    <tbody>
+      <tr><td>原始顺序</td><td class="num">77.63</td><td class="num">81.32</td><td class="num">73.03</td></tr>
+      <tr><td>每块独立随机打乱 A/B，预测映射回原身份后再投票</td><td class="num">76.39</td><td class="num">80.79</td><td class="num">72.08</td></tr>
+      <tr class="hl"><td><b>Δ</b></td><td class="num">−1.24</td><td class="num">−0.53</td><td class="num">−0.95</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">下降有限，说明模型基本不依赖候选位置；作者把这归功于训练数据的互换增强（Tab. 7）。不过 −1.24 也不是 0：位置偏置仍有残留。</p>
+
+  <h3><span class="ix">11.3</span>作为 RL 奖励：HY-WorldPlay 1.5 的后训练（Tab. 4）</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 18</span><span class="ti">三种时程 × 两类动作 × 两个指标：基座 vs WorldCompass vs WorldReward-RL</span></div>
+    <div class="figbody">
+      <div class="chartwrap"><svg id="t4Svg" viewBox="0 0 860 400" role="img" aria-label="Tab. 4 小多图：组合动作与基本动作的动作准确率与 HPSv3 分数随时程变化，三种方法对比"></svg><div class="tip" id="tipT4"></div></div>
+    </div>
+    <div class="legend"><span><i style="background:var(--hum)"></i>HY-WorldPlay 1.5（基座）</span><span><i style="background:var(--vlm)"></i>WorldCompass</span><span><i style="background:var(--act)"></i>WorldReward-RL</span></div>
+    <figcaption><b>数据：Tab. 4。</b>动作准确率由 DepthAnything3 估计的相机轨迹计算，质量为 HPSv3 分数；WorldReward-RL 与 WorldCompass 只差奖励信号。
+    组合动作准确率相对 WorldCompass 提升 1.58–2.78 点、基本动作 2.28–5.81 点，HPSv3 在六个设定里全部提升（0.15–0.29）；最长时程上 HPSv3 为 1.02 / 3.94 对 0.73 / 3.72。相对基座的提升则是数量级的（组合动作 ~20 → ~57）。</figcaption>
+  </figure>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 19</span><span class="ti">Tab. 9：只用动作奖励 / 只用视觉奖励 / 两者都用（长时程组合动作）</span></div>
+    <div class="figbody">
+      <div class="chartwrap"><svg id="t9Svg" viewBox="0 0 860 200" role="img" aria-label="Tab. 9 奖励组件消融：无奖励、仅动作、仅视觉、动作加视觉四种设置的动作准确率与 HPSv3"></svg><div class="tip" id="tipT9"></div></div>
+    </div>
+    <figcaption><b>数据：Tab. 9。</b>无奖励 19.70 / −0.33；仅动作 52.73 / 0.21；仅视觉 27.82 / 0.89；动作 + 视觉 56.40 / 1.02。两个奖励角色不同：只优化动作时视觉变弱，反而让执行出的相机运动更难被识别（动作分低于组合）；只优化视觉时 HPSv3 涨得更明显但对执行一串控制帮助有限；合起来两项都最好。</figcaption>
+  </figure>
+
+  <h3><span class="ix">11.4</span>不是自卖自夸：GPT-5.5 与人类的成对评判（Fig. 6、Tab. 10）</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 20</span><span class="ti">200 对长时程组合动作样本上的左胜 / 平 / 右胜（%），三位评判者、两个维度</span></div>
+    <div class="ctl">
+      <div class="seg" id="f6dim" role="group" aria-label="维度">
+        <button type="button" data-d="0" aria-pressed="true">动作一致性</button>
+        <button type="button" data-d="1">视觉质量</button>
+      </div>
+    </div>
+    <div class="figbody">
+      <div class="chartwrap"><svg id="f6Svg" viewBox="0 0 860 330" role="img" aria-label="Fig. 6 堆叠条：WorldReward、GPT-5.5、人类三位评判者对三组模型对比的左胜、平、右胜比例"></svg><div class="tip" id="tipF6"></div></div>
+    </div>
+    <div class="legend"><span><i style="background:var(--hum)"></i>HY-WorldPlay 1.5</span><span><i style="background:var(--vlm)"></i>WorldCompass</span><span><i style="background:var(--act)"></i>WorldReward-RL</span><span><i class="hatch"></i>Tie</span></div>
+    <figcaption><b>数据：Fig. 6。</b>人类评判：每对由三人独立判断，报告全部 600 个个体判断的比例而不做多数投票，以保留真实的模糊性。
+    三位评判者给出相同的排序：WorldReward-RL &gt; WorldCompass &gt; 基座。对 WorldCompass 的优势在视觉质量上更大（人类 48.9% vs 25.2%），动作上较小（39.8% vs 34.8%，且 25.4% 平局）。</figcaption>
+  </figure>
+
+  <div class="tbl"><table>
+    <thead><tr><th>Tab. 10 · 与人类个体判断的对级一致率（%，600 个判断 / 维度）</th><th class="num">动作</th><th class="num">视觉质量</th></tr></thead>
+    <tbody>
+      <tr><td>GPT-5.5</td><td class="num">69.1（65.6–72.5）</td><td class="num">72.0（68.7–75.2）</td></tr>
+      <tr class="hl"><td><b>WorldReward</b></td><td class="num">70.3（66.9–73.6）</td><td class="num">72.9（69.6–76.0）</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">括号内是按视频对聚类的 bootstrap 95% 置信区间。两者区间大幅重叠——WorldReward 与 GPT-5.5 在逐对判断上<b>相当</b>，而非显著更好；这一段的贡献在于说明「奖励在评判它优化过的模型时仍与人类对齐」，而不是又一次胜过 GPT-5.5。</p>
+
+  <h3><span class="ix">11.5</span>定性观察（Fig. 4、5）</h3>
+  <div class="prose">
+    <p><b>相对基座</b>：HY-WorldPlay 1.5 对若干控制响应很弱，连续几步只有有限的视角变化，且随轨迹推进输出退化，后期帧出现涂抹区域与模糊的场景结构；后训练模型执行平移与旋转更明确，场景结构在整条轨迹上保持干净连贯。</p>
+    <p><b>相对 WorldCompass</b>：WorldCompass 提升了相机控制准确率，但后期帧伴随明显的<b>色偏</b>与纹理一致性的逐渐丢失；作者猜测原因是其图像奖励逐帧独立打分，不直接评估颜色与纹理是否随时间保持。用动作对齐的视频证据评估视觉质量后，后训练模型在整条轨迹上外观更稳定，同时保留了动作跟随的提升——这正是「时间性视觉质量反馈」的价值所在。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 12 LIMITATIONS -->
+<section class="sec" id="s-crit">
+  <div class="eyebrow"><span class="n">12</span><span class="t">Limitations &amp; My Reservations</span><span class="line"></span></div>
+  <h2>局限，以及我读下来的保留意见</h2>
+  <p class="lead">论文没有单独的 Limitations 一节（正文以 Conclusion 收尾），所以下面主要是我对照正文、开源代码与配置后的意见，按重要性排序。前两条是正文与代码之间的<b>事实性出入</b>，建议在引用这篇工作时向作者确认。</p>
+
+  <div class="tbl"><table>
+    <thead><tr><th style="width:26%">问题</th><th>依据</th><th style="width:30%">影响</th></tr></thead>
+    <tbody>
+      <tr><td><b>1 · 发布的 RL 配置不是「只换奖励」</b></td>
+        <td>正文（Sec. 3.6、4.3）说 WorldReward-RL「用 WorldReward 的两个偏好<b>取代</b>异构的几何与图像奖励」「与 WorldCompass 只差奖励信号」。但仓库 <code>train_grpo_16gpu.yaml</code> 同时开启 <code>action_reward_weight: 2.0</code>（DAv3 几何动作奖励）、<code>hpsv3_quality_drift_reward_weight: 1.0</code>、<code>vlm_action 2.0</code>、<code>vlm_vq 1.0</code>。</td>
+        <td>若实际训练用的是这套混合权重，Tab. 4 衡量的就是「WorldCompass 奖励 + WorldReward 奖励」而非替换；Tab. 9 的「仅动作 / 仅视觉」也需要重新解释。也可能发布配置只是从 WorldCompass 继承的模板——需要作者澄清。</td></tr>
+      <tr><td><b>2 · 块级 Tie 被 prompt 禁止</b></td>
+        <td>Eq. 3 与 Sec. 3.3 说块级胜者 ∈ {A, B, Tie}，开源 prompt 要求两个 <code>overall_winner</code> 只能是 A / B，「三个子维度全平也要选一个」。</td>
+        <td>近乎相同的两段视频也会被强制分出胜负，全局 Tie 只能靠票数恰好相等；RL 里对相近候选会引入随机方向的胜率噪声。Bench 三分类里模型「何时该说 Tie」的能力其实来自投票的偶然性。</td></tr>
+      <tr><td><b>3 · 「整段直接喂 VLM 更差」没有实验</b></td>
+        <td>Tab. 5 第一行「Gemini 3.1 Pro (direct judge)」的数字与 Tab. 3 的 Gemini 行完全相同，而蒸馏用的是块级协议——闭源基线很可能<b>也是用六图块级输入</b>评的。全文没有「全帧 + 全动作序列一次评判」的对照。</td>
+        <td>引言里对整段评判的批评（稀疏采样漏转变、稠密采样撑上下文、局部失败被稀释）是论证而非实验结论；Tab. 3 证明的是「训练 + 精修的 9B 优于零样本前沿 VLM」，不是「分块优于整段」。块大小（4）与每动作取帧数（3）也没有消融。</td></tr>
+      <tr><td><b>4 · 模型从未看过视频</b></td>
+        <td>每个动作只取首 / 中 / 末三帧（面板只有首 / 末），一个动作 8 帧里有 5 帧不进模型；帧网格里 IDLE 槽三张相同。</td>
+        <td>「时间一致性」「闪烁」「运动平滑」都是从关键帧差异推断的；8 帧内的高频闪烁或短暂跳变不可见。论文批评图像奖励「看不见闪烁」，这条批评部分也适用于它自己——它能看到的是关键帧之间的漂移。</td></tr>
+      <tr><td><b>5 · Bench 的标签统计缺失</b></td>
+        <td>未报告 A / B / Tie 的比例、标注者间一致性、复核比例。</td>
+        <td>三分类准确率对 Tie 占比极敏感：Tie 多则「保守」策略占优，Tie 少则「总选一边」占优。没有这两个数字，77.63 是「高」还是「一般」缺少参照——比如人类三人之间的一致率是多少？</td></tr>
+      <tr><td><b>6 · 老师、审计者、基线是同两个模型</b></td>
+        <td>Gemini 3.1 Pro 出标注，GPT-5.5 审标注，两者又是 Tab. 3 的主要对手；GPT-5.5 还是 Fig. 6 / Tab. 10 的外部评判者之一。</td>
+        <td>「超过老师」成立，但外部评判与训练监督相关；真正独立的只有人类评测（Fig. 6 人类列与 Tab. 10 的人类判断），幸好这部分结论一致。</td></tr>
+      <tr><td><b>7 · 未见生成器的泛化没有单独报告</b></td>
+        <td>Bench 的 9 个模型里只有 GameCrafter2（9.3%）不在训练池；训练与 Bench 的图—caption 都来自 WorldPlay 的分布。</td>
+        <td>「不同生成器的失败模式」是 Bench 的设计轴之一，但没有按来源模型分解的结果；对全新架构（例如非 I2V 的世界模型）的泛化未知。</td></tr>
+      <tr><td><b>8 · 小子集不要过度解读</b></td>
+        <td>艺术风格 ≈ 61 对（1 对 ≈ 1.6 点），Diag_View ≈ 24 对。</td>
+        <td>Tab. 3 艺术列里 GPT-5.5 运动 77.05 vs WorldReward 65.57 的 11 点差距，也只是约 7 对样本；反过来 WorldReward 在艺术上外观领先也同样脆弱。</td></tr>
+      <tr><td><b>9 · 成本没有报告</b></td>
+        <td>每对视频 K 次调用，每次 6 张大图 + 约 3k token prompt + 最多 4k 输出；RL 里 G = 12 → 每个 rollout 组每个片段 66 次调用；README 用 16 张 GPU 专门服务奖励。</td>
+        <td>相比 DAv3 + HPSv3，奖励侧算力可能上升一个数量级；论文没给延迟、吞吐或训练总 GPU 时。作为「更好的奖励」它站得住，作为「可替代的奖励」还缺一张账单。</td></tr>
+      <tr><td><b>10 · 动作空间是离散的方向 token</b></td>
+        <td>8 个平移 + 4 个旋转原子及其对角组合，每步等长（8 帧）；prompt 对幅度只有「可见但不夸张」的定性要求。</td>
+        <td>连续相机位姿（CameraCtrl 类）、可变速度、物体交互都不在范围内；Loop_Return 这类「回到起点」的一致性也只能靠块内证据间接反映——回访一致性并没有专门的检查。</td></tr>
+      <tr><td><b>11 · 未给出的超参</b></td>
+        <td>λ、Z、β、G、EMA 系数在正文中缺失；仓库配置给了 G = 12、<code>adv_clip_max</code> 2.0 等，但与 λ / Z 的对应关系不明。</td>
+        <td>Tab. 4 / 9 的复现依赖仓库默认值；若第 1 条的混合权重成立，则「λ 平衡两个偏好」的描述也需重新对应到四个权重。</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="call ok">
+    <div class="hd">○ 尽管如此，我认为值得记住的贡献</div>
+    <p><b>把「动作有没有执行」变成了可核对的清单。</b>双锚点的方向预期（旧内容往哪走、新内容从哪进）、逐分量的纯净度检查、以及「动作侧禁止质量词、视觉侧忽略动作对错」的分工，让 VLM 评判从「谈感受」变成了「对照核对」。这套 prompt 本身就值得被别的相机控制工作直接借用。</p>
+    <p><b>数据精修的归因做得干净。</b>Tab. 5 把「蒸馏不涨、agent 审计涨 7 点、人工再涨 1.4 点」拆得很清楚，并且用 Tab. 1 说明了修订发生在哪些粒度。这是近期 VLM-as-judge 工作里少见的诚实拆解。</p>
+    <p><b>Bench 的三维独立标注是有用的公共资产。</b>760 对、9 个生成器、同条件配对、显式 Tie，加上代码、权重、数据全部公开——对于「相机控制世界模型该怎么评」这个问题，它给了一个比 DAv3 轨迹误差更接近人类判断的标尺。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 13 REPO -->
+<section class="sec" id="s-repo">
+  <div class="eyebrow"><span class="n">13</span><span class="t">In Context</span><span class="line"></span></div>
+  <h2>放回 Awesome-Interactive-Video-World-Models 的坐标系里</h2>
+  <p class="lead">这不是一个世界模型，而是<b>评世界模型的模型</b>加一个人工标注 benchmark，外加一条把它当 RL 奖励的应用线。按仓库的分区，它应放进 <code>benchmarks</code>；它的奖励模型部分同时是 <code>control</code> 区「control-fidelity analysis」的直接材料。</p>
+
+  <div class="tbl"><table>
+    <thead><tr><th style="width:26%">严格标准</th><th>WorldReward 的情况</th><th style="width:16%">判断</th></tr></thead>
+    <tbody>
+      <tr><td><b>1. 逐步动作条件</b></td><td>不适用于奖励模型本身；它<b>消费</b>逐步动作（每块 4 个动作标签）来评判视频。被它后训练的 HY-WorldPlay 1.5 是逐步动作条件的系统。</td><td><span class="pill n">不适用</span></td></tr>
+      <tr><td><b>2. 因果 / 流式生成</b></td><td>不生成视频。RL 部分沿用 WorldCompass 的片段级 rollout（因果 AR 基座）。</td><td><span class="pill n">不适用</span></td></tr>
+      <tr><td><b>3. 持久世界状态</b></td><td>不适用。评判维度里「源场景漂移」与 Loop_Return 轨迹间接考察了世界的持久性。</td><td><span class="pill n">不适用</span></td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="ix">13.1</span>与仓库中邻居的关系</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>工作（仓库分区）</th><th>关系</th></tr></thead>
+    <tbody>
+      <tr><td><b>WorldCompass</b> 2602.09022（memory）</td><td>直接前作：提供片段级 rollout + DiffusionNFT 框架与「几何动作奖励 + HPSv3」的组合奖励；WorldReward 的 RL 代码就建在它的代码上，Tab. 4 / Fig. 6 以它为主要对照。</td></tr>
+      <tr><td><b>WorldPlay</b> 2512.14614（systems）</td><td>被后训练的基座 HY-WorldPlay 1.5；训练与 Bench 的图—caption 也取自其数据；600 例评测划分沿用其设定。</td></tr>
+      <tr><td><b>RL with Inverse Rewards</b> 2509.23958（control）· <b>GrndCtrl</b> 2512.01952（memory）</td><td>同属「给世界模型造可验证奖励」的路线（逆动力学 / 几何与感知一致性）；论文把它们归为「刻画几何执行但不评估视觉质量」的一类。</td></tr>
+      <tr><td><b>UNIVERSE</b> 2506.17967（benchmarks）</td><td>同样是「把 VLM 改造成世界模型评估器」；WorldReward 的差异在于成对 + 动作条件 + 块级证据组织 + 大规模推理蒸馏。</td></tr>
+      <tr><td><b>Matrix-Game 2.0 / 3.0、Infinite-World、Yume-1.5、SANA-WM、lingbot-world、Hunyuan-GameCraft（systems）</b></td><td>全部是它的生成池 / Bench 来源模型：训练池 8 个变体，Bench 9 个（多出 GameCrafter2）。</td></tr>
+      <tr><td><b>WorldMark、iWorld-Bench、MIND（benchmarks）</b></td><td>同为交互世界模型评测，但以任务 / 记忆 / 控制的自动指标为主；WorldReward-Bench 是「奖励模型对齐人类偏好」的元评测，评的是评判者。</td></tr>
+      <tr><td><b>名字撞车提醒</b></td><td>docs/ 里已有的 <code>reworld-…-explainer.html</code> 是 ReWorld（2608.23565，长时记忆交互世界模型）；本文引用的 ReWorld（2601.12428）是「具身世界模型的多维奖励模型」，两者无关。</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="ix">13.2</span>建议的 papers.jsonl 条目（供维护者审阅）</h3>
+  <pre>{"id": "2609.03952", "name": "WorldReward", "title": "WorldReward: Reward Modeling for Camera-Conditioned World Models",
+ "venue": null, "date": "2026-09-03", "section": "benchmarks", "section_source": "curated",
+ "links": {"paper": "https://arxiv.org/abs/2609.03952", "website": "https://codegoat24.github.io/WorldReward",
+           "code": "https://github.com/CodeGoat24/WorldReward"},
+ "attrs": {"open_source": true}}</pre>
+  <p class="note">奖励模型 / benchmark 没有 <code>backbone</code>、<code>fps</code>、<code>horizon</code>、<code>memory</code> 可填，按仓库规则留空。<code>open_source</code> 为 true：代码、Qwen3.5-9B 权重与 Bench 数据均已在 GitHub / HuggingFace 发布；RL 后训练后的 HY-WorldPlay 权重我未在正文与仓库 README 中看到发布说明。</p>
+</section>
+
+<!-- ============================================================ 14 APPENDIX -->
+<section class="sec" id="s-appendix">
+  <div class="eyebrow"><span class="n">14</span><span class="t">Appendix</span><span class="line"></span></div>
+  <h2>附录速查</h2>
+
+  <h3><span class="ix">A</span>全部数字</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>项</th><th>值</th><th>出处</th></tr></thead>
+    <tbody>
+      <tr><td>块大小 / 每块图片数</td><td class="num">4 个动作槽 / 6 张图</td><td>Sec. 3.2, Fig. 1</td></tr>
+      <tr><td>训练轨迹库</td><td class="num">224 条 × 11 步 → 12 槽 → 3 块</td><td>Sec. 4.1, Tab. 2</td></tr>
+      <tr><td>Bench 轨迹库</td><td class="num">224 条 × 23 步 → 24 槽 → 6 块</td><td>Sec. 4.1, Tab. 2</td></tr>
+      <tr><td>训练视频对</td><td class="num">50,000 对 · 15 fps · seed 1 · 各模型默认分辨率</td><td>Sec. 4.1</td></tr>
+      <tr><td>候选块 / 标注块</td><td class="num">150,000 → ≈100,000（99,954）</td><td>Sec. 4.1, Tab. 7</td></tr>
+      <tr><td>互换增强后</td><td class="num">124,942（AA 37,107 · AB 25,365 · BA 25,364 · BB 37,106）</td><td>Tab. 7</td></tr>
+      <tr><td>生成池</td><td class="num">HY-WorldPlay 17.6% · Lingbot-World-Fast 17.7% · HY-WorldPlay-RL 17.6% · Infinite-World 17.5% · Yume-1.5 13.7% · SANA-WM 12.6% · Matrix-Game 2/3 3.3%</td><td>Fig. 2b</td></tr>
+      <tr><td>训练图像风格 / 内容</td><td class="num">照片 75.2 · 动漫游戏 15.3 · 艺术 9.5 ／ 场景 41.4 · 建筑 35.0 · 自然 23.6（%）</td><td>Fig. 2a-b</td></tr>
+      <tr><td>训练轨迹族</td><td class="num">纯旋转 34.0 · 纯平移 34.0 · 复合 32.0（%）</td><td>Fig. 2c</td></tr>
+      <tr><td>Agent QC</td><td class="num">保留 57.9% · 修订 42.1%（文本 67.4 · 维度胜者 23.8 · 块胜者 0.9 · 两者 7.9）· 人工确认 87.0%</td><td>Tab. 1</td></tr>
+      <tr><td>奖励模型训练</td><td class="num">Qwen3.5-9B · 3 epoch · batch 128 · lr 8e-6 余弦 · warm-up 0.03 · 序列打包</td><td>Sec. 4.1</td></tr>
+      <tr><td>推理（代码）</td><td class="num">vLLM · 温度 0 · max_tokens 4096 · max_model_len 49,152 · 图长边 ≤ 2048</td><td>infer.py</td></tr>
+      <tr><td>Bench 规模</td><td class="num">760 对 · 184 帧 @15 fps · 3 名标注者 · 3 维 · Tie 显式</td><td>Sec. 3.7, 4.1</td></tr>
+      <tr><td>Bench 构成</td><td class="num">平移 38.4 · 复合 37.1 · 旋转 24.5 ／ 照片 48.0 · 游戏动漫 43.9 · 艺术 8.0（%）</td><td>Fig. 3</td></tr>
+      <tr><td>Bench 全部对（Act/App/Mot）</td><td class="num">WorldReward 77.63 / 81.32 / 73.03 · GPT-5.5 74.21 / 79.87 / 69.47 · Gemini 65.79 / 80.13 / 60.79</td><td>Tab. 3</td></tr>
+      <tr><td>标注精修</td><td class="num">直判 68.90 → 蒸馏 68.69 → +agent 75.94 → +人工 77.33（均值）</td><td>Tab. 5</td></tr>
+      <tr><td>证据消融（均值）</td><td class="num">去源图 76.07 · 去帧网格 74.85 · 去面板 75.68 · 完整 77.33</td><td>Tab. 6</td></tr>
+      <tr><td>推理监督（均值）</td><td class="num">仅标签 72.47 · +整体摘要 74.94 · +每视频分析 77.33</td><td>Tab. 6</td></tr>
+      <tr><td>顺序鲁棒性</td><td class="num">Δ −1.24 / −0.53 / −0.95</td><td>Tab. 8</td></tr>
+      <tr><td>RL 训练 / 评测</td><td class="num">4,000 条件 · WorldPlay 600 例 · 时程 ≈125 / 253 / 381 帧 · DAv3 动作准确率 + HPSv3</td><td>Sec. 4.3</td></tr>
+      <tr><td>RL 长时程组合动作</td><td class="num">基座 19.70 / −0.33 · WorldCompass 54.82 / 0.73 · WorldReward-RL 56.40 / 1.02</td><td>Tab. 4</td></tr>
+      <tr><td>奖励组件</td><td class="num">仅动作 52.73 / 0.21 · 仅视觉 27.82 / 0.89 · 两者 56.40 / 1.02</td><td>Tab. 9</td></tr>
+      <tr><td>人类评测</td><td class="num">200 对 × 3 人 = 600 判断 / 维；WR-RL vs WorldCompass：动作 39.8 vs 34.8，视觉 48.9 vs 25.2</td><td>Fig. 6</td></tr>
+      <tr><td>对级一致率</td><td class="num">WorldReward 70.3 / 72.9；GPT-5.5 69.1 / 72.0</td><td>Tab. 10</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="ix">B</span>Tab. 3 全表（%）</h3>
+  <div class="tbl"><table id="t3full">
+    <thead><tr><th>奖励模型</th><th class="num" colspan="3">全部</th><th class="num" colspan="3">平移</th><th class="num" colspan="3">旋转</th><th class="num" colspan="3">复合</th><th class="num" colspan="3">照片</th><th class="num" colspan="3">游戏/动漫</th><th class="num" colspan="3">艺术</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="note">每组三列依次为动作 / 外观 / 运动；「–」为该方法不建模的维度。最高值加粗（琥珀色）、次高加下划线，按每列计算。</p>
+
+  <h3><span class="ix">C</span>术语</h3>
+  <dl class="gloss">
+    <dt>相机条件世界模型</dt><dd>以源图 + caption + 相机 / 动作轨迹为条件生成交互视频的模型；本文的动作是离散的方向 token（平移 8 种、旋转 4 种及组合），每步等长。</dd>
+    <dt>动作—视频块（chunk）</dt><dd>4 个连续动作槽 + 两段视频对应的解码帧块；前置 IDLE 槽，末块 PAD 补齐；每块渲染成 6 张图交给 VLM。</dd>
+    <dt>帧网格总览（frame grid）</dt><dd>2 行（A / B）× 13 列（参考帧 + 4 动作 × 首 / 中 / 末）的一张图，列边框按槽位着色；用于看块内的时间趋势。</dd>
+    <dt>动作面板（action panel）</dt><dd>每个动作一张 2×2 图（行 A / B，列首 / 末），用于核对该动作引起的局部转变。</dd>
+    <dt>双锚点预期</dt><dd>prompt 对每个指令分量写明「已有内容往哪个边移动」与「新内容从哪个边进入」；使无天空 / 地面的场景也能判断俯仰方向。</dd>
+    <dt>运动纯净度（motion purity）</dt><dd>未被指令的轴不得出现运动：纯旋转时不许缩放，纯平移时不许倾斜，纯俯仰时不许横向漂移；违反者在逐动作比较中被扣分。</dd>
+    <dt>源场景漂移（source-scene drift）</dt><dd>世界身份发生不兼容的变化：场景类别翻转、主体被替换、材质 / 颜色 / 语义强变、块首帧已像另一个世界且无法用相机运动解释。因相机移动而与源图不同不算漂移。</dd>
+    <dt>三分类偏好准确率</dt><dd>Eq. 12：预测与人类多数标签在 {A, B, Tie} 上完全相同才计 1。</dd>
+    <dt>Agent harness QC</dt><dd>Algorithm 1：GPT-5.5 多轮调用读图工具、维护检查历史 ℋ，对 Gemini 的块级判决要么保留、要么输出定位到（块，维度）的 diff。</dd>
+    <dt>成对胜率奖励</dt><dd>Pref-GRPO 形式：候选对其余 G−1 个候选的胜 1 / 平 ½ / 负 0 平均；本文对动作与视觉各算一个。</dd>
+    <dt>DiffusionNFT</dt><dd>负样本感知的流匹配 RL：用最优概率 p<sub>i</sub> 加权正 / 负两个隐式速度场的回归损失（Eq. 10–11）；本文沿用 WorldCompass 的片段级实现。</dd>
+    <dt>片段级 rollout</dt><dd>每次迭代只为一个目标片段 n 采 G 个候选，共享同一个自回归前缀；奖励模型的块与目标片段时间对齐。</dd>
+    <dt>WorldCompass</dt><dd>Wang et al. 2026（2602.09022）：长时程世界模型的 RL 后训练框架，奖励 = DepthAnything3 几何动作奖励 + HPSv3 图像奖励；本文的直接前作与主要对照。</dd>
+    <dt>HY-WorldPlay 1.5</dt><dd>WorldPlay（2512.14614）的实时交互世界模型，基于 HunyuanVideo-1.5 的因果动作条件模型；本文的 RL 基座。</dd>
+  </dl>
+
+  <h3><span class="ix">D</span>关键依赖与相关工作（论文引用）</h3>
+  <div class="prose">
+    <ul>
+      <li>Qwen3.5 — Qwen Team, 2026-02（奖励模型基座，9B；27B 作参照）</li>
+      <li>Gemini 3.1 Pro — Google DeepMind 2026（推理蒸馏来源）；GPT-5.5 — OpenAI 2026（agent 审计 + 外部评判）</li>
+      <li>WorldCompass — Wang et al. 2026, arXiv 2602.09022（RL 框架与对照）；DiffusionNFT — Zheng et al., ICLR 2026（优化目标）；Pref-GRPO — Wang et al. 2025, arXiv 2508.20751（成对胜率）</li>
+      <li>UnifiedReward — Wang et al. 2025, arXiv 2503.05236；UnifiedReward-Think — NeurIPS 2025；UnifiedReward-Flex — arXiv 2602.02380（VLM-as-judge 范式与多维用法）</li>
+      <li>WorldPlay / HY-WorldPlay 1.5 — Sun et al. 2025, arXiv 2512.14614（基座与数据）</li>
+      <li>DepthAnything3 — Lin et al. 2025, arXiv 2511.10647；WorldMirror — Liu et al. 2025, arXiv 2510.10726（几何基线 / 评测指标）</li>
+      <li>HPSv3 — Ma et al., ICCV 2025；VideoAlign — Liu et al., NeurIPS 2025；LAION Aesthetics（图像 / 视频质量基线）</li>
+      <li>生成池：Matrix-Game 2.0 / 3.0、LingBot-World-Fast（Advancing Open-source World Models）、Infinite-World、Yume-1.5、SANA-WM、Hunyuan-GameCraft 系</li>
+      <li>ReWorld — Peng et al. 2026, arXiv 2601.12428；Reward as an Agent — Li et al. 2026, arXiv 2606.19990（具身世界模型的奖励建模，论文用以划清边界）</li>
+    </ul>
+  </div>
+
+  <div class="foot">
+    本页由我根据 arXiv 2609.03952v1（2026-09-03）全文、Fig. 1–6、Tab. 1–10，以及 GitHub 仓库 CodeGoat24/WorldReward 的 <code>worldreward/</code> 包（prompt 模板、分块渲染、投票聚合、推理设置）与 <code>diffusion_nft/</code> 配置整理。
+    图解均为按理解重绘，图注中区分「论文陈述」「代码事实」与「我的推断 / 示意」；所有数字均可在附录 A、B 的出处处核对。正文与代码不一致之处已在 §05、§06、§09、§12 标明。
+  </div>
+</section>
+</main>
+</div>
+
+<script>
+(function(){
+'use strict';
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs={}, parent=null){
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs){ if (attrs[k] !== null && attrs[k] !== undefined) e.setAttribute(k, attrs[k]); }
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function txt(parent, x, y, s, cls='lbl', anchor='start', attrs={}){
+  const t = el('text', Object.assign({x, y, 'text-anchor':anchor, class:cls}, attrs), parent);
+  t.textContent = s; return t;
+}
+function clear(node){ while (node.firstChild) node.removeChild(node.firstChild); }
+const fmt = (v, d=2) => (v===null||v===undefined) ? '–' : (typeof v==='number' ? v.toFixed(d) : v);
+const SLOT = ['s1','s2','s3','s4'];
+const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ------------------------------------------------ theme + progress + toc */
+const root = document.documentElement;
+try { const saved = localStorage.getItem('wr-theme'); if (saved) root.setAttribute('data-theme', saved); } catch(e){}
+$('#themeBtn').addEventListener('click', () => {
+  const cur = root.getAttribute('data-theme') || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  root.setAttribute('data-theme', next);
+  try { localStorage.setItem('wr-theme', next); } catch(e){}
+});
+const prog = $('#prog');
+function onScroll(){
+  const h = document.documentElement;
+  const p = h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight);
+  prog.style.width = (p*100).toFixed(2) + '%';
+}
+document.addEventListener('scroll', onScroll, {passive:true}); onScroll();
+const tocLinks = $$('#toc a');
+const secs = tocLinks.map(a => $(a.getAttribute('href'))).filter(Boolean);
+if ('IntersectionObserver' in window){
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(en => { if (en.isIntersecting){ tocLinks.forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#'+en.target.id)); } });
+  }, {rootMargin:'-20% 0px -70% 0px', threshold:0});
+  secs.forEach(s => io.observe(s));
+}
+
+/* ------------------------------------------------ tooltip helper */
+function bindTip(wrap, tip, target, html){
+  target.addEventListener('mousemove', ev => {
+    const r = wrap.getBoundingClientRect();
+    tip.innerHTML = html; tip.style.opacity = 1;
+    let x = ev.clientX - r.left + 14, y = ev.clientY - r.top + 14;
+    if (x + tip.offsetWidth > r.width - 4) x = ev.clientX - r.left - tip.offsetWidth - 10;
+    if (y + tip.offsetHeight > r.height - 4) y = ev.clientY - r.top - tip.offsetHeight - 10;
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  });
+  target.addEventListener('mouseleave', () => { tip.style.opacity = 0; });
+  target.addEventListener('focus', () => { tip.innerHTML = html; tip.style.opacity = 1; tip.style.left = '10px'; tip.style.top = '10px'; });
+  target.addEventListener('blur', () => { tip.style.opacity = 0; });
+}
+
+/* ------------------------------------------------ chunk math (render.py) */
+function buildChunks(N){
+  const slots = [{i:-1, l:'IDLE'}];
+  for (let i=0;i<N;i++) slots.push({i, l:'a'+(i+1)});
+  const chunks = [];
+  for (let s=0; s<slots.length; s+=4){
+    const c = slots.slice(s, s+4);
+    while (c.length < 4) c.push({i:-1, l:'PAD'});
+    chunks.push(c);
+  }
+  return chunks;
+}
+
+/* ================================================= HERO splitter */
+(function hero(){
+  const nAct = $('#nAct'), nActV = $('#nActV'), fpa = $('#fpa'), slotsEl = $('#slots');
+  let sel = 1;
+  function render(){
+    const N = +nAct.value, F = Math.max(1, +fpa.value || 1);
+    nActV.textContent = N;
+    const chunks = buildChunks(N);
+    if (sel >= chunks.length) sel = chunks.length - 1;
+    clear(slotsEl);
+    chunks.forEach((c, k) => {
+      const d = document.createElement('div'); d.className = 'chunk' + (k===sel?' sel':'');
+      const h = document.createElement('div'); h.className = 'ch'; h.textContent = 'CHUNK ' + k; d.appendChild(h);
+      const row = document.createElement('div'); row.className = 'row'; row.setAttribute('role','button'); row.tabIndex = 0;
+      row.setAttribute('aria-label', '选择 Chunk ' + k);
+      c.forEach((s, j) => {
+        const sp = document.createElement('span');
+        sp.className = 'slot ' + SLOT[j] + (s.l==='IDLE'?' idle':'') + (s.l==='PAD'?' pad':'');
+        sp.textContent = s.i < 0 ? s.l : String(s.i+1);
+        row.appendChild(sp);
+      });
+      const pick = () => { sel = k; render(); };
+      row.addEventListener('click', pick);
+      row.addEventListener('keydown', ev => { if (ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); pick(); } });
+      d.appendChild(row); slotsEl.appendChild(d);
+    });
+    const K = chunks.length;
+    $('#roK').textContent = K;
+    $('#roCalls').innerHTML = K + '<small>次 · ' + (6*K) + ' 张图</small>';
+    const frames = N*F;
+    $('#roFrames').innerHTML = frames + '<small>帧</small>';
+    $('#roSec').textContent = '15 fps 下约 ' + (frames/15).toFixed(1) + ' s' + (N===23&&F===8 ? '；Bench 每对视频正是 184 帧' : (N===11&&F===8 ? '；训练对为 88 帧' : ''));
+    const c = chunks[sel];
+    $('#roSel').textContent = 'Chunk ' + sel + ' = [' + c.map(s => s.i<0 ? s.l : ('a'+(s.i+1))).join(', ') + ']';
+  }
+  nAct.addEventListener('input', () => { $$('#slots').length; render(); syncPreset(); });
+  fpa.addEventListener('input', render);
+  function syncPreset(){ $$('.hero .seg button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.n === +nAct.value && +b.dataset.f === +fpa.value))); }
+  $$('.hero .seg button').forEach(b => b.addEventListener('click', () => { nAct.value = b.dataset.n; fpa.value = b.dataset.f; sel = 1; render(); syncPreset(); }));
+  render();
+})();
+
+/* ================================================= Figure 1 (TL;DR) dynamic bits */
+(function fig1(){
+  const svg = $('#trajTicks').ownerSVGElement;
+  const ticks = $('#trajTicks');
+  for (let i=0;i<23;i++){
+    el('rect', {x:30+i*7.4, y:102, width:5.4, height:10, rx:1, class:'f-surf3 s-'+SLOT[(i+1)%4], 'stroke-width':1}, ticks);
+  }
+  // strips
+  const x0 = 372, w = 460, seg = w/23;
+  [['#stripA', 50, 'fs-A', 's-A'], ['#stripB', 102, 'fs-B', 's-B']].forEach(([id, y, f]) => {
+    const g = $(id);
+    el('rect', {x:x0, y, width:w, height:30, rx:4, class:f}, g);
+    for (let i=0;i<23;i++){
+      el('rect', {x:x0+i*seg+1, y:y+3, width:seg-2, height:24, rx:2, class:'f-surf s-'+SLOT[(i+1)%4], 'stroke-width':1.4}, g);
+      if (i%4===0 || i===22) txt(g, x0+i*seg+seg/2, y+19, String(i+1), 'xs f-ink3', 'middle');
+    }
+  });
+  const br = $('#chunkBrackets');
+  // chunk k covers actions: k=0 -> 1..3 ; k>=1 -> 4k..4k+3 (1-indexed)
+  for (let k=0;k<6;k++){
+    const a = k===0 ? 1 : 4*k, b = k===0 ? 3 : 4*k+3;
+    const xa = x0+(a-1)*seg+1, xb = x0+b*seg-1;
+    el('path', {d:`M${xa} 94 L${xa} 90 L${xb} 90 L${xb} 94`, class:'nofill s-ink3', 'stroke-width':1}, br);
+    txt(br, (xa+xb)/2, 87, 'C'+k + (k===0?' (IDLE+3)':''), 'xs f-ink3', 'middle');
+  }
+  // mini grid 2 x 13 at x=95..335, y=210..258
+  const mg = $('#miniGrid');
+  const cw = 17, gap = 1.6, gx = 96;
+  for (let r=0;r<2;r++){
+    for (let c=0;c<13;c++){
+      const slot = c===0 ? null : SLOT[Math.floor((c-1)/3)];
+      el('rect', {x:gx + c*(cw+gap), y:210 + r*26, width:cw, height:22, rx:1.5, class:(r===0?'fs-A ':'fs-B ') + (slot ? 's-'+slot : 's-rule'), 'stroke-width':1.5}, mg);
+    }
+  }
+  txt(mg, gx-4, 226, 'A', 'xs f-Ai', 'end'); txt(mg, gx-4, 252, 'B', 'xs f-Bi', 'end');
+  // mini panels
+  const mp = $('#miniPanels');
+  for (let p=0;p<4;p++){
+    const px = 352 + p*52;
+    el('rect', {x:px, y:206, width:48, height:56, rx:3, class:'f-surf2 s-'+SLOT[p], 'stroke-width':1.5}, mp);
+    for (let r=0;r<2;r++) for (let c=0;c<2;c++) el('rect', {x:px+3+c*22, y:210+r*26, width:20, height:22, rx:1.5, class:(r===0?'fs-A':'fs-B')+' s-rule', 'stroke-width':1}, mp);
+    txt(mp, px+24, 271, 'A'+(p+1), 'xs f-ink3', 'middle');
+  }
+  // vote rows
+  const va = ['A','A','A','B','A','B'], vv = ['A','A','A','A','A','A'];
+  [['#voteRowAct', 398, va], ['#voteRowVis', 450, vv]].forEach(([id, y, arr]) => {
+    const g = $(id);
+    arr.forEach((v, i) => {
+      const x = 62 + i*74;
+      el('rect', {x, y, width:64, height:28, rx:7, class:(v==='A'?'fs-A s-A':'fs-B s-B'), 'stroke-width':1.2}, g);
+      txt(g, x+32, y+18, 'C'+i+' → '+v, 'sml mono '+(v==='A'?'f-Ai':'f-Bi'), 'middle');
+    });
+  });
+})();
+
+/* ================================================= Figure 2 (problem) bits */
+(function fig2(){
+  const g = $('#tl23'); const x0=310, w=240, seg=w/23;
+  for (let i=0;i<23;i++) el('rect', {x:x0+i*seg+0.6, y:74, width:seg-1.2, height:14, rx:1, class:'f-surf3 s-'+SLOT[(i+1)%4], 'stroke-width':1}, g);
+  const s8 = $('#sparse8');
+  for (let i=0;i<8;i++){ const x = x0 + (i+0.5)*(w/8); el('line', {x1:x, y1:162, x2:x, y2:178, class:'s-L', 'stroke-width':2}, s8); }
+  const ca = $('#chunkAttr');
+  const cx0=600, cw=236/6;
+  for (let k=0;k<6;k++){
+    el('rect', {x:cx0+k*cw+1, y:170, width:cw-2, height:12, rx:2, class:(k>=3?'fs-B s-B':'fs-A s-A'), 'stroke-width':1}, ca);
+    txt(ca, cx0+k*cw+cw/2, 179.5, 'C'+k, 'xs '+(k>=3?'f-Bi':'f-Ai'), 'middle');
+  }
+})();
+
+/* ================================================= Figure 3 (frames per chunk) */
+(function fig3(){
+  const svg = $('#frameSvg'), ro = $('#frameRO');
+  const N=23, F=8, TOT=N*F, X0=20, W=820, px = W/TOT;
+  const chunks = buildChunks(N);
+  let k = 1;
+  function frameSpan(ai){ return [ai*F, ai*F+F]; }
+  function pick(ai){ const [s,e] = frameSpan(ai); const end=e-1; return [s, Math.floor((s+end)/2), end]; }
+  function refFrame(kk){ if (kk===0) return 0; const prev = chunks[kk-1].filter(s=>s.i>=0); return pick(prev[prev.length-1].i)[2]; }
+  function render(){
+    clear(svg);
+    txt(svg, X0, 22, '184 帧（每 8 帧一个动作；标号为动作序号）', 'sml f-ink3');
+    // strip
+    el('rect', {x:X0, y:34, width:W, height:26, rx:4, class:'f-surf2 s-rule1', 'stroke-width':1}, svg);
+    const cur = chunks[k]; const curIdx = new Set(cur.filter(s=>s.i>=0).map(s=>s.i));
+    for (let a=0;a<N;a++){
+      const [s,e] = frameSpan(a);
+      const inC = curIdx.has(a);
+      const slotIdx = (a+1)%4;
+      el('rect', {x:X0+s*px+0.5, y:36, width:F*px-1, height:22, rx:2, class:(inC?'f-surf ':'f-surf2 ')+'s-'+SLOT[slotIdx], 'stroke-width':inC?2:1, opacity:inC?1:.55}, svg);
+      txt(svg, X0+(s+F/2)*px, 51, String(a+1), 'xs '+(inC?'f-ink':'f-ink3'), 'middle');
+    }
+    // chunk brackets
+    chunks.forEach((c, kk) => {
+      const real = c.filter(s=>s.i>=0); if (!real.length) return;
+      const xa = X0 + real[0].i*F*px, xb = X0 + (real[real.length-1].i*F+F)*px;
+      el('path', {d:`M${xa+1} 70 L${xa+1} 66 L${xb-1} 66 L${xb-1} 70`, class:'nofill '+(kk===k?'s-T':'s-ink3'), 'stroke-width':kk===k?1.6:1}, svg);
+      txt(svg, (xa+xb)/2, 82, 'Chunk '+kk+(kk===0?'（IDLE + a1–a3）':''), 'xs '+(kk===k?'f-Ti':'f-ink3'), 'middle');
+    });
+    // zoom lane: the selected chunk's slots magnified across the full width
+    const real = cur.filter(s=>s.i>=0);
+    const lo = real.length ? real[0].i*F : 0, hi = real.length ? real[real.length-1].i*F+F-1 : TOT-1;
+    const zx0 = X0 + 70, zx1 = X0 + W - 10, slotW = (zx1 - zx0)/4;
+    // connector from strip highlight to lane
+    el('path', {d:`M${X0+lo*px} 60 L${zx0} 100 M${X0+(hi+1)*px} 60 L${zx1} 100`, class:'nofill s-T', 'stroke-width':1, 'stroke-dasharray':'3 3'}, svg);
+    txt(svg, X0, 108, '放大：本块的四个槽位与取用的帧索引', 'sml f-ink3');
+    const rows = [];
+    cur.forEach((s, j) => {
+      let frames, label, sub;
+      if (s.i < 0){ frames = s.l==='IDLE' ? [0,0,0] : [TOT-1,TOT-1,TOT-1]; label = s.l; sub = s.l==='IDLE' ? '三张都是第 0 帧（源帧）' : '三张都是末帧（补齐）'; }
+      else { frames = pick(s.i); label = 'a'+(s.i+1); sub = '帧 ' + (s.i*F) + '–' + (s.i*F+F-1); }
+      rows.push({slot:j, label, frames});
+      const bx = zx0 + j*slotW + 6, bw = slotW - 12, by = 116, bh = 46;
+      el('rect', {x:bx, y:by, width:bw, height:bh, rx:6, class:'f-surf s-'+SLOT[j], 'stroke-width':2}, svg);
+      txt(svg, bx+8, by+16, label + '  ·  ' + sub, 'xs mono f-ink2');
+      const names = ['首','中','末'];
+      frames.forEach((f, q) => {
+        const x = bx + 14 + q*((bw-64)/2);
+        el('circle', {cx:x, cy:by+34, r:5, class:'f-'+SLOT[j]}, svg);
+        txt(svg, x+9, by+38, names[q] + ' ' + f, 'xs f-ink2 tab-num');
+      });
+    });
+    const rf = refFrame(k);
+    el('path', {d:`M${zx0-30} 131 l6 8 l-6 8 l-6 -8 z`, class:'f-Ti s-ink', 'stroke-width':1}, svg);
+    txt(svg, zx0-30, 128, '参考', 'xs f-Ti', 'middle');
+    txt(svg, zx0-30, 159, '帧 ' + rf, 'xs f-Ti tab-num', 'middle');
+    txt(svg, X0, 184, '● 每槽三帧进帧网格，首 / 末两帧再进该槽的动作面板；视频 A 与 B 取相同索引。◆ 帧网格参考列：' + (k===0?'第 0 帧':'上一块末动作的末帧（帧 ' + rf + '）'), 'xs f-ink3');
+    ro.innerHTML = '<div><div class="k">Chunk ' + k + ' 的槽位</div><div class="v" style="font-size:14px;font-family:var(--font-mono);font-weight:500">' + rows.map(r=>r.label).join(' · ') + '</div><div class="d">每槽三帧 → 帧网格 12 列 + 参考列；面板取首 / 末</div></div>'
+      + '<div><div class="k">覆盖的帧范围</div><div class="v">' + (function(){ const real = cur.filter(s=>s.i>=0); return real.length ? (real[0].i*F) + '–' + (real[real.length-1].i*F+F-1) : '—'; })() + '</div><div class="d">共 ' + (cur.filter(s=>s.i>=0).length*F) + ' 帧里进模型的只有 ' + rows.reduce((n,r)=>n+new Set(r.frames).size,0) + ' 个不同索引</div></div>'
+      + '<div><div class="k">参考帧</div><div class="v">' + rf + '</div><div class="d">' + (k===0 ? 'Chunk 0 直接用第 0 帧' : '上一块 (Chunk ' + (k-1) + ') 最后一个真实动作的末帧') + '</div></div>';
+  }
+  $$('#chunkSeg button').forEach(b => b.addEventListener('click', () => { k = +b.dataset.k; $$('#chunkSeg button').forEach(x => x.setAttribute('aria-pressed', String(x===b))); render(); }));
+  render();
+})();
+
+/* ================================================= Figure 4 (six-image explorer) */
+(function six(){
+  const svg = $('#sixSvg'), info = $('#sixInfo');
+  const INFO = {
+    src: {k:'IMAGE 1 · 源图 x₀', h:'<b>参考场景。</b>用来检测源场景漂移与身份变化（Sec. 3.2）。prompt 规定：本块首帧不必逐像素等于它——相机可能已在前面的块里移动——但两段视频都应仍像「同一个世界」；场景类别翻转、主体被替换、材质 / 颜色 / 语义强变才算漂移，主要记入「伪影与结构完整性」。<br><b>去掉它（Tab. 6）：</b>动作 −0.79 · 外观 <b>−2.37</b> · 运动 −0.62 —— 主要伤外观，因为失去了识别物体、布局、场景内容漂移的参照。'},
+    grid: {k:'IMAGE 2 · 帧网格总览', h:'<b>块的时间总览。</b>上行 Video A、下行 Video B；第 1 列是参考帧（Chunk 0 为第 0 帧，其后为上一块末动作的末帧），之后每个动作三列：首 / 中 / 末帧，列边框按槽位着色，中帧上方标「A1: Forward | IDLE」。用于检查块内的时间一致性与生成动态的强弱。<br><b>去掉它（Tab. 6）：</b>动作 <b>−2.71</b> · 外观 −1.44 · 运动 <b>−3.29</b>，平均 −2.48，是三种证据里损失最大的。'},
+    panel: {k:'IMAGES 3–6 · 动作面板 × 4', h:'<b>每个动作一张 2×2 特写。</b>行 Video A / Video B，列动作首帧 / 末帧，大标题「Action 2: Forward | IDLE」，边框用该槽位的颜色。它把每个控制直接对应到它引起的局部视觉变化，让短暂的转变更容易判断：相机方向错、几何突变、外观漂移、闪烁、运动不连续。<br><b>去掉它们（Tab. 6）：</b>动作 <b>−2.82</b> · 外观 −0.76 · 运动 −1.35 —— 主要伤动作。'},
+    text: {k:'TEXT · caption + 动作段 + 预期', h:'<b>文本上下文。</b>caption <i>d</i> 保持语义（Sec. 3.2）；本块 4 个动作标签写成 <code>&lt;Translation&gt; | &lt;Rotation&gt;</code>，两轴总是写全、缺省写 IDLE——代码注释说这是为了防止模型把「缺一轴」读成「未指定」而不是「不动」；每个标签下再附一段「预期视觉行为 + 严格判定条件」（reference only，不得抄进 <code>action_label</code>）。整套字符串必须与训练时逐字节一致才能复现论文数字。<br>论文没有对文本部分做消融。'}
+  };
+  function draw(which){
+    clear(svg);
+    const dim = (id) => which===id ? 1 : .38;
+    // source
+    let g = el('g', {opacity:dim('src')}, svg);
+    el('rect', {x:10, y:16, width:100, height:66, rx:5, class:'fs-A s-A', 'stroke-width':1.2}, g);
+    el('path', {d:'M16 78 L40 46 L56 62 L72 40 L104 78 Z', class:'f-A', opacity:.75}, g);
+    el('circle', {cx:30, cy:32, r:6, class:'f-Ti'}, g);
+    txt(g, 60, 98, '图 1 · 源图', 'xs f-ink2', 'middle');
+    // grid
+    g = el('g', {opacity:dim('grid')}, svg);
+    const cw=34, ch=44, gap=3, gx=130, gy=16;
+    txt(g, gx-6, gy+ch/2+4, 'A', 'xs f-Ai', 'end'); txt(g, gx-6, gy+ch+gap+ch/2+4, 'B', 'xs f-Bi', 'end');
+    const labels = ['IDLE | IDLE','Forward | IDLE','Forward | IDLE','IDLE | YawLeft'];
+    for (let r=0;r<2;r++) for (let c=0;c<13;c++){
+      const slot = c===0 ? null : Math.floor((c-1)/3);
+      el('rect', {x:gx+c*(cw+gap), y:gy+r*(ch+gap), width:cw, height:ch, rx:2, class:(r===0?'fs-A ':'fs-B ')+(slot===null?'s-rule':'s-'+SLOT[slot]), 'stroke-width':slot===null?1.5:2}, g);
+      if (r===0 && c>0 && (c-1)%3===1) txt(g, gx+c*(cw+gap)+cw/2, gy-4, 'A'+(slot+1)+': '+labels[slot], 'xs f-'+SLOT[slot], 'middle');
+      if (r===0 && c===0) txt(g, gx+cw/2, gy-4, 'Start', 'xs f-ink3', 'middle');
+    }
+    txt(g, gx+13*(cw+gap)/2, gy+2*ch+gap+16, '图 2 · 帧网格：2 行 × (1 + 4×3) 列，首 / 中 / 末', 'xs f-ink2', 'middle');
+    // panels
+    g = el('g', {opacity:dim('panel')}, svg);
+    for (let p=0;p<4;p++){
+      const px = 10 + p*158, py = 160;
+      el('rect', {x:px, y:py, width:146, height:118, rx:5, class:'f-surf2 s-'+SLOT[p], 'stroke-width':2}, g);
+      txt(g, px+73, py+14, 'Action '+(p+1)+': '+labels[p], 'xs f-'+SLOT[p], 'middle', {'font-weight':600});
+      for (let r=0;r<2;r++) for (let c=0;c<2;c++) el('rect', {x:px+16+c*66, y:py+22+r*46, width:62, height:42, rx:2, class:(r===0?'fs-A':'fs-B')+' s-rule', 'stroke-width':1}, g);
+      txt(g, px+12, py+46, 'A', 'xs f-Ai', 'end'); txt(g, px+12, py+92, 'B', 'xs f-Bi', 'end');
+      if (p===0){ txt(g, px+47, py+116, '首', 'xs f-ink3', 'middle'); txt(g, px+113, py+116, '末', 'xs f-ink3', 'middle'); }
+    }
+    txt(g, 320, 294, '图 3–6 · 动作面板：每动作 2×2（行 A / B，列首 / 末）', 'xs f-ink2', 'middle');
+    // text badge
+    g = el('g', {opacity:dim('text')}, svg);
+    el('rect', {x:10, y:118, width:100, height:26, rx:5, class:'f-surf2 s-rule', 'stroke-width':1, 'stroke-dasharray':'3 2'}, g);
+    txt(g, 60, 135, '+ 文本 prompt', 'xs mono f-ink2', 'middle');
+    if (which==='text'){ el('rect', {x:8, y:116, width:104, height:30, rx:6, class:'nofill s-T', 'stroke-width':1.5}, svg); }
+    if (which==='src') el('rect', {x:7, y:13, width:106, height:72, rx:7, class:'nofill s-T', 'stroke-width':1.5}, svg);
+    if (which==='grid') el('rect', {x:gx-3, y:gy-3, width:13*(cw+gap)-gap+6, height:2*ch+gap+6, rx:5, class:'nofill s-T', 'stroke-width':1.5}, svg);
+    if (which==='panel') el('rect', {x:7, y:157, width:626, height:124, rx:7, class:'nofill s-T', 'stroke-width':1.5}, svg);
+    info.innerHTML = '<div class="kk">' + INFO[which].k + '</div>' + INFO[which].h;
+  }
+  $$('#sixPick button').forEach(b => b.addEventListener('click', () => { $$('#sixPick button').forEach(x => x.setAttribute('aria-pressed', String(x===b))); draw(b.dataset.i); }));
+  draw('src');
+})();
+
+/* ================================================= Figure 5 (camera simulator) */
+(function cam(){
+  const sStart = $('#camStart'), sEnd = $('#camEnd'), exp = $('#camExp');
+  const tR = $('#camT_t'), tV = $('#camTv'), play = $('#camPlay'), impureBtn = $('#camImpure');
+  let tx = 'Forward', rot = 'IDLE', t = 1, impure = false, timer = null;
+  const EXPECT = {
+    Forward: '前进（平移）：相机深入 → 场景放大，前景物体变大，中心细节向外扩展。',
+    Backward: '后退（平移）：相机后退 → 场景缩小，物体变小，边缘出现更多周边环境。',
+    Left: '左移（平移）：相机向左滑 → 已有物体滑向右边缘（部分从右侧退出），新内容从左边缘进入。',
+    Right: '右移（平移）：相机向右滑 → 已有物体滑向左边缘（部分从左侧退出），新内容从右边缘进入。',
+    YawLeft: '左偏航（旋转）：相机向左转 → 已有物体摆向右边缘，新内容从左边缘显露进入。',
+    YawRight: '右偏航（旋转）：相机向右转 → 已有物体摆向左边缘，新内容从右边缘显露进入。',
+    PitchUp: '上仰（相机抬头看高处）：视线升高，已有主体沉向底部（底边附近内容下滑并可能退出），新的更高处内容从顶边进入。关键检查：新内容从顶部进、旧内容从底部出（有天空 / 天花板则顶部露出更多；室内特写无天空时仍只按「哪个边露出新内容」判断）。',
+    PitchDown: '下俯（相机低头看低处）：视线下降，已有主体升向顶部（顶边附近内容上滑并可能退出），新的更低处内容从底边进入。关键检查：新内容从底部进、旧内容从顶部出。'
+  };
+  function scene(svg, p){
+    clear(svg);
+    const W=360, H=220, cx=180, cy=110;
+    const cid = 'clip' + (svg.id);
+    const defs = el('defs', {}, svg);
+    const cp = el('clipPath', {id:cid}, defs); el('rect', {x:0, y:0, width:W, height:H}, cp);
+    el('rect', {x:0, y:0, width:W, height:H, class:'f-surf'}, svg);
+    const view = el('g', {'clip-path':'url(#'+cid+')'}, svg);
+    // far layer
+    const far = el('g', {transform:`translate(${cx+p.dxf} ${cy+p.dyf}) scale(${p.sf}) translate(${-cx} ${-cy})`}, view);
+    el('rect', {x:-200, y:-200, width:760, height:320, class:'fs-A'}, far);                 // sky
+    el('circle', {cx:270, cy:58, r:16, class:'f-Ti'}, far);                                   // sun
+    el('path', {d:'M-200 120 L-120 88 L-60 112 L0 78 L60 108 L120 70 L180 104 L240 76 L300 110 L360 84 L420 112 L560 92 L560 120 Z', class:'f-surf3'}, far); // mountains
+    el('rect', {x:-200, y:120, width:760, height:300, class:'f-surf2'}, far);               // ground
+    // near layer
+    const near = el('g', {transform:`translate(${cx+p.dxn} ${cy+p.dyn}) scale(${p.sn}) translate(${-cx} ${-cy})`}, view);
+    el('path', {d:'M150 200 L210 200 L196 122 L164 122 Z', class:'f-surf3'}, near);        // road
+    el('rect', {x:70, y:62, width:60, height:90, rx:2, class:'f-N'}, near);                 // building
+    for (let r=0;r<4;r++) for (let c=0;c<3;c++) el('rect', {x:78+c*17, y:70+r*20, width:10, height:12, class:'f-surf'}, near);
+    el('rect', {x:246, y:112, width:8, height:42, class:'f-T'}, near);                       // trunk
+    el('circle', {cx:250, cy:100, r:24, class:'f-V'}, near);                                  // canopy
+    el('circle', {cx:236, cy:112, r:14, class:'f-V'}, near);
+    el('circle', {cx:264, cy:112, r:14, class:'f-V'}, near);
+    return {view, W, H};
+  }
+  function params(tt, imp){
+    const p = {dxf:0, dyf:0, sf:1, dxn:0, dyn:0, sn:1};
+    if (tx==='Forward'){ p.sn = 1+0.45*tt; p.sf = 1+0.12*tt; }
+    if (tx==='Backward'){ p.sn = 1-0.30*tt; p.sf = 1-0.09*tt; }
+    if (tx==='Left'){ p.dxn += 70*tt; p.dxf += 26*tt; }
+    if (tx==='Right'){ p.dxn -= 70*tt; p.dxf -= 26*tt; }
+    if (rot==='YawLeft'){ p.dxn += 60*tt; p.dxf += 60*tt; }
+    if (rot==='YawRight'){ p.dxn -= 60*tt; p.dxf -= 60*tt; }
+    if (rot==='PitchUp'){ p.dyn += 46*tt; p.dyf += 46*tt; }
+    if (rot==='PitchDown'){ p.dyn -= 46*tt; p.dyf -= 46*tt; }
+    if (imp && tx!=='Forward' && tx!=='Backward'){ p.sn *= 1+0.28*tt; p.sf *= 1+0.10*tt; }
+    return p;
+  }
+  function overlay(svg, tt){
+    const W=360, H=220;
+    const newEdges = [];
+    if (tx==='Left' || rot==='YawLeft') newEdges.push('left');
+    if (tx==='Right' || rot==='YawRight') newEdges.push('right');
+    if (rot==='PitchUp') newEdges.push('top');
+    if (rot==='PitchDown') newEdges.push('bottom');
+    if (tx==='Backward') newEdges.push('all');
+    const bw = 34*tt;
+    const band = (x,y,w,h) => el('rect', {x, y, width:w, height:h, fill:'url(#newc)'}, svg);
+    newEdges.forEach(e => {
+      if (e==='left') band(0,0,bw,H); if (e==='right') band(W-bw,0,bw,H);
+      if (e==='top') band(0,0,W,bw); if (e==='bottom') band(0,H-bw,W,bw);
+      if (e==='all'){ const b=bw*0.5; band(0,0,W,b); band(0,H-b,W,b); band(0,0,b,H); band(W-b,0,b,H); }
+    });
+    // displacement arrows for near objects (building @ (100,107), tree @ (250,110))
+    const pts = [[100,107],[250,110]];
+    const p1 = params(tt, impure);
+    pts.forEach(([x,y]) => {
+      const ex = 180 + p1.dxn + (x-180)*p1.sn, ey = 110 + p1.dyn + (y-110)*p1.sn;
+      if (Math.hypot(ex-x, ey-y) > 6) el('line', {x1:x, y1:y, x2:ex, y2:ey, class:'s-ink', 'stroke-width':2.2, 'marker-end':'url(#ar-i)', opacity:.9}, svg);
+    });
+    if (tx==='Forward' && tt>0.05){
+      [[40,40],[320,40],[40,180],[320,180]].forEach(([x,y]) => { const dx=(x-180)*0.22*tt, dy=(y-110)*0.22*tt; el('line', {x1:x, y1:y, x2:x+dx, y2:y+dy, class:'s-ink', 'stroke-width':2, 'marker-end':'url(#ar-i)', opacity:.85}, svg); });
+    }
+    const labs = {left:'新内容从左边进', right:'新内容从右边进', top:'新内容从顶边进', bottom:'新内容从底边进', all:'四周出现更多环境'};
+    let ly = 14;
+    newEdges.forEach(e => { const tb = txt(svg, 8, ly, labs[e], 'xs', 'start', {fill:'var(--vis-ink)', 'font-weight':600}); ly += 13; });
+    if (tx==='Forward') txt(svg, 8, ly, '边缘内容退出、物体变大', 'xs', 'start', {fill:'var(--ink)', 'font-weight':600});
+    if (impure && tx!=='Forward' && tx!=='Backward') txt(svg, W-8, H-8, '⚠ 未指令的缩放（纯净度违规）', 'xs', 'end', {fill:'var(--bad-ink)', 'font-weight':600});
+  }
+  function render(){
+    scene(sStart, params(0, false));
+    txt(sStart, 8, 14, tx + ' | ' + rot, 'xs mono', 'start', {fill:'var(--ink)'});
+    scene(sEnd, params(t, impure));
+    overlay(sEnd, t);
+    tV.textContent = t>=0.995 ? '末帧' : ('t = ' + t.toFixed(2));
+    // explanation
+    const atoms = [tx, rot].filter(a => a!=='IDLE');
+    let h = '<div class="kk">动作标签 ' + tx + ' | ' + rot + ' · 预期视觉行为（reference only）</div>';
+    if (!atoms.length){
+      h += '<ul><li>IDLE：无平移、无旋转，场景<b>内容</b>应基本保持不动。</li><li>只有在没有任何可辨的相机运动（无位移、无缩放、无倾斜）时才算正确。</li></ul>';
+    } else {
+      h += '<ul>' + atoms.map(a => '<li>' + EXPECT[a] + '</li>').join('');
+      const forb = [];
+      if (!(tx==='Forward'||tx==='Backward')) forb.push('无前后缩放（物体不得变大或变小）');
+      if (!(tx==='Left'||tx==='Right')) forb.push('无左右平移漂移');
+      if (!(rot==='YawLeft'||rot==='YawRight')) forb.push('无左右偏航');
+      if (!(rot==='PitchUp'||rot==='PitchDown')) forb.push('无上下俯仰');
+      if (atoms.length>1) h += '<li>组合预期：以上分量必须<b>同时</b>可见；只做了其中一个不算完全正确。</li>';
+      h += '<li><b>判定为正确的条件：</b>每个指令分量都符合其方向' + (forb.length ? '，<b>且</b> ' + forb.join('、') : '') + '。</li></ul>';
+    }
+    if (impure && tx!=='Forward' && tx!=='Backward') h += '<p style="margin-top:8px;color:var(--bad-ink)"><b>当前末帧含未指令的缩放</b> → prompt 规则 10/11：任何明显的未指令运动都使该动作「不正确」，并在逐动作比较里对该视频扣分；应优先选择「满足更多指令分量、纯净度违规更少」的视频。</p>';
+    else if (atoms.length) h += '<p class="note" style="margin-top:8px">动作侧只看运动证据：模糊、有伪影的视频仍可以在这里获胜；「近乎静止」通常意味着动作没有真正执行（幅度检查）。</p>';
+    exp.innerHTML = h;
+  }
+  function seg(id, set){ $$('#'+id+' button').forEach(b => b.addEventListener('click', () => { set(b.dataset.v); $$('#'+id+' button').forEach(x => x.setAttribute('aria-pressed', String(x===b))); render(); })); }
+  seg('camT', v => tx = v); seg('camR', v => rot = v);
+  tR.addEventListener('input', () => { t = +tR.value/100; render(); });
+  impureBtn.addEventListener('click', () => { impure = !impure; impureBtn.setAttribute('aria-pressed', String(impure)); render(); });
+  play.addEventListener('click', () => {
+    if (timer){ clearInterval(timer); timer = null; play.textContent = '▶ 播放'; return; }
+    if (reduced){ t = 1; tR.value = 100; render(); return; }
+    t = 0; play.textContent = '■ 停止';
+    timer = setInterval(() => { t = Math.min(1, t + 0.04); tR.value = Math.round(t*100); render(); if (t>=1){ clearInterval(timer); timer=null; play.textContent = '▶ 播放'; } }, 50);
+  });
+  render();
+})();
+
+/* ================================================= generic grouped-bar chart */
+function groupedBars(svg, tipEl, opts){
+  // opts: {cats:[], series:[{name, color, values:[]}], y:[min,max], ticks:[], fmtV, x0, x1, y0, y1, showVal, wrap}
+  clear(svg);
+  const {cats, series, y:[ymin,ymax], ticks} = opts;
+  const x0 = opts.x0 ?? 60, x1 = opts.x1 ?? 840, yTop = opts.y0 ?? 20, yBot = opts.y1 ?? 190;
+  const sy = v => yBot - (v - ymin)/(ymax - ymin)*(yBot - yTop);
+  ticks.forEach(tv => { el('line', {x1:x0, y1:sy(tv), x2:x1, y2:sy(tv), class:tv===0?'s-axis':'s-grid', 'stroke-width':1}, svg); txt(svg, x0-8, sy(tv)+4, opts.fmtT ? opts.fmtT(tv) : String(tv), 'xs f-ink3 tab-num', 'end'); });
+  const gw = (x1-x0)/cats.length, n = series.length, bw = Math.min(34, (gw*0.7)/n);
+  const wrap = svg.parentElement;
+  cats.forEach((c, ci) => {
+    const gx = x0 + ci*gw + gw/2 - (n*bw + (n-1)*2)/2;
+    series.forEach((s, si) => {
+      const v = s.values[ci]; if (v===null||v===undefined) return;
+      const x = gx + si*(bw+2), yv = sy(v), yb = sy(Math.max(ymin, Math.min(0, ymax)) );
+      const base = (ymin <= 0 && ymax >= 0) ? sy(0) : yBot;
+      const top = Math.min(yv, base), h = Math.abs(base - yv);
+      const r = el('rect', {x, y:top, width:bw, height:Math.max(h, 0.5), rx:3, fill:s.color}, svg);
+      const hit = el('rect', {x:x-2, y:yTop, width:bw+4, height:yBot-yTop, class:'bar-hit', tabindex:0}, svg);
+      if (opts.showVal) txt(svg, x+bw/2, (v>=0 ? top-4 : top+h+11), (opts.fmtV?opts.fmtV(v):fmt(v)), 'xs f-ink2 tab-num', 'middle');
+      if (tipEl) bindTip(wrap, tipEl, hit, '<b>' + c + '</b><br><span class="k">' + s.name + '</span> ' + (opts.fmtV?opts.fmtV(v):fmt(v)));
+    });
+    const lines = String(c).split('\n');
+    lines.forEach((ln, li) => txt(svg, x0 + ci*gw + gw/2, yBot + 16 + li*13, ln, 'sml f-ink2', 'middle'));
+  });
+}
+
+/* ================================================= Figure 7 (Tab. 6 reasoning supervision) */
+groupedBars($('#reasonSvg'), $('#tipReason'), {
+  cats:['仅偏好标签\n均值 72.47','+ 整体比较摘要\n均值 74.94','+ 每视频分析（完整）\n均值 77.33'],
+  series:[{name:'动作一致性', color:'var(--act)', values:[71.84,74.93,77.63]},{name:'外观质量', color:'var(--vis)', values:[77.96,79.52,81.32]},{name:'运动质量', color:'var(--A)', values:[67.61,70.38,73.03]}],
+  y:[60,85], ticks:[60,65,70,75,80,85], showVal:true, x0:60, x1:840, y0:16, y1:180
+});
+
+/* ================================================= Figure 8 (vote simulator) */
+(function vote(){
+  const K = $('#voteK'), Kv = $('#voteKv'), body = $('#voteBody'), tally = $('#voteTally');
+  const CYC = ['A','B','Tie'];
+  let rows = [];
+  function fig1(){ const k = +K.value; rows = []; const act = ['A','A','A','B','A','B']; for (let i=0;i<k;i++) rows.push({act: act[i%6], tc:'A', dgq:'A', asi:'A'}); }
+  function split(){ const k = +K.value; rows = []; for (let i=0;i<k;i++) rows.push({act: i%2?'B':'A', tc: i%3===0?'A':'B', dgq: i%2?'B':'A', asi: i%3===0?'B':'A'}); }
+  function rnd(){ const k = +K.value; rows = []; const r = () => ['A','B','Tie'][Math.floor(Math.random()*3)]; for (let i=0;i<k;i++) rows.push({act: Math.random()<0.5?'A':'B', tc:r(), dgq:r(), asi:r()}); }
+  function maj(votes){ const a = votes.filter(v=>v==='A').length, b = votes.filter(v=>v==='B').length; return a>b?'A':(b>a?'B':'Tie'); }
+  function cell(row, key){
+    const b = document.createElement('button'); b.type='button'; b.className='cyc'; b.dataset.v = row[key]; b.textContent = row[key];
+    b.setAttribute('aria-label', key + ' 当前 ' + row[key] + '，点击切换');
+    b.addEventListener('click', () => { row[key] = CYC[(CYC.indexOf(row[key])+1)%3]; render(); });
+    return b;
+  }
+  function render(){
+    Kv.textContent = K.value;
+    clear(body);
+    rows.forEach((row, i) => {
+      const tr = document.createElement('tr');
+      const td0 = document.createElement('td'); td0.textContent = 'Chunk ' + i; tr.appendChild(td0);
+      ['act','tc','dgq','asi'].forEach(k => { const td = document.createElement('td'); td.appendChild(cell(row, k)); tr.appendChild(td); });
+      const vo = maj([row.tc,row.dgq,row.asi]);
+      const td = document.createElement('td'); const sp = document.createElement('span'); sp.className='win '+(vo==='Tie'?'Tie':vo); sp.textContent = vo==='Tie' ? '模型二选一' : vo; td.appendChild(sp); tr.appendChild(td);
+      body.appendChild(tr);
+    });
+    const actV = rows.map(r=>r.act), appV = rows.flatMap(r=>[r.tc, r.asi]), motV = rows.map(r=>r.dgq), visV = rows.map(r=>maj([r.tc,r.dgq,r.asi])).filter(v=>v!=='Tie');
+    const mk = (name, votes, note, cls) => {
+      const a = votes.filter(v=>v==='A').length, b = votes.filter(v=>v==='B').length, n = votes.length - a - b, tot = Math.max(1, votes.length);
+      const w = maj(votes);
+      return '<div class="t"><div class="k">' + name + '</div><div class="bar"><i class="a" style="width:' + (a/tot*100) + '%"></i><i class="b" style="width:' + (b/tot*100) + '%"></i><i class="n" style="width:' + (n/tot*100) + '%"></i></div><div class="r">A : B : Tie = ' + a + ' : ' + b + ' : ' + n + '</div><div class="w" style="color:' + (w==='A'?'var(--A-ink)':(w==='B'?'var(--B-ink)':'var(--tie-ink)')) + '">' + w + (w==='Tie' && note ? ' <small style="font-size:11px;color:var(--ink3)">' + note + '</small>' : '') + '</div></div>';
+    };
+    tally.innerHTML = mk('动作 · RL 与 Bench 共用（每块 1 票）', actV, '（代码：再用全部逐动作胜者破平）') + mk('外观 · Bench 映射（TC + ASI，每块 2 票）', appV, '') + mk('运动 · Bench 映射（DGQ，每块 1 票）', motV, '') + mk('视觉 overall · RL 用（每块 1 票）', visV, '（子维度全平的块此处不计）');
+  }
+  K.addEventListener('input', () => { const k = +K.value; while (rows.length < k) rows.push({act:'A', tc:'A', dgq:'A', asi:'A'}); rows.length = k; render(); });
+  $('#votePreset').addEventListener('click', () => { fig1(); render(); });
+  $('#voteSplit').addEventListener('click', () => { split(); render(); });
+  $('#voteRand').addEventListener('click', () => { rnd(); render(); });
+  fig1(); render();
+})();
+
+/* ================================================= Figure 9 (wm bars inside pipeline svg) */
+(function wm(){
+  const g = $('#wmBars'); const data = [['HY-WorldPlay',17.6],['Lingbot-World-Fast',17.7],['HY-WorldPlay-RL',17.6],['Infinite-World',17.5],['Yume-1.5',13.7],['SANA-WM',12.6],['Matrix-Game 2/3',3.3]];
+  const x0 = 306, bx = 400, maxw = 100;
+  txt(g, 306, 52, '八个世界模型变体的覆盖率（Fig. 2b）', 'xs f-ink2');
+  data.forEach(([n,v], i) => { const y = 62 + i*22; txt(g, bx-6, y+11, n, 'xs f-ink2', 'end'); el('rect', {x:bx, y:y+2, width:v/20*maxw, height:12, rx:3, class:'f-A'}, g); txt(g, bx + v/20*maxw + 5, y+12, v+'%', 'xs f-ink3 tab-num'); });
+})();
+
+/* ================================================= Figure 10 (algorithm stepper) */
+(function alg(){
+  const steps = $$('#algSteps li'), hist = $('#algHist');
+  const H = [
+    [['dif','初始化','ŷ ← y（Gemini 的判决原样接管）；ℋ ← ∅']],
+    [['img','读图 · x₀','沙漠岩地，白天，SUV 在画面中央偏左，多云'],['img','读图 · 帧网格','A 行：三次 YawLeft 内容持续右移，第 4 动作放大；B 行：右移幅度小、末段色调变暖，疑似日落']],
+    [['txt','审计判决 vs ℋ','Action 2：Gemini 判 Tie，但网格显示 B 的右移明显弱于 A → 标为「不一致」；artifacts_and_structure：Gemini 未提及 B 的色调变化 → 标为「不确定」']],
+    [['img','读图 · Action 2 面板','A：首→末，车辆从中央移到右侧 1/3；B：首→末，仅轻微右移，背景几乎不变'],['img','回看 · 帧网格（交叉核对）','确认 B 的暖色调从第 3 动作开始，与源图的白天光照不兼容']],
+    [['dif','生成 diff Δ','Chunk 1 / action_control.actions[2].winner：Tie → A（改写 B 的分析：右移幅度不足）；Chunk 1 / visual_quality.artifacts_and_structure_integrity：补写 B 的源场景漂移，winner 维持 A；应用 Δ 得到 ŷ']],
+    [['hum','转人工校准','复核者对照面板与 Δ：两条修订均有证据支持 → 确认（Tab. 1：87.0% 的修订被确认）']]
+  ];
+  function show(s){
+    steps.forEach(li => li.classList.toggle('on', +li.dataset.s === s));
+    let h = '<div class="hh">检查历史 ℋ（示意）· 步骤 ' + (s===0?'输入':(s+1)) + '</div>';
+    for (let i=0;i<=s;i++) H[i].forEach(([ic, k, v]) => { h += '<div class="it"><span class="ic ' + ic + '">' + ({img:'IMG',txt:'CHK',dif:'Δ',hum:'HU'}[ic]) + '</span><div><b style="color:var(--ink)">' + k + '</b><br>' + v + '</div></div>'; });
+    hist.innerHTML = h;
+  }
+  steps.forEach(li => li.addEventListener('click', () => show(+li.dataset.s)));
+  show(0);
+})();
+
+/* ================================================= Figure 11 (QC + swap augmentation) */
+(function qc(){
+  const svg = $('#qcSvg'); clear(svg);
+  // left: retained vs revised stacked bar + breakdown bars
+  txt(svg, 20, 22, 'Tab. 1 · agent 审计的结果', 'big f-ink');
+  const x0=20, w=380;
+  el('rect', {x:x0, y:36, width:w*0.579, height:22, rx:4, class:'f-N'}, svg);
+  el('rect', {x:x0+w*0.579+2, y:36, width:w*0.421-2, height:22, rx:4, class:'f-L'}, svg);
+  txt(svg, x0+w*0.579/2, 51, '原判保留 57.9%', 'xs', 'middle', {fill:'#fff','font-weight':600});
+  txt(svg, x0+w*0.579+2+(w*0.421-2)/2, 51, '提出修订 42.1%', 'xs', 'middle', {fill:'#fff','font-weight':600});
+  txt(svg, x0, 82, '修订样本中改了什么（占修订样本的比例）', 'sml f-ink2');
+  const bd = [['仅推理文本',67.4],['仅某维度胜者',23.8],['仅块级胜者',0.9],['两类胜者都改',7.9]];
+  bd.forEach(([n,v], i) => { const y = 94 + i*30; txt(svg, x0+110, y+13, n, 'sml f-ink2', 'end'); el('rect', {x:x0+120, y:y+2, width:Math.max(1.5, v/70*230), height:16, rx:3, class:'f-L'}, svg); txt(svg, x0+126+v/70*230, y+14, v+'%', 'xs f-ink2 tab-num'); });
+  txt(svg, x0, 232, '人工校准：确认 87.0% / 驳回 13.0% 的 agent 修订', 'sml f-ink2');
+  el('rect', {x:x0, y:242, width:w*0.87, height:18, rx:4, class:'f-H'}, svg);
+  el('rect', {x:x0+w*0.87+2, y:242, width:w*0.13-2, height:18, rx:4, class:'f-N'}, svg);
+  txt(svg, x0+w*0.87/2, 255, '确认 87.0%', 'xs', 'middle', {fill:'#fff','font-weight':600});
+  // right: Table 7 grouped bars
+  txt(svg, 460, 22, 'Tab. 7 · 位置互换增强前后的训练样本数', 'big f-ink');
+  const cats = ['AA','AB','BA','BB'], orig=[37107,25365,17318,20164], aug=[37107,25365,25364,37106];
+  const gx0=470, gx1=840, gy0=40, gy1=240, maxv=40000;
+  const sy = v => gy1 - v/maxv*(gy1-gy0);
+  [0,10000,20000,30000,40000].forEach(v => { el('line', {x1:gx0, y1:sy(v), x2:gx1, y2:sy(v), class:v===0?'s-axis':'s-grid', 'stroke-width':1}, svg); txt(svg, gx0-6, sy(v)+4, (v/1000)+'k', 'xs f-ink3 tab-num', 'end'); });
+  const gw = (gx1-gx0)/4, bw = 30;
+  cats.forEach((c, i) => {
+    const cx = gx0 + i*gw + gw/2;
+    el('rect', {x:cx-bw-2, y:sy(orig[i]), width:bw, height:gy1-sy(orig[i]), rx:3, class:'f-N'}, svg);
+    el('rect', {x:cx+2, y:sy(aug[i]), width:bw, height:gy1-sy(aug[i]), rx:3, class:'f-T'}, svg);
+    txt(svg, cx-bw/2-2, sy(orig[i])-4, (orig[i]/1000).toFixed(1)+'k', 'xs f-ink3 tab-num', 'middle');
+    txt(svg, cx+bw/2+2, sy(aug[i])-4, (aug[i]/1000).toFixed(1)+'k', 'xs f-ink2 tab-num', 'middle');
+    txt(svg, cx, gy1+16, c, 'sml f-ink2', 'middle');
+  });
+  txt(svg, gx0, 272, '灰 = 原始（99,954）　琥珀 = 增强后（124,942）；组合 XY：X 动作胜者，Y 视觉胜者', 'xs f-ink3');
+  txt(svg, gx0, 288, '把 AA 的一部分互换成 BB、AB 的一部分互换成 BA，使 B 侧样本数与 A 侧持平', 'xs f-ink3');
+})();
+
+/* ================================================= Figure 12 (RL candidates) + Figure 13 (calculator) */
+(function rl(){
+  const g = $('#rlCands');
+  for (let i=0;i<4;i++){ const y = 56 + i*30; el('rect', {x:200, y, width:132, height:22, rx:5, class:(i===0?'fs-T s-T':'f-surf2 s-rule'), 'stroke-width':1}, g); txt(g, 266, y+15, 'x_n^(' + (i+1) + ')' + (i===3?'  … x_n^(G)':''), 'xs mono f-ink2', 'middle'); el('line', {x1:160, y1:88, x2:196, y2:y+11, class:'s-ink3', 'stroke-width':1, 'marker-end':'url(#ar-i)'}, g); }
+  // calculator
+  const G = 4;
+  const act = [[null,'i','i','tie'],[null,null,'i','j'],[null,null,null,'i'],[null,null,null,null]];
+  const vis = [[null,'j','tie','j'],[null,null,'i','i'],[null,null,null,'tie'],[null,null,null,null]];
+  const lam = $('#rlLam'), lamV = $('#rlLamV'), Z = $('#rlZ'), ZV = $('#rlZV');
+  function omega(m, i, j){ // contribution of i vs j
+    if (i<j){ const v = m[i][j]; return v==='i'?1:(v==='tie'?0.5:0); }
+    const v = m[j][i]; return v==='i'?0:(v==='tie'?0.5:1);
+  }
+  function rates(m){ const R=[]; for (let i=0;i<G;i++){ let s=0; for (let j=0;j<G;j++) if (j!==i) s+=omega(m,i,j); R.push(s/(G-1)); } return R; }
+  function std(arr){ const mu = arr.reduce((a,b)=>a+b,0)/arr.length; const v = arr.reduce((a,b)=>a+(b-mu)**2,0)/arr.length; return [mu, Math.sqrt(v)]; }
+  function buildMat(tbl, m, cls){
+    clear(tbl);
+    const thead = document.createElement('thead'); const hr = document.createElement('tr'); hr.appendChild(document.createElement('th'));
+    for (let j=0;j<G;j++){ const th = document.createElement('th'); th.textContent = 'j=' + (j+1); hr.appendChild(th); }
+    thead.appendChild(hr); tbl.appendChild(thead);
+    const tb = document.createElement('tbody');
+    for (let i=0;i<G;i++){
+      const tr = document.createElement('tr'); const th = document.createElement('th'); th.textContent = 'i=' + (i+1); tr.appendChild(th);
+      for (let j=0;j<G;j++){
+        const td = document.createElement('td'); const c = document.createElement('button'); c.type='button'; c.className='cell';
+        if (i===j){ c.classList.add('diag'); c.textContent='—'; c.disabled = true; }
+        else {
+          const v = i<j ? m[i][j] : m[j][i];
+          const mine = i<j ? v : (v==='i'?'j':(v==='j'?'i':'tie'));
+          c.textContent = mine==='i' ? (i+1)+' 胜' : (mine==='tie' ? 'Tie' : (j+1)+' 胜');
+          c.classList.add(mine==='i'?'win':(mine==='tie'?'tie':'lose'));
+          if (i>j){ c.classList.add('mirror'); c.disabled = true; c.title='由上三角镜像'; }
+          else c.addEventListener('click', () => { m[i][j] = m[i][j]==='i' ? 'tie' : (m[i][j]==='tie' ? 'j' : 'i'); render(); });
+        }
+        td.appendChild(c); tr.appendChild(td);
+      }
+      tb.appendChild(tr);
+    }
+    tbl.appendChild(tb);
+  }
+  function render(){
+    buildMat($('#matAct'), act); buildMat($('#matVis'), vis);
+    const l = +lam.value/100, z = +Z.value/100; lamV.textContent = l.toFixed(2); ZV.textContent = z.toFixed(2);
+    const Ra = rates(act), Rv = rates(vis); const [ma, sa] = std(Ra), [mv, sv] = std(Rv);
+    const Aa = Ra.map(r => (r-ma)/(sa+1e-6)), Av = Rv.map(r => (r-mv)/(sv+1e-6));
+    const P = Aa.map((a, i) => 0.5 + 0.5*Math.max(-1, Math.min(1, (l*a + (1-l)*Av[i])/z)));
+    let h = '<thead><tr><th>候选</th><th class="num">R<sup>act</sup></th><th class="num">A<sup>act</sup></th><th class="num">R<sup>vis</sup></th><th class="num">A<sup>vis</sup></th><th class="num">p<sub>i</sub></th><th style="width:34%">正样本权重</th></tr></thead><tbody>';
+    for (let i=0;i<G;i++){
+      h += '<tr><td><b>' + (i+1) + '</b></td><td class="num">' + Ra[i].toFixed(3) + '</td><td class="num">' + Aa[i].toFixed(2) + '</td><td class="num">' + Rv[i].toFixed(3) + '</td><td class="num">' + Av[i].toFixed(2) + '</td><td class="num"><b>' + P[i].toFixed(2) + '</b></td><td><div class="pbar"><div class="trk"><i style="width:' + (P[i]*100) + '%"></i></div></div></td></tr>';
+    }
+    h += '</tbody>';
+    $('#rlTable').innerHTML = h;
+    $('#rlNote').innerHTML = 'μ<sup>act</sup> = ' + ma.toFixed(3) + '，σ<sup>act</sup> = ' + sa.toFixed(3) + '；μ<sup>vis</sup> = ' + mv.toFixed(3) + '，σ<sup>vis</sup> = ' + sv.toFixed(3) + '。p<sub>i</sub> = 1 → 只按正速度场拟合该候选；p<sub>i</sub> = 0 → 只作为负样本推开；0.5 → 两者各半（等价于不学）。' + (sa<1e-6||sv<1e-6 ? ' 某维度全组胜率相同 → 该维度优势全为 0。' : '');
+  }
+  lam.addEventListener('input', render); Z.addEventListener('input', render);
+  render();
+})();
+
+/* ================================================= Figure 14 (bench composition) */
+(function bench(){
+  const svg = $('#benchSvg'), tip = $('#tipBench'); clear(svg);
+  const wrap = svg.parentElement;
+  function hbars(x, y, title, rows, maxv, color, w, opts={}){
+    txt(svg, x, y, title, 'big f-ink');
+    rows.forEach(([n, v, c, hatch], i) => {
+      const yy = y + 14 + i*(opts.rh||22);
+      txt(svg, x+ (opts.lw||110) - 6, yy+12, n, 'xs f-ink2', 'end');
+      const bw = v/maxv*w;
+      const r = el('rect', {x:x+(opts.lw||110), y:yy+2, width:Math.max(1.5,bw), height:14, rx:3, fill: hatch ? 'url(#hatchA)' : (c||color)}, svg);
+      if (hatch) el('rect', {x:x+(opts.lw||110), y:yy+2, width:Math.max(1.5,bw), height:14, rx:3, class:'nofill s-A', 'stroke-width':1}, svg);
+      txt(svg, x+(opts.lw||110)+bw+5, yy+13, v.toFixed(1)+'%', 'xs f-ink3 tab-num');
+      const hit = el('rect', {x, y:yy, width:(opts.lw||110)+w+40, height:(opts.rh||22), class:'bar-hit', tabindex:0}, svg);
+      bindTip(wrap, tip, hit, '<b>' + n + '</b> ' + v.toFixed(1) + '%' + (hatch ? '<br><span class="k">仅出现在 Bench，不在训练池</span>' : ''));
+    });
+  }
+  const traj = [['Basic_Move',13.0,'var(--A)'],['Diag_Move',13.9,'var(--A)'],['Loop_Return',11.4,'var(--A)'],['Yaw_View',15.3,'var(--vis)'],['Pitch_View',6.1,'var(--vis)'],['Diag_View',3.2,'var(--vis)'],['Mixed_Basic',19.7,'var(--act)'],['Mixed_Full',9.9,'var(--act)'],['Move_View',7.5,'var(--act)']];
+  hbars(20, 22, '(a) 轨迹子族（族：纯平移 38.4 · 纯旋转 24.5 · 复合 37.1）', traj, 25, 'var(--A)', 150, {lw:100, rh:24});
+  txt(svg, 20, 262, '■ 纯平移　', 'xs', 'start', {fill:'var(--A)'}); txt(svg, 80, 262, '■ 纯旋转　', 'xs', 'start', {fill:'var(--vis)'}); txt(svg, 140, 262, '■ 复合', 'xs', 'start', {fill:'var(--act)'});
+  hbars(360, 22, '(b) 视觉风格', [['照片',48.0],['游戏 / 动漫',43.9],['艺术',8.0]], 60, 'var(--A)', 120, {lw:80, rh:24});
+  hbars(360, 132, '(c) 来源世界模型（9 个）', [['HY-WorldPlay',21.2],['Lingbot-World-Fast',20.3],['HY-WorldPlay-RL',17.9],['Infinite-World',15.6],['GameCrafter2',9.3,null,true],['SANA-WM',7.0],['Matrix-Game2 & Yume-1.5',5.3],['Matrix-Game3',3.3]], 25, 'var(--A)', 110, {lw:150, rh:22});
+  txt(svg, 20, 300, '斜纹 = 不在训练池里的生成器。760 对里艺术风格约 61 对，Diag_View 约 24 对。', 'xs f-ink3');
+})();
+
+/* ================================================= Tab. 3 data + explorer + full table */
+const T3 = [
+  {name:'Gemini 3.1 Pro', fam:'vlm', v:[[65.79,80.13,60.79],[64.73,82.19,64.38],[62.90,83.87,57.53],[68.79,75.53,59.22],[65.48,82.74,63.84],[65.27,79.34,57.49],[70.49,68.85,60.66]]},
+  {name:'GPT-5.5', fam:'vlm', v:[[74.21,79.87,69.47],[72.95,81.16,74.66],[72.04,84.41,62.90],[76.95,75.53,68.44],[76.44,81.64,68.77],[71.56,79.64,68.86],[75.41,70.49,77.05]]},
+  {name:'VideoAlign', fam:'rm', v:[[null,61.32,40.13],[null,66.44,31.51],[null,60.22,45.16],[null,56.74,45.74],[null,61.10,41.10],[null,61.08,41.32],[null,63.93,27.87]]},
+  {name:'UR-Flex', fam:'rm', v:[[null,64.34,49.32],[null,63.18,47.65],[null,72.63,55.31],[null,60.14,47.10],[null,65.08,55.03],[null,63.32,46.08],[null,65.45,30.91]]},
+  {name:'UR-Think', fam:'rm', v:[[null,66.09,38.79],[null,65.41,32.88],[null,69.73,52.43],[null,64.41,35.94],[null,69.51,41.21],[null,64.37,37.43],[null,55.00,31.67]]},
+  {name:'Aesthetic', fam:'rm', v:[[null,69.87,null],[null,66.10,null],[null,72.04,null],[null,72.34,null],[null,66.58,null],[null,75.15,null],[null,60.66,null]]},
+  {name:'HPSv3', fam:'rm', v:[[null,73.68,null],[null,74.66,null],[null,76.34,null],[null,70.92,null],[null,73.15,null],[null,75.45,null],[null,67.21,null]]},
+  {name:'DAv3', fam:'geo', v:[[70.53,null,null],[67.47,null,null],[68.82,null,null],[74.82,null,null],[70.96,null,null],[75.75,null,null],[39.34,null,null]]},
+  {name:'WorldMirror', fam:'geo', v:[[68.55,null,null],[67.81,null,null],[68.28,null,null],[69.50,null,null],[67.40,null,null],[74.25,null,null],[44.26,null,null]]},
+  {name:'Qwen3.5-9B（基座）', fam:'base', v:[[48.42,48.29,43.82],[48.29,45.55,41.78],[52.69,52.15,49.46],[45.74,48.58,42.20],[50.14,43.84,47.12],[47.01,52.10,42.81],[45.90,54.10,29.51]]},
+  {name:'Qwen3.5-27B', fam:'base', v:[[63.68,44.34,62.76],[65.07,37.33,65.75],[65.05,51.61,63.44],[61.35,46.81,59.22],[64.93,38.36,66.85],[62.87,51.50,58.68],[60.66,40.98,60.66]]},
+  {name:'WorldReward', fam:'wr', v:[[77.63,81.32,73.03],[76.71,77.74,78.77],[73.12,86.02,64.52],[81.56,81.91,72.70],[77.26,81.37,71.78],[78.74,82.04,75.75],[73.77,77.05,65.57]]}
+];
+const GRP = ['全部 760 对','平移','旋转','复合','照片','游戏/动漫','艺术'], DIM = ['动作一致性','外观质量','运动质量'];
+const FAMC = {vlm:'var(--vlm)', rm:'var(--tie)', geo:'var(--tie)', base:'var(--tie)', wr:'var(--act)'};
+const FAMN = {vlm:'闭源 VLM', rm:'图像 / 视频奖励模型', geo:'几何估计', base:'Qwen3.5 基座', wr:'WorldReward'};
+(function t3(){
+  const svg = $('#t3Svg'), tip = $('#tipT3'), tv = $('#t3Table'), wrap = svg.parentElement;
+  let d = 0, gI = 0, table = false;
+  function render(){
+    clear(svg);
+    const rows = T3.map(m => ({name:m.name, fam:m.fam, v:m.v[gI][d]})).filter(r => r.v!==null).sort((a,b) => b.v - a.v);
+    const x0 = 190, x1 = 830, yTop = 30, rh = Math.min(30, (400 - yTop)/rows.length);
+    svg.setAttribute('viewBox', '0 0 860 ' + (yTop + rows.length*rh + 30));
+    const sx = v => x0 + v/100*(x1-x0);
+    [0,20,40,60,80,100].forEach(v => { el('line', {x1:sx(v), y1:yTop-8, x2:sx(v), y2:yTop+rows.length*rh, class:v===0?'s-axis':'s-grid', 'stroke-width':1}, svg); txt(svg, sx(v), yTop-12, v+'%', 'xs f-ink3 tab-num', 'middle'); });
+    rows.forEach((r, i) => {
+      const y = yTop + i*rh;
+      txt(svg, x0-10, y+rh/2+4, r.name, 'sml '+(r.fam==='wr'?'f-ink':'f-ink2'), 'end', r.fam==='wr'?{'font-weight':600}:{});
+      el('rect', {x:x0, y:y+4, width:sx(r.v)-x0, height:rh-8, rx:3, fill:FAMC[r.fam]}, svg);
+      txt(svg, sx(r.v)+6, y+rh/2+4, r.v.toFixed(2), 'xs tab-num '+(r.fam==='wr'?'f-ink':'f-ink2'));
+      const hit = el('rect', {x:20, y, width:820, height:rh, class:'bar-hit', tabindex:0}, svg);
+      bindTip(wrap, tip, hit, '<b>' + r.name + '</b><br><span class="k">' + FAMN[r.fam] + ' · ' + DIM[d] + ' · ' + GRP[gI] + '</span> ' + r.v.toFixed(2) + '%');
+    });
+    txt(svg, x0-10, yTop + rows.length*rh + 16, DIM[d] + ' · ' + GRP[gI] + ' · 三分类准确率（%），按值降序', 'xs f-ink3', 'end');
+    // table view
+    let h = '<table><thead><tr><th>模型</th><th>家族</th>' + DIM.map(x=>'<th class="num">'+x+'</th>').join('') + '</tr></thead><tbody>';
+    T3.forEach(m => { h += '<tr' + (m.fam==='wr'?' class="hl"':'') + '><td>' + m.name + '</td><td>' + FAMN[m.fam] + '</td>' + m.v[gI].map(x => '<td class="num">' + fmt(x) + '</td>').join('') + '</tr>'; });
+    h += '</tbody></table><p class="note">子集：' + GRP[gI] + '</p>';
+    tv.innerHTML = h;
+    svg.hidden = table; tv.hidden = !table;
+  }
+  $$('#t3dim button').forEach(b => b.addEventListener('click', () => { d = +b.dataset.d; $$('#t3dim button').forEach(x => x.setAttribute('aria-pressed', String(x===b))); render(); }));
+  $$('#t3grp button').forEach(b => b.addEventListener('click', () => { gI = +b.dataset.g; $$('#t3grp button').forEach(x => x.setAttribute('aria-pressed', String(x===b))); render(); }));
+  $('#t3tv').addEventListener('click', () => { table = !table; $('#t3tv').setAttribute('aria-pressed', String(table)); render(); });
+  render();
+  // full table in appendix
+  const tb = $('#t3full tbody');
+  const cols = []; for (let g=0; g<7; g++) for (let k=0;k<3;k++) cols.push([g,k]);
+  const best = cols.map(([g,k]) => { const vals = T3.map(m=>m.v[g][k]).filter(v=>v!==null).sort((a,b)=>b-a); return [vals[0], vals[1]]; });
+  T3.forEach(m => {
+    const tr = document.createElement('tr'); if (m.fam==='wr') tr.className='hl';
+    const td = document.createElement('td'); td.innerHTML = m.fam==='wr' ? '<b>'+m.name+'</b>' : m.name; tr.appendChild(td);
+    cols.forEach(([g,k], ci) => { const c = document.createElement('td'); c.className='num'; const v = m.v[g][k]; c.textContent = fmt(v); if (v!==null && v===best[ci][0]) c.classList.add('best'); else if (v!==null && v===best[ci][1]) c.classList.add('second'); tr.appendChild(c); });
+    tb.appendChild(tr);
+  });
+})();
+
+/* ================================================= Figure 16 (Tab. 5 lines) */
+(function t5(){
+  const svg = $('#t5Svg'), tip = $('#tipT5'), wrap = svg.parentElement; clear(svg);
+  const stages = ['Gemini 3.1 Pro\n直接评判','Gemini 蒸馏','+ Agent 审计\n(GPT-5.5)','+ 人工复核\n（完整模型）'];
+  const series = [{n:'动作', c:'var(--act)', v:[65.79,66.84,75.84,77.63]},{n:'外观', c:'var(--vis)', v:[80.13,78.92,80.46,81.32]},{n:'运动', c:'var(--A)', v:[60.79,60.31,71.52,73.03]},{n:'平均', c:'var(--ink2)', v:[68.90,68.69,75.94,77.33]}];
+  const x0=90, x1=800, y0=20, y1=190, ymin=55, ymax=85;
+  const sx = i => x0 + i*(x1-x0)/3, sy = v => y1 - (v-ymin)/(ymax-ymin)*(y1-y0);
+  [55,60,65,70,75,80,85].forEach(v => { el('line', {x1:x0, y1:sy(v), x2:x1, y2:sy(v), class:'s-grid', 'stroke-width':1}, svg); txt(svg, x0-8, sy(v)+4, v, 'xs f-ink3 tab-num', 'end'); });
+  stages.forEach((s, i) => s.split('\n').forEach((ln, li) => txt(svg, sx(i), y1+18+li*13, ln, 'sml f-ink2', 'middle')));
+  series.forEach(s => {
+    el('polyline', {points:s.v.map((v,i)=>sx(i)+','+sy(v)).join(' '), fill:'none', stroke:s.c, 'stroke-width':2, 'stroke-dasharray': s.n==='平均'?'5 4':null}, svg);
+    s.v.forEach((v,i) => { el('circle', {cx:sx(i), cy:sy(v), r:4.5, fill:s.c, class:'s-surf', stroke:'var(--surf)', 'stroke-width':2}, svg); const hit = el('circle', {cx:sx(i), cy:sy(v), r:12, class:'bar-hit', tabindex:0}, svg); bindTip(wrap, tip, hit, '<b>' + stages[i].replace('\n',' ') + '</b><br><span class="k">' + s.n + '</span> ' + v.toFixed(2) + '%'); });
+    txt(svg, x1+8, sy(s.v[3])+4, s.n + ' ' + s.v[3].toFixed(2), 'xs f-ink2 tab-num');
+  });
+})();
+
+/* ================================================= Figure 17 (Tab. 6 evidence deltas) */
+groupedBars($('#t6Svg'), $('#tipT6'), {
+  cats:['去源图\n均值 76.07（−1.26）','去帧网格\n均值 74.85（−2.48）','去动作面板\n均值 75.68（−1.65）'],
+  series:[{name:'动作（完整 77.63）', color:'var(--act)', values:[-0.79,-2.71,-2.82]},{name:'外观（完整 81.32）', color:'var(--vis)', values:[-2.37,-1.44,-0.76]},{name:'运动（完整 73.03）', color:'var(--A)', values:[-0.62,-3.29,-1.35]}],
+  y:[-4,0], ticks:[-4,-3,-2,-1,0], showVal:true, fmtV:v=>v.toFixed(2), x0:60, x1:840, y0:20, y1:150
+});
+
+/* ================================================= Figure 18 (Tab. 4 small multiples) */
+(function t4(){
+  const svg = $('#t4Svg'), tip = $('#tipT4'), wrap = svg.parentElement; clear(svg);
+  const H = ['短 ~125 帧','中 ~253 帧','长 ~381 帧'];
+  const M = [{n:'HY-WorldPlay 1.5', c:'var(--hum)'},{n:'WorldCompass', c:'var(--vlm)'},{n:'WorldReward-RL', c:'var(--act)'}];
+  const panels = [
+    {t:'组合动作 · 动作准确率（%）', y:[10,70], ticks:[10,30,50,70], v:[[21.74,19.73,19.70],[58.20,55.01,54.82],[59.96,57.79,56.40]]},
+    {t:'组合动作 · HPSv3', y:[-1.5,1.5], ticks:[-1.5,-0.5,0.5,1.5], v:[[-1.05,-0.19,-0.33],[0.42,0.37,0.73],[0.68,0.55,1.02]]},
+    {t:'基本动作 · 动作准确率（%）', y:[55,85], ticks:[55,65,75,85], v:[[62.33,63.35,64.28],[68.62,74.09,76.56],[74.43,77.27,78.84]]},
+    {t:'基本动作 · HPSv3', y:[1.5,4.5], ticks:[1.5,2.5,3.5,4.5], v:[[1.96,1.91,1.90],[3.77,3.61,3.72],[3.92,3.85,3.94]]}
+  ];
+  panels.forEach((p, pi) => {
+    const px = 60 + (pi%2)*420, py = 30 + Math.floor(pi/2)*200, w=330, h=120;
+    txt(svg, px, py-10, p.t, 'big f-ink');
+    const sx = i => px + 30 + i*(w-60)/2, sy = v => py + h - (v-p.y[0])/(p.y[1]-p.y[0])*h;
+    p.ticks.forEach(tv => { el('line', {x1:px, y1:sy(tv), x2:px+w, y2:sy(tv), class:'s-grid', 'stroke-width':1}, svg); txt(svg, px-6, sy(tv)+4, tv, 'xs f-ink3 tab-num', 'end'); });
+    H.forEach((hh, i) => txt(svg, sx(i), py+h+16, hh, 'xs f-ink2', 'middle'));
+    const used = [];
+    M.forEach((m, mi) => {
+      const vals = p.v[mi];
+      el('polyline', {points:vals.map((v,i)=>sx(i)+','+sy(v)).join(' '), fill:'none', stroke:m.c, 'stroke-width':2}, svg);
+      vals.forEach((v,i) => { el('circle', {cx:sx(i), cy:sy(v), r:4.5, fill:m.c, stroke:'var(--surf)', 'stroke-width':2}, svg); const hit = el('circle', {cx:sx(i), cy:sy(v), r:12, class:'bar-hit', tabindex:0}, svg); bindTip(wrap, tip, hit, '<b>' + m.n + '</b><br><span class="k">' + p.t + ' · ' + hh(i) + '</span> ' + v.toFixed(2)); });
+      let ly = sy(vals[2]) + 4;
+      used.sort((a,b)=>a-b).forEach(u => { if (Math.abs(ly - u) < 12) ly = u + 12; });
+      used.push(ly);
+      txt(svg, sx(2)+8, ly, vals[2].toFixed(2), 'xs f-ink2 tab-num');
+    });
+    function hh(i){ return H[i]; }
+  });
+})();
+
+/* ================================================= Figure 19 (Tab. 9) */
+(function t9(){
+  const svg = $('#t9Svg'), tip = $('#tipT9'), wrap = svg.parentElement; clear(svg);
+  const cats = ['无奖励（基座）','仅动作奖励','仅视觉奖励','动作 + 视觉'];
+  const A = [19.70,52.73,27.82,56.40], Q = [-0.33,0.21,0.89,1.02];
+  function panel(px, title, vals, ymin, ymax, ticks, fmtf){
+    txt(svg, px, 18, title, 'big f-ink');
+    const w = 360, y0 = 34, y1 = 150; const sy = v => y1 - (v-ymin)/(ymax-ymin)*(y1-y0); const base = sy(Math.max(ymin, Math.min(0, ymax)));
+    ticks.forEach(tv => { el('line', {x1:px, y1:sy(tv), x2:px+w, y2:sy(tv), class:tv===0?'s-axis':'s-grid', 'stroke-width':1}, svg); txt(svg, px-6, sy(tv)+4, fmtf(tv), 'xs f-ink3 tab-num', 'end'); });
+    cats.forEach((c, i) => {
+      const cx = px + 20 + i*(w-40)/4 + (w-40)/8, bw = 40; const v = vals[i]; const top = Math.min(sy(v), base);
+      el('rect', {x:cx-bw/2, y:top, width:bw, height:Math.abs(base-sy(v)), rx:3, fill: i===0?'var(--tie)':'var(--act)'}, svg);
+      txt(svg, cx, v>=0? top-5 : top+Math.abs(base-sy(v))+11, fmtf(v), 'xs f-ink2 tab-num', 'middle');
+      txt(svg, cx, y1+16, c, 'xs f-ink2', 'middle');
+      const hit = el('rect', {x:cx-bw/2-6, y:y0, width:bw+12, height:y1-y0, class:'bar-hit', tabindex:0}, svg);
+      bindTip(wrap, tip, hit, '<b>' + c + '</b><br><span class="k">' + title + '</span> ' + fmtf(v));
+    });
+  }
+  panel(60, '长时程组合动作 · 动作准确率（%）', A, 0, 60, [0,20,40,60], v=>v.toFixed(2));
+  panel(480, '长时程组合动作 · HPSv3', Q, -0.5, 1.2, [-0.5,0,0.5,1.0], v=>v.toFixed(2));
+  txt(svg, 60, 188, '灰 = 未后训练的基座；琥珀 = 用 WorldReward 的不同奖励组合后训练', 'xs f-ink3');
+})();
+
+/* ================================================= Figure 20 (Fig. 6 stacked) */
+(function f6(){
+  const svg = $('#f6Svg'), tip = $('#tipF6'), wrap = svg.parentElement;
+  const judges = ['WorldReward 评判','GPT-5.5 评判','人类评判（600 个判断）'];
+  const pairs = [['HY-WorldPlay 1.5','WorldCompass'],['HY-WorldPlay 1.5','WorldReward-RL'],['WorldCompass','WorldReward-RL']];
+  const COL = {'HY-WorldPlay 1.5':'var(--hum)','WorldCompass':'var(--vlm)','WorldReward-RL':'var(--act)'};
+  const D = [
+    [[[23.4,7.5,69.1],[19.8,6.2,74.0],[38.6,17.9,43.5]],[[26.3,9.1,64.6],[22.6,7.8,69.6],[39.4,19.1,41.5]],[[20.5,13.4,66.1],[17.9,11.6,70.5],[34.8,25.4,39.8]]],
+    [[[15.9,6.8,77.3],[10.2,5.1,84.7],[27.3,16.8,55.9]],[[18.4,8.2,73.4],[12.8,6.4,80.8],[29.8,19.6,50.6]],[[13.6,11.5,74.9],[9.4,9.7,80.9],[25.2,25.9,48.9]]]
+  ];
+  let d = 0;
+  function render(){
+    clear(svg);
+    const x0 = 230, x1 = 830, sx = v => x0 + v/100*(x1-x0);
+    [0,25,50,75,100].forEach(v => { el('line', {x1:sx(v), y1:20, x2:sx(v), y2:318, class:v===0?'s-axis':'s-grid', 'stroke-width':1}, svg); txt(svg, sx(v), 14, v+'%', 'xs f-ink3 tab-num', 'middle'); });
+    judges.forEach((j, ji) => {
+      const gy = 30 + ji*98;
+      txt(svg, 20, gy+6, j, 'sml f-ink', 'start', {'font-weight':600});
+      pairs.forEach((p, pi) => {
+        const y = gy + 14 + pi*26, h = 20; const [l, t, r] = D[d][ji][pi];
+        txt(svg, x0-8, y+14, p[0] + ' vs ' + p[1], 'xs f-ink2', 'end');
+        let cx = x0;
+        [[l, COL[p[0]], p[0]], [t, 'url(#hatchN)', 'Tie'], [r, COL[p[1]], p[1]]].forEach(([v, c, name], si) => {
+          const w = v/100*(x1-x0);
+          const rr = el('rect', {x:cx + (si>0?2:0), y, width:Math.max(0, w-(si>0?2:0)), height:h, rx:2, fill:c}, svg);
+          if (si===1) el('rect', {x:cx+2, y, width:Math.max(0,w-2), height:h, rx:2, class:'nofill s-N', 'stroke-width':1}, svg);
+          if (v >= 9) txt(svg, cx + w/2, y+14, v.toFixed(1), 'xs tab-num', 'middle', {fill: si===1 ? 'var(--ink)' : '#fff', 'font-weight':600});
+          const hit = el('rect', {x:cx, y, width:w, height:h, class:'bar-hit', tabindex:0}, svg);
+          bindTip(wrap, tip, hit, '<b>' + name + '</b> ' + v.toFixed(1) + '%<br><span class="k">' + j + ' · ' + p[0] + ' vs ' + p[1] + ' · ' + (d? '视觉质量':'动作一致性') + '</span>');
+          cx += w;
+        });
+      });
+    });
+  }
+  $$('#f6dim button').forEach(b => b.addEventListener('click', () => { d = +b.dataset.d; $$('#f6dim button').forEach(x => x.setAttribute('aria-pressed', String(x===b))); render(); }));
+  render();
+})();
+})();
+</script>
+</body>
+</html>

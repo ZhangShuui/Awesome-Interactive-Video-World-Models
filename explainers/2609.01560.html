@@ -1,0 +1,2286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>H3-World 语言即世界控制</title>
+<meta name="description" content="arXiv 2609.01560 · H3-World: Turning Language Understanding into World Control —— 方法精读、代码走读与交互图解">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   H3-World 精读 — tokens.
+   角色色即论点：紫 = 动作文本 span A_k（语言通路）
+               橙 = 视频 latent V_k（视觉流）
+               青 = 静态语义上下文 S / 首帧条件 C_0 / 音频（预训练原样保留）
+               金 = LoRA 可训练分支（唯一被改动的 0.199%）
+               红 = 被掩码切断的边 / 漏控 ；绿 = 允许的注意力边
+   暗色为默认地面，亮色是完整设计的第二主题。
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0f1013; --surf:#15171b; --surf2:#1b1e24; --surf3:#242831;
+  --rule:#272b33; --rule2:#3a404b;
+  --ink:#eef0f4; --ink2:#aeb5c0; --ink3:#7d8591;
+  --act:#8a6fe3;  --act-ink:#b09bf7;  --act-soft:rgba(138,111,227,.20);
+  --vid:#d97d31;  --vid-ink:#f09b57;  --vid-soft:rgba(217,125,49,.18);
+  --ctx:#3d8db3;  --ctx-ink:#6cbcdd;  --ctx-soft:rgba(61,141,179,.18);
+  --hot:#c6942a;  --hot-ink:#e7b64f;  --hot-soft:rgba(198,148,42,.18);
+  --bad:#d95f56;  --bad-ink:#ef8078;  --bad-soft:rgba(217,95,86,.15);
+  --ok:#3aa877;   --ok-ink:#5cc796;   --ok-soft:rgba(58,168,119,.16);
+  --m1:#8a6fe3; --m2:#d97d31; --m3:#3d8db3; --m4:#c6942a; --m5:#3aa877; --m6:#d95f56;
+  --grid:#242831; --axis:#3a404b;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.35);
+  --tint:rgba(255,255,255,.045);
+  --font-display:"Archivo","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f2f0; --surf:#fbfbfa; --surf2:#ebebe8; --surf3:#e0e0dc;
+    --rule:#dcdcd7; --rule2:#c0c0b9;
+    --ink:#15171b; --ink2:#4c525c; --ink3:#767d88;
+    --act:#6a47d4;  --act-ink:#5333b9;  --act-soft:rgba(106,71,212,.13);
+    --vid:#c2611a;  --vid-ink:#9f4d0f;  --vid-soft:rgba(194,97,26,.14);
+    --ctx:#1f7a9e;  --ctx-ink:#14607e;  --ctx-soft:rgba(31,122,158,.14);
+    --hot:#a5780e;  --hot-ink:#856008;  --hot-soft:rgba(165,120,14,.14);
+    --bad:#c8362f;  --bad-ink:#a92a24;  --bad-soft:rgba(200,54,47,.11);
+    --ok:#0f8a52;   --ok-ink:#0b7043;   --ok-soft:rgba(15,138,82,.12);
+    --m1:#6a47d4; --m2:#c2611a; --m3:#1f7a9e; --m4:#a5780e; --m5:#0f8a52; --m6:#c8362f;
+    --grid:#e4e4df; --axis:#c0c0b9;
+    --shadow:0 1px 2px rgba(24,22,16,.06), 0 10px 28px rgba(24,22,16,.09);
+    --tint:rgba(24,22,16,.035);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f2f0; --surf:#fbfbfa; --surf2:#ebebe8; --surf3:#e0e0dc;
+  --rule:#dcdcd7; --rule2:#c0c0b9;
+  --ink:#15171b; --ink2:#4c525c; --ink3:#767d88;
+  --act:#6a47d4;  --act-ink:#5333b9;  --act-soft:rgba(106,71,212,.13);
+  --vid:#c2611a;  --vid-ink:#9f4d0f;  --vid-soft:rgba(194,97,26,.14);
+  --ctx:#1f7a9e;  --ctx-ink:#14607e;  --ctx-soft:rgba(31,122,158,.14);
+  --hot:#a5780e;  --hot-ink:#856008;  --hot-soft:rgba(165,120,14,.14);
+  --bad:#c8362f;  --bad-ink:#a92a24;  --bad-soft:rgba(200,54,47,.11);
+  --ok:#0f8a52;   --ok-ink:#0b7043;   --ok-soft:rgba(15,138,82,.12);
+  --m1:#6a47d4; --m2:#c2611a; --m3:#1f7a9e; --m4:#a5780e; --m5:#0f8a52; --m6:#c8362f;
+  --grid:#e4e4df; --axis:#c0c0b9;
+  --shadow:0 1px 2px rgba(24,22,16,.06), 0 10px 28px rgba(24,22,16,.09);
+  --tint:rgba(24,22,16,.035);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+h1,h2,h3,h4{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--ctx-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--hot-ink); outline-offset:3px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); border:1px solid var(--rule);
+  padding:.08em .36em; border-radius:5px; white-space:nowrap}
+strong{font-weight:600; color:var(--ink)}
+hr{border:0; border-top:1px solid var(--rule); margin:40px 0}
+
+/* ============================================================ chrome */
+#prog{position:fixed; inset:0 auto auto 0; height:2px; width:0; z-index:200;
+  background:linear-gradient(90deg,var(--act),var(--vid)); transition:width .08s linear}
+.top{position:fixed; inset:0 0 auto 0; height:60px; z-index:150; display:flex; align-items:center; gap:18px;
+  padding:0 22px; background:color-mix(in srgb, var(--surf) 86%, transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2); background:var(--surf3)}
+
+/* ============================================================ shell */
+.shell{max-width:1340px; margin:0 auto; padding:60px 26px 120px;
+  display:grid; grid-template-columns:minmax(0,1fr); gap:0}
+@media(min-width:1080px){
+  .shell{grid-template-columns:246px minmax(0,1fr); gap:56px; padding-left:32px; padding-right:32px}
+}
+.rail{display:none}
+@media(min-width:1080px){
+  .rail{display:block; position:sticky; top:88px; align-self:start; max-height:calc(100vh - 120px); overflow-y:auto;
+    padding-right:6px; scrollbar-width:thin}
+  .rail .rl{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink3); margin:0 0 14px 12px}
+  .rail ol{list-style:none; margin:0; padding:0; position:relative}
+  .rail ol::before{content:""; position:absolute; left:4px; top:6px; bottom:6px; width:1px; background:var(--rule)}
+  .rail li{position:relative}
+  .rail a{display:block; padding:5px 0 5px 22px; font-size:13px; line-height:1.45; color:var(--ink3);
+    border:0; transition:.16s}
+  .rail a::before{content:""; position:absolute; left:1px; top:14px; width:7px; height:7px; border-radius:50%;
+    background:var(--rule2); transition:.16s}
+  .rail a:hover{color:var(--ink2)}
+  .rail a.on{color:var(--ink); font-weight:500}
+  .rail a.on::before{background:var(--act); box-shadow:0 0 0 3px var(--act-soft)}
+}
+main{min-width:0}
+
+/* ============================================================ hero */
+.hero{margin-bottom:64px}
+.kicker{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:22px}
+.tag{font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; padding:4px 9px; border-radius:6px;
+  border:1px solid var(--rule); color:var(--ink2); background:var(--surf2)}
+.tag.hl{color:var(--act-ink); border-color:var(--act); background:var(--act-soft)}
+.hero h1{font-size:clamp(2.1rem,4.6vw,3.5rem); font-weight:700; letter-spacing:-.025em; margin-bottom:6px}
+.hero .zh{font-size:clamp(1.05rem,2vw,1.4rem); color:var(--ink2); font-family:var(--font-display); font-weight:500;
+  letter-spacing:.01em; margin-bottom:22px}
+.hero .thesis{font-size:1.06rem; line-height:1.9; color:var(--ink2); max-width:66ch; margin-bottom:24px}
+.hero .thesis b{color:var(--ink)}
+.authors{font-size:13.5px; color:var(--ink3); line-height:1.75; max-width:70ch; margin-bottom:8px}
+.authors b{color:var(--ink2); font-weight:500}
+.links{display:flex; flex-wrap:wrap; gap:10px; margin-top:18px}
+.links a{font-family:var(--font-mono); font-size:12.5px; padding:7px 13px; border-radius:8px;
+  border:1px solid var(--rule); background:var(--surf2); color:var(--ink2)}
+.links a:hover{border-color:var(--rule2); color:var(--ink); background:var(--surf3)}
+
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(158px,1fr)); gap:1px; margin-top:34px;
+  background:var(--rule); border:1px solid var(--rule); border-radius:14px; overflow:hidden}
+.stat{background:var(--surf); padding:18px 18px 16px}
+.stat .lb{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.11em; text-transform:uppercase; color:var(--ink3)}
+.stat .vl{font-family:var(--font-display); font-size:1.85rem; font-weight:700; letter-spacing:-.02em; margin:6px 0 2px;
+  font-variant-numeric:tabular-nums}
+.stat .dl{font-size:12px; color:var(--ink3); line-height:1.5}
+.stat .dl b{color:var(--ok-ink); font-weight:600}
+
+/* ============================================================ sections */
+.sec{margin:0 0 76px; scroll-margin-top:88px}
+.eyebrow{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.eyebrow .n{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; color:var(--act-ink);
+  border:1px solid var(--act); background:var(--act-soft); padding:2px 8px; border-radius:5px}
+.eyebrow .t{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.19em; text-transform:uppercase; color:var(--ink3)}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec > h2{font-size:clamp(1.5rem,2.6vw,2rem); letter-spacing:-.02em; margin-bottom:18px}
+.sec h3{font-size:1.16rem; margin:44px 0 12px; letter-spacing:-.01em; display:flex; align-items:baseline; gap:10px}
+.sec h3 .ix{font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-weight:400}
+.sec h4{font-size:.98rem; margin:26px 0 8px; color:var(--ink2); font-weight:600}
+.prose p{max-width:74ch; margin:0 0 15px}
+.prose ul,.prose ol{max-width:74ch; margin:0 0 15px; padding-left:1.35em}
+.prose li{margin:0 0 7px}
+.prose li::marker{color:var(--ink3)}
+.lead{font-size:1.04rem; color:var(--ink2); max-width:70ch; margin-bottom:24px; line-height:1.9}
+
+/* ============================================================ roles */
+.rA{color:var(--act-ink); font-weight:600}
+.rV{color:var(--vid-ink); font-weight:600}
+.rX{color:var(--ctx-ink); font-weight:600}
+.rH{color:var(--hot-ink); font-weight:600}
+.rB{color:var(--bad-ink); font-weight:600}
+.rO{color:var(--ok-ink); font-weight:600}
+.kbd{display:inline-block; font-family:var(--font-mono); font-size:.8em; padding:.05em .45em; border-radius:5px;
+  border:1px solid var(--rule2); background:var(--surf3); color:var(--ink); box-shadow:0 1.5px 0 var(--rule2); vertical-align:1px; line-height:1.5}
+
+/* ============================================================ math */
+.eqwrap{margin:24px 0; border:1px solid var(--rule); border-radius:14px; background:var(--surf); overflow:hidden}
+.eqwrap.acc-A{border-left:3px solid var(--act)}
+.eqwrap.acc-V{border-left:3px solid var(--vid)}
+.eqwrap.acc-X{border-left:3px solid var(--ctx)}
+.eqwrap.acc-H{border-left:3px solid var(--hot)}
+.eqrow{display:flex; align-items:center; gap:16px; padding:20px 22px; overflow-x:auto}
+.eqrow .body{flex:1; min-width:0}
+.eqn{font-family:var(--font-math); font-size:1.08rem; line-height:2.1; white-space:nowrap}
+.eqn i{font-style:italic}
+.eqn .op{font-style:normal; padding:0 .18em}
+.eqn .fn{font-style:normal}
+.eqno{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); flex:none; align-self:flex-start; padding-top:6px}
+.eqcap{border-top:1px dashed var(--rule); padding:13px 22px 15px; font-size:14px; color:var(--ink2); background:var(--tint)}
+.eqcap b{color:var(--ink)}
+.eqn sub{font-size:.66em; vertical-align:-.28em; font-style:normal; font-family:var(--font-body)}
+.eqn sup{font-size:.62em; vertical-align:.5em; font-style:normal; font-family:var(--font-body)}
+.eqn .bb{font-weight:600}
+
+/* ============================================================ callouts */
+.call{margin:22px 0; padding:16px 18px; border-radius:12px; border:1px solid var(--rule);
+  background:var(--surf); font-size:14.6px; line-height:1.82; color:var(--ink2)}
+.call .hd{display:flex; align-items:center; gap:9px; font-family:var(--font-mono); font-size:11px;
+  letter-spacing:.13em; text-transform:uppercase; margin-bottom:8px}
+.call p{max-width:none; margin:0 0 10px}
+.call p:last-child{margin-bottom:0}
+.call b{color:var(--ink)}
+.call.key{border-color:var(--act); background:var(--act-soft)}
+.call.key .hd{color:var(--act-ink)}
+.call.warn{border-color:var(--bad); background:var(--bad-soft)}
+.call.warn .hd{color:var(--bad-ink)}
+.call.code{border-color:var(--hot); background:var(--hot-soft)}
+.call.code .hd{color:var(--hot-ink)}
+.call.note .hd{color:var(--ink3)}
+.call.mine{border-color:var(--rule2); background:var(--surf2); border-left:3px solid var(--ink3)}
+.call.mine .hd{color:var(--ink3)}
+
+/* ============================================================ figures */
+figure{margin:30px 0; padding:0}
+.fig{background:var(--surf); border:1px solid var(--rule); border-radius:16px; padding:20px 20px 4px; box-shadow:var(--shadow)}
+.fig .fh{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:4px}
+.fig .fh .no{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3)}
+.fig .fh .ti{font-family:var(--font-display); font-weight:600; font-size:15px}
+.figbody{overflow-x:auto; padding:10px 0 4px}
+.fig svg{display:block; max-width:100%; height:auto; margin:0 auto}
+.figbody svg, .chart svg{min-width:620px}
+.figbody.narrow svg{min-width:0}
+figcaption{font-size:13px; color:var(--ink3); line-height:1.72; padding:12px 2px 16px; border-top:1px dashed var(--rule); margin-top:8px}
+figcaption b{color:var(--ink2); font-weight:500}
+
+/* svg semantic classes */
+.s-ink{stroke:var(--ink2)} .s-ink3{stroke:var(--ink3)} .s-rule{stroke:var(--rule2)} .s-rule1{stroke:var(--rule)}
+.f-ink{fill:var(--ink)} .f-ink2{fill:var(--ink2)} .f-ink3{fill:var(--ink3)}
+.s-A{stroke:var(--act)} .f-A{fill:var(--act)} .f-Ai{fill:var(--act-ink)} .fs-A{fill:var(--act-soft)}
+.s-V{stroke:var(--vid)} .f-V{fill:var(--vid)} .f-Vi{fill:var(--vid-ink)} .fs-V{fill:var(--vid-soft)}
+.s-X{stroke:var(--ctx)} .f-X{fill:var(--ctx)} .f-Xi{fill:var(--ctx-ink)} .fs-X{fill:var(--ctx-soft)}
+.s-H{stroke:var(--hot)} .f-H{fill:var(--hot)} .f-Hi{fill:var(--hot-ink)} .fs-H{fill:var(--hot-soft)}
+.s-B{stroke:var(--bad)} .f-B{fill:var(--bad)} .f-Bi{fill:var(--bad-ink)} .fs-B{fill:var(--bad-soft)}
+.s-O{stroke:var(--ok)} .f-O{fill:var(--ok)} .f-Oi{fill:var(--ok-ink)} .fs-O{fill:var(--ok-soft)}
+.f-surf{fill:var(--surf)} .f-surf2{fill:var(--surf2)} .f-surf3{fill:var(--surf3)} .f-grain{fill:var(--ink3)}
+.f-tint{fill:var(--tint)}
+.mk-A{fill:var(--act)} .mk-V{fill:var(--vid)} .mk-X{fill:var(--ctx)} .mk-H{fill:var(--hot)}
+.mk-B{fill:var(--bad)} .mk-I{fill:var(--ink3)} .mk-O{fill:var(--ok)}
+svg text{font-family:var(--font-body); font-size:12px}
+svg .mono{font-family:var(--font-mono)}
+svg .lbl{font-size:11.5px}
+svg .sml{font-size:10px; letter-spacing:.08em}
+svg .big{font-size:13px; font-weight:600}
+.nofill{fill:none}
+.hatch{fill:url(#hatch)}
+
+/* ============================================================ tabs / steppers */
+.tabs{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px}
+.tab{font-family:var(--font-body); font-size:13px; padding:7px 13px; border-radius:9px; cursor:pointer;
+  border:1px solid var(--rule); background:var(--surf2); color:var(--ink2); transition:.16s; font-weight:500}
+.tab:hover{color:var(--ink); border-color:var(--rule2)}
+.tab[aria-selected="true"]{background:var(--act-soft); border-color:var(--act); color:var(--act-ink)}
+.tabpanel[hidden]{display:none}
+.stepinfo{border:1px solid var(--rule); border-radius:12px; background:var(--surf2); padding:15px 17px; margin-top:6px;
+  font-size:14.4px; line-height:1.8; color:var(--ink2); min-height:96px}
+.stepinfo h5{margin:0 0 6px; font-family:var(--font-display); font-size:14.5px; color:var(--ink); font-weight:600}
+.dim{opacity:.16; transition:opacity .3s}
+.lit{opacity:1; transition:opacity .3s}
+
+/* ============================================================ controls */
+.ctl{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:8px 0 4px;
+  padding:12px 14px; border:1px solid var(--rule); border-radius:11px; background:var(--surf2)}
+.ctl label{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink3)}
+.readout{font-family:var(--font-mono); font-size:13px; color:var(--ink); font-variant-numeric:tabular-nums;
+  background:var(--surf3); border:1px solid var(--rule); padding:4px 10px; border-radius:7px; white-space:nowrap}
+.mini{font-family:var(--font-mono); font-size:11.5px; padding:6px 11px; border-radius:8px; cursor:pointer;
+  border:1px solid var(--rule); background:var(--surf3); color:var(--ink2); transition:.16s}
+.mini:hover{color:var(--ink); border-color:var(--rule2)}
+.mini.on{background:var(--act); border-color:var(--act); color:#fff}
+.seg{display:inline-flex; gap:0; border:1px solid var(--rule); border-radius:9px; overflow:hidden; background:var(--surf3)}
+.seg button{font-family:var(--font-mono); font-size:11.5px; padding:6px 11px; border:0; cursor:pointer;
+  background:transparent; color:var(--ink3); transition:.16s; border-right:1px solid var(--rule)}
+.seg button:last-child{border-right:0}
+.seg button:hover{color:var(--ink)}
+.seg button.on{background:var(--act); color:#fff}
+
+/* keyboard simulator */
+.kbsim{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:18px; padding:8px 0 10px; align-items:start}
+.kbpad{display:grid; grid-template-columns:auto auto auto; gap:22px; align-items:start; justify-content:start}
+.kbgroup{display:grid; grid-template-columns:repeat(3,46px); gap:6px}
+.kbgroup .lb{grid-column:1 / -1; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink3); margin-bottom:2px}
+.key{height:44px; border-radius:9px; border:1px solid var(--rule2); background:var(--surf3); color:var(--ink2);
+  font-family:var(--font-mono); font-size:14px; font-weight:600; cursor:pointer; box-shadow:0 2px 0 var(--rule2); transition:.12s}
+.key:hover{color:var(--ink); border-color:var(--ink3)}
+.key.on{background:var(--vid); border-color:var(--vid); color:#fff; box-shadow:0 0 0 3px var(--vid-soft); transform:translateY(1px)}
+.key.cam.on{background:var(--ctx); border-color:var(--ctx); box-shadow:0 0 0 3px var(--ctx-soft)}
+.key.fast.on{background:var(--hot); border-color:var(--hot); box-shadow:0 0 0 3px var(--hot-soft)}
+.key.ghost{visibility:hidden}
+.kbout{border:1px solid var(--rule); border-radius:12px; background:var(--surf2); padding:14px 16px; font-size:14px; color:var(--ink2); line-height:1.8}
+.kbout .row{display:flex; gap:12px; align-items:baseline; padding:5px 0; border-bottom:1px dashed var(--rule)}
+.kbout .row:last-child{border-bottom:0}
+.kbout .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.11em; text-transform:uppercase; color:var(--ink3); min-width:88px; flex:none}
+.kbout .v{color:var(--ink)}
+.kbout .bits{font-family:var(--font-mono); font-size:13px; letter-spacing:.14em}
+.kbout .sentence{font-family:var(--font-math); font-size:1.08rem; color:var(--ink); line-height:1.6}
+.kbout .sentence .mo{color:var(--vid-ink); font-weight:500}
+.kbout .sentence .ca{color:var(--ctx-ink); font-weight:500}
+.pill{display:inline-block; font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; padding:2px 9px; border-radius:6px; border:1px solid var(--rule2); color:var(--ink2)}
+.pill.ok{color:var(--ok-ink); border-color:var(--ok); background:var(--ok-soft)}
+.pill.bad{color:var(--bad-ink); border-color:var(--bad); background:var(--bad-soft)}
+.pill.hot{color:var(--hot-ink); border-color:var(--hot); background:var(--hot-soft)}
+
+/* ============================================================ tables */
+.tblwrap{overflow-x:auto; border:1px solid var(--rule); border-radius:14px; background:var(--surf); margin:20px 0}
+table{border-collapse:collapse; width:100%; font-size:13.2px; font-variant-numeric:tabular-nums}
+caption{text-align:left; padding:14px 18px 0; font-size:13px; color:var(--ink3); caption-side:top}
+th,td{padding:9px 13px; text-align:right; border-bottom:1px solid var(--rule); white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td.l{text-align:left; white-space:normal}
+thead th{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--ink3); font-weight:500; background:var(--surf2); position:sticky; top:0}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--tint)}
+td.best{font-weight:700; color:var(--ink)}
+tr.ours td{background:var(--act-soft)}
+tr.ours:hover td{background:var(--act-soft)}
+tr.ours td:first-child{font-weight:600; color:var(--act-ink)}
+tr.grp td{background:var(--surf2); font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--ink3); text-align:left}
+.tnote{font-size:12.4px; color:var(--ink3); padding:10px 18px 14px; line-height:1.7}
+
+/* ============================================================ chart */
+.chart{margin:6px 0}
+.chart .ctitle{font-family:var(--font-display); font-weight:600; font-size:14px; margin-bottom:2px}
+.chart .csub{font-size:12px; color:var(--ink3); margin-bottom:12px}
+.tip{position:fixed; z-index:300; pointer-events:none; background:var(--surf); border:1px solid var(--rule2);
+  border-radius:9px; padding:8px 11px; font-size:12.5px; box-shadow:var(--shadow); color:var(--ink);
+  font-variant-numeric:tabular-nums; opacity:0; transition:opacity .12s; max-width:300px; line-height:1.55}
+.tip b{display:block; font-size:11px; color:var(--ink3); font-weight:500; margin-bottom:3px;
+  font-family:var(--font-mono); letter-spacing:.06em; text-transform:uppercase}
+.legend{display:flex; gap:16px; flex-wrap:wrap; font-size:12.5px; color:var(--ink2); margin:12px 0 2px}
+.legend span{display:inline-flex; align-items:center; gap:7px}
+.sw{display:inline-block; width:12px; height:12px; border-radius:3px; border:1px solid var(--rule2)}
+
+/* ============================================================ grids / cards */
+.grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; margin:20px 0}
+.grid3{display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:14px; margin:20px 0}
+.card{border:1px solid var(--rule); border-radius:13px; background:var(--surf); padding:16px 17px}
+.card h5{margin:0 0 7px; font-family:var(--font-display); font-size:14.5px; font-weight:600}
+.card p{font-size:14px; color:var(--ink2); line-height:1.78; margin:0}
+.card p + p{margin-top:9px}
+.card .mono{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); letter-spacing:.06em}
+.card.aa{border-top:3px solid var(--act)}
+.card.vv{border-top:3px solid var(--vid)}
+.card.xx{border-top:3px solid var(--ctx)}
+.card.hh{border-top:3px solid var(--hot)}
+.card.bb{border-top:3px solid var(--bad)}
+.card.oo{border-top:3px solid var(--ok)}
+
+/* ============================================================ algorithm / code */
+.algo{border:1px solid var(--rule); border-radius:14px; background:var(--surf); overflow:hidden; margin:22px 0}
+.algo .ah{padding:12px 18px; border-bottom:1px solid var(--rule); background:var(--surf2);
+  font-family:var(--font-mono); font-size:11.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3)}
+.algo ol{list-style:none; margin:0; padding:8px 0; counter-reset:ln}
+.algo li{counter-increment:ln; display:grid; grid-template-columns:38px 1fr; gap:12px; padding:5px 18px;
+  font-family:var(--font-mono); font-size:12.8px; line-height:1.72; color:var(--ink2)}
+.algo li::before{content:counter(ln); color:var(--ink3); text-align:right; font-size:11px; padding-top:2px}
+.algo li.cmt{color:var(--ink3); font-style:italic}
+.algo li.cmt::before{content:""}
+.algo li b{color:var(--ink); font-weight:600}
+.algo li .cm{color:var(--act-ink)}
+.algo li .cv{color:var(--vid-ink)}
+.algo li:hover{background:var(--tint)}
+.algo .an{padding:12px 18px; border-top:1px dashed var(--rule); font-size:13px; color:var(--ink3); font-family:var(--font-body)}
+pre.code{font-family:var(--font-mono); font-size:12px; line-height:1.7; white-space:pre; overflow-x:auto;
+  background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:14px 16px; color:var(--ink2); margin:12px 0}
+pre.code b{color:var(--ink); font-weight:600}
+pre.code .c{color:var(--ink3); font-style:italic}
+pre.code .a{color:var(--act-ink)}
+pre.code .v{color:var(--vid-ink)}
+pre.code .h{color:var(--hot-ink)}
+
+/* ============================================================ notation */
+.nota{display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:1px; background:var(--rule);
+  border:1px solid var(--rule); border-radius:13px; overflow:hidden; margin:20px 0}
+.nota div{background:var(--surf); padding:11px 14px; display:flex; gap:12px; align-items:baseline}
+.nota .sym{font-family:var(--font-math); font-size:1rem; color:var(--ink); flex:none; min-width:74px}
+.nota .dsc{font-size:13px; color:var(--ink2); line-height:1.6}
+
+/* ============================================================ details */
+details{border:1px solid var(--rule); border-radius:12px; background:var(--surf); margin:14px 0; overflow:hidden}
+summary{cursor:pointer; padding:13px 17px; font-size:14px; font-weight:500; color:var(--ink2); list-style:none;
+  display:flex; align-items:center; gap:10px; user-select:none}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"＋"; font-family:var(--font-mono); color:var(--ink3); font-size:13px}
+details[open] summary::before{content:"−"}
+summary:hover{color:var(--ink); background:var(--tint)}
+details .dc{padding:4px 17px 16px; font-size:14px; color:var(--ink2); line-height:1.82; border-top:1px solid var(--rule)}
+details .dc p{margin:10px 0}
+
+/* ============================================================ mask explorer */
+.maskwrap{display:grid; grid-template-columns:minmax(0,1fr); gap:16px; padding:6px 0 8px}
+@media(min-width:900px){ .maskwrap{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr)} }
+.maskinfo{border:1px solid var(--rule); border-radius:12px; background:var(--surf2); padding:14px 16px; font-size:14px; line-height:1.8; color:var(--ink2); min-height:150px}
+.maskinfo h5{margin:0 0 6px; font-family:var(--font-display); font-size:14.5px; color:var(--ink); font-weight:600}
+.maskinfo .rule{font-family:var(--font-mono); font-size:12px; color:var(--ink3); display:block; margin-top:6px}
+.mcell{cursor:crosshair}
+
+/* ============================================================ footer */
+footer{border-top:1px solid var(--rule); margin-top:80px; padding-top:26px; font-size:13px; color:var(--ink3); line-height:1.8}
+footer a{color:var(--ink2)}
+.toTop{position:fixed; right:22px; bottom:22px; z-index:140; opacity:0; pointer-events:none; transition:.2s}
+.toTop.show{opacity:1; pointer-events:auto}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms !important; transition-duration:.001ms !important}
+  html{scroll-behavior:auto}
+}
+@media print{
+  .top,.rail,.toTop,#prog{display:none}
+  body{background:#fff; color:#000}
+}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">H3-World<em>语言即世界控制 · 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <marker id="ar-i" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto-start-reverse">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-I"/></marker>
+  <marker id="ar-a" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto-start-reverse">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-A"/></marker>
+  <marker id="ar-v" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto-start-reverse">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-V"/></marker>
+  <marker id="ar-x" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto-start-reverse">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-X"/></marker>
+  <marker id="ar-h" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto-start-reverse">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-H"/></marker>
+  <marker id="ar-b" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto-start-reverse">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-B"/></marker>
+  <marker id="ar-o" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto-start-reverse">
+    <path d="M0 0 L10 3.5 L0 7 Z" class="mk-O"/></marker>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <rect width="6" height="6" fill="var(--surf2)"/>
+    <line x1="0" y1="0" x2="0" y2="6" stroke="var(--rule2)" stroke-width="1.6"/>
+  </pattern>
+</defs></svg>
+
+<div class="shell">
+
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-tldr">00 · 一图看懂</a></li>
+    <li><a href="#s-prior">01 · 前提观察：会听话，不守时</a></li>
+    <li><a href="#s-h3">02 · 骨架：H3 的 packed 单流序列</a></li>
+    <li><a href="#s-iface">03 · 语义动作接口：9 bit → 一句话</a></li>
+    <li><a href="#s-space">04 · 动作空间：135 合法，83 见过</a></li>
+    <li><a href="#s-bind">05 · Latent 对齐的时间绑定</a></li>
+    <li><a href="#s-route">06 · 单出口路由掩码</a></li>
+    <li><a href="#s-lora">07 · LoRA：0.199% 学什么</a></li>
+    <li><a href="#s-recipe">08 · 训练与推理配方走读</a></li>
+    <li><a href="#s-exp1">09 · 实验一：先验 vs 适配</a></li>
+    <li><a href="#s-exp2">10 · 实验二：接口对比与干预</a></li>
+    <li><a href="#s-gen">11 · 泛化：组合与视觉</a></li>
+    <li><a href="#s-crit">12 · 局限与批判性阅读</a></li>
+    <li><a href="#s-map">13 · 放回列表的坐标系</a></li>
+    <li><a href="#s-repo">14 · 复现速查</a></li>
+  </ol>
+</nav>
+
+<main>
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <div class="kicker">
+    <span class="tag">arXiv 2609.01560v1</span>
+    <span class="tag">cs.CV · 2026-09-01</span>
+    <span class="tag">Preprint</span>
+    <span class="tag hl">交互式视频世界模型 / 动作控制接口</span>
+  </div>
+  <h1>H3-World</h1>
+  <p class="zh">把大视频模型的<b>语言理解</b>，变成逐 latent 的<b>世界控制</b></p>
+  <p class="thesis">现有交互式世界模型给预训练视频生成器<b>新加一条控制通路</b>——离散动作嵌入、FiLM 调制、相机几何、或直接改骨干——再用「动作-视频」对齐轨迹把它训出来。
+  H3-World 的主张是：像 MiniMax-H3 这样的 33B 视频生成器，<b>控制的大半桥梁已经在模型里了</b>，因为它本来就能听懂「the man walks forward, camera pans left」这种话。
+  于是它不新学控制表示，而是把键盘状态翻译成<span class="rA">每个视频 latent 一句话</span>，塞进 H3 原生的文本通路；
+  再用<span class="rA">镜像位置</span> + <span class="rB">单出口路由掩码</span>把每句话钉死在它对应的那个 <span class="rV">latent 区间</span>上；
+  最后只训练 <span class="rH">0.199% 的 LoRA 参数</span>（65.6M），让骨干学会「用」这些时间绑定。8,000 段游戏录像、10,000 步，就得到了能跟随时变动作、能组合未见指令、能迁移到陌生画面的控制。</p>
+
+  <p class="authors"><b>Danze Chen</b><sup>1,2♣</sup>, <b>Zeqing Wang</b><sup>1,2♣</sup>, Ziyue Lin<sup>3</sup>, <b>Xingyi Yang</b><sup>3*</sup>, <b>Yeying Jin</b><sup>1,2*♢</sup></p>
+  <p class="authors">1 腾讯 · 2 新加坡国立大学 · 3 香港理工大学　（♣ 腾讯研究实习期间完成，* 通讯作者，♢ 项目负责人）</p>
+
+  <div class="links">
+    <a href="https://arxiv.org/abs/2609.01560" target="_blank" rel="noopener">arXiv 摘要 ↗</a>
+    <a href="https://arxiv.org/pdf/2609.01560" target="_blank" rel="noopener">PDF ↗</a>
+    <a href="https://danzer1xxxxchan.github.io/H3-World" target="_blank" rel="noopener">项目主页 ↗</a>
+    <a href="https://github.com/Danzer1xxxxChan/H3-World" target="_blank" rel="noopener">代码 ↗</a>
+    <a href="https://huggingface.co/DANNY621/H3-World" target="_blank" rel="noopener">LoRA 权重 ↗</a>
+    <a href="https://huggingface.co/MiniMax/MiniMax-H3" target="_blank" rel="noopener">MiniMax-H3 基座 ↗</a>
+    <a href="https://huggingface.co/datasets/acvlab/ABot-World-Explorer-500h" target="_blank" rel="noopener">ABot 数据集 ↗</a>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="lb">可训练参数</div>
+      <div class="vl">0.199%</div>
+      <div class="dl">65.6M LoRA（rank 32）/ 33B 骨干，<b>其余全部冻结</b></div>
+    </div>
+    <div class="stat">
+      <div class="lb">训练数据</div>
+      <div class="vl">7,872 clips</div>
+      <div class="dl">另留 128 段测试 · 每段 124 帧 → <b>37 句动作 prompt</b></div>
+    </div>
+    <div class="stat">
+      <div class="lb">时变调度下的累计水平光流</div>
+      <div class="vl">+52.7 / −106.0</div>
+      <div class="dl">左转→右转两段各自跟随；全局提示只有 <b>0.0 / −17.3</b></div>
+    </div>
+    <div class="stat">
+      <div class="lb">动作空间覆盖</div>
+      <div class="vl">83 / 135</div>
+      <div class="dl">合法的角色×相机组合里 <b>52 个从未在训练中出现</b>，仍可组合泛化</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 00 TLDR -->
+<section class="sec" id="s-tldr">
+  <div class="eyebrow"><span class="n">00</span><span class="t">One picture</span><span class="line"></span></div>
+  <h2>一图看懂：控制信号从哪里进入模型，决定了要学多少东西</h2>
+  <div class="prose">
+    <p class="lead">三种把「动作」送进预训练视频生成器的方式，差别不在模块画法，而在<b>信号走哪条路进入视觉流</b>。
+    第一种要新造一条路并从头学它的语义；第二种走原生文本路，但一句话铺满整段视频、没有时间分辨率；
+    H3-World 走的也是文本路，只是把它切成 37 段，每段只允许通向自己的那个 latent。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 00</span><span class="ti">同一个 packed 序列，三条不同的控制入口</span></div>
+    <div class="figbody">
+      <svg viewBox="0 0 900 424" role="img" aria-label="三栏对比：学习式动作模块把向量加到视频 token 上；全局文本提示让一句话扇出到所有 latent；H3-World 让每个 latent 的动作 span 只连到匹配的 latent，latent 之间保持双向注意力">
+        <!-- panel frames -->
+        <rect x="8" y="8" width="284" height="408" rx="14" class="f-surf2 s-rule1" stroke-width="1"/>
+        <rect x="308" y="8" width="284" height="408" rx="14" class="f-surf2 s-rule1" stroke-width="1"/>
+        <rect x="608" y="8" width="284" height="408" rx="14" class="fs-A s-A" stroke-width="1.4"/>
+
+        <!-- titles -->
+        <text x="24" y="34" class="f-ink big">① 新学一条控制通路</text>
+        <text x="24" y="52" class="f-ink3 sml mono">embedding · additive · FiLM · geometry</text>
+        <text x="324" y="34" class="f-ink big">② 全局文本提示（冻结 H3）</text>
+        <text x="324" y="52" class="f-ink3 sml mono">one sentence for the whole clip</text>
+        <text x="624" y="34" class="f-Ai big">③ H3-World：逐 latent 文本 + 单出口路由</text>
+        <text x="624" y="52" class="f-ink3 sml mono">A_k → V_k only · V↔V bidirectional</text>
+
+        <!-- ===== panel 1 ===== -->
+        <!-- static text tokens -->
+        <rect x="24" y="84" width="118" height="30" rx="7" class="fs-X s-X" stroke-width="1.2"/>
+        <text x="83" y="103" text-anchor="middle" class="f-Xi lbl">S 场景描述</text>
+        <!-- action vectors -->
+        <g>
+          <rect x="24" y="148" width="40" height="26" rx="6" class="f-surf s-rule" stroke-width="1"/>
+          <text x="44" y="165" text-anchor="middle" class="f-ink2 sml mono">a₁</text>
+          <rect x="72" y="148" width="40" height="26" rx="6" class="f-surf s-rule" stroke-width="1"/>
+          <text x="92" y="165" text-anchor="middle" class="f-ink2 sml mono">a₂</text>
+          <rect x="120" y="148" width="40" height="26" rx="6" class="f-surf s-rule" stroke-width="1"/>
+          <text x="140" y="165" text-anchor="middle" class="f-ink2 sml mono">a₃</text>
+          <text x="170" y="165" class="f-ink3 sml">0/1 按键向量</text>
+        </g>
+        <!-- new module -->
+        <rect x="24" y="196" width="136" height="34" rx="8" class="fs-B s-B" stroke-width="1.4" stroke-dasharray="5 3"/>
+        <text x="92" y="217" text-anchor="middle" class="f-Bi lbl">新模块：投影 / FiLM</text>
+        <line x1="92" y1="174" x2="92" y2="194" class="s-B" stroke-width="1.4" marker-end="url(#ar-b)"/>
+        <!-- video latents -->
+        <g>
+          <rect x="24" y="276" width="40" height="30" rx="6" class="fs-V s-V" stroke-width="1.2"/>
+          <text x="44" y="295" text-anchor="middle" class="f-Vi sml mono">V₁</text>
+          <rect x="72" y="276" width="40" height="30" rx="6" class="fs-V s-V" stroke-width="1.2"/>
+          <text x="92" y="295" text-anchor="middle" class="f-Vi sml mono">V₂</text>
+          <rect x="120" y="276" width="40" height="30" rx="6" class="fs-V s-V" stroke-width="1.2"/>
+          <text x="140" y="295" text-anchor="middle" class="f-Vi sml mono">V₃</text>
+        </g>
+        <line x1="44" y1="232" x2="44" y2="274" class="s-B" stroke-width="1.2" marker-end="url(#ar-b)"/>
+        <line x1="92" y1="232" x2="92" y2="274" class="s-B" stroke-width="1.2" marker-end="url(#ar-b)"/>
+        <line x1="140" y1="232" x2="140" y2="274" class="s-B" stroke-width="1.2" marker-end="url(#ar-b)"/>
+        <text x="176" y="292" class="f-ink3 sml">h ← h·(1+γ)+β</text>
+        <!-- S to V dashed -->
+        <path d="M83 116 C 83 140, 200 150, 200 276" class="s-X nofill" stroke-width="1" stroke-dasharray="3 3"/>
+        <text x="206" y="252" class="f-ink3 sml">S 只描述场景</text>
+        <text x="24" y="352" class="f-ink2 lbl">控制语义从零学起；</text>
+        <text x="24" y="370" class="f-ink2 lbl">额外参数 + 额外监督，且可能扰动预训练能力。</text>
+        <text x="24" y="402" class="f-Bi sml mono">✗ 不复用语言先验</text>
+
+        <!-- ===== panel 2 ===== -->
+        <rect x="324" y="84" width="252" height="30" rx="7" class="fs-A s-A" stroke-width="1.2"/>
+        <text x="450" y="103" text-anchor="middle" class="f-Ai lbl">S ‖ “…camera first pans left sharply, then right”</text>
+        <g>
+          <rect x="324" y="276" width="40" height="30" rx="6" class="fs-V s-V" stroke-width="1.2"/>
+          <text x="344" y="295" text-anchor="middle" class="f-Vi sml mono">V₁</text>
+          <rect x="372" y="276" width="40" height="30" rx="6" class="fs-V s-V" stroke-width="1.2"/>
+          <text x="392" y="295" text-anchor="middle" class="f-Vi sml mono">V₂</text>
+          <rect x="420" y="276" width="40" height="30" rx="6" class="fs-V s-V" stroke-width="1.2"/>
+          <text x="440" y="295" text-anchor="middle" class="f-Vi sml mono">V₃</text>
+          <rect x="468" y="276" width="40" height="30" rx="6" class="fs-V s-V" stroke-width="1.2"/>
+          <text x="488" y="295" text-anchor="middle" class="f-Vi sml mono">V₄</text>
+          <rect x="516" y="276" width="40" height="30" rx="6" class="fs-V s-V" stroke-width="1.2"/>
+          <text x="536" y="295" text-anchor="middle" class="f-Vi sml mono">V₅</text>
+        </g>
+        <!-- fan out -->
+        <line x1="450" y1="116" x2="344" y2="274" class="s-A" stroke-width="1.1" marker-end="url(#ar-a)"/>
+        <line x1="450" y1="116" x2="392" y2="274" class="s-A" stroke-width="1.1" marker-end="url(#ar-a)"/>
+        <line x1="450" y1="116" x2="440" y2="274" class="s-A" stroke-width="1.1" marker-end="url(#ar-a)"/>
+        <line x1="450" y1="116" x2="488" y2="274" class="s-A" stroke-width="1.1" marker-end="url(#ar-a)"/>
+        <line x1="450" y1="116" x2="536" y2="274" class="s-A" stroke-width="1.1" marker-end="url(#ar-a)"/>
+        <text x="450" y="200" text-anchor="middle" class="f-ink3 sml">同一组文本 token 被所有 latent 读到</text>
+        <text x="450" y="216" text-anchor="middle" class="f-ink3 sml">「先左后右」没有时间坐标</text>
+        <text x="324" y="352" class="f-ink2 lbl">恒定方向能跟（分离度 301.8 vs 300.5），</text>
+        <text x="324" y="370" class="f-ink2 lbl">时变调度不能：两段光流 0.0 / −17.3。</text>
+        <text x="324" y="402" class="f-Bi sml mono">✗ 有语义，无时间绑定</text>
+
+        <!-- ===== panel 3 ===== -->
+        <rect x="624" y="84" width="64" height="30" rx="7" class="fs-X s-X" stroke-width="1.2"/>
+        <text x="656" y="103" text-anchor="middle" class="f-Xi sml mono">S</text>
+        <g>
+          <rect x="700" y="84" width="52" height="30" rx="7" class="fs-A s-A" stroke-width="1.2"/>
+          <text x="726" y="103" text-anchor="middle" class="f-Ai sml mono">A₁</text>
+          <rect x="760" y="84" width="52" height="30" rx="7" class="fs-A s-A" stroke-width="1.2"/>
+          <text x="786" y="103" text-anchor="middle" class="f-Ai sml mono">A₂</text>
+          <rect x="820" y="84" width="52" height="30" rx="7" class="fs-A s-A" stroke-width="1.2"/>
+          <text x="846" y="103" text-anchor="middle" class="f-Ai sml mono">A₃</text>
+        </g>
+        <text x="624" y="140" class="f-ink3 sml">每 latent 一句 · 镜像位置 τ(A_k)=τ(V_k)−Δ</text>
+        <g>
+          <rect x="700" y="276" width="52" height="30" rx="6" class="fs-V s-V" stroke-width="1.2"/>
+          <text x="726" y="295" text-anchor="middle" class="f-Vi sml mono">V₁</text>
+          <rect x="760" y="276" width="52" height="30" rx="6" class="fs-V s-V" stroke-width="1.2"/>
+          <text x="786" y="295" text-anchor="middle" class="f-Vi sml mono">V₂</text>
+          <rect x="820" y="276" width="52" height="30" rx="6" class="fs-V s-V" stroke-width="1.2"/>
+          <text x="846" y="295" text-anchor="middle" class="f-Vi sml mono">V₃</text>
+          <rect x="624" y="276" width="64" height="30" rx="6" class="fs-X s-X" stroke-width="1.2"/>
+          <text x="656" y="295" text-anchor="middle" class="f-Xi sml mono">C₀</text>
+        </g>
+        <!-- one-to-one links -->
+        <line x1="726" y1="116" x2="726" y2="274" class="s-A" stroke-width="2" marker-end="url(#ar-a)"/>
+        <line x1="786" y1="116" x2="786" y2="274" class="s-A" stroke-width="2" marker-end="url(#ar-a)"/>
+        <line x1="846" y1="116" x2="846" y2="274" class="s-A" stroke-width="2" marker-end="url(#ar-a)"/>
+        <!-- blocked cross links -->
+        <line x1="734" y1="118" x2="778" y2="272" class="s-B" stroke-width="1" stroke-dasharray="3 3"/>
+        <line x1="794" y1="118" x2="838" y2="272" class="s-B" stroke-width="1" stroke-dasharray="3 3"/>
+        <line x1="778" y1="118" x2="734" y2="272" class="s-B" stroke-width="1" stroke-dasharray="3 3"/>
+        <line x1="838" y1="118" x2="794" y2="272" class="s-B" stroke-width="1" stroke-dasharray="3 3"/>
+        <text x="756" y="200" text-anchor="middle" class="f-Bi sml">✕</text>
+        <text x="816" y="200" text-anchor="middle" class="f-Bi sml">✕</text>
+        <!-- V-V bidirectional -->
+        <path d="M726 318 C 740 340, 772 340, 786 318" class="s-V nofill" stroke-width="1.4" marker-start="url(#ar-v)" marker-end="url(#ar-v)"/>
+        <path d="M786 318 C 800 340, 832 340, 846 318" class="s-V nofill" stroke-width="1.4" marker-start="url(#ar-v)" marker-end="url(#ar-v)"/>
+        <path d="M726 322 C 750 356, 822 356, 846 322" class="s-V nofill" stroke-width="1" stroke-dasharray="3 3" marker-start="url(#ar-v)" marker-end="url(#ar-v)"/>
+        <text x="750" y="376" text-anchor="middle" class="f-Vi sml">V 之间全双向：效果经 V_k 再向全时程传播</text>
+        <text x="624" y="402" class="f-Oi sml mono">✓ 复用语言先验 ＋ 时间精确 · 只训 LoRA</text>
+      </svg>
+    </div>
+    <figcaption><b>三条入口，只有第三条同时满足「复用预训练语义」和「时间精确」。</b>①是绝大多数交互式世界模型的做法（论文以 ReactiveGWM 的加性偏置和 FiLM 变体作对照，§10）；②是冻结 H3 的零样本能力（§01）；③是 H3-World：文本 span A<sub>k</sub> 作为 key 只能被 V<sub>k</sub> 读到，而 V 之间保持 H3 原生的双向注意力，所以每个动作有且只有一个进入画面的出口——论文称之为 <i>single-egress routing</i>（§06）。</figcaption>
+  </figure>
+
+  <div class="prose">
+    <h3><span class="ix">TL;DR</span>三句话版本</h3>
+    <ol>
+      <li><b>接口</b>：把每个 latent 区间内的键盘状态（8 个键 + 1 个「快速转向」bit）翻译成一句固定语法的英文
+      <code>the man {motion}, camera {camera}</code>；9 种角色子句 × 16 种相机子句，144 个笛卡尔组合里 135 个结构合法，训练集只覆盖 83 个。</li>
+      <li><b>绑定</b>：37 句话各自独立过 H3 的文本编码器和两层 token refiner（refiner 内按 span 分块、互不可见），
+      打包进 H3 原生的 <code>[text | cond | audio | video | pad]</code> 单流序列；每句话的时间坐标是它所对应 latent 的坐标减去一个常数 Δ（<span class="rA">镜像位置</span>）。</li>
+      <li><b>路由 + 适配</b>：一张确定性掩码只切断 A<sub>k</sub> 的「出边」（除 A<sub>k</sub> 自己和 V<sub>k</sub> 以外谁也读不到它）和它对其他 latent 的「入边」；
+      视频 token 之间、静态上下文与视频之间全部保持原样。然后在 50 个 block 的 <code>qkv_proj</code>/<code>out_proj</code> 和 token refiner 上挂 rank-32 LoRA，
+      用 H3 原生去噪目标训 10,000 步。</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============================================================ 01 PRIOR -->
+<section class="sec" id="s-prior">
+  <div class="eyebrow"><span class="n">01</span><span class="t">The observation</span><span class="line"></span></div>
+  <h2>前提观察：冻结的 H3 已经会「听话」，只是不会「守时」</h2>
+  <div class="prose">
+    <p class="lead">整篇论文建立在一个实验观察上：不做任何动作条件训练，直接给 MiniMax-H3 一句「the man walks forward, camera pans left」，
+    它生成的视频里角色和镜头就会大致照做（论文 Fig. 2）。语言已经是一个<b>粗粒度的控制接口</b>——这不是 H3 独有的，
+    而是大规模视频预训练的副产品：字幕里本来就充满了「镜头左摇」「人物后退」这类描述。</p>
+    <p>但「粗粒度」有两层含义，论文用 §4.2 的对照实验把它们拆开了。第一层是<b>方向语义</b>：给一个恒定的相机指令，
+    冻结 H3 和训练后的 H3-World 产生的左右光流分离度几乎相同（301.8 vs 300.5）——也就是说，对于「整段都往左摇」这种指令，<b>适配几乎没有增益</b>，
+    语义本来就在。第二层是<b>时间绑定</b>：如果指令在一段视频中途切换（前 15 个 latent 左摇、后 22 个右摇），
+    冻结 H3 的全局文本表示是被整个时程共享的，它没有任何机制把「先左」绑到前半段、「后右」绑到后半段：前半段光流 0.0，后半段 −17.3，
+    只在后半段有一点向右的响应，「左」完全丢失。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 01</span><span class="ti">同一条调度，两种文本表示：全局一句话 vs 每个 latent 一句话</span></div>
+    <div class="figbody">
+      <svg viewBox="0 0 900 300" role="img" aria-label="时间轴上 37 个视频 latent；上方一条横跨全部的全局提示条，中间是 37 个逐 latent 的动作句子（前 15 个为左摇，后 22 个为右摇），下方标出 124 帧与 latent 分组">
+        <text x="16" y="28" class="f-ink big">全局提示（冻结 H3）</text>
+        <rect x="16" y="40" width="868" height="30" rx="7" class="fs-A s-A" stroke-width="1.2"/>
+        <text x="450" y="59" text-anchor="middle" class="f-Ai lbl">“The man walks forward while the camera first pans left sharply, then pans right sharply.”</text>
+        <text x="16" y="94" class="f-ink3 sml">一组 token，被 37 个 latent 同时读到 →「先」「后」只是词，没有坐标 → 光流 0.0 / −17.3</text>
+
+        <text x="16" y="132" class="f-ink big">逐 latent 提示（H3-World）</text>
+        <g id="f01-chips"></g>
+        <!-- k axis + switch marker drawn by JS -->
+        <text x="16" y="236" class="f-ink3 sml">k = 1 … 15：the man walks forward, camera pans left sharply　｜　k = 16 … 37：… camera pans right sharply → 光流 +52.7 / −106.0</text>
+        <g id="f01-frames"></g>
+        <text x="16" y="292" class="f-ink3 sml">124 帧 @ 24 fps ＝ 37 个 latent；VAE 时间分组 (1,4,4,4,4)：每 17 帧 5 个 latent，切换点 k=16 恰好落在分组边界</text>
+      </svg>
+    </div>
+    <figcaption><b>同样的语义，不同的时间分辨率。</b>论文 §4.2 的三组条件里，这两种表示分别对应「全局提示」和「H3-World」；第三组「逐 latent 提示但 LoRA 置零」几乎完全静止（平均绝对光流 0.003），说明光有分段句子还不够，骨干需要经过适配才会使用这些绑定（§09 有完整数字）。</figcaption>
+  </figure>
+
+  <div class="call key">
+    <div class="hd">论文的核心论断</div>
+    <p>「生成 ≠ 控制」的缺口不在语义，而在<b>时间绑定</b>。既然 H3 已经理解「pans left」，那么要做的不是教它一套新的动作词表，而是给每句话一个<b>时间坐标</b>和一个<b>唯一的作用范围</b>，再让它学会遵守这两样东西。这就是后面 §05（镜像位置）与 §06（单出口路由）两个组件的全部动机。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 02 H3 -->
+<section class="sec" id="s-h3">
+  <div class="eyebrow"><span class="n">02</span><span class="t">The backbone</span><span class="line"></span></div>
+  <h2>骨架：MiniMax-H3 的 packed 单流序列，以及它为什么让「局部文本条件」变难</h2>
+  <div class="prose">
+    <p class="lead">要理解 H3-World 为什么需要一张掩码，先要看清 H3 的架构与 Wan/HunyuanVideo 这类模型的一个关键差异：
+    <b>H3 没有独立的文本 cross-attention 层</b>。文本、首帧、音频、视频 token 被打包成一条序列，在每个 block 里做<b>单流自注意力</b>。
+    Incantation 那种「文本只 cross-attend 到当前帧」的局部化手法在这里没有落脚点——文本和视频 token 是平等的序列成员，谁都能看谁。</p>
+  </div>
+
+  <div class="nota">
+    <div><span class="sym">θ, φ</span><span class="dsc">θ：冻结的 H3 预训练参数（33B）；φ：为动作控制新学的轻量参数（LoRA，65.6M）</span></div>
+    <div><span class="sym">I<sub>0</sub>, s</span><span class="dsc">初始观测（首帧图像）与静态语义条件（场景描述句）</span></div>
+    <div><span class="sym">a<sub>1:K</sub></span><span class="dsc">按 latent 调度的动作序列，K = 37；a<sub>k</sub> = (u<sub>k</sub>, c<sub>k</sub>) 角色子句 × 相机子句</span></div>
+    <div><span class="sym">V<sub>1:K</sub></span><span class="dsc">K 个视频 latent 区间，每个 390 行 token（832×480 时）；训练时是加噪的目标 latent</span></div>
+    <div><span class="sym">A<sub>k</sub></span><span class="dsc">第 k 句动作 prompt 经 H3 编码器与 token refiner 后的文本 span</span></div>
+    <div><span class="sym">S, C<sub>0</sub></span><span class="dsc">S：多模态编码器联合处理 (s, I<sub>0</sub>) 得到的静态语义 token；C<sub>0</sub>：视觉 VAE 编码 I<sub>0</sub> 得到的首帧条件</span></div>
+    <div><span class="sym">τ(·)</span><span class="dsc">H3 位置编码使用的时间坐标（三维位置 (t, h, w) 中的 t）</span></div>
+    <div><span class="sym">P</span><span class="dsc">被掩码的 padding token（补齐到整个数据集共享的固定长度）</span></div>
+  </div>
+
+  <div class="eqwrap acc-X">
+    <div class="eqrow">
+      <div class="body"><div class="eqn"><i>V̂</i><sub>1:K</sub> <span class="op">∼</span> <i>p</i><sub>θ,φ</sub>( <i>V</i><sub>1:K</sub> | <i>I</i><sub>0</sub>, <i>s</i>, <i>a</i><sub>1:K</sub> )</div></div>
+      <div class="eqno">(1)</div>
+    </div>
+    <div class="eqcap">任务定义：给定首帧、场景句和逐 latent 动作序列，联合去噪整个未来时程。注意这是<b>双向、一次生成整段</b>的模型：没有因果 rollout，没有跨段状态——这决定了它在本列表里属于「控制」而非「系统」（§13）。</div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 02</span><span class="ti">H3 的 packed 序列布局：谁占了多少行，动作句子塞在哪里</span></div>
+    <div class="figbody">
+      <svg viewBox="0 0 900 330" role="img" aria-label="上：124 帧按 (1,4,4,4,4) 分组映射到 37 个 latent；下：packed 序列的比例条，视频段占约 88%，文本段里嵌着 37 个动作 span">
+        <!-- (a) frames to latents -->
+        <text x="16" y="24" class="f-ink big">(a) 124 帧 → 37 个 latent：VAE 时间分组 (1, 4, 4, 4, 4)</text>
+        <g id="f02-frames"></g>
+        <text x="16" y="122" class="f-ink3 sml">latent_t = ((F − 5) ÷ 17) × 5 + 2　→　F = 124 ⇒ 37；243 ⇒ 72；481 ⇒ 142（F 必须是 17k+5）。每组的第一个 latent 只代表 1 帧，其余各代表 4 帧。</text>
+
+        <!-- (b) packed sequence -->
+        <text x="16" y="158" class="f-ink big">(b) 一条序列：[ text | cond | audio | video | pad ]　（832×480，124 帧，行数按比例）</text>
+        <!-- bar: total width 868 for 16448 rows -> 0.05278 px/row -->
+        <!-- text ~950 rows -> 50 ; cond 390 -> 21 ; audio 414 -> 22 ; video 14430 -> 762 ; pad ~264 -> 13 -->
+        <rect x="16" y="172" width="50" height="34" class="fs-A s-A" stroke-width="1.2"/>
+        <rect x="66" y="172" width="21" height="34" class="fs-X s-X" stroke-width="1.2"/>
+        <rect x="87" y="172" width="22" height="34" class="f-surf3 s-rule" stroke-width="1"/>
+        <rect x="109" y="172" width="762" height="34" class="fs-V s-V" stroke-width="1.2"/>
+        <rect x="871" y="172" width="13" height="34" class="hatch s-rule" stroke-width="1"/>
+        <text x="490" y="194" text-anchor="middle" class="f-Vi lbl">video：37 × 390 = 14,430 行（≈ 88%）</text>
+        <text x="41" y="222" text-anchor="middle" class="f-Ai sml mono">text</text>
+        <text x="76" y="222" text-anchor="middle" class="f-Xi sml mono">C₀</text>
+        <text x="98" y="236" text-anchor="middle" class="f-ink3 sml mono">audio</text>
+        <text x="878" y="222" text-anchor="middle" class="f-ink3 sml mono">pad</text>
+        <text x="66" y="248" text-anchor="start" class="f-ink3 sml">cond 首帧 390 行 · audio 207×2 = 414 行 · pad 补到全数据集共享长度（补丁注释里的实际形状：16,448 行 × 56 头 × 128 维）</text>
+
+        <!-- zoom of text segment -->
+        <path d="M16 206 L16 262 M66 206 L884 262" class="s-rule nofill" stroke-width="1" stroke-dasharray="3 3"/>
+        <rect x="16" y="262" width="868" height="34" class="f-surf2 s-rule1" stroke-width="1"/>
+        <rect x="16" y="262" width="60" height="34" class="fs-X s-X" stroke-width="1"/>
+        <rect x="76" y="262" width="240" height="34" class="fs-X s-X" stroke-width="1"/>
+        <rect x="316" y="262" width="70" height="34" class="fs-X s-X" stroke-width="1"/>
+        <g id="f02-spans"></g>
+        <text x="46" y="283" text-anchor="middle" class="f-Xi sml mono">prefix</text>
+        <text x="196" y="283" text-anchor="middle" class="f-Xi sml">首帧的 392 行图像 token</text>
+        <text x="351" y="283" text-anchor="middle" class="f-Xi sml">场景句 s</text>
+        <text x="640" y="283" text-anchor="middle" class="f-Ai sml">A₁ A₂ … A₃₇：37 句动作 prompt，各自独立编码</text>
+        <text x="16" y="318" class="f-ink3 sml">text 段 = 「head」(静态 S：前缀 + 首帧图像 token + 场景句，训练与推理都用同一个 presentation_fl2va 调用重编码) ＋ 37 个动作 span（同一句话只编码一次、复用嵌入）</text>
+      </svg>
+    </div>
+    <figcaption><b>视频 token 占了序列的近九成，文本段只有一小条——但控制全从这一小条里进。</b>(a) 的分组规则决定了「一个 latent 代表几帧」，也决定了 §03 里键盘状态如何按区间聚合；(b) 的行数来自代码（<code>inject_abot_text.py</code>：frame_rows = (H/32)(W/32) = 390，IMAGE_PAD_ROWS = 392，AUDIO_ROWS = 414），文本段与 pad 的宽度是按代码逻辑的估算，论文未给出精确值。</figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card xx">
+      <h5>50 个 Omni Transformer Block</h5>
+      <p>每个 block：RMSNorm → 按模态分组的 AdaLN 调制 → <b>单流自注意力</b>（QKV 投影 + 3D RoPE + 输出投影）→ 门控残差 → FFN。视频与音频有各自的时间步（flow-matching，t = 1 − timestep/1000）。</p>
+      <p class="mono">hidden 5376 · 56 heads × 128 · 补丁注释</p>
+    </div>
+    <div class="card xx">
+      <h5>文本侧：多模态编码器 + 2 层 Token Refiner</h5>
+      <p>H3 编码器同时吃场景句和首帧图像（图像 token 混在文本段里，392 行）。之后一个两层 refiner 再处理文本段——refiner 内部<b>不用 RoPE</b>，它只决定「谁能看谁」，不影响 DiT 的位置编码。</p>
+      <p class="mono">refiner_cu 分段是 §05 的关键改动之一</p>
+    </div>
+    <div class="card xx">
+      <h5>位置：三维坐标 (t, h, w)</h5>
+      <p>文本行的 t 是 0…text_len−1，视频 latent 的 t 排在文本之后——预训练里「文本永远在视频之前」是一个不变量，H3-World 的镜像位置设计刻意保住了它（§05）。</p>
+      <p class="mono">g[text] = arange(text_len)</p>
+    </div>
+  </div>
+
+  <div class="call note">
+    <div class="hd">与 Incantation 的架构差异（论文 §2.2 特意点出）</div>
+    <p>Incantation 也是「每个 latent 帧一句自然语言」，但它建在 Wan 上：有独立的文本 cross-attention 层，且是因果自回归生成——所以它可以直接规定「文本只 cross-attend 当前含噪帧」。H3-World 面对的是一条<b>双向、单流</b>的序列：动作句子和视频 latent 在同一个 self-attention 里互相可见，模型一次性去噪整个未来。论文说自己的关注点是「在这条双向序列里给语言动作做时间接地（temporal grounding）」，路由掩码（§06）就是为这个架构量身做的。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 03 INTERFACE -->
+<section class="sec" id="s-iface">
+  <div class="eyebrow"><span class="n">03</span><span class="t">Semantic action interface</span><span class="line"></span></div>
+  <h2>语义动作接口：9 个比特 → 一句固定语法的英文</h2>
+  <div class="prose">
+    <p class="lead">外部控制先被表示成<b>离散控制态</b>：每个视频 latent 区间一个状态，含 8 个录制下来的角色/相机按键，加 1 个二值的「相机快速」标志。
+    然后一张手写规则表（不是 VLM）把它翻成一句话。整个翻译是这 9 个 bit 的<b>纯函数</b>，训练和推理走完全同一段代码。</p>
+  </div>
+
+  <div class="eqwrap acc-A">
+    <div class="eqrow">
+      <div class="body"><div class="eqn"><i>a</i><sub>k</sub> <span class="op">=</span> (<i>u</i><sub>k</sub>, <i>c</i><sub>k</sub>),　<i>u</i><sub>k</sub> ∈ 𝒰 (9 种角色子句),　<i>c</i><sub>k</sub> ∈ 𝒞 (16 种相机子句)</div>
+      <div class="eqn" style="margin-top:6px"><i>p</i><sub>k</sub> <span class="op">=</span> <i>T</i><sub>char</sub>(<i>u</i><sub>k</sub>) ∥ <i>T</i><sub>cam</sub>(<i>c</i><sub>k</sub>)</div></div>
+      <div class="eqno">(2)(3)</div>
+    </div>
+    <div class="eqcap">动作空间被<b>显式分解</b>为角色控制 × 相机控制，两个子句用共同的语法拼接（∥）。这个分解保留了原始动作空间的因子结构——它是 §11「组合泛化」得以成立的前提：一个联合指令即使没在训练里出现过，它的两个子句也各自出现过。</div>
+  </div>
+
+  <h3><span class="ix">从帧到 latent</span>控制态是怎么聚合出来的</h3>
+  <div class="prose">
+    <p>录像里的按键是逐帧的（ABot 数据集原生 30 fps，切片时按「每 5 帧丢 1 帧」重采样到 24 fps，视频与动作用同一份帧索引切割，天然对齐）。一个 latent 代表 1 帧或 4 帧（§02），
+    所以要把区间内的帧状态压成一个 latent 级状态：<b>按键取 amax</b>（区间内任一帧按下即视为按下——按键是脉冲，平均会把它稀释成没意义的 0.25），
+    <b>连续的相机通道取和</b>（位移是可加量）。取 amax 的副作用是一个 4 帧窗口里先按 W 再按 S 会两个 bit 同时为 1，
+    所以在造句前先<b>抵消互斥键</b>：W↔S、A↔D、J↔L、I↔K 同时出现则一起清零，避免生成「walks forward and walks backward」这种自相矛盾的句子。</p>
+  </div>
+
+  <h3><span class="ix">规则表</span>两个子句的语法</h3>
+  <div class="grid2">
+    <div class="card vv">
+      <h5>角色子句 T<sub>char</sub>（9 种）</h5>
+      <p>按 <span class="kbd">W</span><span class="kbd">S</span><span class="kbd">A</span><span class="kbd">D</span> 固定顺序取词：walks forward / walks backward / strafes left / strafes right，用 “and” 连接；没有任何键 → <b>stands still</b>。</p>
+      <p>互斥抵消后可能的组合：静止 1 种、单键 4 种、前/后 × 左/右 4 种 = 9。固定顺序保证同一按键组合永远产生同一字符串——这是「按句子去重、复用嵌入」能成立的前提。</p>
+    </div>
+    <div class="card xx">
+      <h5>相机子句 T<sub>cam</sub>（16 种）</h5>
+      <p><span class="kbd">J</span>/<span class="kbd">L</span> → pans left / right，速度词由 <span class="kbd">F</span> 决定：<b>sharply</b> 或 <b>slowly</b>；<span class="kbd">I</span> → tilts down，<span class="kbd">K</span> → tilts up（代码按 COLMAP 实测符号校准：K 的 d_pitch 95% 为正）。pan 与 tilt 用 “and” 连接。</p>
+      <p>都没有时看角色是否在动：动 → <b>follows him</b>，不动 → <b>holds steady</b>。计数：(4 pan) × (1 + 2 tilt) = 12，+ 2 tilt 单独，+ follows + holds = 16。</p>
+    </div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 03 · 可交互</span><span class="ti">按键 → 9-bit 控制态 → 句子：<code>action_script.py</code> 的规则表</span></div>
+    <div class="kbsim">
+      <div>
+        <div class="kbpad" id="kbpad">
+          <div class="kbgroup">
+            <div class="lb">角色 · 移动</div>
+            <button class="key ghost" type="button" tabindex="-1">·</button>
+            <button class="key" type="button" data-k="W">W</button>
+            <button class="key ghost" type="button" tabindex="-1">·</button>
+            <button class="key" type="button" data-k="A">A</button>
+            <button class="key" type="button" data-k="S">S</button>
+            <button class="key" type="button" data-k="D">D</button>
+          </div>
+          <div class="kbgroup">
+            <div class="lb">相机 · 旋转</div>
+            <button class="key ghost" type="button" tabindex="-1">·</button>
+            <button class="key cam" type="button" data-k="I">I</button>
+            <button class="key ghost" type="button" tabindex="-1">·</button>
+            <button class="key cam" type="button" data-k="J">J</button>
+            <button class="key cam" type="button" data-k="K">K</button>
+            <button class="key cam" type="button" data-k="L">L</button>
+          </div>
+          <div class="kbgroup" style="grid-template-columns:46px">
+            <div class="lb">速度 bit</div>
+            <button class="key fast" type="button" data-k="F">F</button>
+          </div>
+        </div>
+        <div class="ctl" style="margin-top:14px">
+          <label>预设</label>
+          <button class="mini" type="button" data-preset="">still</button>
+          <button class="mini" type="button" data-preset="W">forward</button>
+          <button class="mini" type="button" data-preset="S,A">back + left</button>
+          <button class="mini" type="button" data-preset="L,F">pan-right-fast</button>
+          <button class="mini" type="button" data-preset="W,J,K">fwd + pan-left + tilt-up</button>
+          <button class="mini" type="button" data-preset="W,S,J">W+S 冲突</button>
+        </div>
+      </div>
+      <div class="kbout" id="kbout">
+        <div class="row"><span class="k">keys9</span><span class="v bits" id="kb-bits">0 0 0 0 0 0 0 0 · 0</span></div>
+        <div class="row"><span class="k">抵消互斥</span><span class="v" id="kb-cancel">—</span></div>
+        <div class="row"><span class="k">角色子句</span><span class="v" id="kb-motion">stands still</span></div>
+        <div class="row"><span class="k">相机子句</span><span class="v" id="kb-camera">holds steady</span></div>
+        <div class="row"><span class="k">句子 p<sub>k</sub></span><span class="v sentence" id="kb-sentence"></span></div>
+        <div class="row"><span class="k">训练集覆盖</span><span class="v" id="kb-seen"></span></div>
+      </div>
+    </div>
+    <figcaption><b>句子是 9 个 bit 的纯函数，因此训练与推理必然一致。</b>keys9 顺序为 W A S D I J K L · F（代码 <code>KEYS9 = ACTIVE_KEY_COLS + ["F"]</code>）。「训练集覆盖」一栏查的是 §04 那张 9×16 表（数值取自论文 Fig. 4，四舍五入）。推理脚本内置的 11 个 preset 只覆盖单键组合；组合指令由用户自行拼 keys9。</figcaption>
+  </figure>
+
+  <h3><span class="ix">第 9 个 bit</span>为什么速度标志要从 COLMAP 里算，而不是从按键里读</h3>
+  <div class="prose">
+    <p>论文只说了一句「训练时速度标志由估计的相机 yaw 速率导出，推理时由用户直接指定」。代码注释把理由写得更透：这是整套方案里<b>唯一能真正增加信息</b>的地方。
+    ABot 的录像只记录了 8 个键，方向可以从 IJKL 读出（命中率 0.85–0.97），但<b>速度读不出来</b>——按住 J 的步里 66% 是慢摇、34% 是快摇，接近抛硬币，
+    按住时长也分不出干净的档位，组内相关 ICC≈0.475 说明它也不是每段录像的常数。如果三个子句全都由同样的 8 bit 推出，那这套「英文」本质上就是<b>用英语拼写的 one-hot</b>——和一个 Action-Index 基线没有区别。
+    加上这一个由 COLMAP 位姿实测得来的 bit，按句子做多数表决的查表准确率从 0.700 提到 0.871。</p>
+    <p>具体规则（代码 <code>keys9()</code>）：F = 1 当且仅当某个 pan 键按下，且该 latent 的<b>每帧 yaw 速率</b> |d_yaw| ≥ <code>YAW_SHARP</code> = 0.225（按 ROT_SCALE = 4 缩放后的单位，约合 0.9°/帧）。
+    「每帧速率」这个细节很要紧：因为分组是 (1,4,4,4,4)，每组第一个 latent 只含 1 帧，它的角度和天然是邻居的 1/4，直接对求和阈值化会把 8/37 的步误判成「相机慢下来了」；
+    代码先除以帧数，再把窄 bin 与下一个 bin 合并估计，避免 A-B-A 抖动。</p>
+  </div>
+
+  <div class="call code">
+    <div class="hd">代码里比论文多出来的两个细节</div>
+    <p><b>「drifts」被丢掉了。</b>角色不动但相机自己在平移（数据里 1.7% 的步）本来可以写成 “camera drifts left”，但它无法从按键推出、推理时也无法产生，所以统一折叠成 “holds steady”。代价是训练标签里少了一种真实存在的相机行为。</p>
+    <p><b>主语锚点。</b>句子里的 “the man” 需要一个先行词：代码用场景 prompt（数据集自带的 caption；推理时用户自写）提供文字指代，而角色长什么样交给首帧的图像 token。这解释了为什么论文 Fig. 3 里写的是 “The character”、正文例句是 “the man”——它只是个稳定的指代符号，不承载外观信息。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 04 ACTION SPACE -->
+<section class="sec" id="s-space">
+  <div class="eyebrow"><span class="n">04</span><span class="t">Action-space coverage</span><span class="line"></span></div>
+  <h2>动作空间：144 个笛卡尔组合，135 个合法，训练只见过 83 个</h2>
+  <div class="prose">
+    <p class="lead">9 × 16 = 144 种角色×相机组合，其中 9 种在结构上不可能出现（「stands still + follows him」1 种，「在动 + holds steady」8 种），剩下 135 种合法。
+    291,264 条训练 prompt（7,872 clips × 37）只覆盖了其中 83 种，<b>52 种合法组合从未出现</b>；而且分布极度不均——最常见的 20 种占 71.4%，40 种占 95.4%。</p>
+  </div>
+
+  <div class="eqwrap acc-A">
+    <div class="eqrow">
+      <div class="body"><div class="eqn">𝒜<sub>train</sub> <span class="op">⊊</span> 𝒜<sub>valid</sub> <span class="op">⊊</span> 𝒰 × 𝒞</div></div>
+      <div class="eqno">(4)</div>
+    </div>
+    <div class="eqcap">论文把这个稀疏、不均衡的覆盖当作<b>评估组合控制的天然实验场</b>：一个联合指令可能不在训练集里，但它的角色子句和相机子句各自在别的组合里出现过。§11 就选了这样一格来测。</div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 04 · 可交互</span><span class="ti">训练集里每种「角色子句 × 相机子句」出现的 prompt 数（重绘自论文 Fig. 4）</span></div>
+    <div class="figbody" id="f04wrap"></div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--surf3)"></i>× 结构上不可用</span>
+      <span><i class="sw" style="background:var(--surf2)"></i>— 合法但未见（52 格）</span>
+      <span><i class="sw" style="background:var(--act-soft)"></i>1–2</span>
+      <span><i class="sw" style="background:color-mix(in srgb,var(--act) 45%,var(--surf))"></i>3–704</span>
+      <span><i class="sw" style="background:color-mix(in srgb,var(--act) 70%,var(--surf))"></i>0.7k–2.9k</span>
+      <span><i class="sw" style="background:var(--act)"></i>2.9k–6.1k</span>
+      <span><i class="sw" style="background:color-mix(in srgb,var(--act) 70%,#000)"></i>≥ 6.1k</span>
+    </div>
+    <figcaption><b>把鼠标悬停在格子上可看数值与句子。</b>几条肉眼可见的结构：① 「stands still」一行约 13.2 万条、占全部 prompt 的 45%——近一半训练信号是「人不动、镜头动」；② 角色在动时相机几乎只会「follows him」或纯 pan，<b>带 tilt 的移动只有个位数样本</b>；③ pan+tilt 组合基本只在角色静止时出现。数值为论文图中的四舍五入值（例如 21.9k），行列合计 ≈ 291k，与论文的 291,264 一致。</figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">我的读解</div>
+    <p>这张表比论文正文更能说明「组合泛化」到底泛化了什么：所有 52 个未见格子集中在右半边（tilt 与 pan+tilt 列）的移动行里。所以 §11 测的「前进 + pan–tilt」并不是随便挑的一格，而是整个未见区域的典型代表——角色子句在 “follows him”/pan 列里学得很充分，相机子句在 “stands still” 行里学得很充分，模型要做的是把两个各自学好的子句拼到一起。这类泛化对语言接口是天然的，对离散动作索引则在结构上不可能。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 05 BINDING -->
+<section class="sec" id="s-bind">
+  <div class="eyebrow"><span class="n">05</span><span class="t">Latent-aligned temporal binding</span><span class="line"></span></div>
+  <h2>Latent 对齐的时间绑定：每个 latent 一句话、独立编码、镜像位置</h2>
+  <div class="prose">
+    <p class="lead">一条视频级 prompt 给整段 clip 一个共享的语义条件，当动作在时程中途变化时它没有时间分辨率。H3-World 给<b>每个视频 latent 区间分配一句独立的动作 prompt</b>，
+    并在三个地方保住「第 k 句 ↔ 第 k 个 latent」的对应：编码时互不串扰、位置上偏移恒定、注意力上只有一个出口（下一节）。</p>
+  </div>
+
+  <div class="eqwrap acc-A">
+    <div class="eqrow">
+      <div class="body"><div class="eqn"><i>A</i><sub>k</sub> <span class="op">=</span> <i>R</i>( <i>E</i>(<i>p</i><sub>k</sub>) )</div></div>
+      <div class="eqno">(5)</div>
+    </div>
+    <div class="eqcap"><i>E</i>：共享的 H3 文本编码器；<i>R</i>：共享的两层 token refiner，对调度的 prompt 用<b>块对角注意力</b>——同一 span 内的 token 双向通信，不同 span 当作独立序列处理。所有动作句共用一个表示空间，但各自的时间身份在进入视频骨干前不会被混掉。</div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 05</span><span class="ti">三条编码路径如何汇成一条 packed 序列</span></div>
+    <div class="figbody">
+      <svg viewBox="0 0 900 360" role="img" aria-label="首帧 I0 走两条路：与场景句一起过多模态 H3 编码器得到静态 token S，过视觉 VAE 得到首帧条件 C0；37 句动作 prompt 各自独立过 H3 编码器与按 span 分块的两层 refiner 得到 A_k；目标视频过 VAE 得到 V_k；所有 token 打包成 [S; A; C0; V; P]">
+        <!-- inputs column -->
+        <rect x="16" y="40" width="120" height="52" rx="9" class="f-surf2 s-rule" stroke-width="1.2"/>
+        <text x="76" y="62" text-anchor="middle" class="f-ink lbl">场景句 s</text>
+        <text x="76" y="80" text-anchor="middle" class="f-ink3 sml">“A man in a yellow…”</text>
+        <rect x="16" y="112" width="120" height="52" rx="9" class="f-surf2 s-rule" stroke-width="1.2"/>
+        <text x="76" y="134" text-anchor="middle" class="f-ink lbl">首帧 I₀</text>
+        <text x="76" y="152" text-anchor="middle" class="f-ink3 sml">832 × 480</text>
+        <rect x="16" y="184" width="120" height="70" rx="9" class="fs-A s-A" stroke-width="1.2"/>
+        <text x="76" y="206" text-anchor="middle" class="f-Ai lbl">p₁ … p₃₇</text>
+        <text x="76" y="224" text-anchor="middle" class="f-ink3 sml">37 句动作 prompt</text>
+        <text x="76" y="242" text-anchor="middle" class="f-ink3 sml">相同句子只编一次</text>
+        <rect x="16" y="274" width="120" height="52" rx="9" class="fs-V s-V" stroke-width="1.2"/>
+        <text x="76" y="296" text-anchor="middle" class="f-Vi lbl">目标视频（训练）</text>
+        <text x="76" y="314" text-anchor="middle" class="f-ink3 sml">124 帧 → 加噪</text>
+
+        <!-- encoders column -->
+        <rect x="220" y="60" width="200" height="60" rx="10" class="fs-X s-X" stroke-width="1.3"/>
+        <text x="320" y="84" text-anchor="middle" class="f-Xi lbl">多模态 H3 编码器</text>
+        <text x="320" y="102" text-anchor="middle" class="f-ink3 sml">presentation_fl2va(s, I₀)</text>
+        <rect x="220" y="140" width="200" height="40" rx="10" class="fs-X s-X" stroke-width="1.3"/>
+        <text x="320" y="165" text-anchor="middle" class="f-Xi lbl">视觉 VAE 编码器</text>
+        <rect x="220" y="196" width="200" height="40" rx="10" class="fs-A s-A" stroke-width="1.3"/>
+        <text x="320" y="221" text-anchor="middle" class="f-Ai lbl">H3 编码器 × 37（逐句、独立）</text>
+        <rect x="220" y="282" width="200" height="40" rx="10" class="fs-V s-V" stroke-width="1.3"/>
+        <text x="320" y="307" text-anchor="middle" class="f-Vi lbl">视觉 VAE 编码器</text>
+
+        <!-- arrows inputs -> encoders -->
+        <line x1="136" y1="66" x2="218" y2="80" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+        <line x1="136" y1="132" x2="218" y2="98" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+        <line x1="136" y1="144" x2="218" y2="160" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+        <line x1="136" y1="219" x2="218" y2="216" class="s-A" stroke-width="1.2" marker-end="url(#ar-a)"/>
+        <line x1="136" y1="300" x2="218" y2="302" class="s-V" stroke-width="1.2" marker-end="url(#ar-v)"/>
+
+        <!-- refiner -->
+        <rect x="452" y="40" width="248" height="216" rx="12" class="f-surf2 s-rule" stroke-width="1.2"/>
+        <text x="576" y="64" text-anchor="middle" class="f-ink lbl">2-Layer Token Refiner</text>
+        <text x="576" y="80" text-anchor="middle" class="f-ink3 sml">块对角注意力 · 无 RoPE</text>
+        <!-- head block -->
+        <rect x="468" y="94" width="216" height="34" rx="7" class="fs-X s-X" stroke-width="1"/>
+        <text x="576" y="115" text-anchor="middle" class="f-Xi sml">head：S（含 392 行图像 token）</text>
+        <!-- span blocks -->
+        <rect x="468" y="138" width="64" height="28" rx="6" class="fs-A s-A" stroke-width="1"/>
+        <rect x="544" y="138" width="64" height="28" rx="6" class="fs-A s-A" stroke-width="1"/>
+        <rect x="620" y="138" width="64" height="28" rx="6" class="fs-A s-A" stroke-width="1"/>
+        <text x="500" y="156" text-anchor="middle" class="f-Ai sml mono">A₁</text>
+        <text x="576" y="156" text-anchor="middle" class="f-Ai sml mono">A₂</text>
+        <text x="652" y="156" text-anchor="middle" class="f-Ai sml mono">…A₃₇</text>
+        <text x="576" y="190" text-anchor="middle" class="f-ink3 sml">refiner_cu = [0, head_end, end(A₁), …, end(A₃₇)]</text>
+        <text x="576" y="208" text-anchor="middle" class="f-ink3 sml">每句只看自己；head 只看 head</text>
+        <text x="576" y="240" text-anchor="middle" class="f-Hi sml mono">LoRA 也挂在这里</text>
+        <line x1="420" y1="90" x2="450" y2="100" class="s-X" stroke-width="1.2" marker-end="url(#ar-x)"/>
+        <line x1="420" y1="216" x2="450" y2="160" class="s-A" stroke-width="1.2" marker-end="url(#ar-a)"/>
+
+        <!-- packed sequence -->
+        <rect x="720" y="40" width="164" height="286" rx="12" class="f-surf2 s-rule" stroke-width="1.2"/>
+        <text x="802" y="64" text-anchor="middle" class="f-ink lbl">packed 序列 X</text>
+        <rect x="736" y="80" width="132" height="26" rx="6" class="fs-X s-X" stroke-width="1"/>
+        <text x="802" y="97" text-anchor="middle" class="f-Xi sml mono">S</text>
+        <rect x="736" y="112" width="132" height="40" rx="6" class="fs-A s-A" stroke-width="1"/>
+        <text x="802" y="136" text-anchor="middle" class="f-Ai sml mono">A₁ … A₃₇</text>
+        <rect x="736" y="158" width="132" height="26" rx="6" class="fs-X s-X" stroke-width="1"/>
+        <text x="802" y="175" text-anchor="middle" class="f-Xi sml mono">C₀（390 行）</text>
+        <rect x="736" y="190" width="132" height="22" rx="6" class="f-surf3 s-rule" stroke-width="1"/>
+        <text x="802" y="205" text-anchor="middle" class="f-ink3 sml mono">audio（原样保留）</text>
+        <rect x="736" y="218" width="132" height="66" rx="6" class="fs-V s-V" stroke-width="1"/>
+        <text x="802" y="245" text-anchor="middle" class="f-Vi sml mono">V₁ … V₃₇</text>
+        <text x="802" y="263" text-anchor="middle" class="f-Vi sml">37 × 390 行</text>
+        <rect x="736" y="290" width="132" height="22" rx="6" class="hatch s-rule" stroke-width="1"/>
+        <text x="802" y="305" text-anchor="middle" class="f-ink3 sml mono">P（pad）</text>
+        <line x1="700" y1="111" x2="734" y2="93" class="s-X" stroke-width="1.2" marker-end="url(#ar-x)"/>
+        <line x1="700" y1="152" x2="734" y2="132" class="s-A" stroke-width="1.2" marker-end="url(#ar-a)"/>
+        <line x1="420" y1="160" x2="734" y2="171" class="s-X" stroke-width="1.2" marker-end="url(#ar-x)"/>
+        <line x1="420" y1="302" x2="734" y2="251" class="s-V" stroke-width="1.2" marker-end="url(#ar-v)"/>
+        <text x="16" y="350" class="f-ink3 sml">推理时 V 段是纯噪声起点；训练时是加噪的目标 latent，损失是 H3 原生的去噪目标，不加任何新项。</text>
+      </svg>
+    </div>
+    <figcaption><b>首帧走两条路，动作句走一条互不串扰的路。</b>多模态编码器把首帧当作 392 行图像 token 与场景句一起编码，给出<span class="rX">粗语义 S</span>；VAE 给出保留细节外观的<span class="rX">C<sub>0</sub></span>。37 句动作各自独立编码（代码注释：这既是「同句同嵌入」去重的前提，也是流式推理的硬要求——未来动作在推理时未知，不可能整段一起编码），再进入按 span 分段的 refiner。</figcaption>
+  </figure>
+
+  <div class="eqwrap acc-A">
+    <div class="eqrow">
+      <div class="body"><div class="eqn"><i>X</i> <span class="op">=</span> [ <i>S</i>; <i>A</i><sub>1</sub>; …; <i>A</i><sub>K</sub>; <i>C</i><sub>0</sub>; <i>V</i><sub>1</sub>; …; <i>V</i><sub>K</sub>; <i>P</i> ]</div></div>
+      <div class="eqno">(6)</div>
+    </div>
+    <div class="eqcap">每个动作 span A<sub>k</sub> 按 H3 VAE 原生的时间划分与第 k 个目标 latent 配对。论文的记号省略了音频段；代码里的真实布局是 <code>[text | cond | audio | video | pad]</code>，A 段位于 text 段尾部。</div>
+  </div>
+
+  <h3><span class="ix">Eq. 7</span><span>镜像位置：每一对 (A<sub>k</sub>, V<sub>k</sub>) 的相对时间偏移都相同</span></h3>
+  <div class="eqwrap acc-A">
+    <div class="eqrow">
+      <div class="body"><div class="eqn">τ(<i>A</i><sub>k</sub>) <span class="op">=</span> τ(<i>V</i><sub>k</sub>) − Δ,　Δ &gt; 0</div></div>
+      <div class="eqno">(7)</div>
+    </div>
+    <div class="eqcap">动作 span 的时间坐标沿用它所匹配 latent 的时间顺序，但整体停留在文本侧的位置区间内。这样既保住了预训练 H3「文本在视频之前」的顺序不变量，又给每一对 (A<sub>k</sub>, V<sub>k</sub>) 一个<b>一致的对齐线索</b>：绑定信号是一条统一的规则——「往回看固定的距离」。</div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 05b · 可交互</span><span class="ti">时间坐标轴上的镜像布局（悬停任一 A<sub>k</sub> 或 V<sub>k</sub>）</span></div>
+    <div class="figbody">
+      <svg viewBox="0 0 900 250" role="img" aria-label="时间坐标 t 轴：head 文本占 0 到 head_end；动作 span 块整体放在 origin 到 text_len−1；首帧条件与视频 latent 从 text_len 起按同一网格排布；每个 A_k 到 V_k 的箭头长度相同" id="f05b">
+        <!-- axis -->
+        <line x1="20" y1="150" x2="884" y2="150" class="s-rule" stroke-width="1.2" marker-end="url(#ar-i)"/>
+        <text x="884" y="176" text-anchor="end" class="f-ink2 lbl">时间坐标 t（位置编码的第 1 维）→</text>
+        <!-- head -->
+        <rect x="20" y="118" width="150" height="32" rx="6" class="fs-X s-X" stroke-width="1.1"/>
+        <text x="95" y="139" text-anchor="middle" class="f-Xi sml">head：t = 0 … head_end−1</text>
+        <!-- A block -->
+        <rect x="200" y="118" width="300" height="32" rx="6" class="f-surf2 s-A" stroke-width="1.1" stroke-dasharray="4 3"/>
+        <g id="f05b-A"></g>
+        <text x="200" y="110" class="f-Ai sml mono">origin = text_len − s_K − 1</text>
+        <text x="500" y="110" text-anchor="end" class="f-Ai sml mono">text_len − 1</text>
+        <!-- C0 + V block -->
+        <rect x="540" y="118" width="16" height="32" rx="4" class="fs-X s-X" stroke-width="1.1"/>
+        <text x="548" y="176" text-anchor="middle" class="f-Xi sml mono">C₀</text>
+        <rect x="540" y="118" width="300" height="32" rx="6" class="f-surf2 s-V" stroke-width="1.1" stroke-dasharray="4 3"/>
+        <g id="f05b-V"></g>
+        <text x="540" y="110" class="f-Vi sml mono">text_len</text>
+        <text x="840" y="110" text-anchor="end" class="f-Vi sml mono">text_len + s_K</text>
+        <g id="f05b-arc"></g>
+        <text x="450" y="40" text-anchor="middle" class="f-ink2 lbl" id="f05b-msg">悬停查看：τ(V_k) − τ(A_k) 对每个 k 都等于同一个 Δ</text>
+        <text x="20" y="214" class="f-ink3 sml">代码（_build_packed_fl2va）：s_k 是视频侧的时间网格；g[A_k, t] = origin + s_k。若 origin &lt; head_end 直接报错——动作块不能与 head 的位置区间重叠。</text>
+        <text x="20" y="234" class="f-ink3 sml">图中 K = 8 仅为示意；真实 K = 37。「减 1」是为了让最后一句不和首帧条件落在同一个 t 上。</text>
+      </svg>
+    </div>
+    <figcaption><b>为什么不直接把 A<sub>k</sub> 放到 V<sub>k</sub> 自己的 t 上？</b>代码注释给了答案：那样文本与视频的 t 偏移会同时出现 0 和正数，是预训练从未见过的配置；镜像布局让偏移恒为一个负常数，是一条<b>统一的规则</b>。但位置只是软偏置——自注意力对置换等变，序列里多了 37 段文本，模型并不知道哪段归哪帧；真正在结构上保证归属的是下一节的掩码。</figcaption>
+  </figure>
+
+  <div class="call code">
+    <div class="hd">代码里的一个工程约束：共享 padding 长度</div>
+    <p>每个 clip 的 37 句话 token 数不同，text_len 就不同；而 FlexAttention 是 <code>torch.compile</code> 过的，序列长度一变就重编译，几步之内就会撞上 Dynamo 的重编译上限。所以 <code>inject_abot_text.py</code> 先扫一遍全数据集，把有效长度统一补到一个共享值（按 64 对齐），pad 行是零向量，由掩码屏蔽（只允许看自己，否则 softmax 没有可见 key 会产生 NaN）。推理时要传同一个 <code>action_pad_used_to</code>。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 06 ROUTING -->
+<section class="sec" id="s-route">
+  <div class="eyebrow"><span class="n">06</span><span class="t">Single-egress routing</span><span class="line"></span></div>
+  <h2>单出口路由：让 A<sub>k</sub> 有且只有一个进入画面的出口——V<sub>k</sub></h2>
+  <div class="prose">
+    <p class="lead">时间对齐本身不限制信息流。在双向自注意力里，A<sub>k</sub> 仍然可以直接和任何一个不匹配的 latent 通信，也可以先把内容传给 S 或别的 A<sub>j</sub>，再由它们转交给全部视频 token。
+    H3-World 为每条 packed 序列构造一张<b>确定性的路由掩码</b>，只做一件事：把 A<sub>k</sub> 的<b>出边</b>限制到 A<sub>k</sub> 自身和 V<sub>k</sub>。</p>
+  </div>
+
+  <div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(330px,1fr))">
+    <div class="card aa">
+      <h5>A<sub>k</sub> 作为 key（谁能读它）</h5>
+      <p>只有<b>同一 span 内的 token</b>（句子需要内部注意自己）和<b>匹配的 V<sub>k</sub></b>。静态 token、首帧条件、音频、其他动作 span、不匹配的 latent 一律读不到。</p>
+      <p class="mono">leak_out = (kv∈A) ∧ ¬same_ann ∧ ¬v_reads_own</p>
+    </div>
+    <div class="card aa">
+      <h5>A<sub>k</sub> 作为 query（它能读谁）</h5>
+      <p>保留对<b>静态上下文 S、首帧条件 C<sub>0</sub>、音频、自身、V<sub>k</sub></b> 的访问；对其他动作 span 和不匹配 latent 的访问被屏蔽。入边保留，是为了让动作句子有场景接地——这些信息是「流进」A<sub>k</sub>，不构成 A<sub>j</sub>→V<sub>k</sub> 的旁路。</p>
+      <p class="mono">leak_in = (q∈A_k) ∧ (kv∈V_j) ∧ j≠k</p>
+    </div>
+    <div class="card vv">
+      <h5>视频 token 之间：完全不动</h5>
+      <p>所有 V span 保留 H3 原生的双向注意力。A<sub>k</sub> 的视觉效果先经 V<sub>k</sub> 进入视频流，再通过 video-to-video 注意力向全时程传播——运动连续性与场景一致性靠的就是这条通路。</p>
+    </div>
+    <div class="card oo">
+      <h5>性质：V<sub>k</sub> 是 A<sub>k</sub> 通往序列其余部分的割点</h5>
+      <p>出边被封后，任何从 A<sub>k</sub> 到 V<sub>j</sub>（j≠k）的路径都必须先经过 V<sub>k</sub>。「A<sub>k</sub> 不读其他 A<sub>j</sub>」是必要条件——否则 A<sub>j</sub> 的内容会先流进 A<sub>k</sub>，V<sub>k</sub> 读 A<sub>k</sub> 时就顺带读到了 A<sub>j</sub>，割点性质立刻失效。</p>
+    </div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 06 · 可交互</span><span class="ti">路由掩码：行 = query，列 = key（K = 3 示意；悬停格子看规则，点击行首看该 query 的可读集合）</span></div>
+    <div class="ctl">
+      <label>掩码</label>
+      <div class="seg" id="maskMode">
+        <button type="button" data-mode="directed" class="on">H3-World 有向掩码</button>
+        <button type="button" data-mode="symmetric">旧版对称绑定（docstring）</button>
+        <button type="button" data-mode="none">无掩码（原生 H3）</button>
+      </div>
+    </div>
+    <div class="maskwrap">
+      <div class="figbody narrow" id="f06wrap"></div>
+      <div class="maskinfo" id="f06info">
+        <h5>怎么读这张表</h5>
+        <p>绿 = 允许；紫 = A<sub>k</sub> ↔ V<sub>k</sub> 的唯一直连；斜纹 = 被掩码切断；灰 = pad 只看自己。列 “Au” 是 H3 原生的音频 token，论文记号里省略了，代码里存在。</p>
+        <span class="rule">allowed(q, kv) = (q == kv) ∨ (real ∧ ¬leak_out ∧ ¬leak_in)</span>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--ok-soft);border-color:var(--ok)"></i>允许（与原生 H3 相同）</span>
+      <span><i class="sw" style="background:var(--act);border-color:var(--act)"></i>A<sub>k</sub> ↔ V<sub>k</sub> 直连</span>
+      <span><i class="sw" style="background:var(--act-soft);border-color:var(--act)"></i>span 内部自注意</span>
+      <span><i class="sw" style="background:repeating-linear-gradient(45deg,var(--surf2),var(--surf2) 2px,var(--rule2) 2px,var(--rule2) 3px)"></i>被切断</span>
+      <span><i class="sw" style="background:var(--surf3)"></i>pad</span>
+    </div>
+    <figcaption><b>只封出边，不封入边，所以叫「有向」。</b>切到「旧版对称绑定」可以看到早期版本的差别：它只切断 A<sub>k</sub> 与不匹配 V<sub>j</sub> 之间的双向边，S、C<sub>0</sub>、音频和其他 A<sub>j</sub> 仍能读 A<sub>k</sub>，割点性质不成立（这是代码 docstring 里描述的语义，与最终 mask_mod 的实现不一致，推测是旧版残留）。切到「无掩码」就是原生 H3：37 段文本对每个 latent 都同样可见，即 §01 的失败模式。</figcaption>
+  </figure>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 06b</span><span class="ti">信息流视角：动作效果的唯一入口与之后的扩散</span></div>
+    <div class="figbody">
+      <svg viewBox="0 0 900 250" role="img" aria-label="图：S 与 C0 向所有 A 和 V 提供上下文；每个 A_k 只有一条到 V_k 的出边；V 之间全连接；从 A_1 到 V_3 的唯一路径经过 V_1">
+        <!-- context nodes -->
+        <rect x="24" y="96" width="80" height="34" rx="9" class="fs-X s-X" stroke-width="1.2"/>
+        <text x="64" y="118" text-anchor="middle" class="f-Xi lbl mono">S · C₀</text>
+        <!-- A nodes -->
+        <rect x="220" y="30" width="70" height="32" rx="9" class="fs-A s-A" stroke-width="1.2"/>
+        <text x="255" y="51" text-anchor="middle" class="f-Ai lbl mono">A₁</text>
+        <rect x="220" y="108" width="70" height="32" rx="9" class="fs-A s-A" stroke-width="1.2"/>
+        <text x="255" y="129" text-anchor="middle" class="f-Ai lbl mono">A₂</text>
+        <rect x="220" y="186" width="70" height="32" rx="9" class="fs-A s-A" stroke-width="1.2"/>
+        <text x="255" y="207" text-anchor="middle" class="f-Ai lbl mono">A₃</text>
+        <!-- V nodes -->
+        <rect x="520" y="30" width="70" height="32" rx="9" class="fs-V s-V" stroke-width="1.2"/>
+        <text x="555" y="51" text-anchor="middle" class="f-Vi lbl mono">V₁</text>
+        <rect x="520" y="108" width="70" height="32" rx="9" class="fs-V s-V" stroke-width="1.2"/>
+        <text x="555" y="129" text-anchor="middle" class="f-Vi lbl mono">V₂</text>
+        <rect x="520" y="186" width="70" height="32" rx="9" class="fs-V s-V" stroke-width="1.2"/>
+        <text x="555" y="207" text-anchor="middle" class="f-Vi lbl mono">V₃</text>
+        <!-- context -> A (incoming to A, allowed) -->
+        <line x1="104" y1="108" x2="218" y2="50" class="s-X" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#ar-x)"/>
+        <line x1="104" y1="113" x2="218" y2="124" class="s-X" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#ar-x)"/>
+        <line x1="104" y1="118" x2="218" y2="198" class="s-X" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#ar-x)"/>
+        <!-- context -> V (allowed) via a curved path under -->
+        <path d="M64 130 C 64 236, 470 236, 520 214" class="s-X nofill" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#ar-x)"/>
+        <text x="270" y="244" text-anchor="middle" class="f-ink3 sml">S、C₀ 对所有 A 与 V 可见（入边）；但没有任何一条从 A 指回 S 的边</text>
+        <!-- A_k -> V_k single egress -->
+        <line x1="290" y1="46" x2="518" y2="46" class="s-A" stroke-width="2.2" marker-end="url(#ar-a)"/>
+        <line x1="290" y1="124" x2="518" y2="124" class="s-A" stroke-width="2.2" marker-end="url(#ar-a)"/>
+        <line x1="290" y1="202" x2="518" y2="202" class="s-A" stroke-width="2.2" marker-end="url(#ar-a)"/>
+        <text x="404" y="38" text-anchor="middle" class="f-Ai sml">唯一出口</text>
+        <!-- blocked A->A -->
+        <path d="M232 62 C 200 80, 200 100, 232 108" class="s-B nofill" stroke-width="1" stroke-dasharray="3 3"/>
+        <text x="196" y="90" text-anchor="middle" class="f-Bi sml">✕</text>
+        <path d="M232 140 C 200 158, 200 178, 232 186" class="s-B nofill" stroke-width="1" stroke-dasharray="3 3"/>
+        <text x="196" y="168" text-anchor="middle" class="f-Bi sml">✕</text>
+        <!-- blocked A1->V2 -->
+        <line x1="290" y1="56" x2="518" y2="112" class="s-B" stroke-width="1" stroke-dasharray="3 3"/>
+        <text x="420" y="78" text-anchor="middle" class="f-Bi sml">✕ A₁→V₂</text>
+        <!-- V-V bidirectional -->
+        <line x1="555" y1="62" x2="555" y2="106" class="s-V" stroke-width="1.6" marker-start="url(#ar-v)" marker-end="url(#ar-v)"/>
+        <line x1="555" y1="140" x2="555" y2="184" class="s-V" stroke-width="1.6" marker-start="url(#ar-v)" marker-end="url(#ar-v)"/>
+        <path d="M590 46 C 640 60, 640 188, 590 202" class="s-V nofill" stroke-width="1.6" marker-start="url(#ar-v)" marker-end="url(#ar-v)"/>
+        <text x="555" y="238" text-anchor="middle" class="f-Vi sml">V 之间全双向</text>
+        <!-- path callout -->
+        <rect x="708" y="40" width="180" height="150" rx="10" class="f-surf2 s-rule1" stroke-width="1"/>
+        <text x="798" y="64" text-anchor="middle" class="f-ink lbl">A₁ 的效果怎样到 V₃</text>
+        <text x="798" y="90" text-anchor="middle" class="f-ink2 sml">A₁ → V₁（直连）</text>
+        <text x="798" y="110" text-anchor="middle" class="f-ink2 sml">V₁ → V₃（视频注意力）</text>
+        <text x="798" y="140" text-anchor="middle" class="f-Bi sml">✗ A₁ → V₃</text>
+        <text x="798" y="158" text-anchor="middle" class="f-Bi sml">✗ A₁ → S → V₃</text>
+        <text x="798" y="176" text-anchor="middle" class="f-Bi sml">✗ A₁ → A₃ → V₃</text>
+      </svg>
+    </div>
+    <figcaption><b>「单出口」不等于「隔离」。</b>动作仍然可以影响整段视频——只是必须先在 V<sub>k</sub> 落地，再由视频 token 之间的注意力把它传出去。这既保证了每个调度动作有唯一的直接入口（时间精确），又保留了全时程的信息交换（运动连续、场景一致）。</figcaption>
+  </figure>
+
+  <details>
+    <summary>代码走读：<code>_build_action_block_masks</code> 与 <code>mask_mod</code>（含两个踩过的坑）</summary>
+    <div class="dc">
+      <pre class="code"><span class="c"># 每个 packed 序列一张掩码，每次前向构造一次，50 层共用；FlexAttention 的索引是 segment 局部的</span>
+ann[lo:hi] = k          <span class="c"># 第 k 句的行 → k；其余 -1</span>
+frm[v0 : v0+T·fr] = (row - v0) // fr   <span class="c"># 视频行 → 所属 latent；其余 -1</span>
+
+def mask_mod(b, h, q, kv):
+    aq, akv, fq, fkv = ann[q], ann[kv], frm[q], frm[kv]
+    same_ann    = (aq &gt;= 0) &amp; (akv &gt;= 0) &amp; (aq == akv)      <span class="c"># 句子内部</span>
+    v_reads_own = (fq &gt;= 0) &amp; (akv &gt;= 0) &amp; (fq == akv)      <span class="c"># V_k 读 A_k</span>
+    <span class="a">leak_out</span>    = (akv &gt;= 0) &amp; ~same_ann &amp; ~v_reads_own     <span class="c"># A_k 作为 key，只许上面两种 query 读</span>
+    <span class="a">leak_in</span>     = (aq &gt;= 0) &amp; (fkv &gt;= 0) &amp; (aq != fkv)       <span class="c"># A_k 作为 query，不读别的 latent</span>
+    real = (q &lt; lim) &amp; (kv &lt; lim)                            <span class="c"># pad 之外</span>
+    return (q == kv) | (real &amp; ~(leak_out | leak_in))</pre>
+      <p><b>坑 1：闭包被烤进内核。</b>flex_attention 编译后 <code>mask_mod</code> 会被内联，若每个样本新建闭包/张量，Dynamo 要么触发重编译上限，要么更糟——第一个样本的掩码被复用到之后所有样本上，且<b>不报错</b>（作者用交换两个探针的顺序验证过）。解法：按 (device, segment start, length) 持久化缓冲区，每个样本原地覆写内容。</p>
+      <p><b>坑 2：refiner 的上游泄漏。</b>refiner 原本把整个文本段当一篇文档做两层全注意力，A<sub>k</sub> 进 DiT 之前就已经混进了其他句子的信息，DiT 侧再严的掩码也关不上。所以 refiner 也按 span 分段（§05）。</p>
+      <p><b>坑 3：静默用错框架。</b>editable 安装的 DiffSynth 会注册一个 MetaPathFinder，无论 PYTHONPATH 指向哪，<code>import diffsynth</code> 都解析到未打补丁的包。第一次训练跑了 5.2 小时（1,997 步）全程用的是旧掩码，日志、loss、吞吐看起来一切正常。之后训练与推理脚本都加了 preflight 检查（源码里必须能找到 <code>leak_out</code>）。</p>
+    </div>
+  </details>
+</section>
+
+<!-- ============================================================ 07 LORA -->
+<section class="sec" id="s-lora">
+  <div class="eyebrow"><span class="n">07</span><span class="t">Low-rank adaptation</span><span class="line"></span></div>
+  <h2>LoRA：0.199% 的参数，学的是「沿着允许的路怎么走」</h2>
+  <div class="prose">
+    <p class="lead">路由掩码和 span 划分不引入任何可学习参数；语义在预训练里已经有了；剩下要学的只是「在允许的注意力路径上，动作句子应当如何改变视频 latent」。
+    这被交给 rank-32 的 LoRA：挂在 H3 自注意力的 <code>qkv_proj</code> 与 <code>out_proj</code> 上，以及两层 token refiner 上。骨干、H3 编码器、VAE 和其余全部冻结，训练目标是 H3 原生的去噪损失，没有任何新增损失项。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 07</span><span class="ti">一个 H3 block 内部：哪里是冻结的，哪里挂了 LoRA，掩码在哪里生效</span></div>
+    <div class="figbody">
+      <svg viewBox="0 0 900 280" role="img" aria-label="H3 自注意力块的数据流：输入经 RMSNorm 与 AdaLN 后进入冻结的 QKV 投影并叠加 LoRA 分支，再经 3D RoPE 与带路由掩码的注意力，输出投影同样叠加 LoRA，门控残差后进入冻结的 FFN">
+        <!-- flow boxes -->
+        <rect x="16" y="90" width="90" height="44" rx="9" class="f-surf2 s-rule" stroke-width="1.1"/>
+        <text x="61" y="109" text-anchor="middle" class="f-ink2 sml">RMSNorm</text>
+        <text x="61" y="124" text-anchor="middle" class="f-ink2 sml">+ AdaLN</text>
+        <rect x="136" y="70" width="120" height="84" rx="10" class="fs-X s-X" stroke-width="1.2"/>
+        <text x="196" y="98" text-anchor="middle" class="f-Xi lbl">QKV Proj.</text>
+        <text x="196" y="116" text-anchor="middle" class="f-ink3 sml">❄ 冻结</text>
+        <text x="196" y="138" text-anchor="middle" class="f-ink3 sml mono">5376 → 3×7168</text>
+        <!-- lora branch on qkv -->
+        <rect x="136" y="180" width="120" height="44" rx="10" class="fs-H s-H" stroke-width="1.4"/>
+        <text x="196" y="199" text-anchor="middle" class="f-Hi lbl">LoRA r = 32</text>
+        <text x="196" y="215" text-anchor="middle" class="f-ink3 sml mono">B·A · 860k 参数</text>
+        <path d="M120 112 C 120 202, 128 202, 136 202" class="s-H nofill" stroke-width="1.3"/>
+        <line x1="256" y1="202" x2="280" y2="202" class="s-H" stroke-width="1.3"/>
+        <path d="M280 202 L280 112" class="s-H nofill" stroke-width="1.3" marker-end="url(#ar-h)"/>
+        <circle cx="280" cy="112" r="8" class="f-surf s-rule" stroke-width="1.2"/>
+        <text x="280" y="116" text-anchor="middle" class="f-ink2 sml">+</text>
+        <!-- rope + attention -->
+        <rect x="312" y="70" width="80" height="84" rx="10" class="f-surf2 s-rule" stroke-width="1.1"/>
+        <text x="352" y="106" text-anchor="middle" class="f-ink2 sml">3D RoPE</text>
+        <text x="352" y="122" text-anchor="middle" class="f-ink3 sml">(t, h, w)</text>
+        <rect x="416" y="56" width="170" height="112" rx="12" class="fs-A s-A" stroke-width="1.4"/>
+        <text x="501" y="84" text-anchor="middle" class="f-Ai lbl">Masked Self-Attention</text>
+        <text x="501" y="104" text-anchor="middle" class="f-ink3 sml">FlexAttention · 56 头</text>
+        <text x="501" y="124" text-anchor="middle" class="f-ink3 sml">路由掩码在此生效</text>
+        <text x="501" y="146" text-anchor="middle" class="f-ink3 sml">（每层同一张，无参数）</text>
+        <!-- out proj -->
+        <rect x="614" y="70" width="110" height="84" rx="10" class="fs-X s-X" stroke-width="1.2"/>
+        <text x="669" y="98" text-anchor="middle" class="f-Xi lbl">Out Proj.</text>
+        <text x="669" y="116" text-anchor="middle" class="f-ink3 sml">❄ 冻结</text>
+        <text x="669" y="138" text-anchor="middle" class="f-ink3 sml mono">7168 → 5376</text>
+        <rect x="614" y="180" width="110" height="44" rx="10" class="fs-H s-H" stroke-width="1.4"/>
+        <text x="669" y="199" text-anchor="middle" class="f-Hi lbl">LoRA r = 32</text>
+        <text x="669" y="215" text-anchor="middle" class="f-ink3 sml mono">401k 参数</text>
+        <path d="M600 112 C 600 202, 606 202, 614 202" class="s-H nofill" stroke-width="1.3"/>
+        <line x1="724" y1="202" x2="748" y2="202" class="s-H" stroke-width="1.3"/>
+        <path d="M748 202 L748 112" class="s-H nofill" stroke-width="1.3" marker-end="url(#ar-h)"/>
+        <circle cx="748" cy="112" r="8" class="f-surf s-rule" stroke-width="1.2"/>
+        <text x="748" y="116" text-anchor="middle" class="f-ink2 sml">+</text>
+        <!-- gate + ffn -->
+        <rect x="782" y="70" width="102" height="84" rx="10" class="f-surf2 s-rule" stroke-width="1.1"/>
+        <text x="833" y="100" text-anchor="middle" class="f-ink2 sml">门控残差</text>
+        <text x="833" y="118" text-anchor="middle" class="f-ink2 sml">→ FFN</text>
+        <text x="833" y="136" text-anchor="middle" class="f-ink3 sml">❄ 冻结</text>
+        <!-- main flow arrows -->
+        <line x1="106" y1="112" x2="134" y2="112" class="s-ink3" stroke-width="1.3" marker-end="url(#ar-i)"/>
+        <line x1="288" y1="112" x2="310" y2="112" class="s-ink3" stroke-width="1.3" marker-end="url(#ar-i)"/>
+        <line x1="392" y1="112" x2="414" y2="112" class="s-ink3" stroke-width="1.3" marker-end="url(#ar-i)"/>
+        <line x1="586" y1="112" x2="612" y2="112" class="s-ink3" stroke-width="1.3" marker-end="url(#ar-i)"/>
+        <line x1="756" y1="112" x2="780" y2="112" class="s-ink3" stroke-width="1.3" marker-end="url(#ar-i)"/>
+        <text x="16" y="36" class="f-ink big">× 50 个 block（另加 2 层 token refiner 同样挂 LoRA）</text>
+        <text x="16" y="256" class="f-ink3 sml">每层 LoRA：32×(5376+21504) + 32×(7168+5376) = 1,261,568；× 52 层 = 65,601,536 ≈ 65.6M，与 README 数字一致（维度取自补丁注释，我的核算）。</text>
+      </svg>
+    </div>
+    <figcaption><b>只有金色分支是可训练的。</b>LoRA 挂在注意力投影上而非 FFN 上，与「学的是路由之后的交互」这一设定一致：动作句子如何被 V<sub>k</sub> 读取（Q/K）、读到之后写回什么（V/Out）。掩码本身和 span 划分不含参数。</figcaption>
+  </figure>
+
+  <div class="tblwrap">
+    <table>
+      <caption>谁冻结、谁训练（论文 §3.4 + train.sh）</caption>
+      <thead><tr><th>组件</th><th>状态</th><th>备注</th></tr></thead>
+      <tbody>
+        <tr><td>H3 DiT 骨干（50 block，33B）</td><td><span class="pill">❄ 冻结</span></td><td class="l">权重 θ 不动；LoRA 以 hotload 方式挂上</td></tr>
+        <tr class="ours"><td>self-attention 的 qkv_proj / out_proj</td><td><span class="pill hot">LoRA r=32</span></td><td class="l"><code>--lora_target_modules qkv_proj,out_proj --lora_rank 32</code></td></tr>
+        <tr class="ours"><td>2 层 token refiner</td><td><span class="pill hot">LoRA r=32</span></td><td class="l">论文明确列出；refiner 内同名投影被同一规则命中</td></tr>
+        <tr><td>H3 多模态文本编码器</td><td><span class="pill">❄ 冻结</span></td><td class="l">动作句与 head 都用它编码，离线缓存</td></tr>
+        <tr><td>视觉 VAE / 音频 VAE</td><td><span class="pill">❄ 冻结</span></td><td class="l">latent 在 stage-1 缓存，改标注方案不必重跑</td></tr>
+        <tr><td>路由掩码、span 划分、镜像位置</td><td><span class="pill ok">无参数</span></td><td class="l">确定性构造</td></tr>
+        <tr><td>损失</td><td><span class="pill ok">原生</span></td><td class="l">H3 的去噪目标（flow matching），无新增项</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ 08 RECIPE -->
+<section class="sec" id="s-recipe">
+  <div class="eyebrow"><span class="n">08</span><span class="t">Training &amp; inference recipe</span><span class="line"></span></div>
+  <h2>训练与推理配方逐条走读：从 ABot 的 tar 包到一段 5.2 秒的视频</h2>
+  <div class="prose">
+    <p class="lead">论文 §4.1 只给了三行设置；仓库把整条流水线拆成了六个脚本。下面按数据流顺序走一遍，标出每一步论文没说、但决定结果的选择。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 08</span><span class="ti">六步流水线：两次离线缓存把「改标注方案」和「重跑 VAE」解耦</span></div>
+    <div class="figbody">
+      <svg viewBox="0 0 900 250" role="img" aria-label="流水线：ABot 数据集 → 切 clip 并划分 → stage-1 缓存 latent → 注入逐 latent 动作文本 → LoRA 训练 → 推理；箭头标注每步产出">
+        <!-- boxes -->
+        <rect x="10" y="60" width="130" height="86" rx="11" class="f-surf2 s-rule" stroke-width="1.1"/>
+        <text x="75" y="84" text-anchor="middle" class="f-ink lbl">① ABot-World-Explorer</text>
+        <text x="75" y="102" text-anchor="middle" class="f-ink3 sml">annotations.tar：</text>
+        <text x="75" y="116" text-anchor="middle" class="f-ink3 sml">action.json · caption.json</text>
+        <text x="75" y="130" text-anchor="middle" class="f-ink3 sml">COLMAP images.txt</text>
+
+        <rect x="160" y="60" width="130" height="86" rx="11" class="f-surf2 s-rule" stroke-width="1.1"/>
+        <text x="225" y="84" text-anchor="middle" class="f-ink lbl">② build_abot_clips</text>
+        <text x="225" y="102" text-anchor="middle" class="f-ink3 sml">30→24 fps（每 5 帧丢 1）</text>
+        <text x="225" y="116" text-anchor="middle" class="f-ink3 sml">124 帧 · 832×480 中心裁</text>
+        <text x="225" y="130" text-anchor="middle" class="f-ink3 sml">7,872 / 128 划分</text>
+
+        <rect x="310" y="60" width="130" height="86" rx="11" class="fs-X s-X" stroke-width="1.2"/>
+        <text x="375" y="84" text-anchor="middle" class="f-Xi lbl">③ cache.sh</text>
+        <text x="375" y="102" text-anchor="middle" class="f-ink3 sml">sft:data_process</text>
+        <text x="375" y="116" text-anchor="middle" class="f-ink3 sml">视频/音频 VAE latent</text>
+        <text x="375" y="130" text-anchor="middle" class="f-ink3 sml">+ 文本 head 嵌入</text>
+
+        <rect x="460" y="60" width="130" height="86" rx="11" class="fs-A s-A" stroke-width="1.2"/>
+        <text x="525" y="84" text-anchor="middle" class="f-Ai lbl">④ inject_abot_text</text>
+        <text x="525" y="102" text-anchor="middle" class="f-ink3 sml">键 → 37 句 → 去重编码</text>
+        <text x="525" y="116" text-anchor="middle" class="f-ink3 sml">镜像 span · 共享 pad 长度</text>
+        <text x="525" y="130" text-anchor="middle" class="f-ink3 sml">改写 prompt_embeds/packed</text>
+
+        <rect x="610" y="60" width="130" height="86" rx="11" class="fs-H s-H" stroke-width="1.2"/>
+        <text x="675" y="84" text-anchor="middle" class="f-Hi lbl">⑤ train.sh</text>
+        <text x="675" y="102" text-anchor="middle" class="f-ink3 sml">4 GPU · lr 1e-4</text>
+        <text x="675" y="116" text-anchor="middle" class="f-ink3 sml">LoRA r=32 · 梯度检查点</text>
+        <text x="675" y="130" text-anchor="middle" class="f-ink3 sml">每 2,000 步存；发布 step-10000</text>
+
+        <rect x="760" y="60" width="130" height="86" rx="11" class="fs-V s-V" stroke-width="1.2"/>
+        <text x="825" y="84" text-anchor="middle" class="f-Vi lbl">⑥ infer.py</text>
+        <text x="825" y="102" text-anchor="middle" class="f-ink3 sml">首帧 + 场景句 + preset</text>
+        <text x="825" y="116" text-anchor="middle" class="f-ink3 sml">50 步 · cfg 1.0 · seed</text>
+        <text x="825" y="130" text-anchor="middle" class="f-ink3 sml">mp4 + 32 kHz 音频</text>
+
+        <line x1="140" y1="103" x2="158" y2="103" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+        <line x1="290" y1="103" x2="308" y2="103" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+        <line x1="440" y1="103" x2="458" y2="103" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+        <line x1="590" y1="103" x2="608" y2="103" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+        <line x1="740" y1="103" x2="758" y2="103" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+
+        <!-- annotations below -->
+        <path d="M375 146 L375 176" class="s-X nofill" stroke-width="1" stroke-dasharray="3 3"/>
+        <path d="M525 146 L525 176" class="s-A nofill" stroke-width="1" stroke-dasharray="3 3"/>
+        <rect x="300" y="176" width="290" height="58" rx="9" class="f-surf2 s-rule1" stroke-width="1"/>
+        <text x="445" y="198" text-anchor="middle" class="f-ink2 sml">③ 与 ④ 解耦：视频/音频 latent 不动，只改写文本段。</text>
+        <text x="445" y="214" text-anchor="middle" class="f-ink2 sml">head 每次都从源数据重编码（0.25 s/clip），保证与推理同一调用；④ 幂等，可重跑。</text>
+        <text x="445" y="228" text-anchor="middle" class="f-ink3 sml">同时删除旧的 action_cond：不再走 FiLM/加性注入</text>
+        <path d="M120 146 C 120 200, 200 200, 225 200" class="s-rule nofill" stroke-width="1" stroke-dasharray="3 3"/>
+        <text x="60" y="174" class="f-ink3 sml">按键 amax、位姿求和</text>
+        <text x="60" y="190" class="f-ink3 sml">yaw 速率 → F bit</text>
+        <text x="60" y="206" class="f-ink3 sml">平移按 episode 归一化</text>
+        <text x="60" y="222" class="f-ink3 sml">（COLMAP 尺度任意，跨度 33×）</text>
+      </svg>
+    </div>
+    <figcaption><b>两级缓存是这套方案能快速迭代的原因。</b>stage-1 只算一次 VAE；标注规则改了只需重跑 ④。推理脚本会先做 preflight——检查加载的 DiffSynth 里确实有 <code>leak_out</code>（有向掩码）和 <code>action_text_spans_local</code>（逐 latent 打包），否则拒绝运行。</figcaption>
+  </figure>
+
+  <div class="algo">
+    <div class="ah">推理一次到底发生了什么（infer.py → pipeline 单元链）</div>
+    <ol>
+      <li><b>keys9</b> ← 用户 preset 展开成 [37, 9] 的 0/1 矩阵（整段恒定；组合指令自行拼接）</li>
+      <li><b>script</b> ← <span class="cm">annotate_from_keys9(keys9)</span>：37 句 “the man …, camera …”</li>
+      <li><b>negative_script</b> ← null_script：37 句 “the man stands still, camera holds steady”<span class="cm">（零动作参考，cfg&gt;1 时才用）</span></li>
+      <li>加载 H3 的 text_encoder / transformer / video VAE / audio VAE；hotload LoRA，校验成对数量</li>
+      <li>首帧：缩放覆盖 + 中心裁到 832×480（与训练切片同一配方，避免拉伸）</li>
+      <li>PromptEmbedder：head = <span class="cm">presentation_fl2va(scene_prompt, 首帧)</span>；每个<b>不同</b>句子独立过 presentation_t2va 一次，按顺序拼在 head 之后，记录 spans</li>
+      <li>PackedSequenceBuilder：布局 [text | cond | audio | video | pad]，A 段位置 t = origin + s_k，写出 action_text_rows / action_video_start / action_frame_rows</li>
+      <li>model_fn：refiner_cu = [0, head_end, end(A₁)…end(A₃₇)]；DiT 每次前向构造一张路由掩码，50 层共用</li>
+      <li>50 步 flow-matching 去噪（视频、音频各自的调度器），得到 <span class="cv">124 帧 @ 24 fps</span> 与同步音频</li>
+      <li class="cmt">num_frames 必须是 17k+5：124 (5.2 s) / 243 (10.1 s) / 481 (20.0 s)；论文只报告了 124</li>
+    </ol>
+    <div class="an">默认 <code>--cfg-scale 1.0</code>，即不做 classifier-free guidance；「零动作参考」负提示的设计意图是让 cfg 放大的只是动作引起的差异而非泛泛的 prompt 遵循，但论文实验是否用了 cfg&gt;1 没有说明。</div>
+  </div>
+
+  <div class="tblwrap">
+    <table>
+      <caption>论文 §4.1 与仓库脚本给出的超参</caption>
+      <thead><tr><th>项目</th><th>值</th><th>出处</th></tr></thead>
+      <tbody>
+        <tr><td>训练 / 测试 clip</td><td>7,872 / 128</td><td class="l">论文；split_abot_metadata.py 固定划分</td></tr>
+        <tr><td>每段 clip</td><td>124 帧 · 24 fps · 832×480</td><td class="l">论文</td></tr>
+        <tr><td>每段动作 prompt 数</td><td>37</td><td class="l">论文；= latent_t</td></tr>
+        <tr><td>LoRA</td><td>rank 32 · qkv_proj + out_proj</td><td class="l">论文 + train.sh</td></tr>
+        <tr><td>学习率 / 步数</td><td>1e-4 · 10,000 步</td><td class="l">论文；train.sh 名义 20 epoch，发布 ckpt 为 step-10000</td></tr>
+        <tr><td>GPU</td><td>4 卡（默认 0–3）</td><td class="l">train.sh；显存型号未公开，补丁注释提到 H200</td></tr>
+        <tr><td>推理</td><td>124 帧 · 50 步</td><td class="l">论文；infer.py 默认 cfg 1.0、seed 0</td></tr>
+        <tr><td>对照的预训练 H3</td><td>同设置、LoRA 关闭</td><td class="l">论文</td></tr>
+      </tbody>
+    </table>
+    <div class="tnote">7,872 × 20 epoch ÷ 4 卡（若每卡 batch 1，脚本未显式设置）≈ 39,360 步，而发布的是 step-10000（≈ 5 个 epoch）。论文正文的「10,000 optimization steps」与此一致；名义 20 epoch 只是脚本上限。</div>
+  </div>
+</section>
+
+<!-- ============================================================ 09 EXP 1 -->
+<section class="sec" id="s-exp1">
+  <div class="eyebrow"><span class="n">09</span><span class="t">Experiment · prior vs adaptation</span><span class="line"></span></div>
+  <h2>实验一：预训练先验能做什么，适配又补上了什么</h2>
+  <div class="prose">
+    <p class="lead">这是全文唯一带定量数字的实验，设计得很干净。固定首帧、seed 和采样配置，相机调度为：<b>前 15 个 latent 急速左摇，后 22 个急速右摇</b>（角色同时前进），切换点落在 latent 分组边界。
+    同一段视频里反转方向，是为了排除「场景漂移」的干扰——如果模型只是随机漂，两段不会给出方向相反的光流。</p>
+    <p>三个条件：(1) 冻结 H3 + 一句全局运动指令追加在场景 prompt 之后；(2) 完整的逐 latent 接口（句子、镜像位置、路由掩码）但 LoRA 全部置零；(3) 训练好的 H3-World。
+    度量是 Farnebäck 稠密光流的<b>累计平均水平分量</b>，分别在切换前后统计；<b>正值 = 相机向左，负值 = 向右</b>。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 09 · 可交互</span><span class="ti">切换前后的累计水平光流（论文 §4.2 数字）</span></div>
+    <div class="ctl">
+      <label>调度</label>
+      <div class="seg" id="f09Seg">
+        <button type="button" data-sched="lr" class="on">先左后右（15 + 22 latent）</button>
+        <button type="button" data-sched="rl">反转：先右后左</button>
+      </div>
+      <span class="readout" id="f09Read">期望符号：前 ＋ / 后 −</span>
+    </div>
+    <div class="chart" id="f09chart"></div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--ink3)"></i>切换前（latent 1–15，51 帧）</span>
+      <span><i class="sw" style="background:var(--act)"></i>切换后（latent 16–37，73 帧）</span>
+      <span>✓ / ✗ 标记该段光流符号是否与调度一致</span>
+    </div>
+    <figcaption><b>只有 H3-World 两段都对且幅度充分。</b>先左后右时，全局提示只在后半段出现一点向右的响应（0.0 / −17.3），「先左」完全没有；零 LoRA 的逐 latent 接口几乎静止（−0.1 / 0.0，平均绝对光流 0.003）；H3-World 给出 +52.7 / −106.0。反转调度后 H3-World 是 −58.7 / +121.0，符号随之翻转；全局提示为 −11.9 / +24.1，零 LoRA 仍无响应（论文未给数字）。作为对照，<b>恒定单一方向</b>时冻结 H3 与 H3-World 的方向分离度几乎相同（301.8 vs 300.5）——先验已经能跟一个方向，适配补上的是「把方向绑到区间」。</figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">读数字时的两点提醒</div>
+    <p><b>前后两段帧数不同。</b>按 (1,4,4,4,4) 分组，前 15 个 latent 是 51 帧，后 22 个是 73 帧；累计光流是逐帧求和的，所以后半段量级天然更大（−106.0 的绝对值约是 +52.7 的两倍，按帧平均后差距缩到约 1.4×）。这张图的论点在<b>符号</b>，不在量级。</p>
+    <p><b>反转调度下全局提示的符号其实是对的。</b>−11.9 / +24.1 两段方向都与「先右后左」一致，只是幅度约为 H3-World 的 1/5；论文把它与正向调度的 0.0 / −17.3 归为「同一模式」略显宽松。更稳妥的表述是：全局提示对时变调度的响应<b>不稳定且微弱</b>，而非「完全没有」。</p>
+    <p><b>条件 (2) 不是纯粹的「只加句子」。</b>它同时带上了路由掩码——S 读不到 A<sub>k</sub>，V<sub>k</sub> 只读自己的 A<sub>k</sub>。对一个从未见过这种句式与掩码的冻结模型来说，这些 span 更像噪声；「几乎静止」既说明分段句子本身不够，也可能部分来自掩码改变了冻结模型的信息流。论文没有单独测「逐 latent 句子、无掩码、零 LoRA」这一档。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 10 EXP 2 -->
+<section class="sec" id="s-exp2">
+  <div class="eyebrow"><span class="n">10</span><span class="t">Experiment · controllability</span><span class="line"></span></div>
+  <h2>实验二：三种接口对比、跟随记录控制、受控干预</h2>
+  <div class="prose">
+    <p class="lead">§4.3 的三组实验全部是<b>定性</b>的（帧序列对比图），但每一组都用配对构造排除了一个混淆变量：接口对比固定数据与骨干、只换注入方式；跟随实验固定首帧与录制动作、看动作语义是否迁移到未见 clip；干预实验固定首帧与 seed、只换指令。</p>
+  </div>
+
+  <h3><span class="ix">Fig. 6</span>直接动作条件 vs 文本接口</h3>
+  <div class="prose">
+    <p>两个对照变体都把 latent 级键盘状态编码成一个<b>学习向量</b>，作用到对应的视频 token 特征上：<b>加性偏置</b>沿用 ReactiveGWM 的做法（投影后加到视频表示上），<b>FiLM</b> 在 AdaLN 之后做逐特征的缩放与平移。
+    在同一段 held-out clip 与录制动作序列上，两者对控制变化的响应「微弱或不一致」（论文图中标注了 “wrong movement”、“incorrect camera controls”），而文本接口给出了协调一致的角色与相机变化。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 10</span><span class="ti">三种接口在一个 block 里的注入点</span></div>
+    <div class="figbody">
+      <svg viewBox="0 0 900 230" role="img" aria-label="block 数据流上标出三个注入点：加性偏置在 block 入口、RMSNorm 之前加到视频行；FiLM 在 AdaLN 之后对视频行做缩放平移；H3-World 不改特征，动作以文本 token 作为注意力的 key/value 进入">
+        <rect x="16" y="86" width="96" height="44" rx="9" class="f-surf2 s-rule" stroke-width="1.1"/>
+        <text x="64" y="112" text-anchor="middle" class="f-ink2 sml">block 输入 x</text>
+        <rect x="150" y="86" width="96" height="44" rx="9" class="f-surf2 s-rule" stroke-width="1.1"/>
+        <text x="198" y="112" text-anchor="middle" class="f-ink2 sml">RMSNorm</text>
+        <rect x="284" y="86" width="96" height="44" rx="9" class="f-surf2 s-rule" stroke-width="1.1"/>
+        <text x="332" y="112" text-anchor="middle" class="f-ink2 sml">AdaLN 调制</text>
+        <rect x="418" y="70" width="190" height="76" rx="11" class="fs-A s-A" stroke-width="1.3"/>
+        <text x="513" y="100" text-anchor="middle" class="f-Ai lbl">Self-Attention</text>
+        <text x="513" y="120" text-anchor="middle" class="f-ink3 sml">Q ← 视频行　K, V ← 全序列</text>
+        <rect x="646" y="86" width="96" height="44" rx="9" class="f-surf2 s-rule" stroke-width="1.1"/>
+        <text x="694" y="112" text-anchor="middle" class="f-ink2 sml">门控残差</text>
+        <rect x="780" y="86" width="104" height="44" rx="9" class="f-surf2 s-rule" stroke-width="1.1"/>
+        <text x="832" y="112" text-anchor="middle" class="f-ink2 sml">FFN → 输出</text>
+        <line x1="112" y1="108" x2="148" y2="108" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+        <line x1="246" y1="108" x2="282" y2="108" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+        <line x1="380" y1="108" x2="416" y2="108" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+        <line x1="608" y1="108" x2="644" y2="108" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+        <line x1="742" y1="108" x2="778" y2="108" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+        <!-- injection 1: additive bias -->
+        <rect x="80" y="170" width="150" height="40" rx="9" class="fs-B s-B" stroke-width="1.2" stroke-dasharray="5 3"/>
+        <text x="155" y="187" text-anchor="middle" class="f-Bi sml">① 加性偏置 b(a_k)</text>
+        <text x="155" y="202" text-anchor="middle" class="f-ink3 sml">加到 V_k 的行上，与 h 无关</text>
+        <line x1="130" y1="170" x2="130" y2="132" class="s-B" stroke-width="1.2" marker-end="url(#ar-b)"/>
+        <!-- injection 2: film -->
+        <rect x="290" y="170" width="170" height="40" rx="9" class="fs-B s-B" stroke-width="1.2" stroke-dasharray="5 3"/>
+        <text x="375" y="187" text-anchor="middle" class="f-Bi sml">② FiLM：h·(1+γ(a_k)) + β(a_k)</text>
+        <text x="375" y="202" text-anchor="middle" class="f-ink3 sml">AdaLN 之后，rms≈1 处，只作用于视频行</text>
+        <line x1="400" y1="170" x2="400" y2="132" class="s-B" stroke-width="1.2" marker-end="url(#ar-b)"/>
+        <!-- injection 3: text keys -->
+        <rect x="500" y="20" width="200" height="36" rx="9" class="fs-A s-A" stroke-width="1.3"/>
+        <text x="600" y="43" text-anchor="middle" class="f-Ai sml">③ H3-World：A_k 作为 key/value 被 V_k 读到</text>
+        <line x1="560" y1="56" x2="540" y2="70" class="s-A" stroke-width="1.4" marker-end="url(#ar-a)"/>
+        <text x="16" y="44" class="f-ink big">三者都零初始化 / 零 LoRA 时与基座完全等价</text>
+      </svg>
+    </div>
+    <figcaption><b>差别不在参数量，在「控制信号是不是特征空间里的一个固定向量」。</b>代码注释记录了加性偏置的失败机理：同一个「按 D」在不同画面里需要把特征往不同方向推，样本间梯度互相抵消——训练近 3,000 步后单层偏置的 L2 范数只有 0.24（相对隐状态 0.107%），增长率持续衰减，ΔW 与 W 的余弦仅 +0.064。FiLM 因为乘性项随 h 变化而不受此困扰，但论文里它同样「响应不一致」。文本接口把控制交给注意力：V<sub>k</sub> 读到 A<sub>k</sub> 后如何改写自己，本来就是内容相关的。</figcaption>
+  </figure>
+
+  <h3><span class="ix">Fig. 7</span>跟随录制的控制序列（held-out clip）</h3>
+  <div class="prose">
+    <p>五段 held-out 游戏 clip，各取首帧与录制的动作序列，生成结果与真实视频上下并列。作者的判断标准是：<b>生成是否呈现了录制控制所指示的角色位移与视角变化，同时保留初始场景内容</b>——而不是逐帧像素匹配，因为每段 clip 都允许多种合理的未来。论文称五段都表现出了主要的角色位移与视角变化，且保住了场景布局与角色外观。</p>
+  </div>
+
+  <h3><span class="ix">Fig. 8</span>受控干预：只换指令</h3>
+  <div class="prose">
+    <p>固定首帧、seed 和采样配置，只改动作指令：静止 vs 前进、左 strafe vs 右 strafe、慢 pan vs 快 pan（两个方向）。相反的 strafe / pan 指令产生方向相反的横向演化；<b>快速 pan 的变化明显大于慢速</b>——这一点值得注意，因为「快/慢」在训练时来自 COLMAP 实测的 yaw 速率，模型确实学到了两个速度词对应不同幅度的运动。配对构造保证了差异来自指令本身。</p>
+  </div>
+
+  <div class="tblwrap">
+    <table>
+      <caption>论文评估协议一览（§4.1）</caption>
+      <thead><tr><th>协议</th><th>固定</th><th>变化</th><th>判断</th></tr></thead>
+      <tbody>
+        <tr><td>受控干预</td><td class="l">首帧、seed、采样配置</td><td class="l">调度的动作</td><td class="l">生成差异是否由指令引起（定性 + 光流）</td></tr>
+        <tr><td>held-out 跟随</td><td class="l">首帧、录制动作</td><td class="l">—</td><td class="l">与 GT 比较运动模式（定性）</td></tr>
+        <tr><td>光流诊断</td><td class="l">Farnebäck 稠密光流</td><td class="l">—</td><td class="l">整段累计的平均水平分量；+ 左 / − 右</td></tr>
+        <tr><td>图示约定</td><td class="l">均匀采帧</td><td class="l">—</td><td class="l">绿框 = 首帧；键盘叠层显示调度状态，橙色为按下</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ 11 GENERALIZATION -->
+<section class="sec" id="s-gen">
+  <div class="eyebrow"><span class="n">11</span><span class="t">Generalization</span><span class="line"></span></div>
+  <h2>泛化：拼出没见过的指令，走进没见过的画面</h2>
+  <div class="prose">
+    <p class="lead">论文用两组定性实验支持「控制能力来自预训练语义、而非记住了 8,000 段游戏录像」：<b>组合泛化</b>——两个子句各自见过、但从未一起出现；<b>视觉泛化</b>——六个与训练集差异巨大的初始画面。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 11</span><span class="ti">组合泛化在 9×16 表上的位置</span></div>
+    <div class="figbody">
+      <svg viewBox="0 0 900 230" role="img" aria-label="示意：角色子句 walks forward 在 follows him 与 pan 列里见过约 1.5 万次，相机子句 pans and tilts 在 stands still 行里见过约 1 万次，两者组合的格子在训练集里为空；H3-World 需在推理时把两个子句拼起来">
+        <rect x="16" y="40" width="250" height="70" rx="11" class="fs-V s-V" stroke-width="1.2"/>
+        <text x="141" y="66" text-anchor="middle" class="f-Vi lbl">角色子句：walks forward</text>
+        <text x="141" y="86" text-anchor="middle" class="f-ink3 sml">在 “follows him” / 四个 pan 列里出现 ≈ 15k 次</text>
+        <text x="141" y="101" text-anchor="middle" class="f-ink3 sml">（Fig. 4 第 2 行）</text>
+        <rect x="16" y="130" width="250" height="70" rx="11" class="fs-X s-X" stroke-width="1.2"/>
+        <text x="141" y="156" text-anchor="middle" class="f-Xi lbl">相机子句：pans … and tilts …</text>
+        <text x="141" y="176" text-anchor="middle" class="f-ink3 sml">在 “stands still” 行里出现 ≈ 39k 次</text>
+        <text x="141" y="191" text-anchor="middle" class="f-ink3 sml">（八个 pan+tilt 列之和）</text>
+        <rect x="360" y="82" width="230" height="76" rx="11" class="f-surf2 s-A" stroke-width="1.4" stroke-dasharray="5 3"/>
+        <text x="475" y="108" text-anchor="middle" class="f-Ai lbl">联合指令：前进 + pan–tilt</text>
+        <text x="475" y="128" text-anchor="middle" class="f-ink3 sml">训练集中该格 = “—”（合法但未见）</text>
+        <text x="475" y="146" text-anchor="middle" class="f-ink3 sml">52 个未见格子全在这一带</text>
+        <line x1="266" y1="75" x2="358" y2="104" class="s-V" stroke-width="1.4" marker-end="url(#ar-v)"/>
+        <line x1="266" y1="165" x2="358" y2="136" class="s-X" stroke-width="1.4" marker-end="url(#ar-x)"/>
+        <rect x="660" y="40" width="224" height="72" rx="11" class="f-surf2 s-rule" stroke-width="1.1"/>
+        <text x="772" y="64" text-anchor="middle" class="f-ink lbl">held-out 游戏画面</text>
+        <text x="772" y="84" text-anchor="middle" class="f-Oi sml">✓ 角色前进 ＋ 相机 pan–tilt 同时成立</text>
+        <text x="772" y="100" text-anchor="middle" class="f-ink3 sml">保住布局与角色外观</text>
+        <rect x="660" y="128" width="224" height="72" rx="11" class="f-surf2 s-rule" stroke-width="1.1"/>
+        <text x="772" y="152" text-anchor="middle" class="f-ink lbl">分布外初始画面</text>
+        <text x="772" y="172" text-anchor="middle" class="f-Oi sml">✓ 同一未见指令同样成立</text>
+        <text x="772" y="188" text-anchor="middle" class="f-ink3 sml">与一个「见过的」参考指令并列对比</text>
+        <line x1="590" y1="110" x2="658" y2="80" class="s-A" stroke-width="1.3" marker-end="url(#ar-a)"/>
+        <line x1="590" y1="130" x2="658" y2="160" class="s-A" stroke-width="1.3" marker-end="url(#ar-a)"/>
+        <text x="16" y="222" class="f-ink3 sml">论文未写明测试的是 pan–tilt 八格中的哪一格；数字为我按 Fig. 4 汇总的近似值。</text>
+      </svg>
+    </div>
+    <figcaption><b>组合泛化测的是「因子化接口」的红利。</b>因为动作空间被显式分解成角色 × 相机两个子句、且两者共享一套语法，一个未见的联合指令只是两个熟悉短语的并列——这对语言接口是自然的，对离散动作索引则在结构上做不到（Incantation 那页的论证在这里同样适用）。</figcaption>
+  </figure>
+
+  <h3><span class="ix">Fig. 10</span>视觉泛化：六个分布外的初始观测</h3>
+  <div class="prose">
+    <p>六个场景覆盖第三人称与第一人称视角、室内与室外、奇幻与科幻题材、多种渲染风格，每个场景各测一个角色指令和一个相机指令，用的是<b>同一套学到的动作接口</b>。论文称在所有画面上都产生了所要求的角色/相机响应，且保住了场景布局、主体身份与视觉风格。
+    这是「轻量适配保留预训练生成能力」这一主张的直接证据——8,000 段单一游戏的录像，没有把 33B 模型的世界知识冲掉。</p>
+  </div>
+  <div class="call warn">
+    <div class="hd">论文自己承认的限度</div>
+    <p>结论一节写明：当前研究聚焦短时程生成，组合泛化与视觉迁移<b>主要通过代表性样例评估</b>；要量化控制可靠性，需要跨动作组合、跨场景、跨随机种子的系统评测。换句话说，Fig. 9–10 是存在性证明，不是统计结论。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 12 CRITIQUE -->
+<section class="sec" id="s-crit">
+  <div class="eyebrow"><span class="n">12</span><span class="t">Limitations &amp; critical reading</span><span class="line"></span></div>
+  <h2>局限，以及我读下来的保留意见</h2>
+  <div class="prose">
+    <p class="lead">这篇论文的价值在于一个干净的论点和一个便宜的配方：<b>大视频模型里已经有控制的语义，缺的只是时间绑定，而时间绑定可以用一张掩码加 0.2% 的参数补上</b>。
+    以下是我认为读者在引用它的结论时应当保留的地方，按重要性排序。</p>
+  </div>
+
+  <div class="grid2">
+    <div class="card bb">
+      <h5>1 · 它不是闭环交互系统</h5>
+      <p>H3 双向一次性去噪整段 124 帧，没有因果 rollout、没有跨段持久状态、没有实时性。论文自己列为未来工作。对本列表而言，它满足「逐步动作条件」的一半（动作按 latent 调度，但必须在生成前全部给定），不满足「因果/流式」与「持久状态」——属于<b>控制</b>方向的工作，不是「系统」（§13）。</p>
+    </div>
+    <div class="card bb">
+      <h5>2 · 定量证据只有一组光流数字</h5>
+      <p>全文数值结果是 §4.2 的两条调度 × 三个条件（外加恒定动作的分离度），来自单一首帧与 seed；128 段测试集存在，但没有报告任何聚合指标（动作准确率、FVD、跨 seed 方差）。「跟随录制控制」「组合泛化」「视觉泛化」全部是样例图。作者在结论中承认了这一点。</p>
+    </div>
+    <div class="card bb">
+      <h5>3 · 「语言接口」目前只是 135 句模板</h5>
+      <p>所有指令都是 <code>the man {9 选 1}, camera {16 选 1}</code>。论文标题的「language understanding」指的是预训练里的语义，但<b>开放词表控制</b>（例如 “the man jumps” / “crouches”）没有测试。这与 Incantation 显式测的「词表外提示」是不同层次的主张。</p>
+    </div>
+    <div class="card bb">
+      <h5>4 · 速度 bit 在推理时是人给的</h5>
+      <p>快/慢的区分训练时来自 COLMAP 实测 yaw 速率，推理时由用户指定。这意味着模型学到的是「sharply / slowly 两个词对应不同幅度」，而非从按键推断速度；代码注释也承认速度无法从 8 键读出。「drifts」类相机行为被直接丢弃。</p>
+    </div>
+    <div class="card bb">
+      <h5>5 · 训练分布极度偏斜，组合泛化的证据来自最稀薄的区域</h5>
+      <p>45% 的 prompt 是「人不动」；移动 + tilt 的组合只有个位数样本；52 个未见格子全在移动行的 tilt/pan–tilt 列。测的那一格周围最近的邻居只有 1–7 个样本，一个样例成功不足以说明整片区域可控。</p>
+    </div>
+    <div class="card bb">
+      <h5>6 · 对照实验的公平性未说明</h5>
+      <p>加性偏置与 FiLM 变体的训练步数、学习率、是否同时开 LoRA 都没有写；代码注释显示加性变体的失败更像优化病理（梯度抵消），而 FiLM 在代码作者自己的记录里是「解决了这个冲突」的，论文却把两者一并归为「微弱或不一致」。读者无法判断这两个基线是否被充分调过。</p>
+    </div>
+    <div class="card bb">
+      <h5>7 · 条件 (2) 的混淆（§09 已述）</h5>
+      <p>「逐 latent 接口 + 零 LoRA」同时引入了句子和掩码，因此「几乎静止」不能单独归因于「句子不够」。缺少「逐 latent 句子、无掩码、零 LoRA」这一档，无法把掩码本身对冻结模型的影响剥离出来。</p>
+    </div>
+    <div class="card bb">
+      <h5>8 · 「不引入专用动作模块」的边界</h5>
+      <p>确实没有新的<b>可学习</b>模块，但有一整套专用的架构机制：span 打包、镜像位置、按 span 分段的 refiner、每层生效的 FlexAttention 路由掩码——一个 52 KB 的框架补丁。它们不占参数，但不是「零改动」。推理必须用打过补丁的 DiffSynth，否则同一份 LoRA 会静默产出无意义视频。</p>
+    </div>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">较小的观察</div>
+    <p><b>代码与文档的一处不一致。</b><code>_build_action_block_masks</code> 的 docstring 描述的是「A<sub>k</sub> 与非匹配视频行互不可见、其余原样」的对称语义，而 <code>mask_mod</code> 实现的是论文所述的有向单出口语义（并在 <code>train_v2.py</code> / <code>infer.py</code> 里以 <code>leak_out</code> 字样做 preflight）。以代码和论文为准，docstring 应是旧版残留。</p>
+    <p><b>成本没有报告。</b>33B 模型、16k 长度序列、50 步去噪；补丁注释里的 FlexAttention 稳态是 75.6 ms/iter（单层前向？未说明）。单段 5.2 秒视频的生成时间与显存需求对使用者很重要，论文和 README 都没给。</p>
+    <p><b>正面的一点。</b>「恒定动作下冻结 H3 与 H3-World 分离度几乎相同」这个结果作者没有藏起来，反而用它来定位适配的真正贡献。这种把「先验能做什么」与「适配补了什么」拆开的写法，是本文最值得学习的地方。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 13 MAP -->
+<section class="sec" id="s-map">
+  <div class="eyebrow"><span class="n">13</span><span class="t">Where it sits</span><span class="line"></span></div>
+  <h2>放回 Awesome-Interactive-Video-World-Models 的坐标系里</h2>
+  <div class="prose">
+    <p class="lead">按本列表的三条硬标准逐一对照：<b>逐步动作条件</b>——部分满足（动作按 latent 调度，但需在生成前整段给定，回路不可闭合）；<b>因果/流式生成</b>——不满足（双向整段去噪）；<b>持久世界状态</b>——不满足。它应放在 <code>control</code> 支撑段，而不是 <code>systems</code> 主表。</p>
+  </div>
+
+  <div class="tblwrap">
+    <table>
+      <caption>建议的 <code>attrs</code>（只填论文/仓库明确给出的字段）</caption>
+      <thead><tr><th>字段</th><th>值</th><th>依据</th></tr></thead>
+      <tbody>
+        <tr><td>section</td><td>control</td><td class="l">不满足因果与持久状态两条</td></tr>
+        <tr><td>backbone</td><td>bidirectional-diffusion</td><td class="l">MiniMax-H3，33B 全模态音视频 DiT，整段联合去噪</td></tr>
+        <tr><td>action_space</td><td class="l">keyboard WASD（角色）+ IJKL（相机 pan/tilt）+ 二值快速标志 → 逐 latent 模板文本（9×16 子句）；ABot-World-Explorer-500h 游戏录像</td><td class="l">§3.2 / action_script.py</td></tr>
+        <tr><td>fps</td><td class="l">输出 24 fps；非实时，未报告生成耗时</td><td class="l">§4.1</td></tr>
+        <tr><td>horizon</td><td class="l">124 帧 (5.2 s) 固定长度；脚本允许 243 / 481 但论文未评测</td><td class="l">§4.1 / infer.py</td></tr>
+        <tr><td>memory</td><td>none</td><td class="l">无跨段状态</td></tr>
+        <tr><td>open_source</td><td>true</td><td class="l">代码 + LoRA 权重 + 补丁；基座权重来自 MiniMax（约 135 GB）</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid3">
+    <div class="card aa">
+      <h5>与 Incantation 的关系</h5>
+      <p>同为「每个 latent 帧一句自然语言」，但 Incantation 是 Wan 上的因果 AR + 文本 cross-attention 局部化 + 多实体槽位；H3-World 是 H3 单流双向自注意力上的路由掩码，单实体。两者互补：前者解决「谁做」，后者解决「在没有 cross-attention 的架构里怎么定位到何时」。</p>
+    </div>
+    <div class="card vv">
+      <h5>与 ReactiveGWM / ABot 的关系</h5>
+      <p>同一研究组的工作：ReactiveGWM 的加性动作注入被当作对照基线；数据来自 ABot-World-0 的 500 小时探索录像（含 COLMAP 位姿），这是「速度 bit」能被算出来的前提。</p>
+    </div>
+    <div class="card xx">
+      <h5>对列表主题的意义</h5>
+      <p>它给「动作控制」这条轴提供了一个新的极端点：<b>零可学习控制模块</b>。如果后续工作把同样的路由思路搬到因果/流式骨干上（代码注释多处提到 streaming 是设计约束），才会进入「系统」范畴。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 14 REPRO -->
+<section class="sec" id="s-repo">
+  <div class="eyebrow"><span class="n">14</span><span class="t">Reproduction cheat-sheet</span><span class="line"></span></div>
+  <h2>复现速查</h2>
+  <div class="prose">
+    <p class="lead">环境：Python 3.10、CUDA 12.8、torch 2.10.0、DiffSynth-Studio 固定 commit + 仓库补丁；基座权重约 135 GB。以下命令摘自 README，路径为仓库相对路径。</p>
+  </div>
+
+  <pre class="code"><span class="c"># 环境与补丁（补丁是必需的：发布的 LoRA 只在有向掩码语义下有意义）</span>
+git clone https://github.com/modelscope/DiffSynth-Studio.git DiffSynth-Studio-h3-v2
+git -C DiffSynth-Studio-h3-v2 checkout "$(cat code/diffsynth_base_commit.txt)"
+git -C DiffSynth-Studio-h3-v2 apply ../code/diffsynth_h3_action.patch
+source env.sh          <span class="c"># HF / torch / triton 缓存都指向仓库内</span>
+
+<span class="c"># 推理：仓库自带一张 held-out 首帧（examples/first_frame.png，样本 d0b768c6）</span>
+python3 code/abot/infer.py \
+  --checkpoint checkpoints/H3-World/step-10000.safetensors \
+  --first-frame examples/first_frame.png \
+  --scene-prompt "A man in a yellow floral shirt stands in a dim, multi-level concrete parking garage." \
+  --action-preset <b>forward</b> --seed 2 --steps 50 --num-frames 124 --cfg-scale 1.0 \
+  --out outputs/example_forward.mp4
+
+<span class="c"># 训练：切片 → 划分 → 缓存 latent → 注入动作文本 → LoRA</span>
+ABOT_SRC_ROOT=/path/to/ABot-World-Explorer-500h python3 code/abot/build_abot_clips.py --num-clips 8000 --workers 48
+python3 code/abot/split_abot_metadata.py --input data/abot_meta_8000.jsonl \
+  --train-output data/abot_meta_train_7872.jsonl --test-output data/abot_meta_test_128.jsonl --clips-dir data/clips
+bash code/cache.sh
+python3 code/abot/inject_abot_text.py --meta data/abot_meta_train_7872.jsonl --cache output/minimax_h3_abot/7872-cache --device cuda:0
+bash code/train.sh     <span class="c"># 默认 4 卡；CUDA_VISIBLE_DEVICES=4,5,6,7 bash code/train.sh</span></pre>
+
+  <div class="tblwrap">
+    <table>
+      <caption>仓库文件与它们在本文中的位置</caption>
+      <thead><tr><th>文件</th><th>做什么</th><th>对应章节</th></tr></thead>
+      <tbody>
+        <tr><td><code>code/abot/action_script.py</code></td><td class="l">9-bit 控制态 → 句子的规则表；F bit 的推导；null_script</td><td>§03</td></tr>
+        <tr><td><code>code/abot/abot_action.py</code></td><td class="l">ABot tar 解析、COLMAP 位姿差分、30→24 fps、按 (1,4,4,4,4) 装箱</td><td>§02 · §08</td></tr>
+        <tr><td><code>code/abot/inject_abot_text.py</code></td><td class="l">改写 stage-1 缓存：head 重编码、句子去重编码、镜像 span、共享 pad 长度</td><td>§05 · §08</td></tr>
+        <tr><td><code>code/diffsynth_h3_action.patch</code></td><td class="l">DiT 路由掩码、packed builder 的镜像位置、refiner 分段、FiLM/偏置基线、训练包装</td><td>§05 · §06 · §10</td></tr>
+        <tr><td><code>code/train.sh</code> / <code>cache.sh</code></td><td class="l">LoRA 训练与 latent 缓存的 accelerate 命令</td><td>§07 · §08</td></tr>
+        <tr><td><code>code/abot/infer.py</code></td><td class="l">单次生成；11 个 preset；preflight 检查</td><td>§08 · §14</td></tr>
+      </tbody>
+    </table>
+    <div class="tnote">内置 preset：still · forward · back · strafe-left · strafe-right · tilt-up · tilt-down · pan-left · pan-right · pan-left-fast · pan-right-fast。组合与分布外指令需自行构造 keys9。</div>
+  </div>
+</section>
+
+<footer>
+  <p><b>信息来源</b>：方法描述、公式 (1)–(7)、光流数字、动作空间统计与超参均出自 arXiv:2609.01560v1（H3-World, Chen, Wang, Lin, Yang, Jin, 2026-09-01）正文；
+  代码细节出自 GitHub 仓库 Danzer1xxxxChan/H3-World（README、code/abot/*.py、code/diffsynth_h3_action.patch、train.sh、cache.sh）。文中标注「代码注释」「我的读解 / 推断 / 保留意见」的段落分别为仓库注释与本页作者的分析，不属于论文原文。</p>
+  <p style="margin-top:10px">本页为方法精读的可视化整理，<b>未转载论文中的任何图片或视频帧</b>；所有图解均按论文文字与代码逻辑重绘。Fig. 04 的数值为论文 Fig. 4 中的四舍五入读数；Fig. 05b 的 K = 8 与 Fig. 06 的 K = 3 均为示意。</p>
+  <p style="margin-top:10px; color:var(--ink3)">生成于 2026-09-02 · 单文件、无外部依赖（字体在离线时自动回退到系统字体）</p>
+</footer>
+
+<button class="tbtn toTop" id="toTop" type="button" aria-label="回到顶部">↑</button>
+</main>
+</div>
+<div class="tip" id="tip" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+"use strict";
+var $=function(s,r){return (r||document).querySelector(s)};
+var $$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
+var NS="http://www.w3.org/2000/svg";
+function E(tag,attrs,txt){
+  var n=document.createElementNS(NS,tag);
+  if(attrs) for(var k in attrs){ if(attrs[k]!==null&&attrs[k]!==undefined) n.setAttribute(k,attrs[k]); }
+  if(txt!==undefined&&txt!==null) n.textContent=txt;
+  return n;
+}
+function clr(g){ while(g.firstChild) g.removeChild(g.firstChild); }
+
+/* ---------------------------------------------------------- theme */
+var root=document.documentElement;
+$('#themeBtn').addEventListener('click',function(){
+  var cur=root.getAttribute('data-theme');
+  if(!cur){ cur = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light':'dark'; }
+  root.setAttribute('data-theme', cur==='dark'?'light':'dark');
+});
+
+/* ---------------------------------------------------------- progress + toc + toTop */
+var prog=$('#prog'), toTop=$('#toTop');
+function onScroll(){
+  var h=document.documentElement.scrollHeight-window.innerHeight;
+  prog.style.width=(h>0?(window.scrollY/h*100):0)+'%';
+  toTop.classList.toggle('show', window.scrollY>700);
+}
+window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+toTop.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'})});
+
+var links=$$('#toc a');
+var secs=links.map(function(a){return document.getElementById(a.getAttribute('href').slice(1))}).filter(Boolean);
+if('IntersectionObserver' in window){
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting){
+        links.forEach(function(a){a.classList.remove('on')});
+        var m=links.filter(function(a){return a.getAttribute('href')==='#'+e.target.id})[0];
+        if(m)m.classList.add('on');
+      }
+    });
+  },{rootMargin:'-84px 0px -70% 0px',threshold:0});
+  secs.forEach(function(s){io.observe(s)});
+}
+
+/* ---------------------------------------------------------- tooltip */
+var tip=$('#tip');
+function showTip(e,html){
+  tip.innerHTML=html; tip.style.opacity='1';
+  var x=e.clientX+14, y=e.clientY+14;
+  if(x+tip.offsetWidth>window.innerWidth-10) x=e.clientX-tip.offsetWidth-14;
+  if(y+tip.offsetHeight>window.innerHeight-10) y=e.clientY-tip.offsetHeight-14;
+  tip.style.left=x+'px'; tip.style.top=y+'px';
+}
+function hideTip(){tip.style.opacity='0'}
+function bindTip(node,html){
+  node.addEventListener('mousemove',function(e){showTip(e,typeof html==='function'?html():html)});
+  node.addEventListener('mouseleave',hideTip);
+  node.style.cursor='crosshair';
+}
+function seg(id,cb){
+  var box=$(id); if(!box) return;
+  $$('button',box).forEach(function(b){
+    b.addEventListener('click',function(){
+      $$('button',box).forEach(function(o){o.classList.toggle('on',o===b)});
+      cb(b.dataset);
+    });
+  });
+}
+
+/* ---------------------------------------------------------- shared: H3 temporal grouping */
+var GROUP=[1,4,4,4,4];
+function frameSpans(T){ var out=[],s=0; for(var k=0;k<T;k++){ var w=GROUP[k%5]; out.push([s,s+w]); s+=w; } return out; }
+var SPANS37=frameSpans(37);   // last end = 124
+
+/* ---------------------------------------------------------- Fig 01: per-latent chips + frame axis */
+(function(){
+  var g=$('#f01-chips'), gf=$('#f01-frames'); if(!g||!gf) return;
+  var x0=16, W=868, n=37, cw=W/n;
+  for(var k=0;k<n;k++){
+    var x=x0+k*cw, left=k<15;
+    g.appendChild(E('rect',{x:x+1,y:146,width:cw-2,height:30,rx:5,class:left?'fs-A s-A':'f-surf2 s-A','stroke-width':1}));
+    g.appendChild(E('text',{x:x+cw/2,y:165,class:'f-Ai sml mono','text-anchor':'middle'},left?'L':'R'));
+    if((k+1)%5===0||k===0||k===14||k===15) g.appendChild(E('text',{x:x+cw/2,y:192,class:'f-ink3 sml mono','text-anchor':'middle'},String(k+1)));
+  }
+  var sx=x0+15*cw;
+  g.appendChild(E('line',{x1:sx,y1:140,x2:sx,y2:200,class:'s-B','stroke-width':1.4,'stroke-dasharray':'4 3'}));
+  g.appendChild(E('text',{x:sx+4,y:212,class:'f-Bi sml'},'切换：latent 15 → 16'));
+  g.appendChild(E('text',{x:x0,y:212,class:'f-ink3 sml mono'},'k →'));
+  // frame strip
+  var pxf=W/124;
+  SPANS37.forEach(function(sp,k){
+    var x=x0+sp[0]*pxf, w=(sp[1]-sp[0])*pxf;
+    gf.appendChild(E('rect',{x:x+0.5,y:252,width:Math.max(w-1,1.5),height:14,rx:2,class:(Math.floor(k/5)%2?'f-surf3':'fs-V'),'stroke-width':0}));
+  });
+  for(var gi=0;gi<=7;gi++){
+    var gx=x0+gi*17*pxf;
+    gf.appendChild(E('line',{x1:gx,y1:248,x2:gx,y2:270,class:'s-rule','stroke-width':1}));
+  }
+  gf.appendChild(E('text',{x:x0+17*pxf/2,y:280,class:'f-ink3 sml','text-anchor':'middle'},'17 帧 = 5 latent'));
+})();
+
+/* ---------------------------------------------------------- Fig 02: frames→latents + spans */
+(function(){
+  var g=$('#f02-frames'), gs=$('#f02-spans'); if(!g||!gs) return;
+  var x0=16, W=868, pxf=W/124;
+  // frame strip
+  for(var i=0;i<124;i++){
+    g.appendChild(E('rect',{x:x0+i*pxf+0.4,y:36,width:pxf-0.8,height:14,rx:1.5,class:(Math.floor(i/17)%2?'f-surf3':'f-surf2'),stroke:'var(--rule)','stroke-width':.5}));
+  }
+  g.appendChild(E('text',{x:x0,y:31,class:'f-ink3 sml mono'},'frames 0 … 123'));
+  // latent strip
+  SPANS37.forEach(function(sp,k){
+    var x=x0+sp[0]*pxf, w=(sp[1]-sp[0])*pxf;
+    var r=E('rect',{x:x+0.6,y:66,width:Math.max(w-1.2,2),height:24,rx:3,class:'fs-V s-V','stroke-width':.8});
+    g.appendChild(r);
+    bindTip(r,'<b>latent k = '+(k+1)+'</b>frames ['+sp[0]+', '+(sp[1]-1)+']　'+(sp[1]-sp[0])+' 帧');
+    if(k<5||k===36) g.appendChild(E('text',{x:x+w/2,y:82,class:'f-Vi sml mono','text-anchor':'middle'},String(k+1)));
+    // connectors for first group
+    if(k<5){
+      g.appendChild(E('line',{x1:x0+sp[0]*pxf,y1:50,x2:x,y2:66,class:'s-rule','stroke-width':.8}));
+    }
+  });
+  g.appendChild(E('text',{x:x0+35*pxf,y:82,class:'f-ink3 sml mono'},'… 37'));
+  g.appendChild(E('text',{x:x0+17*pxf+6,y:105,class:'f-ink3 sml'},'← 第 1 组：1 + 4 + 4 + 4 + 4 = 17 帧'));
+  // spans in text segment: 37 chips from x=390 to 884
+  var sx=390, sw=494, n=37, cw=sw/n;
+  for(var k2=0;k2<n;k2++){
+    gs.appendChild(E('rect',{x:sx+k2*cw+0.5,y:264,width:cw-1,height:30,rx:2,class:'fs-A s-A','stroke-width':.6}));
+  }
+})();
+
+/* ---------------------------------------------------------- action-space table (Fig. 4 readings) */
+var ROWS=[
+  {key:'still', name:'stands still',                    zh:'静止',      en:'still',    keys:'—'},
+  {key:'W',     name:'walks forward',                   zh:'前进',      en:'forward',  keys:'W'},
+  {key:'S',     name:'walks backward',                  zh:'后退',      en:'backward', keys:'S'},
+  {key:'A',     name:'strafes left',                    zh:'左平移',    en:'strafe L', keys:'A'},
+  {key:'D',     name:'strafes right',                   zh:'右平移',    en:'strafe R', keys:'D'},
+  {key:'W+A',   name:'walks forward and strafes left',  zh:'前进+左',   en:'fwd + L',  keys:'W+A'},
+  {key:'W+D',   name:'walks forward and strafes right', zh:'前进+右',   en:'fwd + R',  keys:'W+D'},
+  {key:'S+A',   name:'walks backward and strafes left', zh:'后退+左',   en:'back + L', keys:'S+A'},
+  {key:'S+D',   name:'walks backward and strafes right',zh:'后退+右',   en:'back + R', keys:'S+D'}
+];
+var COLS=[
+  {key:'follow',name:'follows him',                      l1:'Follow',  l2:'him'},
+  {key:'holds', name:'holds steady',                     l1:'Holds',   l2:'steady'},
+  {key:'Ls',    name:'pans left slowly',                 l1:'L pan',   l2:'slow'},
+  {key:'Lf',    name:'pans left sharply',                l1:'L pan',   l2:'sharp'},
+  {key:'Rs',    name:'pans right slowly',                l1:'R pan',   l2:'slow'},
+  {key:'Rf',    name:'pans right sharply',               l1:'R pan',   l2:'sharp'},
+  {key:'down',  name:'tilts down',                       l1:'Tilt',    l2:'down'},
+  {key:'up',    name:'tilts up',                         l1:'Tilt',    l2:'up'},
+  {key:'LdS',   name:'pans left slowly and tilts down',  l1:'L + dn',  l2:'slow'},
+  {key:'LuS',   name:'pans left slowly and tilts up',    l1:'L + up',  l2:'slow'},
+  {key:'LdF',   name:'pans left sharply and tilts down', l1:'L + dn',  l2:'sharp'},
+  {key:'LuF',   name:'pans left sharply and tilts up',   l1:'L + up',  l2:'sharp'},
+  {key:'RdS',   name:'pans right slowly and tilts down', l1:'R + dn',  l2:'slow'},
+  {key:'RuS',   name:'pans right slowly and tilts up',   l1:'R + up',  l2:'slow'},
+  {key:'RdF',   name:'pans right sharply and tilts down',l1:'R + dn',  l2:'sharp'},
+  {key:'RuF',   name:'pans right sharply and tilts up',  l1:'R + up',  l2:'sharp'}
+];
+// 'x' = structurally unavailable, 0 = valid but unseen; strings as printed in the paper figure
+var GRID=[
+  ['x','21.9k','17.4k','7.2k','15.4k','8.7k','11.6k','11.0k','4.6k','5.0k','4.4k','5.1k','3.2k','2.9k','7.1k','6.3k'],
+  ['9.2k','x','1.7k','1.3k','1.3k','1.5k','6','5',0,'1',0,0,0,'2',0,0],
+  ['6.3k','x','1.2k','418','1.2k','485','2','1',0,0,0,0,'1',0,0,0],
+  ['6.2k','x','1.4k','409','987','148',0,0,0,0,0,0,'2',0,0,0],
+  ['10.1k','x','1.6k','240','1.4k','760','4',0,0,0,0,0,0,0,0,0],
+  ['12.3k','x','5.8k','4.6k','3.6k','1.1k','3','2','1','1',0,0,'1','1',0,0],
+  ['13.1k','x','4.5k','973','4.3k','5.5k','3',0,0,'2',0,0,0,0,0,0],
+  ['12.8k','x','4.4k','3.0k','4.0k','2.5k','7','1','3','2',0,0,0,'2',0,0],
+  ['14.9k','x','4.5k','2.9k','4.6k','2.0k','4','7','2','2',0,0,'2','1',0,0]
+];
+function cellNum(v){ if(v==='x') return -1; if(v===0) return 0; if(/k$/.test(v)) return Math.round(parseFloat(v)*1000); return parseInt(v,10); }
+function cellFill(n){
+  if(n<0) return 'var(--surf3)';
+  if(n===0) return 'var(--surf2)';
+  if(n<=2) return 'var(--act-soft)';
+  if(n<=704) return 'color-mix(in srgb,var(--act) 45%,var(--surf))';
+  if(n<2900) return 'color-mix(in srgb,var(--act) 70%,var(--surf))';
+  if(n<6100) return 'var(--act)';
+  return 'color-mix(in srgb,var(--act) 70%,#000)';
+}
+function cellInk(n){ return (n>=2900)?'#fff':(n>2?'var(--ink)':'var(--ink3)'); }
+
+/* ---------------------------------------------------------- Fig 03: keyboard simulator (port of action_script.py) */
+(function(){
+  var pad=$('#kbpad'); if(!pad) return;
+  var KEYS9=['W','A','S','D','I','J','K','L','F'];
+  var on={};
+  KEYS9.forEach(function(k){on[k]=false});
+  var MOTION={W:'walks forward',S:'walks backward',A:'strafes left',D:'strafes right'};
+  var ORDER=['W','S','A','D'];
+  function purify(o,pairs){ var c=[]; pairs.forEach(function(p){ if(o[p[0]]&&o[p[1]]){ o[p[0]]=o[p[1]]=false; c.push(p[0]+'↔'+p[1]); } }); return c; }
+  function compute(){
+    var o={}; KEYS9.forEach(function(k){o[k]=on[k]});
+    var canc=purify(o,[['W','S'],['A','D'],['J','L'],['I','K']]);
+    var words=ORDER.filter(function(k){return o[k]}).map(function(k){return MOTION[k]});
+    var motion=words.length?words.join(' and '):'stands still';
+    var parts=[];
+    if(o.J) parts.push('pans left '+(o.F?'sharply':'slowly'));
+    if(o.L) parts.push('pans right '+(o.F?'sharply':'slowly'));
+    if(o.I) parts.push('tilts down');
+    if(o.K) parts.push('tilts up');
+    var camera=parts.length?parts.join(' and '):(motion!=='stands still'?'follows him':'holds steady');
+    // row / col lookup
+    var mk=ORDER.filter(function(k){return o[k]}).join('+')||'still';
+    var ri=ROWS.map(function(r){return r.key}).indexOf(mk);
+    var ck;
+    if(!parts.length) ck=(motion!=='stands still')?'follow':'holds';
+    else{
+      var pan=o.J?'L':(o.L?'R':''), tilt=o.I?'d':(o.K?'u':'');
+      if(pan&&tilt) ck=pan+tilt+(o.F?'F':'S');
+      else if(pan) ck=pan+(o.F?'f':'s');
+      else ck=(tilt==='d')?'down':'up';
+    }
+    var ci=COLS.map(function(c){return c.key}).indexOf(ck);
+    return {o:o,canc:canc,motion:motion,camera:camera,ri:ri,ci:ci};
+  }
+  function render(){
+    $$('.key[data-k]',pad).forEach(function(b){b.classList.toggle('on',!!on[b.dataset.k])});
+    var r=compute();
+    $('#kb-bits').textContent=KEYS9.slice(0,8).map(function(k){return on[k]?'1':'0'}).join(' ')+' · '+(on.F?'1':'0');
+    $('#kb-cancel').textContent=r.canc.length?('同时按下，抵消：'+r.canc.join('，')):'无';
+    $('#kb-motion').textContent=r.motion;
+    $('#kb-camera').textContent=r.camera+(!r.o.J&&!r.o.L&&on.F?'（F 只在 pan 时生效）':'');
+    $('#kb-sentence').innerHTML='the man <span class="mo">'+r.motion+'</span>, camera <span class="ca">'+r.camera+'</span>';
+    var v=GRID[r.ri][r.ci], n=cellNum(v), seen=$('#kb-seen');
+    if(n<0) seen.innerHTML='<span class="pill bad">结构上不可用</span>（这一格在规则下不会产生）';
+    else if(n===0) seen.innerHTML='<span class="pill hot">合法但未见</span> 训练集 0 条——组合泛化的测试区';
+    else seen.innerHTML='<span class="pill ok">见过</span> 约 '+v+' 条 prompt（'+ROWS[r.ri].zh+' × '+COLS[r.ci].l1+' '+COLS[r.ci].l2+'）';
+  }
+  $$('.key[data-k]',pad).forEach(function(b){
+    b.addEventListener('click',function(){ on[b.dataset.k]=!on[b.dataset.k]; render(); });
+  });
+  $$('.mini[data-preset]').forEach(function(b){
+    b.addEventListener('click',function(){
+      KEYS9.forEach(function(k){on[k]=false});
+      b.dataset.preset.split(',').filter(Boolean).forEach(function(k){on[k]=true});
+      render();
+    });
+  });
+  render();
+})();
+
+/* ---------------------------------------------------------- Fig 04: heatmap */
+(function(){
+  var wrap=$('#f04wrap'); if(!wrap) return;
+  var L=176, T=56, cw=46, ch=30, gap=3;
+  var W=L+16*(cw+gap)+64, H=T+9*(ch+gap)+40;
+  var svg=E('svg',{viewBox:'0 0 '+W+' '+H,role:'img','aria-label':'9 行角色子句乘 16 列相机子句的训练 prompt 计数热力图'});
+  svg.appendChild(E('text',{x:8,y:14,class:'f-ink3 sml mono'},'CAMERA →'));
+  svg.appendChild(E('text',{x:8,y:T-6,class:'f-ink3 sml mono'},'CHARACTER ↓'));
+  // group headers
+  var groups=[['tracking / static',0,2],['pan',2,6],['tilt',6,8],['pan + tilt',8,16]];
+  groups.forEach(function(gr){
+    var x1=L+gr[1]*(cw+gap), x2=L+gr[2]*(cw+gap)-gap;
+    svg.appendChild(E('line',{x1:x1,y1:22,x2:x2,y2:22,class:'s-rule','stroke-width':1}));
+    svg.appendChild(E('text',{x:(x1+x2)/2,y:19,class:'f-ink3 sml','text-anchor':'middle'},gr[0]));
+  });
+  COLS.forEach(function(c,j){
+    var x=L+j*(cw+gap)+cw/2;
+    svg.appendChild(E('text',{x:x,y:36,class:'f-Xi sml','text-anchor':'middle','font-weight':600},c.l1));
+    svg.appendChild(E('text',{x:x,y:48,class:'f-ink3 sml','text-anchor':'middle'},c.l2));
+  });
+  var rowTotals=[];
+  ROWS.forEach(function(r,i){
+    var y=T+i*(ch+gap);
+    svg.appendChild(E('text',{x:8,y:y+ch/2+4,class:'f-ink lbl'},r.zh+'  '+r.en));
+    svg.appendChild(E('text',{x:L-8,y:y+ch/2+4,class:'f-Vi sml mono','text-anchor':'end'},r.keys));
+    var tot=0;
+    GRID[i].forEach(function(v,j){
+      var n=cellNum(v); if(n>0) tot+=n;
+      var x=L+j*(cw+gap);
+      var rect=E('rect',{x:x,y:y,width:cw,height:ch,rx:5,fill:cellFill(n),stroke:'var(--rule)','stroke-width':.6,class:'mcell'});
+      svg.appendChild(rect);
+      var label=(n<0)?'×':(n===0?'—':String(v));
+      svg.appendChild(E('text',{x:x+cw/2,y:y+ch/2+4,class:'sml mono','text-anchor':'middle',fill:cellInk(n),'pointer-events':'none','font-weight':n>=2900?600:400},label));
+      var sentence='the man '+r.name+', camera '+c_name(j);
+      var status=(n<0)?'结构上不可用（规则不会生成）':(n===0?'合法但训练集中未出现':'训练 prompt ≈ '+v+' 条');
+      bindTip(rect,'<b>'+ROWS[i].zh+' × '+COLS[j].l1+' '+COLS[j].l2+'</b>“'+sentence+'”<br>'+status);
+    });
+    rowTotals.push(tot);
+  });
+  function c_name(j){ return COLS[j].name; }
+  // row total column
+  var tx=L+16*(cw+gap)+6;
+  svg.appendChild(E('text',{x:tx,y:48,class:'f-ink3 sml','text-anchor':'start'},'行合计'));
+  var grand=0;
+  rowTotals.forEach(function(t,i){ grand+=t; var y=T+i*(ch+gap); svg.appendChild(E('text',{x:tx,y:y+ch/2+4,class:'f-ink3 sml mono'},(t/1000).toFixed(1)+'k')); });
+  svg.appendChild(E('text',{x:8,y:H-10,class:'f-ink3 sml'},'合计 ≈ '+(grand/1000).toFixed(1)+'k（论文：291,264 = 7,872 × 37）· 见过 83 格 · 未见 52 格 · 不可用 9 格 · 「stands still」行占 '+(rowTotals[0]/grand*100).toFixed(0)+'%'));
+  wrap.appendChild(svg);
+})();
+
+/* ---------------------------------------------------------- Fig 05b: mirrored positions */
+(function(){
+  var gA=$('#f05b-A'), gV=$('#f05b-V'), gArc=$('#f05b-arc'), msg=$('#f05b-msg'); if(!gA) return;
+  var K=8, sk=[], baseA=210, baseV=560, chip=24;
+  for(var k=0;k<K;k++) sk.push(k*36);
+  var chipsA=[], chipsV=[];
+  for(var i=0;i<K;i++){
+    var xa=baseA+sk[i], xv=baseV+sk[i];
+    var ra=E('rect',{x:xa,y:122,width:chip,height:24,rx:5,class:'fs-A s-A','stroke-width':1});
+    var ta=E('text',{x:xa+chip/2,y:138,class:'f-Ai sml mono','text-anchor':'middle','pointer-events':'none'},'A'+(i+1));
+    var rv=E('rect',{x:xv,y:122,width:chip,height:24,rx:5,class:'fs-V s-V','stroke-width':1});
+    var tv=E('text',{x:xv+chip/2,y:138,class:'f-Vi sml mono','text-anchor':'middle','pointer-events':'none'},'V'+(i+1));
+    gA.appendChild(ra); gA.appendChild(ta); gV.appendChild(rv); gV.appendChild(tv);
+    chipsA.push(ra); chipsV.push(rv);
+    (function(idx){
+      [ra,rv].forEach(function(n){
+        n.style.cursor='crosshair';
+        n.addEventListener('mouseenter',function(){show(idx)});
+        n.addEventListener('mouseleave',function(){clear()});
+      });
+    })(i);
+  }
+  function clear(){
+    clr(gArc);
+    chipsA.forEach(function(c){c.setAttribute('class','fs-A s-A')});
+    chipsV.forEach(function(c){c.setAttribute('class','fs-V s-V')});
+    msg.textContent='悬停查看：τ(V_k) − τ(A_k) 对每个 k 都等于同一个 Δ';
+  }
+  function show(i){
+    clr(gArc);
+    var xa=baseA+sk[i]+chip/2, xv=baseV+sk[i]+chip/2;
+    gArc.appendChild(E('path',{d:'M'+xa+' 120 C '+xa+' 60, '+xv+' 60, '+xv+' 120',class:'s-A nofill','stroke-width':2,'marker-end':'url(#ar-a)'}));
+    gArc.appendChild(E('text',{x:(xa+xv)/2,y:78,class:'f-Ai sml mono','text-anchor':'middle'},'Δ = '+(baseV-baseA)+'（常数）'));
+    chipsA.forEach(function(c,j){c.setAttribute('class',j===i?'f-A s-A':'fs-A s-A')});
+    chipsV.forEach(function(c,j){c.setAttribute('class',j===i?'f-V s-V':'fs-V s-V')});
+    msg.textContent='k = '+(i+1)+'：τ(A'+(i+1)+') = origin + s_'+(i+1)+'，τ(V'+(i+1)+') = text_len + s_'+(i+1)+'（示意）；差恒定。若视频网格从 t = text_len 起，则 Δ = s_K + 1（我的推断）';
+  }
+  clear();
+})();
+
+/* ---------------------------------------------------------- Fig 06: mask explorer */
+(function(){
+  var wrap=$('#f06wrap'), info=$('#f06info'); if(!wrap) return;
+  var TOK=[
+    {id:'S', kind:'S', zh:'静态语义 S（场景句 + 首帧图像 token）'},
+    {id:'A1',kind:'A',k:0,zh:'动作 span A₁'},{id:'A2',kind:'A',k:1,zh:'动作 span A₂'},{id:'A3',kind:'A',k:2,zh:'动作 span A₃'},
+    {id:'C0',kind:'C', zh:'首帧条件 C₀（VAE）'},
+    {id:'Au',kind:'Au',zh:'音频 token（原生）'},
+    {id:'V1',kind:'V',k:0,zh:'视频 latent V₁'},{id:'V2',kind:'V',k:1,zh:'视频 latent V₂'},{id:'V3',kind:'V',k:2,zh:'视频 latent V₃'},
+    {id:'pad',kind:'P',zh:'padding 行'}
+  ];
+  var mode='directed';
+  function rule(q,kv){
+    // returns {ok, cat, why}
+    if(q.kind==='P'||kv.kind==='P'){
+      if(q===kv) return {ok:true,cat:'padself',why:'pad 行只允许看自己：否则没有可见 key，softmax 会 NaN。'};
+      return {ok:false,cat:'pad',why:'pad 是零向量，被 real = (q<lim)&(kv<lim) 屏蔽，不参与 softmax 分母。'};
+    }
+    if(mode==='none') return {ok:true,cat:'ok',why:'原生 H3：单流序列里任意两个 token 互相可见。'};
+    var sameAnn = q.kind==='A'&&kv.kind==='A'&&q.k===kv.k;
+    var vReadsOwn = q.kind==='V'&&kv.kind==='A'&&q.k===kv.k;
+    var aReadsOwnV = q.kind==='A'&&kv.kind==='V'&&q.k===kv.k;
+    if(mode==='symmetric'){
+      if(q.kind==='A'&&kv.kind==='V'&&q.k!==kv.k) return {ok:false,cat:'leakin',why:'旧版对称语义：A_k 与不匹配的视频行互不可见（这一条与有向版相同）。'};
+      if(q.kind==='V'&&kv.kind==='A'&&q.k!==kv.k) return {ok:false,cat:'leakout',why:'旧版对称语义：不匹配的视频行也读不到 A_k。'};
+      if(sameAnn) return {ok:true,cat:'self',why:'句子内部自注意。'};
+      if(vReadsOwn||aReadsOwnV) return {ok:true,cat:'link',why:'A_k ↔ V_k 的直连。'};
+      if(kv.kind==='A') return {ok:true,cat:'okwarn',why:'旧版对称语义下 S / C₀ / 音频 / 其他 A_j 仍能读 A_k —— A_k 的内容可以经它们绕到别的 latent，割点性质不成立。'};
+      return {ok:true,cat:'ok',why:'与原生 H3 相同。'};
+    }
+    // directed
+    if(kv.kind==='A'){
+      if(sameAnn) return {ok:true,cat:'self',why:'same_ann：句子需要在内部注意自己。'};
+      if(vReadsOwn) return {ok:true,cat:'link',why:'v_reads_own：V_k 读自己的 A_k —— A_k 的唯一出口。'};
+      return {ok:false,cat:'leakout',why:'leak_out：A_k 作为 key，除 A_k 自身与 V_k 之外任何 query 都读不到它（静态、首帧、音频、其他 A_j、其他 V_j）。只封出边，所以叫有向。'};
+    }
+    if(q.kind==='A'){
+      if(kv.kind==='V'){
+        if(aReadsOwnV) return {ok:true,cat:'link',why:'A_k 作为 query 可以读匹配的 V_k。'};
+        return {ok:false,cat:'leakin',why:'leak_in：A_k 只读自己绑定的那个 latent，不读其他 V_j。'};
+      }
+      return {ok:true,cat:'ok',why:'入边保留：A_k 可以读静态上下文 / 首帧 / 音频，获得场景接地；这是信息流入 A_k，不构成 A_j→V_k 的旁路。'};
+    }
+    return {ok:true,cat:'ok',why:'与原生 H3 相同：视频-视频、静态-视频、音频-视频全部保留双向注意力。'};
+  }
+  var cs=32, L=52, T=48, n=TOK.length;
+  var W=L+n*cs+8, H=T+n*cs+8;
+  var svg=E('svg',{viewBox:'0 0 '+W+' '+H,role:'img','aria-label':'路由掩码矩阵，行为 query，列为 key'});
+  svg.style.maxWidth='420px';
+  wrap.appendChild(svg);
+  var cells=[];
+  function fillFor(cat){
+    switch(cat){
+      case 'ok': return 'var(--ok-soft)';
+      case 'okwarn': return 'var(--hot-soft)';
+      case 'link': return 'var(--act)';
+      case 'self': return 'var(--act-soft)';
+      case 'padself': return 'var(--surf3)';
+      case 'pad': return 'var(--surf2)';
+      default: return 'url(#hatch)';
+    }
+  }
+  function kindClass(kd){ return kd==='A'?'f-Ai':(kd==='V'?'f-Vi':(kd==='S'||kd==='C'?'f-Xi':'f-ink3')); }
+  function build(){
+    clr(svg); cells=[];
+    svg.appendChild(E('text',{x:L,y:14,class:'f-ink3 sml mono'},'KEY →'));
+    svg.appendChild(E('text',{x:6,y:T+n*cs/2,class:'f-ink3 sml mono',transform:'rotate(-90 12 '+(T+n*cs/2)+')','text-anchor':'middle'},'QUERY ↓'));
+    TOK.forEach(function(t,j){
+      svg.appendChild(E('text',{x:L+j*cs+cs/2,y:T-10,class:kindClass(t.kind)+' sml mono','text-anchor':'middle','font-weight':600},t.id));
+      var lab=E('text',{x:L-8,y:T+j*cs+cs/2+4,class:kindClass(t.kind)+' sml mono','text-anchor':'end','font-weight':600},t.id);
+      lab.style.cursor='pointer';
+      lab.addEventListener('click',function(){describeRow(j)});
+      svg.appendChild(lab);
+    });
+    TOK.forEach(function(q,i){
+      TOK.forEach(function(kv,j){
+        var r=rule(q,kv);
+        var rect=E('rect',{x:L+j*cs+1,y:T+i*cs+1,width:cs-2,height:cs-2,rx:5,fill:fillFor(r.cat),stroke:'var(--rule)','stroke-width':.6,class:'mcell'});
+        if(!r.ok&&r.cat!=='pad'){
+          // hatched: fill uses pattern, add red-ish outline
+          rect.setAttribute('stroke','var(--bad)'); rect.setAttribute('stroke-opacity','.35');
+        }
+        if(r.cat==='link'){
+          svg.appendChild(rect);
+          svg.appendChild(E('text',{x:L+j*cs+cs/2,y:T+i*cs+cs/2+4,class:'sml mono','text-anchor':'middle',fill:'#fff','pointer-events':'none','font-weight':600},'●'));
+        } else svg.appendChild(rect);
+        cells.push(rect);
+        (function(q,kv,r){
+          bindTip(rect,function(){return '<b>query '+q.id+' → key '+kv.id+'</b>'+(r.ok?'✓ 允许':'✗ 切断')+'<br>'+r.why});
+          rect.addEventListener('click',function(){
+            info.innerHTML='<h5>query '+q.id+' 读 key '+kv.id+'：'+(r.ok?'<span class="rO">允许</span>':'<span class="rB">切断</span>')+'</h5><p>'+r.why+'</p><span class="rule">'+q.zh+' → '+kv.zh+'</span>';
+          });
+        })(q,kv,r);
+      });
+    });
+  }
+  function describeRow(i){
+    var q=TOK[i], can=[], cant=[];
+    TOK.forEach(function(kv){ var r=rule(q,kv); (r.ok?can:cant).push(kv.id); });
+    info.innerHTML='<h5>'+q.id+' 作为 query 能读谁</h5><p><span class="rO">可读</span>：'+can.join(', ')+'</p><p><span class="rB">被切断</span>：'+(cant.length?cant.join(', '):'无')+'</p><span class="rule">'+q.zh+'</span>';
+    cells.forEach(function(c,idx){ c.style.opacity=(Math.floor(idx/n)===i)?'1':'.25'; });
+    setTimeout(function(){cells.forEach(function(c){c.style.opacity='1'})},2400);
+  }
+  build();
+  seg('#maskMode',function(d){ mode=d.mode; build();
+    var t={directed:'H3-World 有向掩码：只封 A_k 的出边与它对其他 latent 的入边。',symmetric:'旧版对称绑定（docstring 描述）：只切断 A_k 与不匹配 V_j 之间的双向边，其余原样。琥珀色格子标出仍可读到 A_k 的旁路。',none:'无掩码：原生 H3 的单流全双向注意力。'}[mode];
+    info.innerHTML='<h5>模式已切换</h5><p>'+t+'</p><span class="rule">悬停或点击格子查看规则；点击行首字母查看该 query 的可读集合</span>';
+  });
+})();
+
+/* ---------------------------------------------------------- Fig 09: flow chart */
+(function(){
+  var box=$('#f09chart'), read=$('#f09Read'); if(!box) return;
+  var DATA={
+    lr:{exp:[1,-1],lab:'先左后右',rows:[
+      {n:'全局提示（冻结 H3）',v:[0.0,-17.3],note:['无向左响应','弱向右']},
+      {n:'逐 latent 接口 · LoRA = 0',v:[-0.1,0.0],note:['几乎静止','几乎静止']},
+      {n:'H3-World',v:[52.7,-106.0],note:['向左','向右'],ours:true}]},
+    rl:{exp:[-1,1],lab:'先右后左',rows:[
+      {n:'全局提示（冻结 H3）',v:[-11.9,24.1],note:['弱向右','弱向左']},
+      {n:'逐 latent 接口 · LoRA = 0',v:[null,null],note:['无响应（论文未给数字）','无响应']},
+      {n:'H3-World',v:[-58.7,121.0],note:['向右','向左'],ours:true}]}
+  };
+  var sched='lr';
+  function render(){
+    clr(box);
+    var d=DATA[sched];
+    read.textContent='期望符号：前 '+(d.exp[0]>0?'＋':'−')+' / 后 '+(d.exp[1]>0?'＋':'−')+'　（＋ = 相机向左，− = 向右）';
+    var W=900,H=330, X0=250, X1=860, Y0=40, Y1=290;
+    var svg=E('svg',{viewBox:'0 0 '+W+' '+H,role:'img','aria-label':'三种条件在切换前后的累计水平光流条形图'});
+    var lo=-130, hi=130;
+    function px(v){ return X0+(v-lo)/(hi-lo)*(X1-X0); }
+    // grid
+    [-120,-80,-40,0,40,80,120].forEach(function(v){
+      svg.appendChild(E('line',{x1:px(v),y1:Y0,x2:px(v),y2:Y1,class:v===0?'s-ink3':'s-rule1','stroke-width':v===0?1.2:.8,'stroke-dasharray':v===0?null:'2 5'}));
+      svg.appendChild(E('text',{x:px(v),y:Y1+18,class:'f-ink3 sml mono','text-anchor':'middle'},(v>0?'+':'')+v));
+    });
+    svg.appendChild(E('text',{x:X1,y:Y0-14,class:'f-ink3 sml','text-anchor':'end'},'累计平均水平光流 →　（＋ 左 / − 右）'));
+    svg.appendChild(E('text',{x:X0,y:Y0-14,class:'f-ink3 sml'},'← 向右'));
+    var rowH=(Y1-Y0)/d.rows.length;
+    d.rows.forEach(function(r,i){
+      var yc=Y0+i*rowH+rowH/2;
+      svg.appendChild(E('text',{x:X0-14,y:yc-8,class:(r.ours?'f-Ai':'f-ink')+' lbl','text-anchor':'end','font-weight':r.ours?600:500},r.n));
+      svg.appendChild(E('text',{x:X0-14,y:yc+10,class:'f-ink3 sml','text-anchor':'end'},'前 15 latent / 后 22 latent'));
+      [0,1].forEach(function(s){
+        var v=r.v[s], y=yc-22+s*22, h=18;
+        var fill=s===0?'var(--ink3)':'var(--act)';
+        if(v===null){
+          svg.appendChild(E('rect',{x:px(0)-1,y:y,width:2,height:h,fill:fill}));
+          svg.appendChild(E('text',{x:px(0)+8,y:y+13,class:'f-ink3 sml'},'≈ 0 · '+r.note[s]));
+          return;
+        }
+        var x=Math.min(px(0),px(v)), w=Math.max(Math.abs(px(v)-px(0)),1.5);
+        var rect=E('rect',{x:x,y:y,width:w,height:h,rx:3,fill:fill});
+        svg.appendChild(rect);
+        var okSign = v!==0 && Math.sign(v)===d.exp[s];
+        var mark = okSign?'✓':'✗';
+        var lx = v>=0 ? px(v)+8 : px(0)+8;
+        var t=E('text',{x:lx,y:y+13,class:(okSign?'f-Oi':'f-Bi')+' sml mono','text-anchor':'start'},(v>0?'+':'')+v.toFixed(1)+' '+mark+' '+r.note[s]);
+        svg.appendChild(t);
+        bindTip(rect,'<b>'+r.n+' · '+(s?'切换后':'切换前')+'</b>累计水平光流 '+(v>0?'+':'')+v.toFixed(1)+'<br>期望符号 '+(d.exp[s]>0?'＋（左）':'−（右）')+'　'+(okSign?'一致':'不一致'));
+      });
+      if(i<d.rows.length-1) svg.appendChild(E('line',{x1:20,y1:Y0+(i+1)*rowH,x2:X1,y2:Y0+(i+1)*rowH,class:'s-rule1','stroke-width':.8}));
+    });
+    svg.appendChild(E('text',{x:X0,y:Y1+36,class:'f-ink3 sml'},'恒定单一方向（不切换）下的方向分离度：全局提示 301.8 vs H3-World 300.5 —— 先验已能跟随恒定指令。'));
+    box.appendChild(svg);
+  }
+  seg('#f09Seg',function(d){sched=d.sched; render();});
+  render();
+})();
+
+})();
+</script>
+</body>
+</html>

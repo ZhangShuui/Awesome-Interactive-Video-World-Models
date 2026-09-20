@@ -1,0 +1,2518 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DM-Align 蒸馏与对齐的同一个梯度</title>
+<meta name="description" content="arXiv 2609.04283 · Joint Alignment and Distillation for Video Generation via Sample-Guided Distribution Matching 方法精读与图解">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   DM-Align 精读 — tokens. Dark 是默认底，light 是完整设计过的第二主题。
+   角色色对应论文 Fig. 2 里的四个盒子：
+     real = 真实模型 / 教师 μ_real（蓝）——DMD 梯度的「目标」端
+     fake = 假模型 μ_fake（橙）——全文唯一的分数估计器，两个梯度都用它
+     gen  = 生成器 G_θ / 少步采样（绿）——被更新的那个
+     pref = 偏好样本 x+ / 奖励 / 优势（紫）——对齐梯度的「目标」端
+     bad  = 崩溃 / 传统 RL 的代价（红）
+     ok   = 本文结果 / 好（青）
+   签名纹理是分数场（score field）：一片小箭头。
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0e1013; --surf:#14171b; --surf2:#1a1e24; --surf3:#232931;
+  --rule:#272c34; --rule2:#39414c;
+  --ink:#eef1f4; --ink2:#b0b8c3; --ink3:#7e8794;
+  --real:#4a8fe0; --real-ink:#74acf0; --real-soft:rgba(74,143,224,.18);
+  --fake:#c47a26; --fake-ink:#e8a04c; --fake-soft:rgba(196,122,38,.18);
+  --gen:#33a06a;  --gen-ink:#5cc58f;  --gen-soft:rgba(51,160,106,.18);
+  --pref:#9070ea; --pref-ink:#b096f8; --pref-soft:rgba(144,112,234,.20);
+  --bad:#e05a4c;  --bad-ink:#f08479;  --bad-soft:rgba(224,90,76,.16);
+  --ok:#2fb3a0;   --ok-ink:#5ed2c0;   --ok-soft:rgba(47,179,160,.15);
+  --grid:#212630; --axis:#39414c; --field:rgba(238,241,244,.13);
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.35);
+  --tint:rgba(255,255,255,.045);
+  --font-display:"Archivo","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f1f3f5; --surf:#fbfbfc; --surf2:#ebeef1; --surf3:#e1e5ea;
+    --rule:#dce0e6; --rule2:#c3c9d3;
+    --ink:#12151b; --ink2:#4b525e; --ink3:#737b89;
+    --real:#2b6fc4; --real-ink:#1f57a0; --real-soft:rgba(43,111,196,.13);
+    --fake:#a95f0f; --fake-ink:#8a4c0b; --fake-soft:rgba(169,95,15,.14);
+    --gen:#1f8f57;  --gen-ink:#14743f;  --gen-soft:rgba(31,143,87,.13);
+    --pref:#6a4bd4; --pref-ink:#5739ba; --pref-soft:rgba(106,75,212,.13);
+    --bad:#c8362f;  --bad-ink:#a92a24;  --bad-soft:rgba(200,54,47,.11);
+    --ok:#0f8a7a;   --ok-ink:#0b6d61;   --ok-soft:rgba(15,138,122,.12);
+    --grid:#e2e6eb; --axis:#c3c9d3; --field:rgba(18,21,27,.16);
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+    --tint:rgba(16,20,28,.035);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f1f3f5; --surf:#fbfbfc; --surf2:#ebeef1; --surf3:#e1e5ea;
+  --rule:#dce0e6; --rule2:#c3c9d3;
+  --ink:#12151b; --ink2:#4b525e; --ink3:#737b89;
+  --real:#2b6fc4; --real-ink:#1f57a0; --real-soft:rgba(43,111,196,.13);
+  --fake:#a95f0f; --fake-ink:#8a4c0b; --fake-soft:rgba(169,95,15,.14);
+  --gen:#1f8f57;  --gen-ink:#14743f;  --gen-soft:rgba(31,143,87,.13);
+  --pref:#6a4bd4; --pref-ink:#5739ba; --pref-soft:rgba(106,75,212,.13);
+  --bad:#c8362f;  --bad-ink:#a92a24;  --bad-soft:rgba(200,54,47,.11);
+  --ok:#0f8a7a;   --ok-ink:#0b6d61;   --ok-soft:rgba(15,138,122,.12);
+  --grid:#e2e6eb; --axis:#c3c9d3; --field:rgba(18,21,27,.16);
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  --tint:rgba(16,20,28,.035);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+h1,h2,h3,h4,h5{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--real-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--pref-ink); outline-offset:3px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); border:1px solid var(--rule);
+  padding:.08em .36em; border-radius:5px; white-space:nowrap}
+strong{font-weight:600; color:var(--ink)}
+hr{border:0; border-top:1px solid var(--rule); margin:40px 0}
+ul,ol{margin:0; padding-left:1.35em}
+li{margin:.35em 0}
+li::marker{color:var(--ink3)}
+.m{font-family:var(--font-math); font-style:italic}
+.mono{font-family:var(--font-mono)}
+sub,sup{line-height:0; font-size:.72em}
+
+/* ============================================================ chrome */
+#prog{position:fixed; inset:0 auto auto 0; height:2px; width:0; z-index:200;
+  background:linear-gradient(90deg,var(--fake),var(--real),var(--gen),var(--pref)); transition:width .08s linear}
+.top{position:fixed; inset:0 0 auto 0; height:60px; z-index:150; display:flex; align-items:center; gap:18px;
+  padding:0 22px; background:color-mix(in srgb, var(--surf) 86%, transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2)}
+
+.shell{display:grid; grid-template-columns:246px minmax(0,1fr); gap:0; max-width:1250px; margin:0 auto; padding:84px 28px 120px}
+.rail{position:sticky; top:84px; align-self:start; max-height:calc(100vh - 100px); overflow:auto; padding-right:18px}
+.rail .rl{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); margin:0 0 10px}
+.rail ol{list-style:none; margin:0; padding:0; border-left:1px solid var(--rule)}
+.rail li{margin:0}
+.rail a{display:block; padding:5px 0 5px 14px; margin-left:-1px; font-size:12.5px; line-height:1.4; color:var(--ink3);
+  border-left:2px solid transparent; border-bottom:0; transition:.15s}
+.rail a:hover{color:var(--ink)}
+.rail a.on{color:var(--ink); border-left-color:var(--real)}
+main{min-width:0; max-width:860px; padding-left:44px}
+@media (max-width:980px){
+  .shell{grid-template-columns:1fr; padding:76px 16px 90px}
+  .rail{display:none}
+  main{padding-left:0}
+}
+
+/* ============================================================ hero */
+.hero{padding:10px 0 34px; border-bottom:1px solid var(--rule); margin-bottom:56px; position:relative}
+.hero .fieldpat{position:absolute; right:-14px; top:-8px; width:260px; height:260px; opacity:.6; pointer-events:none}
+@media (max-width:760px){.hero .fieldpat{display:none}}
+.kicker{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px}
+.tag{font-family:var(--font-mono); font-size:11.5px; color:var(--ink2); background:var(--surf2); border:1px solid var(--rule);
+  padding:3px 9px; border-radius:6px; letter-spacing:.01em}
+.tag.hl{color:var(--real-ink); border-color:color-mix(in srgb,var(--real) 45%,transparent); background:var(--real-soft)}
+.hero h1{font-size:clamp(40px,6vw,60px); font-weight:700; letter-spacing:-.025em; line-height:1.02}
+.hero .zh{font-size:clamp(18px,2.2vw,22px); color:var(--ink2); margin-top:14px; line-height:1.55; max-width:46ch; font-weight:500; text-wrap:balance}
+.hero .thesis{margin-top:22px; font-size:16.5px; color:var(--ink2); max-width:66ch}
+.hero .thesis b{color:var(--ink)}
+.authors{margin-top:20px; font-size:13.5px; color:var(--ink3); line-height:1.7}
+.authors b{color:var(--ink2); font-weight:500}
+.links{display:flex; flex-wrap:wrap; gap:10px; margin-top:16px}
+.links a,.links span{font-family:var(--font-mono); font-size:12.5px; padding:6px 12px; border:1px solid var(--rule); border-radius:8px; color:var(--ink2); background:var(--surf)}
+.links a:hover{color:var(--ink); border-color:var(--rule2)}
+.links span{color:var(--ink3); border-style:dashed}
+.stats{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:28px}
+.stat{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:14px 16px 12px}
+.stat .lb{font-family:var(--font-mono); font-size:11px; color:var(--ink3); letter-spacing:.06em; text-transform:uppercase}
+.stat .vl{font-family:var(--font-display); font-size:28px; font-weight:700; letter-spacing:-.02em; margin-top:6px}
+.stat .dl{font-size:12.5px; color:var(--ink3); margin-top:4px; line-height:1.5}
+.stat .dl b{color:var(--ink2); font-weight:500}
+@media (max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
+
+/* role text */
+.rR{color:var(--real-ink); font-weight:600}
+.rF{color:var(--fake-ink); font-weight:600}
+.rG{color:var(--gen-ink); font-weight:600}
+.rP{color:var(--pref-ink); font-weight:600}
+.rB{color:var(--bad-ink); font-weight:600}
+.rK{color:var(--ok-ink); font-weight:600}
+
+/* ============================================================ sections */
+.sec{margin:0 0 84px; scroll-margin-top:84px}
+.eyebrow{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.eyebrow .n{font-family:var(--font-mono); font-size:12px; color:var(--real-ink); font-weight:600}
+.eyebrow .t{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); letter-spacing:.12em; text-transform:uppercase}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec h2{font-size:clamp(24px,3vw,31px); letter-spacing:-.02em; margin-bottom:16px}
+.sec h3{font-size:19px; margin:38px 0 12px; letter-spacing:-.01em; display:flex; align-items:baseline; gap:10px}
+.sec h3 .ix{font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-weight:500}
+.sec h4{font-size:15.5px; margin:22px 0 8px}
+.lead{font-size:17px; color:var(--ink2); max-width:68ch; margin-bottom:22px}
+.lead b{color:var(--ink)}
+.prose{max-width:70ch; color:var(--ink2)}
+.prose p{margin:0 0 14px}
+.prose b,.prose strong{color:var(--ink)}
+.prose ul,.prose ol{margin:0 0 14px}
+.note{font-size:13.5px; color:var(--ink3); max-width:70ch; margin-top:10px}
+
+/* ============================================================ figure */
+.fig{margin:26px 0 30px; background:var(--surf); border:1px solid var(--rule); border-radius:14px; box-shadow:var(--shadow); overflow:hidden}
+.fh{display:flex; align-items:baseline; gap:12px; padding:12px 18px 10px; border-bottom:1px solid var(--rule)}
+.fh .no{font-family:var(--font-mono); font-size:11.5px; color:var(--real-ink); letter-spacing:.06em; white-space:nowrap}
+.fh .ti{font-family:var(--font-display); font-size:14px; font-weight:600; color:var(--ink)}
+.figbody{padding:16px 18px 12px; background:var(--surf)}
+.figbody svg{display:block; width:100%; height:auto; max-width:100%; font-family:var(--font-body)}
+figcaption{padding:12px 18px 14px; font-size:13.5px; line-height:1.65; color:var(--ink3); border-top:1px solid var(--rule)}
+figcaption b{color:var(--ink2); font-weight:500}
+.tabs{display:flex; flex-wrap:wrap; gap:6px; padding:10px 14px 0; background:var(--surf)}
+.tab{background:var(--surf2); border:1px solid var(--rule); color:var(--ink3); font-family:var(--font-body); font-size:12.5px;
+  padding:6px 12px; border-radius:8px 8px 0 0; cursor:pointer; transition:.15s; border-bottom:0}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--ink); background:var(--surf3); border-color:var(--rule2)}
+.tabpanel[hidden]{display:none}
+.scrollx{overflow-x:auto}
+
+/* svg utility classes (theme-aware) */
+.f-ink{fill:var(--ink)} .f-ink2{fill:var(--ink2)} .f-ink3{fill:var(--ink3)}
+.f-surf{fill:var(--surf)} .f-surf2{fill:var(--surf2)} .f-surf3{fill:var(--surf3)} .f-bg{fill:var(--bg)}
+.s-rule{stroke:var(--rule2)} .s-rule1{stroke:var(--rule)} .s-ink3{stroke:var(--ink3)} .s-ink2{stroke:var(--ink2)} .s-ink{stroke:var(--ink)}
+.nofill{fill:none}
+.f-R{fill:var(--real)} .f-Ri{fill:var(--real-ink)} .fs-R{fill:var(--real-soft)} .s-R{stroke:var(--real)}
+.f-F{fill:var(--fake)} .f-Fi{fill:var(--fake-ink)} .fs-F{fill:var(--fake-soft)} .s-F{stroke:var(--fake)}
+.f-G{fill:var(--gen)}  .f-Gi{fill:var(--gen-ink)}  .fs-G{fill:var(--gen-soft)}  .s-G{stroke:var(--gen)}
+.f-P{fill:var(--pref)} .f-Pi{fill:var(--pref-ink)} .fs-P{fill:var(--pref-soft)} .s-P{stroke:var(--pref)}
+.f-B{fill:var(--bad)}  .f-Bi{fill:var(--bad-ink)}  .fs-B{fill:var(--bad-soft)}  .s-B{stroke:var(--bad)}
+.f-K{fill:var(--ok)}   .f-Ki{fill:var(--ok-ink)}   .fs-K{fill:var(--ok-soft)}   .s-K{stroke:var(--ok)}
+.mk-R{fill:var(--real)} .mk-F{fill:var(--fake)} .mk-G{fill:var(--gen)} .mk-P{fill:var(--pref)} .mk-B{fill:var(--bad)} .mk-I{fill:var(--ink3)} .mk-K{fill:var(--ok)}
+svg text{font-family:var(--font-body)}
+svg .big{font-size:13px; font-weight:600}
+svg .lbl{font-size:12px}
+svg .sml{font-size:10.5px}
+svg .xs{font-size:9.5px}
+svg .mono{font-family:var(--font-mono)}
+svg .math{font-family:var(--font-math); font-style:italic; font-size:13px}
+svg .tab-num{font-variant-numeric:tabular-nums}
+
+/* ============================================================ cards & callouts */
+.grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:22px 0}
+.grid2{display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin:22px 0}
+@media (max-width:760px){.grid3,.grid2{grid-template-columns:1fr}}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:16px 18px; font-size:14px; color:var(--ink2); line-height:1.7}
+.card .mono{font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3); margin-bottom:6px}
+.card h5{font-size:15px; margin-bottom:8px; color:var(--ink)}
+.card b{color:var(--ink)}
+.card.cR{border-top:3px solid var(--real)} .card.cR .mono{color:var(--real-ink)}
+.card.cF{border-top:3px solid var(--fake)} .card.cF .mono{color:var(--fake-ink)}
+.card.cG{border-top:3px solid var(--gen)}  .card.cG .mono{color:var(--gen-ink)}
+.card.cP{border-top:3px solid var(--pref)} .card.cP .mono{color:var(--pref-ink)}
+.card.cB{border-top:3px solid var(--bad)}  .card.cB .mono{color:var(--bad-ink)}
+.call{border:1px solid var(--rule); border-left:3px solid var(--ink3); background:var(--surf); border-radius:10px; padding:14px 18px; margin:22px 0; font-size:14.5px; color:var(--ink2); max-width:78ch}
+.call .hd{font-family:var(--font-display); font-weight:600; font-size:14px; color:var(--ink); margin-bottom:6px}
+.call p{margin:0 0 6px} .call p:last-child{margin:0}
+.call b{color:var(--ink)}
+.call.key{border-left-color:var(--real); background:color-mix(in srgb,var(--real-soft) 55%,var(--surf))}
+.call.warn{border-left-color:var(--bad); background:color-mix(in srgb,var(--bad-soft) 60%,var(--surf))}
+.call.mine{border-left-color:var(--pref); background:color-mix(in srgb,var(--pref-soft) 45%,var(--surf))}
+.call.ok{border-left-color:var(--ok); background:color-mix(in srgb,var(--ok-soft) 55%,var(--surf))}
+
+.eq{font-family:var(--font-math); font-size:19px; text-align:center; padding:16px 18px; margin:18px 0; background:var(--surf); border:1px solid var(--rule); border-radius:10px; color:var(--ink); overflow-x:auto; line-height:1.7}
+.eq i{font-style:italic}
+.eq .r{font-style:normal}
+.eq .tagno{float:right; font-family:var(--font-mono); font-style:normal; font-size:12px; color:var(--ink3); padding-top:6px}
+.eq .frac{display:inline-flex; flex-direction:column; vertical-align:middle; text-align:center; margin:0 .25em; line-height:1.25}
+.eq .frac span:first-child{border-bottom:1px solid var(--ink); padding:0 .25em}
+.eq .frac span:last-child{padding:0 .25em}
+.eq small{display:block; font-family:var(--font-body); font-style:normal; font-size:12.5px; color:var(--ink3); margin-top:8px; line-height:1.6; text-align:left}
+.eq small b{color:var(--ink2); font-weight:500}
+
+/* tables */
+table{border-collapse:collapse; width:100%; font-size:13.5px; margin:16px 0}
+th,td{padding:9px 10px; border-bottom:1px solid var(--rule); text-align:left; vertical-align:top; line-height:1.55}
+th{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); font-weight:500; border-bottom:1px solid var(--rule2)}
+td{color:var(--ink2)} td b{color:var(--ink)}
+td.num,th.num{font-family:var(--font-mono); font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right}
+tr.hl td{background:var(--tint)}
+td.best{color:var(--ok-ink); font-weight:600}
+td.worst{color:var(--bad-ink)}
+.tbl{overflow-x:auto; border:1px solid var(--rule); border-radius:12px; background:var(--surf); padding:0 14px; margin:18px 0}
+.tbl table{margin:0}
+
+/* pills */
+.pill{display:inline-block; font-family:var(--font-mono); font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--rule2); color:var(--ink2); background:var(--surf2); white-space:nowrap}
+.pill.R{color:var(--real-ink); border-color:color-mix(in srgb,var(--real) 50%,transparent); background:var(--real-soft)}
+.pill.F{color:var(--fake-ink); border-color:color-mix(in srgb,var(--fake) 50%,transparent); background:var(--fake-soft)}
+.pill.G{color:var(--gen-ink); border-color:color-mix(in srgb,var(--gen) 50%,transparent); background:var(--gen-soft)}
+.pill.P{color:var(--pref-ink); border-color:color-mix(in srgb,var(--pref) 50%,transparent); background:var(--pref-soft)}
+.pill.B{color:var(--bad-ink); border-color:color-mix(in srgb,var(--bad) 50%,transparent); background:var(--bad-soft)}
+.pill.K{color:var(--ok-ink); border-color:color-mix(in srgb,var(--ok) 50%,transparent); background:var(--ok-soft)}
+
+/* ============================================================ interactive widgets */
+.ctl{display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; padding:10px 18px; border-bottom:1px solid var(--rule); background:var(--surf2); font-size:13px; color:var(--ink2)}
+.ctl label{display:inline-flex; align-items:center; gap:8px; white-space:nowrap}
+.ctl input[type=range]{width:132px; accent-color:var(--real)}
+.ctl input[type=checkbox]{accent-color:var(--real)}
+.ctl .val{font-family:var(--font-mono); font-size:12px; color:var(--ink); min-width:5ch; font-variant-numeric:tabular-nums}
+.seg{display:inline-flex; border:1px solid var(--rule2); border-radius:8px; overflow:hidden}
+.seg button{background:var(--surf); border:0; color:var(--ink3); font-family:var(--font-body); font-size:12.5px; padding:5px 11px; cursor:pointer; transition:.15s}
+.seg button + button{border-left:1px solid var(--rule2)}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--surf3); color:var(--ink); font-weight:600}
+.btn{background:var(--surf3); border:1px solid var(--rule2); color:var(--ink); font-family:var(--font-body); font-size:12.5px; padding:5px 12px; border-radius:8px; cursor:pointer}
+.btn:hover{border-color:var(--ink3)}
+.btn:disabled{opacity:.4; cursor:default}
+.btn.primary{background:var(--real); border-color:var(--real); color:#fff}
+.readout{display:grid; grid-template-columns:repeat(auto-fit,minmax(122px,1fr)); gap:10px; padding:12px 18px; border-top:1px solid var(--rule); background:var(--surf)}
+.readout .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.04em; color:var(--ink3)}
+.readout .v{font-family:var(--font-display); font-size:19px; font-weight:600; letter-spacing:-.01em; font-variant-numeric:tabular-nums; margin-top:2px}
+.readout .v small{font-family:var(--font-mono); font-size:11px; color:var(--ink3); margin-left:4px; font-weight:400}
+.readout .v.ok{color:var(--ok-ink)} .readout .v.bad{color:var(--bad-ink)} .readout .v.pref{color:var(--pref-ink)} .readout .v.real{color:var(--real-ink)}
+
+/* canvas sandbox */
+.sim{position:relative; border-radius:10px; overflow:hidden; border:1px solid var(--rule); background:var(--surf2)}
+.sim canvas{display:block; width:100%; height:auto}
+.sim .lab{position:absolute; top:10px; font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; padding:3px 8px; border-radius:6px; background:rgba(0,0,0,.55); color:#fff; pointer-events:none}
+.sim .lab.l{left:12px} .sim .lab.r{right:12px}
+.sim .toast{position:absolute; left:50%; top:14px; transform:translateX(-50%); font-family:var(--font-mono); font-size:11.5px; padding:5px 10px; border-radius:8px; background:var(--bad); color:#fff; opacity:0; transition:opacity .25s; pointer-events:none; white-space:nowrap}
+.sim .toast.show{opacity:1}
+.legend{display:flex; flex-wrap:wrap; gap:6px 16px; padding:10px 18px; border-top:1px solid var(--rule); background:var(--surf); font-size:12.5px; color:var(--ink3)}
+.legend span{display:inline-flex; align-items:center; gap:6px}
+.legend i{display:inline-block; width:14px; height:14px; border-radius:3px; border:1px solid var(--rule2)}
+.legend i.dotG{border:0; width:8px; height:8px; border-radius:50%; background:var(--gen)}
+.legend i.dotP{border:0; width:8px; height:8px; border-radius:50%; background:var(--pref)}
+.legend i.lnR{border:0; height:3px; border-radius:2px; background:var(--real)}
+.legend i.lnF{border:0; height:3px; border-radius:2px; background:var(--fake)}
+.legend i.arR{border:0; height:3px; border-radius:2px; background:var(--real)}
+.legend i.arP{border:0; height:3px; border-radius:2px; background:var(--pref)}
+.legend i.rw{background:linear-gradient(90deg,transparent,var(--pref-soft),var(--pref))}
+
+/* explorer / side pane */
+.explore{display:grid; grid-template-columns:minmax(0,1.4fr) minmax(230px,1fr); gap:0}
+@media (max-width:760px){.explore{grid-template-columns:1fr}}
+.explore .pane{border-left:1px solid var(--rule); padding:14px 18px; font-size:13.5px; color:var(--ink2); background:var(--surf)}
+@media (max-width:760px){.explore .pane{border-left:0; border-top:1px solid var(--rule)}}
+.pane h5{font-family:var(--font-display); font-size:15px; color:var(--ink); margin-bottom:8px}
+.pane .row{margin:8px 0}
+.pane .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); display:block}
+.pane ul{padding-left:1.1em; margin:2px 0 0}
+.pane li{margin:2px 0}
+.node{cursor:pointer}
+.node rect{transition:.15s}
+.node:hover rect{stroke-width:2.4}
+
+/* stepper */
+.stepper{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+.stepper .st{font-family:var(--font-mono); font-size:12px; color:var(--ink2); min-width:6ch}
+.alg{font-family:var(--font-mono); font-size:12.5px; line-height:1.75; color:var(--ink2); padding:12px 18px; background:var(--surf2); border-top:1px solid var(--rule); overflow-x:auto}
+.alg div{padding:1px 8px; border-radius:6px; transition:.15s; white-space:pre}
+.alg div.on{background:var(--real-soft); color:var(--ink)}
+.alg div.onF{background:var(--fake-soft); color:var(--ink)}
+.alg div.onP{background:var(--pref-soft); color:var(--ink)}
+.alg .c{color:var(--ink3)}
+
+/* charts */
+.chart{padding:10px 18px 6px}
+.chart svg{display:block; width:100%; height:auto}
+.ttip{position:absolute; pointer-events:none; background:var(--ink); color:var(--bg); font-family:var(--font-mono); font-size:11px; padding:5px 8px; border-radius:6px; opacity:0; transition:opacity .12s; white-space:nowrap; z-index:5}
+.cwrap{position:relative}
+.bars{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:10px 14px; padding:10px 18px 14px}
+.bars .pnl{border:1px solid var(--rule); border-radius:10px; padding:10px 12px 8px; background:var(--surf)}
+.bars .pt{font-family:var(--font-mono); font-size:11px; letter-spacing:.02em; color:var(--ink2); margin-bottom:8px; display:flex; justify-content:space-between; gap:8px}
+.bars .pt span:last-child{color:var(--ink3)}
+.brow{display:grid; grid-template-columns:var(--labw,124px) 1fr auto; align-items:center; gap:8px; margin:4px 0}
+.brow .bl{font-size:11.5px; color:var(--ink2); text-align:right; line-height:1.3}
+.brow .bt{height:11px}
+.brow .bt i{display:block; height:100%; border-radius:3px; background:var(--ink3); opacity:.45; min-width:2px}
+.brow.hl .bl{color:var(--ink); font-weight:600}
+.brow.hl .bt i{background:var(--ok); opacity:1}
+.brow.dim .bt i{background:var(--bad); opacity:.7}
+.brow .bv{font-family:var(--font-mono); font-size:11px; color:var(--ink2); font-variant-numeric:tabular-nums; min-width:5ch}
+.brow.hl .bv{color:var(--ok-ink); font-weight:600}
+.bars svg{display:block; width:100%; height:auto}
+
+/* chips */
+.chips{display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:10px 18px; border-top:1px solid var(--rule); background:var(--surf); font-size:12.5px; color:var(--ink3)}
+.chip{font-family:var(--font-mono); font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--rule2); color:var(--ink2); background:var(--surf2)}
+.chip.R{color:var(--real-ink); border-color:color-mix(in srgb,var(--real) 55%,transparent); background:var(--real-soft)}
+.chip.F{color:var(--fake-ink); border-color:color-mix(in srgb,var(--fake) 55%,transparent); background:var(--fake-soft)}
+.chip.G{color:var(--gen-ink); border-color:color-mix(in srgb,var(--gen) 55%,transparent); background:var(--gen-soft)}
+.chip.P{color:var(--pref-ink); border-color:color-mix(in srgb,var(--pref) 55%,transparent); background:var(--pref-soft)}
+.chip.sep{border:0; background:none; color:var(--ink3); padding:0 2px}
+
+/* appendix */
+.gloss dt{font-family:var(--font-display); font-weight:600; font-size:14.5px; margin-top:14px; color:var(--ink)}
+.gloss dd{margin:2px 0 0; font-size:14px; color:var(--ink2); max-width:72ch}
+pre{font-family:var(--font-mono); font-size:12px; line-height:1.6; background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:14px 16px; overflow-x:auto; color:var(--ink2); margin:14px 0; white-space:pre-wrap; word-break:break-word}
+.foot{margin-top:60px; padding-top:20px; border-top:1px solid var(--rule); font-size:12.5px; color:var(--ink3); line-height:1.7}
+
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{transition:none !important; animation:none !important}
+}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">DM-Align<em>蒸馏与对齐的同一个梯度 · 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <marker id="ar-i" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-I"/></marker>
+  <marker id="ar-r" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-R"/></marker>
+  <marker id="ar-f" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-F"/></marker>
+  <marker id="ar-g" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-G"/></marker>
+  <marker id="ar-p" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-P"/></marker>
+  <marker id="ar-b" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-B"/></marker>
+  <marker id="ar-k" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-K"/></marker>
+  <!-- 签名纹理：分数场（一片小箭头） -->
+  <pattern id="fieldpat" width="42" height="42" patternUnits="userSpaceOnUse">
+    <path d="M6 30 L26 14" stroke="var(--field)" stroke-width="1.2" fill="none"/>
+    <path d="M22 17 L26 14 L23 19" stroke="var(--field)" stroke-width="1.2" fill="none"/>
+    <path d="M28 36 L38 24" stroke="var(--field)" stroke-width="1.2" fill="none"/>
+    <path d="M35 26 L38 24 L36 28" stroke="var(--field)" stroke-width="1.2" fill="none"/>
+  </pattern>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" class="s-rule" stroke-width="2.2"/>
+  </pattern>
+  <pattern id="hatch-b" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" class="s-B" stroke-width="2"/>
+  </pattern>
+</defs></svg>
+
+<div class="shell">
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-tldr">00 · 一图看懂</a></li>
+    <li><a href="#s-problem">01 · 两阶段的死结</a></li>
+    <li><a href="#s-dmd">02 · DMD 回顾：三个模型</a></li>
+    <li><a href="#s-bridge">03 · 把对齐写成分布匹配</a></li>
+    <li><a href="#s-core">04 · 核心近似（与我的核对）</a></li>
+    <li><a href="#s-pair">05 · DM-PairLoss</a></li>
+    <li><a href="#s-group">06 · DM-GroupLoss</a></li>
+    <li><a href="#s-algo">07 · 统一单阶段训练循环</a></li>
+    <li><a href="#s-cost">08 · 代价：30× 从哪来</a></li>
+    <li><a href="#s-exp">09 · 实验与消融</a></li>
+    <li><a href="#s-alt">10 · 两条替代路线为何失败</a></li>
+    <li><a href="#s-crit">11 · 局限与保留意见</a></li>
+    <li><a href="#s-repo">12 · 与本仓库的关联</a></li>
+    <li><a href="#s-appendix">13 · 附录速查</a></li>
+  </ol>
+</nav>
+<main>
+
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <svg class="fieldpat" viewBox="0 0 260 260" aria-hidden="true"><rect width="260" height="260" fill="url(#fieldpat)"/></svg>
+  <div class="kicker">
+    <span class="tag">arXiv 2609.04283v1</span>
+    <span class="tag">cs.CV · 2026-09-03</span>
+    <span class="tag">Tsinghua × Kuaishou</span>
+    <span class="tag hl">分布匹配 / 少步蒸馏 / 偏好对齐</span>
+  </div>
+  <h1>DM-Align</h1>
+  <p class="zh">把「加速」和「对齐」写成同一个分数空间里的两个梯度，一次训练同时做完</p>
+  <p class="thesis">这篇论文要解决的是一个非常具体的工程死结：视频模型既要<b>蒸馏</b>（100 步 → 4 步）又要<b>对齐人类偏好</b>（RL），
+  而这两件事按顺序做，<span class="rB">哪个顺序都不对</span>——先 RL 再蒸馏，RL 阶段每步要采样 20–40 次，慢到 423 s/step，而且蒸馏会把 RL 刚拿到的动态性还回去；
+  先蒸馏再 RL，少步模型的参数极度敏感，稀疏的 RL 梯度会直接把它打崩。
+  作者的解法不是调顺序，而是<b>换框架</b>：注意到 DMD 蒸馏的梯度本质是「<span class="rR">真实模型分数</span> − <span class="rF">假模型分数</span>」，
+  那么偏好对齐也可以写成同一形状的「<span class="rP">偏好样本处的分数</span> − <span class="rG">当前生成处的分数</span>」——两个梯度住在同一个分数空间、共用同一个<span class="rF">假模型 μ<sub>fake</sub></span>、共用同一批少步采样出来的样本，
+  于是可以直接线性相加，在<b>一个阶段</b>里同时优化。代价是每步只多 5 次函数求值（51 vs 46 NFE）。</p>
+  <p class="authors"><b>Jiuzhou Lin</b><sup>1,2†</sup>, <b>Junlong Wu</b><sup>1,2†</sup>, Fei Zuo<sup>2,3</sup>, Huan Ouyang<sup>2,4</sup>, Dewen Fan<sup>2</sup>, Boheng Zhang<sup>2</sup>, Huaiqing Wang<sup>2</sup>, Jia Sun<sup>2</sup>, <b>Fan Yang</b><sup>2*</sup>, <b>Houde Liu</b><sup>1*</sup>, Kehai Chen<sup>3</sup>, Min Zhang<sup>3</sup>, Tingting Gao<sup>2</sup>, Han Li<sup>2</sup></p>
+  <p class="authors"><sup>1</sup>清华大学 · <sup>2</sup>快手科技 · <sup>3</sup>哈尔滨工业大学（深圳） · <sup>4</sup>北京邮电大学　　<span style="opacity:.75">† 共同一作　* 通讯作者</span></p>
+  <div class="links">
+    <a href="https://arxiv.org/abs/2609.04283" target="_blank" rel="noopener">arXiv 摘要 ↗</a>
+    <a href="https://arxiv.org/pdf/2609.04283" target="_blank" rel="noopener">PDF ↗</a>
+    <span>代码：论文正文未给出仓库或项目页（2026-09-07 查）</span>
+  </div>
+
+  <figure class="fig" style="margin-top:28px">
+    <div class="fh"><span class="no">Hero</span><span class="ti">分数空间沙盘：两个梯度同时拉一团粒子，权重比决定结局</span></div>
+    <div class="ctl">
+      <button class="btn primary" id="sPlay" type="button">❚❚ 暂停</button>
+      <button class="btn" id="sReset" type="button">↺ 重来</button>
+      <div class="seg" id="sMode" role="group" aria-label="对齐变体">
+        <button type="button" data-mode="pair" aria-pressed="true">DM-Pair</button>
+        <button type="button" data-mode="group" aria-pressed="false">DM-Group</button>
+      </div>
+      <div class="seg" id="sRatio" role="group" aria-label="损失权重比">
+        <button type="button" data-r="1:0" aria-pressed="false">1 : 0</button>
+        <button type="button" data-r="3:1" aria-pressed="false">3 : 1</button>
+        <button type="button" data-r="1:1" aria-pressed="true">1 : 1</button>
+        <button type="button" data-r="1:3" aria-pressed="false">1 : 3</button>
+        <button type="button" data-r="0:1" aria-pressed="false">0 : 1</button>
+      </div>
+    </div>
+    <div class="ctl" style="border-top:0">
+      <label><input type="checkbox" id="sArrR" checked> <span class="rR">DMD 梯度</span></label>
+      <label><input type="checkbox" id="sArrP" checked> <span class="rP">DM-Align 梯度</span></label>
+      <label><input type="checkbox" id="sTeacher" checked> 教师分布等高线</label>
+      <label><input type="checkbox" id="sReward" checked> 奖励地形 r(x)</label>
+      <label><input type="checkbox" id="sPref" checked> 偏好样本 / 组锚点</label>
+      <label>速度 <input type="range" id="sSpeed" min="1" max="6" value="3" step="1"><span class="val" id="sSpeedV">3×</span></label>
+    </div>
+    <div class="figbody" style="padding:14px 18px 10px">
+      <div class="sim" id="sim">
+        <canvas id="sCanvas" width="1400" height="760" aria-label="二维分布匹配沙盘：绿色粒子代表生成器分布，被指向教师分布的蓝色 DMD 梯度和指向偏好样本的紫色对齐梯度同时拉动"></canvas>
+        <span class="lab l">二维隐空间（示意）</span>
+        <span class="lab r" id="sStepLab">step 0</span>
+        <div class="toast" id="sToast">蒸馏信号不足：分布正在离开教师流形 / 坍缩到奖励峰上</div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i class="lnR"></i> 教师分布 p<sub>real</sub> 等高线</span>
+      <span><i class="rw"></i> 奖励地形 r(x)</span>
+      <span><i class="dotG"></i> 生成器样本（p<sub>fake</sub>）</span>
+      <span><i class="dotP"></i> 偏好样本 x<sup>+</sup> / 组锚点 x̄<sup>+</sup></span>
+      <span><i class="arR"></i> DMD 梯度 s<sub>real</sub> − s<sub>fake</sub></span>
+      <span><i class="arP"></i> DM-Align 梯度</span>
+    </div>
+    <div class="readout">
+      <div><div class="k">保真度 · 平均 log p<sub>real</sub></div><div class="v real" id="rdFid">—</div></div>
+      <div><div class="k">平均奖励 r̄</div><div class="v pref" id="rdRew">—</div></div>
+      <div><div class="k">覆盖度（熵，越大越不塌）</div><div class="v" id="rdCov">—</div></div>
+      <div><div class="k">离教师流形距离</div><div class="v" id="rdOff">—</div></div>
+      <div><div class="k">λ<sub>DMD</sub> : λ<sub>align</sub></div><div class="v" id="rdLam">1 : 1</div></div>
+      <div><div class="k">迭代</div><div class="v" id="rdStep">0</div></div>
+    </div>
+    <figcaption><b>示意模拟，不是论文的实验；用一个二维玩具把 Sec. 3.2–3.3 的两股梯度画出来。</b>
+    绿点是生成器当前分布 <span class="m">p<sub>θ</sub></span> 的样本；蓝色等高线是教师分布 <span class="m">p<sub>real</sub></span>（一个双峰混合高斯）；紫色渐变是奖励地形 <span class="m">r(x)</span>，峰值只落在教师分布的<b>一侧</b>——这正是「高保真」和「高偏好」不重合的情形。
+    每一步对每个粒子算两股力：<span class="rR">DMD 力</span>用核密度估计当场估出 <span class="m">s<sub>fake</sub></span>（对应论文里那个被持续训练的假模型），与解析的 <span class="m">s<sub>real</sub></span> 相减；
+    <span class="rP">对齐力</span>在 Pair 模式下指向配到的偏好样本，在 Group 模式下按论文式 (7) 用组内优势 <span class="m">A<sub>i</sub></span> 加权（K = 8，top-4 均值作锚）。
+    <b>把权重比一路拨到 0 : 1（纯对齐）</b>：覆盖度会掉一半以上、保真度明显变差——这就是论文 Tab. 5 里 1:3 那一列大面积退化的机制；在 1:3 处这个玩具只显出同方向的轻微退化，真实模型的敏感度要高得多。
+    还可以对比两个变体：<b>这个玩具里 Group 比 Pair 退化得更狠</b>，因为 Pair 的锚点是从教师分布里采出来的样本（本身就在流形上），而 Group 的锚点由奖励排序现场合成，会一路往奖励峰上爬。
+    <b>需要说明：这是玩具的行为，不是论文的结论</b>——论文 Tab. 5 的权重扫描本身就是奖励模型驱动的（即 Group），它从未在 1:1 以外的比例下测过 Pair，所以并没有给出 Pair 与 Group 的对照。</figcaption>
+  </figure>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="lb">VBench 平均 · Group 变体</div>
+      <div class="vl">84.40</div>
+      <div class="dl">4 NFE；原模型 77.85（100 NFE）、DanceGRPO 82.76、两阶段 80.54（Tab. 1）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">训练每步耗时</div>
+      <div class="vl">15 s</div>
+      <div class="dl">DanceGRPO 423 s → <b>约 28×</b>；NFE 51 vs 1536（Tab. 3）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">动态程度 Dynamic Degree</div>
+      <div class="vl">80.19</div>
+      <div class="dl">两阶段 DanceGRPO+DMD2 从 75.78 掉到 <b>60.85</b>；本文反而推高（Tab. 1）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">人评净偏好 · Pair 变体</div>
+      <div class="vl">+48% / +32%</div>
+      <div class="dl">GSB 协议，分别对原模型与 DMD2；Group 变体 +30% / +12%（论文 Fig. 3）</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 00 TL;DR -->
+<section class="sec" id="s-tldr">
+  <div class="eyebrow"><span class="n">00</span><span class="t">TL;DR</span><span class="line"></span></div>
+  <h2>一图看懂：两个梯度长得一模一样，所以能直接相加</h2>
+  <p class="lead">这篇论文的全部内容可以压进一句话：<b>DMD 蒸馏的梯度是「两个网络在同一点上的分数之差」，作者把偏好对齐写成「同一个网络在两个点上的分数之差」，
+  于是它们成了同一个空间里的两个向量，加起来就行。</b>其余所有工程收益——不用把扩散采样改写成 MDP、不用反时 SDE、不用 20–40 步采样、不用担心蒸馏后崩溃——都是这一步的推论。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 1</span><span class="ti">全景：一次少步采样，喂给三条梯度通路（对应论文 Fig. 2 与 Algorithm 1）</span></div>
+    <div class="tabs" role="tablist" aria-label="通路">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="ovAll" id="ovT0">全景</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="ovAll" id="ovT1">① 蒸馏梯度</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="ovAll" id="ovT2">② DM-Pair</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="ovAll" id="ovT3">③ DM-Group</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="ovAll" id="ovT4">④ 假模型训练</button>
+    </div>
+    <div class="figbody scrollx" id="ovAll" role="tabpanel">
+      <svg viewBox="0 0 1000 700" style="min-width:760px" role="img" aria-label="DM-Align 框架全景图：一次少步采样产生 x 与 x_final，分别喂给 DMD 梯度、DM-Pair 梯度、DM-Group 梯度，三者加权后更新生成器；假模型则用去噪损失单独训练">
+        <!-- lane backgrounds -->
+        <g id="ovBG">
+          <rect x="18" y="28" width="964" height="104" rx="11" class="f-surf2" opacity=".55"/>
+          <rect x="18" y="144" width="964" height="122" rx="11" class="fs-R" opacity=".38"/>
+          <rect x="18" y="278" width="964" height="124" rx="11" class="fs-P" opacity=".30"/>
+          <rect x="18" y="414" width="964" height="142" rx="11" class="fs-P" opacity=".18"/>
+          <rect x="18" y="568" width="964" height="116" rx="11" class="f-surf2" opacity=".55"/>
+        </g>
+
+        <!-- ===== lane 0 : shared generation ===== -->
+        <g class="ovLane" data-lane="0">
+          <text x="34" y="50" class="f-ink3 mono xs">⓪ 共享的一次生成 · Alg. 1 第 6 行</text>
+          <rect x="34" y="60" width="88" height="26" rx="7" class="f-surf s-rule" stroke-width="1"/>
+          <text x="78" y="77" class="f-ink2 xs" text-anchor="middle">z ~ N(0, I)</text>
+          <rect x="34" y="94" width="88" height="26" rx="7" class="f-surf s-rule" stroke-width="1"/>
+          <text x="78" y="111" class="f-ink2 xs" text-anchor="middle">prompt c</text>
+          <path d="M124 73 L164 82" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+          <path d="M124 107 L164 98" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+          <rect x="170" y="60" width="136" height="60" rx="10" class="fs-G s-G" stroke-width="1.6"/>
+          <text x="238" y="84" class="f-Gi lbl" text-anchor="middle" font-weight="600">G_θ 生成器</text>
+          <text x="238" y="102" class="f-ink3 xs" text-anchor="middle">4 步采样 · τ ∈ {1000,750,500,250}</text>
+          <path d="M308 78 L352 70" class="nofill s-G" stroke-width="1.5" marker-end="url(#ar-g)"/>
+          <path d="M308 102 L352 112" class="nofill s-G" stroke-width="1.5" marker-end="url(#ar-g)"/>
+          <rect x="356" y="54" width="182" height="30" rx="7" class="f-surf s-G" stroke-width="1.3"/>
+          <text x="447" y="73" class="f-ink xs" text-anchor="middle">x — τ 处的中间样本</text>
+          <rect x="356" y="98" width="182" height="30" rx="7" class="f-surf s-G" stroke-width="1.3"/>
+          <text x="447" y="117" class="f-ink xs" text-anchor="middle">x_final — 完整 4 步输出</text>
+          <text x="556" y="62" class="f-ink3 xs">同一次前向、同一批噪声与 prompt，产出两种样本：</text>
+          <text x="556" y="79" class="f-ink3 xs">· x 走蒸馏通路（沿用 DMD 的中间态监督）</text>
+          <text x="556" y="96" class="f-ink3 xs">· x_final 走对齐通路（要能被奖励模型打分，必须是成品）</text>
+          <text x="556" y="113" class="f-ink3 xs">· x 同时还是假模型的训练数据 → 三条路共享一次采样</text>
+        </g>
+
+        <!-- ===== lane 1 : DMD gradient ===== -->
+        <g class="ovLane" data-lane="1">
+          <text x="34" y="160" class="f-Ri mono xs">① 蒸馏梯度 ∇L_DMD — 同一个 x_t，两个不同的网络</text>
+          <rect x="34" y="188" width="58" height="28" rx="7" class="f-surf s-G" stroke-width="1.2"/>
+          <text x="63" y="207" class="f-ink xs" text-anchor="middle">x</text>
+          <circle cx="116" cy="202" r="13" class="f-surf s-ink3" stroke-width="1.2"/>
+          <text x="116" y="206" class="f-ink2 xs" text-anchor="middle">＋t</text>
+          <path d="M94 202 L100 202" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+          <rect x="142" y="188" width="66" height="28" rx="7" class="f-surf s-rule" stroke-width="1.2"/>
+          <text x="175" y="207" class="f-ink xs" text-anchor="middle">x_t</text>
+          <path d="M131 202 L136 202" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+          <path d="M210 198 L252 190" class="nofill s-R" stroke-width="1.5" marker-end="url(#ar-r)"/>
+          <path d="M210 208 L252 228" class="nofill s-F" stroke-width="1.5" marker-end="url(#ar-f)"/>
+          <rect x="256" y="172" width="134" height="32" rx="9" class="fs-R s-R" stroke-width="1.5" stroke-dasharray="5 3"/>
+          <text x="323" y="192" class="f-Ri xs" text-anchor="middle" font-weight="600">μ_real 教师（冻结）</text>
+          <rect x="256" y="214" width="134" height="34" rx="9" class="fs-F s-F" stroke-width="1.5"/>
+          <text x="323" y="235" class="f-Fi xs" text-anchor="middle" font-weight="600">μ_fake 假模型</text>
+          <path d="M392 190 L416 198" class="nofill s-R" stroke-width="1.5" marker-end="url(#ar-r)"/>
+          <path d="M392 231 L416 216" class="nofill s-F" stroke-width="1.5" marker-end="url(#ar-f)"/>
+          <circle cx="432" cy="206" r="14" class="f-surf s-rule" stroke-width="1.4"/>
+          <text x="432" y="211" class="f-ink lbl" text-anchor="middle">−</text>
+          <path d="M448 206 L468 206" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+          <rect x="472" y="188" width="196" height="34" rx="9" class="fs-R s-R" stroke-width="1.4"/>
+          <text x="570" y="210" class="f-Ri xs" text-anchor="middle" font-weight="600">∇L_DMD ∝ s_real(x_t) − s_fake(x_t)</text>
+          <text x="686" y="184" class="f-ink3 xs">方向：把生成拉向<tspan class="f-Ri">教师流形</tspan></text>
+          <text x="686" y="201" class="f-ink3 xs">效果：清晰度、结构保真、少步能力</text>
+          <text x="686" y="218" class="f-ink3 xs">论文式 (2)；教师 CFG = 6.0</text>
+          <text x="686" y="235" class="f-ink3 xs">→ 两次求值都在<tspan class="f-ink2">同一个 x_t</tspan> 上</text>
+        </g>
+
+        <!-- ===== lane 2 : DM-Pair ===== -->
+        <g class="ovLane" data-lane="2">
+          <text x="34" y="300" class="f-Pi mono xs">② 对齐梯度 ∇L_align（Pair）— 同一个网络，两个不同的输入</text>
+          <rect x="34" y="320" width="92" height="28" rx="7" class="f-surf s-G" stroke-width="1.2"/>
+          <text x="80" y="339" class="f-ink xs" text-anchor="middle">x_final</text>
+          <rect x="34" y="358" width="92" height="28" rx="7" class="fs-P s-P" stroke-width="1.3"/>
+          <text x="80" y="377" class="f-Pi xs" text-anchor="middle">x⁺ 偏好样本</text>
+          <circle cx="150" cy="334" r="12" class="f-surf s-ink3" stroke-width="1.2"/>
+          <text x="150" y="338" class="f-ink2 xs" text-anchor="middle">＋t</text>
+          <circle cx="150" cy="372" r="12" class="f-surf s-ink3" stroke-width="1.2"/>
+          <text x="150" y="376" class="f-ink2 xs" text-anchor="middle">＋t</text>
+          <path d="M128 334 L136 334" class="nofill s-ink3" stroke-width="1.3" marker-end="url(#ar-i)"/>
+          <path d="M128 372 L136 372" class="nofill s-ink3" stroke-width="1.3" marker-end="url(#ar-i)"/>
+          <path d="M164 334 L186 334" class="nofill s-ink3" stroke-width="1.3" marker-end="url(#ar-i)"/>
+          <path d="M164 372 L186 372" class="nofill s-P" stroke-width="1.3" marker-end="url(#ar-p)"/>
+          <rect x="190" y="318" width="112" height="32" rx="9" class="fs-F s-F" stroke-width="1.5"/>
+          <text x="246" y="338" class="f-Fi xs" text-anchor="middle" font-weight="600">μ_fake</text>
+          <rect x="190" y="356" width="112" height="32" rx="9" class="fs-F s-F" stroke-width="1.5"/>
+          <text x="246" y="376" class="f-Fi xs" text-anchor="middle" font-weight="600">μ_fake</text>
+          <path d="M306 320 L316 320 L316 386 L306 386" class="nofill s-F" stroke-width="1.2" stroke-dasharray="3 3"/>
+          <text x="322" y="357" class="f-Fi xs">同一份权重</text>
+          <path d="M302 334 L372 344" class="nofill s-ink3" stroke-width="1.3" marker-end="url(#ar-i)"/>
+          <path d="M302 372 L372 362" class="nofill s-P" stroke-width="1.3" marker-end="url(#ar-p)"/>
+          <circle cx="390" cy="353" r="14" class="f-surf s-rule" stroke-width="1.4"/>
+          <text x="390" y="358" class="f-ink lbl" text-anchor="middle">−</text>
+          <path d="M406 353 L424 353" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+          <rect x="428" y="336" width="242" height="34" rx="9" class="fs-P s-P" stroke-width="1.4"/>
+          <text x="549" y="358" class="f-Pi xs" text-anchor="middle" font-weight="600">∇L_align ∝ s_fake(F(x⁺,t)) − s_fake(F(x_final,t))</text>
+          <text x="688" y="330" class="f-ink3 xs">方向：把生成拉向<tspan class="f-Pi">偏好样本</tspan></text>
+          <text x="688" y="347" class="f-ink3 xs">x⁺ 来自真实高质量视频（ConsistID）</text>
+          <text x="688" y="364" class="f-ink3 xs">论文式 (6)；生成物自动充当「负例」</text>
+          <text x="688" y="381" class="f-ink3 xs">→ 两次求值在<tspan class="f-ink2">两个不同的点</tspan>上</text>
+        </g>
+
+        <!-- ===== lane 3 : DM-Group ===== -->
+        <g class="ovLane" data-lane="3">
+          <text x="34" y="432" class="f-Pi mono xs">③ 对齐梯度 ∇L_align（Group）— 用组内探索现场合成锚点</text>
+          <rect x="34" y="442" width="100" height="28" rx="7" class="f-surf s-G" stroke-width="1.2"/>
+          <text x="84" y="461" class="f-ink xs" text-anchor="middle">x₁…x_K（K=8）</text>
+          <path d="M138 456 L156 456" class="nofill s-ink3" stroke-width="1.3" marker-end="url(#ar-i)"/>
+          <rect x="160" y="439" width="96" height="34" rx="9" class="fs-P s-P" stroke-width="1.4"/>
+          <text x="208" y="460" class="f-Pi xs" text-anchor="middle" font-weight="600">奖励模型 r</text>
+          <path d="M260 456 L284 456" class="nofill s-P" stroke-width="1.3" marker-end="url(#ar-p)"/>
+          <rect x="288" y="439" width="92" height="34" rx="9" class="f-surf s-P" stroke-width="1.2"/>
+          <text x="334" y="460" class="f-Pi xs" text-anchor="middle">优势 A_i</text>
+          <path d="M384 456 L520 456 L520 480 L550 480" class="nofill s-P" stroke-width="1.3" marker-end="url(#ar-p)"/>
+          <text x="452" y="450" class="f-ink3 xs" text-anchor="middle">作为权重</text>
+          <path d="M84 472 L84 496" class="nofill s-ink3" stroke-width="1.3" marker-end="url(#ar-i)"/>
+          <rect x="34" y="498" width="214" height="30" rx="8" class="fs-P s-P" stroke-width="1.3" stroke-dasharray="4 3"/>
+          <text x="141" y="518" class="f-Pi xs" text-anchor="middle">锚点 x̄⁺ = 奖励最高 4 个的均值</text>
+          <path d="M252 513 L286 513" class="nofill s-P" stroke-width="1.3" marker-end="url(#ar-p)"/>
+          <path d="M134 456 L134 480 L360 480 L360 490" class="nofill s-ink3" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#ar-i)"/>
+          <rect x="290" y="494" width="154" height="38" rx="9" class="fs-F s-F" stroke-width="1.5"/>
+          <text x="367" y="511" class="f-Fi xs" text-anchor="middle" font-weight="600">μ_fake</text>
+          <text x="367" y="525" class="f-ink3 xs" text-anchor="middle">对 x_i 与 x̄⁺ 各一次</text>
+          <path d="M448 508 L550 508" class="nofill s-ink3" stroke-width="1.3" marker-end="url(#ar-i)"/>
+          <rect x="554" y="470" width="196" height="44" rx="9" class="fs-P s-P" stroke-width="1.4"/>
+          <text x="652" y="488" class="f-Pi xs" text-anchor="middle" font-weight="600">∇L ∝ Σ A_i ×</text>
+          <text x="652" y="504" class="f-Pi xs" text-anchor="middle" font-weight="600">[ s_fake(x_i,t) − s_fake(x̄⁺,t) ]</text>
+          <text x="762" y="442" class="f-ink3 xs">A_i &lt; 0：把差样本拉向锚点</text>
+          <text x="762" y="459" class="f-ink3 xs">A_i &gt; 0：沿好样本方向继续外推</text>
+          <text x="762" y="530" class="f-ink3 xs">论文式 (7)；无需成对标注</text>
+          <text x="762" y="547" class="f-ink3 xs">奖励：VideoAlign-TA / HPSv2</text>
+        </g>
+
+        <!-- ===== lane 4 : aggregation + fake model ===== -->
+        <g class="ovLane" data-lane="4">
+          <text x="34" y="590" class="f-ink3 mono xs">④ 两个阶段交替：假模型跑 N 步，生成器跑 1 步（论文 N+1 = 5）</text>
+          <rect x="34" y="602" width="424" height="66" rx="10" class="f-surf s-G" stroke-width="1.4"/>
+          <text x="246" y="624" class="f-Gi xs" text-anchor="middle" font-weight="600">Phase 2 · 生成器（每 5 步 1 次）</text>
+          <text x="246" y="643" class="f-ink xs" text-anchor="middle">∇L_G = λ_DMD ∇L_DMD + λ_align ∇L_align</text>
+          <text x="246" y="659" class="f-ink3 xs" text-anchor="middle">λ 均取 0.5 · lr 2×10⁻⁶ · step 500 起 EMA 0.99</text>
+          <rect x="486" y="602" width="496" height="66" rx="10" class="f-surf s-F" stroke-width="1.4"/>
+          <text x="734" y="624" class="f-Fi xs" text-anchor="middle" font-weight="600">Phase 1 · 假模型（每 5 步 4 次）</text>
+          <text x="734" y="643" class="f-ink xs" text-anchor="middle">L_denoise = ‖ μ_fake(x_t, t) − stopgrad(x) ‖²  ·  t ~ U(0,1)</text>
+          <text x="734" y="659" class="f-ink3 xs" text-anchor="middle">lr 4×10⁻⁷；它同时是①的负端、②③的唯一分数估计器</text>
+          <path d="M458 635 L482 635" class="nofill s-ink3" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ar-i)"/>
+
+        </g>
+      </svg>
+    </div>
+    <figcaption>点上面的标签只看一条通路。<b>整张图只有一个真正的新东西：第 ② / ③ 条通路。</b>
+    ① 是 DMD2 原样搬来的；④ 是 DMD 的标准假模型训练；⓪ 的巧妙之处在于 <span class="m">x</span> 和 <span class="m">x_final</span> 来自同一次前向，所以对齐几乎不额外花钱。
+    请特别注意 ① 和 ② 的结构差异——这是全文最关键、也最值得推敲的一处，<a href="#s-core">§04</a> 会把它拆开算。</figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card cR">
+      <div class="mono">① 蒸馏方向</div>
+      <h5>清晰度从哪来</h5>
+      <p><span class="m">s<sub>real</sub> − s<sub>fake</sub></span>，两个网络在<b>同一个</b>加噪点上的分数差。指向教师分布密度更高的方向，负责「像不像原模型」。</p>
+    </div>
+    <div class="card cP">
+      <div class="mono">② 对齐方向</div>
+      <h5>偏好从哪来</h5>
+      <p><span class="m">s<sub>fake</sub>(x⁺) − s<sub>fake</sub>(x<sub>gen</sub>)</span>，<b>同一个</b>网络在两个不同样本上的分数差。指向人类偏好样本所在的位置。</p>
+    </div>
+    <div class="card cF">
+      <div class="mono">共用的枢纽</div>
+      <h5>假模型是全场唯一的估计器</h5>
+      <p><span class="m">μ<sub>fake</sub></span> 既当①的减数，又当②③的<b>全部</b>。它靠一个纯去噪损失训练，因此论文说它是「一个异常鲁棒的去噪器」。</p>
+    </div>
+  </div>
+
+  <div class="call key">
+    <div class="hd">读这篇论文的正确姿势</div>
+    <p>不要把它当成「又一个 RLHF 变体」。它的立场是：<b>传统 RL 那一整套（MDP 化、反时 SDE、轨迹概率、多步采样）对扩散模型是一层不必要的翻译层</b>。
+    如果你要的只是「把分布往偏好方向推一点」，分布匹配本来就直接提供了这个操作——你只需要一个样本告诉它往哪推。所以叫 <b>sample-guided</b>：偏好是以样本形式、而不是以标量奖励+概率比的形式进入梯度的。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 01 PROBLEM -->
+<section class="sec" id="s-problem">
+  <div class="eyebrow"><span class="n">01</span><span class="t">The Deadlock</span><span class="line"></span></div>
+  <h2>两阶段的死结：先 RL 太贵，后 RL 会崩</h2>
+  <p class="lead">要把一个视频基座模型交付出去，通常要做两件事：<b>蒸馏</b>（把 100 步采样压到 4 步，否则没法用）和<b>对齐</b>（把生成推向人类偏好，否则不好看）。
+  现有做法把它们当成两个前后相接的阶段。论文 Fig. 1 左半边说的就是：<b>这两个顺序都有问题，而且问题的性质完全不同</b>。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 2</span><span class="ti">三条路线并排：代价、结果、失败模式（数字来自论文 Tab. 1 / Tab. 3 与 §4.1）</span></div>
+    <div class="ctl">
+      <div class="seg" id="pipeSeg" role="group" aria-label="选择路线">
+        <button type="button" data-p="0" aria-pressed="true">① RL → 蒸馏</button>
+        <button type="button" data-p="1" aria-pressed="false">② 蒸馏 → RL</button>
+        <button type="button" data-p="2" aria-pressed="false">③ 单阶段（本文）</button>
+      </div>
+      <label>RL 步数 <input type="range" id="pipeRL" min="20" max="300" value="100" step="10"><span class="val" id="pipeRLV">100</span></label>
+      <label>蒸馏 / 联合步数 <input type="range" id="pipeDM" min="200" max="2000" value="1000" step="100"><span class="val" id="pipeDMV">1000</span></label>
+    </div>
+    <div class="explore">
+      <div class="figbody cwrap" style="padding:14px 18px 6px">
+        <svg id="pipeSVG" viewBox="0 0 660 300" role="img" aria-label="三条训练路线的时间线与总耗时对比"></svg>
+        <div class="ttip" id="pipeTip"></div>
+      </div>
+      <div class="pane" id="pipePane"></div>
+    </div>
+    <div class="readout">
+      <div><div class="k">总训练时长（推算）</div><div class="v" id="pipeTot">—</div></div>
+      <div><div class="k">相对单阶段</div><div class="v" id="pipeRel">—</div></div>
+      <div><div class="k">VBench 平均</div><div class="v" id="pipeVb">—</div></div>
+      <div><div class="k">推理 NFE</div><div class="v" id="pipeNfe">—</div></div>
+    </div>
+    <figcaption><b>横条是训练时间线，长度按「每步耗时 × 步数」等比缩放。</b>每步耗时取论文 Tab. 3（DanceGRPO 423 s、DMD2 11 s、DM-Align 15 s，32×H100），
+    步数取 §4.1 的默认值（RL 100 步、蒸馏与本文 1000 步）并可拖动。<b>总时长是我按这两组数相乘推出来的，论文没有直接给</b>——但相乘的两个数都是论文原文，量级可靠。
+    右侧结果面板里的 VBench 数字全部来自 Tab. 1 下半部分（VidProM / DM-Align (Group) 那一组），未作任何换算。</figcaption>
+  </figure>
+
+  <h3><span class="ix">1.1</span>先 RL 再蒸馏：贵，而且蒸馏会把 RL 的成果吐回去</h3>
+  <div class="prose">
+    <p>贵的原因有两层。<b>表层</b>是采样：RL 要拿到一条完整的生成轨迹才能打分，扩散模型采一次要 20–40 步，所以 DanceGRPO 一个优化步要 1536 次函数求值、423 秒。
+    <b>深层</b>是范式：现有 RL 方法必须把扩散的连续 ODE 轨迹改写成 RL 要的<b>马尔可夫决策过程</b>，这就要沿采样路径算轨迹概率，于是需要转成<span class="rB">反时随机微分方程</span>并依赖高斯假设。
+    论文对这一层的态度很直接——这是一层「为了套用现成算法而付出的翻译成本」，本身不产生任何生成质量。</p>
+    <p>更麻烦的是第二个问题：<b>蒸馏会撤销 RL 的收益</b>。Tab. 1 里这个证据非常干净：DanceGRPO 把 Dynamic Degree 从 56.40 推到 <span class="rK">75.78</span>，
+    接着做 DMD2 蒸馏，它掉回 <span class="rB">60.85</span>——<b>一次蒸馏抹掉了 14.93，也就是 RL 涨幅的 77%</b>。Pair 那一组同理：Flow-DPO 把 Dynamic Degree 推到 67.13，蒸馏后回到 53.43。
+    原因不难理解：蒸馏的目标函数就是「向教师看齐」，而教师正是那个没对齐过的模型。你在第一阶段推开的距离，第二阶段有一个显式的损失项在把它拉回来。</p>
+  </div>
+
+  <h3><span class="ix">1.2</span>先蒸馏再 RL：便宜，但会崩</h3>
+  <div class="prose">
+    <p>反过来，先蒸馏拿到 4 步模型，再在这个快模型上做 RL——采样便宜了 25 倍，听起来是显然的做法。论文 Fig. 5 给出的是失败图：<b>模糊伪影、闪烁，最后完全崩溃</b>。
+    作者的解释是一句假设（原文用了 “We hypothesize”）：<b>蒸馏模型的参数是超敏感的</b>，少步生成依赖一个被压缩得很紧的连续映射，稀疏的 RL 梯度稍一扰动就把它打散。</p>
+    <p>我认为这个解释是对的但不完整，可以更具体一点：DMD 蒸馏出来的 4 步生成器，其输出流形是被 <span class="m">s<sub>real</sub> − s<sub>fake</sub></span> 这个<b>持续存在的约束</b>顶住的。
+    一旦进入纯 RL 阶段，这个约束消失了，唯一剩下的信号是奖励模型的标量分。而奖励模型（论文自己在 §4.1 承认）对<b>退化内容有严重的误判</b>——
+    VideoAlign 会给纯白噪声和闪烁帧打出高的运动/视觉分。没有分布约束 + 奖励模型可被欺骗 = 标准的 reward hacking 崩溃路径。<b>这一点很重要，因为它同时解释了本文为什么必须把 λ<sub>DMD</sub> 一直保留着</b>（见 <a href="#s-exp">§09</a> 的 1:3 那一列）。</p>
+  </div>
+
+  <div class="call warn">
+    <div class="hd">论文自己踩到的坑，写在了 §4.1 里</div>
+    <p>「我们观察到 VideoAlign 奖励模型会给退化内容（如纯白噪声或闪烁帧）错误地打出很高的运动/视觉分数。为了防止 DanceGRPO 和我们的方法训练崩溃，我们在 VidProM 上主要只用<b>文本对齐（TA）</b>这一项奖励。」</p>
+    <p>这句话的分量比它的篇幅大：它意味着 Tab. 1 下半部分那些漂亮的 Dynamic Degree / Aesthetic 提升，<b>并不是被直接优化的目标</b>，而是「只优化 TA」的副产物。这既是好消息（说明没有在指标上作弊），也是一个提醒（说明奖励模型本身仍是这条路线上最脆的一环）。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 02 DMD -->
+<section class="sec" id="s-dmd">
+  <div class="eyebrow"><span class="n">02</span><span class="t">Background · DMD</span><span class="line"></span></div>
+  <h2>DMD 回顾：三个模型、一个分数差、一个加噪技巧</h2>
+  <p class="lead">要理解本文的贡献，必须先把 DMD 的梯度<b>看成一个几何对象</b>而不是一个损失函数。这一节把 §3.1 的三个式子摊开，并配一个可以拖的一维探针。</p>
+
+  <h3><span class="ix">2.1</span>目标：让学生的分布贴上教师的分布</h3>
+  <div class="prose"><p>DMD 的目标是最小化学生（少步生成器）输出分布与教师（多步原模型）分布之间的 KL 散度：</p></div>
+  <div class="eq"><span class="tagno">式 (1)</span>
+    <i>L</i><sub>DMD</sub> = <span class="r">D</span><sub>KL</sub>( <i>p</i><sub>fake</sub> ‖ <i>p</i><sub>real</sub> ) = <span class="r">𝔼</span><sub><i>z</i>~𝒩(0,I), <i>x</i>=<i>G</i><sub>θ</sub>(<i>z</i>)</sub> [ −( log <i>p</i><sub>real</sub>(<i>x</i>) − log <i>p</i><sub>fake</sub>(<i>x</i>) ) ]
+    <small>注意方向是 <b>反向 KL</b>（p<sub>fake</sub> 在前）。反向 KL 是「mode-seeking」的：它惩罚「学生在教师没有密度的地方生成」，但不太惩罚「学生漏掉教师的某个模式」。这正是少步蒸馏想要的性质——宁可少样，不要糊。同时这也是后面 <a href="#s-crit">§11</a> 里多样性问题的根源。</small>
+  </div>
+
+  <h3><span class="ix">2.2</span>梯度：密度算不出来，但分数差算得出来</h3>
+  <div class="prose"><p>式 (1) 里的两个 <span class="m">log p</span> 都无法直接估计。DMD 的做法是只求梯度——对 <span class="m">θ</span> 求导后，密度变成了<b>分数（score）</b>，而分数恰好就是扩散模型在训练的东西：</p></div>
+  <div class="eq"><span class="tagno">式 (2)</span>
+    ∇<sub>θ</sub><i>L</i><sub>DMD</sub> ≈ −<span class="r">𝔼</span><sub><i>t,z</i></sub> [ ( <i>s</i><sub>real</sub>(<i>F</i>(<i>G</i><sub>θ</sub>(<i>z</i>),<i>t</i>), <i>t</i>) − <i>s</i><sub>fake</sub>(<i>F</i>(<i>G</i><sub>θ</sub>(<i>z</i>),<i>t</i>), <i>t</i>) ) · <span class="frac"><span>d<i>G</i><sub>θ</sub>(<i>z</i>)</span><span>d<i>θ</i></span></span> ]
+    <small><b>三处细节值得记住。</b>（i）<span class="m">F(·,t)</span> 是前向加噪：不加噪的话两个分布的支撑集几乎不相交，分数差要么是 0 要么是无穷；加噪把两个流形「泡开」，让它们重叠，梯度才有定义。（ii）两个分数<b>在同一个加噪点 <span class="m">x<sub>t</sub></span> 上求值</b>——这是式 (2) 成立的前提。（iii）<span class="m">dG<sub>θ</sub>/dθ</span> 把「样本空间里的一个方向」翻译成「参数空间里的一个方向」，所以整个方法只需要给生成器输出一个<b>目标位移向量</b>。</small>
+  </div>
+
+  <h3><span class="ix">2.3</span>假模型：一个只会去噪的陪练</h3>
+  <div class="prose">
+    <p>式 (2) 里的 <span class="m">s<sub>real</sub></span> 由冻结的教师提供；<span class="m">s<sub>fake</sub></span> 没有现成的，所以 DMD 现训一个：</p>
+  </div>
+  <div class="eq"><span class="tagno">式 (3)</span>
+    <i>L</i><sub>denoise</sub><sup>ϕ</sup> = ‖ <i>μ</i><sub>fake</sub><sup>ϕ</sup>(<i>x<sub>t</sub></i>, <i>t</i>) − <i>x</i><sub>0</sub> ‖<sub>2</sub><sup>2</sup>,　　<i>x</i><sub>0</sub> = <i>G</i><sub>θ</sub>(<i>z</i>),　<i>x<sub>t</sub></i> = <i>F</i>(<i>x</i><sub>0</sub>, <i>t</i>)
+    <small>就是标准扩散训练，只不过<b>数据集是生成器此刻的输出</b>。因此 <span class="m">μ<sub>fake</sub></span> 是一个「追着生成器跑」的分布估计器。它通过 Tweedie 公式与分数相连：<span class="m">s(x<sub>t</sub>,t) = (α<sub>t</sub> μ(x<sub>t</sub>,t) − x<sub>t</sub>) / σ<sub>t</sub>²</span>。<b>这条换算关系是 <a href="#s-core">§04</a> 全部推敲的工具</b>。</small>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 3</span><span class="ti">一维分数场探针：加噪为什么是必需的，DMD 梯度长什么样</span></div>
+    <div class="ctl">
+      <label>噪声档位 t <input type="range" id="d3T" min="1" max="60" value="18" step="1"><span class="val" id="d3TV">σ=0.18</span></label>
+      <label>生成器位置 <input type="range" id="d3Mu" min="-30" max="30" value="2" step="1"><span class="val" id="d3MuV">0.2</span></label>
+      <label>生成器宽度 <input type="range" id="d3S" min="4" max="40" value="14" step="1"><span class="val" id="d3SV">0.14</span></label>
+      <label><input type="checkbox" id="d3Show" checked> 显示分数曲线</label>
+      <label><input type="checkbox" id="d3Noisy" checked> 显示加噪后的分布</label>
+    </div>
+    <div class="figbody cwrap" style="padding:12px 18px 6px">
+      <svg id="d3SVG" viewBox="0 0 700 380" role="img" aria-label="一维分布与分数曲线：上图是教师与生成器的密度，下图是对应的分数函数，箭头是 DMD 梯度"></svg>
+    </div>
+    <div class="readout">
+      <div><div class="k">s_real(x_t)</div><div class="v real" id="d3SR">—</div></div>
+      <div><div class="k">s_fake(x_t)</div><div class="v" id="d3SF" style="color:var(--fake-ink)">—</div></div>
+      <div><div class="k">DMD 梯度（差）</div><div class="v ok" id="d3G">—</div></div>
+      <div><div class="k">两分布重叠度</div><div class="v" id="d3Ov">—</div></div>
+    </div>
+    <figcaption><b>示意图，一维玩具。</b>上半是密度：<span class="rR">蓝</span>为教师 <span class="m">p<sub>real</sub></span>（双峰），<span class="rF">橙</span>为生成器 <span class="m">p<sub>fake</sub></span>（单峰，可拖）；虚线是加噪 <span class="m">t</span> 之后的版本。
+    下半是对应的分数 <span class="m">∇<sub>x</sub> log p<sub>t</sub></span>，绿色竖线标出探针位置（取一个典型生成样本 μ+0.8σ，而不是均值本身——在均值处 s<sub>fake</sub> 恒为 0），青色箭头是两条分数曲线<b>在同一横坐标上</b>的差，那就是 DMD 要施加给生成器的位移。纵轴用了对数压缩刻度，否则两端会被裁平。
+    <b>把 t 拖到最小</b>：重叠度趋近 0，分数差在生成器所在位置变得极端且几乎不含教师的信息；<b>把 t 拖大</b>：两个分布糊成一片，梯度平滑但方向粗糙。论文在 <span class="m">t ~ U(0,1)</span> 上取期望，就是在把这两端平均掉。</figcaption>
+  </figure>
+
+  <div class="call">
+    <div class="hd">一句话记住 DMD</div>
+    <p>它给生成器的不是「损失」，而是一个<b>逐样本的位移向量</b>：「你现在在这儿，教师的密度更高的方向在那儿，往那边挪一点」。这个接口非常宽——只要你能说出「那儿」在哪，任何目标都能塞进来。<b>本文塞进去的就是「人类偏好样本在那儿」。</b></p>
+  </div>
+</section>
+
+<!-- ============================================================ 03 BRIDGE -->
+<section class="sec" id="s-bridge">
+  <div class="eyebrow"><span class="n">03</span><span class="t">The Pivot</span><span class="line"></span></div>
+  <h2>把「对齐」重写成「分布匹配」：只需要 RLHF 教科书的第一页</h2>
+  <p class="lead">这一步是纯粹的改写，没有新东西，但它决定了后面所有的形状。论文用两个式子把「最大化奖励」翻译成「向某个目标分布做分布匹配」。</p>
+
+  <h3><span class="ix">3.1</span>最优策略有闭式解，所以「对齐」本来就是一个分布</h3>
+  <div class="prose">
+    <p>在 Bradley–Terry 假设下的标准 RLHF 里，「在不跑离参考分布太远的前提下最大化期望奖励」这个约束优化问题有闭式最优解（这是 DPO 推导的起点，也是 KL 正则化策略搜索的经典结果）：</p>
+  </div>
+  <div class="eq"><span class="tagno">式 (4)</span>
+    <i>p</i>*(<i>x</i>) = <span class="frac"><span>1</span><span><i>Z</i></span></span> <i>p</i><sub>ref</sub>(<i>x</i>) · exp( <span class="frac"><span><i>r</i>(<i>x</i>)</span><span><i>β</i></span></span> )
+    <small><b>读法：</b>把参考分布按奖励做指数重加权。<span class="m">β</span> 小 → 尖锐地压向高奖励区；<span class="m">β</span> 大 → 几乎不动。<span class="m">Z</span> 是配分函数，算不出来，但做分布匹配时求梯度会把它消掉——这正是可以往下走的原因。</small>
+  </div>
+  <div class="prose">
+    <p>既然对齐的目标是一个<b>分布</b> <span class="m">p*</span>，那么「对齐」就可以写成 <span class="m">D<sub>KL</sub>(p<sub>θ</sub> ‖ p*)</span> 的最小化——形状和式 (1) 一模一样。走一遍和 DMD 完全相同的重参数化推导，梯度同样落到分数域：</p>
+  </div>
+  <div class="eq"><span class="tagno">式 (5)</span>
+    ∇<sub>θ</sub><i>L</i><sub>align</sub> ≈ −<span class="r">𝔼</span><sub><i>t,z</i></sub> [ ( ∇<sub><i>x<sub>t</sub></i></sub> log <i>p</i>*<sub><i>t</i></sub>(<i>x<sub>t</sub></i>) − ∇<sub><i>x<sub>t</sub></i></sub> log <i>p</i><sub>θ,<i>t</i></sub>(<i>x<sub>t</sub></i>) ) · <span class="frac"><span>d<i>G</i><sub>θ</sub>(<i>z</i>)</span><span>d<i>θ</i></span></span> ]
+    <small>把式 (5) 和式 (2) 并排看：<b>它们是同一个式子</b>，只是把 <span class="m">p<sub>real</sub></span> 换成了 <span class="m">p*</span>。这就是论文说的 <b>gradient compatibility</b>（梯度兼容性）。两个梯度住在同一个向量空间（分数空间），量纲一致、作用点一致（都通过 <span class="m">dG<sub>θ</sub>/dθ</span> 施加给生成器输出），所以<b>相加是有意义的</b>——这不是随手把两个 loss 加起来。</small>
+  </div>
+
+  <div class="call key">
+    <div class="hd">为什么这一步就已经绕开了传统 RL 的全部麻烦</div>
+    <p>传统扩散 RL 要的是「这条采样轨迹的对数概率」，因为 PPO/GRPO 的目标里有 <span class="m">π<sub>θ</sub>(a|s)</span> 的比值。为了算它，必须把 ODE 采样改写成反时 SDE、假设每步转移是高斯、再沿路径累乘。
+    式 (5) 里<b>根本没有轨迹</b>：它只需要「终点样本」和「分数」。<span class="m">Z</span> 消失了、<span class="m">β</span> 被吸收进了后面的权重 <span class="m">λ</span>、轨迹概率从来没出现过。<b>整层翻译成本被删掉了。</b></p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">我的一点提醒：β 去哪了</div>
+    <p>式 (4) 里的 <span class="m">β</span> 控制「向偏好走多远 vs 向参考分布靠多紧」。式 (5) 之后它再也没出现过。实际上它的角色被 <span class="m">λ<sub>DMD</sub> : λ<sub>align</sub></span> 接管了——而且接管得并不完全等价：
+    <span class="m">β</span> 的锚点是 <span class="m">p<sub>ref</sub></span>（原始预训练模型），而 <span class="m">λ<sub>DMD</sub></span> 的锚点是<b>教师 <span class="m">p<sub>real</sub></span></b>。在这篇论文里两者恰好是同一个模型，所以看不出区别；但如果有人把这套框架用在「教师 ≠ 参考」的场景（比如教师已经被别的方法微调过），这个隐含等价就会失效。<a href="#s-exp">§09</a> 的权重敏感性分析（Tab. 5）实际上就是在实验层面标定这个 <span class="m">β</span>。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 04 CORE -->
+<section class="sec" id="s-core">
+  <div class="eyebrow"><span class="n">04</span><span class="t">The Core Approximation</span><span class="line"></span></div>
+  <h2>核心近似：用假模型「看一眼偏好样本」当作目标分数</h2>
+  <p class="lead">式 (5) 里有一项是算不出来的：<span class="m">∇ log p*<sub>t</sub></span>。<b>整篇论文的技术贡献就是它的替代品。</b>这一节先把论文的做法讲清楚，再把我自己的核对过程完整摆出来——因为这里有一处我认为写得不够严谨、但很可能实现上是对的地方。</p>
+
+  <h3><span class="ix">4.1</span>论文的替换：一行，但是全文的支点</h3>
+  <div class="prose">
+    <p>作者的观察是：<span class="m">μ<sub>fake</sub></span> 被式 (3) 持续训练，是一个<b>异常鲁棒的去噪器</b>；由 Tweedie 公式，去噪预测和分数一一对应。
+    因此，把一个人类偏好样本 <span class="m">x⁺</span> 加噪后送进 <span class="m">μ<sub>fake</sub></span>，得到的是「<b>它在已学到的高奖励流形上的隐式投影</b>」（原文：an implicit projection onto the learned high-reward manifold）。于是：</p>
+  </div>
+  <div class="eq"><span class="tagno">式 (6)</span>
+    ∇<sub>θ</sub><i>L</i><sub>align</sub> ≈ −<span class="r">𝔼</span><sub><i>t,z</i></sub> [ ( <i>s</i><sub>fake</sub>(<i>F</i>(<i>x</i>⁺,<i>t</i>), <i>t</i>) − <i>s</i><sub>fake</sub>(<i>F</i>(<i>G</i><sub>θ</sub>(<i>z</i>),<i>t</i>), <i>t</i>) ) · <span class="frac"><span>d<i>G</i><sub>θ</sub></span><span>d<i>θ</i></span></span> ]
+    <small>与式 (2) 逐项对照：<span class="m">s<sub>real</sub>(x<sub>t</sub>)</span> → <span class="m">s<sub>fake</sub>(F(x⁺,t))</span>，<span class="m">s<sub>fake</sub>(x<sub>t</sub>)</span> → <span class="m">s<sub>fake</sub>(F(G<sub>θ</sub>(z),t))</span>。<b>教师被「偏好样本 + 假模型」这个组合替代了。</b>代价：一次额外的 <span class="m">μ<sub>fake</sub></span> 前向（外加对 <span class="m">x⁺</span> 的加噪），这就是 Tab. 3 里 51 − 46 = 5 NFE 的来源。</small>
+  </div>
+
+  <h3><span class="ix">4.2</span>我卡住的地方：式 (2) 和式 (6) 的结构其实不一样</h3>
+  <div class="prose">
+    <p>把两式的括号内部并排写出来，差别就很明显：</p>
+    <ul>
+      <li><b>式 (2)：</b><span class="m">s<sub>real</sub>(x<sub>t</sub>) − s<sub>fake</sub>(x<sub>t</sub>)</span> —— <span class="rR">两个不同的函数</span>，在<b>同一个点</b>上求值。</li>
+      <li><b>式 (5)：</b><span class="m">∇log p*<sub>t</sub>(x<sub>t</sub>) − ∇log p<sub>θ,t</sub>(x<sub>t</sub>)</span> —— 同样是<span class="rR">两个函数、一个点</span>。这是 KL 梯度成立的前提。</li>
+      <li><b>式 (6)：</b><span class="m">s<sub>fake</sub>(x⁺<sub>t</sub>) − s<sub>fake</sub>(x<sub>t</sub>)</span> —— <span class="rP">同一个函数</span>，在<b>两个不同的点</b>上求值。</li>
+    </ul>
+    <p>论文把这一步写成「用 <span class="m">s<sub>fake</sub>(F(x⁺,t),t)</span> 近似 <span class="m">∇log p*<sub>t</sub>(x<sub>t</sub>)</span>」，但没有给出这个近似的误差分析或条件。我按 Tweedie 把它展开算了一遍，结果值得摆出来。取方差爆炸式记号 <span class="m">x<sub>t</sub> = x<sub>0</sub> + σ<sub>t</sub>ε</span>（<span class="m">α<sub>t</sub>=1</span>，只是为了少写符号），Tweedie 给出 <span class="m">s(x<sub>t</sub>) = (μ(x<sub>t</sub>) − x<sub>t</sub>)/σ<sub>t</sub>²</span>，于是：</p>
+  </div>
+  <div class="eq" style="font-size:17px">
+    <i>s</i><sub>fake</sub>(<i>x</i>⁺<sub><i>t</i></sub>) − <i>s</i><sub>fake</sub>(<i>x</i><sub><i>t</i></sub>) = <span class="frac"><span>1</span><span><i>σ<sub>t</sub></i>²</span></span> { [ <i>μ</i><sub>fake</sub>(<i>x</i>⁺<sub><i>t</i></sub>) − <i>μ</i><sub>fake</sub>(<i>x<sub>t</sub></i>) ] − [ <i>x</i>⁺<sub><i>t</i></sub> − <i>x<sub>t</sub></i> ] }
+    <small>第一个方括号是「<b>两次去噪预测之差</b>」，第二个方括号是「<b>两个输入之差</b>」。如果 <span class="m">μ<sub>fake</sub></span> 是个好去噪器（<span class="m">μ(x⁺<sub>t</sub>) ≈ x⁺</span>、<span class="m">μ(x<sub>t</sub>) ≈ x</span>），两个方括号<b>几乎相等</b>，整个式子被减到只剩噪声项。反过来，如果 <span class="m">μ<sub>fake</sub></span> 确实像论文说的那样把 <span class="m">x⁺</span> 投影回它学到的流形，那么差值 <span class="m">≈ (P(x⁺) − x⁺)/σ²</span>——方向是<b>从偏好样本指回生成器流形</b>，也就是我们想要的反方向。</small>
+  </div>
+  <div class="prose">
+    <p>换句话说：<b>把式 (6) 当作字面意义上的分数差来读，它要么退化成噪声，要么符号相反。</b>这不是小数点级别的疑问，所以我把这个玩具算例做成了下面的图，读者可以自己拨参数验证。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 4</span><span class="ti">把式 (5) 的真值、式 (6) 的两种读法放在同一根轴上比</span></div>
+    <div class="ctl">
+      <label>噪声 σ <input type="range" id="d4S" min="5" max="80" value="30" step="1"><span class="val" id="d4SV">0.30</span></label>
+      <label>生成器位置 x <input type="range" id="d4G" min="-25" max="20" value="-9" step="1"><span class="val" id="d4GV">−0.90</span></label>
+      <label>偏好样本 x⁺ <input type="range" id="d4P" min="-10" max="28" value="13" step="1"><span class="val" id="d4PV">1.30</span></label>
+      <label>假模型专精度 w <input type="range" id="d4W" min="0" max="100" value="80" step="5"><span class="val" id="d4WV">0.80</span></label>
+    </div>
+    <div class="ctl" style="border-top:0">
+      <label>奖励温度 β <input type="range" id="d4Beta" min="10" max="300" value="100" step="5"><span class="val" id="d4BetaV">1.00</span></label>
+      <span class="pill">w = 1：μ_fake 完全贴着生成器分布（论文设定的极限）</span>
+      <span class="pill">w = 0：μ_fake 是个通用去噪器</span>
+      <label><input type="checkbox" id="d4Star" checked> 显示 p*</label>
+    </div>
+    <div class="figbody cwrap" style="padding:12px 18px 6px">
+      <svg id="d4SVG" viewBox="0 0 700 502" role="img" aria-label="比较式 5 的真实目标分数差、式 6 的字面分数读法与去噪预测读法三者的方向和大小"></svg>
+    </div>
+    <div class="readout">
+      <div><div class="k">式(5) 真值 · s<sub>p*</sub>−s<sub>pθ</sub></div><div class="v" id="d4A">—</div></div>
+      <div><div class="k">式(6) 分数读法</div><div class="v" id="d4B">—</div></div>
+      <div><div class="k">式(6) 去噪读法 x̂₀</div><div class="v" id="d4C">—</div></div>
+      <div><div class="k">分数读法方向</div><div class="v" id="d4V1">—</div></div>
+      <div><div class="k">去噪读法方向</div><div class="v" id="d4V2">—</div></div>
+    </div>
+    <figcaption><b>一维数值实验，全部量都在 601 点网格上真算，没有示意成分。</b>
+    参考分布 <span class="m">p<sub>ref</sub></span> 取双峰高斯，奖励 <span class="m">r(x)</span> 是一个偏右的钟形，<span class="m">p* ∝ p<sub>ref</sub>·e^{r/β}</span> 按式 (4) 算出；
+    <span class="m">μ<sub>fake</sub></span> 定义为「先验为 <span class="m">w·p<sub>θ</sub> + (1−w)·宽先验</span>」时的后验均值，<span class="m">w</span> 就是它有多贴着生成器。所有分数用网格上的 <span class="m">d log p<sub>t</sub>/dx</span> 直接求，噪声期望用卷积求。
+    最下面一栏把三个量都除以各自的「理想位移」标度（分数量除以 <span class="m">(x⁺−x<sub>gen</sub>)/σ²</span>，去噪量除以 <span class="m">x⁺−x<sub>gen</sub></span>）后无量纲化，正值 = 指向 <span class="m">x⁺</span>。
+    <b>三个观察点：</b>（i）把 <span class="m">w</span> 拉到 1（论文设定），<span class="rF">分数读法</span>稳定为负——指向远离 <span class="m">x⁺</span>；<span class="rK">去噪读法</span>始终为正。
+    （ii）默认 <span class="m">β = 1</span> 时<b>式 (5) 的真值也是负的</b>，因为 <span class="m">p*</span> 仍保留左峰，KL 梯度是<b>局部</b>的（推向最近的 <span class="m">p*</span> 峰）；把 <span class="m">β</span> 调小，<span class="m">p*</span> 塌到奖励区，真值才转正。
+    （iii）这说明式 (6) <b>不是式 (5) 的逐点近似</b>，而是一个更激进的全局算子：它无条件指向给定的那个样本。这既是它见效快的原因，也是 <a href="#s-crit">§11</a> 里多样性顾虑的来源。</figcaption>
+  </figure>
+
+  <h3><span class="ix">4.3</span>最可能的解释：实现里用的是去噪预测差，不是字面分数差</h3>
+  <div class="call mine">
+    <div class="hd">以下是我的推断，不是论文的陈述；论文未放代码，我无法验证</div>
+    <p>在所有 DMD 的实际实现里，传给生成器的位移向量都<b>不是</b>按 <span class="m">(α μ − x<sub>t</sub>)/σ²</span> 逐项算出来再相减的，而是直接写成两个去噪预测之差：
+    <span class="m">s<sub>real</sub>(x<sub>t</sub>) − s<sub>fake</sub>(x<sub>t</sub>) = α<sub>t</sub>[μ<sub>real</sub>(x<sub>t</sub>) − μ<sub>fake</sub>(x<sub>t</sub>)]/σ<sub>t</sub>²</span>——因为两项的 <span class="m">x<sub>t</sub></span> <b>完全相同、精确抵消</b>。
+    如果实现时沿用了同一段代码、只是把两个网络换成「同一个网络的两次前向」，那么算出来的就是：</p>
+    <div class="eq" style="margin:12px 0; font-size:17px; background:var(--surf2)">
+      <i>g</i> ∝ <i>μ</i><sub>fake</sub>(<i>F</i>(<i>x</i>⁺,<i>t</i>)) − <i>μ</i><sub>fake</sub>(<i>F</i>(<i>x</i><sub>final</sub>,<i>t</i>)) ≈ <i>x</i>⁺ − <i>x</i><sub>final</sub>
+    </div>
+    <p>这个量<b>方向正确、大小合理、不退化</b>，而且完全对得上论文所有的文字描述（「把生成拉向偏好锚点」「利用假模型统一的去噪向量场提供稠密、稳定的引导」）。
+    我倾向于认为式 (6) 是一个<b>为了和式 (2) 形式对齐而写的分数域表述，实际实现走的是去噪预测域</b>；两者在 DMD 原本的场景下等价，在这里不等价，论文没有指出这一点。</p>
+    <p><b>如果这个推断成立，还有一个副产品值得注意：</b><span class="m">μ<sub>fake</sub></span> 是非线性且随 <span class="m">t</span> 变化的。<span class="m">t</span> 大时两个输入都被映射到粗结构上，差值主要反映<b>低频/结构性</b>的差异；<span class="m">t</span> 小时才落到细节。
+    所以「在 <span class="m">t~U(0,1)</span> 上取期望」实际上是在做一个<b>多尺度的偏好差分</b>，这大概率就是论文说的「shifts the model's overall distribution toward optimal <b>structural</b> preferences」的真正来源，而不只是修辞。</p>
+  </div>
+
+  <div class="call warn">
+    <div class="hd">还有一个更朴素的问题：x⁺ 不是 p* 的样本</div>
+    <p>式 (4) 定义的 <span class="m">p*</span> 是「参考分布按奖励重加权」。但 DM-Pair 里的 <span class="m">x⁺</span> 来自 <b>ConsistID 的真实视频</b>（§4.1），它是<b>数据分布</b>的样本，不是 <span class="m">p*</span> 的样本——两者只有在「参考模型已经完美拟合数据」时才重合。
+    论文在 §4.1 用了一个务实的辩护：真实视频比生成内容有「更自然流畅的人体运动和真实物理动态，为偏好对齐提供了更好的上界」。这个辩护我认为是成立的，但它意味着 <b>DM-Pair 实际上更接近「用分数场做的 SFT」而不是 DPO</b>：
+    没有 Bradley–Terry、没有参考模型概率比、没有 log-sigmoid 饱和，负例是生成器自己的输出而非标注的 lose 样本。称它 “inspired by DPO” 是合理的，但读者不该期待它继承 DPO 的任何理论性质。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 05 PAIR -->
+<section class="sec" id="s-pair">
+  <div class="eyebrow"><span class="n">05</span><span class="t">DM-PairLoss</span><span class="line"></span></div>
+  <h2>DM-PairLoss：把一段真实视频当成「往哪走」的路标</h2>
+  <p class="lead">Pair 变体是两个实现里更简单的那个：<b>式 (6) 原样使用，<span class="m">x⁺</span> 直接从预标注的正样本里取</b>。论文只用了一小段描述它，但里面有三个决定值得单独拎出来。</p>
+
+  <div class="grid3">
+    <div class="card cP">
+      <div class="mono">决定一 · 正例</div>
+      <h5>用真实视频，不用「更好的生成」</h5>
+      <p>数据是过滤后的 <b>ConsistID</b>（约 6K，人物中心）。论文的理由：真实视频的人体运动和物理动态<b>比任何生成内容都更自然</b>，因此提供了更高的对齐上界。</p>
+    </div>
+    <div class="card cG">
+      <div class="mono">决定二 · 负例</div>
+      <h5>负例是免费的</h5>
+      <p>不需要标注 lose 样本——生成器当前的 <span class="m">x<sub>final</sub></span> 自动就是负端。这也意味着<b>负例随训练自动变强</b>，对比度会随收敛自然收窄。</p>
+    </div>
+    <div class="card cR">
+      <div class="mono">决定三 · 用哪个样本</div>
+      <h5>负端必须是 x_final</h5>
+      <p>不是 DMD 那个中间态 <span class="m">x</span>，而是完整 4 步跑完的成品。<b>只有成品才和 <span class="m">x⁺</span> 处在同一个「干净样本」空间</b>，两者加同一档噪声才可比。</p>
+    </div>
+  </div>
+
+  <div class="prose">
+    <p>还有一个论文没有明说、但从 Algorithm 1 第 16 行读得出来的细节：<span class="m">x⁺ ← sample(D<sub>pref</sub>, c)</span> ——<b>正样本是按当前 prompt <span class="m">c</span> 条件取的</b>，不是随机抽一个漂亮视频。
+    这很关键：如果 <span class="m">x⁺</span> 和 <span class="m">x<sub>final</sub></span> 内容完全无关，那么 <span class="m">x⁺ − x<sub>final</sub></span> 里绝大部分是「内容差异」而不是「质量差异」，梯度会把生成器往一个随机的内容方向推。
+    条件配对把内容差异压下去，剩下的才是论文想要的<b>结构性偏好差异</b>。也正因如此，Pair 变体天然受限于<b>成对高质量数据的可得性</b>——这是它和 Group 变体最实际的分工线。</p>
+  </div>
+
+  <div class="call">
+    <div class="hd">Pair 变体的适用边界</div>
+    <p>它要求：（i）有条件配对的高质量真实数据；（ii）该数据与目标 prompt 分布同域。ConsistID 是人物中心数据集，所以论文 Tab. 1 上半部分的评测也在 ConsistID 上——这是自洽的，但也意味着<b>这一组数字不能直接外推到通用 T2V</b>。论文自己在 §4.4 用「只用 prompt 的交叉评测」（Tab. 6）回应了这个质疑，见 <a href="#s-exp">§09.4</a>。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 06 GROUP -->
+<section class="sec" id="s-group">
+  <div class="eyebrow"><span class="n">06</span><span class="t">DM-GroupLoss</span><span class="line"></span></div>
+  <h2>DM-GroupLoss：没有标注数据时，把锚点现场造出来</h2>
+  <p class="lead">Group 变体解决 Pair 变体的数据依赖：给定一个 prompt，采 <b>K = 8</b> 个输出，用奖励模型打分算优势，
+  再把<b>分数最高的 4 个样本取平均</b>当作偏好锚点 <span class="m">x̄⁺</span>。整组样本按优势加权地推开或拉回。</p>
+
+  <div class="eq"><span class="tagno">式 (7)</span>
+    ∇<sub>θ</sub><i>L</i><sub>DM-Group</sub> ≈ −<span class="r">𝔼</span><sub><i>t,z</i></sub> [ Σ<sub><i>i</i>=1</sub><sup><i>K</i></sup> <i>A<sub>i</sub></i> ( <i>s</i><sub>fake</sub>(<i>F</i>(<i>x<sub>i</sub></i>,<i>t</i>),<i>t</i>) − <i>s</i><sub>fake</sub>(<i>F</i>(<i>x̄</i>⁺,<i>t</i>),<i>t</i>) ) <span class="frac"><span>d<i>G</i><sub>θ</sub></span><span>d<i>θ</i></span></span> ]
+    <small><b>注意括号内的顺序和式 (6) 是反的</b>（式 (6) 是「偏好 − 生成」，这里是「生成 − 锚点」），符号由 <span class="m">A<sub>i</sub></span> 补回来：<span class="m">A<sub>i</sub> &lt; 0</span> 的差样本被<b>拉向</b>锚点；<span class="m">A<sub>i</sub> &gt; 0</span> 的好样本被<b>沿自身方向继续外推</b>，越过锚点、朝偏好流形的峰去。这一正一负是论文说的「动态分布偏移」。</small>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 5</span><span class="ti">组内探索沙盘：K 个样本、优势、锚点，以及锚点到底贡献了什么</span></div>
+    <div class="ctl">
+      <button class="btn" id="gResample" type="button">↺ 重新采样一组</button>
+      <label>组大小 K <input type="range" id="gK" min="4" max="16" value="8" step="1"><span class="val" id="gKV">8</span></label>
+      <label>锚点 top-k <input type="range" id="gTop" min="1" max="8" value="4" step="1"><span class="val" id="gTopV">4</span></label>
+      <div class="seg" id="gAdv" role="group" aria-label="优势定义">
+        <button type="button" data-a="std" aria-pressed="true">A = (r−r̄)/s（GRPO 标准）</button>
+        <button type="button" data-a="cen" aria-pressed="false">A = r−r̄</button>
+        <button type="button" data-a="raw" aria-pressed="false">A = r（不中心化）</button>
+      </div>
+    </div>
+    <div class="explore">
+      <div class="figbody cwrap" style="padding:12px 18px 6px">
+        <svg id="gSVG" viewBox="0 0 660 340" role="img" aria-label="一维奖励地形上的 K 个样本、各自的优势条、top-k 锚点，以及每个样本的梯度方向"></svg>
+        <div class="ttip" id="gTip"></div>
+      </div>
+      <div class="pane" id="gPane"></div>
+    </div>
+    <div class="readout">
+      <div><div class="k">Σ A<sub>i</sub></div><div class="v" id="gSum">—</div></div>
+      <div><div class="k">锚点项贡献 −(ΣA)·x̄⁺</div><div class="v" id="gAnch">—</div></div>
+      <div><div class="k">净位移 Σ A<sub>i</sub>(x<sub>i</sub>−x̄⁺)</div><div class="v ok" id="gNet">—</div></div>
+      <div><div class="k">若去掉锚点 Σ A<sub>i</sub>x<sub>i</sub></div><div class="v" id="gNoAnch">—</div></div>
+      <div><div class="k">锚点 x̄⁺</div><div class="v pref" id="gXbar">—</div></div>
+    </div>
+    <figcaption><b>一维玩具，但优势与净位移是真算的。</b>横轴是样本空间，紫色曲线是奖励地形 <span class="m">r(x)</span>，绿点是同一 prompt 下采出的 K 个样本，
+    竖条是各自的优势 <span class="m">A<sub>i</sub></span>（向上为正），紫色竖线是 top-k 均值锚点 <span class="m">x̄⁺</span>，每个样本上的小箭头是它按式 (7) 得到的位移方向（去噪读法）。
+    <b>把优势切到「GRPO 标准」并注意读数：</b><span class="m">Σ A<sub>i</sub> = 0</span>，于是<b>锚点项的贡献精确为零</b>，「净位移」和「去掉锚点」两个数完全相等。切到「A = r（不中心化）」，锚点才开始真正起作用。</figcaption>
+  </figure>
+
+  <h3><span class="ix">6.1</span>一个代数上的观察：优势一旦中心化，锚点就不影响净梯度</h3>
+  <div class="prose">
+    <p>把式 (7) 的求和拆开（用 <a href="#s-core">§04.3</a> 的去噪读法记 <span class="m">m(x) ≡ μ<sub>fake</sub>(F(x,t))</span>）：</p>
+  </div>
+  <div class="eq" style="font-size:17px">
+    Σ<sub><i>i</i></sub> <i>A<sub>i</sub></i> [ <i>m</i>(<i>x<sub>i</sub></i>) − <i>m</i>(<i>x̄</i>⁺) ] = Σ<sub><i>i</i></sub> <i>A<sub>i</sub></i> <i>m</i>(<i>x<sub>i</sub></i>) − ( Σ<sub><i>i</i></sub> <i>A<sub>i</sub></i> ) <i>m</i>(<i>x̄</i>⁺)
+    <small>因为 <span class="m">m(x̄⁺)</span> 与 <span class="m">i</span> 无关，可以提出求和号。如果 <span class="m">A<sub>i</sub></span> 按 GRPO 惯例做组内标准化（<span class="m">A<sub>i</sub> = (r<sub>i</sub> − r̄)/std</span>），则 <span class="m">Σ A<sub>i</sub> = 0</span>，第二项<b>整体消失</b>。</small>
+  </div>
+  <div class="prose">
+    <p>论文只说「compute their rewards and advantages <span class="m">A<sub>i</sub></span>」，没有写 <span class="m">A<sub>i</sub></span> 的具体定义。于是有两种可能，各有各的含义：</p>
+    <ul>
+      <li><b>如果做了标准中心化：</b>锚点 <span class="m">x̄⁺</span> 在<b>期望意义上不影响</b>梯度方向，它的作用是<b>控制变量（control variate）</b>——在每个 minibatch 的随机估计里降低方差，尤其是当 <span class="m">m(·)</span> 的输出量级很大时。这是一个正当而且常见的做法，但和论文正文的描述（「把差样本拉向高质量组均值」）在因果上不是一回事：真正决定方向的是 <span class="m">Σ A<sub>i</sub> m(x<sub>i</sub>)</span>，锚点只是把公共部分减掉。</li>
+      <li><b>如果没有中心化</b>（比如直接用归一化奖励），那么锚点是<b>实质性</b>的：它把整个组的位移额外平移了 <span class="m">−(ΣA<sub>i</sub>)·m(x̄⁺)</span>，等价于一个指向锚点的全局偏置。这时「top-4 均值」这个设计才真的在起结构性作用。</li>
+    </ul>
+    <p>这是我认为论文最该补一行说明的地方——因为它决定了「top-k 锚点」到底是<b>核心设计</b>还是<b>方差削减技巧</b>。上面的图把两种情况都做出来了，读者可以自己切换看数字。</p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">另一个必须问的问题：K=8 的样本从哪来，NFE 怎么只多了 5</div>
+    <p>Tab. 3 说 DM-Align 每步 51 NFE，只比 DMD2 的 46 多 5。但 Group 变体要为一个 prompt 采 <b>K = 8</b> 个样本，即使每个只要 4 步，也是 32 次额外前向。两个数对不上。</p>
+    <p>我能想到的最自洽解释是：论文用 <b>32 张 H100、每卡 batch size = 1</b>（§4.1），所以「一组 8 个样本」很可能是<b>跨数据并行的 8 张卡凑出来的</b>——每张卡仍然只生成 1 个样本，组内统计通过 all-gather 完成。这样 51 NFE 就是<b>每卡</b>的数字，和 Group 变体不矛盾。
+    如果这个解释对，那么 Tab. 3 的 51 NFE 对 Pair 和 Group 都成立，但也意味着 <b>K 的可调范围被 GPU 数绑死了</b>。论文没有讨论这一点，也没有做 K 的消融。</p>
+  </div>
+
+  <h3><span class="ix">6.2</span>Group 与 Pair 的分工，一张表说清</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>维度</th><th>DM-Align (Pair)</th><th>DM-Align (Group)</th></tr></thead>
+    <tbody>
+      <tr><td><b>锚点 x⁺ 来自</b></td><td>预标注正样本（真实视频）</td><td>组内 top-k 样本均值，训练中动态合成</td></tr>
+      <tr><td><b>数据需求</b></td><td>条件配对的高质量视频（ConsistID ≈ 6K）</td><td>只要 prompt（VidProM 20K）</td></tr>
+      <tr><td><b>需要奖励模型</b></td><td>否</td><td>是（VideoAlign-TA / HPSv2）</td></tr>
+      <tr><td><b>灵感来源</b></td><td>DPO（成对偏好）</td><td>GRPO（组内探索 + 优势）</td></tr>
+      <tr><td><b>梯度上界</b></td><td>受真实数据质量约束，<b>不会被奖励模型骗</b></td><td>受奖励模型质量约束，<b>可能 reward hacking</b></td></tr>
+      <tr><td><b>论文人评净偏好</b></td><td class="best">+48% / +32%</td><td>+30% / +12%</td></tr>
+      <tr><td><b>VBench 平均</b></td><td>82.78（ConsistID 组）</td><td class="best">84.40（VidProM 组）</td></tr>
+      <tr><td><b>适合什么场景</b></td><td>垂类、有高质量素材库（人物、商品、特定风格）</td><td>通用 T2V、只有 prompt、想快速试奖励信号</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">两组 VBench 分数<b>不能横向比较</b>——它们跑在不同数据集（ConsistID vs VidProM）上，各自和自己那一组的基线比才有意义。人评的净偏好则是同协议下的，可比性更强，而论文自己也给出了解释：Pair 用的是真实人类偏好数据，梯度方向更准。</p>
+</section>
+
+<!-- ============================================================ 07 ALGO -->
+<section class="sec" id="s-algo">
+  <div class="eyebrow"><span class="n">07</span><span class="t">The Training Loop</span><span class="line"></span></div>
+  <h2>统一单阶段循环：26 行伪代码里藏着三个设计决定</h2>
+  <p class="lead">Algorithm 1 本身很短，但它的<b>缩进结构</b>比内容更值得读——哪一行在 if 外面、哪一行在里面，决定了这套方法的真实开销和稳定性。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 6</span><span class="ti">Algorithm 1 单步演示：4 次假模型更新 + 1 次生成器更新，循环往复</span></div>
+    <div class="ctl">
+      <div class="stepper">
+        <button class="btn" id="aPrev" type="button">← 上一步</button>
+        <button class="btn primary" id="aNext" type="button">下一步 →</button>
+        <button class="btn" id="aAuto" type="button">▶ 自动</button>
+        <span class="st" id="aLab">iter 1 · Phase 1</span>
+      </div>
+      <label>N（假模型步数）<input type="range" id="aN" min="1" max="8" value="4" step="1"><span class="val" id="aNV">4</span></label>
+      <div class="seg" id="aVar" role="group" aria-label="对齐变体">
+        <button type="button" data-v="pair" aria-pressed="true">Pair</button>
+        <button type="button" data-v="group" aria-pressed="false">Group</button>
+      </div>
+    </div>
+    <div class="figbody" style="padding:12px 18px 4px">
+      <svg id="aSVG" viewBox="0 0 660 190" role="img" aria-label="三个模型的状态图：教师冻结、假模型与生成器交替更新"></svg>
+    </div>
+    <div class="alg" id="aAlg"></div>
+    <div class="readout">
+      <div><div class="k">本轮更新谁</div><div class="v" id="aWho">—</div></div>
+      <div><div class="k">累计假模型更新</div><div class="v" style="color:var(--fake-ink)" id="aCf">0</div></div>
+      <div><div class="k">累计生成器更新</div><div class="v" style="color:var(--gen-ink)" id="aCg">0</div></div>
+      <div><div class="k">累计少步采样次数</div><div class="v" id="aCs">0</div></div>
+    </div>
+    <figcaption>伪代码逐字来自论文 Algorithm 1，只把注释译成中文。<b>请注意第 6 行的缩进</b>：<span class="mono">generateSamples</span> 在 <span class="mono">if</span> <b>外面</b>，
+    也就是说<b>每一次迭代都要跑一遍少步采样</b>，包括那 4 次只更新假模型的迭代。论文 §4.1 说「生成器每 5 步更新一次」，对应默认的 N = 4。
+    <b>由此我推断</b> Tab. 3 里「每步 51 NFE / 15 s」的口径应当是<b>每次迭代</b>而非每次生成器更新——但 Tab. 3 原文只写了 “per optimization step”，没有明说是哪一种，这一句是我的读法，不是论文的陈述。</figcaption>
+  </figure>
+
+  <div class="eq"><span class="tagno">式 (8)</span>
+    <i>L</i><sub>total</sub> = <i>λ</i><sub>DMD</sub> <i>L</i><sub>DMD</sub> + <i>λ</i><sub>align</sub> <i>L</i><sub>align</sub>
+    <small>论文 §3.3 的总损失，两项各取 0.5。它在 Algorithm 1 里以梯度形式出现（第 22 行）。<b>「相加」在这里之所以合法，全靠 <a href="#s-bridge">§03</a> 那个观察：两项是同一个分数空间里的向量。</b></small>
+  </div>
+
+  <h3><span class="ix">7.1</span>决定一：一次采样，三处复用</h3>
+  <div class="prose">
+    <p>第 6 行返回两个东西 <span class="m">(x, x<sub>final</sub>)</span>，随后被三条路吃掉：<span class="rF">假模型的去噪训练</span>用 <span class="m">x</span>（第 9–10 行，带 stopgrad）；
+    <span class="rR">DMD 梯度</span>用 <span class="m">x</span>（第 14 行）；<span class="rP">对齐梯度</span>用 <span class="m">x<sub>final</sub></span>（第 17 / 20 行）。
+    <b>对齐几乎不额外产生采样开销</b>——这是「51 vs 46 NFE」的全部秘密，也是本文能声称「单阶段几乎免费」的唯一依据。</p>
+    <p>顺带一个证据：第 19 行是 <span class="mono">x_group ← groupSamples(x_final, K)</span>，动词是「从已有的 <span class="m">x<sub>final</sub></span> 里<b>切</b>出一组」，而不是「再采 K 个」。
+    这和我在 <a href="#s-group">§06</a> 末尾的推测一致：<b>组是从已有 batch（跨数据并行）里凑的，不是新生成的</b>，所以 Group 变体也不额外增加 NFE。</p>
+  </div>
+
+  <h3><span class="ix">7.2</span>决定二：两个 timestep 是分开采的</h3>
+  <div class="prose">
+    <p>第 5 行采的是<b>蒸馏时间步</b> <span class="m">τ ~ Uniform{1000, 750, 500, 250}</span>——它决定生成器这一次走到少步轨迹的哪个节点上；
+    第 8 / 13 行采的是<b>去噪时间步</b> <span class="m">t ~ U(0,1)</span>——它决定用多大的噪声去「泡开」两个分布以求分数。
+    这两件事在概念上完全独立，论文特意分开采样（§3.3 原文：“the DMD and DM-Align gradients are evaluated after applying forward noise at an <b>independently sampled</b> level <span class="m">t ~ U(0,1)</span>”）。
+    <b>混淆这两个 t 是读 DMD 系论文最常见的错误</b>，值得单独记一笔。</p>
+  </div>
+
+  <h3><span class="ix">7.3</span>决定三：不做 DMD-only 预热</h3>
+  <div class="prose">
+    <p>直觉上应该先纯蒸馏几百步、等生成质量起来再加对齐——否则早期的生成全是糊的，奖励模型打分毫无意义。论文明确说<b>不需要</b>，给了两条理由：</p>
+    <ul>
+      <li>即使早期生成模糊，<b>粗色块和基本运动模式已经足以提供相对优势</b>——注意 Group 变体用的是<b>组内相对</b>比较，不是绝对分数，所以只要排序大致对，方向就大致对。这是 GRPO 类方法一个被低估的鲁棒性来源。</li>
+      <li>早期阶段 <b>DMD 梯度本身量级就占优</b>，会自动主导，无需显式调度。</li>
+    </ul>
+    <p>不过论文还是测了一个 “Varying” 调度（<span class="m">λ<sub>DMD</sub>:λ<sub>align</sub></span> 从 1:0 线性走到 1:3），结果<b>不如固定 1:1</b>（Tab. 5：Wan-1.3B 上 TA 1.45 vs 1.65，HPSv2 27.56 vs 28.89）。
+    这个负结果其实挺有意思：它说明「后期加大对齐权重」是有害的，和「1:3 会崩」是同一个现象的两种表现——<b>蒸馏项不是脚手架，是必须一直在场的约束</b>。</p>
+  </div>
+
+  <div class="call ok">
+    <div class="hd">训练稳定性：论文声称不依赖 EMA</div>
+    <p>§4.1 提到 DanceGRPO 和 Flow-DPO 这类基线<b>严重依赖 EMA</b> 来维持稳定，去掉 EMA 生成质量就会退化；而本文框架「natively 收敛稳定」。
+    但要注意论文自己也用了 EMA（step 500 起，decay 0.99），所以这个对比是「依赖程度」的差别而不是「用不用」的差别。<b>论文没有给去掉 EMA 的消融</b>，这条声明目前只有文字支持。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 08 COST -->
+<section class="sec" id="s-cost">
+  <div class="eyebrow"><span class="n">08</span><span class="t">Cost</span><span class="line"></span></div>
+  <h2>代价：28× 的差距具体来自哪里</h2>
+  <p class="lead">Tab. 3 只有三行六个数，但它是全文最有说服力的一张表。把它拆开算一遍，会发现差距几乎全部来自<b>一件事</b>：RL 必须先把视频完整采样出来才能打分。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 7</span><span class="ti">NFE 拆解计算器：拖动参数，看每步开销如何构成</span></div>
+    <div class="ctl">
+      <label>RL 采样步数 <input type="range" id="cSteps" min="8" max="50" value="24" step="1"><span class="val" id="cStepsV">24</span></label>
+      <label>RL 组大小 K <input type="range" id="cK" min="4" max="16" value="8" step="1"><span class="val" id="cKV">8</span></label>
+      <label>蒸馏后步数 <input type="range" id="cFew" min="1" max="8" value="4" step="1"><span class="val" id="cFewV">4</span></label>
+      <label>教师 CFG <input type="range" id="cCfg" min="0" max="1" value="1" step="1"><span class="val" id="cCfgV">开</span></label>
+      <label><input type="checkbox" id="cPaper" checked> 与论文实测值对照</label>
+    </div>
+    <div class="figbody cwrap" style="padding:12px 18px 4px">
+      <svg id="cSVG" viewBox="0 0 700 300" role="img" aria-label="三种方法每个优化步的函数求值次数拆解条形图"></svg>
+      <div class="ttip" id="cTip"></div>
+    </div>
+    <div class="readout">
+      <div><div class="k">DanceGRPO 采样部分</div><div class="v bad" id="cA">—</div></div>
+      <div><div class="k">DMD2 采样部分</div><div class="v" id="cB">—</div></div>
+      <div><div class="k">DM-Align 采样部分</div><div class="v ok" id="cC">—</div></div>
+      <div><div class="k">DM-Align 相对 DMD2</div><div class="v" id="cD">—</div></div>
+      <div><div class="k">论文实测提速 1536→51</div><div class="v ok" id="cE">—</div></div>
+    </div>
+    <figcaption><b>彩色条是我按论文口径重建的「与采样直接相关」的部分，菱形是论文 Tab. 3 的实测总数；横轴取对数，所以等长 = 等倍数。</b>
+    RL 一侧：一个优化步要为 K 个样本各跑一遍完整采样（<span class="m">K × 步数</span>，带 CFG 再 ×2），再加策略/参考模型的 logprob 重算和奖励模型；
+    蒸馏一侧：少步生成 + 教师两次（CFG）+ 假模型两次。<b>把「RL 采样步数」从 24 拖到 8、把 K 拖到 4，DanceGRPO 的条仍然远在另外两根右边</b>——因为多步采样是<b>乘法项</b>（K × 步数），而 DM-Align 的对齐开销是<b>加法项</b>（+1 次假模型前向）。
+    <b>需要说明的是：</b>我的重建值（默认 776 / 8 / 9）和论文实测（1536 / 46 / 51）在绝对值上差得不少——论文没有披露 NFE 的记账口径（是否计反向传播、是否逐帧计、是否含奖励模型），所以这里只该看两件事：
+    <b>三者的相对量级</b>，以及<b>DM-Align 相对 DMD2 只多一次前向</b>这个结构性事实（重建 +1，实测 +5）。绝对加速比请以论文实测的 1536 → 51（约 30×）和 423 s → 15 s（约 28×）为准。</figcaption>
+  </figure>
+
+  <div class="prose">
+    <p>另一个更实用的数字，论文没有直接给，但可以由 Tab. 3 × §4.1 的训练步数推出来（<a href="#s-problem">§01</a> 的图里可以拖）：</p>
+  </div>
+  <div class="tbl"><table>
+    <thead><tr><th>路线</th><th class="num">每步 (s)</th><th class="num">步数</th><th class="num">总时长（推算）</th><th class="num">推理 NFE</th><th>结果</th></tr></thead>
+    <tbody>
+      <tr><td>DanceGRPO 单独</td><td class="num">423</td><td class="num">100</td><td class="num">≈ 11.8 h</td><td class="num">100</td><td>动态性好，但仍是 100 步推理</td></tr>
+      <tr><td>DMD2 单独</td><td class="num">11</td><td class="num">1000</td><td class="num">≈ 3.1 h</td><td class="num">4</td><td>快，但没对齐</td></tr>
+      <tr><td>两阶段 DanceGRPO → DMD2</td><td class="num">—</td><td class="num">100 + 1000</td><td class="num worst">≈ 14.8 h</td><td class="num">4</td><td class="worst">动态性从 75.78 掉回 60.85</td></tr>
+      <tr class="hl"><td><b>DM-Align 单阶段</b></td><td class="num">15</td><td class="num">1000</td><td class="num best">≈ 4.2 h</td><td class="num">4</td><td class="best">动态性 80.19，VBench 84.40</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">总时长 = 每步耗时 × 步数，全部在 32×H100 上；<b>这一列是我推算的，论文只给了每步耗时和步数两个因子</b>。同时论文也说 DM-Align 与 DMD2 其实「500 步内就收敛」，跑到 1000 步只是为了确保完全收敛——所以实际成本可能还要再打对折。</p>
+</section>
+
+<!-- ============================================================ 09 EXPERIMENTS -->
+<section class="sec" id="s-exp">
+  <div class="eyebrow"><span class="n">09</span><span class="t">Experiments</span><span class="line"></span></div>
+  <h2>实验：最有说服力的不是「我们最高」，而是「两阶段掉了多少」</h2>
+  <p class="lead">主实验用 Wan2.1-T2V-1.3B，5 秒 / 16 FPS / 832×480，32×H100，640 条测试样本，VBench 自动指标 + GSB 人评。
+  但真正撑起论文论点的是<b>两阶段基线的退化幅度</b>——那是一个别人没法解释掉的对照。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 8</span><span class="ti">VBench 六维展开：看「两阶段做了什么」比看谁最高更有信息量</span></div>
+    <div class="tabs" role="tablist" aria-label="实验组">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="vbP" id="vbT0">Pair · ConsistID</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="vbP" id="vbT1">Group · VidProM</button>
+    </div>
+    <div class="ctl">
+      <div class="seg" id="vbMode" role="group" aria-label="显示方式">
+        <button type="button" data-m="abs" aria-pressed="true">绝对值</button>
+        <button type="button" data-m="rel" aria-pressed="false">相对原模型的变化</button>
+      </div>
+      <label><input type="checkbox" id="vbArrow" checked> 标注「RL → 蒸馏」的回退箭头</label>
+    </div>
+    <div class="figbody cwrap scrollx" id="vbP" role="tabpanel" style="padding:12px 18px 6px">
+      <svg id="vbSVG" viewBox="0 0 700 430" style="min-width:640px" role="img" aria-label="VBench 六个维度的分组条形图，比较原模型、DMD2、RL、两阶段与本文方法"></svg>
+      <div class="ttip" id="vbTip"></div>
+    </div>
+    <div class="chips">
+      <span class="chip">原模型 100 NFE</span><span class="chip">DMD2 4 NFE</span><span class="chip">RL 100 NFE</span>
+      <span class="chip">RL+DMD2 4 NFE</span><span class="chip P">DM-Align 4 NFE</span>
+      <span class="chip sep">·</span><span>数据逐字来自论文 Tab. 1</span>
+    </div>
+    <figcaption><b>切到「相对原模型的变化」并打开回退箭头</b>，最关键的一条就出来了：在 Dynamic Degree 这一维，
+    RL 把分数推上去（Flow-DPO +16.35，DanceGRPO +19.38），紧接着的蒸馏又把它<b>大部分推回来</b>（−13.70 / −14.93）；而 DM-Align 在同样只有 4 NFE 的条件下把它留住甚至推得更高。
+    这是全文最强的一个对照，因为它不依赖「谁的绝对分更高」这种容易被超参解释掉的比较。</figcaption>
+  </figure>
+
+  <h3><span class="ix">9.1</span>主表：VBench 全部数字</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>方法</th><th class="num">NFE</th><th class="num">平均</th><th class="num">主体一致</th><th class="num">背景一致</th><th class="num">运动平滑</th><th class="num">动态程度</th><th class="num">美学</th><th class="num">成像</th></tr></thead>
+    <tbody>
+      <tr><td colspan="9" style="color:var(--ink3); font-family:var(--font-mono); font-size:11.5px; letter-spacing:.06em">上半：DM-Align (Pair) on ConsistID</td></tr>
+      <tr><td>Wan-T2V-1.3B 原模型</td><td class="num">100</td><td class="num">78.20</td><td class="num">96.57</td><td class="num">94.46</td><td class="num">99.01</td><td class="num">50.78</td><td class="num">56.09</td><td class="num">72.29</td></tr>
+      <tr><td>DMD2</td><td class="num">4</td><td class="num">79.68</td><td class="num">98.03</td><td class="num">95.78</td><td class="num">99.10</td><td class="num">52.81</td><td class="num">57.64</td><td class="num">74.73</td></tr>
+      <tr><td>Flow-DPO</td><td class="num">100</td><td class="num">81.54</td><td class="num">98.10</td><td class="num">95.56</td><td class="num">99.25</td><td class="num best">67.13</td><td class="num worst">56.32</td><td class="num">72.91</td></tr>
+      <tr><td>Flow-DPO + DMD2（两阶段）</td><td class="num">4</td><td class="num">79.89</td><td class="num">98.14</td><td class="num best">96.01</td><td class="num">99.18</td><td class="num worst">53.43</td><td class="num">58.26</td><td class="num">74.35</td></tr>
+      <tr class="hl"><td><b>DM-Align (Pair)</b></td><td class="num">4</td><td class="num best">82.78</td><td class="num best">98.80</td><td class="num">95.76</td><td class="num best">99.35</td><td class="num">66.25</td><td class="num best">60.89</td><td class="num best">75.61</td></tr>
+      <tr><td colspan="9" style="color:var(--ink3); font-family:var(--font-mono); font-size:11.5px; letter-spacing:.06em">下半：DM-Align (Group) on VidProM</td></tr>
+      <tr><td>Wan-T2V-1.3B 原模型</td><td class="num">100</td><td class="num">77.85</td><td class="num">93.93</td><td class="num">94.63</td><td class="num">98.63</td><td class="num">56.40</td><td class="num">57.33</td><td class="num">66.20</td></tr>
+      <tr><td>DMD2</td><td class="num">4</td><td class="num">78.88</td><td class="num">95.53</td><td class="num">95.22</td><td class="num">98.60</td><td class="num worst">51.64</td><td class="num best">63.02</td><td class="num">69.30</td></tr>
+      <tr><td>DanceGRPO</td><td class="num">100</td><td class="num">82.76</td><td class="num">96.04</td><td class="num">95.86</td><td class="num">98.33</td><td class="num">75.78</td><td class="num">60.44</td><td class="num">70.15</td></tr>
+      <tr><td>DanceGRPO + DMD2（两阶段）</td><td class="num">4</td><td class="num">80.54</td><td class="num">96.60</td><td class="num">95.89</td><td class="num">98.43</td><td class="num">60.85</td><td class="num">60.71</td><td class="num">70.81</td></tr>
+      <tr class="hl"><td><b>DM-Align (Group)</b></td><td class="num">4</td><td class="num best">84.40</td><td class="num best">97.13</td><td class="num best">96.49</td><td class="num best">98.99</td><td class="num best">80.19</td><td class="num">62.17</td><td class="num best">71.45</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">加粗为该组最优。注意<b>上下两半不可横向比较</b>：数据集不同（ConsistID vs VidProM），连原模型的分数都差了 0.35。
+  另外有一个容易被跳过的细节：<b>Group 那一组里 DMD2 的动态程度是往下掉的</b>（56.40 → 51.64），说明纯蒸馏本身就有「压低运动幅度」的倾向；这让 DM-Align (Group) 的 80.19 更值得注意——它是在一个向下的基线上反向拉到 +23.79 的。</p>
+
+  <h3><span class="ix">9.2</span>被直接优化的那个指标：文本对齐</h3>
+  <div class="grid2">
+    <div class="tbl" style="margin:0"><table>
+      <thead><tr><th>方法（VidProM）</th><th class="num">TA 分数 ↑</th></tr></thead>
+      <tbody>
+        <tr><td>Wan-T2V-1.3B 原模型</td><td class="num">0.69</td></tr>
+        <tr><td>DMD2</td><td class="num">0.75</td></tr>
+        <tr><td>DanceGRPO</td><td class="num">1.37</td></tr>
+        <tr><td>DanceGRPO + DMD2</td><td class="num">1.40</td></tr>
+        <tr class="hl"><td><b>DM-Align (Group)</b></td><td class="num best">1.65</td></tr>
+      </tbody>
+    </table></div>
+    <div class="card cP">
+      <div class="mono">怎么读这张表</div>
+      <h5>TA 是训练时唯一被优化的奖励</h5>
+      <p>所以它<b>不算「泛化证据」</b>，而是「优化有没有生效」的证据。有意义的比较是 1.65 vs 1.40：<b>同样以 TA 为目标，单阶段比两阶段多拿了 0.25</b>，而且只花了大约四分之一的时间。</p>
+      <p>反过来，Tab. 1 里那些<b>没有被优化</b>的维度（动态程度、美学、成像）同样在涨，这才是泛化证据。</p>
+    </div>
+  </div>
+
+  <h3><span class="ix">9.3</span>人评、MoE 扩展、权重敏感性</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">Fig. 9</span><span class="ti">三组补充实验：GSB 净偏好 / Wan2.2-A14B MoE / λ 比例扫描</span></div>
+    <div class="figbody cwrap">
+      <div class="bars">
+        <div class="pnl">
+          <div class="pt"><span>GSB 人评 · 净偏好（论文 Fig. 3）</span><span>越高越好</span></div>
+          <div id="hbGSB"></div>
+        </div>
+        <div class="pnl">
+          <div class="pt"><span>Wan2.2-T2V-A14B（MoE，Tab. 4）</span><span>VBench 分数</span></div>
+          <div id="hbMoE"></div>
+        </div>
+      </div>
+      <div style="padding:4px 18px 10px">
+        <div class="pt" style="font-family:var(--font-mono); font-size:11px; color:var(--ink2); margin-bottom:6px; display:flex; justify-content:space-between"><span>λ<sub>DMD</sub> : λ<sub>align</sub> 扫描（Tab. 5，两个骨架 × 两个奖励模型）</span><span>“Varying” = 1:0 线性调度到 1:3</span></div>
+        <svg id="senSVG" viewBox="0 0 700 240" role="img" aria-label="权重比例敏感性折线图：四条曲线在 1:1 附近达到峰值，在 1:3 处崩塌"></svg>
+        <div class="ttip" id="senTip"></div>
+      </div>
+    </div>
+    <figcaption>左上：GSB 协议下的净偏好，四根柱分别是两个变体各自对「原模型」和「DMD2」的对比结果（论文 Fig. 3 只报了净值，此处如实呈现，未补全 G/S/B 三项拆分）。
+    右上：只对 <b>high-noise 专家</b>做 DM-Align 就够——论文的理由是「高层语义一致性主要在高噪声区间决定」，这是一个很有意思的经验判断，但没有给消融验证。
+    下：<b>四条曲线在 1:3 处全部从各自的峰值回落，其中三条跌破纯蒸馏基线</b>——CogVideoX+TA 掉到 0.08（纯蒸馏 0.22）、Wan+HPSv2 掉到 12.37（20.50）、CogVideoX+HPSv2 掉到 13.78（18.71）。
+    <b>唯一的例外是 Wan+TA</b>：1:3 时仍有 1.56，是纯蒸馏 0.75 的两倍多。所以论文的措辞是「只有当蒸馏权重过低时才出现严重不稳定或退化」，而不是全线崩溃——这一点值得如实读出来。</figcaption>
+  </figure>
+
+  <div class="tbl"><table>
+    <thead><tr><th>骨架</th><th>奖励</th><th class="num">1:0（纯蒸馏）</th><th class="num">3:1</th><th class="num">1:1（本文默认）</th><th class="num">1:3</th><th class="num">Varying</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="2">Wan-1.3B</td><td>TA ↑</td><td class="num">0.75</td><td class="num">1.34</td><td class="num best">1.65</td><td class="num">1.56</td><td class="num">1.45</td></tr>
+      <tr><td>HPSv2 ↑</td><td class="num">20.50</td><td class="num">24.01</td><td class="num best">28.89</td><td class="num worst">12.37</td><td class="num">27.56</td></tr>
+      <tr><td rowspan="2">CogVideoX-2B</td><td>TA ↑</td><td class="num">0.22</td><td class="num best">0.58</td><td class="num">0.55</td><td class="num worst">0.08</td><td class="num">0.49</td></tr>
+      <tr><td>HPSv2 ↑</td><td class="num">18.71</td><td class="num">20.92</td><td class="num best">25.01</td><td class="num worst">13.78</td><td class="num">22.11</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">论文的结论是「在很宽的配置范围内都很稳健，只有蒸馏权重过低（1:3）时才严重退化」。我同意这个读法，但要补两句：
+  （i）<b>CogVideoX + TA 那一行的最优点在 3:1 而不是 1:1</b>，说明最优比例是<b>随骨架和奖励模型漂移</b>的；论文用「无需专门调参」来描述泛化性，严格说应该是「1:1 在四种组合里都不差，但不总是最好」。
+  （ii）1:3 的退化<b>不是全线的</b>：Wan+TA 在 1:3 仍有 1.56（纯蒸馏 0.75），只有另外三组跌破了纯蒸馏基线。</p>
+
+  <h3><span class="ix">9.4</span>最该被注意的一个消融：收益是不是来自数据集</h3>
+  <div class="prose">
+    <p>Pair 变体用了 ConsistID 的高质量真实视频，一个自然的质疑是：<b>提升会不会只是因为数据好</b>？论文用一个很干净的设计回应：在同一个 ConsistID 上，让 <b>DM-Group 只用 prompt、不看配对的真实视频</b>，再和各基线比。</p>
+  </div>
+  <div class="tbl"><table>
+    <thead><tr><th>方法（ConsistID，仅用 prompt）</th><th class="num">动态程度</th><th class="num">美学</th><th class="num">时序一致</th></tr></thead>
+    <tbody>
+      <tr><td>DMD2</td><td class="num">74.90</td><td class="num">64.19</td><td class="num">95.51</td></tr>
+      <tr><td>DanceGRPO</td><td class="num">78.42</td><td class="num">66.85</td><td class="num">96.12</td></tr>
+      <tr><td>DMDR（并行工作，直接加 RL 损失）</td><td class="num">77.15</td><td class="num">67.40</td><td class="num">95.88</td></tr>
+      <tr class="hl"><td><b>DM-Group</b></td><td class="num best">81.35</td><td class="num best">68.12</td><td class="num best">97.15</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">这是全文<b>唯一一处与并行工作（DMDR，arXiv 2511.13649）的直接数值对比</b>，也是唯一一处证明「收益来自公式而非数据」的实验。设计是对的。
+  但要注意它换了指标口径（只报三项，而且和 Tab. 1 上半部分的 ConsistID 数字对不上——比如 DMD2 的动态程度这里是 74.90，Tab. 1 里是 52.81），说明<b>评测子集或设置不同</b>，论文没有说明差异来自哪里。这是我在整篇实验里唯一觉得需要作者澄清的地方。</p>
+</section>
+
+<!-- ============================================================ 10 ALTERNATIVES -->
+<section class="sec" id="s-alt">
+  <div class="eyebrow"><span class="n">10</span><span class="t">Why Not X</span><span class="line"></span></div>
+  <h2>两条「看起来更自然」的路，论文为什么说走不通</h2>
+
+  <h3><span class="ix">10.1</span>为什么不直接把 RL 损失加到 DMD 上</h3>
+  <div class="prose">
+    <p>这是最省事的做法，也是并行工作 FlashDMD、DMDR 的做法：保留现成的 GRPO/DPO 损失，和 DMD 损失<b>相加</b>。论文做了这个变体（DanceGRPO 损失 + DMD 损失），结论见<b>论文 Fig. 6</b>：<b>奖励曲线几乎和纯 DMD 重合，对齐基本没发生</b>。</p>
+    <p>论文给的解释是：标准 RL 损失为了在连续生成模型上不崩，<b>被设计得过于保守</b>（裁剪、KL 惩罚、小步长），梯度太弱，被 DMD 梯度淹没。我认为这个解释成立，但可以说得更结构化——两种「相加」的区别在于：</p>
+    <ul>
+      <li><b>损失相加（loss addition）</b>：两个损失来自不同的数学对象（一个是分布散度，一个是策略梯度期望），量纲不可比，梯度量级只能靠 <span class="m">λ</span> 硬调，而且 RL 那一项的梯度是<b>稀疏的</b>（只有采到的轨迹上有信号）。</li>
+      <li><b>梯度相加（gradient composition，本文）</b>：两项都是分数空间里的向量，量纲天然一致，作用点相同（都通过 <span class="m">dG<sub>θ</sub>/dθ</span>），而且都是<b>稠密的</b>（对每个样本的每个像素/隐变量都有分量）。</li>
+    </ul>
+    <p>论文原话说自己提供的是「dense, stable, and highly compatible guidance」，稠密性我认为是这里最本质的那个词。<b>不过论文 Fig. 6 只画了奖励曲线，没有给这个变体的 VBench 分数或调参范围</b>——严格说，这个对照实验证明的是「按论文的调法加不动」，而不是「原理上加不动」。</p>
+  </div>
+
+  <h3><span class="ix">10.2</span>为什么不做两阶段</h3>
+  <div class="prose">
+    <p>这一条 <a href="#s-problem">§01</a> 已经拆过，这里补一个论文没写但值得点破的对称性：<b>两个方向的失败原因其实是同一个</b>——都是「后一个阶段的目标函数不认识前一个阶段的成果」。</p>
+    <ul>
+      <li>RL → 蒸馏：蒸馏的目标是靠近<b>教师</b>，而教师是未对齐的，所以它<b>有一个显式的项在撤销对齐</b>。表现为分数回落（可测、渐进、不崩）。</li>
+      <li>蒸馏 → RL：RL 的目标里<b>没有任何项在维护少步能力</b>，同时奖励模型可以被退化内容骗（§4.1 自陈）。表现为崩溃（不可测、突然、不可逆）。</li>
+    </ul>
+    <p>本文的单阶段之所以两边都躲开，是因为 <span class="m">λ<sub>DMD</sub>L<sub>DMD</sub></span> 这一项<b>永远在场</b>：它既是「保持少步能力」的约束，又是「不许跑出教师分布」的正则。Tab. 5 的 1:3 那一列就是把这个约束调弱后的实证：四组里有三组跌破了纯蒸馏基线，<b>退化的方向和「蒸馏后再 RL」是同一种</b>。</p>
+  </div>
+
+  <div class="call key">
+    <div class="hd">我读下来认为这篇论文最有价值的一句话</div>
+    <p>不是「我们更快更好」，而是：<b>当两个优化目标可以被写成同一个空间里的向量时，它们就不再需要按阶段排队。</b>
+    这句话的适用面比视频生成宽得多——任何「先做 A 再做 B，结果 B 撤销 A」的两阶段流程，都值得先问一句：A 和 B 的梯度能不能被写成同一个形状。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 11 LIMITS -->
+<section class="sec" id="s-crit">
+  <div class="eyebrow"><span class="n">11</span><span class="t">Limitations &amp; Reservations</span><span class="line"></span></div>
+  <h2>论文自陈的局限，和我读下来的保留意见</h2>
+
+  <h3><span class="ix">11.1</span>论文自己写的两条（§4.5）</h3>
+  <div class="grid2">
+    <div class="card cB">
+      <div class="mono">局限一</div>
+      <h5>加权求和没有收敛保证</h5>
+      <p>虽然对齐梯度有推导，但「两个梯度加权相加」这个联合优化动力学<b>缺乏严格的收敛性理论</b>。论文用词是 “lack strict theoretical convergence guarantees”。Tab. 5 的 1:3 崩塌就是这个缺口的实证边界。</p>
+    </div>
+    <div class="card cB">
+      <div class="mono">局限二</div>
+      <h5>被绑在 DMD 系上</h5>
+      <p>整个框架依赖「有一个持续训练的 <span class="m">μ<sub>fake</sub></span> 提供分数」这个前提，因此<b>无法用于 GAN 系的蒸馏方法</b>（如 APT、PoSE）。论文认为这是可接受的取舍，因为 DMD 系已被社区验证为视频任务上最稳的一支。</p>
+    </div>
+  </div>
+  <div class="prose">
+    <p>论文同时给了一个正面论证：DM-Align 是<b>正交的分数梯度提供者</b>，所以可以和后续的 DMD 增强（Phased DMD、TDM 等）叠加。这个说法我认为是合理的——只要 <span class="m">μ<sub>fake</sub></span> 还在，第二个梯度就还能加。</p>
+  </div>
+
+  <h3><span class="ix">11.2</span>我的保留意见</h3>
+  <div class="call mine">
+    <div class="hd">一 · 式 (6) 的推导有一处结构性跳跃</div>
+    <p>这是最重要的一条，<a href="#s-core">§04</a> 已经完整展开：式 (5) 要的是<b>两个分数场在同一点</b>的差，式 (6) 给的是<b>同一个分数场在两点</b>的差。
+    按 Tweedie 展开后，字面读法要么退化成噪声、要么符号相反；只有按「去噪预测差」读才成立。我倾向于认为实现是对的、表述不够严谨，但<b>论文没有放代码，这一点无法证实</b>。
+    对读者的实际影响：如果你要复现，<b>务必按 <span class="m">μ<sub>fake</sub>(x⁺<sub>t</sub>) − μ<sub>fake</sub>(x<sub>t</sub>)</span> 实现，而不是按字面的分数差</b>。</p>
+  </div>
+  <div class="call mine">
+    <div class="hd">二 · 「x⁺ 是 p* 的样本」这个身份从未被验证</div>
+    <p>式 (4) 定义的 <span class="m">p*</span> 依赖奖励模型 <span class="m">r</span> 和温度 <span class="m">β</span>；而 Pair 变体的 <span class="m">x⁺</span> 是真实视频，与 <span class="m">r</span>、<span class="m">β</span> 都无关。
+    换句话说，<b>Pair 变体在 §3.2 的理论框架下其实没有落点</b>——它的合理性来自「真实数据更好」这个经验判断，不来自式 (4)。这不影响它有效，但影响「统一框架」这个叙事的完整性：真正落在框架里的只有 Group 变体。</p>
+  </div>
+  <div class="call mine">
+    <div class="hd">三 · 反向 KL + 单一锚点，多样性没有被测量</div>
+    <p>DMD 的目标是反向 KL（mode-seeking），本身就偏向收窄分布；DM-Align 在此之上<b>再加一个指向偏好锚点的力</b>。两个收窄的力叠加，多样性会怎样？
+    论文<b>完全没有报告任何多样性指标</b>——没有 recall/coverage，没有同 prompt 多次采样的方差，VBench 的六项也都不测这个。Tab. 5 里 1:3 的崩塌大概率就是多样性彻底塌掉的表现，但那是极端点；1:1 时塌了多少，我们不知道。
+    考虑到 Group 变体的锚点是「top-4 均值」——<b>均值本身就是一个比任何单个样本都更「平均」的目标</b>——我认为这个风险不小。</p>
+  </div>
+  <div class="call mine">
+    <div class="hd">四 · 只在 1.3B 上做完整对照，14B 只有一行</div>
+    <p>主表全部基于 Wan2.1-T2V-1.3B。MoE 的 Wan2.2-A14B 只有 Tab. 4 的三个数（80.00 / 78.35 / 83.45），没有基线细分、没有人评、没有指标拆解，而且「只对齐 high-noise 专家」这个关键设计<b>没有对照实验</b>（没有「只对齐 low-noise」或「两个都对齐」的数字）。
+    这一条对论文的核心论点影响不大，但「scalability to MoE」这个小标题目前是被一行数字支撑的。</p>
+  </div>
+  <div class="call mine">
+    <div class="hd">五 · 视频是动的，评测却主要是逐帧的</div>
+    <p>Group 变体的奖励是 HPSv2 时，论文明确说「按惯例把每帧的图像分数取平均」得到视频奖励。<b>逐帧平均的奖励对时间维度是完全盲的</b>——它无法区分「一段流畅的运动」和「一串各自好看但抖动的帧」。
+    VideoAlign 是视频原生的，好一些，但论文因为它对退化内容误判而只用了 TA 一项。所以严格说：<b>本文在时间维度上真正被优化的信号非常有限</b>，而 Dynamic Degree 的大幅提升是间接得来的。这既是好消息（泛化），也让人想知道如果直接优化运动质量会怎样。</p>
+  </div>
+  <div class="call">
+    <div class="hd">六 · 一个小的记账问题</div>
+    <p>Tab. 3 的 51 NFE 与 Group 变体的 K=8 表面上矛盾，我在 <a href="#s-group">§06</a> 和 <a href="#s-algo">§07</a> 给出了「组是从已有 batch 里切的」这个解释，并且 Algorithm 1 第 19 行的措辞支持它。
+    但论文<b>没有明说</b>，而这直接影响读者估算复现成本（如果你只有 8 张卡，K=8 意味着什么？）。这属于可以一句话补上的信息缺口。</p>
+  </div>
+
+  <h3><span class="ix">11.3</span>那么，这篇论文的贡献到底有多硬</h3>
+  <div class="prose">
+    <p>把上面所有意见放在一起，我的判断是：<b>工程贡献非常硬，理论叙事偏软</b>。</p>
+    <ul>
+      <li><b>硬的部分：</b>「一次采样喂三条梯度」这个工程结构是实打实的，51 vs 1536 NFE 不是修辞；「两阶段会互相撤销」这个对照是干净的、别人绕不开的；四种骨架/奖励组合上的稳健性也做了。这套东西如果开源，我认为会被广泛采用。</li>
+      <li><b>软的部分：</b>从式 (5) 到式 (6) 的那一步近似缺乏误差分析；Pair 变体没有真正落在自己的理论框架里；多样性完全没有被测量。论文自己也承认「本文的算法设计有意优先考虑简洁性与基础验证」——这是诚实的定位。</li>
+    </ul>
+    <p>换个角度说：<b>这篇论文的价值不在于「DM-Align 这个损失是对的」，而在于「蒸馏和对齐可以共用一个分数估计器」这个观察被落实成了可跑的代码结构。</b>即使式 (6) 的具体形式将来被更严格的推导替换掉，Fig. 2 那个「一次采样、两股梯度、共享 <span class="m">μ<sub>fake</sub></span>」的骨架大概率会留下来。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 12 REPO -->
+<section class="sec" id="s-repo">
+  <div class="eyebrow"><span class="n">12</span><span class="t">In Context</span><span class="line"></span></div>
+  <h2>放回 Awesome-Interactive-Video-World-Models 的坐标系里</h2>
+  <p class="lead">按本仓库的三条严格标准逐条对照，这篇论文<b>三条都不满足</b>——它不是一个交互式视频世界模型，也不打算是。
+  但它落在仓库「宽口径」的第二条轴上：<b>实时与流式生成</b>里的蒸馏子方向，而且落得很正。</p>
+
+  <div class="tbl"><table>
+    <thead><tr><th>严格标准</th><th>本文</th><th>判定</th></tr></thead>
+    <tbody>
+      <tr><td><b>逐步动作条件</b></td><td>纯 T2V，一个 prompt 给到底，没有动作接口</td><td class="worst">不满足</td></tr>
+      <tr><td><b>因果 / 流式生成</b></td><td>整段 5 秒双向去噪，4 步一次出完</td><td class="worst">不满足</td></tr>
+      <tr><td><b>持久世界状态</b></td><td>无显式记忆，无跨段状态</td><td class="worst">不满足</td></tr>
+      <tr><td><b>宽口径 · 实时与流式生成</b></td><td>100 步 → 4 步的少步蒸馏，且不牺牲偏好对齐</td><td class="best">正中</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="prose">
+    <p>为什么一个非交互的 T2V 蒸馏工作值得进这个列表：<b>交互式世界模型的延迟预算是逐帧的</b>，所有已知的实时系统都建立在少步蒸馏之上。
+    而少步蒸馏一旦和「对齐」冲突，实时系统就只能在「快」和「好」之间二选一。这篇论文说的正是：<b>这个二选一不是必然的，只要你换个框架。</b></p>
+    <p>仓库里几条明显相邻的线索（以下仅按各自标题判断关系，未逐篇精读）：</p>
+    <ul>
+      <li><b>Reward Forcing</b>（arXiv 2512.04678，Efficient Streaming Video Generation with Rewarded Distribution Matching Distillation）——从标题看是最近的一篇，同样是「奖励 + DMD」，但落在<b>流式</b>生成上。本文没有引用它，值得并读。</li>
+      <li><b>Self Forcing</b>（arXiv 2506.08009）与 DMD 系的因果化路线——本文的 <span class="m">μ<sub>fake</sub></span> 机制与之同源（论文引了 Self Forcing，编号 [14]）。</li>
+      <li><b>KVPO</b>（arXiv 2605.14278，ODE-Native GRPO for Autoregressive Video Alignment）——从标题看，同样是「不做 SDE 转换」的对齐路线，但走的是 KV 语义探索而非分布匹配。<b>这两条路线的对比会很有意思</b>。</li>
+      <li><b>RAVEN</b>（arXiv 2605.15190，Real-time Autoregressive Video Extrapolation with Consistency-model GRPO）——一致性模型 + GRPO 的实时组合。</li>
+      <li>论文自己点名的两个并行工作：<b>FlashDMD</b>（2511.20549）与 <b>DMDR</b>（2511.13649），都是「蒸馏 + RL 联合优化」，但走的是「损失相加」路线，且都是图像域。本文的差异化正是 <a href="#s-alt">§10.1</a> 那一节。</li>
+    </ul>
+    <p>如果要给这篇论文在仓库里选一个位置，我会放进 <b>Real-Time &amp; Streaming Generation</b>，并在描述里点出「preference-aligned distillation」这个子标签——因为它和纯加速的蒸馏工作（采样器、缓存、稀疏注意力）解决的不是同一个问题。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 13 APPENDIX -->
+<section class="sec" id="s-appendix">
+  <div class="eyebrow"><span class="n">13</span><span class="t">Appendix</span><span class="line"></span></div>
+  <h2>附录速查</h2>
+
+  <h3><span class="ix">A</span>全部超参与配置（§4.1 逐字整理）</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>项目</th><th>取值</th><th>出处 / 备注</th></tr></thead>
+    <tbody>
+      <tr><td>基座模型</td><td>Wan 2.1-T2V-1.3B；另测 CogVideoX-2B、Wan2.2-T2V-A14B (MoE)</td><td>§4.1 / Tab. 4 / Tab. 5</td></tr>
+      <tr><td>生成设置</td><td>5 秒 · 16 FPS · 832 × 480</td><td>§4.1</td></tr>
+      <tr><td>硬件</td><td>32 × NVIDIA H100，每卡 batch size = 1</td><td>§4.1</td></tr>
+      <tr><td>学习率</td><td>生成器 2×10⁻⁶；假模型 4×10⁻⁷（均为 AdamW）</td><td>§4.1</td></tr>
+      <tr><td>更新比例</td><td>生成器每 5 步更新一次（即 Algorithm 1 的 N = 4）</td><td>§4.1 + Alg. 1</td></tr>
+      <tr><td>EMA</td><td>从第 500 步开始，decay = 0.99</td><td>§4.1</td></tr>
+      <tr><td>蒸馏时间步 T</td><td>[1000, 750, 500, 250]（4 步）</td><td>§4.1</td></tr>
+      <tr><td>教师 CFG</td><td>6.0</td><td>§4.1</td></tr>
+      <tr><td>去噪时间步 t</td><td>U(0, 1)，与 τ 独立采样</td><td>Alg. 1 第 8/13 行、§3.3</td></tr>
+      <tr><td>组大小 / 锚点</td><td>K = 8，取奖励最高的 4 个求均值作 x̄⁺</td><td>§4.1</td></tr>
+      <tr><td>损失权重</td><td>λ<sub>DMD</sub> = λ<sub>align</sub> = 0.5</td><td>§4.1 / Tab. 5</td></tr>
+      <tr><td>训练步数</td><td>DM-Align 与 DMD2 各 1000 步（500 步内已收敛）；DanceGRPO 100 步</td><td>§4.1</td></tr>
+      <tr><td>Pair 数据</td><td>过滤后的 ConsistID，约 6K 条，人物中心</td><td>§4.1</td></tr>
+      <tr><td>Group 数据</td><td>VidProM 的 20K 条多样 prompt</td><td>§4.1</td></tr>
+      <tr><td>奖励模型</td><td>VideoAlign（主要只用 TA 一项）；敏感性分析另用 HPSv2（逐帧平均）</td><td>§4.1 / Tab. 5</td></tr>
+      <tr><td>评测</td><td>640 条测试样本；VBench 自动指标 + GSB 人评</td><td>§4.1</td></tr>
+      <tr><td>基线</td><td>原模型 / DMD2 / Flow-DPO / DanceGRPO / RL+DMD2 两阶段 / DMDR（仅 Tab. 6）</td><td>§4.1 / Tab. 6</td></tr>
+      <tr><td>效率（每优化步）</td><td>DMD2 46 NFE·11 s；DanceGRPO 1536 NFE·423 s；DM-Align 51 NFE·15 s</td><td>Tab. 3</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="ix">B</span>符号表</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>符号</th><th>含义</th><th>在哪出现</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">G<sub>θ</sub></td><td>被训练的少步生成器（学生），从 μ<sub>real</sub> 复制权重初始化</td><td>式 (1)(2)，Alg. 1 第 1 行</td></tr>
+      <tr><td class="mono">μ<sub>real</sub></td><td>预训练教师模型，全程<b>冻结</b>，只提供 s<sub>real</sub></td><td>式 (2)</td></tr>
+      <tr><td class="mono">μ<sub>fake</sub><sup>ϕ</sup></td><td>假模型 / 分数估计器，用去噪损失持续拟合生成器当前分布</td><td>式 (2)(3)(6)(7)</td></tr>
+      <tr><td class="mono">F(·, t)</td><td>前向加噪过程（把干净样本变成噪声档位 t 的样本）</td><td>式 (2)(6)(7)</td></tr>
+      <tr><td class="mono">s<sub>p</sub>(x<sub>t</sub>, t)</td><td>分数函数 ∇<sub>x<sub>t</sub></sub> log p<sub>t</sub>(x<sub>t</sub>)；由 Tweedie 与去噪预测互换</td><td>式 (2) 后</td></tr>
+      <tr><td class="mono">x / x<sub>final</sub></td><td>τ 处的中间样本 / 完整少步输出；由同一次前向产出</td><td>Alg. 1 第 6 行</td></tr>
+      <tr><td class="mono">x⁺ / x̄⁺</td><td>偏好样本（Pair） / 组内 top-k 均值锚点（Group）</td><td>式 (6)(7)</td></tr>
+      <tr><td class="mono">A<sub>i</sub></td><td>组内第 i 个样本的优势；论文未给出具体定义式</td><td>式 (7)</td></tr>
+      <tr><td class="mono">τ / t</td><td>蒸馏时间步（4 档离散） / 去噪时间步（U(0,1) 连续），<b>独立采样</b></td><td>Alg. 1 第 5 / 8 / 13 行</td></tr>
+      <tr><td class="mono">N</td><td>假模型连续更新的步数；生成器每 N+1 步更新 1 次（论文 N=4）</td><td>Alg. 1 第 7 行</td></tr>
+      <tr><td class="mono">λ<sub>DMD</sub> / λ<sub>align</sub></td><td>两股梯度的权重，论文各取 0.5；Tab. 5 扫描其比例</td><td>式 (8)</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="ix">C</span>术语</h3>
+  <dl class="gloss">
+    <dt>Distribution Matching Distillation (DMD)</dt>
+    <dd>Yin et al. 2024 提出的蒸馏范式：交替训练「假模型」与生成器，最小化生成分布与教师分布的反向 KL。本文全部建立在它之上（DMD2 = 其改进版）。</dd>
+    <dt>Tweedie 公式</dt>
+    <dd>把「去噪预测」和「分数」联系起来的恒等式：<span class="m">s(x<sub>t</sub>,t) = (α<sub>t</sub>·x̂<sub>0</sub>(x<sub>t</sub>,t) − x<sub>t</sub>)/σ<sub>t</sub>²</span>。有了它，任何扩散去噪器都可以当分数估计器用——这是本文能把 μ<sub>fake</sub> 当作「目标分数」的技术前提。</dd>
+    <dt>NFE (Number of Function Evaluations)</dt>
+    <dd>神经网络前向次数。在推理语境里≈采样步数（本文 4 vs 100）；在训练语境里是每个优化步的总前向次数（本文 51 vs DanceGRPO 1536）。<b>两个语境的 NFE 不是一回事</b>，读 Tab. 1 和 Tab. 3 时要分开。</dd>
+    <dt>GSB 协议</dt>
+    <dd>人评常用的三分法：Good / Same / Bad。「净偏好」= Good 比例 − Bad 比例。论文 Fig. 3 只报了净值。</dd>
+    <dt>VBench 的六个维度</dt>
+    <dd>本文用到：主体一致性、背景一致性（时序一致）、运动平滑度、动态程度（运动质量）、美学质量、成像质量（视觉质量）。<b>动态程度与运动平滑度存在天然张力</b>——完全静止的视频平滑度接近满分，所以要一起看。</dd>
+    <dt>Reward hacking</dt>
+    <dd>模型找到奖励模型的漏洞而非真正提升质量。本文 §4.1 自陈 VideoAlign 会给纯白噪声和闪烁帧高分，这是一个具体的、已被观察到的 hacking 面。</dd>
+  </dl>
+
+  <h3><span class="ix">D</span>如果要复现，我会按这个顺序读</h3>
+  <div class="prose">
+    <ol>
+      <li><b>先读 Algorithm 1</b>（不是 §3.2）。26 行把整个数据流说完了，尤其注意第 6 行的缩进位置和第 5 / 8 / 13 行的两个 timestep。</li>
+      <li><b>再读 §3.1</b>，确认你的 DMD2 基线是对的。如果 DMD2 的 4 步生成质量不对，后面的一切都无从谈起。</li>
+      <li><b>然后是式 (6)</b>——按 <a href="#s-core">§04.3</a> 的去噪预测形式实现，不要按字面的分数差。先只做 Pair 变体（不需要奖励模型，变量最少）。</li>
+      <li><b>最后加 Group</b>。这里要决定 <span class="m">A<sub>i</sub></span> 的定义（论文没给），并想清楚 K 个样本从哪来（跨卡 gather 还是 batch 内复制 prompt）。</li>
+      <li>λ 从 1:1 起步，先别做调度。如果发现分布收窄，往 3:1 走，不要往 1:3 走。</li>
+    </ol>
+  </div>
+
+  <p class="foot">
+    本页由 Claude 精读 <a href="https://arxiv.org/abs/2609.04283" target="_blank" rel="noopener">arXiv:2609.04283v1</a> 后撰写与绘制，属于
+    <a href="https://github.com/ZhangShuui/Awesome-Interactive-Video-World-Models" target="_blank" rel="noopener">Awesome-Interactive-Video-World-Models</a> 的阅读记录。<br>
+    <b>标注约定：</b>所有表格数字、超参数、算法行均逐字取自论文，标明了 Tab./Fig./§ 出处；标注为「推算」的量（总训练时长、NFE 重建模型）由论文给出的因子相乘或按论文口径重建得到；
+    所有交互图除非另有说明均为<b>示意模拟或一维数值玩具</b>，用来把公式的结构画出来，<b>不是论文的实验结果</b>；标为「我的保留意见」「我的推断」的段落是本页作者的判断，不代表论文观点。<br>
+    <b>编号约定：</b>本页自己的图编号（Fig. 1–9）与论文的（Fig. 1–6）是两套；凡指论文的图，正文都写作「论文 Fig. N」。表格一律指论文的 Tab. N。<br>
+    论文正文未给出代码仓库或项目主页（2026-09-07 查）。
+  </p>
+</section>
+
+</main>
+</div>
+
+<script>
+(function(){
+"use strict";
+const $=(s,r)=>(r||document).querySelector(s);
+const $$=(s,r)=>Array.prototype.slice.call((r||document).querySelectorAll(s));
+const SVGNS="http://www.w3.org/2000/svg";
+function el(tag,attrs,parent){
+  const n=document.createElementNS(SVGNS,tag);
+  if(attrs) for(const k in attrs){ if(k==='text'){ n.textContent=attrs[k]; } else n.setAttribute(k,attrs[k]); }
+  if(parent) parent.appendChild(n);
+  return n;
+}
+const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
+const fmt=(x,n)=>{ if(!isFinite(x)) return '—'; return Number(x).toFixed(n==null?2:n); };
+const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+const cvar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const themeListeners=[];
+
+/* ---------------- theme ---------------- */
+const root=document.documentElement;
+try{ const s=localStorage.getItem('dmalign-theme'); if(s==='light'||s==='dark') root.setAttribute('data-theme',s); }catch(e){}
+$('#themeBtn').addEventListener('click',function(){
+  const cur=root.getAttribute('data-theme'); let next;
+  if(cur==='light') next='dark'; else if(cur==='dark') next='light';
+  else next=(window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches)?'dark':'light';
+  root.setAttribute('data-theme',next);
+  try{ localStorage.setItem('dmalign-theme',next); }catch(e){}
+  themeListeners.forEach(f=>f());
+});
+if(window.matchMedia){ try{ matchMedia('(prefers-color-scheme: light)').addEventListener('change',()=>themeListeners.forEach(f=>f())); }catch(e){} }
+
+/* ---------------- progress + scrollspy ---------------- */
+const prog=$('#prog'), tocLinks=$$('#toc a');
+const secs=tocLinks.map(a=>document.querySelector(a.getAttribute('href')));
+function onScroll(){
+  const h=document.documentElement, max=h.scrollHeight-h.clientHeight;
+  prog.style.width=(max>0?(h.scrollTop/max*100):0)+'%';
+  const y=h.scrollTop+130; let idx=0;
+  secs.forEach((s,i)=>{ if(s && s.offsetTop<=y) idx=i; });
+  tocLinks.forEach((a,i)=>a.classList.toggle('on',i===idx));
+}
+addEventListener('scroll',onScroll,{passive:true}); addEventListener('resize',onScroll); onScroll();
+
+/* ---------------- generic tabs (skip groups that share one panel) ---------------- */
+$$('.tabs').forEach(tl=>{
+  const tabs=$$('.tab',tl);
+  const ctrls={}; tabs.forEach(t=>ctrls[t.getAttribute('aria-controls')]=1);
+  const single=Object.keys(ctrls).length<=1;
+  tabs.forEach(t=>t.addEventListener('click',()=>{
+    tabs.forEach(o=>{
+      o.setAttribute('aria-selected',o===t?'true':'false');
+      if(!single){ const p=document.getElementById(o.getAttribute('aria-controls')); if(p) p.hidden=(o!==t); }
+    });
+    if(tl.__onpick) tl.__onpick(tabs.indexOf(t));
+  }));
+});
+function segment(id,cb){
+  const g=$(id); if(!g) return null;
+  const bs=$$('button',g);
+  bs.forEach(b=>b.addEventListener('click',()=>{ bs.forEach(o=>o.setAttribute('aria-pressed',o===b?'true':'false')); cb(b); }));
+  return bs;
+}
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function gauss(rng){ let u=0,v=0; while(u===0)u=rng(); while(v===0)v=rng(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+
+/* ======================================================================
+   Fig. 1 — overview lane highlighting
+   ====================================================================== */
+(function(){
+  const tl=$('#ovT0'); if(!tl) return;
+  const group=tl.parentNode; const lanes=$$('.ovLane');
+  group.__onpick=function(i){
+    lanes.forEach(g=>{
+      const L=+g.getAttribute('data-lane');
+      const on = (i===0) || (L===0) || (L===i);
+      g.style.opacity = on?1:0.16;
+    });
+  };
+})();
+
+/* ======================================================================
+   HERO — 2-D distribution matching sandbox
+   ====================================================================== */
+(function(){
+  const cv=$('#sCanvas'); if(!cv) return;
+  const ctx=cv.getContext('2d'), W=cv.width, H=cv.height;
+  const X0=-3.25,X1=3.25,Y0=-1.75,Y1=1.75;
+  const px=x=>(x-X0)/(X1-X0)*W, py=y=>H-(y-Y0)/(Y1-Y0)*H;
+  const sx=(X1-X0)/W;
+
+  // teacher: 2-component GMM
+  const MODES=[{w:.5,mx:-1.18,my:.38,sx:.34,sy:.30},{w:.5,mx:1.02,my:-.30,sx:.40,sy:.32}];
+  const SIGT=0.26;                              // fixed diffusion level for score smoothing
+  function pReal(x,y,extra){
+    const e2=(extra||0)*(extra||0); let p=0;
+    for(const m of MODES){ const a=m.sx*m.sx+e2, b=m.sy*m.sy+e2;
+      p+=m.w/(2*Math.PI*Math.sqrt(a*b))*Math.exp(-((x-m.mx)*(x-m.mx)/(2*a)+(y-m.my)*(y-m.my)/(2*b))); }
+    return p;
+  }
+  function sReal(x,y){
+    const e2=SIGT*SIGT; let p=0,gx=0,gy=0;
+    for(const m of MODES){ const a=m.sx*m.sx+e2, b=m.sy*m.sy+e2;
+      const c=m.w/(2*Math.PI*Math.sqrt(a*b))*Math.exp(-((x-m.mx)*(x-m.mx)/(2*a)+(y-m.my)*(y-m.my)/(2*b)));
+      p+=c; gx+=c*(-(x-m.mx)/a); gy+=c*(-(y-m.my)/b); }
+    if(p<1e-12) return [0,0];
+    return [gx/p, gy/p];
+  }
+  const RW={mx:1.62,my:-.62,s:.86,amp:2.4};
+  const rew=(x,y)=>RW.amp*Math.exp(-(((x-RW.mx)*(x-RW.mx)+(y-RW.my)*(y-RW.my))/(2*RW.s*RW.s)));
+
+  // ---- fake-model surrogate: grid KDE + log-gradient
+  const GW=72, GH=40;
+  const dens=new Float32Array(GW*GH), tmp=new Float32Array(GW*GH), lg=new Float32Array(GW*GH);
+  function gi(x,y){ return [ (x-X0)/(X1-X0)*(GW-1), (y-Y0)/(Y1-Y0)*(GH-1) ]; }
+  function buildDens(P){
+    dens.fill(0);
+    for(const p of P){
+      const [u,v]=gi(p.x,p.y); const i=Math.floor(u), j=Math.floor(v);
+      if(i<0||j<0||i>=GW-1||j>=GH-1) continue;
+      const fu=u-i, fv=v-j;
+      dens[j*GW+i]+=(1-fu)*(1-fv); dens[j*GW+i+1]+=fu*(1-fv);
+      dens[(j+1)*GW+i]+=(1-fu)*fv; dens[(j+1)*GW+i+1]+=fu*fv;
+    }
+    for(let pass=0;pass<3;pass++){
+      for(let j=0;j<GH;j++) for(let i=0;i<GW;i++){
+        const a=dens[j*GW+Math.max(0,i-1)], b=dens[j*GW+i], c=dens[j*GW+Math.min(GW-1,i+1)];
+        tmp[j*GW+i]=(a+2*b+c)/4; }
+      for(let j=0;j<GH;j++) for(let i=0;i<GW;i++){
+        const a=tmp[Math.max(0,j-1)*GW+i], b=tmp[j*GW+i], c=tmp[Math.min(GH-1,j+1)*GW+i];
+        dens[j*GW+i]=(a+2*b+c)/4; }
+    }
+    let mx=0; for(let k=0;k<dens.length;k++) if(dens[k]>mx) mx=dens[k];
+    const eps=Math.max(mx,1e-6)*0.02;
+    for(let k=0;k<dens.length;k++) lg[k]=Math.log(dens[k]+eps);
+  }
+  function sFake(x,y){
+    const [u,v]=gi(x,y); const i=clamp(Math.round(u),1,GW-2), j=clamp(Math.round(v),1,GH-2);
+    const hx=(X1-X0)/(GW-1), hy=(Y1-Y0)/(GH-1);
+    return [ (lg[j*GW+i+1]-lg[j*GW+i-1])/(2*hx), (lg[(j+1)*GW+i]-lg[(j-1)*GW+i])/(2*hy) ];
+  }
+
+  // ---- state
+  const N=264, K=8;
+  let P=[], PREF=[], step=0, playing=true, lamR=.5, lamP=.5, mode='pair', speed=3;
+  let rng=mulberry32(20260907);
+  function samplePStar(){                       // rejection sample from p_ref * exp(r/beta)
+    const out=[]; let guard=0;
+    while(out.length<8 && guard++<20000){
+      const m=MODES[rng()<.5?0:1];
+      const x=m.mx+gauss(rng)*m.sx, y=m.my+gauss(rng)*m.sy;
+      const acc=Math.exp((rew(x,y)-RW.amp)/1.0);
+      if(rng()<acc) out.push({x,y});
+    }
+    while(out.length<8) out.push({x:RW.mx,y:RW.my});
+    return out;
+  }
+  function reset(){
+    rng=mulberry32(20260907); step=0; P=[];
+    for(let i=0;i<N;i++) P.push({x:-0.15+gauss(rng)*0.95, y:0.02+gauss(rng)*0.62, g:Math.floor(i/K), p:i%8, gx:0, gy:0, ax:0, ay:0});
+    PREF=samplePStar();
+    buildDens(P);
+  }
+  reset();
+
+  function stepSim(){
+    buildDens(P);
+    const dt=0.012, diff=0.020;
+    // group stats
+    let groups=null;
+    if(mode==='group'){
+      groups={};
+      P.forEach(p=>{ (groups[p.g]=groups[p.g]||[]).push(p); });
+      for(const k in groups){
+        const G=groups[k]; const rs=G.map(p=>rew(p.x,p.y));
+        const mean=rs.reduce((a,b)=>a+b,0)/rs.length;
+        const sd=Math.sqrt(rs.reduce((a,b)=>a+(b-mean)*(b-mean),0)/rs.length)+1e-6;
+        const order=G.map((p,i)=>i).sort((a,b)=>rs[b]-rs[a]);
+        const top=order.slice(0,Math.max(1,Math.round(G.length/2)));
+        let ax=0,ay=0; top.forEach(i=>{ax+=G[i].x; ay+=G[i].y;}); ax/=top.length; ay/=top.length;
+        G.forEach((p,i)=>{ p.A=(rs[i]-mean)/sd; p.anx=ax; p.any=ay; });
+      }
+    }
+    for(const p of P){
+      const sr=sReal(p.x,p.y), sf=sFake(p.x,p.y);
+      let gx=sr[0]-sf[0], gy=sr[1]-sf[1];
+      const gm=Math.hypot(gx,gy); if(gm>9){ gx*=9/gm; gy*=9/gm; }
+      p.gx=gx; p.gy=gy;
+      let ax=0, ay=0;
+      if(mode==='pair'){ const t=PREF[p.p]; ax=(t.x-p.x)*4.4; ay=(t.y-p.y)*4.4; }
+      else { ax=p.A*(p.x-p.anx)*7.2; ay=p.A*(p.y-p.any)*7.2; }
+      const am=Math.hypot(ax,ay); if(am>9){ ax*=9/am; ay*=9/am; }
+      p.ax=ax; p.ay=ay;
+      p.x+=dt*(lamR*gx*2.0+lamP*ax)+gauss(rng)*diff;
+      p.y+=dt*(lamR*gy*2.0+lamP*ay)+gauss(rng)*diff;
+      p.x=clamp(p.x,X0+.05,X1-.05); p.y=clamp(p.y,Y0+.05,Y1-.05);
+    }
+    step++;
+  }
+
+  // ---- drawing
+  let C={};
+  function readColors(){
+    C={bg:cvar('--surf2'),grid:cvar('--grid'),real:cvar('--real'),fake:cvar('--fake'),gen:cvar('--gen'),
+       pref:cvar('--pref'),bad:cvar('--bad'),ink:cvar('--ink'),ink3:cvar('--ink3'),rule:cvar('--rule2')};
+  }
+  readColors(); themeListeners.push(readColors);
+  function arrow(x0,y0,x1,y1,col,w){
+    ctx.strokeStyle=col; ctx.lineWidth=w||1.6; ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
+    const a=Math.atan2(y1-y0,x1-x0), h=6.5;
+    ctx.fillStyle=col; ctx.beginPath(); ctx.moveTo(x1,y1);
+    ctx.lineTo(x1-h*Math.cos(a-0.42),y1-h*Math.sin(a-0.42));
+    ctx.lineTo(x1-h*Math.cos(a+0.42),y1-h*Math.sin(a+0.42)); ctx.closePath(); ctx.fill();
+  }
+  function draw(){
+    ctx.clearRect(0,0,W,H); ctx.fillStyle=C.bg; ctx.fillRect(0,0,W,H);
+    // reward field
+    if($('#sReward').checked){
+      const RX=88,RY=48, cw=W/RX, ch=H/RY;
+      for(let j=0;j<RY;j++) for(let i=0;i<RX;i++){
+        const x=X0+(i+.5)/RX*(X1-X0), y=Y1-(j+.5)/RY*(Y1-Y0);
+        const a=rew(x,y)/RW.amp;
+        if(a>0.03){ ctx.globalAlpha=a*0.40; ctx.fillStyle=C.pref; ctx.fillRect(i*cw,j*ch,cw+1,ch+1); }
+      }
+      ctx.globalAlpha=1;
+    }
+    // grid
+    ctx.strokeStyle=C.grid; ctx.lineWidth=1;
+    for(let g=-3;g<=3;g++){ ctx.beginPath(); ctx.moveTo(px(g),0); ctx.lineTo(px(g),H); ctx.stroke(); }
+    for(let g=-1;g<=1;g++){ ctx.beginPath(); ctx.moveTo(0,py(g)); ctx.lineTo(W,py(g)); ctx.stroke(); }
+    // teacher contours
+    if($('#sTeacher').checked){
+      ctx.strokeStyle=C.real; ctx.lineWidth=1.8;
+      for(const m of MODES) for(const k of [1,1.7,2.5]){
+        ctx.globalAlpha=k===1?.85:(k===1.7?.5:.28);
+        ctx.beginPath(); ctx.ellipse(px(m.mx),py(m.my),k*m.sx/sx,k*m.sy/((Y1-Y0)/H),0,0,Math.PI*2); ctx.stroke();
+      }
+      ctx.globalAlpha=1;
+    }
+    // particles
+    for(const p of P){ ctx.fillStyle=C.gen; ctx.globalAlpha=.82; ctx.beginPath(); ctx.arc(px(p.x),py(p.y),4.2,0,Math.PI*2); ctx.fill(); }
+    ctx.globalAlpha=1;
+    // arrows on a subset
+    const showR=$('#sArrR').checked, showP=$('#sArrP').checked, SC=13;
+    for(let i=0;i<P.length;i+=5){ const p=P[i];
+      if(showR&&lamR>0) arrow(px(p.x),py(p.y),px(p.x)+p.gx*SC*lamR,py(p.y)-p.gy*SC*lamR,C.real,1.7);
+      if(showP&&lamP>0) arrow(px(p.x),py(p.y),px(p.x)+p.ax*SC*lamP,py(p.y)-p.ay*SC*lamP,C.pref,1.7);
+    }
+    // preferred / anchors
+    if($('#sPref').checked){
+      if(mode==='pair'){
+        PREF.forEach(t=>{ ctx.fillStyle=C.pref; ctx.beginPath(); ctx.arc(px(t.x),py(t.y),7,0,Math.PI*2); ctx.fill();
+          ctx.strokeStyle=C.pref; ctx.lineWidth=1.6; ctx.globalAlpha=.6; ctx.beginPath(); ctx.arc(px(t.x),py(t.y),12,0,Math.PI*2); ctx.stroke(); ctx.globalAlpha=1; });
+      } else {
+        const seen={};
+        P.forEach(p=>{ if(p.anx===undefined||seen[p.g])return; seen[p.g]=1;
+          ctx.strokeStyle=C.pref; ctx.lineWidth=2; ctx.beginPath();
+          ctx.moveTo(px(p.anx)-7,py(p.any)); ctx.lineTo(px(p.anx)+7,py(p.any));
+          ctx.moveTo(px(p.anx),py(p.any)-7); ctx.lineTo(px(p.anx),py(p.any)+7); ctx.stroke(); });
+      }
+    }
+  }
+  function stats(){
+    let f=0,r=0,off=0; const bins={};
+    for(const p of P){
+      f+=Math.log(pReal(p.x,p.y,0)+1e-9); r+=rew(p.x,p.y);
+      let d=1e9; for(const m of MODES) d=Math.min(d,Math.hypot((p.x-m.mx)/m.sx,(p.y-m.my)/m.sy)); off+=d;
+      const b=Math.round(p.x*4)+'_'+Math.round(p.y*4); bins[b]=(bins[b]||0)+1;
+    }
+    let H0=0; const n=P.length;
+    for(const k in bins){ const q=bins[k]/n; H0-=q*Math.log(q); }
+    const cov=H0/Math.log(n);
+    const fid=f/n;
+    $('#rdFid').textContent=fmt(fid,2);
+    $('#rdFid').className='v '+(fid<-1.75?'bad':(fid>-1.55?'ok':''));
+    $('#rdRew').textContent=fmt(r/n,2);
+    $('#rdCov').textContent=fmt(cov,2);
+    $('#rdCov').className='v '+(cov<.55?'bad':(cov>.72?'ok':''));
+    $('#rdOff').innerHTML=fmt(off/n,2)+'<small>σ</small>';
+    $('#rdOff').className='v '+(off/n>2.2?'bad':'ok');
+    $('#rdStep').textContent=step;
+    $('#sStepLab').textContent='step '+step;
+    const risk=Math.max((0.72-cov)/0.14,(off/n-1.42)/0.28);
+    const t=$('#sToast'); t.classList.toggle('show', risk>1 && step>60);
+  }
+  function loop(){
+    if(playing){ for(let k=0;k<speed;k++) stepSim(); }
+    draw(); stats(); requestAnimationFrame(loop);
+  }
+  $('#sPlay').addEventListener('click',()=>{ playing=!playing; $('#sPlay').textContent=playing?'❚❚ 暂停':'▶ 播放'; });
+  $('#sReset').addEventListener('click',()=>{ reset(); });
+  $('#sSpeed').addEventListener('input',e=>{ speed=+e.target.value; $('#sSpeedV').textContent=speed+'×'; });
+  segment('#sMode',b=>{ mode=b.getAttribute('data-mode'); });
+  segment('#sRatio',b=>{ const r=b.getAttribute('data-r').split(':').map(Number);
+    const s=r[0]+r[1]; lamR=r[0]/s; lamP=r[1]/s; $('#rdLam').textContent=r[0]+' : '+r[1]; });
+  loop();
+})();
+
+/* ======================================================================
+   Fig. 2 — pipeline comparison
+   ====================================================================== */
+(function(){
+  const svg=$('#pipeSVG'); if(!svg) return;
+  const pane=$('#pipePane'), tip=$('#pipeTip');
+  let sel=0;
+  const RLS=$('#pipeRL'), DMS=$('#pipeDM');
+  const INFO=[
+    {t:'① RL → 蒸馏',
+     desc:'先在 100 步的原模型上做 RL，再蒸馏到 4 步。',
+     bullets:['RL 阶段每步 1536 NFE / 423 s（Tab. 3）','蒸馏阶段把 RL 的收益<b>撤回大半</b>','动态程度 75.78 → <b class="rB">60.85</b>（−14.93）'],
+     vb:'80.54', nfe:'4', note:'论文 Tab. 1 下半部分「DanceGRPO + DMD2」'},
+    {t:'② 蒸馏 → RL',
+     desc:'先蒸馏到 4 步，再在快模型上做 RL——采样便宜了，但训练会崩。',
+     bullets:['采样成本大幅下降（4 步而非 20–40 步）','少步模型参数超敏感，稀疏 RL 梯度直接打散映射','表现为模糊、闪烁，最终<b class="rB">完全崩溃</b>（Fig. 5）'],
+     vb:'崩溃', nfe:'4', note:'论文未报告该配置的 VBench 分数，只给了失败图；此处时长为粗估'},
+    {t:'③ 单阶段（本文）',
+     desc:'蒸馏梯度与对齐梯度在同一次迭代里相加，共享一次少步采样。',
+     bullets:['每步 51 NFE / 15 s，只比纯蒸馏多 5 NFE','λ<sub>DMD</sub> 全程在场，既保少步能力又防跑偏','动态程度 <b class="rK">80.19</b>，VBench <b class="rK">84.40</b>'],
+     vb:'84.40', nfe:'4', note:'论文 Tab. 1 下半部分「DM-Align (Group)」'}
+  ];
+  function totals(){
+    const rl=+RLS.value, dm=+DMS.value;
+    return [ rl*423+dm*11, dm*11+rl*(423/6), dm*15 ];
+  }
+  function stagesOf(i){
+    const rl=+RLS.value, dm=+DMS.value;
+    if(i===0) return [{n:'DanceGRPO ×'+rl,v:rl*423,c:'B'},{n:'DMD2 ×'+dm,v:dm*11,c:'R'}];
+    if(i===1) return [{n:'DMD2 ×'+dm,v:dm*11,c:'R'},{n:'RL(4步) ×'+rl+' · 粗估',v:rl*(423/6),c:'B'}];
+    return [{n:'DM-Align ×'+dm,v:dm*15,c:'K'}];
+  }
+  function render(){
+    $('#pipeRLV').textContent=RLS.value; $('#pipeDMV').textContent=DMS.value;
+    svg.innerHTML='';
+    const T=totals(), MX=Math.max.apply(null,T)*1.02;
+    const XL=132, XR=636;
+    el('text',{x:20,y:22,class:'f-ink3 mono xs',text:'训练时间线 · 长度 ∝ 秒（32×H100）'},svg);
+    [0,1,2].forEach(i=>{
+      const y=54+i*80;
+      const on=(i===sel);
+      el('rect',{x:12,y:y-24,width:640,height:66,rx:10,class:on?'f-surf3':'f-surf',opacity:on?1:.5},svg);
+      el('text',{x:22,y:y-6,class:(on?'f-ink':'f-ink3')+' sml',text:INFO[i].t,'font-weight':on?600:400},svg);
+      let acc=0;
+      stagesOf(i).forEach(s=>{
+        const w=Math.max(2,(s.v/MX)*(XR-XL));
+        const r=el('rect',{x:XL+acc,y:y-2,width:w,height:26,rx:4,class:'f-'+s.c,opacity:on?.95:.42},svg);
+        r.addEventListener('mousemove',e=>{ const b=(tip.offsetParent||svg).getBoundingClientRect();
+          tip.innerHTML='<b>'+s.n+'</b><br>'+(s.v/3600).toFixed(2)+' 小时（'+Math.round(s.v)+' s）';
+          tip.style.left=(e.clientX-b.left+14)+'px'; tip.style.top=(e.clientY-b.top-10)+'px'; tip.style.opacity=1; });
+        r.addEventListener('mouseleave',()=>tip.style.opacity=0);
+        if(w>92) el('text',{x:XL+acc+7,y:y+15,class:'xs',style:'fill:#fff; pointer-events:none',text:s.n},svg);
+        acc+=w+2;
+      });
+      el('text',{x:XL+acc+8,y:y+15,class:(on?'f-ink':'f-ink3')+' mono xs',text:(T[i]/3600).toFixed(1)+' h'},svg);
+      el('text',{x:22,y:y+16,class:'f-ink3 xs',text:'推理 '+INFO[i].nfe+' NFE'},svg);
+      el('text',{x:22,y:y+30,class:(i===2?'f-Ki':'f-Bi')+' xs',text:'VBench '+INFO[i].vb},svg);
+    });
+    el('text',{x:20,y:292,class:'f-ink3 xs',text:'红=RL 阶段　蓝=蒸馏阶段　青=联合单阶段；② 的 RL 时长按「采样步数 24→4」粗估为 1/6，论文未给'},svg);
+    const I=INFO[sel];
+    pane.innerHTML='<h5>'+I.t+'</h5><p style="margin:0 0 10px">'+I.desc+'</p><ul>'+I.bullets.map(b=>'<li>'+b+'</li>').join('')+
+      '</ul><div class="row"><span class="k">出处</span>'+I.note+'</div>';
+    $('#pipeTot').innerHTML=(T[sel]/3600).toFixed(1)+'<small>h</small>';
+    $('#pipeRel').innerHTML=(T[sel]/T[2]).toFixed(1)+'<small>×</small>';
+    $('#pipeRel').className='v '+(sel===2?'ok':'bad');
+    $('#pipeVb').textContent=I.vb; $('#pipeVb').className='v '+(sel===2?'ok':(sel===1?'bad':''));
+    $('#pipeNfe').textContent=I.nfe;
+  }
+  segment('#pipeSeg',b=>{ sel=+b.getAttribute('data-p'); render(); });
+  [RLS,DMS].forEach(s=>s.addEventListener('input',render));
+  render();
+})();
+
+/* ======================================================================
+   Fig. 3 — 1-D score probe (DMD)
+   ====================================================================== */
+(function(){
+  const svg=$('#d3SVG'); if(!svg) return;
+  const A=-2.7,B=2.7,NG=421;
+  const XS=[]; for(let i=0;i<NG;i++) XS.push(A+(B-A)*i/(NG-1));
+  const RM=[{w:.5,m:-1.00,s:.30},{w:.5,m:0.95,s:.34}];
+  const npdf=(x,m,s)=>Math.exp(-(x-m)*(x-m)/(2*s*s))/(s*Math.sqrt(2*Math.PI));
+  function realD(x,sig){ let p=0; for(const c of RM){ const s=Math.sqrt(c.s*c.s+sig*sig); p+=c.w*npdf(x,c.m,s);} return p; }
+  function realS(x,sig){ let p=0,g=0; for(const c of RM){ const s2=c.s*c.s+sig*sig, s=Math.sqrt(s2);
+      const v=c.w*npdf(x,c.m,s); p+=v; g+=v*(-(x-c.m)/s2);} return p<1e-14?0:g/p; }
+  function fakeD(x,mu,sg,sig){ return npdf(x,mu,Math.sqrt(sg*sg+sig*sig)); }
+  function fakeS(x,mu,sg,sig){ const s2=sg*sg+sig*sig; return -(x-mu)/s2; }
+
+  function render(){
+    const sig=+$('#d3T').value/100, mu=+$('#d3Mu').value/10, sg=+$('#d3S').value/100;
+    $('#d3TV').textContent='σ='+sig.toFixed(2); $('#d3MuV').textContent=(mu<0?'−':'')+Math.abs(mu).toFixed(1);
+    $('#d3SV').textContent=sg.toFixed(2);
+    const showS=$('#d3Show').checked, showN=$('#d3Noisy').checked;
+    svg.innerHTML='';
+    const X0=52,X1=676, PT=26,PB=180, QT=216,QB=352;
+    const xm=x=>X0+(x-A)/(B-A)*(X1-X0);
+    // frames
+    el('rect',{x:X0,y:PT,width:X1-X0,height:PB-PT,rx:8,class:'f-surf2 s-rule1','stroke-width':1},svg);
+    el('rect',{x:X0,y:QT,width:X1-X0,height:QB-QT,rx:8,class:'f-surf2 s-rule1','stroke-width':1},svg);
+    el('text',{x:X0,y:PT-8,class:'f-ink3 mono xs',text:'密度 p(x)'},svg);
+    el('text',{x:X1,y:QT-8,class:'f-ink3 mono xs','text-anchor':'end',text:'分数 ∇ₓ log pₜ(x) · 纵轴为压缩刻度'},svg);
+    // density curves
+    let mxd=0; XS.forEach(x=>{ mxd=Math.max(mxd, realD(x,0), fakeD(x,mu,sg,0)); });
+    const yd=v=>PB-6-(v/mxd)*(PB-PT-16);
+    const path=(fn,cls,dash,w)=>{ const d=XS.map((x,i)=>(i?'L':'M')+xm(x).toFixed(1)+' '+fn(x).toFixed(1)).join(' ');
+      el('path',{d:d,class:'nofill '+cls,'stroke-width':w||2,'stroke-dasharray':dash||'none'},svg); };
+    path(x=>yd(realD(x,0)),'s-R','none',2.2);
+    path(x=>yd(fakeD(x,mu,sg,0)),'s-F','none',2.2);
+    if(showN){ path(x=>yd(realD(x,sig)),'s-R','5 4',1.4); path(x=>yd(fakeD(x,mu,sg,sig)),'s-F','5 4',1.4); }
+    el('text',{x:X1-8,y:PT+16,class:'f-Ri xs','text-anchor':'end',text:'p_real（教师，双峰）'},svg);
+    el('text',{x:X1-8,y:PT+30,class:'f-Fi xs','text-anchor':'end',text:'p_fake（生成器）'},svg);
+    if(showN) el('text',{x:X1-8,y:PT+44,class:'f-ink3 xs','text-anchor':'end',text:'虚线 = 加噪 σ 之后'},svg);
+    // score curves
+    const y0=(QT+QB)/2;
+    el('line',{x1:X0,y1:y0,x2:X1,y2:y0,class:'s-rule1','stroke-width':1,'stroke-dasharray':'3 3'},svg);
+    const SCL=(QB-QT)/2-10, CAP=40, LN=Math.log1p(CAP/2);
+    const ys=v=>y0-(Math.sign(v)*Math.log1p(Math.abs(clamp(v,-CAP,CAP))/2)/LN)*SCL;
+    if(showS){ path(x=>ys(realS(x,sig)),'s-R','none',2); path(x=>ys(fakeS(x,mu,sg,sig)),'s-F','none',2); }
+    // probe: a typical generated sample, not the exact mean (where s_fake is identically 0)
+    const xp=clamp(mu+0.8*sg,A+0.05,B-0.05);
+    const sr=realS(xp,sig), sf=fakeS(xp,mu,sg,sig), g=sr-sf;
+    el('line',{x1:xm(xp),y1:PT+4,x2:xm(xp),y2:QB-4,class:'s-G','stroke-width':1.6,'stroke-dasharray':'4 3'},svg);
+    el('circle',{cx:xm(xp),cy:ys(sr),r:5,class:'f-R'},svg);
+    el('circle',{cx:xm(xp),cy:ys(sf),r:5,class:'f-F'},svg);
+    const yA=ys(sf), yB=ys(sr);
+    el('path',{d:'M'+(xm(xp)+16)+' '+yA+' L'+(xm(xp)+16)+' '+yB,class:'nofill s-K','stroke-width':2.4,'marker-end':'url(#ar-k)'},svg);
+    el('text',{x:xm(xp)+24,y:(yA+yB)/2+4,class:'f-Ki xs',text:'DMD 位移 = s_real − s_fake'},svg);
+    el('text',{x:clamp(xm(xp),150,X1-40),y:QB+18,class:'f-Gi xs','text-anchor':'middle',text:'探针：一个典型生成样本 (μ + 0.8σ)'},svg);
+    // axis
+    for(let g2=-2;g2<=2;g2++) el('text',{x:xm(g2),y:PB+16,class:'f-ink3 xs','text-anchor':'middle',text:String(g2)},svg);
+    // overlap
+    let ov=0, dx=(B-A)/(NG-1);
+    XS.forEach(x=>{ ov+=Math.min(realD(x,sig),fakeD(x,mu,sg,sig))*dx; });
+    $('#d3SR').textContent=fmt(sr,2); $('#d3SF').textContent=fmt(sf,2);
+    $('#d3G').textContent=fmt(g,2);
+    $('#d3Ov').textContent=fmt(ov,2);
+    $('#d3Ov').className='v '+(ov<.12?'bad':(ov>.35?'ok':''));
+  }
+  ['#d3T','#d3Mu','#d3S','#d3Show','#d3Noisy'].forEach(s=>$(s).addEventListener('input',render));
+  themeListeners.push(render); render();
+})();
+
+/* ======================================================================
+   Fig. 4 — Eq.(5) truth vs Eq.(6) two readings   (real 1-D numerics)
+   ====================================================================== */
+(function(){
+  const svg=$('#d4SVG'); if(!svg) return;
+  const A=-3.0,B=3.0,NG=601, DX=(B-A)/(NG-1);
+  const XS=new Float64Array(NG); for(let i=0;i<NG;i++) XS[i]=A+DX*i;
+  const npdf=(x,m,s)=>Math.exp(-(x-m)*(x-m)/(2*s*s))/(s*Math.sqrt(2*Math.PI));
+  const PREF=new Float64Array(NG), REW=new Float64Array(NG), PSTAR=new Float64Array(NG);
+  for(let i=0;i<NG;i++){
+    const x=XS[i];
+    PREF[i]=0.5*npdf(x,-1.0,0.30)+0.5*npdf(x,0.95,0.34);
+    REW[i]=2.2*Math.exp(-(x-1.45)*(x-1.45)/(2*0.55*0.55));
+  }
+  function buildStar(beta){ let Z=0;
+    for(let i=0;i<NG;i++){ PSTAR[i]=PREF[i]*Math.exp(REW[i]/beta); Z+=PSTAR[i]*DX; }
+    for(let i=0;i<NG;i++) PSTAR[i]/=Z; }
+  function kernel(sig){
+    const R=Math.min(300,Math.ceil(4*sig/DX)); const k=new Float64Array(2*R+1); let s=0;
+    for(let j=-R;j<=R;j++){ const v=Math.exp(-(j*DX)*(j*DX)/(2*sig*sig)); k[j+R]=v; s+=v; }
+    for(let j=0;j<k.length;j++) k[j]/=s; return {k,R};
+  }
+  function conv(arr,K){
+    const out=new Float64Array(NG), k=K.k, R=K.R;
+    for(let i=0;i<NG;i++){ let s=0;
+      for(let j=-R;j<=R;j++){ const q=Math.min(NG-1,Math.max(0,i+j)); s+=arr[q]*k[j+R]; }
+      out[i]=s; }
+    return out;
+  }
+  function scoreOf(d){
+    const s=new Float64Array(NG);
+    for(let i=0;i<NG;i++){ const a=Math.max(d[Math.max(0,i-1)],1e-300), b=Math.max(d[Math.min(NG-1,i+1)],1e-300);
+      s[i]=(Math.log(b)-Math.log(a))/(2*DX); }
+    return s;
+  }
+  const at=(arr,x)=>{ const u=clamp((x-A)/DX,0,NG-1.001); const i=Math.floor(u), f=u-i; return arr[i]*(1-f)+arr[i+1]*f; };
+
+  function render(){
+    const sig=+$('#d4S').value/100, xg=+$('#d4G').value/10, xp=+$('#d4P').value/10, w=+$('#d4W').value/100;
+    const beta=+$('#d4Beta').value/100; $('#d4BetaV').textContent=beta.toFixed(2); buildStar(beta);
+    $('#d4SV').textContent=sig.toFixed(2);
+    $('#d4GV').textContent=(xg<0?'−':'')+Math.abs(xg).toFixed(2);
+    $('#d4PV').textContent=(xp<0?'−':'')+Math.abs(xp).toFixed(2);
+    $('#d4WV').textContent=w.toFixed(2);
+    const showStar=$('#d4Star').checked;
+
+    const PTH=new Float64Array(NG), Q=new Float64Array(NG);
+    for(let i=0;i<NG;i++){
+      PTH[i]=npdf(XS[i],xg,0.22);
+      Q[i]=w*PTH[i]+(1-w)*npdf(XS[i],0,1.30);
+    }
+    const K=kernel(sig);
+    const PT_t=conv(PTH,K), Q_t=conv(Q,K), PS_t=conv(PSTAR,K);
+    const sQ=scoreOf(Q_t), sTh=scoreOf(PT_t), sSt=scoreOf(PS_t);
+    const MU=new Float64Array(NG); for(let i=0;i<NG;i++) MU[i]=XS[i]+sig*sig*sQ[i];   // Tweedie, alpha=1
+    // expectations over the injected noise = convolve the field, evaluate at the clean point
+    const EsQ=conv(sQ,K), EMU=conv(MU,K), EsSt=conv(sSt,K), EsTh=conv(sTh,K);
+    const truth = at(EsSt,xg) - at(EsTh,xg);
+    const readScore = at(EsQ,xp) - at(EsQ,xg);
+    const readX0   = at(EMU,xp) - at(EMU,xg);
+    const want = Math.sign(xp-xg);
+    const scaleS = Math.abs(xp-xg)/(sig*sig)+1e-9, scaleX=Math.abs(xp-xg)+1e-9;
+    function verdict(v,scale){
+      if(Math.abs(v) < 0.02*scale) return ['≈ 0','?'];
+      return [ (Math.sign(v)===want)?'指向 x⁺ ✓':'反方向 ✗', (Math.sign(v)===want)?'ok':'bad' ];
+    }
+    const v1=verdict(readScore,scaleS), v2=verdict(readX0,scaleX);
+    const nTruth=truth/((xp-xg)/(sig*sig)), nScore=readScore/((xp-xg)/(sig*sig)), nX0=readX0/(xp-xg);
+    $('#d4A').textContent=fmt(truth,2);
+    $('#d4A').className='v '+(nTruth>0.02?'ok':(nTruth<-0.02?'bad':''));
+    $('#d4B').textContent=fmt(readScore,2); $('#d4B').className='v '+(v1[1]==='ok'?'ok':(v1[1]==='bad'?'bad':''));
+    $('#d4C').textContent=fmt(readX0,3);    $('#d4C').className='v '+(v2[1]==='ok'?'ok':(v2[1]==='bad'?'bad':''));
+    $('#d4V1').textContent=v1[0]; $('#d4V1').className='v '+(v1[1]==='ok'?'ok':(v1[1]==='bad'?'bad':''));
+    $('#d4V2').textContent=v2[0]; $('#d4V2').className='v '+(v2[1]==='ok'?'ok':(v2[1]==='bad'?'bad':''));
+
+    // ---------- draw ----------
+    svg.innerHTML='';
+    const X0=54,X1=676;
+    const xm=x=>X0+(x-A)/(B-A)*(X1-X0);
+    function panel(t,b,label){
+      el('rect',{x:X0,y:t,width:X1-X0,height:b-t,rx:8,class:'f-surf2 s-rule1','stroke-width':1},svg);
+      el('text',{x:X0,y:t-7,class:'f-ink3 mono xs',text:label},svg);
+    }
+    function curve(arr,t,b,cls,dash,wid,lo,hi){
+      const d=[]; for(let i=0;i<NG;i+=2){ const v=clamp((arr[i]-lo)/(hi-lo),0,1);
+        d.push((i?'L':'M')+xm(XS[i]).toFixed(1)+' '+(b-4-v*(b-t-8)).toFixed(1)); }
+      el('path',{d:d.join(' '),class:'nofill '+cls,'stroke-width':wid||2,'stroke-dasharray':dash||'none'},svg);
+    }
+    const probes=(t,b,arr,lo,hi)=>{
+      [[xg,'G'],[xp,'P']].forEach(([x,c])=>{
+        const v=clamp((at(arr,x)-lo)/(hi-lo),0,1), y=b-4-v*(b-t-8);
+        el('line',{x1:xm(x),y1:t,x2:xm(x),y2:b,class:'s-'+c,'stroke-width':1.3,'stroke-dasharray':'4 3'},svg);
+        el('circle',{cx:xm(x),cy:y,r:5,class:'f-'+c},svg);
+      });
+    };
+    // panel 1 : densities
+    panel(24,146,'密度：p_ref（蓝）· p*（紫，按式 4 算）· p_θ（绿）· 奖励 r（浅紫填充）');
+    let mx1=0; for(let i=0;i<NG;i++) mx1=Math.max(mx1,PREF[i],PSTAR[i],PTH[i]);
+    { const d=['M'+xm(A)+' 142'];
+      for(let i=0;i<NG;i+=3) d.push('L'+xm(XS[i]).toFixed(1)+' '+(142-REW[i]/2.6*110).toFixed(1));
+      d.push('L'+xm(B)+' 142 Z');
+      el('path',{d:d.join(' '),class:'fs-P',opacity:.6},svg); }
+    curve(PREF,24,146,'s-R','none',2,0,mx1);
+    if(showStar) curve(PSTAR,24,146,'s-P','5 4',1.8,0,mx1);
+    curve(PTH,24,146,'s-G','none',2,0,mx1);
+    probes(24,146,PTH,0,mx1);
+    el('text',{x:xm(xg),y:40,class:'f-Gi xs','text-anchor':'middle',text:'x_gen'},svg);
+    el('text',{x:xm(xp),y:40,class:'f-Pi xs','text-anchor':'middle',text:'x⁺'},svg);
+    // panel 2 : s_q
+    panel(174,282,'式 (6) 分数读法：同一条 s_fake 曲线，读两个点的差');
+    let lo2=1e9,hi2=-1e9; for(let i=0;i<NG;i++){ lo2=Math.min(lo2,EsQ[i]); hi2=Math.max(hi2,EsQ[i]); }
+    const pad2=(hi2-lo2)*0.12; lo2-=pad2; hi2+=pad2;
+    { const zy=282-4-clamp((0-lo2)/(hi2-lo2),0,1)*(282-174-8);
+      el('line',{x1:X0,y1:zy,x2:X1,y2:zy,class:'s-rule1','stroke-width':1,'stroke-dasharray':'3 3'},svg); }
+    curve(EsQ,174,282,'s-F','none',2.2,lo2,hi2);
+    probes(174,282,EsQ,lo2,hi2);
+    { const ya=282-4-clamp((at(EsQ,xg)-lo2)/(hi2-lo2),0,1)*(282-174-8);
+      const yb=282-4-clamp((at(EsQ,xp)-lo2)/(hi2-lo2),0,1)*(282-174-8);
+      el('path',{d:'M'+(xm(xp)+14)+' '+ya+' L'+(xm(xp)+14)+' '+yb,class:'nofill '+(v1[1]==='ok'?'s-K':'s-B'),'stroke-width':2.4,'marker-end':'url('+(v1[1]==='ok'?'#ar-k':'#ar-b')+')'},svg);
+      el('text',{x:xm(xp)+22,y:(ya+yb)/2+4,class:(v1[1]==='ok'?'f-Ki':'f-Bi')+' xs',text:'差 = '+fmt(readScore,2)+' → '+v1[0]},svg); }
+    // panel 3 : denoised prediction
+    panel(310,398,'式 (6) 去噪读法：同一条 μ_fake 曲线（Tweedie 换算），读两个点的差');
+    let lo3=1e9,hi3=-1e9; for(let i=0;i<NG;i++){ lo3=Math.min(lo3,EMU[i]); hi3=Math.max(hi3,EMU[i]); }
+    const pad3=(hi3-lo3)*0.12; lo3-=pad3; hi3+=pad3;
+    curve(EMU,310,398,'s-K','none',2.2,lo3,hi3);
+    probes(310,398,EMU,lo3,hi3);
+    { const ya=398-4-clamp((at(EMU,xg)-lo3)/(hi3-lo3),0,1)*(398-310-8);
+      const yb=398-4-clamp((at(EMU,xp)-lo3)/(hi3-lo3),0,1)*(398-310-8);
+      el('path',{d:'M'+(xm(xp)+14)+' '+ya+' L'+(xm(xp)+14)+' '+yb,class:'nofill '+(v2[1]==='ok'?'s-K':'s-B'),'stroke-width':2.4,'marker-end':'url('+(v2[1]==='ok'?'#ar-k':'#ar-b')+')'},svg);
+      el('text',{x:xm(xp)+22,y:(ya+yb)/2+4,class:(v2[1]==='ok'?'f-Ki':'f-Bi')+' xs',text:'差 = '+fmt(readX0,3)+' → '+v2[0]},svg); }
+    for(let g=-3;g<=3;g++) el('text',{x:xm(g),y:414,class:'f-ink3 xs','text-anchor':'middle',text:String(g)},svg);
+    // panel 4 : normalised bars — all three divided by their own "ideal displacement" scale
+    const BY=452, BH=12;
+    const items=[['式(5) 真值 ÷ (x⁺−x_gen)/σ²',nTruth],['式(6) 分数读法 ÷ (x⁺−x_gen)/σ²',nScore],['式(6) 去噪读法 ÷ (x⁺−x_gen)',nX0]];
+    let mxb=0; items.forEach(it=>mxb=Math.max(mxb,Math.abs(it[1]))); mxb=mxb*1.2+1e-6;
+    const cx=X0+274, HALF=(X1-cx)-48;
+    el('text',{x:X0,y:BY-16,class:'f-ink3 xs',text:'无量纲化后的「有效系数」：正 = 指向 x⁺，负 = 远离 x⁺，0 = 无信号'},svg);
+    el('line',{x1:cx,y1:BY-11,x2:cx,y2:BY+2*20+11,class:'s-rule','stroke-width':1},svg);
+    items.forEach((it,i)=>{
+      const y=BY+i*20, wpx=(Math.abs(it[1])/mxb)*HALF;
+      el('rect',{x:it[1]>=0?cx:cx-wpx,y:y-BH/2,width:Math.max(1,wpx),height:BH,rx:3,class:it[1]>=0?'f-K':'f-B',opacity:.9},svg);
+      el('text',{x:X0,y:y+4,class:'f-ink2 xs','text-anchor':'start',text:it[0]},svg);
+      el('text',{x:X1,y:y+4,class:'f-ink3 mono xs','text-anchor':'end',text:(it[1]>=0?'+':'')+fmt(it[1],3)},svg);
+    });
+  }
+  ['#d4S','#d4G','#d4P','#d4W','#d4Beta','#d4Star'].forEach(s=>$(s).addEventListener('input',render));
+  themeListeners.push(render); render();
+})();
+
+/* ======================================================================
+   Fig. 5 — DM-Group sandbox
+   ====================================================================== */
+(function(){
+  const svg=$('#gSVG'); if(!svg) return;
+  const pane=$('#gPane'), tip=$('#gTip');
+  const A=-2.5,B=2.5;
+  const rewf=x=>1.9*Math.exp(-(x-1.25)*(x-1.25)/(2*0.75*0.75))+0.9*Math.exp(-(x+0.9)*(x+0.9)/(2*0.55*0.55));
+  let seed=7, advMode='std';
+  function render(){
+    const K=+$('#gK').value; let top=+$('#gTop').value;
+    $('#gKV').textContent=K;
+    $('#gTop').max=Math.max(1,K-1); if(top>K-1){ top=K-1; $('#gTop').value=top; }
+    $('#gTopV').textContent=top;
+    const rng=mulberry32(seed);
+    const X=[]; for(let i=0;i<K;i++) X.push(clamp(-0.15+gauss(rng)*0.95,A+.15,B-.15));
+    const R=X.map(x=>rewf(x)+gauss(rng)*0.05);
+    const mean=R.reduce((a,b)=>a+b,0)/K;
+    const sd=Math.sqrt(R.reduce((a,b)=>a+(b-mean)*(b-mean),0)/K)+1e-6;
+    let Adv;
+    if(advMode==='std') Adv=R.map(r=>(r-mean)/sd);
+    else if(advMode==='cen') Adv=R.map(r=>r-mean);
+    else Adv=R.slice();
+    const ord=X.map((_,i)=>i).sort((a,b)=>R[b]-R[a]);
+    const topIdx=ord.slice(0,top);
+    const xbar=topIdx.reduce((a,i)=>a+X[i],0)/top;
+    const sumA=Adv.reduce((a,b)=>a+b,0);
+    const net=Adv.reduce((a,v,i)=>a+v*(X[i]-xbar),0);
+    const noAnch=Adv.reduce((a,v,i)=>a+v*X[i],0);
+    const anchTerm=-sumA*xbar;
+
+    svg.innerHTML='';
+    const X0=44,X1=624; const xm=x=>X0+(x-A)/(B-A)*(X1-X0);
+    // reward curve
+    el('rect',{x:X0,y:18,width:X1-X0,height:104,rx:8,class:'f-surf2 s-rule1','stroke-width':1},svg);
+    el('text',{x:X0,y:13,class:'f-ink3 mono xs',text:'奖励地形 r(x)'},svg);
+    { const d=[]; for(let i=0;i<=120;i++){ const x=A+(B-A)*i/120; d.push((i?'L':'M')+xm(x).toFixed(1)+' '+(118-rewf(x)/2.1*94).toFixed(1)); }
+      el('path',{d:d.join(' '),class:'nofill s-P','stroke-width':2.2},svg); }
+    // anchor
+    el('line',{x1:xm(xbar),y1:18,x2:xm(xbar),y2:300,class:'s-P','stroke-width':1.8,'stroke-dasharray':'5 4'},svg);
+    el('text',{x:xm(xbar),y:314,class:'f-Pi xs','text-anchor':'middle',text:'锚点 x̄⁺ (top-'+top+')'},svg);
+    // samples + stems
+    X.forEach((x,i)=>{
+      const yr=118-rewf(x)/2.1*94, isTop=topIdx.indexOf(i)>=0;
+      el('line',{x1:xm(x),y1:yr,x2:xm(x),y2:140,class:'s-rule1','stroke-width':1,'stroke-dasharray':'2 3'},svg);
+      const c=el('circle',{cx:xm(x),cy:140,r:isTop?7:5.5,class:isTop?'f-P':'f-G',style:'cursor:pointer'},svg);
+      if(isTop) el('circle',{cx:xm(x),cy:140,r:11,class:'nofill s-P','stroke-width':1.3,opacity:.6},svg);
+      c.addEventListener('mousemove',e=>{ const b=(tip.offsetParent||svg).getBoundingClientRect();
+        tip.innerHTML='<b>样本 '+(i+1)+'</b><br>x = '+fmt(X[i],2)+'　r = '+fmt(R[i],3)+'<br>A = '+fmt(Adv[i],3)+(isTop?'<br>（top-k，参与锚点）':'');
+        tip.style.left=(e.clientX-b.left+14)+'px'; tip.style.top=(e.clientY-b.top-10)+'px'; tip.style.opacity=1; });
+      c.addEventListener('mouseleave',()=>tip.style.opacity=0);
+    });
+    el('text',{x:X0-6,y:144,class:'f-ink3 xs','text-anchor':'end',text:'K 个'},svg);
+    // advantages
+    const AZ=212, AH=52;
+    el('line',{x1:X0,y1:AZ,x2:X1,y2:AZ,class:'s-rule','stroke-width':1},svg);
+    el('text',{x:X0,y:AZ-62,class:'f-ink3 mono xs',text:'优势 A_i（向上为正）'},svg);
+    let mxA=0; Adv.forEach(v=>mxA=Math.max(mxA,Math.abs(v))); mxA=mxA||1;
+    X.forEach((x,i)=>{ const h=Adv[i]/mxA*AH;
+      el('rect',{x:xm(x)-5,y:h>=0?AZ-h:AZ,width:10,height:Math.max(1.5,Math.abs(h)),rx:2,class:Adv[i]>=0?'f-K':'f-B',opacity:.9},svg); });
+    // gradient arrows
+    const GY=272;
+    el('text',{x:X0,y:GY-16,class:'f-ink3 mono xs',text:'每个样本得到的位移 A_i·(x_i − x̄⁺)'},svg);
+    let mxG=0; X.forEach((x,i)=>mxG=Math.max(mxG,Math.abs(Adv[i]*(x-xbar)))); mxG=mxG||1;
+    X.forEach((x,i)=>{ const g=Adv[i]*(x-xbar); const L=g/mxG*60;
+      el('path',{d:'M'+xm(x)+' '+GY+' L'+(xm(x)+L)+' '+GY,class:'nofill '+(g>=0?'s-K':'s-B'),'stroke-width':2.2,'marker-end':'url('+(g>=0?'#ar-k':'#ar-b')+')'},svg);
+      el('circle',{cx:xm(x),cy:GY,r:2.5,class:'f-ink3'},svg); });
+    for(let g=-2;g<=2;g++) el('text',{x:xm(g),y:334,class:'f-ink3 xs','text-anchor':'middle',text:String(g)},svg);
+
+    $('#gSum').textContent=fmt(sumA,3);
+    $('#gSum').className='v '+(Math.abs(sumA)<1e-9?'ok':'');
+    $('#gAnch').textContent=fmt(anchTerm,3);
+    $('#gAnch').className='v '+(Math.abs(anchTerm)<1e-9?'ok':'bad');
+    $('#gNet').textContent=fmt(net,3);
+    $('#gNoAnch').textContent=fmt(noAnch,3);
+    $('#gXbar').textContent=fmt(xbar,2);
+    const same=Math.abs(net-noAnch)<1e-9;
+    pane.innerHTML='<h5>这一组发生了什么</h5>'+
+      '<div class="row"><span class="k">优势定义</span>'+(advMode==='std'?'A = (r − r̄)/s（GRPO 标准，强制 ΣA = 0）':(advMode==='cen'?'A = r − r̄（也强制 ΣA = 0）':'A = r（不中心化，ΣA ≠ 0）'))+'</div>'+
+      '<div class="row"><span class="k">锚点是否影响净梯度</span>'+(same?'<b class="rK">否</b>——ΣA = 0，锚点项精确抵消，它只是一个控制变量（降方差）。':'<b class="rP">是</b>——ΣA ≠ 0，锚点给整组加了一个指向 x̄⁺ 的偏置。')+'</div>'+
+      '<div class="row"><span class="k">逐样本行为</span><ul>'+
+      '<li><b class="rK">A &gt; 0</b>（'+Adv.filter(v=>v>=0).length+' 个）：沿自身方向外推，越过锚点</li>'+
+      '<li><b class="rB">A &lt; 0</b>（'+Adv.filter(v=>v<0).length+' 个）：被拉回锚点</li></ul></div>'+
+      '<div class="row"><span class="k">提示</span>把「优势定义」切到最右一档，看两个净位移读数如何分开。</div>';
+  }
+  $('#gResample').addEventListener('click',()=>{ seed=Math.floor(Math.random()*1e9); render(); });
+  ['#gK','#gTop'].forEach(s=>$(s).addEventListener('input',render));
+  segment('#gAdv',b=>{ advMode=b.getAttribute('data-a'); render(); });
+  themeListeners.push(render); render();
+})();
+
+/* ======================================================================
+   Fig. 6 — Algorithm 1 stepper
+   ====================================================================== */
+(function(){
+  const svg=$('#aSVG'); if(!svg) return;
+  const LINES=[
+    '1:  G_θ ← copyWeights(μ_real);  μ_fake ← copyWeights(μ_real)',
+    '2:  iter ← 1',
+    '3:  while 训练中 do',
+    '4:    采样 z ~ N(0,I)^B,  c ~ D',
+    '5:    采样蒸馏时间步 τ ~ Uniform(T)                       // T = {1000,750,500,250}',
+    '6:    x, x_final ← generateSamples(G_θ, z, c, τ)          // 共享的一次生成',
+    '7:    if iter mod (N+1) ≠ 0 then                          // Phase 1：更新假模型（N 步）',
+    '8:      采样去噪时间步 t ~ U(0,1),  噪声 ε ~ N(0,I)',
+    '9:      x_t ← α_t · stopgrad(x) + σ_t ε',
+    '10:     L_denoise ← denoisingLoss(μ_fake(x_t,t), stopgrad(x))',
+    '11:     μ_fake ← update(μ_fake, ∇L_denoise)',
+    '12:   else                                                // Phase 2：更新生成器（1 步）',
+    '13:     采样去噪时间步 t ~ U(0,1)',
+    '14:     ∇L_DMD ← DMDGradient(μ_real, μ_fake, x, t)        // 式 (2)',
+    '15:     if 使用 DM-PairLoss then',
+    '16:       x⁺ ← sample(D_pref, c)',
+    '17:       ∇L_align ← DM-PairGradient(μ_fake, x_final, x⁺, t)      // 式 (6)',
+    '18:     else if 使用 DM-GroupLoss then',
+    '19:       x_group ← groupSamples(x_final, K)',
+    '20:       ∇L_align ← DM-GroupGradient(μ_fake, x_final, x_group, t) // 式 (7)',
+    '21:     end if',
+    '22:     ∇L_G ← λ_DMD ∇L_DMD + λ_align ∇L_align            // 协同梯度聚合',
+    '23:     G_θ ← update(G_θ, ∇L_G)',
+    '24:   end if',
+    '25:   iter ← iter + 1',
+    '26: end while'
+  ];
+  const alg=$('#aAlg');
+  alg.innerHTML=LINES.map((l,i)=>'<div data-i="'+i+'">'+l.replace(/(\/\/.*)$/,'<span class="c">$1</span>')+'</div>').join('');
+  let it=1, N=4, variant='pair', timer=null, cf=0, cg=0, cs=0;
+  const NODES={
+    real:{x:110,y:52,w:150,h:44,t:'μ_real 教师（冻结）',c:'R'},
+    fake:{x:110,y:132,w:150,h:44,t:'μ_fake 假模型',c:'F'},
+    gen:{x:400,y:92,w:150,h:44,t:'G_θ 生成器',c:'G'}
+  };
+  function render(){
+    const phase=(it%(N+1)!==0)?1:2;
+    const on=[3,4,5].concat(phase===1?[6,7,8,9,10]:[11,12,13].concat(variant==='pair'?[14,15,16]:[17,18,19]).concat([20,21,22]));
+    $$('#aAlg div').forEach(d=>{ const i=+d.getAttribute('data-i');
+      d.className = on.indexOf(i)>=0 ? (phase===1?'onF':(i>=14&&i<=19?'onP':'on')) : ''; });
+    $('#aLab').textContent='iter '+it+' · Phase '+phase+(phase===1?'（假模型）':'（生成器）');
+    $('#aWho').textContent=phase===1?'μ_fake':'G_θ';
+    $('#aWho').style.color=phase===1?'var(--fake-ink)':'var(--gen-ink)';
+    $('#aCf').textContent=cf; $('#aCg').textContent=cg; $('#aCs').textContent=cs;
+    // state diagram
+    svg.innerHTML='';
+    for(const k in NODES){ const n=NODES[k];
+      const upd=(k==='fake'&&phase===1)||(k==='gen'&&phase===2);
+      el('rect',{x:n.x-n.w/2,y:n.y-n.h/2,width:n.w,height:n.h,rx:10,class:'fs-'+n.c+' s-'+n.c,'stroke-width':upd?3.2:1.5,'stroke-dasharray':k==='real'?'5 3':'none'},svg);
+      el('text',{x:n.x,y:n.y+4,class:'f-'+n.c+'i sml','text-anchor':'middle','font-weight':600,text:n.t},svg);
+      if(upd) el('text',{x:n.x,y:n.y+n.h/2+15,class:'f-ink sml','text-anchor':'middle','font-weight':600,text:'← 本轮更新'},svg);
+    }
+    el('path',{d:'M475 92 L560 92 L560 40 L120 40 L120 28',class:'nofill s-G','stroke-width':1.4,'marker-end':'url(#ar-g)'},svg);
+    el('text',{x:340,y:34,class:'f-ink3 xs','text-anchor':'middle',text:'x, x_final（每次迭代都生成一遍）'},svg);
+    el('path',{d:'M186 132 L322 110',class:'nofill s-F','stroke-width':1.6,'marker-end':'url(#ar-f)'},svg);
+    el('path',{d:'M186 56 L322 84',class:'nofill s-R','stroke-width':1.6,'marker-end':'url(#ar-r)'},svg);
+    el('text',{x:255,y:74,class:'f-Ri xs','text-anchor':'middle',text:'s_real'},svg);
+    el('text',{x:262,y:146,class:'f-Fi xs','text-anchor':'middle',text:'s_fake（①②③ 都用它）'},svg);
+    // cycle dots
+    for(let i=1;i<=N+1;i++){
+      const cx=430+(i-1)*22, cur=((it-1)%(N+1))+1===i;
+      el('circle',{cx:cx,cy:160,r:cur?7:5,class:(i===N+1)?'f-G':'f-F',opacity:cur?1:.32},svg);
+    }
+    el('text',{x:430,y:182,class:'f-ink3 xs',text:'一个周期：'+N+' 次假模型 + 1 次生成器'},svg);
+  }
+  function next(){ cs++; if(it%(N+1)!==0) cf++; else cg++; it++; render(); }
+  $('#aNext').addEventListener('click',next);
+  $('#aPrev').addEventListener('click',()=>{ if(it>1){ it--; cs=Math.max(0,cs-1); if(it%(N+1)!==0) cf=Math.max(0,cf-1); else cg=Math.max(0,cg-1);} render(); });
+  $('#aAuto').addEventListener('click',()=>{ if(timer){ clearInterval(timer); timer=null; $('#aAuto').textContent='▶ 自动'; return; }
+    $('#aAuto').textContent='❚❚ 停止'; timer=setInterval(next, reduced?1500:900); });
+  $('#aN').addEventListener('input',e=>{ N=+e.target.value; $('#aNV').textContent=N; it=1; cf=cg=cs=0; render(); });
+  segment('#aVar',b=>{ variant=b.getAttribute('data-v'); render(); });
+  themeListeners.push(render); render();
+})();
+
+/* ======================================================================
+   Fig. 7 — NFE calculator (log axis; model vs measured shown side by side)
+   ====================================================================== */
+(function(){
+  const svg=$('#cSVG'); if(!svg) return; const tip=$('#cTip');
+  function render(){
+    const st=+$('#cSteps').value, K=+$('#cK').value, few=+$('#cFew').value, cfg=+$('#cCfg').value?2:1;
+    $('#cStepsV').textContent=st; $('#cKV').textContent=K; $('#cFewV').textContent=few;
+    $('#cCfgV').textContent=cfg===2?'开':'关';
+    const rl=[ {n:'rollout 采样：K × 步数 × CFG', v:K*st*cfg, c:'B'},
+               {n:'重算策略 logprob：K × 步数', v:K*st, c:'B'},
+               {n:'参考/旧策略 logprob：K × 步数', v:K*st, c:'F'},
+               {n:'奖励模型：K', v:K, c:'P'} ];
+    const dm=[ {n:'少步生成：'+few+' 步', v:few, c:'G'},
+               {n:'教师 μ_real（CFG）', v:cfg, c:'R'},
+               {n:'假模型 ×2（求梯度 + 自身训练）', v:2, c:'F'} ];
+    const da=dm.concat([{n:'对 x⁺ / 锚点多一次 μ_fake', v:1, c:'P'}]);
+    const sum=a=>a.reduce((s,x)=>s+x.v,0);
+    const TOT=[sum(rl),sum(dm),sum(da)];
+    const showP=$('#cPaper').checked;
+    svg.innerHTML='';
+    const X0=150,X1=666, LO=Math.log10(1), HI=Math.log10(2400);
+    const lx=v=>X0+(Math.log10(Math.max(1,v))-LO)/(HI-LO)*(X1-X0);
+    el('text',{x:14,y:20,class:'f-ink3 mono xs',text:'与采样直接相关的前向次数（本页重建）· 横轴为对数刻度'},svg);
+    [1,3,10,30,100,300,1000].forEach(t=>{
+      el('line',{x1:lx(t),y1:32,x2:lx(t),y2:238,class:'s-rule1','stroke-width':1,'stroke-dasharray':'2 4'},svg);
+      el('text',{x:lx(t),y:254,class:'f-ink3 mono xs','text-anchor':'middle',text:String(t)},svg); });
+    el('text',{x:(X0+X1)/2,y:272,class:'f-ink3 xs','text-anchor':'middle',text:'每个优化步的前向次数（对数）'},svg);
+    const rows=[{l:'DanceGRPO',p:1536,ps:423,parts:rl},{l:'DMD2',p:46,ps:11,parts:dm},{l:'DM-Align',p:51,ps:15,parts:da}];
+    rows.forEach((r,i)=>{
+      const y=58+i*62;
+      el('text',{x:142,y:y+4,class:'f-ink sml','text-anchor':'end','font-weight':600,text:r.l},svg);
+      let acc=0;
+      r.parts.forEach(p=>{
+        const a=lx(Math.max(1,acc)), b=lx(acc+p.v);
+        acc+=p.v;
+        if(b-a<0.6) return;
+        const rc=el('rect',{x:a,y:y-9,width:Math.max(1,b-a),height:18,rx:2,class:'f-'+p.c,opacity:.92},svg);
+        rc.addEventListener('mousemove',e=>{ const b2=(tip.offsetParent||svg).getBoundingClientRect();
+          tip.innerHTML='<b>'+p.n+'</b><br>'+p.v+' NFE（累计 '+acc+'）';
+          tip.style.left=(e.clientX-b2.left+14)+'px'; tip.style.top=(e.clientY-b2.top-10)+'px'; tip.style.opacity=1; });
+        rc.addEventListener('mouseleave',()=>tip.style.opacity=0);
+      });
+      el('text',{x:lx(TOT[i])+8,y:y+4,class:'f-ink mono xs',text:TOT[i]+' NFE'},svg);
+      if(showP){
+        el('path',{d:'M'+lx(r.p)+' '+(y+16)+' l6 8 l-6 8 l-6 -8 Z',class:'f-ink3',opacity:.75},svg);
+        const far=lx(r.p)>X1-150;
+        el('text',{x:lx(r.p)+(far?-12:12),y:y+29,class:'f-ink3 mono xs','text-anchor':far?'end':'start',text:'论文实测 '+r.p+' NFE · '+r.ps+' s'},svg);
+      }
+    });
+    el('text',{x:14,y:290,class:'f-ink3 xs',text:'菱形 = 论文 Tab. 3 实测值（口径含反传等，未披露细节，故与重建值不重合）；彩色条为本页模型的分项，悬停可看。'},svg);
+    $('#cA').textContent=TOT[0]; $('#cB').textContent=TOT[1]; $('#cC').textContent=TOT[2];
+    $('#cD').innerHTML='+'+(TOT[2]-TOT[1])+'<small>NFE</small>';
+    $('#cE').innerHTML='30<small>× (实测)</small>';
+  }
+  ['#cSteps','#cK','#cFew','#cCfg','#cPaper'].forEach(s=>$(s).addEventListener('input',render));
+  themeListeners.push(render); render();
+})();
+
+/* ======================================================================
+   Fig. 8 — VBench explorer
+   ====================================================================== */
+(function(){
+  const svg=$('#vbSVG'); if(!svg) return; const tip=$('#vbTip');
+  const M=['平均分','主体一致性','背景一致性','运动平滑度','动态程度','美学质量','成像质量'];
+  const DATA=[
+    {names:['原模型 100NFE','DMD2 4NFE','Flow-DPO 100NFE','Flow-DPO+DMD2 4NFE','DM-Align(Pair) 4NFE'],
+     v:[[78.20,79.68,81.54,79.89,82.78],[96.57,98.03,98.10,98.14,98.80],[94.46,95.78,95.56,96.01,95.76],
+        [99.01,99.10,99.25,99.18,99.35],[50.78,52.81,67.13,53.43,66.25],[56.09,57.64,56.32,58.26,60.89],
+        [72.29,74.73,72.91,74.35,75.61]]},
+    {names:['原模型 100NFE','DMD2 4NFE','DanceGRPO 100NFE','DanceGRPO+DMD2 4NFE','DM-Align(Group) 4NFE'],
+     v:[[77.85,78.88,82.76,80.54,84.40],[93.93,95.53,96.04,96.60,97.13],[94.63,95.22,95.86,95.89,96.49],
+        [98.63,98.60,98.33,98.43,98.99],[56.40,51.64,75.78,60.85,80.19],[57.33,63.02,60.44,60.71,62.17],
+        [66.20,69.30,70.15,70.81,71.45]]}
+  ];
+  const CL=['ink3','R','P','B','K'];
+  let ds=0, mode='abs';
+  function render(){
+    svg.innerHTML='';
+    const D=DATA[ds], arrow=$('#vbArrow').checked;
+    const COLS=2, CW=330, CH=100;
+    M.forEach((m,mi)=>{
+      const cx=14+(mi%COLS)*(CW+12), cy=22+Math.floor(mi/COLS)*CH;
+      const raw=D.v[mi][0];
+      const vals=D.v[mi].map(v=>mode==='abs'?v:(v-raw));
+      let lo,hi;
+      if(mode==='abs'){ lo=Math.min.apply(null,vals); hi=Math.max.apply(null,vals); const pad=(hi-lo)*0.35+0.2; lo-=pad; hi+=pad*0.25; }
+      else { const a=Math.max.apply(null,vals.map(Math.abs))*1.2+0.5; lo=-a; hi=a; }
+      el('text',{x:cx,y:cy+2,class:'f-ink sml','font-weight':600,text:m},svg);
+      const BX=cx+126, BW=CW-166;
+      const xv=v=>BX+(v-lo)/(hi-lo)*BW;
+      if(mode!=='abs'){ el('line',{x1:xv(0),y1:cy+8,x2:xv(0),y2:cy+80,class:'s-rule','stroke-width':1},svg); }
+      vals.forEach((v,i)=>{
+        const y=cy+16+i*13;
+        const x0=mode==='abs'?BX:xv(0), x1=xv(v);
+        el('text',{x:cx+84,y:y+4,class:'f-ink3 xs','text-anchor':'end',text:D.names[i].split(' ')[0]},svg);
+        const r=el('rect',{x:Math.min(x0,x1),y:y-4,width:Math.max(1.5,Math.abs(x1-x0)),height:9,rx:2,class:'f-'+CL[i],opacity:i===4?1:.62},svg);
+        r.addEventListener('mousemove',e=>{ const b=(tip.offsetParent||svg).getBoundingClientRect();
+          tip.innerHTML='<b>'+D.names[i]+'</b><br>'+m+' = '+D.v[mi][i].toFixed(2)+(mode==='abs'?'':'<br>相对原模型 '+(v>=0?'+':'')+v.toFixed(2));
+          tip.style.left=(e.clientX-b.left+14)+'px'; tip.style.top=(e.clientY-b.top-10)+'px'; tip.style.opacity=1; });
+        r.addEventListener('mouseleave',()=>tip.style.opacity=0);
+        el('text',{x:xv(v)+(x1>=x0?5:-5),y:y+4,class:'f-ink3 mono xs','text-anchor':x1>=x0?'start':'end',text:(mode==='abs'?D.v[mi][i].toFixed(2):(v>=0?'+':'')+v.toFixed(2))},svg);
+      });
+      if(arrow){
+        const d=D.v[mi][3]-D.v[mi][2];
+        if(Math.abs(d)>1.5){
+          const y2=cy+16+2*13, y3=cy+16+3*13;
+          el('path',{d:'M'+(BX-8)+' '+y2+' L'+(BX-8)+' '+y3,class:'nofill s-B','stroke-width':2,'marker-end':'url(#ar-b)'},svg);
+          el('text',{x:BX-13,y:(y2+y3)/2+4,class:'f-Bi xs','text-anchor':'end',text:(d>0?'+':'')+d.toFixed(1)},svg);
+        }
+      }
+    });
+    const nx=14+(CW+12), ny=22+3*100;
+    ['红色小箭头 = RL 之后再蒸馏，','该维度的净变化（Tab. 1 中','「RL」行 → 「RL + DMD2」行）。','','灰 = 原模型　蓝 = DMD2','紫 = RL　红 = 两阶段　青 = 本文','','注意：动态程度与运动平滑度','存在天然张力，要一起看。'].forEach((t,i)=>
+      el('text',{x:nx+8,y:ny+18+i*15,class:'f-ink3 xs',text:t},svg));
+  }
+  const tl=$('#vbT0').parentNode; tl.__onpick=function(i){ ds=i; render(); };
+  segment('#vbMode',b=>{ mode=b.getAttribute('data-m'); render(); });
+  $('#vbArrow').addEventListener('input',render);
+  themeListeners.push(render); render();
+})();
+
+/* ======================================================================
+   Fig. 9 — human eval, MoE, sensitivity
+   ====================================================================== */
+(function(){
+  function hbars(host,rows,unit,max){
+    const mx=max||Math.max.apply(null,rows.map(r=>Math.abs(r.v)))*1.15;
+    host.innerHTML=rows.map(r=>'<div class="brow'+(r.hl?' hl':(r.dim?' dim':''))+'" style="--labw:150px">'+
+      '<div class="bl">'+r.l+'</div><div class="bt"><i style="width:'+(Math.abs(r.v)/mx*100).toFixed(1)+'%"></i></div>'+
+      '<div class="bv">'+(r.v>0&&unit==='%'?'+':'')+r.v.toFixed(unit==='%'?0:2)+unit+'</div></div>').join('');
+  }
+  const g=$('#hbGSB'); if(g) hbars(g,[
+    {l:'DM-Align (Pair) vs 原模型',v:48,hl:true},
+    {l:'DM-Align (Pair) vs DMD2',v:32,hl:true},
+    {l:'DM-Align (Group) vs 原模型',v:30},
+    {l:'DM-Align (Group) vs DMD2',v:12}
+  ],'%');
+  const m=$('#hbMoE'); if(m) hbars(m,[
+    {l:'原模型 100 NFE',v:80.00},
+    {l:'DMD 4 NFE',v:78.35,dim:true},
+    {l:'DM-Align 4 NFE',v:83.45,hl:true}
+  ],'',88);
+
+  const svg=$('#senSVG'); if(!svg) return; const tip=$('#senTip');
+  const XL=['1:0','3:1','1:1','1:3','Varying'];
+  const S=[
+    {n:'Wan-1.3B · TA',    v:[0.75,1.34,1.65,1.56,1.45], c:'R'},
+    {n:'Wan-1.3B · HPSv2', v:[20.50,24.01,28.89,12.37,27.56], c:'F'},
+    {n:'CogVideoX · TA',   v:[0.22,0.58,0.55,0.08,0.49], c:'G'},
+    {n:'CogVideoX · HPSv2',v:[18.71,20.92,25.01,13.78,22.11], c:'P'}
+  ];
+  function render(){
+    svg.innerHTML='';
+    const X0=54,X1=560,Y0=24,Y1=196;
+    const xs=i=>X0+i/(XL.length-1)*(X1-X0);
+    const norm=s=>s.v.map(v=>v/s.v[0]);
+    let hi=0; S.forEach(s=>norm(s).forEach(v=>hi=Math.max(hi,v)));
+    hi=Math.ceil(hi*10)/10;
+    const ys=v=>Y1-(v/hi)*(Y1-Y0);
+    el('line',{x1:X0,y1:ys(1),x2:X1,y2:ys(1),class:'s-rule','stroke-width':1.4,'stroke-dasharray':'5 4'},svg);
+    el('text',{x:X1+6,y:ys(1)+4,class:'f-ink3 xs',text:'纯蒸馏基线 = 1.0'},svg);
+    [0.5,1,1.5,2,2.5].forEach(v=>{ if(v>hi) return;
+      el('text',{x:X0-8,y:ys(v)+4,class:'f-ink3 mono xs','text-anchor':'end',text:v.toFixed(1)+'×'},svg); });
+    XL.forEach((l,i)=>{ el('line',{x1:xs(i),y1:Y0,x2:xs(i),y2:Y1,class:'s-rule1','stroke-width':1,'stroke-dasharray':'2 4'},svg);
+      el('text',{x:xs(i),y:Y1+18,class:'f-ink2 xs','text-anchor':'middle',text:l},svg); });
+    el('text',{x:(X0+X1)/2,y:Y1+36,class:'f-ink3 xs','text-anchor':'middle',text:'λ_DMD : λ_align'},svg);
+    S.forEach((s,si)=>{
+      const nv=norm(s);
+      el('path',{d:nv.map((v,i)=>(i?'L':'M')+xs(i)+' '+ys(v)).join(' '),class:'nofill s-'+s.c,'stroke-width':2.2},svg);
+      nv.forEach((v,i)=>{
+        const c=el('circle',{cx:xs(i),cy:ys(v),r:i===3?6:4.5,class:'f-'+s.c,style:'cursor:pointer'},svg);
+        c.addEventListener('mousemove',e=>{ const b=(tip.offsetParent||svg).getBoundingClientRect();
+          tip.innerHTML='<b>'+s.n+'</b><br>'+XL[i]+' → '+s.v[i].toFixed(2)+'<br>相对纯蒸馏 '+v.toFixed(2)+'×';
+          tip.style.left=(e.clientX-b.left+14)+'px'; tip.style.top=(e.clientY-b.top-10)+'px'; tip.style.opacity=1; });
+        c.addEventListener('mouseleave',()=>tip.style.opacity=0);
+      });
+      el('text',{x:X1+6,y:ys(nv[4])+4+si*0,class:'f-'+s.c+'i xs',text:s.n},svg);
+    });
+    el('rect',{x:xs(3)-16,y:Y0,width:32,height:Y1-Y0,rx:5,class:'fs-B',opacity:.5},svg);
+    el('text',{x:xs(3),y:Y0-6,class:'f-Bi xs','text-anchor':'middle',text:'四条全部从峰值回落，其中三条跌破基线'},svg);
+  }
+  themeListeners.push(render); render();
+})();
+
+})();
+</script>
+</body>
+</html>

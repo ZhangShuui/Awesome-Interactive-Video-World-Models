@@ -1,0 +1,1788 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Magpie 实时生成式世界渲染器</title>
+<meta name="description" content="arXiv 2608.27168 · Magpie: Real-Time World Renderer for Interactive Games 方法精读与图解">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   Magpie 精读 — tokens. Dark is the default ground; light is a
+   fully designed second theme (OS setting or toggle).
+   角色色沿用论文自己的图例：
+     usr = 玩家 / User Client / Gameplay Design（玫红）
+     eng = Game Engine / 白盒（琥珀）
+     ren = Render Server / 生成模型（绿）
+     dsp = Display / 视频流（蓝）
+     mem = 历史上下文 / 记忆（紫）
+   白盒棋盘格灰是本页的签名纹理（UE 原型材质）。
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0f1114; --surf:#15181c; --surf2:#1b1f25; --surf3:#242a32;
+  --rule:#282d35; --rule2:#3a424d;
+  --ink:#eef1f4; --ink2:#b0b8c3; --ink3:#7f8894;
+  --usr:#d4607a; --usr-ink:#ea86a0; --usr-soft:rgba(212,96,122,.18);
+  --eng:#c99a1e; --eng-ink:#e6b93f; --eng-soft:rgba(201,154,30,.18);
+  --ren:#35a56c; --ren-ink:#5cc58f; --ren-soft:rgba(53,165,108,.18);
+  --dsp:#3d86d8; --dsp-ink:#6aa8ee; --dsp-soft:rgba(61,134,216,.18);
+  --mem:#8a6fe0; --mem-ink:#ad98f5; --mem-soft:rgba(138,111,224,.20);
+  --bad:#e06a63; --bad-ink:#ef8a83; --bad-soft:rgba(224,106,99,.15);
+  --ok:#3fb27a;  --ok-ink:#5fc994;  --ok-soft:rgba(63,178,122,.15);
+  --wb1:#8d9096; --wb2:#6d7178; --wb-ink:#c8ccd2;
+  --grid:#232830; --axis:#3a424d;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.35);
+  --tint:rgba(255,255,255,.045);
+  --font-display:"Archivo","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f3f5; --surf:#fbfbfc; --surf2:#eceef1; --surf3:#e2e5ea;
+    --rule:#dde0e6; --rule2:#c4cad3;
+    --ink:#13161b; --ink2:#4c535e; --ink3:#747c89;
+    --usr:#c14a66; --usr-ink:#a33552; --usr-soft:rgba(193,74,102,.13);
+    --eng:#a97f0c; --eng-ink:#86650a; --eng-soft:rgba(169,127,12,.14);
+    --ren:#1f8f57; --ren-ink:#14743f; --ren-soft:rgba(31,143,87,.13);
+    --dsp:#2b6fc4; --dsp-ink:#1f57a0; --dsp-soft:rgba(43,111,196,.13);
+    --mem:#6f52d0; --mem-ink:#5a3fb5; --mem-soft:rgba(111,82,208,.13);
+    --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+    --ok:#0f8a52;  --ok-ink:#0b7043;  --ok-soft:rgba(15,138,82,.12);
+    --wb1:#c9ccd2; --wb2:#a9adb5; --wb-ink:#4c535e;
+    --grid:#e3e6eb; --axis:#c4cad3;
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+    --tint:rgba(16,20,28,.035);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f3f5; --surf:#fbfbfc; --surf2:#eceef1; --surf3:#e2e5ea;
+  --rule:#dde0e6; --rule2:#c4cad3;
+  --ink:#13161b; --ink2:#4c535e; --ink3:#747c89;
+  --usr:#c14a66; --usr-ink:#a33552; --usr-soft:rgba(193,74,102,.13);
+  --eng:#a97f0c; --eng-ink:#86650a; --eng-soft:rgba(169,127,12,.14);
+  --ren:#1f8f57; --ren-ink:#14743f; --ren-soft:rgba(31,143,87,.13);
+  --dsp:#2b6fc4; --dsp-ink:#1f57a0; --dsp-soft:rgba(43,111,196,.13);
+  --mem:#6f52d0; --mem-ink:#5a3fb5; --mem-soft:rgba(111,82,208,.13);
+  --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+  --ok:#0f8a52;  --ok-ink:#0b7043;  --ok-soft:rgba(15,138,82,.12);
+  --wb1:#c9ccd2; --wb2:#a9adb5; --wb-ink:#4c535e;
+  --grid:#e3e6eb; --axis:#c4cad3;
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  --tint:rgba(16,20,28,.035);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+h1,h2,h3,h4,h5{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--dsp-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--mem-ink); outline-offset:3px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); border:1px solid var(--rule);
+  padding:.08em .36em; border-radius:5px; white-space:nowrap}
+strong{font-weight:600; color:var(--ink)}
+hr{border:0; border-top:1px solid var(--rule); margin:40px 0}
+ul,ol{margin:0; padding-left:1.35em}
+li{margin:.35em 0}
+li::marker{color:var(--ink3)}
+.m{font-family:var(--font-math); font-style:italic}
+.mono{font-family:var(--font-mono)}
+sub,sup{line-height:0; font-size:.72em}
+
+/* ============================================================ chrome */
+#prog{position:fixed; inset:0 auto auto 0; height:2px; width:0; z-index:200;
+  background:linear-gradient(90deg,var(--usr),var(--eng),var(--ren),var(--dsp)); transition:width .08s linear}
+.top{position:fixed; inset:0 0 auto 0; height:60px; z-index:150; display:flex; align-items:center; gap:18px;
+  padding:0 22px; background:color-mix(in srgb, var(--surf) 86%, transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2)}
+
+.shell{display:grid; grid-template-columns:236px minmax(0,1fr); gap:0; max-width:1240px; margin:0 auto; padding:84px 28px 120px}
+.rail{position:sticky; top:84px; align-self:start; max-height:calc(100vh - 100px); overflow:auto; padding-right:18px}
+.rail .rl{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); margin:0 0 10px}
+.rail ol{list-style:none; margin:0; padding:0; border-left:1px solid var(--rule)}
+.rail li{margin:0}
+.rail a{display:block; padding:5px 0 5px 14px; margin-left:-1px; font-size:12.5px; line-height:1.4; color:var(--ink3);
+  border-left:2px solid transparent; border-bottom:0; transition:.15s}
+.rail a:hover{color:var(--ink)}
+.rail a.on{color:var(--ink); border-left-color:var(--eng)}
+main{min-width:0; max-width:860px; padding-left:44px}
+@media (max-width:980px){
+  .shell{grid-template-columns:1fr; padding:76px 16px 90px}
+  .rail{display:none}
+  main{padding-left:0}
+}
+
+/* ============================================================ hero */
+.hero{padding:10px 0 34px; border-bottom:1px solid var(--rule); margin-bottom:56px}
+.kicker{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px}
+.tag{font-family:var(--font-mono); font-size:11.5px; color:var(--ink2); background:var(--surf2); border:1px solid var(--rule);
+  padding:3px 9px; border-radius:6px; letter-spacing:.01em}
+.tag.hl{color:var(--eng-ink); border-color:color-mix(in srgb,var(--eng) 45%,transparent); background:var(--eng-soft)}
+.hero h1{font-size:clamp(40px,6vw,60px); font-weight:700; letter-spacing:-.025em; line-height:1.02}
+.hero .zh{font-size:clamp(18px,2.2vw,22px); color:var(--ink2); margin-top:14px; line-height:1.55; max-width:44ch; font-weight:500; text-wrap:balance}
+.hero .thesis{margin-top:22px; font-size:16.5px; color:var(--ink2); max-width:66ch}
+.hero .thesis b{color:var(--ink)}
+.authors{margin-top:20px; font-size:13.5px; color:var(--ink3); line-height:1.7}
+.authors b{color:var(--ink2); font-weight:500}
+.links{display:flex; flex-wrap:wrap; gap:10px; margin-top:16px}
+.links a{font-family:var(--font-mono); font-size:12.5px; padding:6px 12px; border:1px solid var(--rule); border-radius:8px; color:var(--ink2); background:var(--surf)}
+.links a:hover{color:var(--ink); border-color:var(--rule2)}
+.stats{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:28px}
+.stat{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:14px 16px 12px}
+.stat .lb{font-family:var(--font-mono); font-size:11px; color:var(--ink3); letter-spacing:.06em; text-transform:uppercase}
+.stat .vl{font-family:var(--font-display); font-size:28px; font-weight:700; letter-spacing:-.02em; margin-top:6px; font-variant-numeric:tabular-nums}
+.stat .dl{font-size:12.5px; color:var(--ink3); margin-top:4px; line-height:1.5}
+.stat .dl b{color:var(--ink2); font-weight:500}
+@media (max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
+
+/* role text */
+.rU{color:var(--usr-ink); font-weight:600}
+.rE{color:var(--eng-ink); font-weight:600}
+.rR{color:var(--ren-ink); font-weight:600}
+.rD{color:var(--dsp-ink); font-weight:600}
+.rM{color:var(--mem-ink); font-weight:600}
+.rB{color:var(--bad-ink); font-weight:600}
+.rO{color:var(--ok-ink); font-weight:600}
+
+/* ============================================================ sections */
+.sec{margin:0 0 84px; scroll-margin-top:84px}
+.eyebrow{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.eyebrow .n{font-family:var(--font-mono); font-size:12px; color:var(--eng-ink); font-weight:600}
+.eyebrow .t{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); letter-spacing:.12em; text-transform:uppercase}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec h2{font-size:clamp(24px,3vw,31px); letter-spacing:-.02em; margin-bottom:16px}
+.sec h3{font-size:19px; margin:38px 0 12px; letter-spacing:-.01em; display:flex; align-items:baseline; gap:10px}
+.sec h3 .ix{font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-weight:500}
+.sec h4{font-size:15.5px; margin:22px 0 8px}
+.lead{font-size:17px; color:var(--ink2); max-width:68ch; margin-bottom:22px}
+.lead b{color:var(--ink)}
+.prose{max-width:70ch; color:var(--ink2)}
+.prose p{margin:0 0 14px}
+.prose b,.prose strong{color:var(--ink)}
+.prose ul,.prose ol{margin:0 0 14px}
+.note{font-size:13.5px; color:var(--ink3); max-width:70ch; margin-top:10px}
+
+/* ============================================================ figure */
+.fig{margin:26px 0 30px; background:var(--surf); border:1px solid var(--rule); border-radius:14px; box-shadow:var(--shadow); overflow:hidden}
+.fh{display:flex; align-items:baseline; gap:12px; padding:12px 18px 10px; border-bottom:1px solid var(--rule)}
+.fh .no{font-family:var(--font-mono); font-size:11.5px; color:var(--eng-ink); letter-spacing:.06em; white-space:nowrap}
+.fh .ti{font-family:var(--font-display); font-size:14px; font-weight:600; color:var(--ink)}
+.figbody{padding:16px 18px 12px; background:var(--surf)}
+.figbody svg{display:block; width:100%; height:auto; max-width:100%; font-family:var(--font-body)}
+figcaption{padding:12px 18px 14px; font-size:13.5px; line-height:1.65; color:var(--ink3); border-top:1px solid var(--rule)}
+figcaption b{color:var(--ink2); font-weight:500}
+.tabs{display:flex; flex-wrap:wrap; gap:6px; padding:10px 14px 0; background:var(--surf)}
+.tab{background:var(--surf2); border:1px solid var(--rule); color:var(--ink3); font-family:var(--font-body); font-size:12.5px;
+  padding:6px 12px; border-radius:8px 8px 0 0; cursor:pointer; transition:.15s; border-bottom:0}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--ink); background:var(--surf3); border-color:var(--rule2)}
+.tabpanel[hidden]{display:none}
+.scrollx{overflow-x:auto}
+
+/* svg utility classes (theme-aware) */
+.f-ink{fill:var(--ink)} .f-ink2{fill:var(--ink2)} .f-ink3{fill:var(--ink3)}
+.f-surf{fill:var(--surf)} .f-surf2{fill:var(--surf2)} .f-surf3{fill:var(--surf3)} .f-bg{fill:var(--bg)}
+.s-rule{stroke:var(--rule2)} .s-rule1{stroke:var(--rule)} .s-ink3{stroke:var(--ink3)} .s-ink2{stroke:var(--ink2)} .s-ink{stroke:var(--ink)}
+.nofill{fill:none}
+.f-U{fill:var(--usr)} .f-Ui{fill:var(--usr-ink)} .fs-U{fill:var(--usr-soft)} .s-U{stroke:var(--usr)}
+.f-E{fill:var(--eng)} .f-Ei{fill:var(--eng-ink)} .fs-E{fill:var(--eng-soft)} .s-E{stroke:var(--eng)}
+.f-R{fill:var(--ren)} .f-Ri{fill:var(--ren-ink)} .fs-R{fill:var(--ren-soft)} .s-R{stroke:var(--ren)}
+.f-D{fill:var(--dsp)} .f-Di{fill:var(--dsp-ink)} .fs-D{fill:var(--dsp-soft)} .s-D{stroke:var(--dsp)}
+.f-M{fill:var(--mem)} .f-Mi{fill:var(--mem-ink)} .fs-M{fill:var(--mem-soft)} .s-M{stroke:var(--mem)}
+.f-B{fill:var(--bad)} .f-Bi{fill:var(--bad-ink)} .fs-B{fill:var(--bad-soft)} .s-B{stroke:var(--bad)}
+.f-O{fill:var(--ok)} .f-Oi{fill:var(--ok-ink)} .fs-O{fill:var(--ok-soft)} .s-O{stroke:var(--ok)}
+.f-W1{fill:var(--wb1)} .f-W2{fill:var(--wb2)} .f-Wi{fill:var(--wb-ink)} .s-W{stroke:var(--wb2)}
+.mk-U{fill:var(--usr)} .mk-E{fill:var(--eng)} .mk-R{fill:var(--ren)} .mk-D{fill:var(--dsp)} .mk-M{fill:var(--mem)} .mk-B{fill:var(--bad)} .mk-I{fill:var(--ink3)} .mk-O{fill:var(--ok)}
+svg text{font-family:var(--font-body)}
+svg .big{font-size:13px; font-weight:600}
+svg .lbl{font-size:12px}
+svg .sml{font-size:10.5px}
+svg .xs{font-size:9.5px}
+svg .mono{font-family:var(--font-mono)}
+svg .math{font-family:var(--font-math); font-style:italic; font-size:13px}
+svg .tab-num{font-variant-numeric:tabular-nums}
+
+/* ============================================================ cards & callouts */
+.grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:22px 0}
+.grid2{display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin:22px 0}
+@media (max-width:760px){.grid3,.grid2{grid-template-columns:1fr}}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:16px 18px; font-size:14px; color:var(--ink2); line-height:1.7}
+.card .mono{font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3); margin-bottom:6px}
+.card h5{font-size:15px; margin-bottom:8px; color:var(--ink)}
+.card b{color:var(--ink)}
+.card.cu{border-top:3px solid var(--usr)} .card.cu .mono{color:var(--usr-ink)}
+.card.ce{border-top:3px solid var(--eng)} .card.ce .mono{color:var(--eng-ink)}
+.card.cr{border-top:3px solid var(--ren)} .card.cr .mono{color:var(--ren-ink)}
+.card.cd{border-top:3px solid var(--dsp)} .card.cd .mono{color:var(--dsp-ink)}
+.card.cm{border-top:3px solid var(--mem)} .card.cm .mono{color:var(--mem-ink)}
+.call{border:1px solid var(--rule); border-left:3px solid var(--ink3); background:var(--surf); border-radius:10px; padding:14px 18px; margin:22px 0; font-size:14.5px; color:var(--ink2); max-width:78ch}
+.call .hd{font-family:var(--font-display); font-weight:600; font-size:14px; color:var(--ink); margin-bottom:6px}
+.call p{margin:0 0 6px} .call p:last-child{margin:0}
+.call b{color:var(--ink)}
+.call.key{border-left-color:var(--eng); background:color-mix(in srgb,var(--eng-soft) 55%,var(--surf))}
+.call.warn{border-left-color:var(--bad); background:color-mix(in srgb,var(--bad-soft) 60%,var(--surf))}
+.call.mine{border-left-color:var(--mem); background:color-mix(in srgb,var(--mem-soft) 45%,var(--surf))}
+.call.ok{border-left-color:var(--ok); background:color-mix(in srgb,var(--ok-soft) 55%,var(--surf))}
+
+.eq{font-family:var(--font-math); font-size:19px; text-align:center; padding:16px 18px; margin:18px 0; background:var(--surf); border:1px solid var(--rule); border-radius:10px; color:var(--ink); overflow-x:auto}
+.eq i{font-style:italic}
+.eq .r{font-style:normal}
+.eq small{display:block; font-family:var(--font-body); font-style:normal; font-size:12.5px; color:var(--ink3); margin-top:6px}
+
+/* tables */
+table{border-collapse:collapse; width:100%; font-size:13.5px; margin:16px 0}
+th,td{padding:9px 10px; border-bottom:1px solid var(--rule); text-align:left; vertical-align:top; line-height:1.55}
+th{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); font-weight:500; border-bottom:1px solid var(--rule2)}
+td{color:var(--ink2)} td b{color:var(--ink)}
+td.num{font-family:var(--font-mono); font-variant-numeric:tabular-nums; white-space:nowrap}
+tr.hl td{background:var(--tint)}
+.tbl{overflow-x:auto; border:1px solid var(--rule); border-radius:12px; background:var(--surf); padding:0 14px; margin:18px 0}
+.tbl table{margin:0}
+
+/* pills */
+.pill{display:inline-block; font-family:var(--font-mono); font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--rule2); color:var(--ink2); background:var(--surf2); white-space:nowrap}
+.pill.u{color:var(--usr-ink); border-color:color-mix(in srgb,var(--usr) 50%,transparent); background:var(--usr-soft)}
+.pill.e{color:var(--eng-ink); border-color:color-mix(in srgb,var(--eng) 50%,transparent); background:var(--eng-soft)}
+.pill.r{color:var(--ren-ink); border-color:color-mix(in srgb,var(--ren) 50%,transparent); background:var(--ren-soft)}
+.pill.d{color:var(--dsp-ink); border-color:color-mix(in srgb,var(--dsp) 50%,transparent); background:var(--dsp-soft)}
+.pill.m{color:var(--mem-ink); border-color:color-mix(in srgb,var(--mem) 50%,transparent); background:var(--mem-soft)}
+.pill.b{color:var(--bad-ink); border-color:color-mix(in srgb,var(--bad) 50%,transparent); background:var(--bad-soft)}
+.pill.o{color:var(--ok-ink); border-color:color-mix(in srgb,var(--ok) 50%,transparent); background:var(--ok-soft)}
+
+/* ============================================================ interactive widgets */
+.ctl{display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; padding:10px 18px; border-bottom:1px solid var(--rule); background:var(--surf2); font-size:13px; color:var(--ink2)}
+.ctl label{display:inline-flex; align-items:center; gap:8px; white-space:nowrap}
+.ctl input[type=range]{width:150px; accent-color:var(--eng)}
+.ctl .val{font-family:var(--font-mono); font-size:12px; color:var(--ink); min-width:5ch; font-variant-numeric:tabular-nums}
+.seg{display:inline-flex; border:1px solid var(--rule2); border-radius:8px; overflow:hidden}
+.seg button{background:var(--surf); border:0; color:var(--ink3); font-family:var(--font-body); font-size:12.5px; padding:5px 11px; cursor:pointer; transition:.15s}
+.seg button + button{border-left:1px solid var(--rule2)}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--surf3); color:var(--ink); font-weight:600}
+.btn{background:var(--surf3); border:1px solid var(--rule2); color:var(--ink); font-family:var(--font-body); font-size:12.5px; padding:5px 12px; border-radius:8px; cursor:pointer}
+.btn:hover{border-color:var(--ink3)}
+.readout{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; padding:12px 18px; border-top:1px solid var(--rule); background:var(--surf)}
+.readout .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3)}
+.readout .v{font-family:var(--font-display); font-size:20px; font-weight:600; letter-spacing:-.01em; font-variant-numeric:tabular-nums; margin-top:2px}
+.readout .v small{font-family:var(--font-mono); font-size:11px; color:var(--ink3); margin-left:4px; font-weight:400}
+.readout .v.ok{color:var(--ok-ink)} .readout .v.bad{color:var(--bad-ink)}
+
+/* hero reveal */
+.reveal{position:relative; user-select:none; touch-action:none; border-radius:10px; overflow:hidden; border:1px solid var(--rule); background:var(--surf2)}
+.reveal svg{display:block; width:100%; height:auto}
+.reveal .layer{position:absolute; inset:0}
+.reveal .layer.ren{clip-path:inset(0 0 0 50%)}
+.reveal .handle{position:absolute; top:0; bottom:0; left:50%; width:2px; background:var(--ink); transform:translateX(-1px); pointer-events:none; box-shadow:0 0 0 1px rgba(0,0,0,.3)}
+.reveal .handle::after{content:"◀ ▶"; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:var(--ink); color:var(--bg); font-family:var(--font-mono); font-size:10px; padding:4px 7px; border-radius:999px; letter-spacing:.05em; white-space:nowrap}
+.reveal .lab{position:absolute; top:10px; font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; padding:3px 8px; border-radius:6px; background:rgba(0,0,0,.55); color:#fff; pointer-events:none}
+.reveal .lab.l{left:12px} .reveal .lab.r{right:12px}
+.reveal input[type=range]{position:absolute; inset:0; width:100%; height:100%; opacity:0; margin:0; cursor:ew-resize}
+/* 三种「皮」：只换初始化条件 (c, r)，几何不变 */
+.reveal[data-style="neon"]{--rn-sky1:#0a0f2e; --rn-sky2:#2a2358; --rn-sun:#e9dcff; --rn-wall:#25304e; --rn-wall2:#171d33; --rn-win:#ff4fa3; --rn-lamp:#38e0ff; --rn-ground:#141827; --rn-road:#0c0f18; --rn-line:#38e0ff; --rn-char:#1a1f2e; --rn-skin:#e8b39a}
+.reveal[data-style="dusk"]{--rn-sky1:#f6b26b; --rn-sky2:#8a5fa8; --rn-sun:#ffe08a; --rn-wall:#b98a5f; --rn-wall2:#8c6547; --rn-win:#ffd58a; --rn-lamp:#ffd27a; --rn-ground:#6f6b57; --rn-road:#4c4a48; --rn-line:#e8e0c8; --rn-char:#3b2f2a; --rn-skin:#e0a985}
+.reveal[data-style="toon"]{--rn-sky1:#8fd6ff; --rn-sky2:#e6f7ff; --rn-sun:#fff3a6; --rn-wall:#ffd2a8; --rn-wall2:#f2a97a; --rn-win:#fff8d0; --rn-lamp:#ffe66d; --rn-ground:#9ad97c; --rn-road:#d9c6b0; --rn-line:#ffffff; --rn-char:#ff8a65; --rn-skin:#ffd7b8}
+
+/* explorer */
+.explore{display:grid; grid-template-columns:minmax(0,1.35fr) minmax(240px,1fr); gap:0}
+@media (max-width:760px){.explore{grid-template-columns:1fr}}
+.explore .pane{border-left:1px solid var(--rule); padding:14px 18px; font-size:13.5px; color:var(--ink2); background:var(--surf)}
+@media (max-width:760px){.explore .pane{border-left:0; border-top:1px solid var(--rule)}}
+.pane h5{font-family:var(--font-display); font-size:15px; color:var(--ink); margin-bottom:8px}
+.pane .row{margin:8px 0}
+.pane .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); display:block}
+.pane ul{padding-left:1.1em; margin:2px 0 0}
+.pane li{margin:2px 0}
+.node{cursor:pointer}
+.node rect{transition:.15s}
+.node:hover rect{stroke-width:2.2}
+.node.on rect{stroke-width:2.6}
+
+/* chips row */
+.chips{display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:10px 18px; border-top:1px solid var(--rule); background:var(--surf); font-size:12.5px; color:var(--ink3)}
+.chip{font-family:var(--font-mono); font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--rule2); color:var(--ink2); background:var(--surf2)}
+.chip.a{color:var(--eng-ink); border-color:color-mix(in srgb,var(--eng) 55%,transparent); background:var(--eng-soft)}
+.chip.rt{color:var(--mem-ink); border-color:color-mix(in srgb,var(--mem) 55%,transparent); background:var(--mem-soft)}
+.chip.rc{color:var(--dsp-ink); border-color:color-mix(in srgb,var(--dsp) 55%,transparent); background:var(--dsp-soft)}
+.chip.g{color:var(--ren-ink); border-color:color-mix(in srgb,var(--ren) 55%,transparent); background:var(--ren-soft)}
+.chip.sep{border:0; background:none; color:var(--ink3); padding:0 2px}
+
+/* appendix */
+.gloss dt{font-family:var(--font-display); font-weight:600; font-size:14.5px; margin-top:14px; color:var(--ink)}
+.gloss dd{margin:2px 0 0; font-size:14px; color:var(--ink2); max-width:72ch}
+pre{font-family:var(--font-mono); font-size:12px; line-height:1.6; background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:14px 16px; overflow-x:auto; color:var(--ink2); margin:14px 0}
+.foot{margin-top:60px; padding-top:20px; border-top:1px solid var(--rule); font-size:12.5px; color:var(--ink3); line-height:1.7}
+
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{transition:none !important; animation:none !important}
+}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">Magpie<em>实时生成式世界渲染器 · 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<!-- shared SVG defs (same document, referenced by fragment id) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <marker id="ar-i" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-I"/></marker>
+  <marker id="ar-u" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-U"/></marker>
+  <marker id="ar-e" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-E"/></marker>
+  <marker id="ar-r" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-R"/></marker>
+  <marker id="ar-d" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-D"/></marker>
+  <marker id="ar-m" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-M"/></marker>
+  <marker id="ar-b" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-B"/></marker>
+  <marker id="ar-o" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-O"/></marker>
+  <!-- 白盒棋盘格：UE 原型材质的签名纹理 -->
+  <pattern id="chk" width="12" height="12" patternUnits="userSpaceOnUse">
+    <rect width="12" height="12" class="f-W1"/><rect width="6" height="6" class="f-W2"/><rect x="6" y="6" width="6" height="6" class="f-W2"/>
+  </pattern>
+  <pattern id="chk-s" width="6" height="6" patternUnits="userSpaceOnUse">
+    <rect width="6" height="6" class="f-W1"/><rect width="3" height="3" class="f-W2"/><rect x="3" y="3" width="3" height="3" class="f-W2"/>
+  </pattern>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" class="s-rule" stroke-width="2.2"/>
+  </pattern>
+  <pattern id="hatch-b" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" class="s-B" stroke-width="2"/>
+  </pattern>
+</defs></svg>
+
+<div class="shell">
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-tldr">00 · 一图看懂</a></li>
+    <li><a href="#s-problem">01 · 游戏不是视频</a></li>
+    <li><a href="#s-arch">02 · 四个组件、一条因果链</a></li>
+    <li><a href="#s-data">03 · 300 小时人工配对数据</a></li>
+    <li><a href="#s-cond">04 · 受限条件接口</a></li>
+    <li><a href="#s-mem">05 · 有界历史：锚 + 检索 + 近期</a></li>
+    <li><a href="#s-gen">06 · 分层少步生成</a></li>
+    <li><a href="#s-deploy">07 · 部署：LightTAE / FP8 / 桥接解码</a></li>
+    <li><a href="#s-perf">08 · 32.2 FPS 与 1.55 s</a></li>
+    <li><a href="#s-qual">09 · 定性结果与评估视角</a></li>
+    <li><a href="#s-crit">10 · 局限与保留意见</a></li>
+    <li><a href="#s-repo">11 · 与本仓库的关联</a></li>
+    <li><a href="#s-appendix">12 · 附录速查</a></li>
+  </ol>
+</nav>
+<main>
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <div class="kicker">
+    <span class="tag">arXiv 2608.27168v1</span>
+    <span class="tag">cs.CV · 2026-08-27</span>
+    <span class="tag">Preprint · 系统论文</span>
+    <span class="tag hl">生成式渲染 / 引擎在环 / 实时流式</span>
+  </div>
+  <h1>Magpie</h1>
+  <p class="zh">面向可交互游戏的实时生成式世界渲染器：引擎决定「发生了什么」，视频模型只决定「长什么样」</p>
+  <p class="thesis">Magpie 把一个游戏拆成两半：<span class="rE">Game Engine</span> 照旧执行规则、结算碰撞、维护世界状态，
+  但只输出一段没有材质和光照的<b>白盒画面</b>；一台独立的 <span class="rR">Render Server</span> 用视频扩散模型把白盒逐块「上皮」成最终画面。
+  按键、状态变量、物体属性、事件信号<b>从不进入模型</b>——它们先在引擎里变成可见的几何后果，模型看到的只有后果。
+  文本提示和首帧图只在初始化时给一次；之后每一块的唯一持续条件是白盒帧，相机位姿只用来<span class="rM">检索历史</span>。
+  单卡 H100 上 5B 蒸馏模型 620 ms 出一块 20 帧（计算侧 32.2 FPS），但端到端响应约 1.55 s。</p>
+  <p class="authors"><b>Xiaoyu Zhan</b>*, <b>Xinyu Wang</b>*, <b>Xiaohong Zhang</b>*, <b>Huanjie Zhu</b>*, Tengjiao Sun, Pengcheng Fang, Jiaxing Yu, Yanwen Guo, Dongjie Fu<sup>†</sup></p>
+  <p class="authors">Mogo AI Ltd. · 南京大学 · 南安普顿大学　　<span style="opacity:.75">*共同一作　†通讯作者</span></p>
+  <div class="links">
+    <a href="https://arxiv.org/abs/2608.27168" target="_blank" rel="noopener">arXiv 摘要 ↗</a>
+    <a href="https://arxiv.org/pdf/2608.27168" target="_blank" rel="noopener">PDF ↗</a>
+    <a href="https://zhanxy.xyz/Magpie-website" target="_blank" rel="noopener">项目主页 ↗</a>
+  </div>
+
+  <figure class="fig" style="margin-top:28px">
+    <div class="fh"><span class="no">Hero</span><span class="ti">同一段白盒，拖动分界线看它被「渲染」成不同风格</span></div>
+    <div class="ctl">
+      <span>风格（对应初始化时的文本提示 + 首帧图）</span>
+      <div class="seg" id="styleSeg" role="group" aria-label="渲染风格">
+        <button type="button" data-style="neon" aria-pressed="true">夜市霓虹</button>
+        <button type="button" data-style="dusk" aria-pressed="false">黄昏写实</button>
+        <button type="button" data-style="toon" aria-pressed="false">手绘卡通</button>
+      </div>
+    </div>
+    <div class="figbody" style="padding:14px 18px 10px">
+      <div class="reveal" id="reveal" data-style="neon">
+        <svg viewBox="0 0 720 300" role="img" aria-label="左半是引擎输出的白盒场景（棋盘格灰块、人偶），右半是同一几何被渲染成带材质光照的画面；拖动分界线切换">
+          <g id="wbLayer"></g>
+        </svg>
+        <div class="layer ren" id="renClip"><svg viewBox="0 0 720 300" aria-hidden="true"><g id="renLayer"></g></svg></div>
+        <div class="handle" id="revHandle"></div>
+        <span class="lab l">Game Engine · 白盒</span>
+        <span class="lab r">Render Server · 生成</span>
+        <input type="range" id="revRange" min="0" max="100" value="50" aria-label="白盒与渲染画面的分界位置">
+      </div>
+    </div>
+    <figcaption><b>示意图，非论文原图。</b>左侧是引擎的白盒观察 <span class="m">g<sub>t</sub></span>：只有占位几何、遮挡、角色位置与运动（论文 Fig. 2/3/4/7 里的白盒确实带 UE 原型棋盘格）；
+    右侧是同一块几何的生成结果。三种风格共用同一段白盒，只换初始化时的 <span class="m">(c, r)</span>——这正是论文说的「为同一可玩场景生成不同风格、材质、光照」（Sec. 1）。</figcaption>
+  </figure>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="lb">计算侧吞吐</div>
+      <div class="vl">32.2 FPS</div>
+      <div class="dl">1× H100 · 1280×768 · 每块 20 帧 / <b>620 ms</b>（Tab. 1）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">端到端响应</div>
+      <div class="vl">≈1.55 s</div>
+      <div class="dl">0.83 录白盒 + ~0.1 传输编码 + 0.62 生成（Tab. 2）</div>
+    </div>
+    <div class="stat">
+      <div class="lb">训练数据</div>
+      <div class="vl">~300 h</div>
+      <div class="dl">30+ 个 UE 场景 · 1080p60 · <b>人工操作</b>配对录制</div>
+    </div>
+    <div class="stat">
+      <div class="lb">模型</div>
+      <div class="vl">5B</div>
+      <div class="dl">Wan2.2-TI2V-5B 骨架 · 3 步蒸馏 · FP8 · 峰值显存 34 GB</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 00 TL;DR -->
+<section class="sec" id="s-tldr">
+  <div class="eyebrow"><span class="n">00</span><span class="t">TL;DR</span><span class="line"></span></div>
+  <h2>一图看懂：把「规则」留在引擎，把「外观」交给模型</h2>
+  <p class="lead">这不是一篇模型论文，而是一篇<b>系统边界</b>论文。它回答的问题是：视频生成模型要进入实时游戏，
+  应该站在管线的哪个位置？Magpie 的答案很克制——模型不当世界模型，只当<b>渲染器</b>。
+  引擎依然是唯一的规则执行者和状态持有者；模型收到的是一段已经被引擎结算过的白盒画面，把它变成好看的画面，仅此而已。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 1</span><span class="ti">三种分工、一条闭环、一张边界清单</span></div>
+    <div class="tabs" role="tablist" aria-label="总览">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="p1a" id="t1a">(a) 规则住在哪里</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p1b" id="t1b">(b) 运行时闭环</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p1c" id="t1c">(c) 什么能过边界</button>
+    </div>
+    <div class="figbody">
+    <!-- ---------------- panel a ---------------- -->
+    <div class="tabpanel" id="p1a" role="tabpanel" aria-labelledby="t1a">
+    <svg viewBox="0 0 720 300" role="img" aria-label="三条管线对比：传统图形管线规则在引擎但外观靠资产；纯视频世界模型外观靠生成但规则只是隐式的；Magpie 规则在引擎、外观靠生成，中间以白盒帧衔接">
+      <!-- column headers -->
+      <text x="16" y="22" class="f-ink3 sml mono">管线</text>
+      <text x="470" y="22" class="f-ink3 sml mono" text-anchor="middle">规则 / 状态由谁保证</text>
+      <text x="640" y="22" class="f-ink3 sml mono" text-anchor="middle">外观由谁生产</text>
+      <line x1="16" y1="30" x2="704" y2="30" class="s-rule1" stroke-width="1"/>
+      <!-- row 1: conventional -->
+      <text x="16" y="60" class="f-ink big">① 传统图形管线</text>
+      <rect x="16" y="70" width="86" height="30" rx="7" class="f-surf2 s-rule" stroke-width="1"/><text x="59" y="89" class="f-ink2 sml" text-anchor="middle">玩家输入</text>
+      <path d="M104 85 L124 85" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="126" y="70" width="86" height="30" rx="7" class="fs-E s-E" stroke-width="1.4"/><text x="169" y="89" class="f-Ei sml" text-anchor="middle">引擎结算</text>
+      <path d="M214 85 L234 85" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="236" y="70" width="120" height="30" rx="7" class="f-surf2 s-rule" stroke-width="1"/><text x="296" y="89" class="f-ink2 sml" text-anchor="middle">光栅化 / 光追</text>
+      <path d="M358 85 L378 85" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="380" y="70" width="46" height="30" rx="7" class="f-surf2 s-rule" stroke-width="1"/><text x="403" y="89" class="f-ink2 sml" text-anchor="middle">画面</text>
+      <rect x="440" y="70" width="60" height="30" rx="15" class="fs-O s-O" stroke-width="1"/><text x="470" y="89" class="f-Oi sml" text-anchor="middle">引擎 ✓</text>
+      <rect x="580" y="70" width="120" height="30" rx="15" class="fs-B s-B" stroke-width="1"/><text x="640" y="89" class="f-Bi sml" text-anchor="middle">完整资产管线 $$$</text>
+      <!-- row 2: video world model -->
+      <text x="16" y="146" class="f-ink big">② 纯视频世界模型</text>
+      <rect x="16" y="156" width="86" height="30" rx="7" class="f-surf2 s-rule" stroke-width="1"/><text x="59" y="175" class="f-ink2 sml" text-anchor="middle">玩家输入</text>
+      <path d="M104 171 L124 171" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="126" y="156" width="230" height="30" rx="7" class="fs-R s-R" stroke-width="1.4"/><text x="241" y="175" class="f-Ri sml" text-anchor="middle">动作条件视频模型（规则隐含在权重里）</text>
+      <path d="M358 171 L378 171" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="380" y="156" width="46" height="30" rx="7" class="f-surf2 s-rule" stroke-width="1"/><text x="403" y="175" class="f-ink2 sml" text-anchor="middle">画面</text>
+      <rect x="440" y="156" width="60" height="30" rx="15" class="fs-B s-B" stroke-width="1"/><text x="470" y="175" class="f-Bi sml" text-anchor="middle">无保证</text>
+      <rect x="580" y="156" width="120" height="30" rx="15" class="fs-O s-O" stroke-width="1"/><text x="640" y="175" class="f-Oi sml" text-anchor="middle">生成 ✓</text>
+      <!-- row 3: magpie -->
+      <rect x="8" y="204" width="704" height="84" rx="10" class="fs-E" opacity=".35"/>
+      <text x="16" y="232" class="f-ink big">③ Magpie</text>
+      <rect x="16" y="242" width="86" height="30" rx="7" class="f-surf2 s-rule" stroke-width="1"/><text x="59" y="261" class="f-ink2 sml" text-anchor="middle">玩家输入</text>
+      <path d="M104 257 L124 257" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="126" y="242" width="86" height="30" rx="7" class="fs-E s-E" stroke-width="1.4"/><text x="169" y="261" class="f-Ei sml" text-anchor="middle">引擎结算</text>
+      <path d="M214 257 L234 257" class="nofill s-E" stroke-width="1.6" marker-end="url(#ar-e)"/>
+      <rect x="236" y="242" width="52" height="30" rx="7" fill="url(#chk-s)" class="s-W" stroke-width="1.2"/><text x="262" y="261" class="f-ink xs" text-anchor="middle" font-weight="600">白盒</text>
+      <path d="M290 257 L306 257" class="nofill s-E" stroke-width="1.6" marker-end="url(#ar-e)"/>
+      <rect x="308" y="242" width="48" height="30" rx="7" class="fs-R s-R" stroke-width="1.4"/><text x="332" y="261" class="f-Ri sml" text-anchor="middle">生成</text>
+      <path d="M358 257 L378 257" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="380" y="242" width="46" height="30" rx="7" class="f-surf2 s-rule" stroke-width="1"/><text x="403" y="261" class="f-ink2 sml" text-anchor="middle">画面</text>
+      <rect x="440" y="242" width="60" height="30" rx="15" class="fs-O s-O" stroke-width="1"/><text x="470" y="261" class="f-Oi sml" text-anchor="middle">引擎 ✓</text>
+      <rect x="580" y="242" width="120" height="30" rx="15" class="fs-O s-O" stroke-width="1"/><text x="640" y="261" class="f-Oi sml" text-anchor="middle">生成 ✓（无需资产）</text>
+      <text x="16" y="284" class="f-ink3 xs">白盒 = 无材质、无最终光照、无非必要细节，但保留占位几何、碰撞边界、主轮廓和交互功能（Sec. 4.2）</text>
+    </svg>
+    </div>
+    <!-- ---------------- panel b ---------------- -->
+    <div class="tabpanel" id="p1b" role="tabpanel" aria-labelledby="t1b" hidden>
+    <svg viewBox="0 0 720 300" role="img" aria-label="运行时闭环：Gameplay Design 编辑场景与规则进入 Game Engine；User Client 把带时间戳的输入送给 Game Engine；Game Engine 每块向 Render Server 发送白盒观察与相机位姿；Render Server 在初始化时接收文本提示和首帧图，之后逐块生成视频并经 WebRTC 流回 User Client">
+      <!-- Gameplay Design -->
+      <rect x="16" y="120" width="140" height="64" rx="10" class="fs-U s-U" stroke-width="1.6"/>
+      <text x="86" y="146" class="f-Ui big" text-anchor="middle">Gameplay Design</text>
+      <text x="86" y="164" class="f-ink3 xs" text-anchor="middle">布局 / 交互 / 规则 / 数值</text>
+      <!-- Game Engine -->
+      <rect x="240" y="120" width="150" height="64" rx="10" class="fs-E s-E" stroke-width="1.6"/>
+      <text x="315" y="146" class="f-Ei big" text-anchor="middle">Game Engine</text>
+      <text x="315" y="164" class="f-ink3 xs" text-anchor="middle">执行规则 · 世界状态 · 白盒渲染</text>
+      <!-- Render Server -->
+      <rect x="500" y="120" width="204" height="64" rx="10" class="fs-R s-R" stroke-width="1.6"/>
+      <text x="602" y="146" class="f-Ri big" text-anchor="middle">Render Server</text>
+      <text x="602" y="164" class="f-ink3 xs" text-anchor="middle">生成式世界渲染器（5B，H100）</text>
+      <!-- User Client -->
+      <rect x="330" y="20" width="150" height="54" rx="10" class="fs-D s-D" stroke-width="1.6"/>
+      <text x="405" y="42" class="f-Di big" text-anchor="middle">User Client</text>
+      <text x="405" y="60" class="f-ink3 xs" text-anchor="middle">显示视频流 · 采集键鼠/手柄</text>
+      <!-- edges -->
+      <path d="M158 152 L238 152" class="nofill s-U" stroke-width="1.8" marker-end="url(#ar-u)"/>
+      <text x="198" y="144" class="f-Ui xs" text-anchor="middle">编辑可执行场景</text>
+      <path d="M392 152 L498 152" class="nofill s-E" stroke-width="2" marker-end="url(#ar-e)"/>
+      <text x="445" y="142" class="f-Ei xs" text-anchor="middle">每块：白盒观察 + 相机位姿</text>
+      <path d="M370 76 L328 118" class="nofill s-D" stroke-width="1.8" marker-end="url(#ar-d)"/>
+      <text x="318" y="98" class="f-Di xs" text-anchor="end">带时间戳的动作</text>
+      <path d="M590 118 L448 76" class="nofill s-R" stroke-width="1.8" marker-end="url(#ar-r)"/>
+      <text x="540" y="92" class="f-Ri xs" text-anchor="start">生成视频流（WebRTC）</text>
+      <!-- init condition -->
+      <rect x="540" y="222" width="124" height="44" rx="8" class="f-surf2 s-rule" stroke-width="1" stroke-dasharray="4 3"/>
+      <text x="602" y="240" class="f-ink2 xs" text-anchor="middle">文本提示 c + 首帧图 r</text>
+      <text x="602" y="255" class="f-ink3 xs" text-anchor="middle">仅初始化时给一次</text>
+      <path d="M602 220 L602 188" class="nofill s-ink3" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ar-i)"/>
+      <!-- never crosses -->
+      <rect x="240" y="210" width="150" height="66" rx="8" class="nofill s-B" stroke-width="1" stroke-dasharray="4 3"/>
+      <text x="315" y="230" class="f-Bi xs" text-anchor="middle" font-weight="600">留在引擎内、绝不外发</text>
+      <text x="315" y="246" class="f-ink3 xs" text-anchor="middle">玩家动作 · 状态变量</text>
+      <text x="315" y="260" class="f-ink3 xs" text-anchor="middle">物体属性 · 事件信号 · 隐藏状态</text>
+      <text x="16" y="292" class="f-ink3 xs">因果顺序（Sec. 5.5）：采集动作 → 引擎结算并渲染白盒 → 服务器生成 → 客户端显示；当前实现以「块」为交换粒度。</text>
+    </svg>
+    </div>
+    <!-- ---------------- panel c ---------------- -->
+    <div class="tabpanel" id="p1c" role="tabpanel" aria-labelledby="t1c" hidden>
+    <svg viewBox="0 0 720 300" role="img" aria-label="边界清单：能进入模型的只有初始化一次的文本与首帧、每块更新的白盒帧、以及只用于检索的相机位姿；动作、状态、属性、事件永不进入">
+      <rect x="16" y="16" width="410" height="270" rx="12" class="fs-R" opacity=".35"/>
+      <rect x="16" y="16" width="410" height="270" rx="12" class="nofill s-R" stroke-width="1.2"/>
+      <text x="32" y="42" class="f-Ri big">进入 Render Server 的信号</text>
+      <!-- rows -->
+      <rect x="32" y="58" width="378" height="56" rx="8" class="f-surf s-rule1" stroke-width="1"/>
+      <text x="44" y="80" class="f-ink big">文本提示 c + 首帧图 r → s₀ = E(c, r)</text>
+      <text x="44" y="98" class="f-ink3 sml">场景风格、角色外观、初始视觉状态；<tspan class="f-Ei" font-weight="600">只在初始化编码一次</tspan></text>
+      <rect x="32" y="122" width="378" height="56" rx="8" class="f-surf s-rule1" stroke-width="1"/>
+      <rect x="40" y="130" width="40" height="40" rx="5" fill="url(#chk-s)" class="s-W" stroke-width="1"/>
+      <text x="92" y="144" class="f-ink big">白盒帧 g<tspan dy="3" font-size="9">t</tspan><tspan dy="-3"> ：每块 5 个 latent</tspan></text>
+      <text x="92" y="162" class="f-ink3 sml">布局 / 主几何 / 遮挡 / 角色位置 / 引擎结算的运动；<tspan class="f-Ei" font-weight="600">唯一持续的去噪条件</tspan></text>
+      <rect x="32" y="186" width="378" height="56" rx="8" class="f-surf s-rule1" stroke-width="1"/>
+      <text x="44" y="208" class="f-ink big">相机位姿（位置 / 朝向 / 视锥）</text>
+      <text x="44" y="226" class="f-ink3 sml"><tspan class="f-Mi" font-weight="600">只用于按 FOV 重叠检索历史帧</tspan>，不编码进去噪条件</text>
+      <text x="32" y="270" class="f-ink3 xs">ε<tspan dy="3" font-size="8">θ</tspan><tspan dy="-3"> = D</tspan><tspan dy="3" font-size="8">θ</tspan><tspan dy="-3">(z</tspan><tspan dy="3" font-size="8">τ</tspan><tspan dy="-3">, τ | g</tspan><tspan dy="3" font-size="8">t</tspan><tspan dy="-3">, h</tspan><tspan dy="3" font-size="8">t</tspan><tspan dy="-3">, s</tspan><tspan dy="3" font-size="8">0</tspan><tspan dy="-3">)　（Sec. 6.1）</tspan></text>
+      <!-- right: never -->
+      <rect x="446" y="16" width="258" height="270" rx="12" class="fs-B" opacity=".3"/>
+      <rect x="446" y="16" width="258" height="270" rx="12" class="nofill s-B" stroke-width="1.2" stroke-dasharray="5 4"/>
+      <text x="462" y="42" class="f-Bi big">留在 Game Engine 里</text>
+      <g class="f-ink2 lbl">
+        <text x="462" y="76">✕ 玩家动作（键鼠 / 手柄）</text>
+        <text x="462" y="102">✕ 状态变量（血量、冷却、进度）</text>
+        <text x="462" y="128">✕ 物体属性</text>
+        <text x="462" y="154">✕ 事件信号 / 触发器</text>
+        <text x="462" y="180">✕ 隐藏的 gameplay 状态</text>
+      </g>
+      <text x="462" y="214" class="f-ink3 xs">它们只能<tspan class="f-Ei" font-weight="600">间接</tspan>影响生成：</text>
+      <text x="462" y="230" class="f-ink3 xs">改变白盒里可见的东西，</text>
+      <text x="462" y="246" class="f-ink3 xs">或经相机位姿改变检索到的历史。</text>
+      <text x="462" y="272" class="f-ink3 xs">「显式消息边界」防止它们绕过引擎（Sec. 5）</text>
+    </svg>
+    </div>
+    </div>
+    <figcaption><b>三个面板按论文 Fig. 2 / Fig. 4 与 Sec. 3、5、6.1 重绘。</b>(a) 说明 Magpie 在两种既有范式之间的位置：它没有让模型替代引擎，而是替代了「资产 + 光栅化」这一段；
+    (b) 是运行时的四个组件与消息方向；(c) 是全文最重要的一张表——<b>能进模型的只有三样东西</b>，其中一样只给一次、一样只做索引。</figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card ce">
+      <p class="mono">ENGINE</p>
+      <h5>规则的唯一执行者</h5>
+      <p>碰撞体、可通行区域、冷却、隐藏触发器、进度标志——这些在画面里几乎留不下可靠证据、也就很难从视频推断的东西，在引擎里是<b>显式表示</b>的。设计师可以检视、改规则、回放、比版本。</p>
+    </div>
+    <div class="card cr">
+      <p class="mono">RENDERER</p>
+      <h5>只负责「外观」的扩散模型</h5>
+      <p>Wan2.2-TI2V-5B 改成分块自回归；继承 Helios 的多尺度有界上下文、分层生成与 3 步蒸馏；再加 LightTAE 和 FP8。它<b>不参与</b>规则判断，也收不到任何规则相关变量。</p>
+    </div>
+    <div class="card cm">
+      <p class="mono">MEMORY</p>
+      <h5>锚块 + FOV 检索 + 近期块</h5>
+      <p>历史 <span class="m">h<sub>t</sub></span> 按固定顺序拼装：会话开头的锚块稳住风格，按相机 FOV 重叠检索的帧支持回访，最近几块保证局部连续。<b>上下文有界</b>，不随时长增长。</p>
+    </div>
+  </div>
+
+  <div class="call key">
+    <div class="hd">◆ 如果只记三件事</div>
+    <p><b>1.</b> 分工的边界画得极窄：模型的持续输入只有白盒帧；动作、状态、事件<b>从不</b>进模型（Sec. 3、6.1）。视觉错误顶多让反馈变糊，<b>改不了碰撞逻辑和后续决策</b>。</p>
+    <p><b>2.</b> 数据也是按这个边界造的：300 小时人工操作的 UE 配对录制，高保真流与白盒流共享时间线、角色状态和相机；操作输入、碰撞、事件都录了，但<b>当前版本一律不当条件</b>（Sec. 4）。</p>
+    <p><b>3.</b> 「实时」要分开读：计算侧 620 ms/20 帧 = 32.2 FPS 高于 24 FPS 管线；但引擎要先录满一块白盒（0.83 s）才能开算，所以动作到画面 <b>≈1.55 s</b>——作者自己把它列为第一条局限（Sec. 7–8）。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 01 PROBLEM -->
+<section class="sec" id="s-problem">
+  <div class="eyebrow"><span class="n">01</span><span class="t">The Problem</span><span class="line"></span></div>
+  <h2>游戏不是视频：为什么要把「发生什么」和「长什么样」拆开</h2>
+  <p class="lead">论文的引言花了两页论证一个命题：<b>视频基础模型改变了影视生产，但游戏不是线性媒体</b>。
+  游戏需要的不只是连续逼真的画面，还有可复现的规则、物体状态和交互结果——同一个动作在同一状态下必须保持稳定的含义，机制才能被测试、调整、交流，原型才能长成产品。</p>
+
+  <h3><span class="ix">1.1</span>两种既有范式各缺一半</h3>
+  <div class="prose">
+    <p><b>传统图形管线</b>把规则和外观都做对了，代价是外观贵得离谱：建模、拓扑、UV、贴图、材质校准、绑定、动画、灯光、特效、多级优化，需要多个工种长期协作。
+    即便在消费级 GPU 上做光追，复杂材质、间接光、半透明介质、天气变化仍是近似。结果是<b>一个 gameplay 已经完整的原型，依然无法传达设计师想要的体验</b>——因为皮还没做完。</p>
+    <p><b>视频生成模型</b>（Wan、Seedance 等）把外观做得很好、而且切换风格的边际成本极低，但它们的长处是「生成可观察的画面」，而不是「维护规则与状态」。
+    论文的判断是：单靠视频模型无法可靠保证一致的交互规则，也无法给设计师精确的状态控制与调试工具。此外要进入实时游戏，还得同时解决输入响应、连续交互中的历史保持、以及对场景结构的稳定服从。</p>
+  </div>
+
+  <h3><span class="ix">1.2</span>Magpie 的切法：引擎「决定」，模型「呈现」</h3>
+  <div class="prose">
+    <p>于是分工被定成一句话：<span class="rE">Game Engine 决定发生了什么</span>，<span class="rR">Render Server 决定结果被如何呈现</span>。
+    引擎执行规则、维护世界状态、在每次动作结算后产出白盒观察；渲染服务器从这个结构条件生成画面，但不参与任何规则判断。
+    这带来一个论文反复强调的性质：<b>生成错误只能降低反馈的质量或清晰度，不能改变碰撞逻辑、进度或后续决策</b>（Sec. 3）。</p>
+    <p>另一个不那么显眼但很关键的推论：因为规则、物理、状态迁移都已经在引擎里了，<b>模型需要的标注也随之收窄</b>——只要标注白盒里没有、但建立视觉身份所必需的信息（场景风格、角色外观），不需要标注任何机制、动作或事件（Sec. 4.5）。</p>
+  </div>
+
+  <div class="grid3">
+    <div class="card cu">
+      <p class="mono">FOR DESIGNERS</p>
+      <h5>白盒即原型</h5>
+      <p>设计初期本来就用粗模做功能原型；Magpie 让这个白盒在建模、贴图、绑定、灯光、优化完成之前就<b>接近目标视觉效果</b>，gameplay 可以更早被评估。</p>
+    </div>
+    <div class="card cd">
+      <p class="mono">FOR PLAYERS</p>
+      <h5>同一场景，多种皮</h5>
+      <p>同一个可玩场景可以生成不同的风格、材质、光照、环境细节和次级运动——换一个文本提示和首帧图即可，指向<b>个性化呈现</b>。</p>
+    </div>
+    <div class="card ce">
+      <p class="mono">FOR THE SYSTEM</p>
+      <h5>可复现性不被稀释</h5>
+      <p>设计元数据不直接发给渲染服务器：一次编辑先改变可执行场景，再由引擎结算出新的白盒。<b>随机的视觉合成</b>与<b>可复现的 gameplay</b> 被物理隔开。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 02 ARCHITECTURE -->
+<section class="sec" id="s-arch">
+  <div class="eyebrow"><span class="n">02</span><span class="t">System Architecture</span><span class="line"></span></div>
+  <h2>四个组件、一条因果链、以及一个偏爱「新鲜」的 WebRTC</h2>
+  <p class="lead">Sec. 5 把系统实现为分布式运行时：Gameplay Design、User Client、Game Engine、独立的 Render Server，组件之间用 WebRTC 通信。
+  点下面任一组件，看它<b>收什么、发什么、绝不发什么</b>。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 2</span><span class="ti">组件探索器：每个组件的输入 / 输出 / 禁区</span></div>
+    <div class="explore">
+      <div class="figbody" style="padding:14px 14px 10px">
+        <svg viewBox="0 0 440 300" role="img" aria-label="可点击的四组件图：Gameplay Design、User Client、Game Engine、Render Server，以及它们之间带标签的消息">
+          <g class="node on" data-node="design" tabindex="0" role="button" aria-label="Gameplay Design">
+            <rect x="14" y="120" width="120" height="58" rx="10" class="fs-U s-U" stroke-width="1.6"/>
+            <text x="74" y="145" class="f-Ui big" text-anchor="middle">Gameplay Design</text>
+            <text x="74" y="163" class="f-ink3 xs" text-anchor="middle">编辑白盒场景与规则</text>
+          </g>
+          <g class="node" data-node="engine" tabindex="0" role="button" aria-label="Game Engine">
+            <rect x="170" y="120" width="120" height="58" rx="10" class="fs-E s-E" stroke-width="1.6"/>
+            <text x="230" y="145" class="f-Ei big" text-anchor="middle">Game Engine</text>
+            <text x="230" y="163" class="f-ink3 xs" text-anchor="middle">规则 · 状态 · 白盒</text>
+          </g>
+          <g class="node" data-node="render" tabindex="0" role="button" aria-label="Render Server">
+            <rect x="316" y="120" width="112" height="58" rx="10" class="fs-R s-R" stroke-width="1.6"/>
+            <text x="372" y="145" class="f-Ri big" text-anchor="middle">Render Server</text>
+            <text x="372" y="163" class="f-ink3 xs" text-anchor="middle">生成式渲染器</text>
+          </g>
+          <g class="node" data-node="client" tabindex="0" role="button" aria-label="User Client">
+            <rect x="180" y="18" width="130" height="54" rx="10" class="fs-D s-D" stroke-width="1.6"/>
+            <text x="245" y="40" class="f-Di big" text-anchor="middle">User Client</text>
+            <text x="245" y="58" class="f-ink3 xs" text-anchor="middle">显示 · 采集输入</text>
+          </g>
+          <path d="M136 149 L168 149" class="nofill s-U" stroke-width="1.8" marker-end="url(#ar-u)"/>
+          <path d="M292 149 L314 149" class="nofill s-E" stroke-width="2" marker-end="url(#ar-e)"/>
+          <text x="303" y="194" class="f-Ei xs" text-anchor="middle">白盒+位姿</text>
+          <path d="M226 74 L226 118" class="nofill s-D" stroke-width="1.8" marker-end="url(#ar-d)"/>
+          <text x="220" y="100" class="f-Di xs" text-anchor="end">动作</text>
+          <path d="M360 118 L300 74" class="nofill s-R" stroke-width="1.8" marker-end="url(#ar-r)"/>
+          <text x="346" y="92" class="f-Ri xs" text-anchor="start">视频流</text>
+          <rect x="316" y="214" width="112" height="40" rx="8" class="f-surf2 s-rule" stroke-width="1" stroke-dasharray="4 3"/>
+          <text x="372" y="231" class="f-ink2 xs" text-anchor="middle">文本 + 首帧图</text>
+          <text x="372" y="245" class="f-ink3 xs" text-anchor="middle">仅初始化</text>
+          <path d="M372 212 L372 182" class="nofill s-ink3" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ar-i)"/>
+          <text x="14" y="286" class="f-ink3 xs">通信：WebRTC · 抖动缓冲改为「新鲜优先」，宁可丢帧降帧率也不推迟后续帧</text>
+        </svg>
+      </div>
+      <div class="pane" id="nodePane"></div>
+    </div>
+    <figcaption><b>按 Sec. 5.1–5.4 整理。</b>注意两条「否定句」：User Client <b>不在本地修改世界状态、不向 Render Server 发送控制</b>；Render Server <b>管理条件与推理，但不做任何 gameplay 决策</b>。
+    这两条把边界钉死——任何组件都没有第二条路把状态送进模型。</figcaption>
+  </figure>
+
+  <h3><span class="ix">2.1</span>闭环的因果顺序</h3>
+  <div class="prose">
+    <p>每个交互周期只有一种因果顺序（Sec. 5.5）：</p>
+    <ol>
+      <li><span class="rD">User Client</span> 采集一个动作并打上时间戳，转发给引擎；</li>
+      <li><span class="rE">Game Engine</span> 结算这个动作的 gameplay 后果（通行、碰撞、交互、事件、相机更新），渲染出对应的白盒观察及其相机位姿；</li>
+      <li><span class="rR">Render Server</span> 生成对应的视觉片段；</li>
+      <li><span class="rD">User Client</span> 显示。</li>
+    </ol>
+    <p>换句话说，模型收到的是一个<b>已经被 gameplay 执行确定了的可见结果</b>，它不预测、也不重新定义规则层面的结果。当前实现的交换粒度是「块」（chunk）——这是 Sec. 8 里延迟问题的根源，后面会算。</p>
+  </div>
+
+  <h3><span class="ix">2.2</span>WebRTC 的一个反常配置</h3>
+  <div class="prose">
+    <p>常规 WebRTC 抖动缓冲（jitter buffer）的目标是在网络波动下保持播放平滑，代价是缓冲延迟。Magpie 反过来配置：<b>优先帧的新鲜度和低通信延迟</b>——必要时直接丢弃过期帧，让有效帧率下降，而不是推迟后续帧。
+    这和游戏串流的取舍一致：对交互而言，一帧迟到比一帧缺席更糟。</p>
+    <p>论文还提到「显式消息边界」（explicit message boundaries）：防止 gameplay 状态绕过引擎、或作为未声明的条件信号溜进生成模型。这是把 Sec. 3 的设计原则落到协议层。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 03 DATA -->
+<section class="sec" id="s-data">
+  <div class="eyebrow"><span class="n">03</span><span class="t">Data Engine</span><span class="line"></span></div>
+  <h2>数据引擎：300 小时人工操作的配对录制，教的是渲染而不是规则</h2>
+  <p class="lead">Sec. 4 开宗明义：数据引擎的目的是<b>教视觉渲染，不教 gameplay 执行</b>。规则和状态迁移在引擎里编写和执行，训练数据只提供「把引擎输出转成生成视频」的时间对齐监督。
+  录制格式记录的信息<b>比当前模型消费的多</b>——这是一个刻意的余量。</p>
+
+  <div class="stats" style="margin-top:0">
+    <div class="stat"><div class="lb">时长</div><div class="vl">~300 h</div><div class="dl">单段录制从几十分钟到数小时</div></div>
+    <div class="stat"><div class="lb">场景</div><div class="vl">30+</div><div class="dl">Unreal Engine · 室内 + 室外</div></div>
+    <div class="stat"><div class="lb">采集规格</div><div class="vl">1080p60</div><div class="dl">1920×1080 · 60 FPS · 约 <b>6.5×10⁷</b> 对帧（我按 300 h 换算）</div></div>
+    <div class="stat"><div class="lb">标注</div><div class="vl">2 字段</div><div class="dl">场景风格 + 角色外观 · Qwen3.6-27B 自动生成</div></div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 3</span><span class="ti">一次录制包含什么，以及当前版本用了什么</span></div>
+    <div class="tabs" role="tablist" aria-label="数据引擎">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="p3a" id="t3a">(a) 共享时间戳下的多路记录</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p3b" id="t3b">(b) 交互分布覆盖了什么</button>
+    </div>
+    <div class="figbody">
+    <div class="tabpanel" id="p3a" role="tabpanel" aria-labelledby="t3a">
+    <svg viewBox="0 0 720 300" role="img" aria-label="共享时间戳下的多路记录：高保真流作训练目标，白盒流作去噪条件，相机位姿只作检索索引，文本标注作初始化；操作输入、碰撞、状态迁移、事件被记录但不参与训练目标或条件接口">
+      <text x="16" y="20" class="f-ink3 sml mono">共享时间戳 →</text>
+      <line x1="150" y1="16" x2="560" y2="16" class="s-rule" stroke-width="1"/>
+      <g class="f-ink3 xs mono"><text x="150" y="30">t₀</text><text x="355" y="30" text-anchor="middle">…</text><text x="560" y="30" text-anchor="end">t₀ + 数小时</text></g>
+      <text x="600" y="20" class="f-ink3 sml mono">当前版本的角色</text>
+      <!-- lanes -->
+      <g>
+        <text x="16" y="60" class="f-ink big">高保真目标流</text>
+        <text x="16" y="75" class="f-ink3 xs">材质 · 光照 · 环境细节 · 次级动态</text>
+        <rect x="150" y="46" width="410" height="26" rx="5" class="fs-R s-R" stroke-width="1"/>
+        <rect x="592" y="46" width="112" height="26" rx="13" class="fs-R s-R" stroke-width="1"/><text x="648" y="63" class="f-Ri xs" text-anchor="middle" font-weight="600">训练目标</text>
+      </g>
+      <g>
+        <text x="16" y="104" class="f-ink big">白盒流（同视角同时刻）</text>
+        <text x="16" y="119" class="f-ink3 xs">几何 · 布局 · 遮挡 · 主运动</text>
+        <rect x="150" y="90" width="410" height="26" rx="5" fill="url(#chk-s)" class="s-W" stroke-width="1"/>
+        <rect x="592" y="90" width="112" height="26" rx="13" class="fs-E s-E" stroke-width="1"/><text x="648" y="107" class="f-Ei xs" text-anchor="middle" font-weight="600">去噪条件 g<tspan dy="2" font-size="7">t</tspan></text>
+      </g>
+      <g>
+        <text x="16" y="148" class="f-ink big">相机位姿</text>
+        <text x="16" y="163" class="f-ink3 xs">位置 · 朝向 · 视锥</text>
+        <rect x="150" y="134" width="410" height="26" rx="5" class="fs-M s-M" stroke-width="1"/>
+        <rect x="592" y="134" width="112" height="26" rx="13" class="fs-M s-M" stroke-width="1"/><text x="648" y="151" class="f-Mi xs" text-anchor="middle" font-weight="600">仅检索索引</text>
+      </g>
+      <g>
+        <text x="16" y="192" class="f-ink big">外观标注（两个字段）</text>
+        <text x="16" y="207" class="f-ink3 xs">场景风格 / 角色外观 · 固定提示 · 排除机制语义</text>
+        <rect x="150" y="178" width="60" height="26" rx="5" class="fs-D s-D" stroke-width="1"/><text x="180" y="195" class="f-Di xs" text-anchor="middle">一次</text>
+        <rect x="592" y="178" width="112" height="26" rx="13" class="fs-D s-D" stroke-width="1"/><text x="648" y="195" class="f-Di xs" text-anchor="middle" font-weight="600">初始化 s₀</text>
+      </g>
+      <g opacity=".85">
+        <text x="16" y="240" class="f-ink big">操作输入 · 碰撞 · 状态迁移 · 事件</text>
+        <text x="16" y="255" class="f-ink3 xs">保留每个视觉变化的来源；用于筛选数据与系统分析</text>
+        <rect x="150" y="226" width="410" height="26" rx="5" fill="url(#hatch)" class="s-rule" stroke-width="1"/>
+        <rect x="592" y="226" width="112" height="26" rx="13" class="f-surf2 s-rule" stroke-width="1" stroke-dasharray="3 3"/><text x="648" y="243" class="f-ink3 xs" text-anchor="middle" font-weight="600">录了，未使用</text>
+      </g>
+      <text x="16" y="288" class="f-ink3 xs">「录得比用得多」是设计：输入 / 碰撞 / 事件已同步保存，为将来的事件级条件留了余量（Sec. 8 提议的深度 / 法线等几何缓冲则需引擎另行导出）。</text>
+    </svg>
+    </div>
+    <div class="tabpanel" id="p3b" role="tabpanel" aria-labelledby="t3b" hidden>
+    <svg viewBox="0 0 720 300" role="img" aria-label="交互分布：覆盖了基础移动、视角变化、驾驶、坐下、碰撞类可见后果与空闲状态；复杂战斗、多角色协作、密集物体操作尚未按同等规模覆盖">
+      <rect x="16" y="16" width="440" height="268" rx="12" class="fs-O" opacity=".28"/>
+      <rect x="16" y="16" width="440" height="268" rx="12" class="nofill s-O" stroke-width="1.2"/>
+      <text x="32" y="42" class="f-Oi big">操作员被要求「像真的玩家一样玩」</text>
+      <text x="32" y="70" class="f-ink2 lbl" font-weight="600">动作</text>
+      <g class="f-ink2 sml">
+        <rect x="32" y="80" width="46" height="22" rx="11" class="f-surf s-rule" stroke-width="1"/><text x="55" y="95" text-anchor="middle">走</text>
+        <rect x="84" y="80" width="46" height="22" rx="11" class="f-surf s-rule" stroke-width="1"/><text x="107" y="95" text-anchor="middle">跑</text>
+        <rect x="136" y="80" width="46" height="22" rx="11" class="f-surf s-rule" stroke-width="1"/><text x="159" y="95" text-anchor="middle">跳</text>
+        <rect x="188" y="80" width="46" height="22" rx="11" class="f-surf s-rule" stroke-width="1"/><text x="211" y="95" text-anchor="middle">攀爬</text>
+        <rect x="240" y="80" width="62" height="22" rx="11" class="f-surf s-rule" stroke-width="1"/><text x="271" y="95" text-anchor="middle">转视角</text>
+        <rect x="308" y="80" width="46" height="22" rx="11" class="f-surf s-rule" stroke-width="1"/><text x="331" y="95" text-anchor="middle">驾驶</text>
+        <rect x="360" y="80" width="46" height="22" rx="11" class="f-surf s-rule" stroke-width="1"/><text x="383" y="95" text-anchor="middle">坐下</text>
+      </g>
+      <text x="32" y="132" class="f-ink2 lbl" font-weight="600">引擎侧 gameplay 的可见后果</text>
+      <g class="f-ink2 sml">
+        <rect x="32" y="142" width="96" height="22" rx="11" class="f-surf s-rule" stroke-width="1"/><text x="80" y="157" text-anchor="middle">撞墙 / 撞地</text>
+        <rect x="134" y="142" width="70" height="22" rx="11" class="f-surf s-rule" stroke-width="1"/><text x="169" y="157" text-anchor="middle">上下楼梯</text>
+        <rect x="210" y="142" width="84" height="22" rx="11" class="f-surf s-rule" stroke-width="1"/><text x="252" y="157" text-anchor="middle">车辆变速</text>
+        <rect x="300" y="142" width="46" height="22" rx="11" class="f-surf s-rule" stroke-width="1"/><text x="323" y="157" text-anchor="middle">阻挡</text>
+        <rect x="352" y="142" width="46" height="22" rx="11" class="f-surf s-rule" stroke-width="1"/><text x="375" y="157" text-anchor="middle">滑动</text>
+        <rect x="32" y="170" width="84" height="22" rx="11" class="f-surf s-rule" stroke-width="1"/><text x="74" y="185" text-anchor="middle">姿态变化</text>
+      </g>
+      <text x="32" y="222" class="f-ink2 lbl" font-weight="600">空闲——同样重要</text>
+      <g class="f-ink2 sml">
+        <rect x="32" y="232" width="70" height="22" rx="11" class="fs-E s-E" stroke-width="1"/><text x="67" y="247" text-anchor="middle">站着不动</text>
+        <rect x="108" y="232" width="96" height="22" rx="11" class="fs-E s-E" stroke-width="1"/><text x="156" y="247" text-anchor="middle">小幅相机调整</text>
+        <rect x="210" y="232" width="96" height="22" rx="11" class="fs-E s-E" stroke-width="1"/><text x="258" y="247" text-anchor="middle">只有环境在动</text>
+      </g>
+      <text x="32" y="274" class="f-ink3 xs">动作过多的数据会让自回归渲染器偏向「没事也要动」或静态场景不稳（Sec. 4.3）</text>
+      <!-- not covered -->
+      <rect x="476" y="16" width="228" height="268" rx="12" class="fs-B" opacity=".25"/>
+      <rect x="476" y="16" width="228" height="268" rx="12" class="nofill s-B" stroke-width="1.2" stroke-dasharray="5 4"/>
+      <text x="492" y="42" class="f-Bi big">尚未按同等规模覆盖</text>
+      <g class="f-ink2 lbl">
+        <text x="492" y="80">复杂战斗</text>
+        <text x="492" y="110">多角色协作</text>
+        <text x="492" y="140">密集的物体操作</text>
+      </g>
+      <text x="492" y="190" class="f-ink3 xs">当前优先「干净、可验证」的覆盖：</text>
+      <text x="492" y="206" class="f-ink3 xs">移动 / 视角 / 车辆 / 简单状态迁移 / 空闲</text>
+      <text x="492" y="240" class="f-ink3 xs">这直接对应 Sec. 8 的「训练分布之外</text>
+      <text x="492" y="256" class="f-ink3 xs">白盒一致性下降」。</text>
+    </svg>
+    </div>
+    </div>
+    <figcaption><b>按 Sec. 4.1–4.5 整理。</b>(a) 每次采集含高保真流、同步白盒流、相机位姿与初始化文本；操作输入、碰撞、状态迁移、事件以同步元数据保存，但<b>不作为训练条件或目标</b>（Sec. 4、4.4 两处明说）。
+    (b) 采集不是脚本 rollout 也不是自主 agent，而是受训操作员亲自玩，刻意回访难视角、交互边界、过渡与空闲区间。</figcaption>
+  </figure>
+
+  <h3><span class="ix">3.1</span>白盒到底去掉了什么、留下了什么</h3>
+  <div class="prose">
+    <p>每个场景有高保真和白盒两种表示，二者<b>空间占位、碰撞边界、主轮廓、交互功能一一匹配</b>。白盒去掉最终贴图、材质、复杂光照和非必要几何细节，保留应当约束生成的结构与可见的状态变化。
+    采集时两种表示共享时间线、角色状态和相机配置：每一帧目标画面都有同一视角、同一时刻的白盒帧。</p>
+    <p>两路流携带的信息是互补的：白盒指定<b>可见几何、布局、遮挡、主运动</b>；高保真目标提供<b>外观、光照、材质响应、环境细节、次级动态</b>。模型要学的，就是从前者到后者的条件映射。</p>
+  </div>
+
+  <h3><span class="ix">3.2</span>只标注两个字段，且明确排除机制</h3>
+  <div class="prose">
+    <p>因为物理、规则、状态迁移都在引擎里，标注被限制在「白盒流里没有、但建立视觉身份所必需」的信息：<b>场景风格</b>（视觉领域与美术方向）和<b>角色外观</b>（受控角色的可见身份与呈现）。
+    两个字段都不描述机制、物理规则、动作或事件结果。标注由 Qwen3.6-27B 从代表性高保真画面自动生成，固定提示分别产出两个字段并显式排除 gameplay 语义——这与渲染器的「初始化角色」对齐。</p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">◇ 我读到的两个数据侧空白</div>
+    <p><b>训练细节几乎没有。</b>论文没有给出训练步数、GPU 数量、学习率、损失权重、训练分辨率与帧率的下采样方式（采集 1080p60，推理 1280×768 / 24 FPS），也没有数据划分与验证集。</p>
+    <p><b>白盒并非「纯白」。</b>从 Fig. 2/3/4/7 看，白盒使用 UE 原型棋盘格材质和标准人偶——棋盘格本身携带尺度与透视线索，这可能是模型能从单张 RGB 白盒推断深度的隐性原因之一，也意味着换一套白盒风格未必能直接迁移。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 04 CONDITIONS -->
+<section class="sec" id="s-cond">
+  <div class="eyebrow"><span class="n">04</span><span class="t">Restricted Conditions</span><span class="line"></span></div>
+  <h2>受限条件接口：三种白盒注入方式的取舍</h2>
+  <p class="lead">Sec. 6.1 把整个条件接口写成一个函数。读懂这个函数里<b>有什么、没什么</b>，就读懂了 Magpie 和一般「动作条件世界模型」的区别。</p>
+
+  <div class="eq">
+    <i>ε</i><sub>θ</sub> <span class="r">=</span> <i>D</i><sub>θ</sub><span class="r">(</span><i>z</i><sub>τ</sub><span class="r">, </span><i>τ</i> <span class="r">|</span> <i>g</i><sub>t</sub><span class="r">, </span><i>h</i><sub>t</sub><span class="r">, </span><i>s</i><sub>0</sub><span class="r">)</span>
+    <small><i>z</i><sub>τ</sub> 当前块的噪声 latent · <i>τ</i> 扩散时间步 · <i>g</i><sub>t</sub> 当前块的白盒观察 · <i>h</i><sub>t</sub> 拼装好的视觉历史 · <i>s</i><sub>0</sub> = <i>E</i>(<i>c</i>, <i>r</i>) 初始化时编码一次的文本与首帧</small>
+  </div>
+
+  <div class="prose">
+    <p>三样条件的「生命周期」各不相同：<span class="rD">s₀</span> 在会话开始时编码一次，之后不再更新；<span class="rE">g<sub>t</sub></span> 每个生成块（5 个 latent）由引擎产出一次，并<b>贯穿整个去噪过程</b>注入；
+    <span class="rM">h<sub>t</sub></span> 每块重新拼装，拼装规则由相机位姿驱动。玩家动作、游戏状态、物体属性、事件信号<b>不在这个函数里</b>——它们只能改变 <span class="m">g<sub>t</sub></span> 里可见的东西，或经位姿改变 <span class="m">h<sub>t</sub></span> 里放了哪些历史。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 4</span><span class="ti">白盒条件注入的三种候选——点选查看注入位置与代价</span></div>
+    <div class="ctl">
+      <div class="seg" id="injSeg" role="group" aria-label="注入机制">
+        <button type="button" data-inj="latent" aria-pressed="false">① 直接嵌入噪声 latent</button>
+        <button type="button" data-inj="adaln" aria-pressed="false">② AdaLN 调制</button>
+        <button type="button" data-inj="xattn" aria-pressed="true">③ 历史序列 + Cross-Attention（采用）</button>
+      </div>
+    </div>
+    <div class="figbody">
+      <svg viewBox="0 0 720 300" role="img" aria-label="一个去噪 Transformer 块的示意：噪声 latent 经自注意力、交叉注意力、前馈层；三种注入方式分别把白盒条件送进输入 latent、AdaLN 调制、或交叉注意力的历史条件序列" id="injSvg">
+        <!-- main flow -->
+        <rect x="16" y="120" width="96" height="60" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+        <text x="64" y="146" class="f-ink big" text-anchor="middle">z<tspan dy="3" font-size="9">τ</tspan></text>
+        <text x="64" y="164" class="f-ink3 xs" text-anchor="middle">噪声 latent 块</text>
+        <path d="M114 150 L146 150" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+        <rect x="148" y="120" width="110" height="60" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+        <text x="203" y="146" class="f-ink big" text-anchor="middle">Self-Attn</text>
+        <text x="203" y="164" class="f-ink3 xs" text-anchor="middle">块内时空注意力</text>
+        <path d="M260 150 L292 150" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+        <rect x="294" y="120" width="120" height="60" rx="10" class="f-surf2 s-rule" stroke-width="1" id="xaBox"/>
+        <text x="354" y="146" class="f-ink big" text-anchor="middle">Cross-Attn</text>
+        <text x="354" y="164" class="f-ink3 xs" text-anchor="middle">Q 来自 z，K/V 来自条件</text>
+        <path d="M416 150 L448 150" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+        <rect x="450" y="120" width="96" height="60" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+        <text x="498" y="146" class="f-ink big" text-anchor="middle">FFN</text>
+        <text x="498" y="164" class="f-ink3 xs" text-anchor="middle">前馈</text>
+        <path d="M548 150 L580 150" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+        <rect x="582" y="120" width="122" height="60" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+        <text x="643" y="146" class="f-ink big" text-anchor="middle">ε<tspan dy="3" font-size="9">θ</tspan> / 下一块</text>
+        <text x="643" y="164" class="f-ink3 xs" text-anchor="middle">× N 层</text>
+        <!-- AdaLN modulation from timestep -->
+        <rect x="148" y="40" width="200" height="40" rx="8" class="f-surf2 s-rule" stroke-width="1" stroke-dasharray="3 3" id="adaBox"/>
+        <text x="248" y="57" class="f-ink2 sml" text-anchor="middle">AdaLN：scale / shift / gate</text>
+        <text x="248" y="72" class="f-ink3 xs" text-anchor="middle">默认由时间步 τ 驱动</text>
+        <path d="M203 82 L203 118" class="nofill s-ink3" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#ar-i)"/>
+        <path d="M330 82 L354 118" class="nofill s-ink3" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#ar-i)"/>
+        <!-- condition sequence -->
+        <rect x="294" y="214" width="260" height="54" rx="10" class="fs-M s-M" stroke-width="1.2" id="histBox"/>
+        <text x="306" y="234" class="f-Mi sml" font-weight="600">历史条件序列（K/V）</text>
+        <g id="histTokens">
+          <rect x="306" y="242" width="52" height="18" rx="4" class="fs-E s-E" stroke-width="1"/><text x="332" y="255" class="f-Ei xs" text-anchor="middle">h_anchor</text>
+          <rect x="362" y="242" width="56" height="18" rx="4" class="fs-M s-M" stroke-width="1"/><text x="390" y="255" class="f-Mi xs" text-anchor="middle">h_relevant</text>
+          <rect x="422" y="242" width="52" height="18" rx="4" class="fs-D s-D" stroke-width="1"/><text x="448" y="255" class="f-Di xs" text-anchor="middle">h_recent</text>
+          <rect x="478" y="242" width="30" height="18" rx="4" class="fs-D s-D" stroke-width="1"/><text x="493" y="255" class="f-Di xs" text-anchor="middle">s₀</text>
+          <rect x="512" y="242" width="34" height="18" rx="4" fill="url(#chk-s)" class="s-W" stroke-width="1" id="gTok" opacity="0"/><text x="529" y="255" class="f-ink xs" text-anchor="middle" font-weight="600" id="gTokT" opacity="0">g<tspan dy="2" font-size="7">t</tspan></text>
+        </g>
+        <path d="M354 212 L354 182" class="nofill s-M" stroke-width="1.6" marker-end="url(#ar-m)"/>
+        <!-- white-box source -->
+        <rect x="16" y="214" width="120" height="54" rx="10" fill="url(#chk-s)" class="s-W" stroke-width="1.2"/>
+        <rect x="24" y="222" width="104" height="38" rx="6" class="f-surf" opacity=".85"/>
+        <text x="76" y="238" class="f-ink big" text-anchor="middle">白盒 g<tspan dy="3" font-size="9">t</tspan></text>
+        <text x="76" y="253" class="f-ink3 xs" text-anchor="middle">编码为 latent 条件</text>
+        <!-- injection paths (toggled) -->
+        <g id="inj-latent" opacity="0">
+          <path d="M76 212 C 76 190, 64 200, 64 182" class="nofill s-E" stroke-width="2.4" marker-end="url(#ar-e)"/>
+          <text x="90" y="200" class="f-Ei xs" font-weight="600">与 z 相加 / 拼接</text>
+        </g>
+        <g id="inj-adaln" opacity="0">
+          <path d="M138 232 C 200 232, 120 60, 146 60" class="nofill s-E" stroke-width="2.4" marker-end="url(#ar-e)"/>
+          <text x="150" y="104" class="f-Ei xs" font-weight="600">g 驱动 scale/shift</text>
+        </g>
+        <g id="inj-xattn" opacity="1">
+          <path d="M138 241 L 290 241" class="nofill s-E" stroke-width="2.4" marker-end="url(#ar-e)"/>
+          <text x="214" y="232" class="f-Ei xs" font-weight="600" text-anchor="middle">放进历史条件序列</text>
+        </g>
+        <!-- verdict -->
+        <text x="16" y="292" class="f-ink3 xs" id="injNote">③ 折中：整体质量可接受 + 对白盒一致性可接受 → 当前模型采用</text>
+      </svg>
+    </div>
+    <div class="readout" id="injRead">
+      <div><div class="k">白盒一致性</div><div class="v" id="injC">可接受</div></div>
+      <div><div class="k">视觉质量</div><div class="v" id="injQ">可接受</div></div>
+      <div><div class="k">块间连续性</div><div class="v" id="injB">未报告问题</div></div>
+      <div><div class="k">额外计算</div><div class="v" id="injK">中等（K/V 变长）</div></div>
+    </div>
+    <figcaption><b>Transformer 块的内部结构是通用示意</b>（Wan 系列以交叉注意力接文本、以时间步调制归一化）；论文只描述了三种机制的<b>注入位置</b>与定性结论，没有给出层级细节或数值对比。
+    第一种一致性最强、成本最低，但压制细节、明显降低渲染质量；第二种块内有效，但块边界出现显著视觉不连续；第三种被评价为「最实用的平衡」并采用。评价维度里「额外计算」是我的推断，论文只说要兼顾控制质量与计算成本。</figcaption>
+  </figure>
+
+  <div class="call warn">
+    <div class="hd">△ 一个措辞上的细节</div>
+    <p>Sec. 1、Sec. 3、Sec. 6.1 三处都说白盒帧是「唯一持续的去噪条件」（the only continuing denoising condition；摘要里没有「唯一」二字），但 Sec. 6.1 的函数里 <span class="m">s<sub>0</sub></span> 和 <span class="m">h<sub>t</sub></span> 同样出现在条件位置。
+    我的理解是：「持续」指的是<b>每块由外部更新</b>的条件——<span class="m">s<sub>0</sub></span> 是一次性常量，<span class="m">h<sub>t</sub></span> 是模型自己的输出回流；只有 <span class="m">g<sub>t</sub></span> 是每块从引擎新来的。这不影响结论，但读的时候容易被「唯一」绊一下。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 05 MEMORY -->
+<section class="sec" id="s-mem">
+  <div class="eyebrow"><span class="n">05</span><span class="t">Bounded History</span><span class="line"></span></div>
+  <h2>有界历史：锚块 + FOV 检索 + 近期块，按固定顺序拼装</h2>
+  <p class="lead">渲染器把一场长会话生成为一串短块，每块只看当前白盒和一段<b>有界</b>的视觉历史。Sec. 6.2 规定了历史的三段式结构与拼装顺序：</p>
+
+  <div class="eq">
+    <i>h</i><sub>t</sub> <span class="r">= [ </span><i>h</i><sub>anchor</sub><span class="r">, </span><i>h</i><sup>relevant</sup><sub>t</sub><span class="r">, </span><i>h</i><sup>recent</sup><sub>t</sub><span class="r"> ]</span>
+    <small>锚块稳住初始化 · 检索历史支持回访 · 近期历史保持局部连续；旧的近期块随新块产出被逐出，活跃上下文保持有界</small>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 5</span><span class="ti">俯视相机轨迹：拖动时间，看第 t 块的历史由哪些块组成</span></div>
+    <div class="ctl">
+      <label>当前块 t <input type="range" id="memT" min="4" max="27" value="27"> <span class="val" id="memTv">27</span></label>
+      <label><input type="checkbox" id="memShowAll"> 显示所有历史视锥</label>
+      <span style="color:var(--ink3)">FOV 70° · 视距固定 · 锚块 = 前 2 块 · 近期 = 最近 3 块（示意值）</span><span style="display:flex;gap:12px;flex-wrap:wrap"><span class="chip a">锚块 h_anchor</span><span class="chip rt">FOV 重叠检索 h_relevant</span><span class="chip rc">近期块 h_recent</span><span class="chip g">当前块 t</span><span class="chip">其余历史（不在上下文）</span></span>
+    </div>
+    <div class="figbody" style="padding:10px 18px 8px">
+      <svg viewBox="0 0 720 262" role="img" aria-label="俯视图：一条绕街区一圈后回到起点附近的相机轨迹；当前块的视锥为绿色，锚块为琥珀色，按视锥重叠检索到的历史块为紫色，最近三块为蓝色" id="memSvg">
+        <g id="memBlocks"></g>
+        <g id="memPast"></g>
+        <g id="memHi"></g>
+        <g id="memCur"></g>
+              </svg>
+    </div>
+    <div class="chips" id="memChips"></div>
+    <figcaption><b>示意图，轨迹与数量为我设定。</b>论文只给出结构与顺序：锚块是「会话开头附近的块」，检索按 Context-as-Memory 用相机位姿计算<b>视野重叠</b>，近期块是「最新产出」并随新块逐出；
+    <b>没有给出</b>各段的块数、检索阈值或上限。把 t 拖到轨迹末尾（相机回到起点附近）可以看到：近期块里没有起点的画面，但检索段把它找了回来——这正是 revisit 一致性的来源。</figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card ce">
+      <p class="mono">ANCHOR</p>
+      <h5>早期锚块</h5>
+      <p>会话开头的块保留首帧图建立的外观与场景身份。保持这一段稳定，减少长时程中<b>偏离初始化</b>的漂移。</p>
+    </div>
+    <div class="card cm">
+      <p class="mono">RETRIEVED</p>
+      <h5>按 FOV 重叠检索</h5>
+      <p>相机位姿的位置、朝向、视锥<b>只参与这一步索引</b>，不被编码为去噪条件。检索到的是与当前视角相关的历史观察，支持回访时的一致性。</p>
+    </div>
+    <div class="card cd">
+      <p class="mono">RECENT</p>
+      <h5>最近生成的块</h5>
+      <p>保留局部运动、短期外观和相邻块之间的连续性。<b>先进先出</b>：新块产出，旧的近期块被逐出，活跃上下文保持有界（bounded）。</p>
+    </div>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">◇ 与 Helios「多尺度有界上下文」的关系</div>
+    <p>Sec. 6 说渲染器采用了 Helios 的<b>有界多尺度上下文</b>。在 Helios 里这指 Multi-Term Memory Patchification：把历史切成短 / 中 / 长期三段，越远的段用越大的 patch 核压缩，使历史 token 总数与视频长度无关。
+    Magpie 没有说明三段式历史 <span class="m">[anchor, relevant, recent]</span> 如何映射到 Helios 的三个压缩尺度——最自然的读法是锚块与检索段被更狠地压缩、近期段保留较高分辨率，但这是<b>我的推测</b>，原文未写。</p>
+    <p>另外，Sec. 8 自己承认这套二维历史「不维护生成世界的显式持久表示」：大视角变化或长时间离开后外观仍会漂移，被遮挡过的内容要从不完整观察里重新推断。作者给出的方向是把生成观察投影进一个可更新的离线三维表示。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 06 GENERATION -->
+<section class="sec" id="s-gen">
+  <div class="eyebrow"><span class="n">06</span><span class="t">Hierarchical Few-Step Generation</span><span class="line"></span></div>
+  <h2>分层少步生成：从 Helios 继承的三件东西，和一处不同</h2>
+  <p class="lead">渲染器建立在 <b>Wan2.2-TI2V-5B</b> 上（Sec. 6）。为了在交互吞吐下做长视频，它采用 Helios 的三项设计：有界多尺度上下文、分层生成、少步蒸馏。
+  Magpie 在此之上加的是<b>条件控制信号</b>：文本与首帧初始化外观，白盒帧提供持续结构控制，相机位姿留给历史索引。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 6</span><span class="ti">先出粗结构再补高频，再把多步教师压成 3 步学生</span></div>
+    <div class="tabs" role="tablist" aria-label="生成与蒸馏">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="p6a" id="t6a">(a) 分层（金字塔）生成</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p6b" id="t6b">(b) 3 步蒸馏 + Self Forcing</button>
+    </div>
+    <div class="figbody">
+    <div class="tabpanel" id="p6a" role="tabpanel" aria-labelledby="t6a">
+    <svg viewBox="0 0 720 300" role="img" aria-label="金字塔式分层生成：去噪早期在低分辨率 latent 上解决布局与运动，随后逐级上采样并再加噪，最后在全分辨率恢复高频外观；每级处理的 token 数按分辨率递减">
+      <text x="16" y="24" class="f-ink big">去噪时间步 τ：从纯噪声（左）到干净样本（右）</text>
+      <line x1="60" y1="222" x2="690" y2="222" class="s-ink3" stroke-width="1.2" marker-end="url(#ar-i)"/>
+      <text x="60" y="240" class="f-ink3 xs mono">τ = 1000</text>
+      <text x="680" y="240" class="f-ink3 xs mono" text-anchor="end">τ = 0</text>
+      <!-- stage 1 -->
+      <rect x="60" y="150" width="180" height="60" rx="8" class="fs-E s-E" stroke-width="1.4"/>
+      <rect x="132" y="168" width="36" height="24" rx="3" fill="url(#chk-s)" class="s-W" stroke-width="1"/>
+      <text x="150" y="132" class="f-Ei sml" text-anchor="middle" font-weight="600">低分辨率阶段</text>
+      <text x="150" y="146" class="f-ink3 xs" text-anchor="middle">h/4 × w/4 · 效率优先</text>
+      <text x="150" y="200" class="f-ink3 xs" text-anchor="middle" opacity="0">.</text>
+      <!-- upsample & renoise -->
+      <path d="M242 180 L270 180" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <text x="256" y="168" class="f-ink3 xs" text-anchor="middle">上采样</text>
+      <text x="256" y="196" class="f-ink3 xs" text-anchor="middle">+ 再加噪</text>
+      <!-- stage 2 -->
+      <rect x="272" y="120" width="190" height="90" rx="8" class="fs-E s-E" stroke-width="1.4" opacity=".85"/>
+      <rect x="331" y="142" width="72" height="48" rx="3" fill="url(#chk-s)" class="s-W" stroke-width="1"/>
+      <text x="367" y="102" class="f-Ei sml" text-anchor="middle" font-weight="600">中分辨率阶段</text>
+      <text x="367" y="116" class="f-ink3 xs" text-anchor="middle">h/2 × w/2 · 兼顾</text>
+      <path d="M464 180 L492 180" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <text x="478" y="168" class="f-ink3 xs" text-anchor="middle">上采样</text>
+      <text x="478" y="196" class="f-ink3 xs" text-anchor="middle">+ 再加噪</text>
+      <!-- stage 3 -->
+      <rect x="494" y="80" width="196" height="130" rx="8" class="fs-R s-R" stroke-width="1.4"/>
+      <rect x="520" y="98" width="144" height="96" rx="3" fill="url(#chk)" class="s-W" stroke-width="1"/>
+      <text x="592" y="62" class="f-Ri sml" text-anchor="middle" font-weight="600">全分辨率阶段</text>
+      <text x="592" y="76" class="f-ink3 xs" text-anchor="middle">h × w · 质量优先 · 恢复高频外观</text>
+      <!-- what each stage resolves -->
+      <text x="60" y="270" class="f-ink2 xs">早期步骤被强噪声主导 → 决定全局布局、颜色、运动；晚期步骤 → 细化边缘、纹理。把早期放到低分辨率去做，每一步的 token 数就不必全程按全分辨率算。</text>
+      <text x="60" y="288" class="f-ink3 xs mono">token 成本 ≈ (HW + HW/4 + HW/16) × N/3　vs　单尺度 HW × N　（Helios Eq. 9，K = 3）</text>
+    </svg>
+    </div>
+    <div class="tabpanel" id="p6b" role="tabpanel" aria-labelledby="t6b" hidden>
+    <svg viewBox="0 0 720 300" role="img" aria-label="蒸馏：多步教师的去噪轨迹被逐级转移到 3 步学生；随后用 self forcing 让学生在自己生成的历史上训练，缩小训练与推理的差距">
+      <!-- teacher -->
+      <text x="16" y="26" class="f-ink big">多步教师轨迹</text>
+      <text x="150" y="26" class="f-ink3 xs">（Helios 原文：50 步 UniPC；Magpie 未写教师步数）</text>
+      <line x1="16" y1="56" x2="704" y2="56" class="s-rule" stroke-width="1.2"/>
+      <g id="teacherDots"></g>
+      <!-- progressive arrow -->
+      <path d="M360 72 L360 100" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <text x="372" y="90" class="f-ink3 xs">逐级（progressive）蒸馏，Helios 的做法基于 DMD + 分阶段反向模拟 + 对抗后训练</text>
+      <!-- student -->
+      <text x="16" y="126" class="f-ink big">3 步学生</text>
+      <line x1="16" y1="150" x2="704" y2="150" class="s-rule" stroke-width="1.2"/>
+      <g class="f-R">
+        <circle cx="16" cy="150" r="7"/><circle cx="245" cy="150" r="7"/><circle cx="474" cy="150" r="7"/><circle cx="704" cy="150" r="7"/>
+      </g>
+      <g class="f-Ri xs" text-anchor="middle">
+        <text x="16" y="172">噪声</text><text x="130" y="140">step 1</text><text x="360" y="140">step 2</text><text x="590" y="140">step 3</text><text x="704" y="172">干净块</text>
+      </g>
+      <path d="M24 150 L236 150" class="nofill s-R" stroke-width="2.2" marker-end="url(#ar-r)"/>
+      <path d="M253 150 L465 150" class="nofill s-R" stroke-width="2.2" marker-end="url(#ar-r)"/>
+      <path d="M482 150 L695 150" class="nofill s-R" stroke-width="2.2" marker-end="url(#ar-r)"/>
+      <!-- self forcing -->
+      <rect x="16" y="196" width="330" height="90" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="32" y="218" class="f-ink2 sml" font-weight="600">训练时：历史 = 干净的真实视频</text>
+      <g>
+        <rect x="32" y="230" width="40" height="26" rx="4" class="fs-R s-R" stroke-width="1"/><rect x="76" y="230" width="40" height="26" rx="4" class="fs-R s-R" stroke-width="1"/><rect x="120" y="230" width="40" height="26" rx="4" class="fs-R s-R" stroke-width="1"/>
+        <rect x="172" y="230" width="40" height="26" rx="4" fill="url(#hatch)" class="s-rule" stroke-width="1"/>
+        <text x="52" y="247" class="f-Ri xs" text-anchor="middle">GT</text><text x="96" y="247" class="f-Ri xs" text-anchor="middle">GT</text><text x="140" y="247" class="f-Ri xs" text-anchor="middle">GT</text><text x="192" y="247" class="f-ink3 xs" text-anchor="middle">预测</text>
+      </g>
+      <text x="32" y="276" class="f-ink3 xs">推理时历史却是模型自己生成的 → 分布不匹配 → 漂移</text>
+      <rect x="374" y="196" width="330" height="90" rx="10" class="fs-O s-O" stroke-width="1.2"/>
+      <text x="390" y="218" class="f-Oi sml" font-weight="600">Self forcing：历史 = 学生自己生成的块</text>
+      <g>
+        <rect x="390" y="230" width="40" height="26" rx="4" class="fs-M s-M" stroke-width="1"/><rect x="434" y="230" width="40" height="26" rx="4" class="fs-M s-M" stroke-width="1"/><rect x="478" y="230" width="40" height="26" rx="4" class="fs-M s-M" stroke-width="1"/>
+        <rect x="530" y="230" width="40" height="26" rx="4" fill="url(#hatch)" class="s-rule" stroke-width="1"/>
+        <text x="410" y="247" class="f-Mi xs" text-anchor="middle">生成</text><text x="454" y="247" class="f-Mi xs" text-anchor="middle">生成</text><text x="498" y="247" class="f-Mi xs" text-anchor="middle">生成</text><text x="550" y="247" class="f-ink3 xs" text-anchor="middle">预测</text>
+      </g>
+      <text x="390" y="276" class="f-ink3 xs">缩小「在干净视频上训练」与「在生成上下文上推理」的差距</text>
+      <path d="M350 241 L370 241" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+    </svg>
+    </div>
+    </div>
+    <figcaption><b>(a)</b> 对应 Sec. 6.3「先解决粗空间结构与运动，再恢复高频外观」；金字塔的级数与成本公式取自 Helios（Pyramid Unified Predictor Corrector，K = 3），Magpie 只说「遵循 Helios 的分层生成与多阶段蒸馏」。
+    <b>(b)</b> 蒸馏把多步教师轨迹逐级转移到 3 步学生，然后用 self forcing 缩小训练 / 推理差距；Magpie 的目标是在少步生成器下<b>保住白盒条件的服从和有序的历史接口</b>。</figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">◇ 一处与 Helios 不同的选择</div>
+    <p>Helios 论文的一个卖点是<b>不用</b> self forcing：它用「纯教师强制 + 自回归教师」加上模拟漂移的训练策略，声称能达到同等抗漂移能力而省掉昂贵的 rollout。
+    Magpie 却明确写了「学生随后通过 self forcing 缩小干净视频与生成上下文之间的差距」（Sec. 6.3）。这说明 Magpie 借的是 Helios 的<b>架构与蒸馏骨架</b>，而非它的整套反漂移方案——在一个条件极强（白盒每块都给）的设定里，self forcing 的成本或许更容易承受，但论文没有解释这个取舍。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 07 DEPLOYMENT -->
+<section class="sec" id="s-deploy">
+  <div class="eyebrow"><span class="n">07</span><span class="t">Deployment</span><span class="line"></span></div>
+  <h2>部署：LightTAE、FP8、逐块调度与「桥接」解码</h2>
+  <p class="lead">Sec. 6.4 与 7.1 讲的是让每一块的成本<b>恒定</b>：编码、去噪、解码都以块为单位，工作量不随会话时长增长。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 7</span><span class="ti">一次推理步的固定调度，以及每一步用了什么省时手段</span></div>
+    <div class="figbody">
+    <svg viewBox="0 34 720 266" role="img" aria-label="每个推理步的四个阶段：LightTAE 编码一块白盒为 latent 条件、拼装有界历史、以 FP8 混合精度 3 步去噪一个输出块、LightTAE 带桥接解码为视频帧；编码与解码都只处理一块">
+      <!-- step boxes -->
+      <rect x="16" y="60" width="150" height="96" rx="10" class="fs-E s-E" stroke-width="1.4"/>
+      <text x="91" y="84" class="f-Ei big" text-anchor="middle">① 编码白盒块</text>
+      <text x="91" y="104" class="f-ink2 xs" text-anchor="middle">引擎传来的 20 帧白盒</text>
+      <text x="91" y="120" class="f-ink2 xs" text-anchor="middle">→ 5 个 latent 条件</text>
+      <text x="91" y="142" class="f-ink3 xs mono" text-anchor="middle">LightTAE</text>
+      <path d="M168 108 L192 108" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="194" y="60" width="150" height="96" rx="10" class="fs-M s-M" stroke-width="1.4"/>
+      <text x="269" y="84" class="f-Mi big" text-anchor="middle">② 拼装有界历史</text>
+      <text x="269" y="104" class="f-ink2 xs" text-anchor="middle">[anchor, relevant, recent]</text>
+      <text x="269" y="120" class="f-ink2 xs" text-anchor="middle">位姿只在这里用</text>
+      <text x="269" y="142" class="f-ink3 xs mono" text-anchor="middle">Context-as-Memory</text>
+      <path d="M346 108 L370 108" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="372" y="60" width="150" height="96" rx="10" class="fs-R s-R" stroke-width="1.4"/>
+      <text x="447" y="84" class="f-Ri big" text-anchor="middle">③ 去噪一个输出块</text>
+      <text x="447" y="104" class="f-ink2 xs" text-anchor="middle">3 步 · 金字塔多尺度</text>
+      <text x="447" y="120" class="f-ink2 xs" text-anchor="middle">线性 / 注意力 / FFN 走 FP8</text>
+      <text x="447" y="142" class="f-ink3 xs mono" text-anchor="middle">5B DiT · FP8 mixed</text>
+      <path d="M524 108 L548 108" class="nofill s-ink3" stroke-width="1.4" marker-end="url(#ar-i)"/>
+      <rect x="550" y="60" width="154" height="96" rx="10" class="fs-D s-D" stroke-width="1.4"/>
+      <text x="627" y="84" class="f-Di big" text-anchor="middle">④ 解码为视频帧</text>
+      <text x="627" y="104" class="f-ink2 xs" text-anchor="middle">5 latent → 20 帧（首块 17）</text>
+      <text x="627" y="120" class="f-ink2 xs" text-anchor="middle">相邻块之间加「桥」</text>
+      <text x="627" y="142" class="f-ink3 xs mono" text-anchor="middle">LightTAE + bridge</text>
+      <!-- loop back -->
+      <path d="M627 158 L627 186 L269 186 L269 160" class="nofill s-M" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-m)"/>
+      <text x="448" y="180" class="f-Mi xs" text-anchor="middle">生成的块回流进近期历史；最旧的近期块被逐出</text>
+      <!-- timing note -->
+      <rect x="16" y="206" width="688" height="80" rx="10" class="f-surf2 s-rule" stroke-width="1"/>
+      <text x="32" y="228" class="f-ink big">为什么解码要「桥」（Sec. 7.1）</text>
+      <text x="32" y="248" class="f-ink2 xs">Wan 解码器是时间因果的：解码当前块依赖前面的时间上下文，所以不能把相邻块当成互相独立的输入直接解码。</text>
+      <text x="32" y="264" class="f-ink2 xs">Magpie 在相邻块之间加一个桥，供给块边界处所需的因果上下文，同时保持固定的逐块解码调度——解码延迟不随会话长度增长。</text>
+      <text x="32" y="280" class="f-ink3 xs">桥的具体形式（复用多少前块 latent、是否缓存解码器特征）论文未描述。</text>
+    </svg>
+    </div>
+    <figcaption><b>按 Sec. 6.4「每个 Magpie 推理步遵循固定的块级调度」重绘。</b>LightTAE 替换了更昂贵的时空自编码器——编解码在每个块边界都要做一次，直接计入交互延迟。
+    编码与解码都<b>一次只处理一块</b>，工作量不随会话时长增长。</figcaption>
+  </figure>
+
+  <h3><span class="ix">7.1</span>FP8 混合精度：哪些算子降精度、哪些不降</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>算子</th><th>精度</th><th>理由</th></tr></thead>
+    <tbody>
+      <tr><td><b>线性投影</b>（QKV / 输出投影等）</td><td><span class="pill o">FP8</span></td><td rowspan="3">论文措辞：「在数值敏感性允许之处」使用低精度计算。（我的补充：这三类占了 DiT 的绝大部分 FLOPs，所以收益集中在这里）</td></tr>
+      <tr><td><b>注意力运算</b></td><td><span class="pill o">FP8</span></td></tr>
+      <tr><td><b>前馈层</b></td><td><span class="pill o">FP8</span></td></tr>
+      <tr><td><b>归一化</b></td><td><span class="pill d">高精度</span></td><td rowspan="3">保留更高精度；论文未给出具体位宽（BF16/FP16/FP32）</td></tr>
+      <tr><td><b>时间嵌入</b></td><td><span class="pill d">高精度</span></td></tr>
+      <tr><td><b>其他敏感算子</b></td><td><span class="pill d">高精度</span></td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="ix">7.2</span>为什么首块 17 帧、之后每块 20 帧</h3>
+  <div class="prose">
+    <p>Table 1 写明：每块 5 个 latent，首块解码为 17 帧，之后每块 20 帧。论文没有解释这个差异，但它和 Wan 系列 VAE 的时间压缩规则完全吻合：
+    因果 3D VAE 把<b>第一帧单独编码</b>，之后每个 latent 对应 4 帧，所以 <span class="mono">5 latent = 1 + 4×4 = 17 帧</span>；后续块有了桥接提供的前置上下文，5 个 latent 就对应完整的 <span class="mono">5×4 = 20 帧</span>。
+    这也解释了为什么首块「使用不同的解码布局」并被排除在稳态吞吐统计之外（Sec. 7.2）。<b>这一段是我的推断</b>，与论文数字一致，但原文未明说。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 08 PERFORMANCE -->
+<section class="sec" id="s-perf">
+  <div class="eyebrow"><span class="n">08</span><span class="t">Performance</span><span class="line"></span></div>
+  <h2>32.2 FPS 与 1.55 s 是两个不同的问题</h2>
+  <p class="lead">Sec. 7 有意把<b>计算侧吞吐</b>和<b>端到端交互延迟</b>分开报告：前者衡量预热后的模型执行速度，后者还包含引擎准备条件的时间。
+  两组数字都来自单卡 H100 上的 Magpie 5B Render Server。</p>
+
+  <div class="grid2">
+    <div class="tbl" style="margin:0"><table>
+      <thead><tr><th colspan="2">Table 1 · 稳态推理性能</th></tr></thead>
+      <tbody>
+        <tr><td>模型规模</td><td class="num">5B</td></tr>
+        <tr><td>GPU</td><td class="num">1× NVIDIA H100</td></tr>
+        <tr><td>推理模式</td><td class="num">分块自回归</td></tr>
+        <tr><td>解码策略</td><td class="num">逐块 + 桥接</td></tr>
+        <tr><td>分辨率</td><td class="num">1280 × 768</td></tr>
+        <tr><td>每块 latent 数</td><td class="num">5</td></tr>
+        <tr><td>首块 / 后续块输出</td><td class="num">17 / 20 帧</td></tr>
+        <tr class="hl"><td><b>稳态预测时间</b></td><td class="num"><b>620 ms / 块</b></td></tr>
+        <tr class="hl"><td><b>计算侧吞吐</b></td><td class="num"><b>32.2 FPS</b></td></tr>
+        <tr><td>峰值显存</td><td class="num">34 GB</td></tr>
+      </tbody>
+    </table></div>
+    <div class="tbl" style="margin:0"><table>
+      <thead><tr><th colspan="2">Table 2 · 从输入到对应画面的延迟</th></tr></thead>
+      <tbody>
+        <tr><td><span class="rE">引擎</span>准备一块白盒（20 帧 @ 24 FPS）</td><td class="num">0.83 s</td></tr>
+        <tr><td>网络传输 + 编码</td><td class="num">~0.1 s</td></tr>
+        <tr><td><span class="rR">服务器</span>推理 + 解码</td><td class="num">0.62 s</td></tr>
+        <tr class="hl"><td><b>端到端响应</b></td><td class="num"><b>~1.55 s</b></td></tr>
+        <tr><td colspan="2" style="color:var(--ink3);font-size:12.5px">
+          <span class="m">T</span><sub>response</sub> = <span class="m">T</span><sub>engine</sub> + <span class="m">T</span><sub>transmission</sub> + <span class="m">T</span><sub>render</sub> ≈ 1.55 s（Sec. 7.3）。<br>
+          20 帧 / 0.62 s = 32.26 FPS，高于管线的 24 FPS，所以稳态下服务器<b>跟得上</b>显示速率；首块 17 帧不计入稳态统计。</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 8</span><span class="ti">块级交互时间线（论文 Fig. 5 重绘，可播放）</span></div>
+    <div class="ctl">
+      <button class="btn" id="tlPlay" type="button">▶ 播放</button>
+      <label>时间 <input type="range" id="tlT" min="0" max="2700" value="1550" step="10"> <span class="val" id="tlTv">1550 ms</span></label>
+      <label>动作发生于块内第 <input type="range" id="tlA" min="0" max="830" value="300" step="10"> <span class="val" id="tlAv">300 ms</span></label>
+    </div>
+    <div class="figbody" style="padding:10px 18px 6px">
+      <svg viewBox="0 0 720 300" role="img" aria-label="四条泳道：用户输入、显示、游戏引擎、渲染服务器。引擎用 830 毫秒录一块 20 帧白盒，经约 100 毫秒传输编码后服务器用 620 毫秒生成，首个动作对齐的画面在约 1550 毫秒出现并以 830 毫秒播完；下一块的录制与本块的生成并行" id="tlSvg">
+        <g id="tlStatic"></g>
+        <g id="tlDyn"></g>
+      </svg>
+    </div>
+    <div class="readout">
+      <div><div class="k">Game Engine</div><div class="v" id="tlE" style="font-size:15px">—</div></div>
+      <div><div class="k">Render Server</div><div class="v" id="tlR" style="font-size:15px">—</div></div>
+      <div><div class="k">Display</div><div class="v" id="tlD" style="font-size:15px">—</div></div>
+      <div><div class="k">该动作的画面延迟</div><div class="v" id="tlL">1550<small>ms</small></div></div>
+    </div>
+    <figcaption><b>按 Fig. 5 与 Sec. 7.3 重绘</b>；红色是传输 / 缓冲的短间隔（论文只给合计 ~0.1 s，图中 70 / 30 ms 的上下行拆分是我为作图设定的）。论文的 Fig. 5 只画了一块；下面两点是我把它<b>外推到连续多块</b>后的推导：
+    ① 引擎在录第 k+1 块时服务器正在算第 k 块，稳态周期由 <b>830 ms 的录制</b>决定而不是 620 ms 的推理——服务器有 25% 左右的空闲；
+    ② 无论动作落在块内哪个时刻，它对应的那一帧总在 1550 ms 后显示（块以录制时的速率回放，两段偏移抵消）——所以延迟对每一帧都是<b>常数 ≈1.55 s</b>，而不是「最好 0.7 s、最坏 1.55 s」。论文只给了首帧的 1550 ms 和 Sec. 7.2 的一句「32.2 FPS 高于 24 FPS，足以维持目标速率」。</figcaption>
+  </figure>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">Figure 9</span><span class="ti">思想实验：块的大小、推理时间与延迟的关系</span></div>
+    <div class="ctl">
+      <label>每块帧数 F <input type="range" id="lcF" min="2" max="40" value="20" step="1"> <span class="val" id="lcFv">20</span></label>
+      <label>管线帧率 <input type="range" id="lcFps" min="12" max="60" value="24" step="1"> <span class="val" id="lcFpsv">24</span></label>
+      <label>每块推理 R <input type="range" id="lcR" min="50" max="1500" value="620" step="10"> <span class="val" id="lcRv">620 ms</span></label>
+      <label>传输 N <input type="range" id="lcN" min="0" max="400" value="100" step="10"> <span class="val" id="lcNv">100 ms</span></label>
+      <button class="btn" id="lcReset" type="button">回到论文设定</button>
+    </div>
+    <div class="readout">
+      <div><div class="k">T_engine = F / fps</div><div class="v" id="lcTe">833<small>ms</small></div></div>
+      <div><div class="k">T_response</div><div class="v" id="lcTr">1553<small>ms</small></div></div>
+      <div><div class="k">服务器吞吐 F / R</div><div class="v" id="lcTh">32.3<small>FPS</small></div></div>
+      <div><div class="k">稳态能否跟上显示</div><div class="v ok" id="lcOk">能（周期 833 ms）</div></div>
+    </div>
+    <figcaption><b>这是我的思想实验，不是论文数据。</b>默认值复现 Table 2；把 F 调小就是论文 Sec. 8 提议的「帧级流式」方向——引擎不必先录满一块。
+    但注意 R 在这里是独立滑杆：真实的推理时间不会随 F 线性缩小（每块有固定开销、金字塔与历史拼装都是按块算的），所以小 F 下 R 需要单独优化，否则「跟不上」会先出现。</figcaption>
+  </figure>
+
+  <div class="call warn">
+    <div class="hd">△ 「实时」的准确读法</div>
+    <p>论文没有正式定义标题里的 Real-Time；按 Sec. 7.2 的数字读，它指的是<b>计算侧吞吐 ≥ 显示帧率</b>（32.2 &gt; 24），这保证了画面不会越播越慢。但它<b>不是</b>输入到画面的低延迟：作者在 Sec. 8 第一条就写「约 1.6 s 的延迟对需要即时反馈的交互来说太高」，并把帧级流式架构列为必要的下一步。
+    读这篇论文时最好把两个数字都记住，而不是只记 32.2。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 09 QUALITATIVE -->
+<section class="sec" id="s-qual">
+  <div class="eyebrow"><span class="n">09</span><span class="t">Qualitative Results</span><span class="line"></span></div>
+  <h2>定性结果与作者提议的三条评估轴</h2>
+  <p class="lead">Sec. 7.4 只有一段话：展示基础自回归模型（Fig. 6）与蒸馏后实时模型（Fig. 7）在 1280×768 下的定性结果，并提出<b>生成式渲染器应当从三个方面评估</b>。论文<b>没有</b>给出任何生成质量的定量指标（只有 Tab. 1–2 的吞吐 / 延迟 / 显存）。</p>
+
+  <div class="grid3">
+    <div class="card cm">
+      <p class="mono">AXIS 1</p>
+      <h5>长时程记忆</h5>
+      <p>回到看过的地方是否还是同一个世界。对应 Sec. 6.2 的锚块与 FOV 检索，也对应 Sec. 8「缺乏持久三维记忆」的自我批评。</p>
+    </div>
+    <div class="card ce">
+      <p class="mono">AXIS 2</p>
+      <h5>与白盒条件的一致性</h5>
+      <p>生成的几何、角色位置、物体边界是否跟随引擎给出的白盒。这是 Magpie 特有的评估维度——在纯世界模型里没有对应物。</p>
+    </div>
+    <div class="card cr">
+      <p class="mono">AXIS 3</p>
+      <h5>整体视觉质量</h5>
+      <p>材质、光照、细节、时间稳定性。Sec. 8 承认少步、低精度、有界上下文与有限训练覆盖共同造成可见的质量差距。</p>
+    </div>
+  </div>
+
+  <div class="prose">
+    <p>从 Fig. 7（蒸馏模型）能读到的信息：图按行交替排列<b>生成帧</b>与<b>对应白盒帧</b>，场景包括集装箱堆场（绿色围栏）和一片废墟风格的沙色小镇，全部是<b>第三人称跟随视角</b>、同一款 UE 人偶被渲染成穿着不同服装的角色；
+    白盒里的棋盘格方块在生成结果里变成了带材质与阴影的墙体与地面，角色姿态（跑、转身）与白盒对齐。图 3 的采集样例还包括驾驶视角、赛博朋克街道、卡通田野、雨夜霓虹街等风格，说明「同一白盒、多种外观」的数据基础是存在的。</p>
+  </div>
+
+  <div class="call warn">
+    <div class="hd">△ 评估上的空白（这是全文最薄弱的部分）</div>
+    <p>没有指标、没有基线（例如同为「G-buffer / 粗模 → 视频」路线的 Generative World Renderer、Coarse-to-Real、DiffusionRenderer），没有对三条评估轴的任何量化，三种注入机制的比较只有一句定性结论，也没有用户研究。
+    作者自己提出了三条评估轴却没有沿着它们给出数字，这使得「cross-attention 是最实用的平衡」「锚块减少长时程偏离」这类陈述目前只能当作设计陈述而非实验结论。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 10 LIMITATIONS -->
+<section class="sec" id="s-crit">
+  <div class="eyebrow"><span class="n">10</span><span class="t">Limitations &amp; My Reservations</span><span class="line"></span></div>
+  <h2>局限，以及我读下来的保留意见</h2>
+  <p class="lead">Sec. 8 是全文写得最诚实的一节：作者列了八条局限，并明说系统「尚不满足生产级游戏渲染器的延迟、保真度与持久性要求」。先按原文整理，再补我的意见。</p>
+
+  <div class="tbl"><table>
+    <thead><tr><th style="width:30%">作者列出的局限</th><th>症状</th><th>作者给的方向</th></tr></thead>
+    <tbody>
+      <tr><td><b>白盒预录 + 逐块推理的延迟</b></td><td>先录满 20 帧（830 ms）再传、算、解码；总延迟约 1.6 s，对需要即时反馈的交互太高</td><td><b>帧级流式</b>：白盒帧一产出就传输并消费，让引擎执行、条件编码、生成、显示重叠</td></tr>
+      <tr><td><b>白盒条件的深度歧义</b></td><td>单张 RGB 白盒对度量深度、表面朝向、细结构、同色区域的空间关系仍有歧义，二维看似合理却违反场景几何</td><td>用引擎导出的<b>深度</b>、法线、分割、运动矢量等几何缓冲补充条件；深度最直接，且不会把规则或隐藏状态带进渲染器</td></tr>
+      <tr><td><b>对白盒的不一致</b></td><td>快速运动、大视角变化、遮挡、复杂交互、训练分布之外的场景下，几何、角色位置、物体边界会偏离引擎观察</td><td>更强的条件编码与注入；显式惩罚结构偏差的目标；覆盖更多困难过渡；运行时一致性检查</td></tr>
+      <tr><td><b>高保真外观监督不足</b></td><td>引擎配对数据同步准确、结构可控，但视觉目标覆盖不了真实世界材质、光照、天气、人体运动与细尺度物理效果</td><td>混入高质量真实视频与产线级离线渲染；可能需要额外渲染通道、几何条件构造、伪标注或分阶段预训练 / 微调</td></tr>
+      <tr><td><b>没有音频</b></td><td>只产出视觉观察；生成的运动可能改变可见事件的时机</td><td>定义引擎到音频的接口；更紧的渲染延迟与时间同步控制</td></tr>
+      <tr><td><b>没有持久三维视觉记忆</b></td><td>二维有界历史支持短期连续与回访，但大视角变化或长时间离开后外观漂移，被遮挡内容需从不完整观察重新推断</td><td>把生成观察持续投影到可更新、可存储、可复用的<b>离线三维表示</b>，同时引擎仍是 gameplay 状态的权威</td></tr>
+      <tr><td><b>推理成本高、难上边缘设备</b></td><td>需要高端服务器 GPU，峰值显存约 34 GB</td><td>更小更高效的模型：架构、蒸馏、量化、面向部署的优化，目标是把生成渲染搬到本地边缘硬件</td></tr>
+      <tr><td><b>帧率与画质</b></td><td>32.2 FPS 仍达不到游戏要求；少步、低精度、有界上下文、有限训练覆盖带来时间不稳定、纹理退化、身份漂移、与引擎可见细节不一致</td><td>（未单列方向，散见于上述各条）</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="ix">10.1</span>我的保留意见</h3>
+  <div class="prose">
+    <ol>
+      <li><b>没有定量评测是硬伤。</b>上一节已说。尤其是三种注入机制的对比——这是论文唯一算得上「方法选择」的实验——却没有任何数字，读者无法判断「明显降低质量」「显著不连续」到底有多大。</li>
+      <li><b>「实时」只对了一半。</b>标题的 Real-Time 是吞吐意义上的；1.55 s 的动作—画面延迟按游戏标准属于不可玩区间。作者坦率承认这一点，但标题和摘要的措辞会让粗读者高估。</li>
+      <li><b>引擎侧的渲染并没有被去掉，只是被降级。</b>Magpie 依旧需要引擎以 24 FPS 渲染白盒（白盒分辨率论文未说明），也依旧需要粗模资产、碰撞体与动画状态机。省掉的是贴图 / 材质 / 灯光 / 后期这一段——这段确实最贵，但「无需资产」的说法要打折扣。</li>
+      <li><b>白盒的表示不是中性的。</b>从图看白盒带 UE 棋盘格与标准人偶。棋盘格给了尺度与透视线索，人偶给了姿态先验；换一套白盒风格（纯色、不同人形比例）是否需要重训，论文没有讨论。这也牵涉「深度歧义」——模型现在的深度感可能部分来自棋盘格。</li>
+      <li><b>训练细节与接口细节缺失过多。</b>训练步数 / 算力 / 学习率 / 分辨率对齐（采集 1080p60 → 推理 1280×768@24）、教师步数、<span class="m">E</span>(<i>c</i>, <i>r</i>) 的编码器是什么、三段历史与 Helios 多尺度压缩的映射、桥接解码的形式、检索的帧数上限——全部未写。这篇论文目前是<b>系统设计陈述</b>而非可复现报告。</li>
+      <li><b>检索的对象是什么？</b>Sec. 6.2 说检索「与当前视角相关的观察」，历史 <span class="m">h<sub>t</sub></span> 是「视觉历史」，近期块是「最新输出」。我读为检索的是<b>模型自己生成过的 latent</b>（而非白盒或真值）；若是这样，回访一致性依赖于早期生成本身没漂——锚块的存在也暗示了这一点。原文未明说。</li>
+      <li><b>延迟分解可能少算了一段。</b>Table 2 的 ~0.1 s 写的是「白盒序列与相机元数据传到服务器并编码」；生成视频流回客户端的视频编码 / 传输 / 解码在 Fig. 5 里只画成一小段红色。若它没被计入 0.1 s，真实的动作—画面延迟会略高于 1.55 s。</li>
+      <li><b>覆盖面与视角。</b>所有展示均为第三人称跟随视角、单一受控角色；多角色、战斗、密集物体交互被明确列为未覆盖。作为「游戏渲染器」，这仍是一个相当窄的切片。</li>
+      <li><b>发布状态。</b>论文正文没有代码、模型或数据的发布链接；项目主页的页面描述是「Interactive results for Magpie」，我也未在其上看到代码 / 权重 / 数据入口。数据（300 h 配对）是这项工作最有价值的资产之一，是否开放会很大程度决定它的影响力。</li>
+    </ol>
+  </div>
+
+  <div class="call ok">
+    <div class="hd">○ 尽管如此，我认为值得记住的贡献</div>
+    <p><b>边界的定义是清楚且可执行的。</b>「动作 / 状态 / 事件永不进模型，只有结算后的白盒进模型」是一条可以被别的系统直接采用的接口契约；它把「生成模型能不能保证规则」这个无解的问题，换成了「生成模型能不能忠实于给定几何」这个可测的问题。</p>
+    <p><b>数据引擎的设计有前瞻性。</b>录得比用得多（输入 / 碰撞 / 事件同步保留）、刻意保留空闲行为、人工而非脚本操作——这些选择让同一份数据能支持从「白盒渲染」到「事件条件渲染」的多个后续版本。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 11 REPO -->
+<section class="sec" id="s-repo">
+  <div class="eyebrow"><span class="n">11</span><span class="t">In Context</span><span class="line"></span></div>
+  <h2>放回 Awesome-Interactive-Video-World-Models 的坐标系里</h2>
+  <p class="lead">按本仓库的三条严格标准逐条对照，Magpie 是一个<b>有争议的边界案例</b>：系统层面闭环成立，模型层面却刻意不消费动作。</p>
+
+  <div class="tbl"><table>
+    <thead><tr><th style="width:26%">严格标准</th><th>Magpie 的情况</th><th style="width:14%">判断</th></tr></thead>
+    <tbody>
+      <tr><td><b>1. 逐步动作条件</b></td><td>模型<b>不</b>消费动作；它每块消费引擎结算后的白盒观察（动作的可见后果）与相机位姿（仅索引）。系统层面：玩家动作 → 引擎 → 白盒 → 模型，闭环可闭合，但粒度是块（20 帧）而非帧。</td><td><span class="pill b">模型层不满足</span><br><span class="pill o">系统层满足</span></td></tr>
+      <tr><td><b>2. 因果 / 流式生成</b></td><td>分块自回归、3 步去噪、逐块编解码、WebRTC 流式回传；稳态 620 ms / 20 帧。</td><td><span class="pill o">满足</span></td></tr>
+      <tr><td><b>3. 持久世界状态</b></td><td>模型侧：锚块 + FOV 检索 + 近期块的有界二维历史（retrieval）。系统侧：权威世界状态在引擎里持久存在。</td><td><span class="pill o">满足（双重）</span></td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="prose">
+    <p>我的建议是放进 <code>control</code>（Action Control &amp; Interfaces）而不是 <code>systems</code>：这篇论文的核心贡献恰恰是<b>一种新的「动作到达生成器」的方式</b>——不直接到达，而是经引擎结算成白盒。若维护者认为「相机 / 导航控制算动作空间」的放宽也适用于「引擎结算后的观察」，再升入 <code>systems</code> 也说得通。<code>realtime</code> 与 <code>memory</code> 两轴它都碰到了，但都是继承（Helios、Context-as-Memory），不是贡献。</p>
+  </div>
+
+  <h3><span class="ix">11.1</span>与邻居的关系</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>工作</th><th>控制信号进入模型的方式</th><th>规则 / 状态由谁保证（我的归类）</th><th>与 Magpie 的关系</th></tr></thead>
+    <tbody>
+      <tr><td><b>Matrix-Game 2.0</b> (2508.13009)</td><td>帧级键鼠输入直接注入</td><td>模型隐式学习</td><td>Magpie 与之对照的路线：论文说键盘或文本条件都不能保证遵守设计好的规则</td></tr>
+      <tr><td><b>WorldCam</b> (2603.16871)</td><td>相机位姿既做即时控制又做历史索引</td><td>模型隐式学习</td><td>Magpie 只保留了后一半：位姿<b>只</b>做索引，不做控制</td></tr>
+      <tr><td><b>Context-as-Memory</b> (2506.03141)</td><td>—（相机 FOV 重叠检索上下文帧）</td><td>—</td><td>直接被 Magpie 的检索段采用</td></tr>
+      <tr><td><b>Helios</b> (2603.04379)</td><td>—（实时长视频骨架）</td><td>—</td><td>提供有界多尺度上下文、金字塔生成、3 步蒸馏；Magpie 额外用了 self forcing</td></tr>
+      <tr><td><b>Generative World Renderer</b> (2604.02329)</td><td>同步游戏画面 + 多路 G-buffer</td><td>引擎</td><td>同属「图形缓冲 → 视频」的生成式渲染；Magpie 把它推进到<b>闭环交互</b>，且当前只用 RGB 白盒（G-buffer 是 Sec. 8 的扩展方向）</td></tr>
+      <tr><td><b>Coarse-to-Real</b> (2601.22301)</td><td>粗糙动态仿真 → 真实视频，保留布局 / 相机 / 人的轨迹</td><td>仿真</td><td>非交互设定下的同一思想（论文原话：Magpie「把这一原则扩展到闭环交互」）；区别是实时 + 引擎在环 + 有界记忆</td></tr>
+      <tr><td><b>LingBot-World 2.0 / DreamX-World</b></td><td>文本驱动的事件与动作</td><td>模型隐式学习</td><td>论文指出文本词汇更广，但时机与空间后果说得不直接</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="ix">11.2</span>建议的 papers.jsonl 条目（供维护者审阅）</h3>
+  <pre>{"id": "2608.27168", "name": "Magpie", "title": "Magpie: Real-Time World Renderer for Interactive Games",
+ "venue": null, "date": "2026-08-27", "section": "control", "section_source": "curated",
+ "links": {"paper": "https://arxiv.org/abs/2608.27168", "website": "https://zhanxy.xyz/Magpie-website"},
+ "attrs": {"backbone": "causal-diffusion",
+           "action_space": "none at the model; engine-resolved white-box frames (per 5-latent chunk) + camera pose used only for history retrieval; keyboard/mouse/controller handled by the game engine",
+           "fps": "32.2 (compute-side, 1x H100, 1280x768, 620 ms per 20-frame chunk); 24 FPS pipeline; ~1.55 s end-to-end input-to-frame latency",
+           "memory": "hybrid:retrieval+implicit-context",
+           "open_source": false}}</pre>
+  <p class="note"><code>open_source</code> 我填 false 是因为正文与项目页均未提供代码 / 权重 / 数据链接；若后续发布应改。<code>horizon</code> 留空：论文未报告最长会话时长。</p>
+</section>
+
+<!-- ============================================================ 12 APPENDIX -->
+<section class="sec" id="s-appendix">
+  <div class="eyebrow"><span class="n">12</span><span class="t">Appendix</span><span class="line"></span></div>
+  <h2>附录速查</h2>
+
+  <h3><span class="ix">A</span>全部数字</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>项</th><th>值</th><th>出处</th></tr></thead>
+    <tbody>
+      <tr><td>训练数据</td><td class="num">~300 h · 30+ UE 场景 · 1920×1080 @ 60 FPS</td><td>Sec. 4.1</td></tr>
+      <tr><td>标注模型</td><td class="num">Qwen3.6-27B（两个字段）</td><td>Sec. 4.5</td></tr>
+      <tr><td>骨架</td><td class="num">Wan2.2-TI2V-5B</td><td>Sec. 6</td></tr>
+      <tr><td>去噪步数</td><td class="num">3（蒸馏后）</td><td>Sec. 6.3</td></tr>
+      <tr><td>每块 latent / 帧</td><td class="num">5 latent → 首块 17 帧、后续 20 帧</td><td>Tab. 1</td></tr>
+      <tr><td>推理分辨率</td><td class="num">1280 × 768</td><td>Tab. 1</td></tr>
+      <tr><td>稳态预测时间</td><td class="num">620 ms / 块 → 32.2 FPS</td><td>Tab. 1 / Sec. 7.2</td></tr>
+      <tr><td>峰值显存</td><td class="num">≈34 GB（1× H100）</td><td>Tab. 1</td></tr>
+      <tr><td>管线帧率</td><td class="num">24 FPS</td><td>Sec. 7.2</td></tr>
+      <tr><td>延迟分解</td><td class="num">0.83 + ~0.1 + 0.62 ≈ 1.55 s（Sec. 8 写作 ≈1.6 s）</td><td>Tab. 2 / Sec. 8</td></tr>
+      <tr><td>通信</td><td class="num">WebRTC，新鲜优先的抖动缓冲</td><td>Sec. 5</td></tr>
+      <tr><td>精度</td><td class="num">FP8 混合（线性 / 注意力 / FFN 低精度）</td><td>Sec. 6.4</td></tr>
+      <tr><td>自编码器</td><td class="num">LightTAE（LightX2V）</td><td>Sec. 6.4</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="ix">B</span>术语</h3>
+  <dl class="gloss">
+    <dt>白盒（white-box）渲染</dt><dd>去掉最终贴图、材质、复杂光照与非必要几何细节，只保留占位几何、碰撞边界、主轮廓、交互功能与可见状态变化的引擎渲染。游戏开发里的 greybox / blockout 原型。</dd>
+    <dt>Chunk / latent</dt><dd>渲染器的生成单位：5 个 latent 帧为一块，经 VAE 解码为 17（首块）或 20 帧视频；引擎与服务器以块为粒度交换白盒与视频。</dd>
+    <dt>s₀ = E(c, r)</dt><dd>文本提示 c 与首帧图 r 在初始化时编码一次得到的条件，建立场景风格、角色外观与初始视觉状态。</dd>
+    <dt>AdaLN</dt><dd>自适应层归一化（DiT，Peebles &amp; Xie 2023）：用条件向量回归出归一化的 scale / shift / gate。Magpie 试过用它注入白盒，块边界不连续。</dd>
+    <dt>Cross-attention 注入</dt><dd>把编码后的白盒表示放进历史条件序列，作为交叉注意力的 K/V 供去噪网络读取。Magpie 采用的方式。</dd>
+    <dt>Context-as-Memory</dt><dd>Yu et al. 2025：用相机位姿计算视野（FOV）重叠，把与当前视角相关的历史帧检索回上下文。</dd>
+    <dt>Helios</dt><dd>Yuan et al. 2026：14B 实时长视频模型；Multi-Term Memory Patchification（有界多尺度上下文）、Pyramid Unified Predictor Corrector（分层生成）、Adversarial Hierarchical Distillation（50 → 3 步）。Magpie 继承其架构与蒸馏设计。</dd>
+    <dt>Self forcing</dt><dd>Huang et al. 2025：训练时让自回归模型以自己生成的历史为条件，缩小教师强制训练与推理之间的差距。</dd>
+    <dt>LightTAE</dt><dd>LightX2V 项目提供的轻量自编码器，替代「更昂贵的时空自编码器」（论文未点名，Sec. 7.1 另提到 Wan 解码器）做 latent 编解码，降低块边界处的编解码延迟。</dd>
+    <dt>桥接解码（bridging）</dt><dd>因为 Wan 解码器时间因果、当前块的解码依赖前文，Magpie 在相邻块之间提供因果上下文，使得可以固定地一次只解码一块。</dd>
+    <dt>抖动缓冲（jitter buffer）</dt><dd>WebRTC 用于吸收网络抖动的接收缓冲；Magpie 将其配置为新鲜优先——必要时丢弃过期帧、降低有效帧率，而不推迟后续帧。</dd>
+  </dl>
+
+  <h3><span class="ix">C</span>关键依赖与相关工作（论文引用）</h3>
+  <div class="prose">
+    <ul>
+      <li>Wan2.2-TI2V-5B — Team Wan et al. 2025, arXiv 2503.20314（骨架）</li>
+      <li>Helios — Yuan et al. 2026, arXiv 2603.04379（多尺度上下文 / 分层生成 / 蒸馏）</li>
+      <li>Context as Memory — Yu et al. 2025, arXiv 2506.03141（FOV 检索）</li>
+      <li>Self Forcing — Huang et al. 2025, arXiv 2506.08009</li>
+      <li>DiT / AdaLN — Peebles &amp; Xie, ICCV 2023</li>
+      <li>LightX2V — ModelTC, 2025（LightTAE）</li>
+      <li>Generative World Renderer — Huang et al. 2026, arXiv 2604.02329；Coarse-to-Real — Gomez-Nogales et al. 2026, arXiv 2601.22301；DiffusionRenderer — Liang et al., CVPR 2025</li>
+      <li>Matrix-Game 2.0 — He et al. 2025, arXiv 2508.13009；WorldCam — Nam et al. 2026, arXiv 2603.16871；LingBot-World 2.0 — Gao et al. 2026, arXiv 2607.07534</li>
+    </ul>
+  </div>
+
+  <div class="foot">
+    本页由我根据 arXiv 2608.27168v1（2026-08-27）全文与 Fig. 2–7 整理，图解均为按理解重绘，并在图注中区分「论文陈述」与「我的推断 / 示意」。
+    论文本身未提供定量评测；本页所有数字均可在附录 A 的出处处核对。
+  </div>
+</section>
+</main>
+</div>
+
+<script>
+(function(){
+'use strict';
+const $=(s,r)=>(r||document).querySelector(s);
+const $$=(s,r)=>Array.prototype.slice.call((r||document).querySelectorAll(s));
+const NS='http://www.w3.org/2000/svg';
+function el(tag,attrs,parent){
+  const e=document.createElementNS(NS,tag);
+  if(attrs){ for(const k in attrs){ if(k==='text') e.textContent=attrs[k]; else e.setAttribute(k,attrs[k]); } }
+  if(parent) parent.appendChild(e);
+  return e;
+}
+const reduced=window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------------- theme ---------------- */
+const root=document.documentElement;
+try{ const s=localStorage.getItem('magpie-theme'); if(s==='light'||s==='dark') root.setAttribute('data-theme',s); }catch(e){}
+$('#themeBtn').addEventListener('click',function(){
+  const cur=root.getAttribute('data-theme'); let next;
+  if(cur==='light') next='dark'; else if(cur==='dark') next='light';
+  else next=(window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches)?'dark':'light';
+  root.setAttribute('data-theme',next);
+  try{ localStorage.setItem('magpie-theme',next); }catch(e){}
+});
+
+/* ---------------- progress + scrollspy ---------------- */
+const prog=$('#prog'), tocLinks=$$('#toc a');
+const secs=tocLinks.map(a=>document.querySelector(a.getAttribute('href')));
+function onScroll(){
+  const h=document.documentElement; const max=h.scrollHeight-h.clientHeight;
+  prog.style.width=(max>0?(h.scrollTop/max*100):0)+'%';
+  const y=h.scrollTop+130; let idx=0;
+  secs.forEach((s,i)=>{ if(s && s.offsetTop<=y) idx=i; });
+  tocLinks.forEach((a,i)=>a.classList.toggle('on',i===idx));
+}
+addEventListener('scroll',onScroll,{passive:true}); addEventListener('resize',onScroll); onScroll();
+
+/* ---------------- tabs ---------------- */
+$$('.tabs').forEach(tl=>{
+  const tabs=$$('.tab',tl);
+  tabs.forEach(t=>t.addEventListener('click',()=>{
+    tabs.forEach(o=>{ o.setAttribute('aria-selected',o===t?'true':'false'); const p=document.getElementById(o.getAttribute('aria-controls')); if(p) p.hidden=(o!==t); });
+  }));
+});
+
+/* ---------------- hero: white-box ↔ rendered reveal ---------------- */
+(function(){
+  const wb=$('#wbLayer'), rn=$('#renLayer'); if(!wb||!rn) return;
+  const G={
+    sky:[0,0,720,200], ground:[0,200,720,100],
+    road:'330,200 390,200 470,300 250,300',
+    bldgs:[
+      {f:[30,70,160,130], s:'190,70 236,92 236,200 190,200', win:[4,3]},
+      {f:[500,90,190,110], s:'458,106 500,90 500,200 458,200', win:[5,3]},
+      {f:[252,124,74,76], s:'326,124 344,132 344,200 326,200', win:[2,2]},
+      {f:[392,132,62,68], s:'454,132 470,138 470,200 454,200', win:[2,2]}
+    ],
+    lamp:{x:298,y0:200,y1:140}, ch:{x:360,y:262}
+  };
+  const rect=(g,a,attrs)=>el('rect',Object.assign({x:a[0],y:a[1],width:a[2],height:a[3]},attrs),g);
+  const rsvg=rn.ownerSVGElement; const defs=el('defs',{},rsvg);
+  const sky=el('linearGradient',{id:'rnSky',x1:0,y1:0,x2:0,y2:1},defs);
+  el('stop',{offset:0,style:'stop-color:var(--rn-sky1)'},sky); el('stop',{offset:1,style:'stop-color:var(--rn-sky2)'},sky);
+  const gr=el('linearGradient',{id:'rnGround',x1:0,y1:0,x2:0,y2:1},defs);
+  el('stop',{offset:0,style:'stop-color:var(--rn-sky2);stop-opacity:.45'},gr); el('stop',{offset:1,style:'stop-color:var(--rn-sky2);stop-opacity:0'},gr);
+  function draw(g,isW){
+    if(isW) rect(g,G.sky,{class:'f-surf3'}); else rect(g,G.sky,{fill:'url(#rnSky)'});
+    if(!isW){ el('circle',{cx:600,cy:70,r:46,style:'fill:var(--rn-sun)',opacity:.16},g); el('circle',{cx:600,cy:70,r:24,style:'fill:var(--rn-sun)',opacity:.95},g); }
+    if(isW){ rect(g,G.ground,{fill:'url(#chk)'}); el('line',{x1:0,y1:200,x2:720,y2:200,class:'s-W','stroke-width':1.2},g); }
+    else { rect(g,G.ground,{style:'fill:var(--rn-ground)'}); rect(g,G.ground,{fill:'url(#rnGround)'}); }
+    [2,3,0,1].forEach(i=>{
+      const b=G.bldgs[i];
+      if(isW){
+        el('polygon',{points:b.s,fill:'url(#chk-s)',class:'s-W','stroke-width':1},g);
+        rect(g,b.f,{fill:'url(#chk-s)',class:'s-W','stroke-width':1});
+      }else{
+        el('polygon',{points:b.s,style:'fill:var(--rn-wall2)'},g);
+        rect(g,b.f,{style:'fill:var(--rn-wall)'});
+        const cx=b.f[0],cy=b.f[1],cw=b.f[2],ch=b.f[3],nx=b.win[0],ny=b.win[1];
+        const px=cw/(nx+1),py=ch/(ny+1),u=Math.min(px,py);
+        for(let r=0;r<ny;r++)for(let c=0;c<nx;c++){
+          const lit=((r*3+c*5+i)%4)!==0;
+          el('rect',{x:cx+px*(c+1)-u*.28,y:cy+py*(r+1)-u*.3,width:u*.56,height:u*.6,rx:1.5,style:'fill:var('+(lit?'--rn-win':'--rn-wall2')+')',opacity:lit?.95:.85},g);
+        }
+        el('rect',{x:cx,y:cy+ch,width:cw,height:7,fill:'#000',opacity:.28},g);
+      }
+    });
+    if(isW){ el('polygon',{points:G.road,class:'f-W2'},g); el('polygon',{points:G.road,class:'nofill s-W','stroke-width':1},g); }
+    else { el('polygon',{points:G.road,style:'fill:var(--rn-road)'},g); el('line',{x1:360,y1:206,x2:360,y2:300,style:'stroke:var(--rn-line)','stroke-width':2,'stroke-dasharray':'10 12',opacity:.8},g); }
+    const L=G.lamp;
+    if(isW){ el('line',{x1:L.x,y1:L.y0,x2:L.x,y2:L.y1,class:'s-W','stroke-width':3},g); el('circle',{cx:L.x,cy:L.y1,r:5,class:'f-W2'},g); }
+    else { el('line',{x1:L.x,y1:L.y0,x2:L.x,y2:L.y1,style:'stroke:var(--rn-wall2)','stroke-width':3},g); el('circle',{cx:L.x,cy:L.y1,r:24,style:'fill:var(--rn-lamp)',opacity:.22},g); el('circle',{cx:L.x,cy:L.y1,r:5,style:'fill:var(--rn-lamp)'},g); }
+    const c=G.ch;
+    if(isW){ el('ellipse',{cx:c.x,cy:c.y+2,rx:14,ry:4,fill:'#000',opacity:.15},g); el('rect',{x:c.x-9,y:c.y-40,width:18,height:38,rx:9,fill:'#d8dbe0',stroke:'#8d9096','stroke-width':1},g); el('circle',{cx:c.x,cy:c.y-49,r:8,fill:'#d8dbe0',stroke:'#8d9096','stroke-width':1},g); }
+    else { el('ellipse',{cx:c.x,cy:c.y+2,rx:16,ry:4,fill:'#000',opacity:.4},g); el('rect',{x:c.x-9,y:c.y-40,width:18,height:38,rx:9,style:'fill:var(--rn-char)'},g); el('circle',{cx:c.x,cy:c.y-49,r:8,style:'fill:var(--rn-skin)'},g); el('rect',{x:c.x-9,y:c.y-22,width:18,height:3,style:'fill:var(--rn-lamp)',opacity:.9},g); }
+  }
+  draw(wb,true); draw(rn,false);
+  const range=$('#revRange'), clip=$('#renClip'), handle=$('#revHandle'), wrap=$('#reveal');
+  function setV(v){ clip.style.clipPath='inset(0 0 0 '+v+'%)'; handle.style.left=v+'%'; }
+  range.addEventListener('input',()=>setV(+range.value)); setV(+range.value);
+  $$('#styleSeg button').forEach(b=>b.addEventListener('click',()=>{
+    $$('#styleSeg button').forEach(o=>o.setAttribute('aria-pressed',o===b?'true':'false'));
+    wrap.setAttribute('data-style',b.getAttribute('data-style'));
+  }));
+})();
+
+/* ---------------- component explorer ---------------- */
+(function(){
+  const pane=$('#nodePane'); if(!pane) return;
+  const D={
+    design:{t:'Gameplay Design',c:'usr',role:'构建并维护可编辑的白盒场景：布局、可通行区域、交互规则与对象、物理参数、触发器、事件逻辑；建立一次交互会话的初始状态。',
+      recv:['（设计工具本身，不在运行时消息环里）'],send:['对可执行场景的编辑 → Game Engine'],never:['设计元数据不直接发给 Render Server：一次编辑先改变可执行场景，再由引擎结算出更新后的白盒观察']},
+    client:{t:'User Client',c:'dsp',role:'显示生成的视频流；采集键盘、鼠标或手柄输入，每条输入打上时间戳后转发给 Game Engine。它只把玩家输入和生成输出接进运行时闭环。',
+      recv:['生成视频流 ← Render Server（WebRTC）'],send:['带时间戳的输入 → Game Engine'],never:['不在本地修改世界状态','不向 Render Server 发送任何控制']},
+    engine:{t:'Game Engine',c:'eng',role:'接收玩家输入、应用设计好的规则、推进 gameplay 状态；先结算通行、碰撞、交互、事件与相机更新，再渲染下一段白盒。',
+      recv:['玩家输入 ← User Client','场景与规则编辑 ← Gameplay Design'],send:['每个生成块两个运行时产物：白盒观察 + 相机位姿 → Render Server'],never:['物体属性、动作、状态变量、事件记录一律留在引擎内——把随机的视觉合成与可复现的 gameplay 隔开']},
+    render:{t:'Render Server',c:'ren',role:'管理生成式世界渲染器的生命周期：初始化时接受文本提示与首帧图；之后每块把引擎渲染的白盒帧注入去噪，并只用相机位姿检索相关历史以保持视觉一致。',
+      recv:['初始化：文本提示 c + 首帧图 r','每块：白盒观察 g_t + 相机位姿'],send:['生成视频流 → User Client'],never:['不做任何 gameplay 决策；只管理条件与推理']}
+  };
+  const nodes=$$('.node');
+  function show(k){
+    const d=D[k]; if(!d) return;
+    nodes.forEach(n=>n.classList.toggle('on',n.getAttribute('data-node')===k));
+    const li=a=>a.map(x=>'<li>'+x+'</li>').join('');
+    pane.innerHTML='<h5 style="color:var(--'+d.c+'-ink)">'+d.t+'</h5><p>'+d.role+'</p>'+
+      '<div class="row"><span class="k">接收</span><ul>'+li(d.recv)+'</ul></div>'+
+      '<div class="row"><span class="k">发出</span><ul>'+li(d.send)+'</ul></div>'+
+      '<div class="row"><span class="k" style="color:var(--bad-ink)">绝不</span><ul>'+li(d.never)+'</ul></div>';
+  }
+  nodes.forEach(n=>{ n.addEventListener('click',()=>show(n.getAttribute('data-node'))); n.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); show(n.getAttribute('data-node')); } }); });
+  show('engine');
+})();
+
+/* ---------------- injection mechanism selector ---------------- */
+(function(){
+  const seg=$('#injSeg'); if(!seg) return;
+  const M={
+    latent:{C:['强','ok'],Q:['明显下降','bad'],B:['未报告问题',''],K:['最低','ok'],note:'① 一致性最强、计算成本最低，但压制视觉细节，渲染质量明显下降'},
+    adaln:{C:['块内有效',''],Q:['未单独评价',''],B:['显著不连续','bad'],K:['低（一个调制向量）',''],note:'② 在单个块内能有效传达条件，但块边界出现显著的视觉不连续'},
+    xattn:{C:['可接受','ok'],Q:['可接受','ok'],B:['未报告问题',''],K:['中等（K/V 变长）',''],note:'③ 折中：整体质量可接受 + 对白盒一致性可接受 → 当前模型采用'}
+  };
+  function set(k){
+    $$('button',seg).forEach(b=>b.setAttribute('aria-pressed',b.getAttribute('data-inj')===k?'true':'false'));
+    ['latent','adaln','xattn'].forEach(m=>{ const g=$('#inj-'+m); if(g) g.setAttribute('opacity',m===k?'1':'0'); });
+    const gt=$('#gTok'),gtt=$('#gTokT'); if(gt){ gt.setAttribute('opacity',k==='xattn'?'1':'0'); gtt.setAttribute('opacity',k==='xattn'?'1':'0'); }
+    const ada=$('#adaBox'); if(ada) ada.setAttribute('class', k==='adaln'?'fs-E s-E':'f-surf2 s-rule');
+    const xa=$('#xaBox'); if(xa) xa.setAttribute('class', k==='xattn'?'fs-E s-E':'f-surf2 s-rule');
+    const hb=$('#histBox'); if(hb) hb.setAttribute('class', k==='xattn'?'fs-M s-E':'fs-M s-M');
+    const d=M[k]; const put=(id,v)=>{ const e=$(id); e.textContent=v[0]; e.className='v'+(v[1]?' '+v[1]:''); };
+    put('#injC',d.C); put('#injQ',d.Q); put('#injB',d.B); put('#injK',d.K);
+    $('#injNote').textContent=d.note;
+  }
+  $$('button',seg).forEach(b=>b.addEventListener('click',()=>set(b.getAttribute('data-inj'))));
+  set('xattn');
+})();
+
+/* ---------------- memory map (FOV retrieval) ---------------- */
+(function(){
+  const svg=$('#memSvg'); if(!svg) return;
+  const N=28, FOV=70*Math.PI/180, RANGE=88;
+  const way=[[112,196],[330,196],[560,196],[606,140],[560,60],[300,60],[150,60],[92,112],[100,186],[112,196],[214,196]];
+  // resample evenly
+  const seg=[]; let total=0;
+  for(let i=0;i<way.length-1;i++){ const dx=way[i+1][0]-way[i][0], dy=way[i+1][1]-way[i][1]; const L=Math.hypot(dx,dy); seg.push(L); total+=L; }
+  const cams=[];
+  for(let k=0;k<N;k++){
+    let d=total*k/(N-1), i=0; while(i<seg.length-1 && d>seg[i]){ d-=seg[i]; i++; }
+    const u=Math.min(1,d/seg[i]); const x=way[i][0]+(way[i+1][0]-way[i][0])*u, y=way[i][1]+(way[i+1][1]-way[i][1])*u;
+    const th=Math.atan2(way[i+1][1]-way[i][1], way[i+1][0]-way[i][0]) + 0.28*Math.sin(k*1.7);
+    cams.push({x:x,y:y,th:th});
+  }
+  const fr=c=>[[c.x,c.y],[c.x+RANGE*Math.cos(c.th-FOV/2),c.y+RANGE*Math.sin(c.th-FOV/2)],[c.x+RANGE*Math.cos(c.th+FOV/2),c.y+RANGE*Math.sin(c.th+FOV/2)]];
+  function overlap(A,B){ // SAT for convex polygons
+    const polys=[A,B];
+    for(const P of polys){ for(let i=0;i<P.length;i++){ const p1=P[i],p2=P[(i+1)%P.length]; const nx=p2[1]-p1[1], ny=p1[0]-p2[0];
+      let minA=Infinity,maxA=-Infinity,minB=Infinity,maxB=-Infinity;
+      A.forEach(p=>{const v=p[0]*nx+p[1]*ny; minA=Math.min(minA,v); maxA=Math.max(maxA,v);});
+      B.forEach(p=>{const v=p[0]*nx+p[1]*ny; minB=Math.min(minB,v); maxB=Math.max(maxB,v);});
+      if(maxA<minB||maxB<minA) return false; } }
+    return true;
+  }
+  // static blocks (city block the camera circles)
+  const gb=$('#memBlocks');
+  [[170,96,130,68],[330,96,80,68],[440,96,100,68],[200,18,120,14],[380,232,150,14]].forEach(b=>el('rect',{x:b[0],y:b[1],width:b[2],height:b[3],rx:4,fill:'url(#chk-s)',class:'s-W','stroke-width':1},gb));
+  el('text',{x:355,y:135,class:'f-ink3 xs',style:'font-family:var(--font-body)','text-anchor':'middle',text:'街区（白盒）'},gb);
+  const gp=$('#memPast'), gh=$('#memHi'), gc=$('#memCur'), chips=$('#memChips');
+  const tI=$('#memT'), tV=$('#memTv'), all=$('#memShowAll');
+  const pts=p=>p.map(q=>q[0].toFixed(1)+','+q[1].toFixed(1)).join(' ');
+  function render(){
+    const t=+tI.value; tV.textContent=t;
+    gp.innerHTML=''; gh.innerHTML=''; gc.innerHTML='';
+    // path so far
+    el('polyline',{points:cams.slice(0,t+1).map(c=>c.x+','+c.y).join(' '),class:'nofill s-ink3','stroke-width':1.2,'stroke-dasharray':'3 4'},gp);
+    const cur=fr(cams[t]);
+    const anchor=[0,1].filter(i=>i<t), recent=[t-3,t-2,t-1].filter(i=>i>=0);
+    const retrieved=[];
+    for(let i=0;i<t;i++){ if(anchor.indexOf(i)>=0||recent.indexOf(i)>=0) continue; if(overlap(cur,fr(cams[i]))) retrieved.push(i); }
+    for(let i=0;i<t;i++){
+      const isA=anchor.indexOf(i)>=0, isR=recent.indexOf(i)>=0, isV=retrieved.indexOf(i)>=0;
+      const cls=isA?'fs-E s-E':isR?'fs-D s-D':isV?'fs-M s-M':'f-surf3 s-rule';
+      if(!(isA||isR||isV) && !all.checked){ el('circle',{cx:cams[i].x,cy:cams[i].y,r:2.2,class:'f-ink3'},gp); continue; }
+      el('polygon',{points:pts(fr(cams[i])),class:cls,'stroke-width':(isA||isR||isV)?1.2:0.8,opacity:(isA||isR||isV)?.9:.22},(isA||isR||isV)?gh:gp);
+      el('circle',{cx:cams[i].x,cy:cams[i].y,r:3,class:(isA?'f-E':isR?'f-D':isV?'f-M':'f-ink3')},(isA||isR||isV)?gh:gp);
+      if(isA||isR||isV) el('text',{x:cams[i].x+5,y:cams[i].y-5,class:'xs mono '+(isA?'f-Ei':isR?'f-Di':'f-Mi'),text:'#'+i},gh);
+    }
+    el('polygon',{points:pts(cur),class:'fs-R s-R','stroke-width':1.8},gc);
+    el('circle',{cx:cams[t].x,cy:cams[t].y,r:4.5,class:'f-R'},gc);
+    el('text',{x:cams[t].x+7,y:cams[t].y+14,class:'f-Ri sml mono',text:'t = '+t},gc);
+    const chip=(cls,txt)=>'<span class="chip '+cls+'">'+txt+'</span>';
+    chips.innerHTML='h<sub>t</sub> = [ '+anchor.map(i=>chip('a','#'+i)).join('')+chip('sep','|')+
+      (retrieved.length?retrieved.map(i=>chip('rt','#'+i)).join(''):'<span class="chip sep">（无重叠）</span>')+chip('sep','|')+
+      recent.map(i=>chip('rc','#'+i)).join('')+' ] → '+chip('g','当前块 #'+t)+
+      '<span style="margin-left:auto">锚 '+anchor.length+' · 检索 '+retrieved.length+' · 近期 '+recent.length+'</span>';
+  }
+  tI.addEventListener('input',render); all.addEventListener('change',render); render();
+})();
+
+/* ---------------- teacher dots (Fig 6b) ---------------- */
+(function(){
+  const g=$('#teacherDots'); if(!g) return;
+  for(let i=0;i<24;i++){ const x=16+i*(688/23); el('circle',{cx:x,cy:56,r:3.2,class:'f-ink3'},g); }
+  el('text',{x:16,y:80,class:'f-ink3 xs',text:'噪声'},g); el('text',{x:704,y:80,class:'f-ink3 xs','text-anchor':'end',text:'干净块'},g);
+  el('text',{x:360,y:80,class:'f-ink3 xs','text-anchor':'middle',text:'… 几十次求值 …'},g);
+})();
+
+/* ---------------- timeline (Fig 8) ---------------- */
+(function(){
+  const svg=$('#tlSvg'); if(!svg) return;
+  const X0=96, W=604, TMAX=2700, X=t=>X0+Math.max(0,Math.min(TMAX,t))*W/TMAX;
+  const lanes={input:56,display:116,engine:176,server:236}; const H=22;
+  const P={rec:830,net1:70,ren:620,net2:30}; // 830 + 70 + 620 + 30 = 1550
+  const st=$('#tlStatic'), dy=$('#tlDyn');
+  // lanes
+  Object.keys(lanes).forEach(k=>{ const y=lanes[k]; el('line',{x1:X0,y1:y+H/2+8,x2:X0+W,y2:y+H/2+8,class:'s-rule','stroke-width':1},st); });
+  const lab=[['User Input','input','f-Ui'],['Display','display','f-Di'],['Game Engine','engine','f-Ei'],['Render Server','server','f-Ri']];
+  lab.forEach(l=>el('text',{x:X0-10,y:lanes[l[1]]+H/2+4,class:l[2]+' sml','text-anchor':'end',text:l[0]},st));
+  // axis
+  for(let t=0;t<=TMAX;t+=500){ el('line',{x1:X(t),y1:20,x2:X(t),y2:272,class:'s-rule1','stroke-width':.8},st); el('text',{x:X(t),y:290,class:'f-ink3 xs mono','text-anchor':'middle',text:t+' ms'},st); }
+  const bar=(lane,t0,t1,cls,txt,extra)=>{ if(t0>=TMAX) return; const y=lanes[lane]; if(X(Math.min(t1,TMAX))-X(t0)<70) txt=null; el('rect',Object.assign({x:X(t0),y:y,width:Math.max(0,X(Math.min(t1,TMAX))-X(t0)),height:H,rx:4,class:cls},extra||{}),st); if(txt) el('text',{x:(X(t0)+X(Math.min(t1,TMAX)))/2,y:y+H/2+4,class:'xs','text-anchor':'middle',text:txt,style:'fill:var(--ink)'},st); };
+  for(let k=0;k<4;k++){
+    const s=k*P.rec;
+    bar('input',s,s+P.rec,'nofill s-rule',k===0?'块 k 的输入窗口':'块 k+'+k,{fill:'url(#hatch)',opacity:.7});
+    bar('engine',s,s+P.rec,'fs-E s-E','录白盒 ~830 ms');
+    const r0=s+P.rec; bar('server',r0,r0+P.net1,'s-B',null,{fill:'url(#hatch-b)'}); bar('server',r0+P.net1,r0+P.net1+P.ren,'fs-R s-R','生成 ~620 ms');
+    const d0=r0+P.net1+P.ren; const dstart=Math.max(d0+P.net2, 1550+k*P.rec);
+    bar('display',d0,d0+P.net2,'s-B',null,{fill:'url(#hatch-b)'}); bar('display',dstart,dstart+P.rec,'fs-D s-D','播放 ~830 ms');
+  }
+  // 1550 bracket
+  el('path',{d:'M'+X(0)+' 36 L'+X(0)+' 30 L'+X(1550)+' 30 L'+X(1550)+' 36',class:'nofill s-ink2','stroke-width':1.2},st);
+  el('text',{x:(X(0)+X(1550))/2,y:26,class:'f-ink2 xs mono','text-anchor':'middle',text:'~1550 ms：块 k 首个动作对齐画面出现'},st);
+  el('rect',{x:X0+W-120,y:14,width:12,height:12,fill:'url(#hatch-b)',class:'s-B','stroke-width':1},st); el('text',{x:X0+W-104,y:24,class:'f-ink3 xs',text:'传输 / 缓冲'},st);
+  // dynamic
+  const tI=$('#tlT'), tV=$('#tlTv'), aI=$('#tlA'), aV=$('#tlAv'), E=$('#tlE'), R=$('#tlR'), Dd=$('#tlD'), L=$('#tlL'), play=$('#tlPlay');
+  function status(t){
+    const k=Math.floor(t/P.rec); E.textContent='录第 '+k+' 块（'+Math.round(t-k*P.rec)+' / 830 ms）';
+    let rs='空闲'; for(let j=0;j<4;j++){ const r0=j*P.rec+P.rec; if(t>=r0&&t<r0+P.net1) rs='接收 / 编码第 '+j+' 块'; else if(t>=r0+P.net1&&t<r0+P.net1+P.ren) rs='生成第 '+j+' 块（'+Math.round(t-r0-P.net1)+' / 620 ms）'; }
+    R.textContent=rs;
+    let ds='等待首块'; for(let j=0;j<4;j++){ const d=1550+j*P.rec; if(t>=d&&t<d+P.rec) ds='播放第 '+j+' 块（帧 '+Math.floor((t-d)/1000*24)+' / 20）'; }
+    Dd.textContent=ds;
+  }
+  function render(){
+    const t=+tI.value, a=+aI.value; tV.textContent=t+' ms'; aV.textContent=a+' ms';
+    dy.innerHTML='';
+    // action marker and its displayed frame
+    el('path',{d:'M'+X(a)+' '+(lanes.input-6)+' l-5 -8 l10 0 z',class:'f-U'},dy);
+    el('text',{x:X(a)+8,y:lanes.input-8,class:'f-Ui xs',text:'动作 @'+a},dy);
+    const fx=X(1550+a);
+    el('path',{d:'M'+fx+' '+(lanes.display+H+6)+' l-5 8 l10 0 z',class:'f-D'},dy);
+    el('text',{x:fx+8,y:lanes.display+H+14,class:'f-Di xs',text:'对应帧 @'+(1550+a)},dy);
+    el('path',{d:'M'+X(a)+' '+(lanes.input+H)+' C '+X(a)+' '+(lanes.input+60)+', '+fx+' '+(lanes.display-40)+', '+fx+' '+lanes.display,class:'nofill s-U','stroke-width':1.2,'stroke-dasharray':'4 3'},dy);
+    el('line',{x1:X(t),y1:16,x2:X(t),y2:276,class:'s-ink','stroke-width':1.6},dy);
+    el('rect',{x:X(t)-24,y:4,width:48,height:14,rx:4,class:'f-ink'},dy);
+    el('text',{x:X(t),y:14.5,class:'xs mono','text-anchor':'middle',style:'fill:var(--bg)',text:t+' ms'},dy);
+    L.innerHTML='1550<small>ms</small>'; status(t);
+  }
+  tI.addEventListener('input',()=>{ stop(); render(); }); aI.addEventListener('input',render);
+  let raf=null,last=0;
+  function step(ts){ if(!last) last=ts; const dt=ts-last; last=ts; let t=+tI.value+dt; if(t>TMAX) t=0; tI.value=Math.round(t); render(); raf=requestAnimationFrame(step); }
+  function stop(){ if(raf){ cancelAnimationFrame(raf); raf=null; last=0; play.textContent='▶ 播放'; } }
+  play.addEventListener('click',()=>{ if(raf){ stop(); } else { if(reduced){ tI.value=(+tI.value+250)%TMAX; render(); return; } play.textContent='❚❚ 暂停'; last=0; raf=requestAnimationFrame(step); } });
+  render();
+})();
+
+/* ---------------- latency calculator (Fig 9) ---------------- */
+(function(){
+  const F=$('#lcF'); if(!F) return;
+  const fps=$('#lcFps'), R=$('#lcR'), N=$('#lcN');
+  function calc(){
+    const f=+F.value, p=+fps.value, r=+R.value, n=+N.value;
+    $('#lcFv').textContent=f; $('#lcFpsv').textContent=p; $('#lcRv').textContent=r+' ms'; $('#lcNv').textContent=n+' ms';
+    const te=f/p*1000, tr=te+n+r, th=f/r*1000; const period=Math.max(te,r);
+    $('#lcTe').innerHTML=Math.round(te)+'<small>ms</small>'; $('#lcTr').innerHTML=Math.round(tr)+'<small>ms</small>';
+    $('#lcTh').innerHTML=th.toFixed(1)+'<small>FPS</small>';
+    const ok=$('#lcOk'); if(r<=te){ ok.textContent='能（周期 '+Math.round(period)+' ms）'; ok.className='v ok'; } else { ok.textContent='跟不上：有效 '+(f/period*1000).toFixed(1)+' FPS'; ok.className='v bad'; }
+  }
+  [F,fps,R,N].forEach(i=>i.addEventListener('input',calc));
+  $('#lcReset').addEventListener('click',()=>{ F.value=20; fps.value=24; R.value=620; N.value=100; calc(); });
+  calc();
+})();
+})();
+</script>
+</body>
+</html>

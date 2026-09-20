@@ -1,0 +1,1591 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MemRoPE 精读</title>
+<meta name="description" content="MemRoPE：把 KV cache 里的 key 全部去掉位置、每一步重新编号，再用双速 EMA 把历史压成 2 个 token。方法精读、数据复核与交互图解。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   MemRoPE 精读 — design tokens
+   角色色：sk = sink（冻结的开头几帧）
+           lm = 长期记忆 μ_L
+           sm = 短期记忆 μ_S
+           lw = local window（最近帧）
+           cur= 当前正在去噪的 chunk（中性色 + 虚线）
+   方法色：ours=MemRoPE(teal) inf=∞-RoPE(blue) deep=Deep Forcing(amber)
+   调色板已用 dataviz validator 在明暗两套 surface 上过检（3 序列全对通过）
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0d1014; --surf:#13171c; --surf2:#191e25; --surf3:#222932;
+  --rule:#252c35; --rule2:#38414d;
+  --ink:#ebeff4; --ink2:#a7b1bd; --ink3:#78838f;
+
+  --lw:#16a893;  --lw-ink:#3fd0ba;  --lw-soft:rgba(22,168,147,.16);
+  --lm:#4c94ec;  --lm-ink:#7db3f5;  --lm-soft:rgba(76,148,236,.17);
+  --sk:#c18500;  --sk-ink:#e0a83a;  --sk-soft:rgba(193,133,0,.18);
+  --sm:#d168a7;  --sm-ink:#ec8cc0;  --sm-soft:rgba(209,104,167,.17);
+  --cur:#8d95a1; --cur-ink:#aab3bf; --cur-soft:rgba(141,149,161,.14);
+
+  --ours:var(--lw); --ours-ink:var(--lw-ink);
+  --inf:var(--lm);  --inf-ink:var(--lm-ink);
+  --deep:var(--sk); --deep-ink:var(--sk-ink);
+
+  --ok:#3fb27a; --ok-ink:#62cf95; --ok-soft:rgba(63,178,122,.14);
+  --bad:#e0605a; --bad-ink:#f0857f; --bad-soft:rgba(224,96,90,.14);
+  --warn:#e3b341; --warn-ink:#f0c766; --warn-soft:rgba(227,179,65,.14);
+
+  --grid:#1f242c; --axis:#38414d; --tint:rgba(255,255,255,.03);
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 32px rgba(0,0,0,.36);
+  --font-display:"Bricolage Grotesque","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f3f5; --surf:#ffffff; --surf2:#eaedf1; --surf3:#dfe3e9;
+    --rule:#dcdfe5; --rule2:#c1c7d0;
+    --ink:#12161b; --ink2:#485058; --ink3:#6f7986;
+    --lw:#00887a; --lw-ink:#006f64; --lw-soft:rgba(0,136,122,.13);
+    --lm:#337bd0; --lm-ink:#255ea3; --lm-soft:rgba(51,123,208,.12);
+    --sk:#a86d00; --sk-ink:#855700; --sk-soft:rgba(168,109,0,.14);
+    --sm:#b6508e; --sm-ink:#943f73; --sm-soft:rgba(182,80,142,.12);
+    --cur:#6f7986; --cur-ink:#565e69; --cur-soft:rgba(111,121,134,.12);
+    --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+    --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+    --warn:#b98512; --warn-ink:#8f6608; --warn-soft:rgba(185,133,18,.14);
+    --grid:#e2e5ea; --axis:#c1c7d0; --tint:rgba(16,20,28,.028);
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f3f5; --surf:#ffffff; --surf2:#eaedf1; --surf3:#dfe3e9;
+  --rule:#dcdfe5; --rule2:#c1c7d0;
+  --ink:#12161b; --ink2:#485058; --ink3:#6f7986;
+  --lw:#00887a; --lw-ink:#006f64; --lw-soft:rgba(0,136,122,.13);
+  --lm:#337bd0; --lm-ink:#255ea3; --lm-soft:rgba(51,123,208,.12);
+  --sk:#a86d00; --sk-ink:#855700; --sk-soft:rgba(168,109,0,.14);
+  --sm:#b6508e; --sm-ink:#943f73; --sm-soft:rgba(182,80,142,.12);
+  --cur:#6f7986; --cur-ink:#565e69; --cur-soft:rgba(111,121,134,.12);
+  --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+  --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+  --warn:#b98512; --warn-ink:#8f6608; --warn-soft:rgba(185,133,18,.14);
+  --grid:#e2e5ea; --axis:#c1c7d0; --tint:rgba(16,20,28,.028);
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;}
+h1,h2,h3,h4,h5{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--lw-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--lw); outline-offset:2px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.9em; background:var(--surf2); border:1px solid var(--rule); border-radius:5px; padding:1px 5px; color:var(--ink2)}
+b{font-weight:600}
+sup{font-size:.72em}
+#prog{position:fixed; top:0; left:0; height:2px; width:0; background:var(--lw); z-index:60; transition:width .1s linear}
+
+.top{position:fixed; top:0; left:0; right:0; height:52px; z-index:50; display:flex; align-items:center; gap:14px;
+  padding:0 22px; background:color-mix(in srgb,var(--bg) 84%,transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; font-family:var(--font-body); font-size:13px; cursor:pointer; display:inline-flex;
+  align-items:center; gap:6px}
+.tbtn:hover{border-color:var(--rule2); color:var(--ink)}
+.navwrap{position:relative}
+.navmenu{position:absolute; right:0; top:42px; background:var(--surf); border:1px solid var(--rule); border-radius:12px;
+  box-shadow:var(--shadow); padding:7px; min-width:270px; max-height:70vh; overflow:auto}
+.navmenu a{display:flex; gap:10px; padding:7px 10px; border-radius:8px; color:var(--ink2); font-size:13.5px; border:0}
+.navmenu a:hover{background:var(--surf2); color:var(--ink)}
+.navmenu a span{color:var(--ink3); font-family:var(--font-mono); font-size:11.5px; min-width:20px}
+
+.wrap{max-width:1000px; margin:0 auto; padding:0 24px}
+main{padding-top:52px}
+
+/* ============================================================ hero */
+.hero{padding:62px 0 26px; border-bottom:1px solid var(--rule)}
+.kicker{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); margin-bottom:16px}
+.hero h1{font-size:clamp(32px,5.1vw,52px); font-weight:700; letter-spacing:-.022em; margin-bottom:8px}
+.hero h1 small{display:block; font-size:clamp(15px,1.9vw,19px); font-weight:500; color:var(--ink2); letter-spacing:0; margin-top:12px; line-height:1.6; font-family:var(--font-body)}
+.meta{display:flex; flex-wrap:wrap; gap:8px; margin-top:22px}
+.chip{font-family:var(--font-mono); font-size:11.5px; color:var(--ink2); background:var(--surf2); border:1px solid var(--rule);
+  border-radius:999px; padding:4px 11px}
+.chip.hl{background:var(--lw-soft); border-color:color-mix(in srgb,var(--lw) 40%,transparent); color:var(--lw-ink)}
+.thesis{margin-top:30px; background:var(--surf); border:1px solid var(--rule); border-left:3px solid var(--lw); border-radius:12px; padding:20px 22px; box-shadow:var(--shadow)}
+.thesis .hd{font-family:var(--font-display); font-weight:600; font-size:15px; margin-bottom:8px}
+.thesis p+p{margin-top:10px}
+.thesis p{color:var(--ink2); font-size:15.4px}
+
+/* ============================================================ sections */
+.sec{padding:52px 0; border-bottom:1px solid var(--rule)}
+.eyebrow{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.eyebrow .n{font-family:var(--font-mono); font-size:11.5px; color:var(--lw-ink); background:var(--lw-soft);
+  border:1px solid color-mix(in srgb,var(--lw) 34%,transparent); border-radius:6px; padding:2px 7px}
+.eyebrow .t{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.11em; text-transform:uppercase; color:var(--ink3)}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec h2{font-size:clamp(22px,3.1vw,31px); letter-spacing:-.018em; margin-bottom:14px}
+.sec h3{font-size:18.5px; margin:30px 0 10px; letter-spacing:-.01em}
+.lead{color:var(--ink2); font-size:16.4px; max-width:78ch}
+.prose{color:var(--ink2); max-width:78ch; margin-top:14px}
+.prose p+p{margin-top:12px}
+.xs{font-size:12.6px; line-height:1.7}
+.f-ink3{color:var(--ink3)}
+.f-ink2{color:var(--ink2)}
+.mono{font-family:var(--font-mono)}
+
+/* ============================================================ figures */
+.fig{margin:26px 0 8px; background:var(--surf); border:1px solid var(--rule); border-radius:14px; overflow:hidden; box-shadow:var(--shadow)}
+.fh{display:flex; align-items:center; gap:11px; padding:12px 16px; border-bottom:1px solid var(--rule); background:var(--surf2)}
+.fh .no{font-family:var(--font-mono); font-size:10.8px; letter-spacing:.1em; color:var(--ink3); border:1px solid var(--rule2); border-radius:5px; padding:1px 6px}
+.fh .ti{font-family:var(--font-display); font-weight:600; font-size:14.4px}
+.fh .sp{flex:1}
+.ctl{display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; padding:12px 16px; border-bottom:1px solid var(--rule); font-size:13px; color:var(--ink2)}
+.ctl .sp{flex:1}
+.seg{display:inline-flex; background:var(--surf2); border:1px solid var(--rule); border-radius:9px; padding:2px}
+.seg button{background:transparent; border:0; color:var(--ink3); font-family:var(--font-body); font-size:12.6px; padding:5px 11px; border-radius:7px; cursor:pointer; white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--surf3); color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.18)}
+.seg button:hover{color:var(--ink)}
+.rng{display:inline-flex; align-items:center; gap:9px}
+input[type=range]{-webkit-appearance:none; appearance:none; height:4px; border-radius:3px; background:var(--surf3); outline:none; width:150px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:15px; height:15px; border-radius:50%; background:var(--lw); border:2px solid var(--surf); cursor:pointer}
+input[type=range]::-moz-range-thumb{width:13px; height:13px; border-radius:50%; background:var(--lw); border:2px solid var(--surf); cursor:pointer}
+.val{font-family:var(--font-mono); font-size:12.4px; color:var(--ink); min-width:62px; display:inline-block}
+.btn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); border-radius:9px; padding:5px 12px; font-family:var(--font-body); font-size:12.6px; cursor:pointer}
+.btn:hover{border-color:var(--rule2); color:var(--ink)}
+.figbody{padding:16px}
+.figbody svg{display:block; width:100%; height:auto; overflow:visible}
+figcaption{padding:11px 16px 14px; border-top:1px solid var(--rule); color:var(--ink3); font-size:12.8px; line-height:1.72; background:var(--surf2)}
+.readout{display:flex; flex-wrap:wrap; gap:8px; padding:0 16px 14px}
+.stat{background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:8px 12px; min-width:118px}
+.stat .lb{display:block; font-size:10.8px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink3); font-family:var(--font-mono)}
+.stat .dn{display:block; font-family:var(--font-mono); font-size:16px; color:var(--ink); margin-top:3px; font-weight:500}
+.stat.a .dn{color:var(--lm-ink)} .stat.b .dn{color:var(--sm-ink)} .stat.c .dn{color:var(--lw-ink)} .stat.d .dn{color:var(--sk-ink)}
+.stat.warnv .dn{color:var(--bad-ink)}
+.legend{display:flex; flex-wrap:wrap; gap:12px; padding:0 16px 14px; font-size:12.4px; color:var(--ink2)}
+.legend i{display:inline-block; width:11px; height:11px; border-radius:3px; margin-right:6px; vertical-align:-1px}
+
+/* ============================================================ callouts / cards */
+.call{margin:22px 0; border:1px solid var(--rule); border-radius:12px; padding:16px 18px; background:var(--surf)}
+.call .hd{font-family:var(--font-display); font-weight:600; font-size:14.8px; margin-bottom:7px}
+.call p{color:var(--ink2); font-size:14.6px}
+.call p+p{margin-top:9px}
+.call.mine{border-left:3px solid var(--warn); background:var(--warn-soft)}
+.call.mine .hd{color:var(--warn-ink)}
+.call.good{border-left:3px solid var(--ok); background:var(--ok-soft)}
+.call.good .hd{color:var(--ok-ink)}
+.call.note{border-left:3px solid var(--lm)}
+.call.note .hd{color:var(--lm-ink)}
+
+.cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(248px,1fr)); gap:12px; margin-top:18px}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:15px 16px}
+.card .ti{font-family:var(--font-display); font-weight:600; font-size:14.4px; margin-bottom:6px; display:flex; align-items:center; gap:8px}
+.card .ti i{width:9px; height:9px; border-radius:3px; display:inline-block}
+.card p{font-size:13.6px; color:var(--ink2)}
+
+.algo-grid{display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr); gap:14px}
+@media (max-width:860px){ .algo-grid{grid-template-columns:1fr} .algo-grid #f8Pane{position:static} }
+
+/* equations */
+.eq{font-family:var(--font-math); font-size:16.5px; background:var(--surf); border:1px solid var(--rule); border-radius:10px;
+  padding:14px 18px; margin:16px 0; color:var(--ink); overflow-x:auto; text-align:center}
+.eq .an{display:block; font-family:var(--font-body); font-size:12.6px; color:var(--ink3); margin-top:8px; text-align:center}
+.eq i{font-style:italic}
+
+/* tables */
+.tblwrap{overflow-x:auto; margin:18px 0; border:1px solid var(--rule); border-radius:12px; background:var(--surf)}
+table.tbl{border-collapse:collapse; width:100%; font-size:13.2px; font-variant-numeric:tabular-nums}
+table.tbl th, table.tbl td{padding:8px 11px; text-align:right; border-bottom:1px solid var(--rule); white-space:nowrap}
+table.tbl th{font-family:var(--font-mono); font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--ink3); font-weight:500; background:var(--surf2)}
+table.tbl td:first-child, table.tbl th:first-child{text-align:left}
+table.tbl tr.grp td{background:var(--surf2); color:var(--ink3); font-family:var(--font-mono); font-size:11.4px; letter-spacing:.05em}
+table.tbl td.best{color:var(--lw-ink); font-weight:600}
+table.tbl td.neg{color:var(--bad-ink)}
+table.tbl td.pos{color:var(--ok-ink)}
+table.tbl tr.ours td{background:var(--lw-soft)}
+
+/* doubts */
+.doubt{border:1px solid var(--rule); border-radius:12px; background:var(--surf); margin-bottom:11px; overflow:hidden}
+.doubt>button{width:100%; display:flex; align-items:flex-start; gap:12px; background:transparent; border:0; text-align:left;
+  padding:14px 16px; cursor:pointer; color:var(--ink); font-family:var(--font-body); font-size:15.2px; line-height:1.5}
+.doubt>button:hover{background:var(--surf2)}
+.sev{font-family:var(--font-mono); font-size:10.6px; letter-spacing:.06em; border-radius:5px; padding:2px 7px; flex:none; margin-top:3px}
+.sev.hi{background:var(--bad-soft); color:var(--bad-ink); border:1px solid color-mix(in srgb,var(--bad) 40%,transparent)}
+.sev.mid{background:var(--warn-soft); color:var(--warn-ink); border:1px solid color-mix(in srgb,var(--warn) 40%,transparent)}
+.sev.low{background:var(--surf2); color:var(--ink3); border:1px solid var(--rule2)}
+.doubt .caret{margin-left:auto; color:var(--ink3); flex:none; transition:transform .18s}
+.doubt[data-open="1"] .caret{transform:rotate(90deg)}
+.doubt .body{padding:0 16px 16px 16px; color:var(--ink2); font-size:14.4px; border-top:1px solid var(--rule); padding-top:14px}
+.doubt .body p+p{margin-top:10px}
+.doubt .body .dl{margin-top:11px; font-size:13.4px}
+.doubt .body .dl b{color:var(--ink); font-weight:600}
+.quote{border-left:2px solid var(--rule2); padding:2px 0 2px 12px; color:var(--ink3); font-style:italic; font-size:13.6px; margin:10px 0}
+
+ul.nb{margin:12px 0 0; padding-left:0; list-style:none}
+ul.nb li{position:relative; padding-left:20px; color:var(--ink2); font-size:14.6px; margin-bottom:8px}
+ul.nb li::before{content:""; position:absolute; left:4px; top:11px; width:5px; height:5px; border-radius:50%; background:var(--rule2)}
+ul.nb li b{color:var(--ink)}
+
+.foot{padding:34px 0 60px; color:var(--ink3); font-size:13px}
+.foot a{color:var(--ink2)}
+
+@media (max-width:760px){
+  .wrap{padding:0 16px}
+  .hero{padding:40px 0 20px}
+  .sec{padding:38px 0}
+  .ctl{gap:8px 10px}
+  input[type=range]{width:118px}
+  .readout{gap:6px}
+  .stat{min-width:104px; padding:7px 10px}
+}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">MemRoPE<em>精读 · arXiv 2603.12513</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换主题">◐</button>
+  <div class="navwrap">
+    <button class="tbtn" id="navBtn" type="button" aria-expanded="false">目录 ▾</button>
+    <nav class="navmenu" id="navMenu" hidden></nav>
+  </div>
+</header>
+
+<main>
+<div class="wrap">
+
+<section class="hero">
+  <div class="kicker">Training-free · Autoregressive video diffusion · KV cache</div>
+  <h1>把时间撒个谎，然后一直撒下去
+    <small>MemRoPE 的两个动作：① KV cache 里所有 key 都<b>不带位置</b>存，注意力时才临时编号；② 被挤出窗口的帧用<b>两个速度</b>的 EMA 揉进 2 个 token。合起来，一个 12 帧的定长缓存可以撑一小时的生成——而且不训练。</small>
+  </h1>
+  <div class="meta">
+    <span class="chip">arXiv:2603.12513v1</span>
+    <span class="chip">2026-03-12 · cs.CV</span>
+    <span class="chip">USC</span>
+    <span class="chip">Kim*, Hu*, Kuo, Beerel</span>
+    <span class="chip hl">training-free</span>
+    <span class="chip">Wan2.1-T2V-1.3B</span>
+    <span class="chip">base: Self-Forcing / LongLive</span>
+  </div>
+
+  <div class="thesis">
+    <div class="hd">一句话</div>
+    <p>自回归视频扩散靠 KV cache 记住过去，而 cache 是定长的：FIFO 把老帧直接扔掉（上下文丢失），attention sink 把开头几帧冻住（不会随剧情更新），Deep Forcing 用注意力分数选 token（会锁死在一组老 token 上，偶尔换一次就闪一下）。MemRoPE 说：<b>别再挑该留谁，把挤出去的帧连续地揉进一个滑动平均里</b>——但要揉就必须先解决一件事，<b>RoPE 不能对加法分配</b>，带着不同旋转相位的 key 平均出来不对应任何位置。于是它把 cache 里的 key 全改成<b>不带位置存</b>，每一步注意力时从 0 开始重新编号。两件事互为前提。</p>
+    <p class="xs f-ink3">下面的图都可以动。凡是我自己算的、论文里没有的数字，都会标成「我的推算」。论文数字一律标注来源表号。</p>
+  </div>
+</section>
+<section class="sec" id="s-map">
+  <div class="eyebrow"><span class="n">01</span><span class="t">The whole idea in one picture</span><span class="line"></span></div>
+  <h2>一图看懂：视频越来越长，<b>模型看到的索引永远是 0–11</b></h2>
+  <p class="lead">上半张图是<b>真实发生的事</b>：视频一直往前长，历史被指数式地遗忘。下半张图是<b>模型每一步真正看到的东西</b>：永远是 12 个槽位、永远编号 0…11。MemRoPE 的全部魔法，就是让这两张图一直对得上。拖动滑块看 1 秒到 1 小时。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 1</span><span class="ti">三层缓存 + 在线重编号</span><span class="sp"></span><span class="xs f-ink3 mono" id="f1Tag">t = 2 chunk</span></div>
+    <div class="ctl">
+      <span class="rng"><span>生成进度</span><input type="range" id="f1T" min="0" max="1000" value="560"><span class="val" id="f1TV">1.5 s</span></span>
+      <span class="sp"></span>
+      <button class="btn" id="f1Play" type="button">▶ 播放到 1 小时</button>
+    </div>
+    <div class="figbody"><svg id="f1Svg" viewBox="0 0 720 300" role="img" aria-label="MemRoPE 的三层缓存与在线 RoPE 重编号示意"></svg></div>
+    <div class="legend">
+      <span><i style="background:var(--sk)"></i>Sink：第 0 块，冻结不动（S=3 帧）</span>
+      <span><i style="background:var(--lm)"></i>μ<sub>L</sub> 长期 EMA（α<sub>L</sub>=0.01）</span>
+      <span><i style="background:var(--sm)"></i>μ<sub>S</sub> 短期 EMA（α<sub>S</sub>=0.1）</span>
+      <span><i style="background:var(--lw)"></i>Local window（L=4 帧）</span>
+      <span><i style="background:var(--cur)"></i>当前正在去噪的 chunk（3 帧）</span>
+    </div>
+    <div class="readout" id="f1Read"></div>
+    <figcaption>上：真实时间轴，阴影高度＝该时刻的内容在 μ<sub>L</sub> 里还剩多少权重（我按 α<sub>L</sub>=0.01 画的指数衰减）。下：Eq.(7) 的块相对索引映射，无论视频多长都是 [0,11]。<b>注意 sink 与当前 chunk 之间的「距离」永远是 9–11 帧</b>——模型被告知「开头刚刚才过去」，这个谎言从第 2 块一直说到第 4800 块。</figcaption>
+  </figure>
+
+  <div class="cards">
+    <div class="card"><div class="ti"><i style="background:var(--sk)"></i>Sink（S=3）</div><p>Algorithm 1 第 1–2 行：第 0 块生成后立刻取 K/V 存下，<b>此后永不更新</b>。论文的理由是早期帧在训练范围内、且 DMD 蒸馏模型开头质量最高。</p></div>
+    <div class="card"><div class="ti"><i style="background:var(--lm)"></i>μ<sub>L</sub> / <i style="background:var(--sm)"></i>μ<sub>S</sub>（2M=2）</div><p>每次有 chunk 被挤出 local window，就把它<b>空间池化成 1 个 token</b>，再按两个速率写进两条 EMA。key 和 value 都做。</p></div>
+    <div class="card"><div class="ti"><i style="background:var(--lw)"></i>Local（L=4）</div><p>最近的帧，原样保留、全空间分辨率。这是唯一能提供细节的部分。</p></div>
+    <div class="card"><div class="ti"><i style="background:var(--cur)"></i>Query（3 帧）</div><p>当前 chunk 的 3 个 latent 帧，4 步去噪（t=1000/750/500/250）。只有最后一步的 K/V 才进 cache。</p></div>
+  </div>
+</section>
+
+<section class="sec" id="s-why">
+  <div class="eyebrow"><span class="n">02</span><span class="t">What actually breaks</span><span class="line"></span></div>
+  <h2>它在解什么问题：三种缓存策略，三种忘法</h2>
+  <p class="lead">同样是定长缓存，「留下谁」的策略决定了失败方式。下图把三种策略放在同一条时间轴上跑：每一列是一个已经生成的 chunk，颜色深浅＝这个 chunk 的内容此刻还能影响生成多少。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 2</span><span class="ti">FIFO / Participative Compression / EMA 的保留曲线</span><span class="sp"></span><span class="xs f-ink3 mono" id="f2Tag"></span></div>
+    <div class="ctl">
+      <span class="rng"><span>已生成</span><input type="range" id="f2T" min="2" max="80" value="34"><span class="val" id="f2TV">34 chunk</span></span>
+      <span class="sp"></span>
+      <button class="btn" id="f2Play" type="button">▶ 播放</button>
+    </div>
+    <div class="figbody"><svg id="f2Svg" viewBox="0 0 720 300" role="img" aria-label="三种 KV cache 策略的历史保留对比"></svg></div>
+    <div class="readout" id="f2Read"></div>
+    <figcaption><b>这张图里 FIFO 与 MemRoPE 的曲线是解析式画的</b>（FIFO：窗口内为 1、窗口外为 0；EMA：α(1−α)<sup>k</sup>），<b>Deep Forcing 那一行是按论文 Fig. 3 描述的行为做的示意模拟</b>（被留下的 token 累积注意力分数 → 更可能继续被留下 → 选择集迅速冻结，偶尔才换进一个新 token），不是论文数据，只用来说明「离散选择 vs 连续聚合」的差别。</figcaption>
+  </figure>
+
+  <div class="prose">
+    <p>论文对三者的批评可以压成一句话：<b>FIFO 把过去删掉，sink 把过去冻住，PC 把过去锁死。</b>而 PC 的锁死还有个副作用——Fig. 3(c,d) 显示，每当那一小撮 token 终于换一次，相邻帧的 SSIM 会掉、LPIPS 会尖峰，也就是画面「跳一下」。EMA 的卖点不是记得更多，而是<b>每一次遗忘都足够小</b>，小到看不见。</p>
+  </div>
+
+  <div class="call note">
+    <div class="hd">先把术语对齐：这里的「一个 token」有多大</div>
+    <p>480×832 经 Wan2.1 的 VAE（空间 8×）与 patch=2，一个 latent 帧约 30×52 = <b>1560 个 token</b>（我按 Wan2.1 配置推算）。所以 sink=3 帧≈4680 token、local=4 帧≈6240 token，而<b>整个历史被压进的 μ<sub>L</sub>+μ<sub>S</sub> 一共只有 2 个 token</b>。记住这个比例，后面很多事情就解释得通了。</p>
+  </div>
+</section>
+<section class="sec" id="s-mem">
+  <div class="eyebrow"><span class="n">03</span><span class="t">Memory tokens — the dual EMA</span><span class="line"></span></div>
+  <h2>双速记忆：一条快的追动态，一条慢的<span id="h3claim">「累积全部历史」</span></h2>
+  <p class="lead">机制本身只有两行。每当一个 chunk 被挤出 local window，先把它空间池化成一个 key <i>k̄</i>，然后写进两条流：</p>
+
+  <div class="eq">
+    μ<sub>L</sub><sup>(t)</sup> = (1 − α<sub>L</sub>) μ<sub>L</sub><sup>(t−1)</sup> + α<sub>L</sub> <i>k̄</i><sub>new</sub> &nbsp;&nbsp;&nbsp; μ<sub>S</sub><sup>(t)</sup> = (1 − α<sub>S</sub>) μ<sub>S</sub><sup>(t−1)</sup> + α<sub>S</sub> <i>k̄</i><sub>new</sub>
+    <span class="an">Eq.(3)(4)，α<sub>L</sub> ≪ α<sub>S</sub>；论文取 α<sub>L</sub>=0.01、α<sub>S</sub>=0.1。value 同样处理。</span>
+  </div>
+
+  <p class="prose">论文对这两条流的描述是：「长期流<b>累积全部生成历史</b>成一个稳定表示，短期流追最近的动态」。这句话在数学上只在很弱的意义上成立——EMA 的确对每一个历史 chunk 都有非零权重，但权重是<b>指数衰减</b>的。所以真正的问题是：<b>它的时间尺度到底有多长？</b>下图把这个尺度算给你看。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 3</span><span class="ti">遗忘曲线：EMA 到底覆盖多长的过去</span><span class="sp"></span><span class="xs f-ink3 mono">我的推算</span></div>
+    <div class="ctl">
+      <span class="rng"><span>α<sub>L</sub></span><input type="range" id="f3AL" min="0" max="3" step="1" value="1"><span class="val" id="f3ALV">0.01</span></span>
+      <span class="rng"><span>α<sub>S</sub></span><input type="range" id="f3AS" min="0" max="3" step="1" value="1"><span class="val" id="f3ASV">0.1</span></span>
+      <span class="sp"></span>
+      <span class="rng"><span>视频时长</span><input type="range" id="f3D" min="0" max="5" step="1" value="2"><span class="val" id="f3DV">120 s</span></span>
+    </div>
+    <div class="figbody"><svg id="f3Svg" viewBox="0 0 720 300" role="img" aria-label="双 EMA 的权重随历史时间的衰减曲线"></svg></div>
+    <div class="legend">
+      <span><i style="background:var(--lm)"></i>μ<sub>L</sub> 长期流</span>
+      <span><i style="background:var(--sm)"></i>μ<sub>S</sub> 短期流</span>
+      <span class="f-ink3">横轴＝距当前多久以前（对数），纵轴＝该时刻内容在记忆里占的权重份额（累积）</span>
+    </div>
+    <div class="readout" id="f3Read"></div>
+    <figcaption>换算基准：1 chunk = 3 个 latent 帧 = 12 个像素帧 = 0.75 s（16 fps，Wan2.1 VAE 时间 4× 压缩）。半衰期 = ln2 / (−ln(1−α)) 个 chunk。</figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">我的第一个意见：「长期记忆」是一个 75 秒的指数窗口，不是「全部历史」</div>
+    <p>按论文的 α<sub>L</sub>=0.01：时间常数 100 chunk = <b>75 秒</b>，半衰期 69 chunk = <b>51.7 秒</b>。也就是说，在 Fig. 1 那个一小时的例子里，生成到第 60 分钟时，μ<sub>L</sub> 中<b>5 分钟以前的全部内容加起来只占 1.8% 的权重，10 分钟以前占 0.03%，55 分钟以前（也就是视频开头）占 6×10<sup>−20</sup></b>。开头的人脸不是被 μ<sub>L</sub> 记住的——它是被那 3 帧<b>冻结的 sink</b> 锚住的，而 sink 是 attention sink 老办法，不是本文的新东西。</p>
+    <p>这不否定方法有效，但它改变了机制叙事：MemRoPE 的 EMA 不是「记忆」，更像一个<b>平滑的、时间尺度约一分钟的低通锚</b>，作用是抑制逐帧漂移（曝光、色调、整体统计），而不是召回远处的具体内容。论文自己在 Limitations 里承认「EMA 聚合是有损的，可能限制对远处内容的精确召回」，但摘要与 Fig. 1 的表述（"compress <i>all</i> past keys"、一小时身份完美保持）比这个承认强得多。</p>
+    <p class="xs f-ink3">要验证很容易：把 α<sub>L</sub> 换成 1/t（真正的累计平均，无衰减）再跑一次；或者在 30 分钟处切换场景，看 μ<sub>L</sub> 是否还携带开头的信息。论文两件都没做。</p>
+  </div>
+
+  <h3>还有一个没人提的细节：μ 从零开始，而且没有偏置校正</h3>
+  <p class="prose">Algorithm 1 第 3 行：<code>μ_L, μ_S ← 0</code>。EMA 的经典问题是初期被零值拖着（Adam 用 1/(1−(1−α)<sup>t</sup>) 做偏置校正），而论文<b>没有做任何校正</b>。于是在视频前几分钟，μ<sub>L</sub> 的幅度只有稳态的一小部分——一个幅度很小的 key，注意力 logit 也小，行为上更接近一个<b>内容近乎为零的「空槽」</b>（经典的 null attention sink）而不是携带信息的记忆。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 4</span><span class="ti">预热：μ 的幅度要多久才「长满」</span><span class="sp"></span><span class="xs f-ink3 mono">我的推算</span></div>
+    <div class="ctl">
+      <span>标注论文评测的 5 个时长：</span>
+      <span class="seg" id="f4Mark"><button type="button" data-v="on" aria-pressed="true">显示</button><button type="button" data-v="off">隐藏</button></span>
+      <span class="sp"></span>
+      <span class="xs f-ink3">曲线 = 1 − (1−α)<sup>t</sup>，t 以 chunk 计</span>
+    </div>
+    <div class="figbody"><svg id="f4Svg" viewBox="0 0 720 250" role="img" aria-label="EMA 未做偏置校正时的幅度预热曲线"></svg></div>
+    <div class="readout" id="f4Read"></div>
+    <figcaption>α<sub>S</sub>=0.1 在 30 秒时已达 98.5%，基本瞬时；α<sub>L</sub>=0.01 在 30 s / 60 s / 120 s / 240 s 时分别只有 <b>33.1% / 55.2% / 80.0% / 96.0%</b>。而 Fig. 7 的敏感性网格里最小的 α<sub>L</sub>=0.001，在 60 秒评测点上只有 <b>7.7%</b>——它几乎就是个零向量，却和 α<sub>L</sub>=0.05 打成平手。这条观察是我对「记忆内容到底重不重要」存疑的主要依据（见 §09 第 7 条）。</figcaption>
+  </figure>
+</section>
+
+<section class="sec" id="s-pool">
+  <div class="eyebrow"><span class="n">04</span><span class="t">Spatial pooling — 1560 → 1</span><span class="line"></span></div>
+  <h2>压缩比：两千两百万个 token，压进 2 个</h2>
+  <p class="lead">Algorithm 1 第 16–17 行：<code>k̄ ← SpatialPool(K_local[0])</code>。被挤出去的那一帧，它的 1560 个空间 token 被池化成<b>一个</b>。所有更早的历史，全部住在 μ<sub>L</sub> 和 μ<sub>S</sub> 这两个 token 里。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 5</span><span class="ti">token 预算：cache 里装的是什么</span><span class="sp"></span><span class="xs f-ink3 mono">我的推算</span></div>
+    <div class="ctl">
+      <span class="rng"><span>视频时长</span><input type="range" id="f5D" min="0" max="5" step="1" value="4"><span class="val" id="f5DV">480 s</span></span>
+      <span class="sp"></span>
+      <span class="xs f-ink3">横轴为对数刻度</span>
+    </div>
+    <div class="figbody"><svg id="f5Svg" viewBox="0 0 720 260" role="img" aria-label="MemRoPE 的 token 预算与压缩比"></svg></div>
+    <div class="readout" id="f5Read"></div>
+    <figcaption>按 480×832、Wan2.1 VAE 空间 8× 下采样、patch=2 推算：1 个 latent 帧 = 30×52 = 1560 token。历史部分＝总 latent 帧数减去 sink(3)+local(4)。</figcaption>
+  </figure>
+
+  <div class="prose">
+    <p>池化之后的 key 和 value 在注意力里意味着什么，值得说清楚：</p>
+    <ul class="nb">
+      <li><b>池化的 key</b>：<i>q</i>·mean(<i>k</i>) = mean(<i>q</i>·<i>k</i>)，也就是这一帧对当前 query 的<b>平均相关度</b>——一个「这帧整体像不像你要的东西」的标量式匹配，没有任何空间选择性。</li>
+      <li><b>池化的 value</b>：注意力从这个槽位取回的是整帧 value 的<b>均值</b>，也就是一个全局的「色调／曝光／整体统计」的直流项。它能拉住画面不要跑偏，但不可能还原「左上角那栋楼」。</li>
+      <li>所以 §07 会看到的现象就顺理成章了：MemRoPE 的增益几乎全在 <b>Imaging Quality / Aesthetic Quality</b>（逐帧画质、曝光、色彩）上，而在真正测「同一个主体有没有变」的 Subject Consistency 上只有零点几分。<b>机制解释了指标形状。</b></li>
+    </ul>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">顺带一个复现上的硬伤：池化后的 token，3D-RoPE 的空间坐标是什么？</div>
+    <p>Wan2.1 用的是 3D-RoPE，每个 token 的旋转由 (t, h, w) 三个坐标决定。Eq.(7) 只给了一条一维的连续索引 φ，对普通帧可以理解成「只重排时间轴、空间坐标照旧」。但<b>池化后的 μ 只有一个 token，它的 (h, w) 取什么？</b>取 (0,0)？取中心？还是空间分量干脆置零（等于不旋转）？论文正文、算法、附录都没写，而这个选择会实打实地改变 μ 在注意力里的行为。没有代码的话，这一条足以卡住复现。</p>
+  </div>
+</section>
+<section class="sec" id="s-rope">
+  <div class="eyebrow"><span class="n">05</span><span class="t">Online RoPE indexing</span><span class="line"></span></div>
+  <h2>为什么「先存再转」就没法平均：相位是会互相抵消的</h2>
+  <p class="lead">RoPE 的全部好处来自一个恒等式：<i>q̃</i><sub>i</sub><sup>⊤</sup><i>k̃</i><sub>j</sub> = <i>q</i><sub>i</sub><sup>⊤</sup><i>R</i><sub>i−j</sub><i>k</i><sub>j</sub>，注意力只看<b>相对距离</b>。代价是：标准实现在<b>写 cache 的时候</b>就把 <i>k̃</i><sub>j</sub> = <i>R</i><sub>j</sub><i>k</i><sub>j</sub> 转好存下，这个 key 从此被<b>钉死</b>在位置 j 上。</p>
+
+  <div class="eq">
+    α <i>R</i><sub>j</sub><i>k</i><sub>j</sub> + (1−α) <i>R</i><sub>j′</sub><i>k</i><sub>j′</sub> &nbsp;≠&nbsp; <i>R</i><sub>φ</sub>( α <i>k</i><sub>j</sub> + (1−α) <i>k</i><sub>j′</sub> )&nbsp;&nbsp;&nbsp;对任何 φ
+    <span class="an">Eq.(5)：RoPE 对加法不分配。论文据此说「平均后的 key 不对应任何合法时间位置」。</span>
+  </div>
+
+  <p class="prose">论文到此为止。但这句话其实可以算得更准，而算准之后结论会软一点——下面这张图是<b>我推的</b>：把 EMA 作用在「已经旋转过的 key」上，对<b>每一个 RoPE 频带</b>而言，等价于一个<b>单极点低通滤波器</b>。</p>
+
+  <div class="eq">
+    |H(ω)| = α / |1 − (1−α)e<sup>−jω</sup>| &nbsp;&nbsp;≈&nbsp;&nbsp; α / (2 sin(ω/2))　（当 ω ≫ α）
+    <span class="an">我的推导：设各时刻的 key 内容相近，EMA 权重 α(1−α)<sup>k</sup> 对频率 ω 的旋转求和 = Σ<sub>k</sub> α(1−α)<sup>k</sup>e<sup>−jωk</sup>。−3dB 截止点恰好在 ω ≈ α。</span>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 6</span><span class="ti">相位平均：旋转后再平均 = 一个低通滤波器</span><span class="sp"></span><span class="xs f-ink3 mono">我的推导</span></div>
+    <div class="ctl">
+      <span>cache 里存的是：</span>
+      <span class="seg" id="f6Mode"><button type="button" data-v="rot" aria-pressed="true">旋转后的 key（常规做法）</button><button type="button" data-v="raw">原始 key（MemRoPE）</button></span>
+      <span class="sp"></span>
+      <span class="rng"><span>α</span><input type="range" id="f6A" min="0" max="3" step="1" value="1"><span class="val" id="f6AV">0.01</span></span>
+      <span class="rng"><span>频带 ω</span><input type="range" id="f6W" min="0" max="100" value="66"><span class="val" id="f6WV">0.100</span></span>
+    </div>
+    <div class="figbody"><svg id="f6Svg" viewBox="0 0 720 318" role="img" aria-label="RoPE 相位平均的向量图与频率响应"></svg></div>
+    <div class="readout" id="f6Read"></div>
+    <figcaption>左：单位圆上每根细线是一个历史 chunk 在该频带上的相位（深浅＝它的 EMA 权重）；黑色粗箭头是它们的加权合矢量。右：合矢量长度随频带 ω 的变化（双对数）。<b>结论不是「结果无意义」，而是「高频位置带被抹平、只剩低频带和一个平均相位」</b>——数学上是有损，实测代价见 §08 的 Tab. 7：只有 0.13/0.16 分。</figcaption>
+  </figure>
+
+  <h3>第二件事：索引从哪儿开始数</h3>
+  <p class="prose">存原始 key 之后，位置就成了一个可以每一步重新发的号码牌。Eq.(7) 把整个 cache 当成一个块，从 0 开始连续编号：</p>
+  <div class="eq" style="font-family:var(--font-mono); font-size:13.4px">
+    [0 … S−1]<sub>sink</sub> &nbsp; [S … S+2M−1]<sub>memory</sub> &nbsp; [S+2M … S+2M+L−1]<sub>local</sub> &nbsp; → query 从 S+2M+L 开始
+    <span class="an">论文配置 S=3、M=1、L=4 → cache 占 9 个索引，当前 chunk 占 9,10,11。总跨度 12，永远落在训练见过的范围里。</span>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 7</span><span class="ti">三种编号方案：越界 / 贴着上界滑 / 贴着下界钉住</span></div>
+    <div class="ctl">
+      <span class="rng"><span>已生成</span><input type="range" id="f7T" min="0" max="1000" value="500"><span class="val" id="f7TV">—</span></span>
+      <span class="sp"></span>
+      <span class="xs f-ink3">Wan2.1 的位置上界 f<sub>limit</sub> = 1024 个 latent 帧 ≈ 4 分 16 秒</span>
+    </div>
+    <div class="figbody"><svg id="f7Svg" viewBox="0 0 720 270" role="img" aria-label="三种位置索引方案对比"></svg></div>
+    <div class="readout" id="f7Read"></div>
+    <figcaption>论文说 Self-Forcing / LongLive 的极限是「4 分 15 秒」，与 1024 latent 帧 × 4 像素帧 ÷ 16 fps = 256 秒对得上（我核算）。∞-RoPE 把 cache 映到 [f<sub>limit</sub>−C, f<sub>limit</sub>]，MemRoPE 映到 [0, C−1]——论文给的理由是「让 sink 永远拿最低索引、memory 永远占同一组位置」，<b>但这两种映射没有做过消融对比</b>。</figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">我的第二个意见：「省掉了每步旋转」这句话说反了</div>
+    <p>论文说 ∞-RoPE「需要对已存的 key 每步做相位旋转，而我们省掉了这一步」（Sec. 4.2 末）。但 Algorithm 1 第 10 行写得很清楚：<code>Apply R_φ to q_s, K</code>——MemRoPE 在<b>每个去噪步、每一层</b>都对<b>整个 cache</b> 施加一次旋转。旋转量不比 ∞-RoPE 少，甚至更多；真正省掉的是「<b>就地改写已存 key</b>」这个破坏性操作，以及由此带来的不可聚合性。</p>
+    <p>这不是空口推断：Tab. 8 里同为 C=12 时，LongLive 4.409 FPS → +MemRoPE 4.376 FPS，<b>慢了 0.7%</b>，方向正好和「多做了旋转」一致。论文把它描述成「negligible overhead」是对的，但机制表述应该改成「rotation is cheap」，而不是「rotation is eliminated」。</p>
+  </div>
+
+  <div class="call good">
+    <div class="hd">要给的肯定：position-free cache 本身是个干净的抽象</div>
+    <p>把「内容」和「位置」在 KV cache 里解耦，之后位置就变成了注意力时刻才发放的号码牌——这使得<b>任何</b>基于聚合的缓存压缩（不止 EMA：聚类、低秩、merge、token pooling）在 RoPE 模型上第一次变得良定义。这个抽象比论文里具体那条 EMA 更有价值，也更容易被后续工作复用。Rolling Forcing 只对 sink 做过类似的事，MemRoPE 把它推广到了整个 cache。</p>
+  </div>
+</section>
+<section class="sec" id="s-algo">
+  <div class="eyebrow"><span class="n">06</span><span class="t">Algorithm 1, line by line</span><span class="line"></span></div>
+  <h2>Algorithm 1 逐行：点任意一行看它在干什么</h2>
+  <p class="lead">整个方法就是这 24 行，没有新损失、没有新模块、不改一个权重。注意三处 <code>w/o RoPE</code>——它们是全文的支点。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 8</span><span class="ti">MemRoPE Inference（可点）</span><span class="sp"></span><span class="xs f-ink3" id="f8Hint">点一行看注解</span></div>
+    <div class="figbody algo-grid" id="f8Grid">
+      <div id="f8Code"></div>
+      <div id="f8Pane"></div>
+    </div>
+    <figcaption>论文正文说「KV cache 只在每个 chunk 的最后一个去噪步之后更新，保证只有完全去噪的 K/V 进 cache」——对应第 13–14 行在内层循环<b>之外</b>。</figcaption>
+  </figure>
+
+  <h3>一个对不上的账：C 到底是 9 还是 12，L=4 又是什么单位</h3>
+  <p class="prose">论文的配置是 <b>S=3、M=1、L=4</b>，正文明写 <span class="mono">C = S + 2M + L</span>，代进去是 <b>9</b>；而 Tab. 8 的延迟表里 MemRoPE 写的是 <b>C = 12</b>。我能找到的唯一自洽还原是：<b>C 指的是「索引跨度」，把当前正在去噪的 3 帧也算进去</b>——3 + 2 + 4 + 3 = 12，正好等于 Eq.(7) 里 query 拿到 9,10,11 之后的总长度。Self-Forcing 那行 C=21 也刚好是它 21 个 latent 帧的完整窗口（含当前 chunk），互相印证。</p>
+  <p class="prose">但这个还原会立刻撞上第二个问题：<b>L=4「帧」不是 chunk（3 帧）的整数倍</b>。而 Algorithm 1 内部本身就不自洽——第 16 行池化的是 <code>K_local[0]</code>（<b>一个</b>元素），第 22 行却写 "Evict oldest <b>chunk</b>"（3 帧）。两种读法各自和论文别处的数字打架：</p>
+
+  <div class="tblwrap">
+    <table class="tbl">
+      <thead><tr><th>如果 K_local 的元素是…</th><th>L=4 意味着</th><th>索引跨度 C（含 query）</th><th>和论文冲突在哪</th></tr></thead>
+      <tbody>
+        <tr><td>latent 帧</td><td>4 帧 local window</td><td>3+2+4+3 = <b>12</b> ✓ 对上 Tab. 8</td><td class="neg" style="text-align:left">每次驱逐 3 帧，却只有第 1 帧进了 EMA，另外 2 帧被直接扔掉；且 |K_local| 在 3↔6 之间跳，永远不等于 4</td></tr>
+        <tr><td>chunk（3 帧）</td><td>4 chunk = 12 帧</td><td>3+2+12+3 = <b>20</b> ✗</td><td class="neg" style="text-align:left">第 16/22 行自洽了，但 C 对不上 Tab. 8 的 12，也对不上「比 LongLive 更省」的说法</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="prose xs f-ink3">这不是吹毛求疵：local window 到底留 4 帧还是 12 帧，直接决定了「有多少细节是原样保留的」——也就决定了该把多少功劳记在 EMA 头上。没有代码，这一条只能存疑。</p>
+</section>
+
+<section class="sec" id="s-res">
+  <div class="eyebrow"><span class="n">07</span><span class="t">Reading the numbers</span><span class="line"></span></div>
+  <h2>结果怎么读：赢的是画质分，不是一致性分</h2>
+  <p class="lead">先说结论：论文报的 43 行 VBench-Long 数据，<b>平均值一行不差地等于 6 项指标的无权平均</b>（我全部核算过，最大偏差 0.007，全是四舍五入）。数字本身是干净的。问题出在这个「无权平均」上。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 9</span><span class="ti">各时长的 VBench-Long 平均分</span><span class="sp"></span><span class="xs f-ink3 mono">论文 Tab. 1/2/6</span></div>
+    <div class="ctl">
+      <span>基座模型：</span>
+      <span class="seg" id="f9Base"><button type="button" data-v="sf" aria-pressed="true">Self-Forcing</button><button type="button" data-v="ll">LongLive</button></span>
+      <span class="sp"></span>
+      <span class="xs f-ink3">同一时长内可比；<b>跨时长不可比</b>（prompt 数不同，见下）</span>
+    </div>
+    <div class="figbody"><svg id="f9Svg" viewBox="0 0 720 300" role="img" aria-label="不同时长下各方法的 VBench-Long 平均分"></svg></div>
+    <div class="legend">
+      <span><i style="background:var(--ours)"></i>MemRoPE</span>
+      <span><i style="background:var(--inf)"></i>∞-RoPE</span>
+      <span><i style="background:var(--deep)"></i>Deep Forcing</span>
+      <span><i style="background:var(--cur)"></i>base（基座模型本身）</span>
+    </div>
+    <div class="readout" id="f9Read"></div>
+    <figcaption>每组下方标注该时长用了多少条 prompt：30 s / 60 s 论文<b>未说明</b>，120 s 与 240 s 用 128 条，480 s 用 20 条，1 小时用 10 条。所以柱子只能<b>组内</b>比。</figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">我的第三个意见：这个「平均分」几乎就是 Imaging + Aesthetic 两项</div>
+    <p>六项指标的量纲差得离谱。在论文全部数据行上，各项的标准差是：<b>Imaging 3.43、Aesthetic 2.86</b>，而 Subject 1.13、Temporal 0.74、Background 0.62、Motion 0.60（我算的）。无权平均的结果是：方差大的两项几乎决定一切。</p>
+    <p>我把每一组的 Δ平均 拆开，看它由谁贡献（下图）。对 ∞-RoPE 的<b>全部 10 组比较里，Aesthetic+Imaging 贡献了 107%–140%</b>——超过 100% 的意思是，<b>其余四项的净贡献是负的</b>。而 Aesthetic（LAION 美学打分）和 Imaging（MUSIQ 画质）都是<b>逐帧</b>指标，衡量的是「这一帧糊不糊、过不过曝」，不是「这个人还是不是同一个人」。论文把这两项称作「对长程上下文保持最敏感的维度」，这个说法需要打个问号：真正测身份保持的 Subject Consistency，MemRoPE 相对 ∞-RoPE 只有 +0.07 ~ +0.47。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 10</span><span class="ti">Δ平均 的来源分解</span><span class="sp"></span><span class="xs f-ink3 mono">我的推算（基于论文数字）</span></div>
+    <div class="ctl">
+      <span>对比对象：</span>
+      <span class="seg" id="f10Ref"><button type="button" data-v="inf" aria-pressed="true">vs ∞-RoPE</button><button type="button" data-v="base">vs 基座模型</button></span>
+      <span class="sp"></span>
+      <span class="xs f-ink3">每根柱＝Δ平均，按 Aesthetic / Imaging / 其余四项 拆段</span>
+    </div>
+    <div class="figbody"><svg id="f10Svg" viewBox="0 0 720 378" role="img" aria-label="MemRoPE 平均分增益的来源分解"></svg></div>
+    <div class="legend">
+      <span><i style="background:var(--sk)"></i>Aesthetic Quality 的贡献</span>
+      <span><i style="background:var(--lw)"></i>Imaging Quality 的贡献</span>
+      <span><i style="background:var(--cur)"></i>其余四项合计（Bg / Motion / Subject / Temporal）</span>
+    </div>
+    <div class="readout" id="f10Read"></div>
+    <figcaption>贡献 = (该项差值)/6，因为平均是 6 项无权平均。灰色段向左＝这四项合计拖后腿。</figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">我的第四个意见：六项里没有 Dynamic Degree，而摘要点名要治的正是 motion stagnation</div>
+    <p>摘要开篇列的三个失败模式是 fidelity degradation、identity drift、<b>motion stagnation</b>。VBench 里正好有一项 <b>Dynamic Degree</b> 专门测运动幅度，而论文选的六项里没有它（Deep Forcing / ∞-RoPE 这一系文献普遍如此，不是本文独创，但本文的动机让这个缺席格外刺眼）。</p>
+    <p>为什么要紧：Subject Consistency 与 Background Consistency 本质是<b>跨帧特征相似度</b>，Motion Smoothness 和 Temporal Flickering 奖励<b>帧间变化小</b>。一个把历史往均值上拉的 EMA 记忆，天然会让画面更「稳」。也就是说，<b>「画面更稳」和「画面更死」在这六项指标上是同号的</b>，而唯一能把它们分开的那一项没有报。补一列 Dynamic Degree 是零成本的（视频都已经生成好了），不补就无法排除「分数是靠冻住画面换来的」。</p>
+  </div>
+
+  <h3>跨时长的绝对分不要连起来看</h3>
+  <p class="prose">Tab. 2 的 1 小时那组，两种方法的分都比 2 分钟那组<b>高</b>（MemRoPE 87.99 vs 86.45，∞-RoPE 87.01 vs 85.58），而 480 秒那组又比 2 分钟低。如果真有「累积退化」，分数不该这样上下跳。原因很直接：<b>1 小时只用了 10 条 prompt、480 秒 20 条、120/240 秒 128 条</b>，三组打分对象根本不是一批。论文自己在附录 C 里也承认了这点，特意用固定的 20-prompt 子集重画了 Fig. 8。可主表 Tab. 2 没有提醒读者，很容易读成「越长越好」。</p>
+</section>
+<section class="sec" id="s-abl">
+  <div class="eyebrow"><span class="n">08</span><span class="t">Ablations, at their real size</span><span class="line"></span></div>
+  <h2>消融：两条流的边际收益是 <b>+0.02</b></h2>
+  <p class="lead">论文的两个关键消融都在 LongLive、60 秒、20 条 prompt 上做。把它们画在同一把尺子上，差距的实际大小就出来了。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 11</span><span class="ti">Tab. 5 记忆消融 与 Tab. 7 position-free 消融</span><span class="sp"></span><span class="xs f-ink3 mono">论文数字</span></div>
+    <div class="figbody"><svg id="f11Svg" viewBox="0 0 720 300" role="img" aria-label="记忆组件消融与 position-free 缓存消融"></svg></div>
+    <div class="readout" id="f11Read"></div>
+    <figcaption>左：Tab. 5，四种记忆配置的 VBench-Long 平均分。右：Tab. 7，「聚合前先去掉位置」相对「带着 RoPE 直接聚合」的增益差。两张图的纵轴都从非零起点截断，请看标注的绝对差值。</figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">我的第五个意见：双流设计的定量证据只有 +0.02，而定性图说「只有双流才行」</div>
+    <p>Tab. 5：无记忆 85.48 → 只要 μ<sub>L</sub> 85.84 → 只要 μ<sub>S</sub> <b>85.95</b> → 双流 <b>85.97</b>。也就是说，<b>在「只用短期流」的基础上再加一条长期流，只换来 +0.02</b>——在 20 条 prompt、没有任何方差报告的设定下，这个量级和噪声无法区分。</p>
+    <p>可 Fig. 11（论文的定性图）却说：无记忆、只长期、只短期三种情况下背景建筑都会逐渐消失，<b>只有双流</b>才保住。定量和定性在这里是打架的。要么定性图挑了个别例子，要么 Tab. 5 的平均分掩盖了某类样本上的显著差异——无论哪种，论文都应该给出方差或按 prompt 的分布，而不是只给一个平均。</p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">我的第六个意见：Tab. 5 的「双流」行和 Tab. 6/7 的 MemRoPE 行对不上</div>
+    <p>同为 <b>LongLive + 60 秒 + 完整方法</b>，两处数字应该相同：</p>
+    <div class="tblwrap" style="margin:12px 0">
+      <table class="tbl">
+        <thead><tr><th>来源</th><th>Aesthetic</th><th>Imaging</th><th>Subject</th><th>Average</th></tr></thead>
+        <tbody>
+          <tr><td>Tab. 5「μ<sub>L</sub>+μ<sub>S</sub>」</td><td>58.76</td><td>67.09</td><td>97.61</td><td>85.97</td></tr>
+          <tr><td>Tab. 6 / Tab. 7「MemRoPE」</td><td>58.76</td><td class="neg">69.01</td><td class="neg">97.41</td><td class="neg">86.24</td></tr>
+          <tr><td>差</td><td>0.00</td><td>−1.92</td><td>+0.20</td><td>−0.27</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Aesthetic <b>分毫不差</b>，Imaging 却差 1.92。如果两处用的是不同 prompt 子集，Aesthetic 不可能刚好一致到小数点后两位；如果是同一批数据，Imaging 就不该差这么多。我反推了 Tab. 5「双流」行未展示的三项之和（6×85.97 − 58.76 − 67.09 − 97.61 = 292.36），与 Tab. 6 那三项的实际和 292.28 几乎相等——说明差异<b>就集中在 Imaging 这一列</b>，更像一处录入/取数错误，而不是两次独立实验。</p>
+    <p class="xs f-ink3">同一处还有一个小疏漏：Tab. 7 的表头列序是 Aesthetic / <b>Subject</b> / Imaging / Motion / <b>Background</b> / Temporal，与 Tab. 1/2/5/6 不同；但把它的数据行和 Tab. 6 同一行逐个对照，会发现数字完全相同、只是 Subject 与 Background 两列的<b>标题</b>互换了。结论不受影响，属于制表疏漏。</p>
+  </div>
+
+  <div class="call note">
+    <div class="hd">position-free 这一刀，实测值多少</div>
+    <p>Tab. 7 是全文最该被注意的消融：把「先去位置再 EMA」换成「带着 RoPE 直接 EMA」，两者<b>都</b>比基座好，差距是 <b>+0.84 vs +0.71</b>（Self-Forcing）和 <b>+0.53 vs +0.37</b>（LongLive）。也就是说，Eq.(5) 那个「相位冲突导致表征无效」的理论问题，实际只值 <b>0.13 / 0.16</b> 分。</p>
+    <p>这和我在 §05 推的低通滤波解释完全一致：带 RoPE 聚合并不会得到垃圾，它得到的是一个<b>只保留低频位置带、幅度被压缩</b>的 key——有损，但不是废的。所以 position-free 是<b>更干净的设计</b>（而且顺手解决了外推），但论文用的 "essential" 一词比证据强。</p>
+  </div>
+</section>
+
+<section class="sec" id="s-ledger">
+  <div class="eyebrow"><span class="n">09</span><span class="t">My verification ledger</span><span class="line"></span></div>
+  <h2>我的复核账本：算过的、对上的、对不上的</h2>
+  <p class="lead">凡是论文给了数字的地方我都重算了一遍。下面是全部结果，包括对上的（这很重要，说明主表可信）。</p>
+
+  <div class="tblwrap">
+    <table class="tbl">
+      <thead><tr><th>核对项</th><th>结果</th><th>细节</th></tr></thead>
+      <tbody>
+        <tr><td style="text-align:left">Tab. 1/2/6/7 的 Average = 6 项无权平均？</td><td class="pos">✓ 43/43 行</td><td style="text-align:left">最大偏差 0.0067，全部来自四舍五入</td></tr>
+        <tr><td style="text-align:left">Δ 列 = MemRoPE 平均 − 基座平均？</td><td class="pos">✓ 全部</td><td style="text-align:left">含 Deep Forcing / ∞-RoPE 的负增益行</td></tr>
+        <tr><td style="text-align:left">「1024 latent 帧 ≈ 4 分 15 秒」</td><td class="pos">✓</td><td style="text-align:left">1024 × 4 ÷ 16 fps = 256 s = 4:16，与论文口径一致</td></tr>
+        <tr><td style="text-align:left">Tab. 8 的加速 3.631 → 5.115 FPS 合理吗</td><td class="pos">✓ 自洽</td><td style="text-align:left">若注意力占 C=21 时总耗时 ≈55%，C=21→12 的 token 削减正好给出 1.41×（我的简单模型）</td></tr>
+        <tr><td style="text-align:left">同 C=12 时 MemRoPE 比 LongLive 慢</td><td class="pos">✓ −0.7%</td><td style="text-align:left">4.409 → 4.376 FPS，与「每步多做一次全 cache 旋转」一致</td></tr>
+        <tr><td style="text-align:left">C = S+2M+L 与 Tab. 8 的 C=12</td><td class="neg">✗ 9 ≠ 12</td><td style="text-align:left">只有把当前 chunk 的 3 帧算进去才对得上（见 §06）</td></tr>
+        <tr><td style="text-align:left">L=4「帧」与 chunk=3 帧的整除关系</td><td class="neg">✗</td><td style="text-align:left">Algorithm 1 第 16 行与第 22 行互相矛盾（见 §06）</td></tr>
+        <tr><td style="text-align:left">Tab. 5 双流行 vs Tab. 6/7 MemRoPE 行</td><td class="neg">✗ Imaging 差 1.92</td><td style="text-align:left">Aesthetic 却完全相同；差异集中在单独一列</td></tr>
+        <tr><td style="text-align:left">Tab. 7 表头列序</td><td class="neg">✗</td><td style="text-align:left">Subject / Background 两列标题与数据互换</td></tr>
+        <tr><td style="text-align:left">Tab. 3 用户研究的分母</td><td class="neg">未给出</td><td style="text-align:left">30 人 × 20 对 ÷ 5 个基线 ⇒ 每格 n≈120；但 30 个百分数里没有任何整数 n（30–600）能同时复现（如 66.1% 无法由 k/120 得到），推测是按人平均后的比率，论文应说明</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>我算出来、而论文没写的几个量</h3>
+  <div class="cards">
+    <div class="card"><div class="ti"><i style="background:var(--lm)"></i>长期记忆的半衰期</div><p><b>51.7 秒</b>（α<sub>L</sub>=0.01，69 个 chunk）。时间常数 75 秒。1 小时视频里，5 分钟前的内容只剩 1.8% 权重。</p></div>
+    <div class="card"><div class="ti"><i style="background:var(--sm)"></i>短期记忆的半衰期</div><p><b>4.9 秒</b>（α<sub>S</sub>=0.1）。它覆盖的范围只比 local window（4 帧 = 1 秒）大一个数量级。</p></div>
+    <div class="card"><div class="ti"><i style="background:var(--sk)"></i>压缩比</div><p>1 小时 = 14,400 latent 帧 ≈ <b>2245 万 token</b>，扣掉 sink+local 后压进 <b>2 个 token</b>，约 <b>1120 万 : 1</b>。</p></div>
+    <div class="card"><div class="ti"><i style="background:var(--lw)"></i>预热（无偏置校正）</div><p>α<sub>L</sub>=0.01 在 30/60/120/240 秒时幅度分别只有 <b>33% / 55% / 80% / 96%</b>；α<sub>L</sub>=0.001 在 60 秒时只有 <b>7.7%</b>。</p></div>
+    <div class="card"><div class="ti"><i style="background:var(--cur)"></i>指标离散度</div><p>全部数据行上：Imaging σ=3.43、Aesthetic σ=2.86，其余四项 σ≤1.13。无权平均 ≈ 前两项。</p></div>
+    <div class="card"><div class="ti"><i style="background:var(--lm)"></i>带 RoPE 聚合的频响</div><p>|H(ω)| = α/|1−(1−α)e<sup>−jω</sup>|，−3dB 点在 ω≈α。α=0.01 时 ω=1 的频带只剩 <b>1.05%</b>。</p></div>
+  </div>
+</section>
+<section class="sec" id="s-doubt">
+  <div class="eyebrow"><span class="n">10</span><span class="t">Open questions</span><span class="line"></span></div>
+  <h2>我的存疑清单</h2>
+  <p class="lead">按「会不会动摇结论」排序。每条都写清楚：论文的说法是什么、我凭什么怀疑、以及<b>什么实验能一次性解决它</b>。前 6 条我认为审稿时应该被追问。</p>
+
+  <div id="doubts"></div>
+
+  <div class="call good" style="margin-top:26px">
+    <div class="hd">把话说公道：哪些是真的站得住的</div>
+    <p>① <b>position-free cache 是个好抽象</b>，它让任何形式的 KV 聚合在 RoPE 模型上第一次良定义，价值超出本文的 EMA。② <b>方法真的不用训练、真的常数显存</b>，这两点没有水分。③ <b>在 Self-Forcing 上它同时更快更好</b>（cache 21→12，FPS 3.631→5.115，平均分 +0.98 ~ +1.85），这是很少见的组合。④ <b>43 行主表数据算术自洽</b>，Δ 列、平均列都对得上，没有 CrossDistill 那种加权对不上的问题。⑤ <b>Fig. 3 对 Deep Forcing 的批评是有诊断的</b>（选择集冻结 + 相邻帧 SSIM/LPIPS 跳变），比单纯「我们更好」扎实。</p>
+  </div>
+</section>
+
+<section class="sec" id="s-missing">
+  <div class="eyebrow"><span class="n">11</span><span class="t">To reproduce this, you still need…</span><span class="line"></span></div>
+  <h2>复现清单：论文没给的东西</h2>
+  <p class="lead">方法本身只有二三十行代码，但下面这些没写清楚，照着论文写出来的实现大概率和作者的不是同一个。</p>
+  <ul class="nb">
+    <li><b>local window 的单位</b>：L=4 是 4 个 latent 帧还是 4 个 chunk？决定了原样保留的细节量（§06）。</li>
+    <li><b>SpatialPool 的定义</b>：均值？最大值？带权？论文只给了函数名。</li>
+    <li><b>池化 token 的 3D-RoPE 空间坐标 (h,w)</b>：完全没写（§04）。</li>
+    <li><b>基线的 cache 预算</b>：Deep Forcing 在同样 C=12 下跑，还是按它自己论文的配置跑？Deep Forcing 的设计是「一半以上 cache 给 static sink」，预算被压到 12 会严重受损——而它在 Self-Forcing 上恰好是负增益（240 s 时 −1.38）。</li>
+    <li><b>30 秒 / 60 秒表格用了多少条 prompt</b>：评测协议只交代了 120/240 s（128 条）、480 s（20 条）、1 h（10 条）、消融（20 条）。</li>
+    <li><b>用户研究的分母与统计口径</b>：每格 n 未给；30 个百分数无法由任何统一整数分母复现，推测是按人平均。</li>
+    <li><b>方差 / 种子 / 置信区间</b>：全文一个都没有。1 小时那组只有 10 条 prompt，差距约 1 分。</li>
+    <li><b>代码</b>：只给了项目页 memrope.github.io，正文没有开源承诺。</li>
+    <li><b>μ 是否做过任何归一化</b>：EMA 值的尺度会随预热变化，是否有 scale 校正未提（§03）。</li>
+    <li><b>引用小错</b>：Sec. 5.1 说用 Gemini 3.1-Pro 时引的是 [7]，而 [7] 是 Gemini 2.5 的技术报告；真正的 3.1 model card 是 [14]，在 Sec. 5.2 才被正确引用。</li>
+  </ul>
+</section>
+
+<section class="sec" id="s-place">
+  <div class="eyebrow"><span class="n">12</span><span class="t">Where it sits</span><span class="line"></span></div>
+  <h2>谱系与定位：它是抗漂移稳定器，不是世界记忆</h2>
+  <p class="prose">长视频的「记忆」这条线上大致有四类做法，MemRoPE 在最右边一栏——也是最便宜的一栏：</p>
+
+  <div class="tblwrap">
+    <table class="tbl">
+      <thead><tr><th>路线</th><th>代表</th><th>记忆载体</th><th>训练</th><th>能做空间回访吗</th></tr></thead>
+      <tbody>
+        <tr><td style="text-align:left">几何/检索记忆</td><td style="text-align:left">WorldMem, VMem, Context-as-Memory</td><td style="text-align:left">位姿索引的历史帧库</td><td>需要</td><td class="pos">能</td></tr>
+        <tr><td style="text-align:left">架构级压缩记忆</td><td style="text-align:left">FAR (FlexRoPE), VideoSSM, FramePack</td><td style="text-align:left">多尺度 patch / 状态空间</td><td>从头训</td><td style="text-align:left">部分</td></tr>
+        <tr><td style="text-align:left">长上下文微调</td><td style="text-align:left">LongLive, Self-Forcing++, Context Forcing</td><td style="text-align:left">更长的窗口 + 对齐训练</td><td>需要</td><td class="neg">不能</td></tr>
+        <tr class="ours"><td style="text-align:left"><b>推理期缓存管理</b></td><td style="text-align:left">∞-RoPE, Deep Forcing, <b>MemRoPE</b></td><td style="text-align:left">定长 KV cache 的分配策略</td><td class="pos">不需要</td><td class="neg">不能</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="prose">对<b>交互式世界模型</b>而言，这个区别是要命的：交互的核心考验是「我转身走开再回来，那面墙还是不是原来那面」。MemRoPE 的记忆是 2 个<b>空间池化</b>的 token，没有任何空间选择性，加上一个约 1 分钟的指数窗口——<b>它在原理上就不可能支持空间回访一致性</b>。它真正解决的是另一件同样重要的事：<b>长时间 rollout 的数值漂移</b>（曝光跑飞、色调偏移、结构逐渐糊掉）。</p>
+
+  <p class="prose">所以它在这个仓库里的正确位置是：<b>一个可以叠加在任何自回归视频世界模型上的、零成本的稳定层</b>。特别值得注意的是 Self-Forcing 那组——cache 从 21 帧砍到 12 帧，<b>FPS 提升 41%，分数还涨了 0.98~1.85</b>。对实时交互来说，「更快 + 更稳」比「多记 10 秒」更有直接价值。而它最可复用的零件不是那条 EMA，是 <b>position-free cache</b>：任何想在 RoPE 模型上做 KV 合并/聚类/检索的工作，都可以先把这一刀借走。</p>
+</section>
+
+<section class="sec" id="s-appendix">
+  <div class="eyebrow"><span class="n">13</span><span class="t">Appendix</span><span class="line"></span></div>
+  <h2>附录速查</h2>
+
+  <h3>配置一览（论文 Sec. 5.1）</h3>
+  <div class="tblwrap">
+    <table class="tbl">
+      <thead><tr><th>项</th><th>值</th><th>项</th><th>值</th></tr></thead>
+      <tbody>
+        <tr><td style="text-align:left">骨干</td><td style="text-align:left">Wan2.1-T2V-1.3B</td><td style="text-align:left">基座</td><td style="text-align:left">Self-Forcing / LongLive</td></tr>
+        <tr><td style="text-align:left">chunk</td><td style="text-align:left">3 个 latent 帧</td><td style="text-align:left">去噪步</td><td style="text-align:left">4 步 @ {1000,750,500,250}</td></tr>
+        <tr><td style="text-align:left">S（sink）</td><td style="text-align:left">3</td><td style="text-align:left">M（每条流）</td><td style="text-align:left">1</td></tr>
+        <tr><td style="text-align:left">L（local）</td><td style="text-align:left">4</td><td style="text-align:left">α<sub>L</sub> / α<sub>S</sub></td><td style="text-align:left">0.01 / 0.1</td></tr>
+        <tr><td style="text-align:left">分辨率 / 帧率</td><td style="text-align:left">480×832 / 16 fps</td><td style="text-align:left">prompt 来源</td><td style="text-align:left">MovieGenBench（Qwen2.5-7B-Instruct 改写）</td></tr>
+        <tr><td style="text-align:left">评测</td><td style="text-align:left">VBench-Long 6 项</td><td style="text-align:left">硬件</td><td style="text-align:left">单张 A6000（测速）</td></tr>
+        <tr><td style="text-align:left">用户研究</td><td style="text-align:left">30 人 × 20 对，2AFC</td><td style="text-align:left">VLM 评审</td><td style="text-align:left">Gemini 3.1 Pro，5 分制曝光稳定性</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>全部主表数字（可切换）</h3>
+  <figure class="fig">
+    <div class="fh"><span class="no">TAB</span><span class="ti">VBench-Long 全表</span><span class="sp"></span><span class="xs f-ink3 mono">论文 Tab. 1/2/6</span></div>
+    <div class="ctl">
+      <span>时长：</span>
+      <span class="seg" id="tabDur">
+        <button type="button" data-v="30" >30 s</button><button type="button" data-v="60">60 s</button><button type="button" data-v="120" aria-pressed="true">120 s</button><button type="button" data-v="240">240 s</button><button type="button" data-v="480">480 s</button><button type="button" data-v="3600">1 h</button>
+      </span>
+    </div>
+    <div class="figbody" id="tabBody" style="padding:0"></div>
+    <figcaption>列序统一为 Aesthetic / Background / Imaging / Motion / Subject / Temporal。Average 为 6 项无权平均（我已逐行核算）。</figcaption>
+  </figure>
+
+  <h3>术语</h3>
+  <ul class="nb">
+    <li><b>Attention sink</b>：StreamingLLM 观察到的现象——序列最开头的几个 token 会吸走大量注意力，删掉它们会让模型崩掉。视频这边把开头几帧固定留在 cache 里，就是这个思路。</li>
+    <li><b>FIFO eviction</b>：cache 满了就丢最老的。滑动窗口的默认策略。</li>
+    <li><b>Participative Compression (Deep Forcing)</b>：按累计注意力分数挑 token 留下。本文 Fig. 3 指出它会自我强化地锁死在一组老 token 上。</li>
+    <li><b>块相对 RoPE（∞-RoPE）</b>：把 cache 的位置索引整体平移到训练见过的区间里，从而突破 1024 帧上限。</li>
+    <li><b>VBench-Long</b>：把长视频切片打分再聚合的评测套件。本文用其中 6 项，<b>不含 Dynamic Degree</b>。</li>
+    <li><b>2AFC</b>：两选一强制选择，用户研究的标准范式。</li>
+  </ul>
+
+  <div class="foot">
+    <p>原文：<a href="https://arxiv.org/abs/2603.12513" target="_blank" rel="noopener">arXiv:2603.12513v1</a>　项目页：<a href="https://memrope.github.io" target="_blank" rel="noopener">memrope.github.io</a>　本页由 Claude 精读生成：图解与「我的推算 / 我的意见」部分是我自己的计算与判断，可能出错，数字都标了来源，欢迎对着原文复核。</p>
+  </div>
+</section>
+<script>
+/* ============================================================ helpers */
+const NS="http://www.w3.org/2000/svg";
+const $=(s,r)=>(r||document).querySelector(s);
+const $$=(s,r)=>Array.from((r||document).querySelectorAll(s));
+function E(tag,attrs,txt){const e=document.createElementNS(NS,tag);
+  for(const k in (attrs||{})) e.setAttribute(k,attrs[k]);
+  if(txt!=null) e.textContent=txt; return e;}
+function clear(n){while(n.firstChild) n.removeChild(n.firstChild);}
+function T(x,y,txt,o){o=o||{};return E("text",Object.assign({x:x,y:y,"font-size":o.s||11,"font-family":o.f||"var(--font-mono)",
+  fill:o.c||"var(--ink3)","text-anchor":o.a||"start","dominant-baseline":o.b||"auto","font-weight":o.w||400},o.extra||{}),txt);}
+function R(x,y,w,h,o){o=o||{};return E("rect",Object.assign({x:x,y:y,width:Math.max(0,w),height:Math.max(0,h),rx:o.r==null?3:o.r,
+  fill:o.f||"none",stroke:o.s||"none","stroke-width":o.sw||1},o.extra||{}));}
+function L(x1,y1,x2,y2,o){o=o||{};return E("line",Object.assign({x1:x1,y1:y1,x2:x2,y2:y2,stroke:o.s||"var(--axis)",
+  "stroke-width":o.w||1},o.extra||{}));}
+function P(d,o){o=o||{};return E("path",Object.assign({d:d,fill:o.f||"none",stroke:o.s||"none","stroke-width":o.w||1.6,
+  "stroke-linejoin":"round","stroke-linecap":"round"},o.extra||{}));}
+const fmt=(n,d)=>Number(n).toFixed(d==null?2:d);
+function fmtTime(s){ if(s<60) return fmt(s,s<10?1:0)+" s"; if(s<3600) return fmt(s/60,1)+" min"; return fmt(s/3600,2)+" h";}
+function fmtBig(n){ if(n>=1e8) return (n/1e8).toFixed(2)+"亿"; if(n>=1e4) return (n/1e4).toFixed(n>=1e6?0:1)+"万"; return Math.round(n).toLocaleString();}
+function stat(lb,dn,cls){const d=document.createElement("div"); d.className="stat"+(cls?" "+cls:"");
+  d.innerHTML='<span class="lb"></span><span class="dn"></span>';
+  d.querySelector(".lb").textContent=lb; d.querySelector(".dn").innerHTML=dn; return d;}
+function fill(node,items){clear2(node); items.forEach(i=>node.appendChild(stat(i[0],i[1],i[2])));}
+function clear2(n){while(n.firstChild) n.removeChild(n.firstChild);}
+
+const CH=0.75;            // seconds per chunk (3 latent frames @16fps, VAE 4x)
+const TOK=1560;           // tokens per latent frame (480x832, /8, patch2)
+const FLIMIT=1024;        // max latent-frame position index
+
+/* ============================================================ chrome */
+(function(){
+  const btn=$("#themeBtn");
+  btn.addEventListener("click",()=>{
+    const cur=document.documentElement.getAttribute("data-theme");
+    const dark=cur? cur==="dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.setAttribute("data-theme", dark?"light":"dark");
+    window.dispatchEvent(new Event("themechange"));
+  });
+  const nb=$("#navBtn"), nm=$("#navMenu");
+  $$("section.sec").forEach((s,i)=>{
+    const h=s.querySelector("h2"); if(!h) return;
+    const a=document.createElement("a"); a.href="#"+s.id;
+    a.innerHTML='<span></span>';
+    a.querySelector("span").textContent=String(i+1).padStart(2,"0");
+    a.appendChild(document.createTextNode(h.textContent.replace(/\s+/g," ").trim().slice(0,26)));
+    nm.appendChild(a);
+  });
+  nb.addEventListener("click",()=>{const o=nm.hasAttribute("hidden"); if(o){nm.removeAttribute("hidden");}else{nm.setAttribute("hidden","");} nb.setAttribute("aria-expanded",String(o));});
+  document.addEventListener("click",e=>{ if(!nm.contains(e.target)&&e.target!==nb){nm.setAttribute("hidden","");nb.setAttribute("aria-expanded","false");}});
+  const pr=$("#prog");
+  addEventListener("scroll",()=>{const h=document.body.scrollHeight-innerHeight;
+    pr.style.width=(h>0? Math.min(100,scrollY/h*100):0)+"%";},{passive:true});
+})();
+
+function segment(id,cb){
+  const box=$("#"+id); if(!box) return;
+  box.addEventListener("click",e=>{
+    const b=e.target.closest("button"); if(!b) return;
+    $$("button",box).forEach(x=>x.removeAttribute("aria-pressed"));
+    b.setAttribute("aria-pressed","true"); cb(b.dataset.v);
+  });
+}
+const redraws=[];
+function onTheme(f){redraws.push(f);}
+addEventListener("themechange",()=>redraws.forEach(f=>{try{f()}catch(e){}}));
+
+/* ============================================================ FIG 1 */
+(function(){
+  const svg=$("#f1Svg"), slider=$("#f1T"), tv=$("#f1TV"), tag=$("#f1Tag"), read=$("#f1Read");
+  const AL=0.01, AS=0.1;
+  const chunksAt=v=>Math.round(Math.exp(Math.log(2)+ (v/1000)*(Math.log(4800)-Math.log(2))));
+  let playing=null;
+
+  function draw(){
+    const t=chunksAt(+slider.value);           // chunks generated so far
+    const T=t*CH;                              // seconds
+    tv.textContent=fmtTime(T); tag.textContent="t = "+t.toLocaleString()+" chunk";
+    clear(svg);
+    const x0=62,x1=694;
+    /* ---- panel A : real timeline ---- */
+    svg.appendChild(T2(10,22,"真实时间轴：视频一直在长，历史被指数遗忘",{s:12,c:"var(--ink2)",f:"var(--font-body)",w:600}));
+    const yb=96, hMax=52;
+    svg.appendChild(R(x0,yb-hMax,x1-x0,hMax,{f:"var(--tint)",s:"var(--rule)",r:4}));
+    // memory weight profile: weight of content at age a (chunks) = alpha(1-alpha)^a, normalized to newest
+    const prof=(a,al)=>Math.pow(1-al,a);
+    const N=260; let dL="M "+x0+" "+yb, dS="M "+x0+" "+yb;
+    for(let i=0;i<=N;i++){
+      const frac=i/N, age=(1-frac)*t;          // frac 0 = oldest (left)
+      const x=x0+frac*(x1-x0);
+      dL+=" L "+x.toFixed(1)+" "+(yb-prof(age,AL)*hMax).toFixed(1);
+      dS+=" L "+x.toFixed(1)+" "+(yb-prof(age,AS)*hMax).toFixed(1);
+    }
+    dL+=" L "+x1+" "+yb+" Z"; dS+=" L "+x1+" "+yb+" Z";
+    svg.appendChild(P(dL,{f:"var(--lm-soft)",s:"var(--lm)",w:1.4}));
+    svg.appendChild(P(dS,{f:"var(--sm-soft)",s:"var(--sm)",w:1.4}));
+    // sink block (3 latent frames = 1 chunk) pinned at left
+    const wOne=Math.max(5,(x1-x0)/t);
+    svg.appendChild(R(x0,yb-hMax,wOne,hMax,{f:"var(--sk-soft)",s:"var(--sk)",r:2,sw:1.4}));
+    svg.appendChild(T2(x0,yb-hMax-8,"sink（冻结的第 0 块）",{s:10.5,c:"var(--sk-ink)"}));
+    // local window (4 latent frames ≈ 1.33 chunk)
+    const wLoc=Math.max(5,(x1-x0)*(4/3)/t);
+    svg.appendChild(R(x1-wLoc,yb-hMax,wLoc,hMax,{f:"var(--lw-soft)",s:"var(--lw)",r:2,sw:1.4}));
+    svg.appendChild(T2(x1,yb-hMax-8,"local + 当前",{s:10.5,c:"var(--lw-ink)",a:"end"}));
+    svg.appendChild(L(x0,yb,x1,yb,{s:"var(--axis)"}));
+    svg.appendChild(T2(x0,yb+15,"0 s",{s:10}));
+    svg.appendChild(T2(x1,yb+15,fmtTime(T),{s:10,a:"end"}));
+    // marker: 5 min ago
+    if(T>330){
+      const xm=x0+(1-(300/T))*(x1-x0);
+      svg.appendChild(L(xm,yb-hMax-4,xm,yb+4,{s:"var(--rule2)",w:1,extra:{"stroke-dasharray":"3 3"}}));
+      svg.appendChild(T2(xm+4,yb-hMax+2,"5 分钟前 → μ_L 权重仅 "+fmt(Math.pow(1-AL,300/CH)*100,2)+"%",{s:10,c:"var(--ink3)"}));
+    }
+    /* ---- panel B : what the model sees ---- */
+    svg.appendChild(T2(10,152,"模型每一步真正看到的：12 个槽位，编号永远 0–11",{s:12,c:"var(--ink2)",f:"var(--font-body)",w:600}));
+    const slots=[["0","sink","sk"],["1","sink","sk"],["2","sink","sk"],["3","μ_L","lm"],["4","μ_S","sm"],
+                 ["5","local","lw"],["6","local","lw"],["7","local","lw"],["8","local","lw"],
+                 ["9","now","cur"],["10","now","cur"],["11","now","cur"]];
+    const bw=48, gap=5, bx0=62, by=176, bh=54;
+    slots.forEach((s,i)=>{
+      const x=bx0+i*(bw+gap), c="var(--"+s[2]+")";
+      const isNow=s[2]==="cur";
+      svg.appendChild(R(x,by,bw,bh,{f:"var(--"+s[2]+"-soft)",s:c,r:5,sw:1.5,
+        extra:isNow?{"stroke-dasharray":"4 3"}:{}}));
+      svg.appendChild(T2(x+bw/2,by+22,s[1],{s:11.5,a:"middle",c:"var(--"+s[2]+"-ink)",w:600}));
+      svg.appendChild(T2(x+bw/2,by+40,"idx "+s[0],{s:10,a:"middle",c:"var(--ink3)"}));
+    });
+    svg.appendChild(L(bx0,by+bh+14,bx0+12*(bw+gap)-gap,by+bh+14,{s:"var(--rule2)"}));
+    svg.appendChild(T2(bx0,by+bh+30,"φ = [0 … 11]，每个去噪步重新发放；R_φ 在注意力时才施加",{s:10.5,c:"var(--ink3)"}));
+    svg.appendChild(T2(bx0+12*(bw+gap)-gap,by+bh+30,"真实 latent 帧号：≈ "+(t*3).toLocaleString(),{s:10.5,c:"var(--bad-ink)",a:"end"}));
+    /* readouts */
+    fill(read,[
+      ["已生成",fmtTime(T),"c"],
+      ["chunk 数",t.toLocaleString(),""],
+      ["真实 latent 帧号",(t*3).toLocaleString(),"warnv"],
+      ["模型看到的索引","0 – 11","c"],
+      ["μ_L 幅度（相对稳态）",fmt((1-Math.pow(1-AL,t))*100,1)+"%","a"],
+      ["μ_L 中来自最近 75 s 的权重",fmt((1-Math.pow(1-AL,Math.min(t,100)))/(1-Math.pow(1-AL,t))*100,1)+"%","a"]
+    ]);
+  }
+  function T2(x,y,txt,o){return T(x,y,txt,o);}
+  slider.addEventListener("input",()=>{if(playing){clearInterval(playing);playing=null;$("#f1Play").textContent="▶ 播放到 1 小时";} draw();});
+  $("#f1Play").addEventListener("click",function(){
+    if(playing){clearInterval(playing);playing=null;this.textContent="▶ 播放到 1 小时";return;}
+    this.textContent="⏸ 暂停"; slider.value=0;
+    playing=setInterval(()=>{ let v=+slider.value+8; if(v>=1000){v=1000; clearInterval(playing); playing=null; $("#f1Play").textContent="▶ 播放到 1 小时";}
+      slider.value=v; draw(); },40);
+  });
+  onTheme(draw); draw();
+})();
+
+/* ============================================================ FIG 2 */
+(function(){
+  const svg=$("#f2Svg"), sl=$("#f2T"), tv=$("#f2TV"), read=$("#f2Read"), tag=$("#f2Tag");
+  const AL=0.01, WIN=2; let playing=null;
+
+  // toy simulation of Deep Forcing's participative compression (illustrative, per Fig.3 description)
+  function pcRetention(t){
+    const score=new Array(t+1).fill(0), sel=new Set(); const K=6;
+    for(let s=1;s<=t;s++){
+      sel.add(s);                                  // newest always enters the local window
+      for(const i of sel) score[i]+= (i<=s-WIN? 1.0 : 0.15);   // persisted tokens accumulate score
+      if(sel.size>K){
+        const arr=[...sel].filter(i=>i<=s-WIN).sort((a,b)=>score[a]-score[b]);
+        while(sel.size>K && arr.length){ sel.delete(arr.shift()); }
+      }
+    }
+    const r=new Array(t+1).fill(0); for(const i of sel) r[i]=1; return r;
+  }
+  function draw(){
+    const t=+sl.value; tv.textContent=t+" chunk"; tag.textContent="≈ "+fmtTime(t*CH);
+    clear(svg);
+    const x0=104,x1=700, rows=[
+      ["FIFO 滑动窗口","var(--cur)","var(--cur-soft)"],
+      ["Deep Forcing (PC) ·示意","var(--deep)","var(--sk-soft)"],
+      ["MemRoPE (EMA)","var(--ours)","var(--lw-soft)"]
+    ];
+    const pc=pcRetention(t);
+    const w=(x1-x0)/t;
+    rows.forEach((rw,ri)=>{
+      const yb=78+ri*78, h=46;
+      svg.appendChild(T(10,yb-h/2,rw[0],{s:12,c:"var(--ink2)",f:"var(--font-body)",w:600,b:"middle"}));
+      svg.appendChild(L(x0,yb,x1,yb,{s:"var(--rule)"}));
+      for(let i=1;i<=t;i++){
+        let v=0;
+        if(ri===0) v=(i===1||i>t-WIN)?1:0;
+        else if(ri===1) v=(i===1)?1:pc[i];
+        else v=(i===1)?1:Math.pow(1-AL,t-i);
+        if(v<=0.004) continue;
+        const x=x0+(i-1)*w;
+        const isSink=(i===1);
+        svg.appendChild(R(x+0.5,yb-v*h,Math.max(1.2,w-1),v*h,{f:isSink?"var(--sk)":rw[1],r:1.5,
+          extra:{opacity:isSink?0.95:(0.35+0.65*Math.min(1,v))}}));
+      }
+    });
+    svg.appendChild(T(x0,272,"← 最早生成的 chunk",{s:10.5}));
+    svg.appendChild(T(x1,272,"最新 →",{s:10.5,a:"end"}));
+    svg.appendChild(T(x0,24,"每根柱＝一个已生成的 chunk；高度＝它此刻还能影响生成多少（第 1 块＝sink，金色）",{s:10.5,c:"var(--ink3)"}));
+    const ema=Math.pow(1-AL,t-1);
+    fill(read,[
+      ["FIFO：第 2 块的残留", (2>t-WIN?"100%":"0%"), ""],
+      ["PC：当前选择集大小", "6（很快冻结）","d"],
+      ["EMA：第 2 块的残留", fmt(ema*100,ema<0.1?2:1)+"%","c"],
+      ["EMA：最近 10 chunk 占比", fmt((1-Math.pow(1-AL,Math.min(t,10)))*100,1)+"%","c"]
+    ]);
+  }
+  sl.addEventListener("input",()=>{if(playing){clearInterval(playing);playing=null;$("#f2Play").textContent="▶ 播放";}draw();});
+  $("#f2Play").addEventListener("click",function(){
+    if(playing){clearInterval(playing);playing=null;this.textContent="▶ 播放";return;}
+    this.textContent="⏸ 暂停"; sl.value=2;
+    playing=setInterval(()=>{let v=+sl.value+1; if(v>=80){v=80;clearInterval(playing);playing=null;$("#f2Play").textContent="▶ 播放";}
+      sl.value=v; draw();},90);
+  });
+  onTheme(draw); draw();
+})();
+</script>
+<script>
+/* ============================================================ FIG 3 — forgetting curve */
+(function(){
+  const svg=$("#f3Svg"), read=$("#f3Read");
+  const ALs=[0.001,0.01,0.05,0.1], ASs=[0.05,0.1,0.3,0.5], DUR=[30,60,120,240,480,3600];
+  const sAL=$("#f3AL"), sAS=$("#f3AS"), sD=$("#f3D");
+  const half=a=>Math.log(2)/(-Math.log(1-a));
+  function draw(){
+    const aL=ALs[+sAL.value], aS=ASs[+sAS.value], D=DUR[+sD.value];
+    $("#f3ALV").textContent=aL; $("#f3ASV").textContent=aS; $("#f3DV").textContent= D>=3600?"1 h":D+" s";
+    clear(svg);
+    const x0=64,x1=694,y0=36,y1=232, lo=Math.log(CH), hi=Math.log(D);
+    const X=s=>x0+(Math.log(Math.max(CH,s))-lo)/(hi-lo)*(x1-x0);
+    const Y=v=>y1-v*(y1-y0);
+    // grid
+    [0,.25,.5,.75,1].forEach(v=>{ svg.appendChild(L(x0,Y(v),x1,Y(v),{s:"var(--grid)"}));
+      svg.appendChild(T(x0-8,Y(v)+4,(v*100)+"%",{s:10,a:"end"})); });
+    const ticks=[1,5,15,60,300,1800,3600].filter(s=>s<=D);
+    ticks.forEach(s=>{ svg.appendChild(L(X(s),y0,X(s),y1,{s:"var(--grid)"}));
+      svg.appendChild(T(X(s),y1+16,s<60?s+"s":(s/60)+"min",{s:10,a:"middle"})); });
+    svg.appendChild(L(x0,y1,x1,y1,{s:"var(--axis)"}));
+    // curves: cumulative weight share of the most recent s seconds
+    function curve(a,color,label){
+      let d=""; const N=200;
+      for(let i=0;i<=N;i++){ const s=Math.exp(lo+(hi-lo)*i/N), k=s/CH, v=1-Math.pow(1-a,k);
+        d+=(i?" L ":"M ")+X(s).toFixed(1)+" "+Y(v).toFixed(1); }
+      svg.appendChild(P(d,{s:color,w:2}));
+      const hl=half(a)*CH;
+      if(hl<=D){ svg.appendChild(E("circle",{cx:X(hl),cy:Y(.5),r:4.5,fill:color,stroke:"var(--surf)","stroke-width":2}));
+        svg.appendChild(T(Math.max(x0+40,Math.min(x1-40,X(hl))),Y(.5)-12,"半衰期 "+fmtTime(hl),{s:10,a:"middle",c:color})); }
+      return hl;
+    }
+    const hS=curve(aS,"var(--sm)"), hL=curve(aL,"var(--lm)");
+    svg.appendChild(T(x0+14,y0+16,"μ_L（α="+aL+"）",{s:11,c:"var(--lm-ink)",w:600}));
+    svg.appendChild(T(x0+14,y0+32,"μ_S（α="+aS+"）",{s:11,c:"var(--sm-ink)",w:600}));
+    svg.appendChild(T(x0,y0-14,"纵轴：记忆里有多少权重来自「最近这么久」",{s:10.5}));
+    svg.appendChild(T(x1,y1+34,"距当前多久以前（对数）",{s:10.5,a:"end"}));
+    const oldShare=Math.pow(1-aL,(D/2)/CH);
+    fill(read,[
+      ["μ_L 半衰期",fmtTime(half(aL)*CH),"a"],
+      ["μ_L 时间常数",fmtTime((1/aL)*CH),"a"],
+      ["μ_S 半衰期",fmtTime(half(aS)*CH),"b"],
+      ["视频前一半的权重合计", (oldShare<1e-4? oldShare.toExponential(1) : fmt(oldShare*100,2)+"%"), oldShare<0.02?"warnv":""],
+      ["最近 1 分钟占比",fmt((1-Math.pow(1-aL,60/CH))*100,1)+"%","a"]
+    ]);
+  }
+  [sAL,sAS,sD].forEach(s=>s.addEventListener("input",draw));
+  onTheme(draw); draw();
+})();
+
+/* ============================================================ FIG 4 — warm-up */
+(function(){
+  const svg=$("#f4Svg"), read=$("#f4Read"); let marks=true;
+  segment("f4Mark",v=>{marks=(v==="on"); draw();});
+  function draw(){
+    clear(svg);
+    const x0=64,x1=694,y0=30,y1=190, lo=Math.log(3), hi=Math.log(3600);
+    const X=s=>x0+(Math.log(Math.max(3,s))-lo)/(hi-lo)*(x1-x0), Y=v=>y1-v*(y1-y0);
+    [0,.25,.5,.75,1].forEach(v=>{svg.appendChild(L(x0,Y(v),x1,Y(v),{s:"var(--grid)"}));
+      svg.appendChild(T(x0-8,Y(v)+4,(v*100)+"%",{s:10,a:"end"}));});
+    [3,10,30,60,120,240,480,1800,3600].forEach(s=>{svg.appendChild(L(X(s),y0,X(s),y1,{s:"var(--grid)"}));
+      svg.appendChild(T(X(s),y1+16,s<60?s+"s":(s<3600?(s/60)+"m":"1h"),{s:10,a:"middle"}));});
+    svg.appendChild(L(x0,y1,x1,y1,{s:"var(--axis)"}));
+    const series=[[0.001,"var(--lm)","α_L=0.001"],[0.01,"var(--lw)","α_L=0.01（论文默认）"],[0.05,"var(--sk)","α_L=0.05"],[0.1,"var(--sm)","α_S=0.1"]];
+    series.forEach((s,i)=>{
+      let d=""; const N=220;
+      for(let k=0;k<=N;k++){const sec=Math.exp(lo+(hi-lo)*k/N), v=1-Math.pow(1-s[0],sec/CH);
+        d+=(k?" L ":"M ")+X(sec).toFixed(1)+" "+Y(v).toFixed(1);}
+      svg.appendChild(P(d,{s:s[1],w:s[0]===0.01?2.4:1.8,extra:s[0]===0.01?{}:{"stroke-dasharray":"5 3"}}));
+      svg.appendChild(T(x1-4,y0+92+i*16,s[2],{s:10.5,a:"end",c:s[1],w:600}));
+    });
+    if(marks){
+      [30,60,120,240,480].forEach(sec=>{
+        const v=1-Math.pow(1-0.01,sec/CH);
+        svg.appendChild(L(X(sec),Y(v),X(sec),y1,{s:"var(--rule2)",w:1,extra:{"stroke-dasharray":"2 3"}}));
+        svg.appendChild(E("circle",{cx:X(sec),cy:Y(v),r:4,fill:"var(--lw)",stroke:"var(--surf)","stroke-width":1.6}));
+        svg.appendChild(T(X(sec),Y(v)-9,fmt(v*100,0)+"%",{s:10,a:"middle",c:"var(--lw-ink)",w:600}));
+      });
+    }
+    svg.appendChild(T(x0,y0-12,"纵轴：μ 的幅度相对稳态（无偏置校正）",{s:10.5}));
+    svg.appendChild(T(x1,y1+34,"已生成时长（对数）",{s:10.5,a:"end"}));
+    fill(read,[
+      ["α_L=0.01 @30s",fmt((1-Math.pow(.99,40))*100,1)+"%","c"],
+      ["α_L=0.01 @60s",fmt((1-Math.pow(.99,80))*100,1)+"%","c"],
+      ["α_L=0.01 @240s",fmt((1-Math.pow(.99,320))*100,1)+"%","c"],
+      ["α_L=0.001 @60s",fmt((1-Math.pow(.999,80))*100,1)+"%","warnv"],
+      ["α_S=0.1 @30s",fmt((1-Math.pow(.9,40))*100,1)+"%","b"]
+    ]);
+  }
+  onTheme(draw); draw();
+})();
+
+/* ============================================================ FIG 5 — token budget */
+(function(){
+  const svg=$("#f5Svg"), read=$("#f5Read"), sD=$("#f5D"); const DUR=[30,60,120,240,480,3600];
+  function draw(){
+    const D=DUR[+sD.value]; $("#f5DV").textContent= D>=3600?"1 h":D+" s";
+    const lf=Math.round(D*16/4);               // latent frames
+    const hist=Math.max(0,(lf-7))*TOK, all=lf*TOK;
+    clear(svg);
+    const x0=180,x1=690,y0=40, bh=26, gap=18;
+    const LO=Math.log(1), HI=Math.log(3e7);
+    const W=v=>Math.max(2,(Math.log(Math.max(1,v))-LO)/(HI-LO)*(x1-x0));
+    const rows=[
+      ["全部历史 "+lf.toLocaleString()+" 帧",all,"var(--cur)","var(--cur-soft)"],
+      ["Self-Forcing 窗口 21 帧",21*TOK,"var(--inf)","var(--lm-soft)"],
+      ["MemRoPE cache 3+4 帧",7*TOK+2,"var(--ours)","var(--lw-soft)"],
+      ["其中 μ_L + μ_S 两个 token",2,"var(--sm)","var(--sm-soft)"]
+    ];
+    rows.forEach((r,i)=>{
+      const y=y0+i*(bh+gap);
+      svg.appendChild(T(x0-12,y+bh/2+4,r[0],{s:11.5,a:"end",c:"var(--ink2)",f:"var(--font-body)"}));
+      svg.appendChild(R(x0,y,W(r[1]),bh,{f:r[3],s:r[2],r:4,sw:1.5}));
+      svg.appendChild(T(x0+W(r[1])+8,y+bh/2+4,fmtBig(r[1])+" token",{s:11,c:r[2],w:600}));
+    });
+    const yAx=y0+4*(bh+gap)+4;
+    svg.appendChild(L(x0,yAx,x1,yAx,{s:"var(--axis)"}));
+    [1,10,100,1000,1e4,1e5,1e6,1e7].forEach(v=>{const x=x0+W(v);
+      svg.appendChild(L(x,yAx,x,yAx+4,{s:"var(--axis)"}));
+      svg.appendChild(T(x,yAx+16,v>=1e4?("10^"+Math.round(Math.log10(v))):String(v),{s:9.5,a:"middle"}));});
+    svg.appendChild(T(x0,yAx+34,"token 数（对数刻度）",{s:10.5}));
+    fill(read,[
+      ["latent 帧",lf.toLocaleString(),""],
+      ["历史 token 总量",fmtBig(hist),"warnv"],
+      ["压进 memory 的压缩比","≈ "+fmtBig(hist/2)+" : 1","b"],
+      ["cache 常驻 token",(7*TOK+2).toLocaleString(),"c"]
+    ]);
+  }
+  sD.addEventListener("input",draw); onTheme(draw); draw();
+})();
+
+/* ============================================================ FIG 6 — phasor + transfer */
+(function(){
+  const svg=$("#f6Svg"), read=$("#f6Read"), sA=$("#f6A"), sW=$("#f6W");
+  const AS=[0.001,0.01,0.1,0.3]; let mode="rot";
+  segment("f6Mode",v=>{mode=v;draw();});
+  const wOf=()=>Math.exp(Math.log(0.001)+(+sW.value/100)*(Math.log(3)-Math.log(0.001)));
+  const Hm=(a,w)=>a/Math.hypot(1-(1-a)*Math.cos(w),(1-a)*Math.sin(w));
+  function draw(){
+    const a=AS[+sA.value], w=wOf();
+    $("#f6AV").textContent=a; $("#f6WV").textContent=w.toFixed(w<0.01?4:3);
+    clear(svg);
+    /* ---- left: vector sum ---- */
+    const cx=160,cy=160,r=104;
+    svg.appendChild(T(10,22,mode==="rot"?"左：把「已带相位」的 key 按 EMA 权重相加":"左：先平均、再统一发一个相位",{s:12,c:"var(--ink2)",f:"var(--font-body)",w:600}));
+    svg.appendChild(E("circle",{cx:cx,cy:cy,r:r,fill:"none",stroke:"var(--rule)","stroke-dasharray":"4 4"}));
+    svg.appendChild(L(cx-r-10,cy,cx+r+10,cy,{s:"var(--grid)"}));
+    svg.appendChild(L(cx,cy-r-10,cx,cy+r+10,{s:"var(--grid)"}));
+    const K=28, mag=(mode==="rot")? Hm(a,w) : 1;
+    let ang=0;
+    for(let k=0;k<K;k++){
+      const th=(mode==="rot")? w*k : 0;
+      const op=0.85-0.7*(k/K);
+      svg.appendChild(L(cx,cy,cx+Math.cos(th)*r,cy-Math.sin(th)*r,
+        {s:mode==="rot"?"var(--sm)":"var(--lw)",w:1.2,extra:{opacity:op}}));
+      ang=th;
+    }
+    // resultant: weighted mean of unit phasors (weights sum to 1) -> length = |H|
+    const phi=(mode==="rot")? Math.atan2(Math.sin(0)*0 + (function(){let sy=0,sx=0;for(let k=0;k<400;k++){const wk=a*Math.pow(1-a,k);sx+=wk*Math.cos(w*k);sy+=wk*Math.sin(w*k);}return sy;})(),
+               (function(){let sx=0;for(let k=0;k<400;k++){sx+=a*Math.pow(1-a,k)*Math.cos(w*k);}return sx;})()) : 0;
+    const ex=cx+Math.cos(phi)*mag*r, ey=cy-Math.sin(phi)*mag*r;
+    svg.appendChild(L(cx,cy,ex,ey,{s:"var(--surf)",w:7}));
+    svg.appendChild(L(cx,cy,ex,ey,{s:"var(--ink)",w:3.2}));
+    svg.appendChild(E("circle",{cx:ex,cy:ey,r:5.5,fill:"var(--ink)",stroke:"var(--surf)","stroke-width":2}));
+    if(mag<0.3){
+      svg.appendChild(L(ex,ey,cx+66,cy-78,{s:"var(--ink3)",w:1,extra:{"stroke-dasharray":"2 2"}}));
+      svg.appendChild(T(cx+70,cy-80,"合矢量（就这么短）",{s:10.5,c:"var(--ink)",w:600,f:"var(--font-body)"}));
+    } else {
+      svg.appendChild(T(ex+8,ey-8,"合矢量",{s:10.5,c:"var(--ink)",w:600,f:"var(--font-body)"}));
+    }
+    svg.appendChild(T(cx,cy+r+14,mode==="rot"?("细线 = 最近 "+K+" 个历史 chunk 在该频带上的相位"):"细线 = 全部 key 被发放同一个索引",{s:10,a:"middle",c:"var(--ink3)",f:"var(--font-body)"}));
+    svg.appendChild(T(cx,cy+r+32,"合矢量长度 = "+fmt(mag,3)+"（1.0 = 无损）",{s:11,a:"middle",c:"var(--ink2)",f:"var(--font-body)",w:600}));
+    svg.appendChild(T(cx,cy+r+48,mode==="rot"?"相位互相抵消 → 幅度被吃掉":"所有 key 同相位 → 幅度完整保留",{s:10.5,a:"middle",c:"var(--ink3)",f:"var(--font-body)"}));
+    /* ---- right: |H(w)| ---- */
+    const x0=400,x1=700,y0=44,y1=212;
+    const LOx=Math.log(0.001),HIx=Math.log(3), LOy=Math.log(0.002),HIy=Math.log(1.2);
+    const X=v=>x0+(Math.log(v)-LOx)/(HIx-LOx)*(x1-x0), Y=v=>y1-(Math.log(Math.max(0.002,v))-LOy)/(HIy-LOy)*(y1-y0);
+    svg.appendChild(T(x0,22,"右：合矢量长度随频带 ω 的变化",{s:12,c:"var(--ink2)",f:"var(--font-body)",w:600}));
+    [0.001,0.01,0.1,1].forEach(v=>{svg.appendChild(L(X(v),y0,X(v),y1,{s:"var(--grid)"}));
+      svg.appendChild(T(X(v),y1+15,String(v),{s:9.5,a:"middle"}));});
+    [0.01,0.1,1].forEach(v=>{svg.appendChild(L(x0,Y(v),x1,Y(v),{s:"var(--grid)"}));
+      svg.appendChild(T(x0-6,Y(v)+4,(v*100)+"%",{s:9.5,a:"end"}));});
+    svg.appendChild(L(x0,y1,x1,y1,{s:"var(--axis)"}));
+    AS.forEach(aa=>{
+      let dd="",N=160;
+      for(let i=0;i<=N;i++){const ww=Math.exp(LOx+(HIx-LOx)*i/N);
+        dd+=(i?" L ":"M ")+X(ww).toFixed(1)+" "+Y(Hm(aa,ww)).toFixed(1);}
+      const cur=(aa===a);
+      svg.appendChild(P(dd,{s:cur?"var(--sm)":"var(--rule2)",w:cur?2.4:1.2,extra:cur?{}:{"stroke-dasharray":"3 3"}}));
+      if(cur) svg.appendChild(T(X(0.0012),Y(Hm(aa,0.0012))-8,"α="+aa,{s:10.5,c:"var(--sm-ink)",w:600}));
+    });
+    // -3dB marker at w = a
+    svg.appendChild(L(X(a),y0,X(a),y1,{s:"var(--warn)",w:1,extra:{"stroke-dasharray":"3 3"}}));
+    svg.appendChild(T(X(a),y0-4,"ω≈α（−3dB）",{s:9.5,a:"middle",c:"var(--warn-ink)"}));
+    const hv=Hm(a,w);
+    svg.appendChild(E("circle",{cx:X(w),cy:Y(hv),r:5,fill:"var(--lw)",stroke:"var(--surf)","stroke-width":2}));
+    svg.appendChild(T(x1,y1+32,"RoPE 频带 ω（rad / 位置，对数）",{s:10.5,a:"end"}));
+    fill(read,[
+      ["当前频带 ω",w.toFixed(w<0.01?4:3),""],
+      ["该频带保留幅度", mode==="rot"? fmt(hv*100,hv<0.1?2:1)+"%" : "100%", mode==="rot"?"warnv":"c"],
+      ["−3dB 截止","ω ≈ "+a,"d"],
+      ["高频带 ω=1 保留",fmt(Hm(a,1)*100,2)+"%","warnv"]
+    ]);
+  }
+  [sA,sW].forEach(s=>s.addEventListener("input",draw)); onTheme(draw); draw();
+})();
+
+/* ============================================================ FIG 7 — index maps */
+(function(){
+  const svg=$("#f7Svg"), read=$("#f7Read"), sl=$("#f7T");
+  const chunksAt=v=>Math.round(Math.exp(Math.log(2)+(v/1000)*(Math.log(4800)-Math.log(2))));
+  const C=12;
+  function draw(){
+    const t=chunksAt(+sl.value), lf=t*3;      // latent frame index of current chunk start
+    $("#f7TV").textContent=fmtTime(t*CH);
+    clear(svg);
+    const x0=150,x1=676, AX=1200;
+    const X=v=>x0+Math.min(1.06,v/AX)*(x1-x0);
+    const rows=[
+      ["原生单调索引",lf,lf+3,lf+3>FLIMIT],
+      ["∞-RoPE 块相对",FLIMIT-C,FLIMIT,false],
+      ["MemRoPE 在线编号",0,C,false]
+    ];
+    rows.forEach((r,i)=>{
+      const y=52+i*68;
+      svg.appendChild(T(12,y+12,r[0],{s:12,c:"var(--ink2)",f:"var(--font-body)",w:600}));
+      svg.appendChild(L(x0,y+22,x1,y+22,{s:"var(--rule)"}));
+      // training range shading
+      svg.appendChild(R(x0,y-2,X(FLIMIT)-x0,26,{f:"var(--tint)",r:3}));
+      const over=r[3];
+      const a=X(r[1]), b=Math.max(a+4,X(r[2]));
+      svg.appendChild(R(a,y,b-a,22,{f:over?"var(--bad-soft)":(i===2?"var(--lw-soft)":"var(--lm-soft)"),
+        s:over?"var(--bad)":(i===2?"var(--lw)":"var(--lm)"),r:3,sw:1.6}));
+      const lbl=over? ("越界！索引 "+r[1].toLocaleString()+"–"+r[2].toLocaleString()) : ("索引 "+r[1]+"–"+(r[2]-1));
+      svg.appendChild(T(Math.min(b+8,x1-4),y+15,lbl,{s:10.5,c:over?"var(--bad-ink)":"var(--ink2)",a:b+8>x1-120?"end":"start",w:600}));
+      if(over){ svg.appendChild(T(x1,y-6,"→ 位置外推，模型没见过",{s:10,a:"end",c:"var(--bad-ink)"})); }
+    });
+    const yA=52+3*68-6;
+    svg.appendChild(L(X(FLIMIT),24,X(FLIMIT),yA+10,{s:"var(--warn)",w:1.2,extra:{"stroke-dasharray":"4 3"}}));
+    svg.appendChild(T(X(FLIMIT),18,"f_limit = 1024",{s:10.5,a:"middle",c:"var(--warn-ink)",w:600}));
+    svg.appendChild(T(x0,yA+30,"0",{s:10,a:"middle"}));
+    svg.appendChild(T(x1,yA+30,"→ latent 帧位置索引",{s:10.5,a:"end"}));
+    fill(read,[
+      ["已生成",fmtTime(t*CH),""],
+      ["真实 latent 帧号",lf.toLocaleString(),lf>FLIMIT?"warnv":""],
+      ["原生索引是否越界",lf+3>FLIMIT?"是":"否",lf+3>FLIMIT?"warnv":"c"],
+      ["MemRoPE 当前索引","9 – 11","c"]
+    ]);
+  }
+  sl.addEventListener("input",draw); onTheme(draw); draw();
+})();
+</script>
+<script>
+/* ============================================================ data (paper Tab.1/2/6) */
+const MET=["Aesthetic","Background","Imaging","Motion","Subject","Temporal"];
+const DATA={
+ "30":{sf:[["Self-Forcing",58.28,95.14,66.92,98.02,95.50,96.87,85.12],
+           ["Deep Forcing",57.83,94.86,66.29,97.53,94.98,95.71,84.53],
+           ["∞-RoPE",57.13,95.81,65.10,98.39,96.37,97.18,85.00],
+           ["MemRoPE",58.48,95.59,68.73,98.01,96.31,96.41,85.59]],
+       ll:[["LongLive",58.57,96.22,67.85,98.65,97.21,97.32,85.97],
+           ["Deep Forcing",59.87,96.22,69.41,98.59,97.05,97.33,86.41],
+           ["∞-RoPE",59.32,96.40,66.68,98.94,97.32,97.93,86.10],
+           ["MemRoPE",59.31,96.34,69.27,98.68,97.48,97.40,86.42]],
+       other:[["CausVid",57.25,96.77,65.16,98.08,97.87,96.86,85.33],
+              ["Rolling Forcing",58.45,95.77,69.35,98.23,96.78,97.13,85.95]]},
+ "60":{sf:[["Self-Forcing",56.96,95.08,66.36,97.35,95.15,96.56,84.57],
+           ["Deep Forcing",57.30,94.59,65.67,97.22,94.36,95.38,84.09],
+           ["∞-RoPE",54.97,95.69,62.81,98.39,96.26,97.37,84.25],
+           ["MemRoPE",57.77,95.58,68.54,97.93,96.29,96.35,85.41]],
+       ll:[["LongLive",57.93,96.10,67.41,98.57,97.10,97.15,85.71],
+           ["Deep Forcing",59.63,96.16,68.73,98.52,96.88,97.33,86.21],
+           ["∞-RoPE",58.52,96.33,65.63,98.95,97.27,97.95,85.78],
+           ["MemRoPE",58.76,96.27,69.01,98.67,97.41,97.34,86.24]],
+       other:[["NOVA",47.53,88.06,44.97,98.94,77.50,98.27,75.88],
+              ["MAGI-1",52.10,87.76,54.54,99.26,79.46,98.48,78.60],
+              ["SkyReels-V2",57.64,89.95,66.67,98.67,84.99,97.60,82.59],
+              ["CausVid",57.06,96.94,64.84,98.16,98.03,97.05,85.35],
+              ["Rolling Forcing",58.34,96.21,69.41,98.52,97.26,97.47,86.20]]},
+ "120":{sf:[["Self-Forcing",55.11,95.41,65.95,97.17,95.35,96.53,84.25],
+            ["Deep Forcing",56.86,94.58,65.02,97.07,94.17,95.33,83.84],
+            ["∞-RoPE",52.82,95.66,61.07,98.48,96.30,97.50,83.64],
+            ["MemRoPE",56.77,95.54,68.44,97.90,96.37,96.33,85.23]],
+        ll:[["LongLive",57.21,95.96,67.13,98.56,97.06,97.12,85.51],
+            ["Deep Forcing",59.16,96.13,68.07,98.51,96.79,97.38,86.01],
+            ["∞-RoPE",57.87,96.46,64.84,99.00,97.29,98.00,85.58],
+            ["MemRoPE",59.25,96.29,69.43,98.73,97.54,97.47,86.45]]},
+ "240":{sf:[["Self-Forcing",51.00,95.01,61.52,98.18,95.83,96.72,83.04],
+            ["Deep Forcing",52.20,93.91,59.50,96.72,92.28,95.38,81.66],
+            ["∞-RoPE",50.51,95.52,58.81,98.47,96.24,97.48,82.84],
+            ["MemRoPE",55.54,95.45,67.77,97.93,96.30,96.39,84.89]],
+        ll:[["LongLive",56.70,95.80,66.90,98.52,97.02,97.04,85.33],
+            ["Deep Forcing",57.75,96.03,66.48,98.50,96.65,97.47,85.48],
+            ["∞-RoPE",57.47,96.34,63.38,98.99,97.11,97.94,85.21],
+            ["MemRoPE",58.90,96.39,68.93,98.59,97.37,97.13,86.22]]},
+ "480":{sf:[["∞-RoPE",48.35,95.45,56.00,98.59,96.46,97.71,82.09],
+            ["MemRoPE",56.12,95.65,68.23,97.96,96.87,96.42,85.21]],
+        ll:[["∞-RoPE",56.77,96.25,61.32,99.05,97.16,97.95,84.75],
+            ["MemRoPE",57.96,96.12,67.52,98.66,97.37,97.23,85.81]]},
+ "3600":{ll:[["∞-RoPE",60.87,96.42,70.42,99.01,97.71,97.62,87.01],
+             ["MemRoPE",63.05,96.77,72.71,99.07,98.18,98.14,87.99]]}
+};
+const PROMPTS={"30":"未说明","60":"未说明","120":"128","240":"128","480":"20","3600":"10"};
+const DURLBL={"30":"30 s","60":"60 s","120":"120 s","240":"240 s","480":"480 s","3600":"1 h"};
+const find=(rows,n)=>rows? rows.find(r=>r[0]===n) : null;
+
+/* ============================================================ FIG 8 — Algorithm 1 */
+(function(){
+  const ALG=[
+    [0,"Require: DiT G_θ, 去噪步数 N, EMA 速率 α_L, α_S","超参只有两个 α。没有任何需要训练的参数。"],
+    [0,"1:  x̂₀ ← G_θ(x₀⁽⁰⁾, N)","第 0 块正常生成，此时 cache 是空的。"],
+    [0,"2:  K_sink, V_sink ← W_K x̂₀, W_V x̂₀        ▷ w/o RoPE","<b>第一处「不带 RoPE」。</b>sink 取自第 0 块的 3 个 latent 帧，存的是原始 key，此后<b>永不更新</b>。"],
+    [0,"3:  μᵏ_L, μᵛ_L, μᵏ_S, μᵛ_S ← 0;  K_local, V_local ← ∅","<b>记忆从零初始化，且没有偏置校正。</b>α_L=0.01 时要约 240 秒才长到稳态的 96%（见 FIG 4）。在此之前它更像一个幅度很小的空槽。"],
+    [0,"4:  for t = 1, 2, … do                     ▷ chunk 循环","外层：一块 3 个 latent 帧。真正的「无限」就发生在这个没有上界的 for 里。"],
+    [1,"5:    for s = 1, …, N do                   ▷ 去噪步","内层：N=4 步，timestep {1000,750,500,250}。"],
+    [2,"6:      q_s, k_s, v_s ← W_Q x, W_K x, W_V x","当前块的 QKV。"],
+    [2,"7:      K ← [K_sink‖μᵏ_L‖μᵏ_S‖K_local‖k_s]  ▷ w/o RoPE","<b>三层缓存在这里拼起来</b>：sink 3 + memory 2 + local 4 + 当前 3 = 12 个索引位。注意 μ 从 t=1 就占着槽位，哪怕它还是零向量。"],
+    [2,"8:      V ← [V_sink‖μᵛ_L‖μᵛ_S‖V_local‖v_s]","value 同样分层。value 不参与旋转（RoPE 只作用于 q/k）。"],
+    [2,"9:      φ ← [0, …, |K|−1]                  ▷ Online RoPE","<b>核心的一行。</b>每个去噪步都从 0 重新发号，所以索引永远不会超出训练范围——位置外推问题在这里被消掉。"],
+    [2,"10:     Apply R_φ to q_s, K","<b>旋转在这里、每步、每层都发生一次。</b>论文说「省掉了每步旋转」其实不准确；省掉的是「就地改写已存 key」。"],
+    [2,"11:     x⁽ˢ⁺¹⁾ ← DiT-Block(R_φ q_s, R_φ K, V)","模型本体完全没改，只是喂进去的 K 被临时旋转过。"],
+    [1,"12:   end for",""],
+    [1,"13:   x̂_t ← x⁽ᴺ⁾                            ▷ 去噪完成","只有完全去噪的结果才会进 cache。"],
+    [1,"14:   Append W_K x̂_t, W_V x̂_t to K_local  ▷ w/o RoPE","<b>第三处「不带 RoPE」。</b>整个 cache 里没有任何一个 key 是带位置的。"],
+    [1,"15:   if |K_local| > L then                 ▷ 驱逐并更新记忆","<b>这一行的单位是全文最含糊的地方</b>：|K_local| 是按帧数还是按 chunk 数？L=4 与 chunk=3 不整除（见正文的表）。"],
+    [2,"16:     k̄ ← SpatialPool(K_local[0])","<b>1560 个空间 token → 1 个。</b>SpatialPool 的定义（均值？带权？）论文没给；池化后 token 的 3D-RoPE 空间坐标也没给。"],
+    [2,"17:     v̄ ← SpatialPool(V_local[0])","value 也池化。之后注意力从记忆槽取回的就是「整帧 value 的均值」——一个全局色调/曝光的直流项。"],
+    [2,"18:     μᵏ_L ← (1−α_L)μᵏ_L + α_L k̄","长期流。α_L=0.01 → 半衰期 51.7 秒（我算的），不是「全部历史」。"],
+    [2,"19:     μᵛ_L ← (1−α_L)μᵛ_L + α_L v̄",""],
+    [2,"20:     μᵏ_S ← (1−α_S)μᵏ_S + α_S k̄","短期流。α_S=0.1 → 半衰期 4.9 秒，只比 local window（≈1 秒）大一个数量级。"],
+    [2,"21:     μᵛ_S ← (1−α_S)μᵛ_S + α_S v̄",""],
+    [2,"22:     Evict oldest chunk from K_local, V_local","<b>和第 16 行矛盾</b>：16 行池化的是「一个元素」，这里驱逐的是「一个 chunk（3 帧）」。若两者都按字面理解，每次被扔掉的 3 帧里只有 1 帧进了记忆。"],
+    [1,"23:   end if",""],
+    [0,"24: end for","没有终止条件——这就是「无限」的字面含义。"]
+  ];
+  const code=$("#f8Code"), pane=$("#f8Pane");
+  code.style.cssText="font-family:var(--font-mono); font-size:11.6px; line-height:1.95; background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:10px 6px; overflow-x:auto";
+  pane.style.cssText="background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:14px 16px; font-size:13.8px; color:var(--ink2); align-self:start; position:sticky; top:66px";
+  pane.innerHTML='<div style="font-family:var(--font-display);font-weight:600;color:var(--ink);margin-bottom:6px">点左边任意一行</div><p>有注解的行会高亮。三处 <code>w/o RoPE</code> 是全文支点。</p>';
+  ALG.forEach((ln,i)=>{
+    const d=document.createElement("div");
+    d.textContent=ln[1];
+    d.style.cssText="padding:1px 10px 1px "+(10+ln[0]*14)+"px; border-radius:5px; white-space:pre; cursor:"+(ln[2]?"pointer":"default")+"; color:"+(ln[2]?"var(--ink)":"var(--ink3)")+";";
+    if(ln[2]){
+      d.addEventListener("click",()=>{
+        $$("div",code).forEach(x=>{x.style.background="transparent";x.style.boxShadow="none";});
+        d.style.background="var(--lw-soft)"; d.style.boxShadow="inset 2px 0 0 var(--lw)";
+        pane.innerHTML='<div style="font-family:var(--font-mono);font-size:11px;color:var(--ink3);margin-bottom:8px">LINE '+(i)+'</div><p>'+ln[2]+'</p>';
+      });
+      d.addEventListener("mouseenter",()=>{if(d.style.background==="transparent"||!d.style.background)d.style.background="var(--surf3)";});
+      d.addEventListener("mouseleave",()=>{if(d.style.boxShadow==="none"||!d.style.boxShadow)d.style.background="transparent";});
+    }
+    code.appendChild(d);
+  });
+})();
+
+/* ============================================================ FIG 9 — scores by duration */
+(function(){
+  const svg=$("#f9Svg"), read=$("#f9Read"); let base="sf";
+  segment("f9Base",v=>{base=v;draw();});
+  const SER=[["base","var(--cur)"],["Deep Forcing","var(--deep)"],["∞-RoPE","var(--inf)"],["MemRoPE","var(--ours)"]];
+  function draw(){
+    clear(svg);
+    const durs=Object.keys(DATA).filter(d=>DATA[d][base]);
+    const x0=54,x1=700,y0=30,y1=228;
+    let vals=[]; durs.forEach(d=>DATA[d][base].forEach(r=>vals.push(r[7])));
+    const lo=Math.floor(Math.min(...vals)-0.6), hi=Math.ceil(Math.max(...vals)+0.4);
+    const Y=v=>y1-(v-lo)/(hi-lo)*(y1-y0);
+    for(let v=lo;v<=hi;v+=1){svg.appendChild(L(x0,Y(v),x1,Y(v),{s:"var(--grid)"}));
+      svg.appendChild(T(x0-8,Y(v)+4,String(v),{s:10,a:"end"}));}
+    svg.appendChild(L(x0,y1,x1,y1,{s:"var(--axis)"}));
+    const gw=(x1-x0)/durs.length;
+    durs.forEach((d,gi)=>{
+      const rows=DATA[d][base], n=rows.length, bw=Math.min(30,(gw-26)/n), gx=x0+gi*gw+(gw-n*(bw+4))/2;
+      rows.forEach((r,ri)=>{
+        const isBase=(r[0]==="Self-Forcing"||r[0]==="LongLive");
+        const key=isBase?"base":r[0];
+        const col=(SER.find(s=>s[0]===key)||["","var(--cur)"])[1];
+        const x=gx+ri*(bw+4), h=y1-Y(r[7]);
+        svg.appendChild(R(x,Y(r[7]),bw,h,{f:col,r:3,extra:{opacity:isBase?0.45:0.95}}));
+        if(r[0]==="MemRoPE"||r[0]==="∞-RoPE")
+          svg.appendChild(T(x+bw/2,Y(r[7])-6,fmt(r[7],2),{s:9.8,a:"middle",c:col,w:600}));
+      });
+      svg.appendChild(T(gx+n*(bw+4)/2-2,y1+18,DURLBL[d],{s:11.5,a:"middle",c:"var(--ink2)",f:"var(--font-body)",w:600}));
+      svg.appendChild(T(gx+n*(bw+4)/2-2,y1+34,"n="+PROMPTS[d],{s:9.8,a:"middle",c:PROMPTS[d]==="未说明"?"var(--warn-ink)":"var(--ink3)"}));
+      if(gi<durs.length-1) svg.appendChild(L(x0+(gi+1)*gw,y0,x0+(gi+1)*gw,y1,{s:"var(--rule)",extra:{"stroke-dasharray":"2 4"}}));
+    });
+    svg.appendChild(T(x0,y0-10,"VBench-Long 平均分（6 项无权平均）",{s:10.5}));
+    svg.appendChild(T(x1,y0-10,"⚠ 不同时长的 prompt 数不同，柱高只能组内比较",{s:10.5,a:"end",c:"var(--warn-ink)"}));
+    const items=[];
+    durs.forEach(d=>{const rows=DATA[d][base], m=find(rows,"MemRoPE"), i=find(rows,"∞-RoPE");
+      if(m&&i) items.push([DURLBL[d]+" vs ∞-RoPE","+"+fmt(m[7]-i[7],2),"c"]);});
+    fill(read,items);
+  }
+  onTheme(draw); draw();
+})();
+
+/* ============================================================ FIG 10 — gain decomposition */
+(function(){
+  const svg=$("#f10Svg"), read=$("#f10Read"); let ref="inf";
+  segment("f10Ref",v=>{ref=v;draw();});
+  function draw(){
+    clear(svg);
+    const rows=[];
+    ["30","60","120","240","480","3600"].forEach(d=>{
+      ["sf","ll"].forEach(b=>{
+        const rs=DATA[d]&&DATA[d][b]; if(!rs) return;
+        const m=find(rs,"MemRoPE"); if(!m) return;
+        const r=ref==="inf"? find(rs,"∞-RoPE") : (find(rs,"Self-Forcing")||find(rs,"LongLive"));
+        if(!r) return;
+        const dif=[]; for(let i=1;i<=6;i++) dif.push(m[i]-r[i]);
+        rows.push({lbl:DURLBL[d]+" · "+(b==="sf"?"Self-Forcing":"LongLive"),
+          aes:dif[0]/6, img:dif[2]/6, rest:(dif[1]+dif[3]+dif[4]+dif[5])/6, tot:(m[7]-r[7])});
+      });
+    });
+    const x0=128,y0=34,bh=20,gap=12;
+    const zx=250, barR=452;                     // bars live in [zx-90, barR]; labels start at barR+10
+    const maxAbs=Math.max(...rows.map(r=>Math.max(Math.abs(r.aes)+Math.abs(r.img),Math.abs(r.rest),Math.abs(r.tot))))*1.08;
+    const SX=v=>zx+v/maxAbs*(barR-zx);
+    svg.appendChild(L(zx,y0-14,zx,y0+rows.length*(bh+gap),{s:"var(--axis)"}));
+    svg.appendChild(T(zx,y0-20,"0",{s:10,a:"middle"}));
+    rows.forEach((r,i)=>{
+      const y=y0+i*(bh+gap);
+      svg.appendChild(T(x0-10,y+bh/2+4,r.lbl,{s:11,a:"end",c:"var(--ink2)",f:"var(--font-body)"}));
+      let posX=zx, negX=zx;
+      [["aes","var(--sk)"],["img","var(--lw)"],["rest","var(--cur)"]].forEach(seg=>{
+        const v=r[seg[0]]; if(Math.abs(v)<0.0005) return;
+        if(v>0){ const w=SX(v)-zx; svg.appendChild(R(posX+1,y,w-2,bh,{f:seg[1],r:2})); posX+=w; }
+        else   { const w=zx-SX(v); svg.appendChild(R(negX-w+1,y,w-2,bh,{f:seg[1],r:2,extra:{opacity:.8}})); negX-=w; }
+      });
+      const tx=SX(r.tot);
+      svg.appendChild(L(tx,y-3,tx,y+bh+3,{s:"var(--ink)",w:2}));
+      svg.appendChild(T(barR+12,y+bh/2+4,"Δ平均 "+(r.tot>0?"+":"")+fmt(r.tot,2)+"　Aes+Img 占 "+fmt(100*(r.aes+r.img)/r.tot,0)+"%",
+        {s:10.5,c:"var(--ink2)",f:"var(--font-body)"}));
+    });
+    svg.appendChild(T(x0-10,y0-12,"黑竖线 = 实际 Δ平均",{s:10,a:"end"}));
+    const over=rows.filter(r=>r.rest<0).length;
+    fill(read,[
+      ["比较组数",rows.length,""],
+      ["其余四项拖后腿的组数",over+" / "+rows.length,over>rows.length/2?"warnv":""],
+      ["Aes+Img 贡献区间",fmt(Math.min(...rows.map(r=>100*(r.aes+r.img)/r.tot)),0)+"% – "+fmt(Math.max(...rows.map(r=>100*(r.aes+r.img)/r.tot)),0)+"%","d"]
+    ]);
+  }
+  onTheme(draw); draw();
+})();
+
+/* ============================================================ FIG 11 — ablations */
+(function(){
+  const svg=$("#f11Svg"), read=$("#f11Read");
+  const T5=[["无记忆",85.48],["只 μ_L",85.84],["只 μ_S",85.95],["μ_L+μ_S",85.97]];
+  const T7=[["Self-Forcing",0.71,0.84],["LongLive",0.37,0.53]];
+  function draw(){
+    clear(svg);
+    /* left: Tab.5 */
+    const x0=56,x1=330,y0=54,y1=222, lo=85.3,hi=86.1;
+    const Y=v=>y1-(v-lo)/(hi-lo)*(y1-y0);
+    svg.appendChild(T(10,24,"Tab. 5 记忆消融（LongLive · 60 s · 20 prompts）",{s:11.5,c:"var(--ink2)",f:"var(--font-body)",w:600}));
+    for(let v=85.4;v<=86.1;v+=0.2){svg.appendChild(L(x0,Y(v),x1,Y(v),{s:"var(--grid)"}));
+      svg.appendChild(T(x0-8,Y(v)+4,fmt(v,1),{s:9.5,a:"end"}));}
+    svg.appendChild(L(x0,y1,x1,y1,{s:"var(--axis)"}));
+    const bw=44;
+    T5.forEach((r,i)=>{
+      const x=x0+16+i*(bw+22);
+      svg.appendChild(R(x,Y(r[1]),bw,y1-Y(r[1]),{f:i===3?"var(--ours)":"var(--cur)",r:3,extra:{opacity:i===3?0.95:0.55}}));
+      svg.appendChild(T(x+bw/2,Y(r[1])-7,fmt(r[1],2),{s:10,a:"middle",c:i===3?"var(--ours)":"var(--ink2)",w:600}));
+      svg.appendChild(T(x+bw/2,y1+16,r[0],{s:10.5,a:"middle",c:"var(--ink2)",f:"var(--font-body)"}));
+    });
+    // highlight the +0.02
+    const xA=x0+16+2*(bw+22)+bw/2, xB=x0+16+3*(bw+22)+bw/2;
+    svg.appendChild(L(xA,Y(85.95)-22,xB,Y(85.95)-22,{s:"var(--bad)",w:1.4}));
+    svg.appendChild(T((xA+xB)/2,Y(85.95)-27,"+0.02",{s:11,a:"middle",c:"var(--bad-ink)",w:600}));
+    svg.appendChild(T((xA+xB)/2,Y(85.95)-41,"第二条流的全部收益",{s:9.8,a:"middle",c:"var(--bad-ink)",f:"var(--font-body)"}));
+    /* right: Tab.7 */
+    const rx0=430,rx1=700,ry0=54,ry1=222, rlo=0,rhi=1.0;
+    const RY=v=>ry1-(v-rlo)/(rhi-rlo)*(ry1-ry0);
+    svg.appendChild(T(388,24,"Tab. 7 聚合前要不要先去位置（Δ 相对基座）",{s:11.5,c:"var(--ink2)",f:"var(--font-body)",w:600}));
+    [0,0.25,0.5,0.75,1].forEach(v=>{svg.appendChild(L(rx0,RY(v),rx1,RY(v),{s:"var(--grid)"}));
+      svg.appendChild(T(rx0-8,RY(v)+4,"+"+fmt(v,2),{s:9.5,a:"end"}));});
+    svg.appendChild(L(rx0,ry1,rx1,ry1,{s:"var(--axis)"}));
+    T7.forEach((r,i)=>{
+      const gx=rx0+30+i*128;
+      [[r[1],"var(--cur)","带 RoPE 聚合"],[r[2],"var(--ours)","position-free"]].forEach((b,j)=>{
+        const x=gx+j*46;
+        svg.appendChild(R(x,RY(b[0]),38,ry1-RY(b[0]),{f:b[1],r:3,extra:{opacity:j?0.95:0.55}}));
+        svg.appendChild(T(x+19,RY(b[0])-7,"+"+fmt(b[0],2),{s:10,a:"middle",c:j?"var(--ours)":"var(--ink2)",w:600}));
+      });
+      svg.appendChild(T(gx+42,ry1+16,r[0],{s:10.5,a:"middle",c:"var(--ink2)",f:"var(--font-body)"}));
+      svg.appendChild(T(gx+42,ry1+31,"差 "+fmt(r[2]-r[1],2)+" 分",{s:10,a:"middle",c:"var(--bad-ink)",w:600}));
+    });
+    svg.appendChild(R(rx0+4,ry0-24,9,9,{f:"var(--cur)",r:2,extra:{opacity:.55}}));
+    svg.appendChild(T(rx0+18,ry0-16,"带 RoPE 聚合",{s:9.8}));
+    svg.appendChild(R(rx0+96,ry0-24,9,9,{f:"var(--ours)",r:2}));
+    svg.appendChild(T(rx0+110,ry0-16,"position-free（本文）",{s:9.8}));
+    fill(read,[
+      ["只 μ_S → 双流","+0.02","warnv"],
+      ["无记忆 → 双流","+0.49","c"],
+      ["position-free 的实测价值","+0.13 / +0.16","d"],
+      ["消融样本量","20 prompts · 无方差","warnv"]
+    ]);
+  }
+  onTheme(draw); draw();
+})();
+
+/* ============================================================ doubts */
+(function(){
+  const D=[
+   ["hi","「长期记忆」实际是一个 75 秒的指数窗口，与「压缩全部历史 / 一小时身份保持」的叙事不符",
+    "<p><b>论文说：</b>「Memory Tokens continuously compress <i>all past keys</i>」（摘要）；「长期流累积<i>全部</i>生成历史」（Sec. 4.1）；Fig. 1 展示一小时生成「perfectly preserves subject identity」。</p>"+
+    "<p><b>我的推理：</b>α_L=0.01 的 EMA，时间常数 100 chunk = 75 秒，半衰期 51.7 秒。在 1 小时的生成里，5 分钟以前的全部内容在 μ_L 中的权重合计只有 <b>1.8%</b>，10 分钟以前 0.032%，55 分钟以前（视频开头）约 <b>6×10⁻²⁰</b>。数学上「每个历史 key 都有非零权重」是对的，实践上开头的信息早已被浮点精度吞掉。真正把开头锚住的是 3 帧<b>冻结的 sink</b>——那是 StreamingLLM 的老办法。</p>"+
+    "<div class='dl'><b>能一次性解决它的实验：</b>①把 μ_L 换成真正的累计平均（α=1/t）再比一次；②在第 30 分钟切换场景，测模型对开头内容的召回；③把 sink 去掉、只留 EMA，看一小时的身份保持还剩多少。</div>"],
+   ["hi","消融缺一个「空壳 token」对照：收益可能来自多了两个槽位，而不是槽里的内容",
+    "<p><b>证据链：</b>(a) μ 初始化为 0 且<b>没有偏置校正</b>，α_L=0.01 在 30 s/60 s 时幅度只有稳态的 33%/55%，α_L=0.001 在 60 s 时只有 <b>7.7%</b>——几乎就是零向量；(b) Fig. 7 显示 α_L 在 0.001–0.05 之间（时间常数相差 <b>50 倍</b>）平均分变动不到 0.7；(c) Tab. 5 的对照组是把两个槽位<b>整个删掉</b>，而不是换成无信息的占位符。</p>"+
+    "<p><b>我的推理：</b>零向量 key 在注意力里给出常数 logit，正是经典的 null attention sink——它会吸走一部分注意力质量、稳定 softmax。把 (a)(b)(c) 合起来，「收益主要来自多了 2 个吸收注意力的槽位」这个替代解释<b>无法被现有消融排除</b>。论文把 α 不敏感解读为「鲁棒」，但同一组数据也支持「内容不重要」。</p>"+
+    "<div class='dl'><b>能一次性解决它的实验：</b>用同样 2 个槽位装：①全零常向量；②固定随机向量；③第 0 块的池化 key（静态、不更新）。如果三者都接近 85.9，EMA 的「记忆」属性就被证伪了；如果明显更差，这条存疑作废。成本极低。</div>"],
+   ["hi","主指标是六项无权平均，而收益几乎全部来自两项逐帧画质指标；真正测一致性的项只有零点几分",
+    "<p><b>我算的：</b>在论文全部数据行上，各项标准差为 Imaging 3.43、Aesthetic 2.86，其余四项 ≤1.13。相对 ∞-RoPE 的 10 组比较中，Aesthetic+Imaging 贡献了 <b>107%–140%</b> 的 Δ平均，也就是说其余四项<b>净贡献为负</b>。</p>"+
+    "<p><b>我的推理：</b>Aesthetic（LAION 美学）与 Imaging（MUSIQ）是<b>逐帧</b>画质指标，测的是「糊不糊、过不过曝」；论文却称它们是「对长程上下文保持最敏感的维度」。真正测身份保持的 Subject Consistency，MemRoPE 相对 ∞-RoPE 只有 +0.07~+0.47。结论应当改写为：<b>MemRoPE 主要抑制了逐帧画质的退化</b>，这和它的机制（池化 value = 全局色调直流项）完全吻合，但不等于「记住了主体」。</p>"+
+    "<div class='dl'><b>能一次性解决它的实验：</b>报告加权或标准化后的平均；并单独给出首尾帧的 DINO/CLIP 身份相似度，这才是「identity drift」的直接度量。</div>"],
+   ["hi","六项指标里没有 Dynamic Degree，而摘要点名要治的失败模式正是 motion stagnation",
+    "<p><b>论文说：</b>摘要把 fidelity degradation、identity drift、<b>motion stagnation</b> 并列为要解决的问题。</p>"+
+    "<p><b>我的推理：</b>VBench 有 Dynamic Degree 专测运动幅度，本文选的六项不含它（这一系文献普遍如此，但本文的动机让缺席格外刺眼）。而 Subject/Background Consistency 本质是跨帧特征相似度、Motion Smoothness 与 Temporal Flickering 奖励帧间变化小——<b>「更稳」和「更死」在这六项上同号</b>。一个把历史往均值拉的 EMA 记忆，恰恰最可能以牺牲动态换取这些分数。论文自己也注意到 ∞-RoPE 在 Motion Smoothness/Temporal Flickering 上更高，却解释为「只保住了局部平滑」，没有考虑反向可能。</p>"+
+    "<div class='dl'><b>能一次性解决它的实验：</b>补一列 Dynamic Degree。视频都已经生成好了，这是零额外生成成本的一列。</div>"],
+   ["hi","缓存尺寸的账对不上，且 Algorithm 1 内部自相矛盾",
+    "<p><b>证据：</b>正文 C = S+2M+L = 3+2+4 = <b>9</b>，Tab. 8 却写 C = <b>12</b>；L=4「帧」不是 chunk（3 帧）的整数倍；Algorithm 1 第 16 行池化 <code>K_local[0]</code>（一个元素），第 22 行却「evict oldest <b>chunk</b>」（3 帧）。</p>"+
+    "<p><b>我的推理：</b>唯一能让 C=12 成立的读法是把当前 chunk 的 3 帧算进索引跨度（3+2+4+3=12），这与 Eq.(7)「query 从 S+2M+L 开始」一致，也与 Self-Forcing 的 C=21（21 帧完整窗口）一致。但这样一来 local window 就是 4 帧，每次驱逐 3 帧时只有 1 帧进 EMA，另外 2 帧凭空消失；若改按 chunk 计，C 又变成 20。<b>两种读法各自与论文另一处数字冲突。</b></p>"+
+    "<div class='dl'><b>能一次性解决它：</b>放出代码，或在文中写清 |K_local| 的单位与驱逐粒度。这直接决定「有多少细节是原样保留的」，也就决定该把多少功劳记在 EMA 头上。</div>"],
+   ["hi","基线的 cache 预算没有报告，Deep Forcing 在 Self-Forcing 上的负增益无法核验",
+    "<p><b>证据：</b>论文只说「Deep Forcing 和 ∞-RoPE 也是 training-free，我们在相同协议下把它们应用到两个基座上以保证公平」，但<b>没有给出它们各自的 cache 配置</b>。Deep Forcing 的设计特征是「超过一半的 cache 给 static sink」（本文 Fig. 2 的描述）。</p>"+
+    "<p><b>我的推理：</b>如果 Deep Forcing 被压到 C=12 的预算里跑，它的 sink+压缩 token 结构会严重受损；而它恰好在 Self-Forcing 上给出负增益（120 s −0.41、240 s −1.38），在 LongLive 上却是正的（+0.50/+0.15）。这种基座依赖的符号翻转，更可能来自配置而非方法本身。</p>"+
+    "<div class='dl'><b>能一次性解决它：</b>给出每个基线的 S/M/L/C 配置表，并在相同 C 下做一次对齐比较。</div>"],
+   ["hi","全文没有任何方差、种子或置信区间；最长的两组样本量分别是 20 和 10 条 prompt",
+    "<p><b>证据：</b>评测协议：120/240 s 用 128 条 prompt，480 s 用 20 条，1 小时用 10 条，消融用 20 条。所有表格都是单点数字。</p>"+
+    "<p><b>我的推理：</b>1 小时那组的差距是 87.99 vs 87.01（约 1 分），n=10；消融里最关键的「双流 vs 单流」差距是 0.02，n=20。在没有方差的情况下，这些数字无法支撑「双流必要」「1 小时也稳定领先」这类结论。</p>"+
+    "<div class='dl'><b>能一次性解决它：</b>每个配置跑 3 个种子，报告均值±标准差；或至少给出按 prompt 的胜负计数（win rate）。</div>"],
+   ["mid","双流的边际收益只有 +0.02，定性图却说「只有双流才保得住背景」",
+    "<p>Tab. 5：无记忆 85.48 → 只 μ_L 85.84 → 只 μ_S 85.95 → 双流 85.97。而 Fig. 11 的定性图显示无记忆/只长期/只短期三种情况下背景建筑都会消失，只有双流保住。</p>"+
+    "<p><b>我的推理：</b>要么定性图是挑出来的个例，要么平均分掩盖了分布上的差异。无论哪种，都应该给按 prompt 的分布而不是单个平均。另外注意 μ_S 单独（85.95）已经几乎等于双流（85.97），也就是<b>论文标题里的「dual」在定量上几乎不成立</b>。</p>"+
+    "<div class='dl'><b>实验：</b>给出 20 条 prompt 上「双流 vs 只短期」的逐条胜负与差值分布。</div>"],
+   ["mid","Tab. 5 的「双流」行与 Tab. 6/7 的 MemRoPE 行对不上，而两者应当是同一配置",
+    "<p>同为 LongLive + 60 秒 + 完整方法：Aesthetic 都是 <b>58.76</b>（分毫不差），Imaging 却是 67.09 vs <b>69.01</b>，Average 85.97 vs <b>86.24</b>。我反推 Tab. 5 未展示三项之和为 292.36，与 Tab. 6 实际的 292.28 几乎一致——说明差异<b>集中在 Imaging 单独一列</b>。</p>"+
+    "<p><b>我的推理：</b>若是不同 prompt 子集，Aesthetic 不可能完全相同；若是同一批数据，Imaging 不该差 1.92。更像取数或录入错误。它不改变「加记忆有用」的方向，但让「+0.49」这个消融增益的可信度打折。</p>"+
+    "<div class='dl'><b>实验：</b>作者核对一次即可。</div>"],
+   ["mid","跨时长的绝对分不可比，而主表没有提醒",
+    "<p>Tab. 2 的 1 小时组，两种方法的分都<b>高于</b> 2 分钟组（87.99/87.01 vs 86.45/85.58），480 秒组又低于 2 分钟组。如果存在累积退化，分数不该这样起伏。</p>"+
+    "<p><b>我的推理：</b>原因是 prompt 数不同（128 / 20 / 10），三组打分对象不是一批。附录 C 自己承认了这点并改用固定 20-prompt 子集重画 Fig. 8，但主表没有任何提示，读者很容易读成「越长越好」。</p>"+
+    "<div class='dl'><b>实验：</b>全部时长统一用同一组 prompt（哪怕只有 10 条）重画一版主表。</div>"],
+   ["mid","Eq.(5) 的理论结论被说得比证据强：实测代价只有 0.13/0.16 分",
+    "<p><b>论文说：</b>带 RoPE 的 key 做平均会「产生无效表征」「破坏注意力依赖的相对位置结构」，并称 position-free 是 essential。</p>"+
+    "<p><b>我的推导：</b>对每个 RoPE 频带而言，带相位的 EMA 等价于一个单极点低通滤波：|H(ω)| = α/|1−(1−α)e^{−jω}|，−3dB 点在 ω≈α。也就是说结果不是垃圾，而是<b>高频位置带被抹掉、保留低频带与一个平均相位</b>的有损版本。Tab. 7 的实测完全吻合：带 RoPE 聚合仍然有效（+0.71/+0.37），只比 position-free 低 0.13/0.16。</p>"+
+    "<div class='dl'><b>建议：</b>把「无效」改成「有损且频带依赖」，并补一个按频带的诊断（不同 RoPE 频率下 key 的余弦相似度变化）。</div>"],
+   ["mid","池化后的 memory token，3D-RoPE 的空间坐标未定义",
+    "<p>Wan2.1 用 3D-RoPE，旋转由 (t,h,w) 决定；Eq.(7) 只给了一维索引 φ。1560 个 patch 池化成 1 个 token 后，(h,w) 取什么完全没写——取 (0,0)、取中心、还是把空间分量置零，会实打实地改变这个 token 在注意力里的行为。</p>"+
+    "<div class='dl'><b>实验：</b>写清楚即可；顺便做个消融（空间分量置零 vs 取中心）。</div>"],
+   ["mid","「消除了每步旋转」的表述与 Algorithm 1 第 10 行矛盾",
+    "<p>论文称 ∞-RoPE 需要对已存 key 做逐步相位旋转，而本文「eliminating per-step rotations」。但第 10 行 <code>Apply R_φ to q_s, K</code> 在<b>每个去噪步、每一层</b>对<b>整个 cache</b> 施加旋转，旋转量并不更少。Tab. 8 里同 C=12 时 MemRoPE 比 LongLive 慢 0.7%（4.409→4.376 FPS），方向与「多做了旋转」一致。</p>"+
+    "<div class='dl'><b>建议：</b>改成「避免了对已存 key 的破坏性就地旋转」，这才是真正的差别。</div>"],
+   ["mid","Fig. 3(b) 的证据强度：纵轴 8.34–8.42，不到 1% 的变动被描述为「disproportionately high」",
+    "<p>论文用 Fig. 3(b) 论证 Deep Forcing 新进入的 token 带着「不成比例地高」的注意力分数，从而造成画面跳变。但图上纵轴范围只有 8.34–8.42，相对变动 <b>&lt;1%</b>，而且没有说明这个「attention score」的口径（累计？归一化？哪一层？）。</p>"+
+    "<p><b>我的推理：</b>(c)(d) 的 SSIM/LPIPS 跳变是硬证据，(a) 的选择集冻结也清楚；唯独 (b) 这个因果链条最弱的一环，证据最弱。建议改用「新旧 token 的注意力质量占比」这类归一化量。</p>"],
+   ["mid","块相对索引映射到 [0, C−1] 而不是 [f_limit−C, f_limit]，没有做对比消融",
+    "<p>这是与 ∞-RoPE 的显式差异之一，论文给了理由（让 sink 拿最低索引、memory 占固定位置），但没有实验。两种映射会让模型处在不同的「相对位置先验」下，很可能有可测差异。</p>"+
+    "<div class='dl'><b>实验：</b>同一套代码换一个偏移量再跑一次，成本几乎为零。</div>"],
+   ["low","训练-推理错配没有讨论",
+    "<p>LongLive 本身是带着自己的 sink + 短窗口<b>训练过</b>的；MemRoPE 在推理时改变了 cache 的构成与索引映射。它仍然有效说明模型对位置映射有相当鲁棒性，这本身是个有意思的发现，但论文没有把它当作一个需要解释的现象。</p>"],
+   ["low","Tab. 7 的表头列序与数据不符",
+    "<p>Tab. 7 的表头是 Aesthetic / Subject / Imaging / Motion / Background / Temporal，而把数据行与 Tab. 6 同一行逐个比对，数字完全相同、只是 Subject 与 Background 两列的<b>标题</b>互换。属于制表疏漏，不影响结论。</p>"],
+   ["low","用户研究的统计口径与引用小错",
+    "<p>Tab. 3 未给每格样本量；30 人×20 对÷5 个基线推出每格 n≈120，但 30 个百分数里没有任何统一整数分母（30–600）能同时复现（例如 66.1% 无法写成 k/120），推测是按人平均后的比率——应当写明。另外 Sec. 5.1 说用 Gemini 3.1-Pro 时引的是 [7]（Gemini 2.5 技术报告），Sec. 5.2 才正确引用了 [14]（3.1 model card）。</p>"]
+  ];
+  const box=$("#doubts");
+  D.forEach((d,i)=>{
+    const w=document.createElement("div"); w.className="doubt"; w.dataset.open="0";
+    const b=document.createElement("button"); b.type="button";
+    b.innerHTML='<span class="sev '+d[0]+'">'+(d[0]==="hi"?"高":d[0]==="mid"?"中":"低")+'</span><span></span><span class="caret">›</span>';
+    b.children[1].textContent=(i+1)+"　"+d[1];
+    const body=document.createElement("div"); body.className="body"; body.hidden=true; body.innerHTML=d[2];
+    b.addEventListener("click",()=>{const o=w.dataset.open==="1"; w.dataset.open=o?"0":"1"; body.hidden=o;});
+    w.appendChild(b); w.appendChild(body); box.appendChild(w);
+  });
+})();
+
+/* ============================================================ appendix table */
+(function(){
+  const body=$("#tabBody"); let dur="120";
+  segment("tabDur",v=>{dur=v;draw();});
+  function draw(){
+    const g=DATA[dur]; let h='<div class="tblwrap" style="margin:0;border:0;border-radius:0"><table class="tbl"><thead><tr><th>方法</th>';
+    MET.forEach(m=>h+='<th>'+m+'</th>'); h+='<th>Average</th><th>Δ</th></tr></thead><tbody>';
+    const groups=[["sf","Results on Self-Forcing"],["ll","Results on LongLive"],["other","其他架构（附录 A，仅供参考）"]];
+    groups.forEach(gr=>{
+      const rows=g[gr[0]]; if(!rows) return;
+      h+='<tr class="grp"><td colspan="'+(MET.length+3)+'">'+gr[1]+'</td></tr>';
+      const base=rows[0];
+      rows.forEach(r=>{
+        const isM=r[0]==="MemRoPE";
+        h+='<tr'+(isM?' class="ours"':'')+'><td>'+r[0]+'</td>';
+        for(let i=1;i<=6;i++){
+          const best=Math.max(...rows.map(x=>x[i]));
+          h+='<td'+(r[i]===best&&gr[0]!=="other"?' class="best"':'')+'>'+fmt(r[i])+'</td>';
+        }
+        h+='<td'+(isM?' class="best"':'')+'>'+fmt(r[7])+'</td>';
+        const d=r[7]-base[7];
+        h+='<td class="'+(gr[0]==="other"||r===base?'':(d>0?'pos':'neg'))+'">'+((gr[0]==="other"||r===base)?'–':((d>0?'+':'')+fmt(d)))+'</td></tr>';
+      });
+    });
+    h+='</tbody></table></div>';
+    body.innerHTML=h;
+  }
+  draw();
+})();
+</script>
+
+</div>
+</main>
+</body>
+</html>
