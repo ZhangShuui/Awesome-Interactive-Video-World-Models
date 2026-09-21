@@ -89,6 +89,9 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`OmniVBench`**, A Benchmark and Large-Scale Dataset for Omni Reference-to-Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.22069)] · 📊`benchmarks` 🗂️`datasets`
+* **`CompAdapt`**, Adaptable Composite Motion Modeling for Physics-Consistent Text-to-Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.21455)] · 🧠`memory`
+* **`Edit-VAR`**, Taming Visual Autoregressive Model for Precise Video Editing. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.21268)] · 🧠`memory`
 * Video DeltaNet: A Video-Native Hybrid Attention for Livestream Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.20744)] · 🧠`memory`
 * **`DART`**, Distillation-Aware Reparameterization for Training-Free LoRA Reuse in Few-Step Video Diffusion Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.20051)] · ⚡`realtime`
 * **`Astronex-World 1.0`**, Real-Time Interactive World Model Foundation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.20034)] · 🌍`systems` ⚡`realtime`
