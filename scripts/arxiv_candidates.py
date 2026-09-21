@@ -170,6 +170,19 @@ class Refused(SystemExit):
 # then reach for the fallback, instead of spending a quarter of an hour of
 # runner time to arrive at the same place.
 #
+# Still true on 2026-09-21, five days and every scheduled run later, and it is
+# nothing this side of the wire can talk its way out of. Ruled out, one knob at
+# a time, against both export.arxiv.org and arxiv.org: the User-Agent (ours, a
+# browser's, none), an explicit Accept of atom or */*, Accept-Language,
+# gzip vs identity, curl over h2 and http/1.1 against urllib and requests,
+# query shape from `all:electron` up to the full parenthesised OR with a
+# submittedDate range, and every value of sortBy including its absence. All
+# 406, and the refusals carry `X-Cache: MISS, MISS` while the one request that
+# answered 200 was a cache hit on arXiv's own documentation example. The edge
+# is serving what it already holds and the backend is declining the rest, so
+# the only way to the window is a different interface -- which is what
+# fetch_papers does. Do not spend another afternoon on the headers.
+#
 # The list is deliberately short. Everything outside it -- a 500, a 400 on a
 # query this script built wrong -- still fails the run loudly, because a
 # fallback that absorbs every kind of breakage is how a pipeline ends up
