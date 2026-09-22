@@ -89,6 +89,13 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`VideoGen-Agent`**, Reinforcing Video Generation Agents. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.24997)] · 🧠`memory`
+* **`WorldCrafter`**, Consistent Video World Model with Implicit 3D-aware Memory. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.24984)] · 🧠`memory`
+* Streaming Video Editing with Easy Adaptation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.24788)] · ⚡`realtime`
+* HappyWorld-Bench. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.24308)] · 🕹️`control`
+* Why Do Video Diffusion Models Violate Physics? Unveiling the Flaws in Attention Mechanisms. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.23658)] · ⚡`realtime`
+* **`SparkDiffusion`**, Mitigating the High-Sparsity Trap --- A Unified Framework for up to $265\times$ Single-GPU Acceleration of Visual Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.23153)] · ⚡`realtime`
+* **`ConsistWorld`**, Evidence Routing for Consistent Multi-Agent World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.22641)] · 🧠`memory`
 * **`OmniVBench`**, A Benchmark and Large-Scale Dataset for Omni Reference-to-Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.22069)] · 📊`benchmarks` 🗂️`datasets`
 * **`CompAdapt`**, Adaptable Composite Motion Modeling for Physics-Consistent Text-to-Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.21455)] · 🧠`memory`
 * **`Edit-VAR`**, Taming Visual Autoregressive Model for Precise Video Editing. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.21268)] · 🧠`memory`
