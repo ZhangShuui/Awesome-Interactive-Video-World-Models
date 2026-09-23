@@ -89,6 +89,9 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* Code Plans, Diffusion Renders: Open-Ended Generative World Modeling. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.26458)] · 🧠`memory`
+* **`QuantWM`**, Temporally Consistent 2-Bit KV Cache Quantization for World Models and Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.26425)] · ⚡`realtime` 🧠`memory`
+* **`GameDirector`**, Decoupling Gameplay Logic from Rendering for Player-Configurable Game World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.25652)] · 🧠`memory`
 * **`VideoGen-Agent`**, Reinforcing Video Generation Agents. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.24997)] · 🧠`memory`
 * **`WorldCrafter`**, Consistent Video World Model with Implicit 3D-aware Memory. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.24984)] · 🧠`memory`
 * Streaming Video Editing with Easy Adaptation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.24788)] · ⚡`realtime`
