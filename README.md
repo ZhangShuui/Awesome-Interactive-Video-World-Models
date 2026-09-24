@@ -89,6 +89,8 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* The Past Frames the Future: Memory for Autoregressive Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.28466)] · 🧠`memory`
+* **`MotionSpec`**, Spectral Trajectory Supervision for Motion-Consistent Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.28095)] · 🧠`memory`
 * Code Plans, Diffusion Renders: Open-Ended Generative World Modeling. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.26458)] · 🧠`memory`
 * **`QuantWM`**, Temporally Consistent 2-Bit KV Cache Quantization for World Models and Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.26425)] · ⚡`realtime` 🧠`memory`
 * **`GameDirector`**, Decoupling Gameplay Logic from Rendering for Player-Configurable Game World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.25652)] · 🧠`memory`
