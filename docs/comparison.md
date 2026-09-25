@@ -9,6 +9,38 @@ not measured here and are not comparable across rows without reading the setups.
 
 ## Interactive systems
 
+### Astronex-World 1.0 ([paper](https://arxiv.org/abs/2609.20034))
+
+_Astronex-World 1.0: Real-Time Interactive World Model Foundation_ — 2026-09-17
+
+- **Backbone:** causal-diffusion
+- **Action space:** 64-dim continuous action + embodiment ID (games, driving, robot)
+- **Reported FPS:** 24 (832x480, single L20)
+- **Horizon / context:** 861 frames at 24 fps (~35.9 s), longest single continuous output (App. 7.2: outputs 93-861 frames, each generated as one sequence); event-edit case 477 frames
+- **Memory mechanism:** hybrid:implicit-context+retrieval
+- **Open source:** yes
+
+### Matrix-Game 3.5 ([paper](https://arxiv.org/abs/2608.29910))
+
+_Matrix-Game 3.5: Enhancing Real-Time Streaming Interactive World Models with Patch Memory_ — 2026-08-30
+
+- **Backbone:** bidirectional-diffusion+adapt
+- **Action space:** camera trajectory (keyboard/mouse mapped to camera) + text
+- **Reported FPS:** 20 (1280x704, batch 1, single H100)
+- **Horizon / context:** 60 s one-minute rollouts; revisit rotation error 1.63 deg vs 4.50 runner-up
+- **Memory mechanism:** hybrid:explicit-spatial-reconstruction+retrieval
+- **Open source:** yes
+
+### ForgeWM ([paper](https://arxiv.org/abs/2608.14022))
+
+_ForgeWM: Progressive Causal Training for Few-Step Action-Conditioned Video World Models_ — 2026-08-14
+
+- **Backbone:** causal-diffusion
+- **Action space:** keyboard + mouse (Minecraft); gamepad buttons + sticks (CrossFPS)
+- **Horizon / context:** 77 frames quantitative; ~264 frames qualitative with drift
+- **Memory mechanism:** implicit-context
+- **Open source:** yes
+
 ### MASS ([paper](https://arxiv.org/abs/2608.06257))
 
 _MASS: Multiplayer World Models with Authoritative Shared State_ — 2026-08-06
@@ -65,6 +97,15 @@ _StatePlay: State-Aware Game World Models for Mechanics-Consistent Generation_ �
 
 </details>
 
+### Visko Orbis 1.0 ([paper](https://arxiv.org/abs/2607.26694))
+
+_Visko Orbis 1.0: A Live Model for Real-Time Interactive Long Video Generation_ — 2026-07-29
+
+- **Backbone:** causal-diffusion
+- **Action space:** time-indexed text/event instructions against the running stream
+- **Horizon / context:** one-hour rollout shown (qualitative, Fig. 1 DOVER curves); training clips up to 240 s
+- **Memory mechanism:** compression-ssm
+
 ### Wonder ([paper](https://arxiv.org/abs/2607.26037))
 
 _Wonder: Video World Model Done Better_ — 2026-07-28
@@ -84,6 +125,17 @@ _Wonder: Video World Model Done Better_ — 2026-07-28
 - **backbone:** Fig 3 caption: 'Wonder first learns high-quality camera control in a bidirectional teacher, then converts the model to a sparse-context causal student, distills it into a few-step autoregressive generator'; Sec 4.4/Fig 6 (4-step sampler, Mixture-of-Students, DMD distillation). Base model Wan2.1-I2V-14B. Classified causal-diffusion per the distilled-deployed-model rule.
 
 </details>
+
+### ABot-World-0 ([paper](https://arxiv.org/abs/2607.19191))
+
+_ABot-World-0: Infinite Interactive World Rollout on a Single Desktop GPU_ — 2026-07-21
+
+- **Backbone:** causal-diffusion (Wan2.2 bidirectional teacher -> causal student via teacher forcing + ODE distillation, then LongForcing)
+- **Action space:** keyboard: 8 discrete keys (WASD movement, IJKL camera rotation)
+- **Reported FPS:** 16 (720p, single RTX 5090, ~19 GiB; 1.2 s action-to-first-frame)
+- **Horizon / context:** one-hour interactive rollouts (qualitative, five runs, Fig. 5); day-scale rollouts shown at sampled checkpoints (duration unstated); 60 s quantitative ablation
+- **Memory mechanism:** implicit-context
+- **Open source:** yes
 
 ### WanToFight ([paper](https://arxiv.org/abs/2607.12592))
 
@@ -608,7 +660,7 @@ _Spatia: Video Generation with Updatable Spatial Memory_ — 2025-12-17
 
 - **Backbone:** bidirectional-diffusion+adapt
 - **Action space:** text instructions + camera pose trajectory + 3D scene edits (point-cloud manipulation)
-- **Horizon / context:** 6 sequential clips (72-81 frames each) in closed-loop revisit eval; camera-control ~83.4 held through clip 6 vs baseline's decay to 49.97
+- **Horizon / context:** 441 frames (81 + 5x72) over 6 sequential clips in closed-loop revisit eval (each clip pair moves the camera out and back); camera-control ~83.4 held through clip 6 vs baseline's decay to 49.97
 - **Memory mechanism:** hybrid:explicit-spatial-storage+retrieval
 
 ### WorldPlay ([paper](https://arxiv.org/abs/2512.14614))
@@ -643,11 +695,11 @@ _RELIC: Interactive Video World Model with Long-Horizon Memory_ — 2025-12-03
 
 ### WorldPack ([paper](https://arxiv.org/abs/2512.02473))
 
-_WorldPack: Compressed Memory Improves Spatial Consistency in Video World Modeling_ — 2025-12-02
+_WorldPack: Dynamic Frame Compression for Long-context Video World Modeling_ — 2025-12-02
 
 - **Backbone:** causal-diffusion
 - **Action space:** Minecraft navigation: delta-position, delta-yaw, delta-pitch
-- **Horizon / context:** Minecraft LoopNav ABCA-50 (explore+return, navigation range 50, ~101+ frame evaluation window); effective compressed context only 2.84 frames
+- **Horizon / context:** Minecraft LoopNav ABCA-50 (explore+return, navigation range 50, ~101+ frame evaluation window); v3 packs 22 history frames into a 4-frame context
 - **Memory mechanism:** hybrid:compression-packing+retrieval
 
 ### SpriteHand ([paper](https://arxiv.org/abs/2512.01960))
@@ -763,7 +815,7 @@ _LongLive: Real-time Interactive Long Video Generation_ — 2025-09-26
 
 ### Matrix-Game 2.0 ([paper](https://arxiv.org/abs/2508.13009))
 
-_Matrix-game 2.0: An open-source real-time and streaming interactive world model_ — 2025-08-18
+_Matrix-Game 2.0: An Open-Source, Real-Time, and Streaming Interactive World Model_ — 2025-08-18
 
 - **Backbone:** causal-diffusion
 - **Action space:** keyboard (multi-key) + continuous mouse (camera); Minecraft, Unreal Engine, GTA5, Temple Run
@@ -857,7 +909,7 @@ _Context as Memory: Scene-Consistent Interactive Long Video Generation with Memo
 - **Backbone:** causal-diffusion
 - **Action space:** camera pose (rotation + XY translation)
 - **Reported FPS:** 0.97
-- **Horizon / context:** ~7,601 frames (~253s @30fps) per video across 100 synthetic test videos; static-scene, 2D camera trajectory (XY translation + yaw only) condition
+- **Horizon / context:** revisit test: camera rotates n degrees and returns (test length unstated); dataset: 100 videos of 7,601 frames at 30 fps, 5% held out for testing
 - **Memory mechanism:** retrieval
 
 ### DeepVerse ([paper](https://arxiv.org/abs/2506.01103))
@@ -1084,6 +1136,99 @@ _Learning Interactive Real-World Simulators_ — 2023-10-09
 ## Components and analyses
 
 Not interactive systems in their own right. Their numbers measure a part of the stack and do not belong in the same column as an end-to-end frame rate.
+
+### GameDirector ([paper](https://arxiv.org/abs/2609.25652))
+
+_GameDirector: Decoupling Gameplay Logic from Rendering for Player-Configurable Game World Models_ — 2026-09-22 · Long-Horizon Memory & Consistency
+
+- **Backbone:** other:hand-coded state engine + DiT renderer (5-s segments)
+- **Action space:** player movement + boss skills (LLM planner)
+- **Horizon / context:** 60 s (12 chained 5-s segments)
+- **Memory mechanism:** explicit-state (entity-indexed, state-first)
+
+### ConsistWorld ([paper](https://arxiv.org/abs/2609.22641))
+
+_ConsistWorld: Evidence Routing for Consistent Multi-Agent World Models_ — 2026-09-18 · Long-Horizon Memory & Consistency
+
+- **Backbone:** causal-diffusion
+- **Action space:** per-agent camera poses, K concurrent agents
+- **Horizon / context:** 32 AR chunks (9-chunk training)
+- **Memory mechanism:** hybrid:retrieval+explicit-spatial-storage
+- **Open source:** yes
+
+### AlayaVista ([paper](https://arxiv.org/abs/2609.14462))
+
+_AlayaVista: Streaming World Modeling from Panoramic States to Perspective Video_ — 2026-09-13 · Real-Time & Streaming Generation
+
+- **Backbone:** causal-diffusion
+- **Action space:** 6-DoF camera + viewport (yaw, pitch, FOV)
+- **Horizon / context:** 81-frame evaluation clips; 20 s training
+- **Memory mechanism:** explicit-spatial-reconstruction
+
+### Programmable World Model ([paper](https://arxiv.org/abs/2609.10540))
+
+_Programmable World Model_ — 2026-09-09 · Long-Horizon Memory & Consistency
+
+- **Backbone:** other:engine-executed world program + frozen LingBot-World with ControlNet
+- **Action space:** entity-level actions under agent-authored rules
+- **Horizon / context:** 897-frame example
+- **Memory mechanism:** explicit-state (entity-indexed, state-first)
+
+### TourPhysics ([paper](https://arxiv.org/abs/2609.04911))
+
+_TourPhysics: Bringing Physics to World Models for Exploration and Manipulation from a Single Image_ — 2026-09-04 · Long-Horizon Memory & Consistency
+
+- **Backbone:** other:physics solvers (state) + diffusion renderer
+- **Action space:** camera command + physical intervention
+- **Horizon / context:** 30.06 s (~481 frames) over 6 chained windows
+- **Memory mechanism:** explicit-state (solver-held, state-first)
+
+### Solaris ([paper](https://arxiv.org/abs/2609.00776))
+
+_Solaris: Towards Interfaces That Are Generated, Not Coded_ — 2026-09-01 · Real-Time & Streaming Generation
+
+- **Backbone:** hybrid-AR-diffusion
+- **Action space:** mouse clicks/drags + keyboard/text (software interfaces)
+- **Memory mechanism:** implicit-context
+- **Open source:** no
+
+### ReWorld ([paper](https://arxiv.org/abs/2608.23565))
+
+_ReWorld: An Interactive World Model with Long-Horizon Memory_ — 2026-08-24 · Long-Horizon Memory & Consistency
+
+- **Backbone:** causal-diffusion
+- **Action space:** 6-DoF camera increment per chunk
+- **Horizon / context:** 384 latents / 64 s out-and-back revisit
+- **Memory mechanism:** hybrid:explicit-spatial-storage+retrieval
+
+### EchoWM ([paper](https://arxiv.org/abs/2608.23189))
+
+_EchoWM: Open and Enterable Omnimodal World Models_ — 2026-08-24 · Long-Horizon Memory & Consistency
+
+- **Backbone:** causal-diffusion
+- **Action space:** discrete commands + continuous poses -> 6-DoF trajectory; first/third person
+- **Horizon / context:** 961 frames (four overlapping 241-frame generations chained)
+- **Memory mechanism:** implicit-context
+- **Open source:** yes
+
+### Marionette ([paper](https://arxiv.org/abs/2608.14530))
+
+_Marionette: Predicting World States, Rendering Geometry, Painting Appearance_ — 2026-08-14 · Long-Horizon Memory & Consistency
+
+- **Backbone:** hybrid-AR-diffusion
+- **Action space:** per-entity discrete action ids (1v1 combat)
+- **Horizon / context:** 120 frames (12 s) quantitative
+- **Memory mechanism:** explicit-state (entity-indexed, state-first)
+
+### Alaya-EVOKE ([paper](https://arxiv.org/abs/2608.13546))
+
+_Alaya-EVOKE: From Linear-Scaling Supervision to Endless World_ — 2026-08-13 · Long-Horizon Memory & Consistency
+
+- **Backbone:** causal-diffusion
+- **Action space:** camera extrinsics/intrinsics + per-step text
+- **Horizon / context:** 65.5 min stability (94,281 frames, 8 rollouts); recall bounded to 90 s retention budget
+- **Memory mechanism:** hybrid:explicit-spatial-reconstruction+retrieval
+- **Open source:** yes
 
 ### FlashDecoder ([paper](https://arxiv.org/abs/2607.14898))
 
