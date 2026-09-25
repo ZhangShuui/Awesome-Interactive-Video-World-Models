@@ -89,6 +89,9 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`WanPE`**, Towards Cinematic Prompt Enhancement for Modern Text-to-Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.30221)] · 🧠`memory`
+* Accelerating Video Diffusion via Training-Free Trajectory Routing. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.30096)] · ⚡`realtime`
+* **`ViRDM`**, Taming Representation Distribution Matching for Few-Step Causal Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.28923)] · ⚡`realtime`
 * The Past Frames the Future: Memory for Autoregressive Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.28466)] · 🧠`memory`
 * **`MotionSpec`**, Spectral Trajectory Supervision for Motion-Consistent Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.28095)] · 🧠`memory`
 * Code Plans, Diffusion Renders: Open-Ended Generative World Modeling. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.26458)] · 🧠`memory`
