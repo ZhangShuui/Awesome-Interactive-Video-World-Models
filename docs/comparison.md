@@ -265,6 +265,7 @@ _DreamX-World 1.0: A General-Purpose Interactive World Model_ — 2026-06-15
 - **Reported FPS:** 16
 - **Horizon / context:** ~30s stable in long-horizon eval; up to 1 min claimed for stable inference, camera-controlled T2V/I2V
 - **Memory mechanism:** retrieval
+- **Open source:** yes
 
 ### GeoStream ([paper](https://arxiv.org/abs/2606.15162))
 
@@ -551,6 +552,7 @@ _UCM: Unifying Camera Control and Memory with Time-aware Positional Encoding War
 - **Reported FPS:** 0.42
 - **Horizon / context:** 801-frame training videos; eval uses 480 history frames to predict a further 321 (clip-by-clip), plus long cycle-trajectory revisits
 - **Memory mechanism:** hybrid:retrieval+explicit-spatial-reconstruction
+- **Open source:** yes
 
 ### Solaris ([paper](https://arxiv.org/abs/2602.22208))
 
@@ -590,6 +592,7 @@ _LIVE: Long-horizon Interactive Video World Modeling_ — 2026-02-03
 - **Action space:** camera pose (RealEstate10K) + 25-dim action vector (Minecraft)
 - **Horizon / context:** 200+ frames stable (FID~10); results tabulated to a >=256-frame bucket, RealEstate10K 256x256, frame-skip 2
 - **Memory mechanism:** implicit-context
+- **Open source:** yes
 
 ### Infinite-World ([paper](https://arxiv.org/abs/2602.02393))
 
@@ -639,7 +642,8 @@ _Yume-1.5: A Text-Controlled Interactive World Generation Model_ — 2025-12-26
 - **Action space:** text-described discrete actions: 8 camera actions (turn/tilt/still) + 9 human-movement actions (WASD+diagonals+still); egocentric walking, open-world
 - **Reported FPS:** 12
 - **Horizon / context:** 30s demonstrated at 16fps (480 frames), evaluated across 6 consecutive 5s segments; no explicit hard maximum stated
-- **Memory mechanism:** implicit-context
+- **Memory mechanism:** hybrid:compression-packing+implicit-context
+- **Open source:** yes
 
 ### CustomX ([paper](https://arxiv.org/abs/2512.17796))
 
@@ -658,7 +662,8 @@ _Spatia: Video Generation with Updatable Spatial Memory_ — 2025-12-17
 - **Backbone:** bidirectional-diffusion+adapt
 - **Action space:** text instructions + camera pose trajectory + 3D scene edits (point-cloud manipulation)
 - **Horizon / context:** 441 frames (81 + 5x72) over 6 sequential clips in closed-loop revisit eval (each clip pair moves the camera out and back); camera-control ~83.4 held through clip 6 vs baseline's decay to 49.97
-- **Memory mechanism:** hybrid:explicit-spatial-storage+retrieval
+- **Memory mechanism:** hybrid:explicit-spatial-reconstruction+retrieval
+- **Open source:** yes
 
 ### WorldPlay ([paper](https://arxiv.org/abs/2512.14614))
 
@@ -669,6 +674,7 @@ _WorldPlay: Towards Long-Term Geometric Consistency for Real-Time Interactive Wo
 - **Reported FPS:** 24
 - **Horizon / context:** ~30s continuous generation (stated ceiling); quantitative long-term evaluation bucket is >=250 frames (cycle/revisit trajectories)
 - **Memory mechanism:** hybrid:implicit-context+retrieval
+- **Open source:** yes
 
 ### Astra ([paper](https://arxiv.org/abs/2512.08931))
 
@@ -678,6 +684,7 @@ _Astra: General Interactive World Model with Autoregressive Denoising_ — 2025-
 - **Action space:** multi-modal: camera, robot end-effector, keyboard/mouse, vehicle pose
 - **Horizon / context:** 8-10s action-responsive; Astra-Bench clips are 96 frames @20fps (4.8s) at 480x832 resolution
 - **Memory mechanism:** implicit-context
+- **Open source:** yes
 
 ### RELIC ([paper](https://arxiv.org/abs/2512.04040))
 
@@ -727,7 +734,6 @@ _Hunyuan-GameCraft-2: Instruction-following Interactive Game World Model_ — 20
 - **Reported FPS:** 16
 - **Horizon / context:** training curriculum 45->81->149 frames at 480p; long-video tuning on clips >10s (~240+ frames); qualitative semantic drift noted beyond 500 frames
 - **Memory mechanism:** implicit-context
-- **Open source:** no
 
 ### Captain Safari ([paper](https://arxiv.org/abs/2511.22815))
 
@@ -746,6 +752,7 @@ _MagicWorld: Towards Long-Horizon Stability for Interactive Video World Explorat
 - **Action space:** WASD keyboard movement mapped to camera extrinsics
 - **Horizon / context:** 81 frames per evaluation video (480x832, 16 fps output); interactive rollouts of M steps simulated in training; longer rollouts shown qualitatively
 - **Memory mechanism:** hybrid:retrieval+explicit-spatial-reconstruction
+- **Open source:** yes
 
 ### PAN ([paper](https://arxiv.org/abs/2511.09057))
 
@@ -795,7 +802,6 @@ _Training Agents Inside of Scalable World Models_ — 2025-09-29
 - **Reported FPS:** 21
 - **Horizon / context:** 9.6s / 192-frame block-causal context (Table 1), 6x longer than best prior Minecraft WM (Oasis-small 1.6s); full agent episodes run 60min/~72K frames but generation conditions only on this window
 - **Memory mechanism:** implicit-context
-- **Open source:** no
 
 ### LongLive ([paper](https://arxiv.org/abs/2509.22622))
 
@@ -827,7 +833,6 @@ _Yan: Foundational Interactive Video Generation_ — 2025-08-12
 - **Action space:** 8 discrete directions/skills, per-frame keyboard-style signal, 3D game
 - **Horizon / context:** Claimed 'infinite' (autoregressive, no fixed length bound) with 'visual consistency remains high' in qualitative long-video demos, but no specific frame count, duration, or quantitative consistency-vs-length curve is given anywhere in the paper
 - **Memory mechanism:** implicit-context
-- **Open source:** no
 
 ### Yume ([paper](https://arxiv.org/abs/2507.17744))
 
@@ -836,7 +841,7 @@ _Yume: An Interactive World Generation Model_ — 2025-07-23
 - **Backbone:** bidirectional-diffusion (FramePack-compressed history frame-wise concatenated into the Wan DiT)
 - **Action space:** 8 quantized camera motions (fwd/back/left/right, turn-L/R, tilt-up/down) via keyboard
 - **Horizon / context:** 18-second long-video validation via 9 chunked 2-second extrapolations; mild decay from 0-8s to 12-18s segments (subject consistency -0.5%, background consistency -0.6%); main eval clips are 96 frames (6s) at 544x960
-- **Memory mechanism:** implicit-context
+- **Memory mechanism:** hybrid:compression-packing+implicit-context
 - **Open source:** yes
 
 ### From Virtual Games to Real-World Play ([paper](https://arxiv.org/abs/2506.18901))
@@ -856,6 +861,7 @@ _Matrix-Game: Interactive World Foundation Model_ — 2025-06-23
 - **Action space:** keyboard 6-discrete + continuous mouse pitch (camera), Minecraft + Unreal Engine
 - **Horizon / context:** 65-frame segments is the primary evaluated unit; autoregressive chaining across ~3 segments shown qualitatively (Fig. 10, 'maintain strong local temporal consistency between segments') but total chained duration/frame count is not quantified
 - **Memory mechanism:** implicit-context
+- **Open source:** yes
 
 ### Hunyuan-GameCraft ([paper](https://arxiv.org/abs/2506.17201))
 
@@ -866,6 +872,7 @@ _Hunyuan-GameCraft: High-dynamic Interactive Game Video Generation with Hybrid H
 - **Reported FPS:** 6.6
 - **Horizon / context:** minute-level video clips at 720p/25fps (Fig. 8); exact max frame/second count not quantified in text
 - **Memory mechanism:** implicit-context
+- **Open source:** yes
 
 ### PlayerOne ([paper](https://arxiv.org/abs/2506.09995))
 
@@ -875,7 +882,7 @@ _PlayerOne: Egocentric World Simulator_ — 2025-06-11
 - **Action space:** 159-dim SMPL motion: body/feet 66 + head 3 + hands 90 (2x45)
 - **Reported FPS:** 8
 - **Horizon / context:** 49 frames / 6 seconds (training clip length, also the primary evaluation unit); no longer quantified rollout -- qualitative figures do not state frame counts and show no evidence of chaining beyond this length
-- **Memory mechanism:** explicit-spatial-reconstruction (training-time joint 4D/point-map recon only; NOT queried as memory at inference -- single-shot generation from first frame + motion)
+- **Memory mechanism:** implicit-context
 
 ### Autoregressive Adversarial Post-Training for Real-Time Interactive Video Generation ([paper](https://arxiv.org/abs/2506.09350))
 
@@ -934,7 +941,6 @@ _Long-Context State-Space Video World Models_ — 2025-05-26
 - **Action space:** continuous camera pose (Memory Maze) or discrete moves (Minecraft: forward/turn/jump)
 - **Horizon / context:** 800 frames total on Memory Maze retrieval task (400 context + 400 generated); also 224-frame reasoning task w/ 576 context frames
 - **Memory mechanism:** compression-ssm
-- **Open source:** no
 
 ### Vid2World ([paper](https://arxiv.org/abs/2505.14357))
 
@@ -955,6 +961,7 @@ _WorldMem: Long-term Consistent World Simulation with Memory_ — 2025-04-16
 - **Reported FPS:** 0.89
 - **Horizon / context:** 600-frame memory bank conditions generation of 100 future frames beyond context window; RealEstate10K trajectories to 60 frames vs 25-frame baseline max
 - **Memory mechanism:** hybrid:explicit-spatial-storage+retrieval
+- **Open source:** yes
 
 ### MineWorld ([paper](https://arxiv.org/abs/2504.08388))
 
@@ -1006,7 +1013,7 @@ _AdaWorld: Learning Adaptable World Models with Latent Actions_ — 2025-03-24
 - **Action space:** unsupervised latent actions; adapts to discrete or continuous target actions
 - **Horizon / context:** 20 frames (action-transfer eval); ~20 steps (visual planning); paper states rollout quality degrades once generation exceeds the initial scene's content -- no long-horizon (>20 frame) demonstration
 - **Memory mechanism:** implicit-context
-- **Open source:** no
+- **Open source:** yes
 
 ### Pre-Trained Video Generative Models as World Simulators ([paper](https://arxiv.org/abs/2502.07825))
 
@@ -1019,7 +1026,7 @@ _Pre-Trained Video Generative Models as World Simulators_ — 2025-02-10
 
 ### GameFactorly ([paper](https://arxiv.org/abs/2501.08325))
 
-_GameFactorly: Creating New Games with Generative Interactive Videos_ — 2025-01-14
+_GameFactory: Creating New Games with Generative Interactive Videos_ — 2025-01-14
 
 - **Backbone:** causal-diffusion
 - **Action space:** Minecraft keyboard (7 discrete: WASD+jump/sneak/sprint) + continuous mouse yaw/pitch
@@ -1045,7 +1052,6 @@ _The Matrix: Infinite-Horizon World Generation with Real-Time Moving Control_ �
 - **Reported FPS:** 16
 - **Horizon / context:** ~2.5 min continuous rollout shown concretely (Fig. 6b); 'hour-long' and 'half-hour' claimed in abstract/supplementary video without frame counts; architecture (Swin-DPM) is unbounded by design but not fully empirically verified at hour-scale
 - **Memory mechanism:** implicit-context
-- **Open source:** yes
 
 ### Playable Game Generation ([paper](https://arxiv.org/abs/2412.00887))
 
@@ -1076,7 +1082,6 @@ _SlowFast-VGen: Slow-Fast Learning for Action-Driven Long Video Generation_ — 
 - **Action space:** free-text action descriptions (from keyboard/instructions), e.g. 'go left'
 - **Horizon / context:** up to 1000 frames w/o major distortion (Minecraft/Unreal navigation, qualitative); visible drift by ~frame 896 in shown example
 - **Memory mechanism:** other:temp-lora-fast-weight-memory
-- **Open source:** no
 
 ### Learning Generative Interactive Environments By Trained Agent Exploration ([paper](https://arxiv.org/abs/2409.06445))
 
