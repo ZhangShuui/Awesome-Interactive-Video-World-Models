@@ -164,7 +164,6 @@ _AlayaWorld: Long-Horizon and Playable Video World Generation_ — 2026-07-07
 
 - **Backbone:** bidirectional-diffusion+adapt
 - **Action space:** continuous camera pose navigation + chunk-boundary text-prompt event switching
-- **Reported FPS:** 24
 - **Horizon / context:** ~1 minute (60s) under purely forward exploration without revisits; qualitative only, no loop-closure metric
 - **Memory mechanism:** hybrid:explicit-spatial-reconstruction+compression-ssm
 
@@ -232,7 +231,7 @@ _Walking in the Implicit: Interactive World Exploration via Neural Scene Represe
 
 _Directing the World: Fast Autoregressive Video Generation with Compositional Human-Camera Control_ — 2026-06-26
 
-- **Backbone:** hybrid-AR-diffusion
+- **Backbone:** bidirectional-diffusion (plan-then-populate segments guided by past and future anchors; medium confidence)
 - **Action space:** SMPL human motion sequences (multi-person) + Plucker camera trajectories
 - **Horizon / context:** 15 seconds to 2 minutes (100 sampled long videos), joint human-motion + camera control
 - **Memory mechanism:** implicit-context
@@ -290,7 +289,7 @@ _MoVerse: Real-Time Video World Modeling with Panoramic Gaussian Scaffold_ — 2
 
 _BiWM: Advancing Open-Source Interactive Video World Models with Bidirectional Autoregression_ — 2026-06-08
 
-- **Backbone:** hybrid-AR-diffusion
+- **Backbone:** bidirectional-diffusion (full attention over the chunk and its history window)
 - **Action space:** 81-class discrete camera actions (9 translation x 9 rotation), as text
 - **Horizon / context:** 60 seconds and beyond with history compression (Sec 3.5); shown qualitatively (Fig. 7 long-horizon rollouts), no quantitative degradation curve given.
 - **Memory mechanism:** hybrid:implicit-context+compression-ssm
@@ -396,7 +395,6 @@ _SANA-WM: Efficient Minute-Scale World Modeling with Hybrid Linear Diffusion Tra
 
 - **Backbone:** SSM-hybrid
 - **Action space:** 6-DoF camera trajectory (position, rotation, intrinsics)
-- **Reported FPS:** 16
 - **Horizon / context:** 960 frames / 60s @16fps, revisit-trajectory loop-closure test (80 initial scenes x 2 trajectories)
 - **Memory mechanism:** hybrid:compression-ssm+implicit-context
 - **Open source:** yes
@@ -417,7 +415,6 @@ _PROWL: Prioritized Regret-Driven Optimization for World Model Learning_ — 202
 
 - **Backbone:** causal-diffusion
 - **Action space:** MineRL discrete+camera actions: locomotion, camera bins, jump, attack, use, sprint
-- **Reported FPS:** 20
 - **Horizon / context:** 10.8s (18 chunks x 0.6s, Npred=18) autoregressive rollout, long-horizon evaluation
 - **Memory mechanism:** implicit-context
 - **Open source:** no
@@ -487,7 +484,7 @@ _ShotStream: Streaming Multi-Shot Video Generation for Interactive Storytelling_
 
 _WorldCam: Interactive Autoregressive 3D Gaming Worlds with Camera Pose as a Unifying Geometric Representation_ — 2026-03-17
 
-- **Backbone:** hybrid-AR-diffusion
+- **Backbone:** causal-diffusion (one Wan DiT with a diffusion-forcing-style progressive noise schedule)
 - **Action space:** continuous 6-DoF keyboard/mouse via Lie algebra se(3)
 - **Horizon / context:** 200-frame sequences (10s at 20fps); closed-loop palindrome trajectories up to 200 frames
 - **Memory mechanism:** retrieval
@@ -542,7 +539,7 @@ _COMBAT: Conditional World Models for Behavioral Agent Training_ — 2026-02-28
 - **Backbone:** causal-diffusion
 - **Action space:** 8-button multi-hot keyboard input, Tekken 3 (player 1 only)
 - **Reported FPS:** 85
-- **Horizon / context:** 128-frame training context; 32-frame quantitative test sequences (~1-4s at typical game framerates)
+- **Horizon / context:** test clips roughly 1-2 s in length (300 clips of 32 frames); 128-frame training context
 - **Memory mechanism:** implicit-context
 
 ### UCM ([paper](https://arxiv.org/abs/2602.22960))
@@ -679,7 +676,6 @@ _Astra: General Interactive World Model with Autoregressive Denoising_ — 2025-
 
 - **Backbone:** causal-diffusion
 - **Action space:** multi-modal: camera, robot end-effector, keyboard/mouse, vehicle pose
-- **Reported FPS:** 20
 - **Horizon / context:** 8-10s action-responsive; Astra-Bench clips are 96 frames @20fps (4.8s) at 480x832 resolution
 - **Memory mechanism:** implicit-context
 
@@ -748,8 +744,7 @@ _MagicWorld: Towards Long-Horizon Stability for Interactive Video World Explorat
 
 - **Backbone:** causal-diffusion
 - **Action space:** WASD keyboard movement mapped to camera extrinsics
-- **Reported FPS:** 16
-- **Horizon / context:** ~20s (4 steps x 81 frames @16fps) trained multi-shot rollout; longer rollouts shown qualitatively, no quantified max
+- **Horizon / context:** 81 frames per evaluation video (480x832, 16 fps output); interactive rollouts of M steps simulated in training; longer rollouts shown qualitatively
 - **Memory mechanism:** hybrid:retrieval+explicit-spatial-reconstruction
 
 ### PAN ([paper](https://arxiv.org/abs/2511.09057))
@@ -784,7 +779,7 @@ _Memory Forcing: Spatio-Temporal Memory for Consistent Scene Generation on Minec
 
 _EvoWorld: Evolving Panoramic World Generation with Explicit 3D Memory_ — 2025-10-01
 
-- **Backbone:** bidirectional-diffusion+adapt
+- **Backbone:** causal-diffusion (SVD clip generator; previous clip's final frame, reprojections and Plucker maps enter by channel concatenation and CLIP cross-attention, i.e. as fixed conditioning)
 - **Action space:** camera pose (translation+rotation), spherical Plucker embeddings
 - **Reported FPS:** 0.32
 - **Horizon / context:** 73 frames (three chained 25-frame clips) on Spatial360; paper states it has not explored very long-horizon settings since open-source generators typically max out at a few hundred frames
@@ -815,7 +810,7 @@ _LongLive: Real-time Interactive Long Video Generation_ — 2025-09-26
 
 ### Matrix-Game 2.0 ([paper](https://arxiv.org/abs/2508.13009))
 
-_Matrix-Game 2.0: An Open-Source, Real-Time, and Streaming Interactive World Model_ — 2025-08-18
+_Matrix-game 2.0: An open-source real-time and streaming interactive world model_ — 2025-08-18
 
 - **Backbone:** causal-diffusion
 - **Action space:** keyboard (multi-key) + continuous mouse (camera); Minecraft, Unreal Engine, GTA5, Temple Run
@@ -876,7 +871,7 @@ _Hunyuan-GameCraft: High-dynamic Interactive Game Video Generation with Hybrid H
 
 _PlayerOne: Egocentric World Simulator_ — 2025-06-11
 
-- **Backbone:** bidirectional-diffusion+adapt
+- **Backbone:** causal-diffusion (the reported 8 fps model is a causal student distilled from the bidirectional teacher)
 - **Action space:** 159-dim SMPL motion: body/feet 66 + head 3 + hands 90 (2x45)
 - **Reported FPS:** 8
 - **Horizon / context:** 49 frames / 6 seconds (training clip length, also the primary evaluation unit); no longer quantified rollout -- qualitative figures do not state frame counts and show no evidence of chaining beyond this length
@@ -886,7 +881,7 @@ _PlayerOne: Egocentric World Simulator_ — 2025-06-11
 
 _Autoregressive Adversarial Post-Training for Real-Time Interactive Video Generation_ — 2025-06-11
 
-- **Backbone:** hybrid-AR-diffusion
+- **Backbone:** causal-diffusion (block-causal attention with KV cache, one-step after adversarial post-training)
 - **Action space:** human pose keypoints (DWPose) OR 6-DoF camera (Plucker embeddings); two separate setups
 - **Reported FPS:** 24.8
 - **Horizon / context:** 60s / 1440 frames @24fps demonstrated WITH quantitative VBench-I2V evaluation (Table 1); qualitatively extends toward 5 minutes 'with artifacts' but not quantitatively tested at that length
@@ -897,7 +892,7 @@ _Autoregressive Adversarial Post-Training for Real-Time Interactive Video Genera
 
 _Video World Models with Long-term Spatial Memory_ — 2025-06-05
 
-- **Backbone:** hybrid-AR-diffusion
+- **Backbone:** causal-diffusion (clean recent frames plus one-way memory cross-attention)
 - **Action space:** camera pose/trajectory + text prompts
 - **Horizon / context:** not stated as an absolute length; evaluated via revisit/recall metrics on 97-frame clips (49 context + 48 target frames)
 - **Memory mechanism:** hybrid:explicit-spatial-reconstruction+retrieval
@@ -1007,7 +1002,7 @@ _Model as a Game: On Numerical and Spatial Consistency for Generative Games_ —
 
 _AdaWorld: Learning Adaptable World Models with Latent Actions_ — 2025-03-24
 
-- **Backbone:** causal-diffusion (SVD modified to denoise one frame per call; history channel-concatenated)
+- **Backbone:** bidirectional-diffusion (SVD; history frames "concatenate[d] ... with the noise latent map" to "inherit the pretrained temporal modeling capability", read as temporal-axis context; axis not stated, medium confidence)
 - **Action space:** unsupervised latent actions; adapts to discrete or continuous target actions
 - **Horizon / context:** 20 frames (action-transfer eval); ~20 steps (visual planning); paper states rollout quality degrades once generation exceeds the initial scene's content -- no long-horizon (>20 frame) demonstration
 - **Memory mechanism:** implicit-context
@@ -1099,7 +1094,7 @@ _Diffusion Models Are Real-Time Game Engines_ — 2024-08-27
 - **Backbone:** causal-diffusion
 - **Action space:** discrete DOOM key-presses (attack, move forward/back, strafe left/right, turn, etc.)
 - **Reported FPS:** 20
-- **Horizon / context:** human raters at chance (50%) on 1.6-3.2s clips; 64-step autoregressive eval
+- **Horizon / context:** stable over multi-minute play sessions (v2 abstract); raters at chance on 3-s clips taken after 5 to 10 minutes of gameplay (Sec. 5.1); 3.2 s context window
 - **Memory mechanism:** implicit-context
 - **Open source:** no
 
@@ -1127,7 +1122,7 @@ _iVideoGPT: Interactive VideoGPTs are Scalable World Models_ — 2024-05-24
 
 _Learning Interactive Real-World Simulators_ — 2023-10-09
 
-- **Backbone:** hybrid-AR-diffusion
+- **Backbone:** causal-diffusion (history frames channel-concatenated as fixed conditioning; medium confidence)
 - **Action space:** text + robot delta-x/delta-y (4096 bins) + camera pose + activity labels
 - **Horizon / context:** 8 sequential interactions (chunks) chained autoregressively in reported rollout demo; per-chunk/total frame count not specified
 - **Memory mechanism:** implicit-context
@@ -1187,7 +1182,7 @@ _TourPhysics: Bringing Physics to World Models for Exploration and Manipulation 
 
 _Solaris: Towards Interfaces That Are Generated, Not Coded_ — 2026-09-01 · Real-Time & Streaming Generation
 
-- **Backbone:** hybrid-AR-diffusion
+- **Backbone:** causal-diffusion (one Gen-4.5 backbone made frame-causal, distilled to few steps)
 - **Action space:** mouse clicks/drags + keyboard/text (software interfaces)
 - **Memory mechanism:** implicit-context
 - **Open source:** no
@@ -1268,7 +1263,7 @@ _SAGA: Stable Acceleration Guidance for Autoregressive Video Generation_ — 202
 
 _Flex-Forcing: Towards a Unified Autoregressive and Bidirectional Video Diffusion Model_ — 2026-07-03 · Real-Time & Streaming Generation
 
-- **Backbone:** hybrid-AR-diffusion
+- **Backbone:** causal-diffusion (chunk-causal Wan2.1 DiT with tunable chunking)
 - **Reported FPS:** 25.8
 - **Horizon / context:** 30-second, 480p videos on VBench-Long via Infinity-RoPE extrapolation; trained only on 5s clips
 - **Memory mechanism:** implicit-context

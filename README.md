@@ -497,7 +497,7 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * Mixture of Contexts for Long Video Generation. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.21058)] · 🧠`memory`
 * **`HERO`**, Hierarchical Extrapolation and Refresh for Efficient World Models. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.17588)] · 🧠`memory`
 * **`WorldWeaver`**, Generating Long-Horizon Video Worlds via Rich Perception. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.15720)] · 🧠`memory`
-* **`Matrix-Game 2.0`**, An Open-Source, Real-Time, and Streaming Interactive World Model. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.13009)] [[Website](https://matrix-game-v2.github.io/)] · 🌍`systems` ⚡`realtime`
+* **`Matrix-Game 2.0`**, An open-source real-time and streaming interactive world model. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.13009)] [[Website](https://matrix-game-v2.github.io/)] · 🌍`systems` ⚡`realtime`
 * **`Yan`**, Foundational Interactive Video Generation. **`arXiv 2025.08`** [[Paper](https://arxiv.org/abs/2508.08601)] · 🌍`systems`
 * **`Genie 3`**, A new frontier for world models. **`DeepMind 2025`** [[Blog](https://deepmind.google/blog/genie-3-a-new-frontier-for-world-models/)] · 📰`reports`
 * **`Yume`**, An Interactive World Generation Model. **`arXiv 2025.07`** [[Paper](https://arxiv.org/abs/2507.17744)] [[Website](https://stdstu12.github.io/YUME-Project/)] [[Code](https://github.com/stdstu12/YUME)] · 🌍`systems`
@@ -518,7 +518,7 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * Context as Memory: Scene-Consistent Interactive Long Video Generation with Memory Retrieval. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.03141)] · 🌍`systems` 🧠`memory`
 * Playing with Transformer at 30+ FPS via Next-Frame Diffusion. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.01380)] · ⚡`realtime`
 * **`DeepVerse`**, 4D Autoregressive Video Generation as a World Model. **`arXiv 2025.06`** [[Paper](https://arxiv.org/abs/2506.01103)] · 🌍`systems` 🕹️`control`
-* Toward Memory-Aided World Models: Benchmarking via Spatial Consistency. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.22976)] [[Code](https://github.com/Kevin-lkw/LoopNav)] · 🧠`memory` 📊`benchmarks`
+* LoopNav: Benchmarking Spatial Consistency in World Models. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.22976)] [[Code](https://github.com/Kevin-lkw/LoopNav)] · 🧠`memory` 📊`benchmarks`
 * **`StateSpaceDiffuser`**, Bringing Long Context to Diffusion World Models. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.22246)] · 🧠`memory`
 * **`VRAG`**, Learning World Models for Interactive Video Generation. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.21996)] · 🌍`systems`
 * Long-Context State-Space Video World Models. **`arXiv 2025.05`** [[Paper](https://arxiv.org/abs/2505.20171)] [[Website](https://ryanpo.com/ssm_wm)] · 🌍`systems`
@@ -791,20 +791,20 @@ These are notes taken while reading, not measurements. Frame rates are the numbe
 | [ABot-World-0](https://arxiv.org/abs/2607.19191) | 2026-07 | causal diffusion | keyboard + camera | 16 | context | yes |
 | [WanToFight](https://arxiv.org/abs/2607.12592) | 2026-07 | causal diffusion | keyboard | 30 | context | no |
 | [Infinite Worlds with Versatile Interactions](https://arxiv.org/abs/2607.07534) | 2026-07 | causal diffusion | camera + language + embodied | 60 | context | yes |
-| [AlayaWorld](https://arxiv.org/abs/2607.06291) | 2026-07 | bidir. diffusion | camera + language | 24 | hybrid: spatial (recon)+compressive | no |
+| [AlayaWorld](https://arxiv.org/abs/2607.06291) | 2026-07 | bidir. diffusion | camera + language | — | hybrid: spatial (recon)+compressive | no |
 | [MoWorld](https://arxiv.org/abs/2607.06216) | 2026-07 | bidir. diffusion | camera | 50 | hybrid: context+retrieval | no |
 | [Multiplayer Interactive World Models with R…](https://arxiv.org/abs/2607.05352) | 2026-07 | causal diffusion | keyboard | 20 | context | no |
 | [Worldscape-MoE](https://arxiv.org/abs/2607.03964) | 2026-07 | other | camera + embodied | — | context | no |
 | [WorldDirector](https://arxiv.org/abs/2607.02517) | 2026-07 | causal diffusion | camera + language | — | hybrid: spatial (store)+retrieval | no |
 | [DreamForge-World 0.1](https://arxiv.org/abs/2606.30292) | 2026-06 | causal diffusion | keyboard + mouse | 14.5 | context | no |
 | [Walking in the Implicit](https://arxiv.org/abs/2606.30045) | 2026-06 | other | camera | — | hybrid: spatial (recon)+retrieval | no |
-| [Directing the World](https://arxiv.org/abs/2606.27964) | 2026-06 | AR + diffusion | camera | — | context | no |
+| [Directing the World](https://arxiv.org/abs/2606.27964) | 2026-06 | bidir. diffusion | camera | — | context | no |
 | [MaineCoon](https://arxiv.org/abs/2606.17800) | 2026-06 | causal diffusion | language + embodied | 47.5 | context | no |
 | [ActWorld](https://arxiv.org/abs/2606.17730) | 2026-06 | bidir. diffusion | keyboard + mouse + camera | 3.5 | hybrid: context+retrieval | no |
 | [DreamX-World 1.0](https://arxiv.org/abs/2606.16993) | 2026-06 | causal diffusion | camera + language | 16 | retrieval | no |
 | [GeoStream](https://arxiv.org/abs/2606.15162) | 2026-06 | causal diffusion | camera | 4.05 | spatial (recon) | no |
 | [MoVerse](https://arxiv.org/abs/2606.13376) | 2026-06 | bidir. diffusion | camera | 8 | hybrid: spatial (recon)+context | no |
-| [BiWM](https://arxiv.org/abs/2606.10135) | 2026-06 | AR + diffusion | camera + language | — | hybrid: context+compressive | yes |
+| [BiWM](https://arxiv.org/abs/2606.10135) | 2026-06 | bidir. diffusion | camera + language | — | hybrid: context+compressive | yes |
 | [Prisma-World](https://arxiv.org/abs/2606.09507) | 2026-06 | bidir. diffusion | camera | — | hybrid: context+spatial (store) | no |
 | [DisCo](https://arxiv.org/abs/2606.07967) | 2026-06 | causal diffusion | camera | — | context | no |
 | [Streaming Video Generation with Streaming F…](https://arxiv.org/abs/2606.07508) | 2026-06 | causal diffusion | other | 16.6 | context | no |
@@ -815,9 +815,9 @@ These are notes taken while reading, not measurements. Frame rates are the numbe
 | [SCOPE](https://arxiv.org/abs/2605.23345) | 2026-05 | bidir. diffusion | keyboard + camera | — | none | yes |
 | [Incantation](https://arxiv.org/abs/2605.18601) | 2026-05 | causal diffusion | language | 19.7 | context | no |
 | [ReactiveGWM](https://arxiv.org/abs/2605.15256) | 2026-05 | bidir. diffusion | keyboard | — | context | no |
-| [SANA-WM](https://arxiv.org/abs/2605.15178) | 2026-05 | SSM hybrid | camera | 16 | hybrid: compressive+context | yes |
+| [SANA-WM](https://arxiv.org/abs/2605.15178) | 2026-05 | SSM hybrid | camera | — | hybrid: compressive+context | yes |
 | [CausalCine](https://arxiv.org/abs/2605.12496) | 2026-05 | causal diffusion | language | 16 | retrieval | no |
-| [PROWL](https://arxiv.org/abs/2605.18803) | 2026-05 | causal diffusion | camera | 20 | context | no |
+| [PROWL](https://arxiv.org/abs/2605.18803) | 2026-05 | causal diffusion | camera | — | context | no |
 | [MultiWorld](https://arxiv.org/abs/2604.18564) | 2026-04 | causal diffusion | keyboard + mouse + embodied | — | hybrid: context+spatial (recon) | no |
 | [Matrix-Game 3.0](https://arxiv.org/abs/2604.08995) | 2026-04 | bidir. diffusion | keyboard + mouse | 40 | hybrid: retrieval+context | yes |
 
