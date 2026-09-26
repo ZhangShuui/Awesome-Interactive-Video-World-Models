@@ -781,7 +781,7 @@ These are notes taken while reading, not measurements. Frame rates are the numbe
 | System | Date | Backbone | Action | FPS | Memory | Open |
 | --- | --- | --- | --- | --- | --- | --- |
 | [Astronex-World 1.0](https://arxiv.org/abs/2609.20034) | 2026-09 | causal diffusion | embodied | 24 | hybrid: context+retrieval | yes |
-| [Matrix-Game 3.5](https://arxiv.org/abs/2608.29910) | 2026-08 | bidir. diffusion | keyboard + mouse + camera | 20 | hybrid: spatial (recon)+retrieval | yes |
+| [Matrix-Game 3.5](https://arxiv.org/abs/2608.29910) | 2026-08 | causal diffusion | keyboard + mouse + camera | 20 | hybrid: spatial (recon)+retrieval | yes |
 | [ForgeWM](https://arxiv.org/abs/2608.14022) | 2026-08 | causal diffusion | keyboard + mouse | — | context | yes |
 | [MASS](https://arxiv.org/abs/2608.06257) | 2026-08 | other | embodied | — | other | no |
 | [HelloWorld](https://arxiv.org/abs/2608.05070) | 2026-08 | bidir. diffusion | keyboard + camera + language | 24 | spatial (recon) | no |
@@ -790,7 +790,7 @@ These are notes taken while reading, not measurements. Frame rates are the numbe
 | [Wonder](https://arxiv.org/abs/2607.26037) | 2026-07 | causal diffusion | keyboard + camera | 16 | hybrid: retrieval+context | no |
 | [ABot-World-0](https://arxiv.org/abs/2607.19191) | 2026-07 | causal diffusion | keyboard + camera | 16 | context | yes |
 | [WanToFight](https://arxiv.org/abs/2607.12592) | 2026-07 | causal diffusion | keyboard | 30 | context | no |
-| [Infinite Worlds with Versatile Interactions](https://arxiv.org/abs/2607.07534) | 2026-07 | AR + diffusion | camera + language + embodied | 60 | context | yes |
+| [Infinite Worlds with Versatile Interactions](https://arxiv.org/abs/2607.07534) | 2026-07 | causal diffusion | camera + language + embodied | 60 | context | yes |
 | [AlayaWorld](https://arxiv.org/abs/2607.06291) | 2026-07 | bidir. diffusion | camera + language | 24 | hybrid: spatial (recon)+compressive | no |
 | [MoWorld](https://arxiv.org/abs/2607.06216) | 2026-07 | bidir. diffusion | camera | 50 | hybrid: context+retrieval | no |
 | [Multiplayer Interactive World Models with R…](https://arxiv.org/abs/2607.05352) | 2026-07 | causal diffusion | keyboard | 20 | context | no |
@@ -801,7 +801,7 @@ These are notes taken while reading, not measurements. Frame rates are the numbe
 | [Directing the World](https://arxiv.org/abs/2606.27964) | 2026-06 | AR + diffusion | camera | — | context | no |
 | [MaineCoon](https://arxiv.org/abs/2606.17800) | 2026-06 | causal diffusion | language + embodied | 47.5 | context | no |
 | [ActWorld](https://arxiv.org/abs/2606.17730) | 2026-06 | bidir. diffusion | keyboard + mouse + camera | 3.5 | hybrid: context+retrieval | no |
-| [DreamX-World 1.0](https://arxiv.org/abs/2606.16993) | 2026-06 | bidir. diffusion | camera + language | 16 | retrieval | no |
+| [DreamX-World 1.0](https://arxiv.org/abs/2606.16993) | 2026-06 | causal diffusion | camera + language | 16 | retrieval | no |
 | [GeoStream](https://arxiv.org/abs/2606.15162) | 2026-06 | causal diffusion | camera | 4.05 | spatial (recon) | no |
 | [MoVerse](https://arxiv.org/abs/2606.13376) | 2026-06 | bidir. diffusion | camera | 8 | hybrid: spatial (recon)+context | no |
 | [BiWM](https://arxiv.org/abs/2606.10135) | 2026-06 | AR + diffusion | camera + language | — | hybrid: context+compressive | yes |
