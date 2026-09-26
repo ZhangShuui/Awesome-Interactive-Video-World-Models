@@ -550,7 +550,7 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * History-Guided Video Diffusion. **`arXiv 2025.02`** [[Paper](https://arxiv.org/abs/2502.06764)] · 🧠`memory`
 * Taming Teacher Forcing for Masked Autoregressive Video Generation. **`arXiv 2025.01`** [[Paper](https://arxiv.org/abs/2501.12389)] · ⚡`realtime`
 * Generative Physical AI in Vision: A Survey. **`arXiv 2025.01`** [[Paper](https://arxiv.org/abs/2501.10928)] · 📚`surveys`
-* **`GameFactorly`**, Creating New Games with Generative Interactive Videos. **`arXiv 2025.01`** [[Paper](https://arxiv.org/abs/2501.08325)] · 🌍`systems`
+* **`GameFactorly`**, GameFactory: Creating New Games with Generative Interactive Videos. **`arXiv 2025.01`** [[Paper](https://arxiv.org/abs/2501.08325)] · 🌍`systems`
 * Diffusion Adversarial Post-Training for One-Step Video Generation. **`arXiv 2025.01`** [[Paper](https://arxiv.org/abs/2501.08316)] · ⚡`realtime`
 * **`MSC`**, Multi-Scale Spatio-Temporal Causal Attention for Autoregressive Video Diffusion. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.09828)] · ⚡`realtime`
 * **`GenEx`**, Generating an Explorable World. **`arXiv 2024.12`** [[Paper](https://arxiv.org/abs/2412.09624)] · 🌍`systems`
@@ -801,7 +801,7 @@ These are notes taken while reading, not measurements. Frame rates are the numbe
 | [Directing the World](https://arxiv.org/abs/2606.27964) | 2026-06 | bidir. diffusion | camera | — | context | no |
 | [MaineCoon](https://arxiv.org/abs/2606.17800) | 2026-06 | causal diffusion | language + embodied | 47.5 | context | no |
 | [ActWorld](https://arxiv.org/abs/2606.17730) | 2026-06 | bidir. diffusion | keyboard + mouse + camera | 3.5 | hybrid: context+retrieval | no |
-| [DreamX-World 1.0](https://arxiv.org/abs/2606.16993) | 2026-06 | causal diffusion | camera + language | 16 | retrieval | no |
+| [DreamX-World 1.0](https://arxiv.org/abs/2606.16993) | 2026-06 | causal diffusion | camera + language | 16 | retrieval | yes |
 | [GeoStream](https://arxiv.org/abs/2606.15162) | 2026-06 | causal diffusion | camera | 4.05 | spatial (recon) | no |
 | [MoVerse](https://arxiv.org/abs/2606.13376) | 2026-06 | bidir. diffusion | camera | 8 | hybrid: spatial (recon)+context | no |
 | [BiWM](https://arxiv.org/abs/2606.10135) | 2026-06 | bidir. diffusion | camera + language | — | hybrid: context+compressive | yes |
