@@ -89,6 +89,10 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`DyMD`**, Preserving Interaction Dynamics through Distribution Matching Distillation in Few-Step Video World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.31349)] · ⚡`realtime`
+* Where Compute Matters: Heterogeneous Attention for Efficient Video Diffusion. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.31050)] · ⚡`realtime`
+* Where and When to Force: Routed Forcing for Streaming Avatars. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.30963)] · ⚡`realtime`
+* Action Forcing: Training World Models on Unsupervised Video by Recovering Underlying Egomotion Bases. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.30595)] · 🕹️`control`
 * **`WanPE`**, Towards Cinematic Prompt Enhancement for Modern Text-to-Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.30221)] · 🧠`memory`
 * Accelerating Video Diffusion via Training-Free Trajectory Routing. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.30096)] · ⚡`realtime`
 * **`ViRDM`**, Taming Representation Distribution Matching for Few-Step Causal Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.28923)] · ⚡`realtime`
