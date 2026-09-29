@@ -5,7 +5,7 @@ merging a pull request.
 
 | Source | Cadence | Finds | Script |
 | --- | --- | --- | --- |
-| arXiv | daily, 01:30 UTC | preprints, which is most of the field | `arxiv_candidates.py` |
+| arXiv | daily, 02:43 UTC | preprints, which is most of the field | `arxiv_candidates.py` |
 | Blog watchlist | daily, same job | Genie, Oasis, Marble — systems announced with no paper | `blog_candidates.py` |
 | OpenReview | swept on demand | ICLR/NeurIPS/ICML papers, and the venue a paper was accepted to | `openreview_candidates.py` |
 | Conference proceedings | swept per conference | CVPR/ICCV/ECCV/WACV/NeurIPS papers that never went to arXiv | `venue_candidates.py` |
@@ -126,7 +126,7 @@ gets expensive again and is the first one to reconsider.
 
 ## The daily job
 
-1. `.github/workflows/arxiv-candidates.yml` runs at 01:30 UTC, and on demand.
+1. `.github/workflows/arxiv-candidates.yml` runs at 02:43 UTC, and on demand.
 2. `scripts/arxiv_candidates.py` queries arXiv over the last N days;
    `scripts/blog_candidates.py` polls the watchlist in `data/sources.json`.
    Three interfaces answer that window, in descending order of how well:
@@ -142,6 +142,15 @@ gets expensive again and is the first one to reconsider.
    submission, so it is the coarse filter, and the abstract page — a third
    host — is asked for the exact date once the gates have cut the week down to
    a couple of dozen.
+
+   Whichever of the first two answers, the run also reads that day's
+   announcement feeds and keeps whatever the window did not return. A window
+   of submission dates misses an announcement in two ways. The search index
+   trails it: at 02:54 UTC on 2026-09-29 the API had the batch's weekend
+   submissions and none of its Monday ones, 29 candidates. And a paper held in
+   moderation is announced under a submission date older than the window —
+   `2609.31654` was submitted 09-14 and announced 09-29. The first cost a day;
+   the second cost the paper.
 3. Papers already in `data/papers.jsonl`, listed in `data/arxiv-ignore.txt`,
    or already rejected are skipped.
 4. One Issue labeled `arxiv-candidates` is created or updated with both
@@ -248,6 +257,11 @@ python3 scripts/arxiv_candidates.py --feed-file tests/data/sample-feed.xml --out
 - `QUERY_PHRASES` in `scripts/sources.py` — recall, shared by every source.
   Add a phrase when a paper you expected never showed up, and read the rules
   above first.
+- `PHRASE_RE` in `scripts/arxiv_candidates.py` — the same phrases applied
+  client-side, for the interfaces that take no query (OAI-PMH and the
+  announcement feeds). It reads a hyphen as a space and cuts each phrase's last
+  word to a stem, because the API does: matched verbatim, the phrases recalled
+  111 of the papers announced on 2026-09-29 where the API recalled 140.
 - `proposal()` in `scripts/sources.py` — the one admission decision.
 - `OFF_TOPIC_RE`, `VISUAL_GATE_RE` — precision.
 - `CRITERIA` in `scripts/triage.py` — the three-criteria evidence patterns.
@@ -263,14 +277,14 @@ disables it, which is why `tests/test_pipeline.py` pins the off-topic filter.
 
 ## Known gaps
 
-- **A long outage loses papers.** The daily window is 3 days, so the job can
-  fail twice and still catch up. Fail for four days and those papers are gone;
-  there is no watermark. Re-run by hand with `--days`.
+- **A long outage is bounded by `--max-results`.** `--since` reaches back to
+  the last run that succeeded, so a failed run costs latency rather than
+  papers — until the stretched window holds more than `--max-results`, and its
+  oldest end, the part nobody has seen, is cut. The cap is 1000 because an
+  ordinary week passed the old 400 on 2026-09-29 (426). The run warns on
+  stderr when it truncates; re-run by hand with a larger `--max-results`.
 - **arXiv v1 only.** A paper cross-listed into cs.CV later, or rewritten in v2,
   is never reconsidered.
-- **`--max-results` truncates.** A 3-day window returns a couple of dozen
-  papers; a 30-day backfill returns hundreds and will hit the cap. It now warns
-  on stderr instead of silently returning a short list.
 - **SIGGRAPH and the ACM DL** are not covered by any source here.
 
 ## APIs and terms
