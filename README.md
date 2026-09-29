@@ -89,6 +89,19 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* Residual-Stream Burden Shapes Representation Learning in Diffusion Transformers. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.33895)] · 🧠`memory`
+* **`StoryEngine`**, A State-Grounded Agentic Framework for Video Storytelling. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.33627)] · 🧠`memory`
+* **`PulseQuant`**, Propagation-Guided Subspace Correction for 4-Bit Video Diffusion Transformers. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.33384)] · 🧠`memory`
+* **`Scope-WM`**, Scoped Computation for Efficient Visual World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.33218)] · 🌍`systems`
+* **`ReAL`**, Accelerating Flow Matching through Segment Advancement with Shared Lookahead. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.33202)] · ⚡`realtime`
+* Octree-based Video Representation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.33100)] · ⚡`realtime`
+* **`DraftAttention2`**, Fast Video Diffusion with Low-Resolution-Guided Mixed-Precision Attention. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.32628)] · ⚡`realtime`
+* In-Flight KV Cache with Clean Anchors for Faster Autoregressive Video Diffusion. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.32540)] · ⚡`realtime`
+* **`UnStep`**, Training-Free Acceleration of Causal Video Diffusion with Fewer Steps Than Distillation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.32518)] · ⚡`realtime`
+* **`Carnator`**, Fast Text-to-Video Generation with Generation-Native Compatibility-Guided Cross-Request Reuse. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.32420)] · ⚡`realtime`
+* **`SparSP`**, Exploiting Communication Sparsity for Sequence-Parallel Video DiTs. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.32197)] · ⚡`realtime`
+* Continuous-Time Trajectory Generation from Discrete Observations with Stochasticity. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.32026)] · 🧠`memory`
+* Cache-Aware Conv3D Lowering Across Embedded World-Model Decoders. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.31938)] · ⚡`realtime`
 * **`DyMD`**, Preserving Interaction Dynamics through Distribution Matching Distillation in Few-Step Video World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.31349)] · ⚡`realtime`
 * Where Compute Matters: Heterogeneous Attention for Efficient Video Diffusion. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.31050)] · ⚡`realtime`
 * Where and When to Force: Routed Forcing for Streaming Avatars. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.30963)] · ⚡`realtime`
