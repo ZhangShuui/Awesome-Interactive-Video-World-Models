@@ -89,6 +89,25 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`PDMD`**, Projected Distribution Matching Distillation for Video Diffusion Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.35768)] · ⚡`realtime`
+* Lagrangian--Hamiltonian Flows for Video Prediction and Image Generation: A Symplectic Perspective. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.35710)] · ⚡`realtime`
+* **`WorldPlay2`**, Extending Real-Time Interactive World Models in Control and Horizon. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.35560)] · ⚡`realtime`
+* From Scores to Samples: Elastic Forcing for Autoregressive Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.35491)] · ⚡`realtime`
+* **`G$^3$-LoRA`**, Organizing Reward-Weighted Video Data with Gradient-Guided Grouped LoRA. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.35189)] · ⚡`realtime`
+* **`Sol-H3`**, Recursive Self-Improvement for MiniMax-H3 Inference Acceleration on Sol-Engine across Cloud and Edge. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.35110)] · ⚡`realtime`
+* **`OPIS`**, An Input-Grounded Benchmark for Multi-Object Memory in Video World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.35052)] · 🧠`memory` 📊`benchmarks`
+* **`Proxy2World`**, Learning to Generate Worlds From Lightweight Proxies without Seeing Them. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.35023)] · 🕹️`control`
+* **`ORAV`**, Benchmarking Audio-Video Generation from Multimodal Contexts. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.34843)] · 📊`benchmarks`
+* **`CoDrive`**, Cross-Vehicle World-Consistent Video Generation with Precise Trajectory Control for Cooperative Driving. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.34749)] · 🧠`memory`
+* Geometry as Address: Routing Attention to Visual Memory for Long-Horizon Camera-Controlled Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.34722)] · 🧠`memory`
+* Learning What to Recall: Adaptive Multi-Cue Episodic Memory for World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.34677)] · 🧠`memory`
+* **`WorldAttention`**, An Efficient Attention Architecture for Interactive Video World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.34606)] · 🧠`memory`
+* **`TSGate`**, Timestep-Aware Gated Attention for Diffusion Transformers. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.34539)] · 🧠`memory`
+* Precise Editing and Flexible Referencing for Interactable Worlds. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.34470)] · ⚡`realtime`
+* From Static to Dynamic: On-Policy Distillation from Image to Video Diffusion Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.34371)] · ⚡`realtime`
+* **`MaLiang-Harness`**, A Programmable Path to Image and Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.34309)] · 🧠`memory`
+* **`WorldWeave`**, Growing Persistent Geometric Worlds for Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.34221)] · 🧠`memory`
+* **`CAST`**, Reconstruction-Coupled Acceleration of Interactive World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.34144)] · ⚡`realtime`
 * Residual-Stream Burden Shapes Representation Learning in Diffusion Transformers. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.33895)] · 🧠`memory`
 * **`StoryEngine`**, A State-Grounded Agentic Framework for Video Storytelling. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.33627)] · 🧠`memory`
 * **`PulseQuant`**, Propagation-Guided Subspace Correction for 4-Bit Video Diffusion Transformers. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.33384)] · 🧠`memory`
@@ -129,6 +148,7 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * **`Astronex-World 1.0`**, Real-Time Interactive World Model Foundation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.20034)] · 🌍`systems` ⚡`realtime`
 * Recency Forcing: Bridging the Long-Horizon Gap in Autoregressive Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.19729)] · 🧠`memory`
 * Can MiniMax-H3 Reason About the Physical World? An Evaluation of Omni-Modal Generative Model. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.18323)] · 📊`benchmarks`
+* Temporal-Attention Head Specialization During Video Diffusion Training. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.31654)] · ⚡`realtime`
 * A Chosen Future Can Still Be Rewritten: Causal Writability in Video Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.15980)] · ⚡`realtime`
 * **`LynnReal-Omni`**, Native multi-modal Video Generation for Agentic Visual Workflows. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.15863)] · ⚡`realtime`
 * **`VC-Attention`**, Value Smoothing and Softmax Casting for Low-bit Attention. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.15810)] · ⚡`realtime`
