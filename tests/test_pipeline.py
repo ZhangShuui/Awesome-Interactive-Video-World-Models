@@ -1,7 +1,9 @@
 """The inbox round trip: feed -> report -> ticks -> records."""
 import contextlib
 import email.message
+import io
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -514,6 +516,139 @@ class TestRssFallback(unittest.TestCase):
                 mock.patch.object(ac.time, "sleep", lambda _s: None):
             ac.fill_submitted_dates(cand, 60.0, 2, 5.0)
         self.assertEqual(cand, [{"id": "2609.11111", "date": "2026-09-14"}])
+
+
+class TestTodaysAnnouncement(unittest.TestCase):
+    """What a window of submission dates cannot see, and the feeds can.
+
+    On 09-29 the API's index was still missing the batch's Monday submissions
+    at 02:54 -- 29 candidates, 2609.35768 among them -- and 2609.31654, held
+    in moderation since 09-14, was announced into a window long past it.
+    """
+
+    @staticmethod
+    def paper(pid, date="2026-09-28"):
+        return {"id": pid, "date": date, "categories": ["cs.CV"],
+                "title": "Causal Video Generation with Persistent Memory",
+                "abstract": "We generate video autoregressively, one frame at a "
+                            "time, and keep a persistent memory of the scene."}
+
+    def _main(self, window, source, feed, dated=None):
+        """main() over a stubbed window and announcement.
+
+        -> ({id: date} as reported, [ids whose abstract page was asked]).
+        """
+        out = Path(tempfile.mkdtemp()) / "inbox.md"
+        asked = []
+
+        def fill(cands, *_a, **_kw):
+            for cand in cands:
+                asked.append(cand["id"])
+                cand["date"] = (dated or {}).get(cand["id"], cand["date"])
+            return cands
+
+        argv = ["arxiv_candidates.py", "--output", str(out), "--papers", str(EMPTY)]
+        for flag in ISOLATED:
+            argv += [flag, str(EMPTY)]
+        with mock.patch.object(sys, "argv", argv), \
+                mock.patch.object(ac, "fetch_papers",
+                                  lambda *a, **k: ([dict(p) for p in window], source)), \
+                mock.patch.object(ac, "fetch_rss",
+                                  lambda *a, **k: [dict(p) for p in feed]), \
+                mock.patch.object(ac, "fill_submitted_dates", fill), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            ac.main()
+        report = out.read_text(encoding="utf-8")
+        return dict(re.findall(r"arxiv\.org/abs/(\S+) · (\S+)", report)), asked
+
+    def test_what_the_index_has_not_caught_up_with_is_taken_from_the_feeds(self):
+        window = [self.paper("2609.33895", "2026-09-27")]
+        feed = [self.paper("2609.33895", "2026-09-29"),
+                self.paper("2609.35768", "2026-09-29")]
+        with contextlib.redirect_stderr(io.StringIO()):
+            papers, late = ac.merge_announcements(window, feed)
+        self.assertEqual([p["id"] for p in papers], ["2609.33895", "2609.35768"])
+        self.assertEqual(late, {"2609.35768"})
+
+    def test_the_window_keeps_its_own_copy(self):
+        """Its date is the submission; the feed's is only the announcement."""
+        window = [self.paper("2609.33895", "2026-09-27")]
+        papers, late = ac.merge_announcements(
+            window, [self.paper("2609.33895", "2026-09-29")])
+        self.assertEqual(papers, window)
+        self.assertEqual(late, set())
+
+    def test_silent_feeds_cost_the_supplement_not_the_run(self):
+        for failure in (SystemExit("rss.arxiv.org failed"),
+                        ac.ET.ParseError("not a feed")):
+            def fail(*_a, _exc=failure, **_kw):
+                raise _exc
+
+            with self.subTest(failure=type(failure).__name__), \
+                    mock.patch.object(ac, "fetch_rss", fail), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(ac.todays_announcements(60.0, 2, 5.0), [])
+
+    def test_only_what_the_feeds_added_is_dated_from_its_abstract_page(self):
+        """The window's dates are submissions already; the feeds' are not."""
+        dates, asked = self._main(
+            [self.paper("2609.33895", "2026-09-27")], "api",
+            [self.paper("2609.33895", "2026-09-29"),
+             self.paper("2609.35768", "2026-09-29")],
+            dated={"2609.35768": "2026-09-28"})
+        self.assertEqual(asked, ["2609.35768"])
+        self.assertEqual(dates, {"2609.33895": "2026-09-27",
+                                 "2609.35768": "2026-09-28"})
+
+    def test_a_held_paper_is_not_mistaken_for_a_revision(self):
+        """OAI returns 2609.31654 under its 09-29 datestamp and its abstract
+        page says 09-14 -- older than the floor that keeps revisions out. The
+        feed says it is new, and a revision is never announced as new."""
+        old = (datetime.now(timezone.utc) - timedelta(days=15)).date().isoformat()
+        dates, _asked = self._main(
+            [self.paper("2609.31654", "2026-09-29"),
+             self.paper("2508.07769", "2026-09-29")], "oai",
+            [self.paper("2609.31654", "2026-09-29")],
+            dated={"2609.31654": old, "2508.07769": old})
+        self.assertIn("2609.31654", dates)
+        self.assertNotIn("2508.07769", dates)
+
+    def test_a_run_on_the_feeds_alone_does_not_read_them_twice(self):
+        def twice(*_a, **_kw):
+            raise AssertionError("the degraded run read the feeds again")
+
+        with mock.patch.object(ac, "todays_announcements", twice):
+            dates, _asked = self._main(
+                [self.paper("2609.35768", "2026-09-29")], "rss", [])
+        self.assertEqual(set(dates), {"2609.35768"})
+
+
+class TestPhraseRecall(unittest.TestCase):
+    """The client-side vocabulary filter reads phrases the way the API does.
+
+    Verbatim it recalled 111 of the 2027 papers announced on 09-29 where the
+    API's own query recalled 140, and dropped 2609.35734 ("video generative")
+    and 2609.35439 ("action conditioning") on the way.
+    """
+
+    def test_endings_and_hyphens_are_read_the_way_the_api_reads_them(self):
+        for text in ("a video generative prior", "action conditioning",
+                     "world-model rollouts", "Video-Diffusion Transformers",
+                     "self forced rollout", "video gaming agents"):
+            with self.subTest(text=text):
+                self.assertIsNotNone(ac.PHRASE_RE.search(text))
+
+    def test_every_phrase_still_matches_itself(self):
+        for phrase in ac.QUERY_PHRASES:
+            with self.subTest(phrase=phrase):
+                self.assertIsNotNone(ac.PHRASE_RE.search(phrase))
+
+    def test_a_stem_is_not_a_licence_to_match_inside_a_word(self):
+        """`forc` must not reach into "enforce" or "workforce"."""
+        for text in ("we enforce a margin", "a workforce study"):
+            with self.subTest(text=text):
+                self.assertIsNone(ac.PHRASE_RE.search(text))
 
 
 class TestSearchWindow(unittest.TestCase):

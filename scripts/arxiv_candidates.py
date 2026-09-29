@@ -86,8 +86,28 @@ QUERY_PHRASES = sources.QUERY_PHRASES
 # cation, TinyML, 802.11 channel contention and maize leaf segmentation, 39
 # candidates where six were real. So the recall layer is reapplied here, and it
 # has to run before proposal(), not after.
+#
+# It has to be the same layer the API applies, and matched verbatim it was not.
+# The API stems and reads a hyphen as a space, so `all:"video generation"` also
+# returns "video generative" and `all:"action-conditioned"` returns "action
+# conditioning". Of the 2027 papers announced on 09-29 the API's query recalled
+# 140 and the verbatim phrases 111, and four of the ones they missed went on to
+# clear every gate -- 2609.35734 and 2609.35439 among them. So words are joined
+# by a space or a hyphen and the last one is cut back to its stem: the same day
+# then recalls 139, and 56 through the gates, which is what the API's 140 yield
+# too -- the two sets differing by one paper each way.
+STEM_SUFFIX_RE = re.compile(r"(?:ation|ion|ing|ed|e)$")
+
+
+def phrase_pattern(phrase):
+    """A query phrase as the search engine reads it, hyphens and endings aside."""
+    words = re.split(r"[\s-]+", phrase)
+    words[-1] = STEM_SUFFIX_RE.sub("", words[-1])
+    return r"[\s-]+".join(re.escape(word) for word in words)
+
+
 PHRASE_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(p) for p in QUERY_PHRASES) + r")", re.I)
+    r"\b(?:" + "|".join(phrase_pattern(p) for p in QUERY_PHRASES) + r")", re.I)
 
 # "Announce Type: new" and the abstract that follows it, which is the only
 # place the RSS item carries one.
@@ -619,16 +639,71 @@ def _fetch_window(start_at, end, max_results, timeout, retries, retry_delay):
             break
         start += PAGE_SIZE
         time.sleep(MIN_DELAY_S)
-    # A routine window returns a couple of hundred papers and never comes near
-    # the cap. A hand-run backfill over a month does, and so does a window that
-    # `--since` has stretched across a long outage: the window silently lost its
-    # oldest papers and the report looked complete. Say so.
+    # A routine week comes to four or five hundred papers -- 426 on 09-29 --
+    # and sits inside the cap. A hand-run backfill over a month does not, and
+    # neither does a window that `--since` has stretched across a long outage:
+    # the window silently lost its oldest papers and the report looked
+    # complete. Say so.
     if total is not None and total > max_results:
         print(f"warning: the window from {start_at:%Y-%m-%d %H:%M}Z holds "
               f"{total} papers but --max-results is {max_results}; "
               f"{total - max_results} were not fetched. Re-run with "
               f"--max-results {total} or a shorter window.", file=sys.stderr)
     return papers
+
+
+def todays_announcements(timeout, retries, retry_delay):
+    """-> [paper]: the day's announcement, read alongside a searched window.
+
+    A window of submission dates misses a day's announcement in two ways.
+
+    The search index trails the announcement, and not by a fixed amount. The
+    batch of 2026-09-29 went out at 00:00 UTC; at 02:54 the API answered this
+    job's window with 426 papers, the batch's Saturday and Sunday submissions
+    among them and not one of its Monday ones. The same query at 08:47 held
+    517, and the difference was Monday: 92 papers, 29 of them through every
+    gate, 2609.35768 among them. The window is seven days wide, so they were a
+    day late rather than lost -- which is exactly the cost the 02:43 schedule
+    was chosen to avoid.
+
+    And a paper held in moderation is announced under the date it was
+    submitted, which by then can be older than the window. 2609.31654 was
+    submitted 09-14 and announced as new on 09-29, and no window of submission
+    dates that opens after 09-14 contains it -- not that day's, and not any
+    later one's. That paper was not late, it was gone.
+
+    The announcement feeds have neither problem: they list the announcement
+    itself, whenever each paper was submitted. So a run that searched a window
+    also reads the day's feeds, whichever tier answered it -- nothing promises
+    that OAI-PMH is current either -- and merge_announcements keeps whatever
+    the window did not return. On an ordinary day that is five requests and
+    nothing added.
+
+    The window is the report and this is a supplement to it, so the feeds
+    failing costs the supplement and not the run.
+    """
+    try:
+        return fetch_rss(ALLOWED_CATEGORIES, timeout, retries, retry_delay)
+    except (SystemExit, ET.ParseError) as exc:
+        print(f"{exc}\nthe announcement feeds did not answer, so this report is "
+              f"the window alone: a paper announced today from outside it is "
+              f"not here", file=sys.stderr)
+        return []
+
+
+def merge_announcements(papers, announced):
+    """-> (papers, ids): the window, plus what the announcement has that it lacks.
+
+    What is added carries its announcement date until fill_submitted_dates
+    corrects it, which is why its ids come back too.
+    """
+    have = {p["id"] for p in papers}
+    added = [p for p in announced if p["id"] not in have]
+    if added:
+        print(f"{len(added)} paper(s) announced today were missing from the "
+              f"window the search returned; taken from the announcement feeds",
+              file=sys.stderr)
+    return papers + added, {p["id"] for p in added}
 
 
 def fill_abstracts(candidates, timeout=60.0, retries=2, retry_delay=5.0):
@@ -751,7 +826,13 @@ def parse_args():
     ap.add_argument("--since", default="",
                     help="when the last successful run started (ISO-8601); the "
                          "window is widened to reach back at least this far")
-    ap.add_argument("--max-results", type=int, default=400)
+    # A thousand, not four hundred. The cap cuts the *oldest* end of the
+    # window, which is harmless while every run succeeds -- an earlier run saw
+    # those papers -- and exactly wrong after an outage, when `--since` has
+    # stretched the window and its oldest papers are the ones nobody has seen.
+    # An ordinary week held 426 on 09-29, so four hundred had stopped being
+    # headroom. The API pages at a hundred: at most six more requests.
+    ap.add_argument("--max-results", type=int, default=1000)
     ap.add_argument("--output", default="ARXIV_CANDIDATES.md",
                     help="'-' writes the report to stdout")
     ap.add_argument("--papers", type=Path, default=ROOT / "data" / "papers.jsonl")
@@ -788,6 +869,9 @@ def main():
 
     days, degraded, unsearched = args.days, False, None
     source = "api"
+    # Everything today's announcement holds, and the part of it only the
+    # announcement had -- see todays_announcements.
+    announced, late = set(), set()
     if args.feed_file:
         papers = parse_feed(args.feed_file.read_bytes())
     elif args.oai_file:
@@ -815,6 +899,11 @@ def main():
                                       args.timeout, args.retries,
                                       args.retry_delay)
         degraded = source == "rss"
+        if not degraded:
+            feed = todays_announcements(args.timeout, args.retries,
+                                        args.retry_delay)
+            announced = {p["id"] for p in feed}
+            papers, late = merge_announcements(papers, feed)
         # What the report claims to cover has to be what it covered, or a
         # stretched window reads as a routine one.
         days = max(1, round((end - start_at).total_seconds() / 86400))
@@ -857,16 +946,26 @@ def main():
     # date for anything revised. The abstract page is the one host of the three
     # that states the submission outright, and asking it is affordable here
     # because the gates have cut a week's thousands down to a couple of dozen.
-    if source in ("oai", "rss") and candidates and not (args.rss_file
-                                                        or args.oai_file):
-        fill_submitted_dates(candidates, args.timeout, args.retries,
+    # What the feeds added to a searched window is dated by its announcement
+    # just the same, so it is asked about too.
+    undated = (candidates if source in ("oai", "rss")
+               else [c for c in candidates if c["id"] in late])
+    if undated and not (args.rss_file or args.oai_file):
+        fill_submitted_dates(undated, args.timeout, args.retries,
                              args.retry_delay)
     if source == "oai":
         # Only now are the dates the real ones, so only now can the window be
         # held to what it claims. submitted_before could not do this: an
         # identifier carries the month and the window starts on a day.
+        #
+        # The floor is there to keep out revisions, and nothing the feeds
+        # announced as new or cross-listed today is one, whatever its date. A
+        # paper held in moderation is the case in point: OAI hands 2609.31654
+        # over under its 09-29 datestamp, its abstract page says 09-14, and the
+        # floor would drop the one copy of it any run was ever going to see.
         floor = start_at.date().isoformat()
-        candidates = [c for c in candidates if c["date"] >= floor]
+        candidates = [c for c in candidates
+                      if c["date"] >= floor or c["id"] in announced]
 
     # Everything above came out of this run's date window. Anything still open
     # from an earlier one has to be put back by hand, or the inbox forgets it
