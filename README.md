@@ -89,6 +89,27 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`LongLive-Plug`**, Once-for-All Distillation for Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38154)] · ⚡`realtime`
+* **`FracGen`**, Learning How Objects Stretch and Tear with Physics-Informed Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38152)] · 🕹️`control`
+* **`LIFT`**, Layout-In-Future Video Generation under Large Viewpoint Change via On-Policy Self-Distillation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38146)] · ⚡`realtime`
+* **`HelixWorld`**, A Real-time Interactive Audio-Visual World Model. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38123)] · 🌍`systems` ⚡`realtime`
+* **`Self-Aligned Forcing`**, Streaming Video Diffusion with Differentiable Noisy History. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38114)] · ⚡`realtime`
+* **`MUGEN`**, Interactive Panoramic World Exploration via Camera Control. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38077)] · 🕹️`control`
+* **`SoL-Refiner`**, Speed-of-Light One-Step Refinement for High-Resolution Video. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.37969)] · ⚡`realtime`
+* Rollout-Marginal Distillation for Long-Horizon Autoregressive Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.37925)] · ⚡`realtime` 🧠`memory`
+* **`DIET`**, Deletion-response Expert Trimming for Video Diffusion Transformers. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.37829)] · 🧠`memory`
+* **`Honeycomb`**, Constant-Size Scene Memory Representation for Video World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.37690)] · 🧠`memory`
+* Adaptive Reward Routing: Dynamic Multi-Reward Optimization for Joint Audio-Video Diffusion via Forward-Process RL. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.37200)] · 🧠`memory`
+* **`Waypoint-1.5`**, A Real-Time Video World Model for Consumer Hardware. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.37107)] · ⚡`realtime`
+* **`MotionInsight`**, Diagnosing Object Motion Deficiencies in Generated Videos. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.37030)] · 🧠`memory`
+* Parameterized Stripe Attention for Efficient Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.37001)] · ⚡`realtime`
+* **`Salt++`**, Context-Aligned Post-Training for Few-Step Streaming Multimodal Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.36995)] · ⚡`realtime`
+* **`RolloutFaith`**, Auditing Persistent Internal Interventions in Visual World Model. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.36843)] · 🧠`memory`
+* Motion Concept Unlearning in Video Diffusion Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.36832)] · ⚡`realtime`
+* Compress to Remember: Learning Compact Memory via On-Policy Distillation for Long Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.36364)] · ⚡`realtime` 🧠`memory`
+* **`CoRe`**, Co-Evolving Reward Models for Mitigating Latent Reward Hacking in Video Diffusion Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.36245)] · 🧠`memory`
+* **`PreviewDiff`**, Multimodal Critic-Guided Search over Diffusion Latents. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.36199)] · 🧠`memory`
+* Persistence Forcing: Exploiting Feature Specialization in Pixel-Space Diffusion. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.36014)] · 🧠`memory`
 * **`PDMD`**, Projected Distribution Matching Distillation for Video Diffusion Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.35768)] · ⚡`realtime`
 * Lagrangian--Hamiltonian Flows for Video Prediction and Image Generation: A Symplectic Perspective. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.35710)] · ⚡`realtime`
 * **`WorldPlay2`**, Extending Real-Time Interactive World Models in Control and Horizon. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.35560)] · ⚡`realtime`
