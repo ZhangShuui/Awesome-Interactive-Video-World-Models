@@ -89,6 +89,35 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`ROWBench`**, Do Video Models Render What the Program Specifies?. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.02205)] · 🧠`memory`
+* **`DMAD`**, Distribution Matching as Adversarial Distillation for Fast Visual Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.02188)] · ⚡`realtime`
+* 4Director: Controlling Video World Models with Rigid 3D Geometry. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.02160)] · 🧠`memory`
+* **`MosaiChunk`**, Compositing Spatio-Temporal Memory for Autoregressive Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.02153)] · 🧠`memory`
+* **`DiVid`**, Diagnosing Dimension-Specific Diversity Collapse in Video Generation Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.01661)] · 🕹️`control`
+* **`Oneira`**, From Open-Ended Generation to Open-World Interaction in Video World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.01614)] · 🧠`memory`
+* **`PickMoment`**, Continuous-Time Single-Image-to-Video via Learning Deblurring and Blur-to-Video. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.01279)] · 🧠`memory`
+* Towards Subject Consistency over Dynamic Subject Sets in Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.01052)] · 🧠`memory`
+* Video Generation Models: A Survey of Post-Training and Alignment. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2610.00812)] · 📚`surveys`
+* **`SemanTok`**, Predictable Semantic Tokens for Efficient Autoregressive Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2610.00686)] · ⚡`realtime`
+* **`Memorizon`**, Training World Models Beyond Their Context Window. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2610.00544)] · 🧠`memory`
+* **`PACT`**, End-to-End Learning of Human Pose, Contacts, and Forces from Video. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2610.00451)] · 🧠`memory`
+* **`Physis-Lang`**, Self-Evolving Language as a Physical Representation for Video World Model. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.40358)] · 🧠`memory`
+* **`ViTeX-Bench`**, Benchmarking High-Fidelity Video Scene Text Editing. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.40356)] · 📊`benchmarks`
+* **`LOCI`**, Spatial Linear Memory for Streaming World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.40222)] · ⚡`realtime` 🧠`memory`
+* Enhancing Autoregressive Video Generation via Representation Adversarial Distillation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.40037)] · ⚡`realtime`
+* **`PartiCam`**, Camera Controlled Video Generation with Reward Guidance. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.39504)] · 🕹️`control`
+* **`CAST`**, Causal Advantage-Structured Training with Spatially Grounded Compositional Rewards for Diffusion Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.39441)] · ⚡`realtime`
+* The Golden Path Hypothesis: Reusable Schedules in Diffusion Caching. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.39343)] · ⚡`realtime`
+* **`MindWorldBench`**, Evaluating Mental-State-to-Behavior Reasoning in Image-to-Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.39147)] · 📊`benchmarks`
+* Uncertainty-Aware Consistency Distillation for Few-Step Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.39132)] · ⚡`realtime` 🧠`memory`
+* **`DeCoPrune`**, Efficient KV-Cache Pruning for Autoregressive Video Diffusion via Denoising Consistency. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.39096)] · 🌍`systems` ⚡`realtime` 🧠`memory`
+* **`BadAction`**, Backdoor Attacks on Interactive Video Generation via Action-Guided Triggers. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.39047)] · 🕹️`control`
+* **`PARK`**, Accurate Block Retrieval for Sparse Attention in Video Diffusion Transformers. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38978)] · 🧠`memory`
+* **`FrameMorrow`**, Future-guided Frame Selection with Prospective Tokens for Long-Horizon Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38839)] · 🌍`systems` 🧠`memory`
+* Future Video Generation Better Aligns with the Human Visual Cortex than Observed Video. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38819)] · ⚡`realtime`
+* No Corners Cut: State-Grounded Transitions for Mid-Stream Prompt Switches in Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38691)] · ⚡`realtime`
+* **`PixelUMM`**, Encoder-Free Unified Image and Video Understanding and Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38597)] · ⚡`realtime`
+* **`LongTake`**, Learning to Sustain Dynamics in Long-Horizon Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38562)] · 🧠`memory`
 * **`LongLive-Plug`**, Once-for-All Distillation for Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38154)] · ⚡`realtime`
 * **`FracGen`**, Learning How Objects Stretch and Tear with Physics-Informed Video Generation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38152)] · 🕹️`control`
 * **`LIFT`**, Layout-In-Future Video Generation under Large Viewpoint Change via On-Policy Self-Distillation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.38146)] · ⚡`realtime`
