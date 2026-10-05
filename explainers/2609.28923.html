@@ -1,0 +1,1857 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ViRDM 精读</title>
+<meta name="description" content="ViRDM：不用在线教师和 critic，只在冻结的 V-JEPA 2.1 特征空间里对一份离线参考视频集做 MMD，20 次更新完成少步因果视频生成器的后训练。方法精读、代码核对、数字复核与交互图解。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   ViRDM 精读 — design tokens（沿用本仓库 explainer 系列的体系）
+   角色色：gen = 生成器 / 生成侧样本
+           ref = 离线参考分布（本页强调色）
+           rep = 冻结表征编码器 / 特征空间
+           dmd = 被拿掉的教师 + critic 栈
+           dyn = 动态 / 光流 / Dynamic Degree
+           qa  = VBench 分数
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0c1013; --surf:#12171b; --surf2:#181e24; --surf3:#20272e;
+  --rule:#242c34; --rule2:#37414b;
+  --ink:#e9eef2; --ink2:#a6b0ba; --ink3:#77828d;
+
+  --gen:#5a9bf6; --gen-ink:#86b8ff; --gen-soft:rgba(90,155,246,.16);
+  --ref:#22b6a2; --ref-ink:#4fd6c3; --ref-soft:rgba(34,182,162,.16);
+  --rep:#9d7bf0; --rep-ink:#b89fff; --rep-soft:rgba(157,123,240,.17);
+  --dmd:#e5834d; --dmd-ink:#f5a273; --dmd-soft:rgba(229,131,77,.16);
+  --dyn:#e0a53a; --dyn-ink:#f0bd5c; --dyn-soft:rgba(224,165,58,.16);
+  --qa:#ec6a9c;  --qa-ink:#ff8fb6;  --qa-soft:rgba(236,106,156,.16);
+
+  --ok:#3fb27a; --ok-ink:#62cf95; --ok-soft:rgba(63,178,122,.14);
+  --bad:#e0605a; --bad-ink:#f0857f; --bad-soft:rgba(224,96,90,.14);
+  --warn:#e3b341; --warn-ink:#f0c766; --warn-soft:rgba(227,179,65,.14);
+
+  --grid:#1e242b; --axis:#3a444e; --tint:rgba(255,255,255,.03);
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 32px rgba(0,0,0,.36);
+  --font-display:"Bricolage Grotesque","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f4f5; --surf:#ffffff; --surf2:#eaeef0; --surf3:#dde3e6;
+    --rule:#d9dee2; --rule2:#bdc6cc;
+    --ink:#11171b; --ink2:#465159; --ink3:#6c7883;
+    --gen:#2b6fd6; --gen-ink:#1f58b0; --gen-soft:rgba(43,111,214,.12);
+    --ref:#0c8b7a; --ref-ink:#097062; --ref-soft:rgba(12,139,122,.12);
+    --rep:#6f4fd6; --rep-ink:#5b3cc4; --rep-soft:rgba(111,79,214,.12);
+    --dmd:#c75f25; --dmd-ink:#a64a17; --dmd-soft:rgba(199,95,37,.12);
+    --dyn:#b07908; --dyn-ink:#8d6106; --dyn-soft:rgba(176,121,8,.13);
+    --qa:#c93a72;  --qa-ink:#a72c5d;  --qa-soft:rgba(201,58,114,.12);
+    --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+    --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+    --warn:#b98512; --warn-ink:#8f6608; --warn-soft:rgba(185,133,18,.14);
+    --grid:#e1e6e9; --axis:#bdc6cc; --tint:rgba(16,20,28,.028);
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f4f5; --surf:#ffffff; --surf2:#eaeef0; --surf3:#dde3e6;
+  --rule:#d9dee2; --rule2:#bdc6cc;
+  --ink:#11171b; --ink2:#465159; --ink3:#6c7883;
+  --gen:#2b6fd6; --gen-ink:#1f58b0; --gen-soft:rgba(43,111,214,.12);
+  --ref:#0c8b7a; --ref-ink:#097062; --ref-soft:rgba(12,139,122,.12);
+  --rep:#6f4fd6; --rep-ink:#5b3cc4; --rep-soft:rgba(111,79,214,.12);
+  --dmd:#c75f25; --dmd-ink:#a64a17; --dmd-soft:rgba(199,95,37,.12);
+  --dyn:#b07908; --dyn-ink:#8d6106; --dyn-soft:rgba(176,121,8,.13);
+  --qa:#c93a72;  --qa-ink:#a72c5d;  --qa-soft:rgba(201,58,114,.12);
+  --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+  --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+  --warn:#b98512; --warn-ink:#8f6608; --warn-soft:rgba(185,133,18,.14);
+  --grid:#e1e6e9; --axis:#bdc6cc; --tint:rgba(16,20,28,.028);
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none !important; animation:none !important} }
+body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;}
+h1,h2,h3,h4,h5{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--ref-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--ref); outline-offset:2px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.88em; background:var(--surf2); border:1px solid var(--rule); border-radius:5px; padding:1px 5px; color:var(--ink2); word-break:break-word}
+sub,sup{font-size:.72em}
+b{font-weight:600}
+.tn{font-variant-numeric:tabular-nums}
+#prog{position:fixed; top:0; left:0; height:2px; width:0; background:var(--ref); z-index:60}
+
+.top{position:fixed; top:0; left:0; right:0; z-index:50; display:flex; align-items:center; gap:14px;
+  height:calc(52px + env(safe-area-inset-top, 0px)); padding:env(safe-area-inset-top, 0px) 22px 0;
+  background:color-mix(in srgb,var(--bg) 84%,transparent);
+  backdrop-filter:saturate(1.5) blur(14px); -webkit-backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap; min-width:0; overflow:hidden; text-overflow:ellipsis}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:12px; flex-shrink:0}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2)}
+@media (max-width:640px){ .top{padding-left:14px; padding-right:14px; gap:10px} .brand{font-size:13px} .brand em{display:none} }
+
+.shell{display:grid; grid-template-columns:238px minmax(0,1fr); max-width:1260px; margin:0 auto; padding:84px 28px 120px}
+.rail{position:sticky; top:84px; align-self:start; max-height:calc(100vh - 100px); overflow:auto; padding-right:18px}
+.rail .rl{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); margin:0 0 10px}
+.rail ol{list-style:none; margin:0; padding:0; border-left:1px solid var(--rule)}
+.rail a{display:block; padding:5px 0 5px 14px; margin-left:-1px; font-size:12.5px; line-height:1.4; color:var(--ink3);
+  border-left:2px solid transparent; border-bottom:0; transition:color .15s, border-color .15s}
+.rail a:hover{color:var(--ink)}
+.rail a.on{color:var(--ink); border-left-color:var(--ref)}
+main{min-width:0; max-width:880px; padding-left:44px}
+@media (max-width:980px){
+  .shell{grid-template-columns:minmax(0,1fr); padding:72px 16px 90px}
+  .rail{display:none}
+  main{padding-left:0}
+}
+
+/* ============================================================ hero */
+.hero{position:relative; overflow:hidden; border:1px solid var(--rule); border-radius:20px; background:
+  radial-gradient(1100px 330px at 6% -22%, var(--ref-soft), transparent 62%),
+  radial-gradient(800px 300px at 98% 2%, var(--rep-soft), transparent 58%), var(--surf);
+  padding:34px 34px 30px; margin-bottom:54px; box-shadow:var(--shadow)}
+.hero .cloud{position:absolute; right:-40px; top:-30px; width:280px; height:230px; opacity:.55; pointer-events:none}
+.kicker{display:flex; flex-wrap:wrap; gap:7px; margin-bottom:16px; position:relative}
+.tag{font-family:var(--font-mono); font-size:11px; letter-spacing:.03em; color:var(--ink3);
+  border:1px solid var(--rule2); border-radius:999px; padding:2.5px 10px; background:var(--surf2)}
+.tag.hl{color:var(--ref-ink); border-color:color-mix(in srgb,var(--ref) 46%,transparent); background:var(--ref-soft)}
+.hero h1{font-size:clamp(40px,6vw,62px); font-weight:800; letter-spacing:-.025em; margin-bottom:10px; position:relative}
+.hero .zh{font-size:19px; color:var(--ink2); max-width:66ch; line-height:1.7; position:relative}
+.hero .thesis{margin-top:18px; padding:15px 17px; border-radius:13px; background:var(--surf2); border:1px solid var(--rule);
+  font-size:15px; color:var(--ink2); max-width:80ch; line-height:1.8; position:relative}
+.hero .thesis p+p{margin-top:9px}
+.hero .authors{margin-top:16px; font-size:13px; color:var(--ink3); line-height:1.7}
+.hero .links{margin-top:12px; display:flex; flex-wrap:wrap; gap:8px; font-family:var(--font-mono); font-size:12px}
+.hero .links a{border:1px solid var(--rule2); border-radius:8px; padding:4px 11px; color:var(--ink2); background:var(--surf2)}
+.hero .links a:hover{color:var(--ink); border-color:var(--ref)}
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:11px; margin-top:24px}
+.stat{background:var(--surf2); border:1px solid var(--rule); border-radius:13px; padding:13px 15px}
+.stat .lb{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3)}
+.stat .vl{font-family:var(--font-display); font-size:27px; font-weight:700; letter-spacing:-.02em; margin:3px 0 4px; font-variant-numeric:tabular-nums}
+.stat .dl{font-size:12px; color:var(--ink3); line-height:1.6}
+.readme{margin-top:16px; font-size:12.5px; color:var(--ink3); line-height:1.8}
+@media (max-width:640px){ .hero{padding:24px 18px 22px; border-radius:16px} .hero .cloud{display:none} }
+
+/* ============================================================ sections */
+.sec{margin:0 0 72px; scroll-margin-top:88px}
+.eyebrow{display:flex; align-items:center; gap:11px; margin-bottom:13px}
+.eyebrow .n{font-family:var(--font-mono); font-size:11px; color:var(--bg); background:var(--ink3); border-radius:5px; padding:2px 7px; font-weight:600}
+.eyebrow .t{font-family:var(--font-mono); font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink3)}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec h2{font-size:clamp(24px,3.2vw,31px); font-weight:700; letter-spacing:-.02em; margin-bottom:14px}
+.sec h3{font-size:19px; margin:34px 0 11px}
+.sec h5{font-size:15px; margin:0 0 6px}
+.sec p{margin:0 0 13px; color:var(--ink2)}
+.sec .lead{font-size:17px; color:var(--ink); line-height:1.8; margin-bottom:20px}
+.sec ul,.sec ol{margin:0 0 14px; padding-left:22px; color:var(--ink2)}
+.sec li{margin:0 0 7px}
+.rG{color:var(--gen-ink); font-weight:600} .rR{color:var(--ref-ink); font-weight:600} .rP{color:var(--rep-ink); font-weight:600}
+.rT{color:var(--dmd-ink); font-weight:600} .rY{color:var(--dyn-ink); font-weight:600} .rQ{color:var(--qa-ink); font-weight:600}
+.rBad{color:var(--bad-ink); font-weight:600} .rOk{color:var(--ok-ink); font-weight:600}
+
+/* source badges */
+.src,.cod,.inf{font-family:var(--font-mono); font-size:10px; letter-spacing:.03em; border-radius:4px; padding:0 5px; margin:0 3px; vertical-align:1px; white-space:nowrap; font-weight:500}
+.src{color:var(--ref-ink); border:1px solid color-mix(in srgb,var(--ref) 45%,transparent); background:var(--ref-soft)}
+.cod{color:var(--rep-ink); border:1px solid color-mix(in srgb,var(--rep) 45%,transparent); background:var(--rep-soft)}
+.inf{color:var(--warn-ink); border:1px solid color-mix(in srgb,var(--warn) 45%,transparent); background:var(--warn-soft)}
+
+/* figures */
+.fig{margin:24px 0 26px; border:1px solid var(--rule); border-radius:16px; background:var(--surf); overflow:hidden; box-shadow:var(--shadow)}
+.fh{display:flex; align-items:center; gap:10px; padding:11px 16px; border-bottom:1px solid var(--rule); background:var(--surf2)}
+.fh .no{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; color:var(--bg); background:var(--ref); border-radius:4px; padding:1.5px 7px; font-weight:600; flex-shrink:0}
+.fh .ti{font-size:13px; color:var(--ink2); font-weight:500}
+.fig svg{display:block; width:100%; height:auto}
+.scrollx{overflow-x:auto}
+.scrollx svg{min-width:640px}
+.fig figcaption{padding:11px 16px; border-top:1px solid var(--rule); font-size:12.5px; color:var(--ink3); line-height:1.75; background:var(--surf2)}
+.pad{padding:16px}
+.ctl{display:flex; flex-wrap:wrap; gap:9px 14px; padding:11px 16px; border-bottom:1px solid var(--rule); align-items:center}
+.ctl .sp{flex:1}
+.ctl .lbl{font-family:var(--font-mono); font-size:11px; color:var(--ink3)}
+.tab,.btn{font-family:var(--font-mono); font-size:11.5px; background:var(--surf2); border:1px solid var(--rule);
+  color:var(--ink3); border-radius:8px; padding:5px 11px; cursor:pointer; transition:color .15s, border-color .15s}
+.tab:hover,.btn:hover{color:var(--ink); border-color:var(--rule2)}
+.btn.pri{color:var(--ref-ink); border-color:color-mix(in srgb,var(--ref) 50%,transparent); background:var(--ref-soft)}
+.tab[aria-selected="true"]{color:var(--ref-ink); border-color:color-mix(in srgb,var(--ref) 50%,transparent); background:var(--ref-soft)}
+.seg{display:inline-flex; border:1px solid var(--rule); border-radius:8px; overflow:hidden; background:var(--surf2); flex-wrap:wrap}
+.seg button{font-family:var(--font-mono); font-size:11.5px; background:transparent; border:0; border-right:1px solid var(--rule);
+  color:var(--ink3); padding:5px 11px; cursor:pointer; transition:color .15s, background .15s}
+.seg button:last-child{border-right:0}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{color:var(--ref-ink); background:var(--ref-soft)}
+.slider{display:flex; align-items:center; gap:10px; font-family:var(--font-mono); font-size:11.5px; color:var(--ink3)}
+.slider input[type=range]{width:150px; max-width:40vw; accent-color:var(--ref)}
+.slider .v{color:var(--ink); min-width:46px; display:inline-block; text-align:right; font-variant-numeric:tabular-nums}
+.readout{display:flex; flex-wrap:wrap; gap:8px 22px; padding:11px 16px; border-top:1px solid var(--rule); font-family:var(--font-mono); font-size:12px; color:var(--ink3)}
+.readout b{color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums}
+.pill{display:inline-block; font-family:var(--font-mono); font-size:11px; border-radius:999px; padding:1px 9px; border:1px solid var(--rule2); color:var(--ink2); background:var(--surf2)}
+.pill.ok{color:var(--ok-ink); border-color:color-mix(in srgb,var(--ok) 45%,transparent); background:var(--ok-soft)}
+.pill.bad{color:var(--bad-ink); border-color:color-mix(in srgb,var(--bad) 45%,transparent); background:var(--bad-soft)}
+
+/* canvas toy */
+.toy{position:relative; background:var(--surf)}
+.toy canvas{display:block; width:100%; height:340px}
+.toy .hud{position:absolute; left:12px; top:10px; font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); background:color-mix(in srgb,var(--surf) 80%,transparent); border:1px solid var(--rule); border-radius:8px; padding:4px 9px; line-height:1.6}
+.toy .hud b{color:var(--ink); font-variant-numeric:tabular-nums}
+
+/* cards / callouts */
+.grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(262px,1fr)); gap:13px; margin:18px 0}
+.grid3{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:13px; margin:18px 0}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:13px; padding:15px 17px; font-size:14px; color:var(--ink2); line-height:1.72}
+.card .mono{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink3); margin-bottom:6px}
+.card h5{color:var(--ink); font-size:15px; margin-bottom:6px}
+.card.cG{border-top:3px solid var(--gen)} .card.cR{border-top:3px solid var(--ref)} .card.cP{border-top:3px solid var(--rep)}
+.card.cT{border-top:3px solid var(--dmd)} .card.cY{border-top:3px solid var(--dyn)} .card.cQ{border-top:3px solid var(--qa)}
+.note{border:1px solid var(--rule); border-left:3px solid var(--warn); background:var(--warn-soft); border-radius:11px;
+  padding:13px 16px; font-size:14px; color:var(--ink2); margin:18px 0; line-height:1.76}
+.note .hd{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--warn-ink); margin-bottom:5px}
+.note.ok{border-left-color:var(--ok); background:var(--ok-soft)} .note.ok .hd{color:var(--ok-ink)}
+.note.bad{border-left-color:var(--bad); background:var(--bad-soft)} .note.bad .hd{color:var(--bad-ink)}
+.note.info{border-left-color:var(--rep); background:var(--rep-soft)} .note.info .hd{color:var(--rep-ink)}
+.note p{margin:0 0 8px} .note p:last-child{margin:0}
+
+/* equations */
+.eq{font-family:var(--font-math); font-size:16.5px; background:var(--surf); border:1px solid var(--rule); border-left:3px solid var(--rep);
+  border-radius:11px; padding:15px 19px; margin:16px 0; overflow-x:auto; color:var(--ink); line-height:2.05}
+.eq .cm{font-family:var(--font-body); font-size:12.5px; color:var(--ink3); display:block; margin-top:7px; line-height:1.65}
+.eq i{font-style:italic}
+.eq .hl-g{color:var(--gen-ink)} .eq .hl-r{color:var(--ref-ink)} .eq .hl-y{color:var(--dyn-ink)}
+
+/* tables */
+.tw{overflow-x:auto; margin:18px 0; border:1px solid var(--rule); border-radius:13px; background:var(--surf)}
+table{border-collapse:collapse; width:100%; font-size:13.3px; min-width:520px}
+th,td{padding:8px 11px; text-align:right; border-bottom:1px solid var(--rule); white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td.l,th.l{text-align:left}
+td.wrap{white-space:normal; min-width:180px}
+thead th{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink3); background:var(--surf2)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr.me td{background:var(--ref-soft)}
+tbody tr.dim td{color:var(--ink3)}
+tbody tr.grp td{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); background:var(--surf2); text-align:left}
+td.num{font-family:var(--font-mono); font-variant-numeric:tabular-nums}
+td .bst{color:var(--ok-ink); font-weight:600}
+td .wst{color:var(--bad-ink)}
+td .dlt{font-family:var(--font-mono); font-size:11px; color:var(--ink3); margin-left:4px}
+
+/* glossary */
+.gloss{display:grid; grid-template-columns:max-content minmax(0,1fr); gap:10px 18px; margin:0; padding:16px 18px; border:1px solid var(--rule); border-radius:14px; background:var(--surf)}
+.gloss dt{font-family:var(--font-mono); font-size:12.5px; color:var(--ink); white-space:nowrap; padding-top:1px}
+.gloss dd{margin:0; font-size:13.8px; color:var(--ink2); line-height:1.72}
+@media (max-width:640px){ .gloss{grid-template-columns:minmax(0,1fr); gap:2px} .gloss dd{margin-bottom:10px} }
+
+/* stage stepper */
+.stages{display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,1fr)}
+@media (max-width:820px){ .stages{grid-template-columns:minmax(0,1fr)} }
+.modlist{padding:14px 16px; border-right:1px solid var(--rule)}
+@media (max-width:820px){ .modlist{border-right:0; border-bottom:1px solid var(--rule)} }
+.mod{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:center; padding:8px 10px; border:1px solid var(--rule); border-radius:10px; margin-bottom:7px; background:var(--surf2); font-size:13.3px; color:var(--ink2)}
+.mod .nm b{color:var(--ink); font-weight:600}
+.mod .nm small{display:block; font-family:var(--font-mono); font-size:10.5px; color:var(--ink3); line-height:1.5}
+.st{font-family:var(--font-mono); font-size:10.5px; border-radius:6px; padding:2px 8px; white-space:nowrap; border:1px solid var(--rule2); color:var(--ink3); background:var(--surf)}
+.st.idle{opacity:.7}
+.st.fwd{color:var(--gen-ink); border-color:color-mix(in srgb,var(--gen) 45%,transparent); background:var(--gen-soft)}
+.st.graph{color:var(--bad-ink); border-color:color-mix(in srgb,var(--bad) 45%,transparent); background:var(--bad-soft)}
+.st.free{color:var(--ok-ink); border-color:color-mix(in srgb,var(--ok) 45%,transparent); background:var(--ok-soft)}
+.cache{margin-top:10px; padding-top:10px; border-top:1px dashed var(--rule); font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); line-height:1.7}
+.cache span{display:inline-block; border:1px solid color-mix(in srgb,var(--ref) 45%,transparent); background:var(--ref-soft); color:var(--ref-ink); border-radius:6px; padding:0 7px; margin:2px 4px 2px 0}
+.pane{padding:15px 17px; font-size:13.8px; color:var(--ink2); line-height:1.78}
+.pane h5{font-size:15px; color:var(--ink); margin-bottom:7px}
+.pane .tagline{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ref-ink); margin-bottom:5px}
+.pane p{margin:0 0 9px}
+
+/* cost bars */
+.bars{padding:16px 18px 10px}
+.bar{display:grid; grid-template-columns:120px minmax(0,1fr) 92px; gap:10px; align-items:center; margin-bottom:10px; font-size:13px; color:var(--ink2)}
+.bar .trk{height:18px; border-radius:5px; background:var(--surf2); border:1px solid var(--rule); overflow:hidden}
+.bar .fill{height:100%; border-radius:4px 0 0 4px; transition:width .25s}
+.bar .val{font-family:var(--font-mono); font-size:12px; color:var(--ink); text-align:right; font-variant-numeric:tabular-nums}
+@media (max-width:560px){ .bar{grid-template-columns:86px minmax(0,1fr) 72px} }
+
+/* doubts */
+.dfilter{display:flex; gap:9px; align-items:center; margin:16px 0 14px; flex-wrap:wrap}
+.dt{border:1px solid var(--rule); border-radius:12px; background:var(--surf); margin-bottom:9px; overflow:hidden}
+.dt summary{list-style:none; cursor:pointer; padding:12px 15px; display:flex; align-items:center; gap:10px; font-size:14.3px; color:var(--ink)}
+.dt summary::-webkit-details-marker{display:none}
+.dt summary:hover{background:var(--surf2)}
+.dt .sev{font-family:var(--font-mono); font-size:10px; letter-spacing:.06em; border-radius:4px; padding:1.5px 7px; font-weight:600; flex-shrink:0}
+.dt .sev.hi{background:var(--bad-soft); color:var(--bad-ink); border:1px solid color-mix(in srgb,var(--bad) 40%,transparent)}
+.dt .sev.mid{background:var(--warn-soft); color:var(--warn-ink); border:1px solid color-mix(in srgb,var(--warn) 40%,transparent)}
+.dt .sev.lo{background:var(--surf2); color:var(--ink3); border:1px solid var(--rule2)}
+.dt .dn{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); flex-shrink:0}
+.dt .dtt{flex:1; min-width:0}
+.dt .caret{color:var(--ink3); font-size:11px; transition:transform .18s; flex-shrink:0}
+.dt[open] .caret{transform:rotate(90deg)}
+.dt .body{padding:2px 17px 15px; font-size:13.9px; color:var(--ink2); line-height:1.8; border-top:1px solid var(--rule)}
+.dt .body p{margin:0 0 10px}
+.dt .lb{display:inline-block; font-family:var(--font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--ink3); border:1px solid var(--rule); border-radius:4px; padding:1px 6px; margin:11px 0 5px; background:var(--surf2)}
+a.dref{font-family:var(--font-mono); font-size:.88em; color:var(--dyn-ink); border-bottom:1px dashed currentColor; white-space:nowrap}
+.dt:target{box-shadow:0 0 0 2px var(--ref)}
+
+/* svg text roles */
+.s-ttl{font-family:var(--font-display); font-size:13px; font-weight:600; fill:var(--ink)}
+.s-lb{font-family:var(--font-body); font-size:11.5px; fill:var(--ink2)}
+.s-lbb{font-family:var(--font-body); font-size:12.5px; font-weight:600; fill:var(--ink)}
+.s-sm{font-family:var(--font-mono); font-size:10px; fill:var(--ink3)}
+.s-mono{font-family:var(--font-mono); font-size:11px; fill:var(--ink2)}
+.s-big{font-family:var(--font-display); font-size:18px; font-weight:700; fill:var(--ink)}
+.s-box{fill:var(--surf2); stroke:var(--rule2); stroke-width:1.2}
+.s-box3{fill:var(--surf3); stroke:var(--rule2); stroke-width:1.2}
+.s-rule{stroke:var(--rule2); fill:none}
+.s-grid{stroke:var(--grid); fill:none; stroke-width:1}
+.s-axis{stroke:var(--axis); fill:none; stroke-width:1.2}
+.s-thr{stroke:var(--bad); fill:none; stroke-width:1.4; stroke-dasharray:5 4}
+.mk-G{fill:var(--gen)} .mk-R{fill:var(--ref)} .mk-P{fill:var(--rep)} .mk-T{fill:var(--dmd)} .mk-Y{fill:var(--dyn)} .mk-Q{fill:var(--qa)} .mk-N{fill:var(--rule2)} .mk-B{fill:var(--bad)} .mk-O{fill:var(--ok)}
+.l-G{stroke:var(--gen); fill:none; stroke-width:2} .l-R{stroke:var(--ref); fill:none; stroke-width:2}
+.l-P{stroke:var(--rep); fill:none; stroke-width:2} .l-T{stroke:var(--dmd); fill:none; stroke-width:2}
+.l-Y{stroke:var(--dyn); fill:none; stroke-width:2} .l-Q{stroke:var(--qa); fill:none; stroke-width:2}
+.l-N{stroke:var(--rule2); fill:none; stroke-width:1.4} .l-I{stroke:var(--ink3); fill:none; stroke-width:1.4}
+.f-G{fill:var(--gen-soft); stroke:var(--gen); stroke-width:1.3} .f-R{fill:var(--ref-soft); stroke:var(--ref); stroke-width:1.3}
+.f-P{fill:var(--rep-soft); stroke:var(--rep); stroke-width:1.3} .f-T{fill:var(--dmd-soft); stroke:var(--dmd); stroke-width:1.3}
+.f-Y{fill:var(--dyn-soft); stroke:var(--dyn); stroke-width:1.3} .f-Q{fill:var(--qa-soft); stroke:var(--qa); stroke-width:1.3}
+.f-B{fill:var(--bad-soft); stroke:var(--bad); stroke-width:1.3} .f-O{fill:var(--ok-soft); stroke:var(--ok); stroke-width:1.3}
+.f-N{fill:var(--surf2); stroke:var(--rule2); stroke-width:1.1}
+.dash{stroke-dasharray:5 4}
+.legend{display:flex; flex-wrap:wrap; gap:8px 16px; padding:10px 16px; border-top:1px solid var(--rule); font-size:11.5px; color:var(--ink3); background:var(--surf2)}
+.legend i{display:inline-block; width:11px; height:11px; border-radius:3px; margin-right:6px; vertical-align:-1px}
+
+.verdict{border:1px solid var(--rule); border-left:3px solid var(--ref); background:var(--surf); border-radius:12px; padding:15px 18px; margin:20px 0; font-size:14.6px; color:var(--ink2); line-height:1.82}
+.verdict p{margin:0 0 9px} .verdict p:last-child{margin:0}
+.foot{margin-top:70px; padding-top:22px; border-top:1px solid var(--rule); font-size:12.5px; color:var(--ink3); line-height:1.85}
+.steps{counter-reset:st; list-style:none; padding-left:0 !important}
+.steps li{counter-increment:st; position:relative; padding-left:34px; margin-bottom:10px !important}
+.steps li::before{content:counter(st); position:absolute; left:0; top:2px; width:22px; height:22px; border-radius:6px; background:var(--dyn-soft); color:var(--dyn-ink); font-family:var(--font-mono); font-size:12px; display:grid; place-items:center; border:1px solid color-mix(in srgb,var(--dyn) 40%,transparent)}
+</style>
+</head>
+<body>
+
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">ViRDM<em>不要教师、不要 critic，对着一堆离线视频特征做分布匹配 · 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <marker id="ar-G" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-G"/></marker>
+  <marker id="ar-R" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-R"/></marker>
+  <marker id="ar-P" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-P"/></marker>
+  <marker id="ar-T" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-T"/></marker>
+  <marker id="ar-Y" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-Y"/></marker>
+  <marker id="ar-N" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-N"/></marker>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" style="stroke:var(--bad)" stroke-width="2" opacity=".55"/>
+  </pattern>
+</defs></svg>
+
+<div class="shell">
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-terms">先认几个词</a></li>
+    <li><a href="#s-tldr">一图看懂（可切换）</a></li>
+    <li><a href="#s-rdm">核心目标：MMD（可玩）</a></li>
+    <li><a href="#s-mem">坎一 · 显存（可点）</a></li>
+    <li><a href="#s-recipe">坎二 · 种群与初始化</a></li>
+    <li><a href="#s-dyn">坎三 · 动态（可拖）</a></li>
+    <li><a href="#s-reg">动态正则 = 可微版 DD（可玩）</a></li>
+    <li><a href="#s-num">数字复核：VBench 记账</a></li>
+    <li><a href="#s-cost">效率账（可拖）</a></li>
+    <li><a href="#s-code">代码里有、论文没写</a></li>
+    <li><a href="#s-doubt">存疑清单（15 条）</a></li>
+    <li><a href="#s-repro">建议补的实验</a></li>
+    <li><a href="#s-place">定位与世界模型</a></li>
+    <li><a href="#s-appendix">附录速查</a></li>
+  </ol>
+</nav>
+<main>
+
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <svg class="cloud" id="heroCloud" viewBox="0 0 280 230" aria-hidden="true"></svg>
+  <div class="kicker">
+    <span class="tag">arXiv:2609.28923v1</span>
+    <span class="tag">cs.CV · 2026-09-24</span>
+    <span class="tag">Northeastern × Adobe Research</span>
+    <span class="tag hl">后训练 / 少步因果视频</span>
+    <span class="tag">Wan2.1-T2V-1.3B · 4 步 · 逐段</span>
+    <span class="tag">代码 + 权重已公开</span>
+  </div>
+  <h1>ViRDM</h1>
+  <p class="zh">把 Self&nbsp;Forcing / Causal&nbsp;Forcing 里「在线 14B 教师 + 在线 critic」这套 DMD 栈拿掉，改成在冻结的视频编码器特征空间里，让生成视频的分布去贴一份离线算好的参考分布。只训生成器，20 次更新收工。</p>
+  <div class="thesis">
+    <p><b style="color:var(--ink)">一句话结论。</b>省资源这件事成立，而且有代码能复现：8 张 A100、2 小时、每卡峰值 48.3 GB，对照 DMD 的 22 小时、77.1 GB。让它跑得动的三招（随机出口、分段 VJP、轻量解码器）设计得干净，值得借鉴。</p>
+    <p>「VBench 比 Causal Forcing 高 0.36」这句要打折。最后一步 +1.46 分几乎全部来自动态正则，而发布代码里的动态正则，就是 VBench Dynamic Degree 判据的可微复刻：同一个 RAFT 权重、同样按 8&nbsp;fps 取帧、同一个 11.25&nbsp;px 阈值、同样看「第 10 高的帧对」。论文还缺一个最基本的基线：初始化模型本身（0 次更新）是多少分。</p>
+  </div>
+  <p class="authors">Zichong Meng, Chongjian Ge, Chun-Hao P. Huang, Yang Zhou<sup>†</sup>, Huaizu Jiang<sup>†</sup> · Northeastern University / Adobe Research · <sup>†</sup>Equal advising</p>
+  <div class="links">
+    <a href="https://arxiv.org/abs/2609.28923" target="_blank" rel="noopener">arXiv 2609.28923</a>
+    <a href="https://neu-vi.github.io/ViRDM/" target="_blank" rel="noopener">项目页</a>
+    <a href="https://github.com/neu-vi/ViRDM" target="_blank" rel="noopener">GitHub · neu-vi/ViRDM</a>
+    <a href="https://huggingface.co/cr8br0ze/ViRDM" target="_blank" rel="noopener">HF 权重</a>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="lb">生成器更新</div><div class="vl">20 次</div><div class="dl">每次 64 条新生成视频；DMD 对照 120 次</div></div>
+    <div class="stat"><div class="lb">训练成本</div><div class="vl" style="color:var(--ref-ink)">16 A100·h</div><div class="dl">8×A100 · 2 h；DMD 对照 176 A100·h</div></div>
+    <div class="stat"><div class="lb">峰值显存 / 卡</div><div class="vl">48.3 GB</div><div class="dl">DMD 对照 77.1 GB；单卡跑 68.5 GB</div></div>
+    <div class="stat"><div class="lb">VBench Total</div><div class="vl" style="color:var(--qa-ink)">84.87</div><div class="dl">CF 复测 84.51；其中 +1.46 来自动态正则</div></div>
+  </div>
+  <p class="readme">来源标记：<span class="src">论文</span>论文原文 · <span class="cod">代码</span>发布代码（GitHub，2026-09-26 读取）· <span class="inf">推算</span>本页自己算出或推断的，论文没有直接写。</p>
+</section>
+
+<!-- ============================================================ TERMS -->
+<section class="sec" id="s-terms">
+  <div class="eyebrow"><span class="t">Glossary</span><span class="line"></span></div>
+  <h2>先认几个词</h2>
+  <dl class="gloss">
+    <dt>少步因果视频生成</dt><dd>视频按段生成：每段 3 个 latent 帧，7 段拼成 21 个 latent 帧（解码后 81 帧、832×480、16 fps）。每段只去噪 4 步，靠 KV cache 接上前文，所以能边生成边播放。</dd>
+    <dt>DMD</dt><dd>Distribution Matching Distillation。把生成器的输出加噪，分别送进冻结的<span class="rT">教师</span>（估计真实分布的分数）和在线训练的<span class="rT">critic</span>（估计生成器自己分布的分数），两者之差就是梯度方向。Self Forcing、Causal Forcing 都用它：生成器 1.3B、教师 14B、critic 1.3B，三个视频扩散网络同时在显存里。</dd>
+    <dt>RDM</dt><dd>Representation Distribution Matching。不算分数，直接把生成样本和参考样本都送进一个冻结的<span class="rP">表征编码器</span>，比较两堆特征的分布差。图像上的前作是 RDM / iRDM（ref [17]）与 FD loss（ref [68]），都只做了一步图像生成。</dd>
+    <dt>MMD</dt><dd>最大均值差异。两堆点之间的「核平均」距离，由三项组成：生成–生成（把生成点互相推开）、生成–参考（把生成点拉向参考）、参考–参考（常数）。</dd>
+    <dt>V-JEPA 2.1 / SigLIP2</dt><dd>冻结的视频编码器（ViT-L/16，所有 token 做全局平均得到 1024 维）和文本编码器（1152 维，L2 归一化）。两者拼接成 2176 维的联合特征。</dd>
+    <dt>随机出口 S</dt><dd>stochastic exit，沿用 Self Forcing。训练时每次随机选第 S 步（1–4）的干净预测 x̂<sub>0</sub> 当作这一段的输出，只对这一步回传梯度，前面几步不留计算图。</dd>
+    <dt>VJP</dt><dd>vector–Jacobian product。给定输出端的梯度，算出输入端的梯度，不需要显式构造雅可比矩阵。反向传播本质上就是一串 VJP。</dd>
+    <dt>TAEW2.1</dt><dd>给 Wan2.1 latent 用的小型解码器（madebyollin/taehv）。只在训练的梯度路径里替代完整的 Wan VAE 解码器。</dd>
+    <dt>Dynamic Degree（DD）</dt><dd>VBench 的「动态程度」维度：用 RAFT 光流判断每条视频「动了没有」，报告判为动态的视频占比（0–100）。它在 VBench Quality 里的权重是其他维度的一半。</dd>
+  </dl>
+</section>
+
+<!-- ============================================================ TL;DR / FIG A -->
+<section class="sec" id="s-tldr">
+  <div class="eyebrow"><span class="n">A</span><span class="t">Overview</span><span class="line"></span></div>
+  <h2>一图看懂：三个网络换成一张「特征分布靶子」</h2>
+  <p class="lead">DMD 每一步都要问教师和 critic「这个样本该往哪挪」。ViRDM 换了个问法：把整条生成视频变成一个特征点，然后看 64 个生成点组成的点云，和 6,505 个参考点组成的点云，差多少。参考点云离线算一次就冻结，训练期间只剩生成器一个大网络。</p>
+
+  <figure class="fig" id="figA">
+    <div class="fh"><span class="no">图 A</span><span class="ti">后训练阶段的数据流：DMD 对照 ViRDM</span></div>
+    <div class="ctl">
+      <div class="seg" role="group" aria-label="切换流程">
+        <button type="button" data-a="dmd" aria-pressed="false">DMD（Self / Causal Forcing）</button>
+        <button type="button" data-a="virdm" aria-pressed="true">ViRDM</button>
+      </div>
+    </div>
+    <div class="scrollx">
+    <svg viewBox="0 0 860 330" role="img" aria-label="DMD 与 ViRDM 的训练数据流对比">
+      <!-- ================= DMD ================= -->
+      <g id="fA-dmd" hidden>
+        <rect x="16" y="128" width="104" height="60" rx="10" class="s-box"/>
+        <text x="68" y="153" text-anchor="middle" class="s-lbb">噪声 ε</text>
+        <text x="68" y="172" text-anchor="middle" class="s-sm">+ prompt c</text>
+        <path d="M120 158 H146" class="l-N" marker-end="url(#ar-N)"/>
+
+        <rect x="150" y="118" width="140" height="80" rx="11" class="f-G"/>
+        <text x="220" y="145" text-anchor="middle" class="s-lbb">生成器 G_θ</text>
+        <text x="220" y="164" text-anchor="middle" class="s-sm">Wan2.1-1.3B · 训练</text>
+        <text x="220" y="181" text-anchor="middle" class="s-sm">4 步自回归 rollout</text>
+        <path d="M290 158 H316" class="l-G" marker-end="url(#ar-G)"/>
+        <text x="303" y="150" text-anchor="middle" class="s-mono">x̂</text>
+
+        <rect x="320" y="128" width="112" height="60" rx="10" class="s-box"/>
+        <text x="376" y="153" text-anchor="middle" class="s-lbb">再加噪</text>
+        <text x="376" y="172" text-anchor="middle" class="s-sm">x̂ → x̂ₜ（随机 t）</text>
+        <path d="M432 146 L496 84" class="l-T" marker-end="url(#ar-T)"/>
+        <path d="M432 172 L496 234" class="l-T" marker-end="url(#ar-T)"/>
+
+        <rect x="500" y="34" width="196" height="76" rx="11" class="f-T"/>
+        <text x="598" y="61" text-anchor="middle" class="s-lbb">教师 f_φ（real score）</text>
+        <text x="598" y="80" text-anchor="middle" class="s-sm">Wan2.1-14B · 冻结 · CFG 3</text>
+        <text x="598" y="96" text-anchor="middle" class="s-sm">估计「真实分布」的分数</text>
+
+        <text x="598" y="150" text-anchor="middle" class="s-sm">critic 也在训：每 1 次生成器更新</text>
+        <text x="598" y="166" text-anchor="middle" class="s-sm">配 5 次 critic 更新（扩散损失）</text>
+
+        <rect x="500" y="206" width="196" height="76" rx="11" class="f-T dash"/>
+        <text x="598" y="233" text-anchor="middle" class="s-lbb">critic f_ψ（fake score）</text>
+        <text x="598" y="252" text-anchor="middle" class="s-sm">Wan2.1-1.3B · 在线训练</text>
+        <text x="598" y="268" text-anchor="middle" class="s-sm">拟合生成器自己的分布</text>
+
+        <path d="M696 78 L728 136" class="l-T" marker-end="url(#ar-T)"/>
+        <path d="M696 240 L728 182" class="l-T" marker-end="url(#ar-T)"/>
+        <rect x="730" y="118" width="116" height="80" rx="11" class="s-box3"/>
+        <text x="788" y="145" text-anchor="middle" class="s-lbb">梯度方向</text>
+        <text x="788" y="164" text-anchor="middle" class="s-mono">f_ψ − f_φ</text>
+        <text x="788" y="181" text-anchor="middle" class="s-sm">反向 KL</text>
+
+        <path d="M788 198 V314 H220 V202" class="l-G dash" marker-end="url(#ar-G)"/>
+        <text x="520" y="306" text-anchor="middle" class="s-sm">梯度回传到 G_θ（只回传随机出口那一步）</text>
+      </g>
+
+      <!-- ================= ViRDM ================= -->
+      <g id="fA-virdm">
+        <rect x="16" y="128" width="100" height="60" rx="10" class="s-box"/>
+        <text x="66" y="153" text-anchor="middle" class="s-lbb">噪声 ε</text>
+        <text x="66" y="172" text-anchor="middle" class="s-sm">+ prompt c</text>
+        <path d="M116 158 H138" class="l-N" marker-end="url(#ar-N)"/>
+
+        <rect x="142" y="118" width="128" height="80" rx="11" class="f-G"/>
+        <text x="206" y="145" text-anchor="middle" class="s-lbb">生成器 G_θ</text>
+        <text x="206" y="164" text-anchor="middle" class="s-sm">1.3B · 唯一在训的</text>
+        <text x="206" y="181" text-anchor="middle" class="s-sm">随机出口 S</text>
+        <path d="M270 158 H294" class="l-G" marker-end="url(#ar-G)"/>
+        <text x="282" y="150" text-anchor="middle" class="s-mono">ẑ₀</text>
+
+        <rect x="298" y="128" width="112" height="60" rx="10" class="s-box"/>
+        <text x="354" y="153" text-anchor="middle" class="s-lbb">TAEW2.1 解码</text>
+        <text x="354" y="172" text-anchor="middle" class="s-sm">冻结 · 轻量</text>
+        <path d="M410 158 H434" class="l-N" marker-end="url(#ar-N)"/>
+        <text x="422" y="150" text-anchor="middle" class="s-mono">v̂</text>
+
+        <rect x="438" y="118" width="132" height="80" rx="11" class="f-P"/>
+        <text x="504" y="145" text-anchor="middle" class="s-lbb">V-JEPA 2.1</text>
+        <text x="504" y="164" text-anchor="middle" class="s-sm">ViT-L/16 · 冻结</text>
+        <text x="504" y="181" text-anchor="middle" class="s-sm">全局平均 → 1024 维</text>
+        <path d="M570 158 H594" class="l-P" marker-end="url(#ar-P)"/>
+
+        <rect x="598" y="30" width="92" height="44" rx="9" class="s-box"/>
+        <text x="644" y="50" text-anchor="middle" class="s-lb">SigLIP2 文本</text>
+        <text x="644" y="65" text-anchor="middle" class="s-sm">τ(c) · 1152 维</text>
+        <path d="M644 74 V114" class="l-N" marker-end="url(#ar-N)"/>
+
+        <rect x="598" y="118" width="110" height="80" rx="11" class="f-P"/>
+        <text x="653" y="145" text-anchor="middle" class="s-lbb">联合特征 ĥ</text>
+        <text x="653" y="164" text-anchor="middle" class="s-mono">[ϕ ; β·τ]</text>
+        <text x="653" y="181" text-anchor="middle" class="s-sm">2176 维</text>
+        <path d="M708 158 H732" class="l-P" marker-end="url(#ar-P)"/>
+
+        <rect x="712" y="16" width="134" height="64" rx="10" class="f-R"/>
+        <text x="779" y="40" text-anchor="middle" class="s-lbb">参考库 H*</text>
+        <text x="779" y="57" text-anchor="middle" class="s-sm">6,505 条 · 离线算一次</text>
+        <text x="779" y="71" text-anchor="middle" class="s-sm">训练中冻结</text>
+        <path d="M791 80 V114" class="l-R" marker-end="url(#ar-R)"/>
+
+        <rect x="736" y="118" width="110" height="80" rx="11" class="s-box3"/>
+        <text x="791" y="145" text-anchor="middle" class="s-lbb">MMD²</text>
+        <text x="791" y="164" text-anchor="middle" class="s-sm">吸引 + 排斥</text>
+        <text x="791" y="181" text-anchor="middle" class="s-sm">B = 64 条</text>
+        <path d="M791 198 V242" class="l-N" marker-end="url(#ar-N)"/>
+
+        <path d="M354 188 V224" class="l-Y" marker-end="url(#ar-Y)"/>
+        <rect x="298" y="228" width="196" height="54" rx="10" class="f-Y"/>
+        <text x="396" y="251" text-anchor="middle" class="s-lbb">RAFT 光流 · 冻结</text>
+        <text x="396" y="269" text-anchor="middle" class="s-sm">动态正则 λ·L_dyn（最终版才加）</text>
+        <path d="M494 258 H771" class="l-Y" marker-end="url(#ar-Y)"/>
+
+        <circle cx="791" cy="260" r="17" class="s-box3"/>
+        <text x="791" y="265" text-anchor="middle" class="s-lbb">Σ</text>
+
+        <path d="M791 277 V314 H206 V202" class="l-G dash" marker-end="url(#ar-G)"/>
+        <text x="540" y="306" text-anchor="middle" class="s-sm">分段 VJP：∂L/∂ĥ → ∂L/∂v̂ → ∂L/∂ẑ₀ → θ，三张计算图不同时驻留</text>
+      </g>
+    </svg>
+    </div>
+    <div class="readout" id="fA-read"></div>
+    <figcaption>点上方按钮切换。两种流程都从 Causal Forcing 的因果 ODE 初始化出发（图里没画），都用 Self Forcing 的自回归 rollout 和随机出口。区别只在「用什么告诉生成器往哪挪」。资源数字来自论文 Table 7，同一台 8×A100 上测，只计最后的分布匹配阶段。</figcaption>
+  </figure>
+
+  <h3>三道坎，三个对策</h3>
+  <p>作者把「图像 RDM 为什么不能直接搬到视频」拆成三个问题，逐个解决，每一步保留验证过的选择，最后叠成完整配方。</p>
+  <div class="grid3">
+    <div class="card cG"><div class="mono">坎一 · 显存</div><h5>梯度链太长</h5>损失在「4 步自回归 rollout → Wan VAE 解码 → V-JEPA」之后，整条链一起反传直接 OOM。<br><b style="color:var(--ink)">对策：</b>随机出口 + 分段 VJP + 轻量解码器。<a class="dref" href="#s-mem">→ 细节</a></div>
+    <div class="card cR"><div class="mono">坎二 · 配方</div><h5>图像的超参不迁移</h5>图像 RDM 要 2048 张以上的新样本；视频做不到。直接从双向模型起步也会漂移。<br><b style="color:var(--ink)">对策：</b>B = 64，从因果 ODE 初始化起步。<a class="dref" href="#s-recipe">→ 细节</a></div>
+    <div class="card cY"><div class="mono">坎三 · 动态</div><h5>表征对运动不敏感</h5>匹配完分布，画面更好看但动得少（DD 48.6）。<br><b style="color:var(--ink)">对策：</b>加一个 RAFT 光流的单边 hinge 正则。<a class="dref" href="#s-reg">→ 细节</a></div>
+  </div>
+</section>
+
+<!-- ============================================================ RDM / FIG B -->
+<section class="sec" id="s-rdm">
+  <div class="eyebrow"><span class="n">B</span><span class="t">Objective</span><span class="line"></span></div>
+  <h2>核心目标：在特征空间里「拉近 + 推开」</h2>
+  <p class="lead">一条视频先变成一个 2176 维的点：前 1024 维来自 V-JEPA（这条视频长什么样、怎么动），后 1152 维来自 prompt 的文本特征。训练就是让 64 个生成点组成的点云，和 6,505 个参考点组成的点云，在高斯核意义下尽量重合。</p>
+
+  <div class="eq">
+    ĥ = h(v̂, c) = [ ϕ<sub>v</sub>(v̂) ; β · τ(c) ],&nbsp;&nbsp; τ(c) = ϕ<sub>t</sub>(c) / ‖ϕ<sub>t</sub>(c)‖<sub>2</sub>
+    <span class="cm">视频特征不做归一化；文本特征单位化后乘一个缩放 β，让两部分在核里分量相当。<span class="src">论文 式 1</span></span>
+  </div>
+  <div class="eq">
+    k(h, h′) = exp(−‖ϕ<sub>v</sub> − ϕ′<sub>v</sub>‖² / 2σ²) · exp(−‖τ − τ′‖² / 2σ<sub>t</sub>²),&nbsp;&nbsp; β = σ / σ<sub>t</sub>
+    <span class="cm">联合核可以拆成「视频相似度 × 文本相似度」。只有画面像、prompt 也像，两个样本才算近。σ 与 σ<sub>t</sub> 用参考集上的中位数距离定（median heuristic）。<span class="src">论文 式 2</span></span>
+  </div>
+  <div class="eq">
+    L<sub>RDM</sub> = <span class="hl-g">(1/B²) Σ<sub>i,i′</sub> k(ĥ<sub>i</sub>, ĥ<sub>i′</sub>)</span> − <span class="hl-r">(2/BN) Σ<sub>i,j</sub> k(ĥ<sub>i</sub>, h*<sub>j</sub>)</span> + (1/N²) Σ<sub>j,j′</sub> k(h*<sub>j</sub>, h*<sub>j′</sub>)
+    <span class="cm"><span class="rG">第一项</span>：生成点彼此越近越大，最小化它就把生成点互相推开，防止塌缩到同一个样子。<span class="rR">第二项</span>：生成点离参考点越近越大，前面带负号，所以把生成点拉向参考。第三项与 θ 无关。B = 64 条生成视频，N = 6,505 条参考。<span class="src">论文 式 3</span></span>
+  </div>
+
+  <div class="note info">
+    <div class="hd">发布代码里的具体数字 <span class="cod">代码</span></div>
+    <p>视频带宽 σ = 26.09（V-JEPA 特征未归一化，所以数值大）；文本中位距离 1.097；β = 26.09 / 1.097 = 23.77。参考侧 6,505 行，吸引项用 4,096 个 Nyström 地标近似（论文式 3 写的是精确求和）。每条生成视频用的 prompt 就是参考表里同一行的 caption，文本特征直接查表取出。</p>
+  </div>
+
+  <figure class="fig" id="figB">
+    <div class="fh"><span class="no">图 B</span><span class="ti">二维玩具：MMD 的吸引与排斥（点 = 一条视频的特征）</span></div>
+    <div class="ctl">
+      <button type="button" class="btn pri" id="bPlay">▶ 播放</button>
+      <button type="button" class="btn" id="bStep">单步</button>
+      <button type="button" class="btn" id="bReset">重置</button>
+      <span class="lbl">带宽 σ</span>
+      <div class="seg" id="bSig" role="group" aria-label="带宽">
+        <button type="button" data-v="0.2" aria-pressed="false">0.2×</button>
+        <button type="button" data-v="0.5" aria-pressed="false">0.5×</button>
+        <button type="button" data-v="1" aria-pressed="true">1×</button>
+        <button type="button" data-v="2" aria-pressed="false">2×</button>
+      </div>
+      <span class="lbl">B</span>
+      <div class="seg" id="bB" role="group" aria-label="生成点数">
+        <button type="button" data-v="8" aria-pressed="false">8</button>
+        <button type="button" data-v="32" aria-pressed="false">32</button>
+        <button type="button" data-v="64" aria-pressed="true">64</button>
+      </div>
+      <div class="seg" id="bMode" role="group" aria-label="目标">
+        <button type="button" data-v="full" aria-pressed="true">完整 MMD</button>
+        <button type="button" data-v="attr" aria-pressed="false">去掉排斥项</button>
+      </div>
+    </div>
+    <div class="toy">
+      <canvas id="bCanvas" aria-label="MMD 粒子模拟"></canvas>
+      <div class="hud">步数 <b id="bIt">0</b> · MMD² <b id="bVal">–</b></div>
+    </div>
+    <div class="legend"><span><i style="background:var(--ref)"></i>参考点（6,505 条参考视频的缩影）</span><span><i style="background:var(--gen)"></i>生成点（一次更新里的 B 条生成视频）</span><span>σ 的 1× = 参考点两两距离的中位数</span></div>
+    <figcaption>试三件事。① 点「去掉排斥项」：生成点全挤到最近的一个峰上，这就是 mode collapse，第一项存在的意义。② 把 σ 调到 0.2×：离参考远的点几乎收不到拉力，高斯核在远处梯度消失。③ B = 8：点太少，只能覆盖分布的几个位置。真实训练里，这些点不是自由移动的粒子，而是生成器的输出；梯度经过编码器、解码器回到 θ。</figcaption>
+  </figure>
+
+  <p>这一节留下三个伏笔，后面会展开：</p>
+  <ul>
+    <li><b style="color:var(--ink)">只有一个视频编码器。</b>图像前作 iRDM 的核心发现之一，是任何单一编码器都能被「刷」到比真实数据还近而图像仍然假，所以它用 10 个编码器互相牵制，另留 4 个做评测。ViRDM 只用 V-JEPA 2.1。<a class="dref" href="#d9">→ D9</a></li>
+    <li><b style="color:var(--ink)">一条视频只剩一个全局平均向量。</b>41×30×52 ≈ 6.4 万个 token 平均成 1 个点<span class="cod">代码</span>，时序细节只能靠 V-JEPA 自己的上下文编码保住。这是坎三的根源。</li>
+    <li><b style="color:var(--ink)">参考集是什么决定了靶子在哪。</b>6,505 条来自 Causal Forcing 的数据集。CF 论文说这批数据由 Wan 双向基座用 VidProM 提示词合成，而 ViRDM 项目页写的是「real video-text pairs」。<a class="dref" href="#d5">→ D5</a></li>
+  </ul>
+</section>
+
+<!-- ============================================================ MEMORY -->
+<section class="sec" id="s-mem">
+  <div class="eyebrow"><span class="n">C</span><span class="t">Barrier 1 · Memory</span><span class="line"></span></div>
+  <h2>坎一：显存。随机出口 + 分段 VJP + 轻量解码器</h2>
+  <p class="lead">直接端到端反传需要同时保留三张计算图：4 步 × 7 段的自回归 rollout、Wan VAE 解码 81 帧 480p、V-JEPA 处理约 6.4 万个 token。编码器和解码器冻结只省掉参数梯度，激活值照样要存。作者分两刀解决：先把「生成器那张图」缩到只剩一步，再让三张图轮流上场。</p>
+
+  <h3>第一刀：一致性式采样 + 随机出口</h3>
+  <p>少步采样器每一步都先预测一个干净的 x̂<sub>0</sub>，如果还要继续，就把 x̂<sub>0</sub> 用新噪声重新加噪到下一个时间步再预测一次。所以<b style="color:var(--ink)">每一步的 x̂<sub>0</sub> 都是一条可以解码、可以打分的完整视频</b>。RDM 只看终点分布，不关心中间轨迹，于是可以沿用 Self Forcing 的随机出口：每个微批随机抽一个 S，7 段都在第 S 步停下，把那一步的 x̂<sub>0</sub> 当作这段的输出，只有这一步带梯度。</p>
+
+  <figure class="fig" id="figC">
+    <div class="fh"><span class="no">图 C</span><span class="ti">一条训练视频里，生成器被调用了哪些次（7 段 × 4 步 + KV 写入）</span></div>
+    <div class="ctl">
+      <span class="lbl">出口 S</span>
+      <div class="seg" id="cS" role="group" aria-label="出口步">
+        <button type="button" data-v="1" aria-pressed="false">S=1</button>
+        <button type="button" data-v="2" aria-pressed="false">S=2</button>
+        <button type="button" data-v="3" aria-pressed="true">S=3</button>
+        <button type="button" data-v="4" aria-pressed="false">S=4</button>
+      </div>
+      <span class="lbl">阶段</span>
+      <div class="seg" id="cMode" role="group" aria-label="阶段">
+        <button type="button" data-v="s1" aria-pressed="false">Stage 1 无梯度生成</button>
+        <button type="button" data-v="s4" aria-pressed="true">Stage 4 带梯度重放</button>
+        <button type="button" data-v="inf" aria-pressed="false">推理</button>
+      </div>
+    </div>
+    <div class="scrollx"><svg id="figCsvg" viewBox="0 0 860 300" role="img" aria-label="随机出口示意"></svg></div>
+    <div class="readout" id="cRead"></div>
+    <div class="legend">
+      <span><i style="background:var(--surf3); border:1px solid var(--rule2)"></i>无梯度前向（预测 x̂₀ 后重新加噪）</span>
+      <span><i style="background:var(--gen)"></i>出口：这一步的 x̂₀ 就是这段的输出</span>
+      <span><i style="background:var(--ref-soft); border:1px solid var(--ref)"></i>t = 0 再跑一次，把本段写进 KV cache（无梯度）</span>
+      <span><i style="background:transparent; border:1px dashed var(--rule2)"></i>跳过</span>
+    </div>
+    <figcaption>时间步是 1000/750/500/250 经 shift = 5 变换后的 {1, 0.9375, 0.8333, 0.625}。<span class="src">论文 §4.1</span> 7 段共享同一个 S；S 在每个累积微批里重新抽，并从 rank 0 广播到 8 张卡<span class="cod">代码</span>，所以一次更新的 64 条视频里混着 8 组不同的 S。KV cache 写入不带梯度，梯度不会跨段传播（与 Self Forcing 相同）。</figcaption>
+  </figure>
+
+  <h3>第二刀：分段 VJP，三张计算图轮流驻留</h3>
+  <p>MMD 把 64 条视频耦合在一起（每一条的梯度都依赖其他 63 条），所以不能「生成一条、反传一条」。作者的做法是先全部无梯度生成、算出每条视频在特征端的梯度，再从后往前一段一段地把梯度「翻译」回去：<span class="rP">Φ</span> 把 ∂L/∂ĥ 变成 ∂L/∂v̂，<span class="rP">D</span> 把它变成 ∂L/∂ẑ<sub>0</sub>，最后<span class="rG">生成器</span>按记录下来的随机数重放 rollout，把 ∂L/∂ẑ<sub>0</sub> 反传进 θ。每一段用完就释放。</p>
+
+  <figure class="fig" id="figD">
+    <div class="fh"><span class="no">图 D</span><span class="ti">Algorithm 2 的四个阶段：谁在跑、谁的计算图在显存里、缓存了什么</span></div>
+    <div class="ctl">
+      <div class="seg" id="dStage" role="group" aria-label="阶段">
+        <button type="button" data-v="0" aria-pressed="true">Stage 1</button>
+        <button type="button" data-v="1" aria-pressed="false">Stage 2</button>
+        <button type="button" data-v="2" aria-pressed="false">Stage 3</button>
+        <button type="button" data-v="3" aria-pressed="false">Stage 4</button>
+      </div>
+      <span class="sp"></span>
+      <button type="button" class="btn" id="dNext">下一阶段 →</button>
+    </div>
+    <div class="stages">
+      <div class="modlist" id="dMods"></div>
+      <div class="pane" id="dPane"></div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--gen-soft); border:1px solid var(--gen)"></i>前向，不留计算图</span>
+      <span><i style="background:var(--bad-soft); border:1px solid var(--bad)"></i>计算图驻留显存（最贵）</span>
+      <span><i style="background:var(--ok-soft); border:1px solid var(--ok)"></i>用完已释放</span>
+      <span><i style="background:var(--surf); border:1px solid var(--rule2)"></i>本阶段不用</span>
+    </div>
+    <figcaption>代价是生成器要跑两遍 rollout（Stage 1 一遍无梯度，Stage 4 一遍重放），TAEW 解码和 V-JEPA 前向也各多跑一遍。发布代码会检查重放结果与第一遍的最大偏差 ≤ 1×10⁻⁴，特征重放同样 ≤ 1×10⁻⁴<span class="cod">代码</span>，这个校验做得很扎实。</figcaption>
+  </figure>
+
+  <h3>第三刀：换一个轻量解码器</h3>
+  <p>即使分段，只对 Wan VAE 解码器做 VJP 也会超 80 GB。作者的理由是：解码器在这里不是被优化的对象，只是把 latent 递给编码器的「可微的桥」，不需要完整容量，于是训练路径里换成 TAEW2.1。推理和评测仍用 Wan VAE。</p>
+
+  <figure class="fig" id="figM">
+    <div class="fh"><span class="no">图 M</span><span class="ti">Table 1：逐步叠加三招后的每卡峰值显存（A100 80GB，每卡 1 条视频）</span></div>
+    <div class="scrollx"><svg id="figMsvg" viewBox="0 0 860 256" role="img" aria-label="显存阶梯"></svg></div>
+    <figcaption>前三行都超过 80 GB（论文只写 OOM，图中的斜纹条长度只表示「超出」，不代表具体数值）。单卡与 8 卡之间差约 20 GB：1.3B 参数的 fp32 主权重、梯度和两份 Adam 状态约 16 字节/参数 ≈ 21 GB，8 卡 FSDP 全分片后每卡只剩约 2.6 GB，恰好对得上<span class="inf">推算</span>。另外，发布代码还开着 gradient checkpointing、生成器激活值 CPU offload 和 FSDP 全分片<span class="cod">代码</span>，Table 1 没有把这些列出来，所以「三招各省多少」不能从这张表里单独读出。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ RECIPE -->
+<section class="sec" id="s-recipe">
+  <div class="eyebrow"><span class="n">E</span><span class="t">Barrier 2 · Recipe</span><span class="line"></span></div>
+  <h2>坎二：每次要多少条新视频？从哪个模型起步？</h2>
+  <p class="lead">图像 RDM 发现生成侧的新样本要 2048 个以上才好，B = 512 就明显变差。视频上 B = 1024 意味着每张卡累积 128 次、每次更新 96 分钟。作者固定 20 次更新，只改 B。</p>
+
+  <figure class="fig" id="figE">
+    <div class="fh"><span class="no">图 E</span><span class="ti">Table 2：生成种群大小 B 对 VBench 的影响，以及每次更新的耗时</span></div>
+    <div class="ctl">
+      <span class="lbl">指标</span>
+      <div class="seg" id="eMetric" role="group" aria-label="指标">
+        <button type="button" data-v="0" aria-pressed="true">Total</button>
+        <button type="button" data-v="1" aria-pressed="false">Quality</button>
+        <button type="button" data-v="2" aria-pressed="false">Semantic</button>
+      </div>
+    </div>
+    <div class="scrollx"><svg id="figEsvg" viewBox="0 0 860 290" role="img" aria-label="种群大小研究"></svg></div>
+    <figcaption>左：20 次更新后的分数（纵轴只跨 0.4–0.6 分，看起来陡，实际差距很小）。右：每次更新的分钟数，按 B = 64 时约 6 分钟线性外推，B = 1024 的 96 分钟是论文原文<span class="src">论文 §3.4.1</span>，B = 8 与 256 的数字是按累积次数折算<span class="inf">推算</span>。所有行只跑了一个训练 seed，行间最大差 0.38。</figcaption>
+  </figure>
+
+  <p>读法：B = 8 已经有效，B = 64 之后收益很小；B = 1024 其实最高（83.57），只是贵 16 倍。所以更准确的结论是「大种群在视频上不值这个价」，而不是「图像的大种群处方不成立」。论文最终用 B = 64。</p>
+
+  <h3>初始化：必须先「因果兼容」</h3>
+  <div class="tw"><table>
+    <thead><tr><th>初始化（都再跑同样 20 次 RDM）</th><th>因果前缀训练</th><th>少步</th><th>Total</th><th>Quality</th><th>Semantic</th><th>DD</th></tr></thead>
+    <tbody>
+      <tr class="dim"><td>原始双向 Wan2.1（直接逐段推理）</td><td>✗</td><td>✗</td><td class="num">65.80</td><td class="num">68.82</td><td class="num">53.72</td><td class="num">51.39<span class="dlt">漂移造成</span></td></tr>
+      <tr><td>Teacher Forcing（多步因果）</td><td>✓</td><td>✗</td><td class="num">83.21</td><td class="num">84.05</td><td class="num">79.85</td><td class="num">43.18</td></tr>
+      <tr><td>因果一致性蒸馏</td><td>✓</td><td>✓</td><td class="num">82.99</td><td class="num">83.92</td><td class="num">79.25</td><td class="num">47.44</td></tr>
+      <tr class="me"><td>因果 ODE（默认）</td><td>✓</td><td>✓</td><td class="num"><span class="bst">83.41</span></td><td class="num"><span class="bst">84.11</span></td><td class="num"><span class="bst">80.61</span></td><td class="num">48.61</td></tr>
+    </tbody>
+  </table></div>
+  <p>三个初始化都来自 Causal Forcing 公开的 checkpoint<span class="src">论文 §3.4.2</span>。结论分两层：从双向模型直接起步会严重漂移（65.80），说明 RDM 只能<b style="color:var(--ink)">精修</b>一个已经因果兼容的生成器，<b style="color:var(--ink)">造</b>不出来；而一旦因果兼容，少步专门化不是必需的，但会让最终动态更好。这和 DMD 系方法先做因果适配再做分布匹配的经验一致。</p>
+
+  <div class="note">
+    <div class="hd">这张表缺的那一行</div>
+    <p>所有行都是「初始化 + 20 次 RDM」之后的分数，没有任何一行报告<b>初始化本身</b>（0 次更新）的 VBench。因果 ODE checkpoint 已由 Causal Forcing 公开，补这一行只需推理和评测。</p>
+    <p>这一行很关键，因为 20 次更新走得很近：Adam 每步每个参数的位移量级约等于学习率，20 × 2×10⁻⁶ ≈ 4×10⁻⁵<span class="inf">推算</span>。没有 0 次更新的基线，就说不清 83.41 里有多少是 RDM 带来的。<a class="dref" href="#d3">→ D3</a></p>
+  </div>
+</section>
+
+<!-- ============================================================ DYNAMICS -->
+<section class="sec" id="s-dyn">
+  <div class="eyebrow"><span class="n">T</span><span class="t">Barrier 3 · Dynamics</span><span class="line"></span></div>
+  <h2>坎三：表征对「动」不够敏感？</h2>
+  <p class="lead">到这里，配方已经在不含 DD 的 VBench 上超过 Self Forcing（85.77 vs 85.34），但 DD 只有 48.61，Self Forcing 是 67.78、Causal Forcing 是 83.33。作者用一个「冻结动态」的干预来诊断原因。</p>
+
+  <p>干预是这样做的<span class="src">论文 §3.5.1</span>：每条 81 帧视频保留 0/25/50/75/100% 的均匀间隔帧，再重复补回 81 帧。每个保留比例取 20 组、每组 64 条视频，算它们对参考分布的 RDM。图像版把 81 帧各自送进 DINOv2（每组 64×81 = 5,184 个特征），视频版每条视频一个 V-JEPA 全局特征。</p>
+
+  <figure class="fig" id="figT">
+    <div class="fh"><span class="no">图 T</span><span class="ti">Table 5：相对 0%（整条视频只有第一帧）的 RDM 变化</span></div>
+    <div class="ctl">
+      <div class="seg" id="tMode" role="group" aria-label="尺度">
+        <button type="button" data-v="0" aria-pressed="true">RDM</button>
+        <button type="button" data-v="1" aria-pressed="false">√RDM</button>
+      </div>
+      <span class="sp"></span>
+      <span class="lbl">越低 = 越像参考分布</span>
+    </div>
+    <div class="scrollx"><svg id="figTsvg" viewBox="0 0 860 270" role="img" aria-label="冻结动态诊断"></svg></div>
+    <figcaption>图像边际（DINOv2）从 25% 到 100% 几乎一条平线；视频表征（V-JEPA 2.1）单调下降，但越往右越平。作者据此认为：视频表征能把生成器从「几乎不动」推到「中等动态」，却分不清中等与高动态，所以需要额外的动态正则。</figcaption>
+  </figure>
+
+  <h3>这个干预测的其实是「卡顿」，不是「动了多少」</h3>
+  <p>保留均匀帧再重复补齐，物体从第 0 帧走到第 80 帧的<b style="color:var(--ink)">总位移没有变</b>，变的是它走得一顿一顿的。下面把一个匀速运动的物体按论文的做法处理，同时给一个「真的少动」的对照：把运动慢放到同样比例。右侧用 VBench Dynamic Degree 的规则（8 fps 取帧、看第 10 高的帧对是否超过 11.25 px）判一下它们「动不动」。</p>
+
+  <figure class="fig" id="figF">
+    <div class="fh"><span class="no">图 F</span><span class="ti">「保留 p% 帧」与「慢放到 p%」：位置曲线与 DD 判定</span></div>
+    <div class="ctl">
+      <label class="slider" for="fP">保留比例 p <input type="range" id="fP" min="0" max="100" step="25" value="25"><span class="v" id="fPv">25%</span></label>
+      <span class="sp"></span>
+      <span class="lbl">示意：原视频每帧位移 6 px（8 fps 下每对 12 px）</span>
+    </div>
+    <div class="scrollx"><svg id="figFsvg" viewBox="0 0 860 300" role="img" aria-label="冻结干预示意"></svg></div>
+    <figcaption>在 VBench 的 8 fps 取帧下，p = 50% 与原视频完全相同（取到的都是被保留的偶数帧）；p = 25% 时一半帧对位移为 0、另一半翻倍到 24 px，第 10 高的帧对反而更大。也就是说，论文这组干预在 DD 看来根本没有降低动态。V-JEPA 以 2 帧为一个 tubelet、看全部 81 帧，它对这组干预的敏感，更可能来自对「卡顿、重复帧」的敏感。<span class="inf">推算</span></figcaption>
+  </figure>
+
+  <div class="note bad">
+    <div class="hd">所以结论要改写</div>
+    <p>Table 5 说明了两件事：图像边际对帧的顺序和间隔完全无感（这点成立，也是预期内的）；V-JEPA 对时间上的不自然很敏感。它<b>没有</b>检验「V-JEPA 能否区分中等运动和大幅运动」，因为干预根本没有改变运动幅度。</p>
+    <p>还有一个更直接的问题没回答：参考集自身的 DD 是多少？如果 6,505 条参考视频本来就只有中等运动，RDM 停在 48.6 附近恰恰是在如实匹配靶子，动态正则则是把分布往靶子之外推。<a class="dref" href="#d4">→ D4</a></p>
+  </div>
+</section>
+
+<!-- ============================================================ REGULARIZER -->
+<section class="sec" id="s-reg">
+  <div class="eyebrow"><span class="n">G</span><span class="t">Dynamics Regularizer</span><span class="line"></span></div>
+  <h2>动态正则：一个可微版的 VBench Dynamic Degree</h2>
+  <p class="lead">论文对它的描述很简短<span class="src">论文 §3.5.2</span>：受 VBench 用光流幅值衡量动态的启发，用冻结 RAFT 在采样的帧对上估计光流，汇总高幅值响应得到视频级分数 s(v̂)，再加单边损失 L<sub>dyn</sub> = [τ − s(v̂)]<sub>+</sub>。s 怎么汇总、τ 取多少，正文都没给。发布代码把它们写得很清楚<span class="cod">代码</span>。</p>
+
+  <ol class="steps">
+    <li>用 TAEW2.1 解码 81 帧，每 2 帧取 1 帧（16 fps → 8 fps），得到 41 帧、40 个相邻帧对。</li>
+    <li>每个帧对跑 RAFT（raft-things 权重，20 次迭代）得到光流。</li>
+    <li>每对取光流幅值最大的 5% 像素求平均，得到这一对的「运动分」，单位是像素。</li>
+    <li>40 个运动分从大到小排，取第 10 名，记为 s<sub>10</sub>。</li>
+    <li>若 s<sub>10</sub> &lt; 11.25 px，损失为 11.25 − s<sub>10</sub>，<b style="color:var(--ink)">只对第 10 名那一对</b>求梯度，经 TAEW2.1 的 VJP 回到 latent；否则这条视频不产生梯度。</li>
+    <li>latent 上的总梯度 = RDM 梯度 + (5×10⁻⁴ / 8) × 动态梯度，再走 Stage 4 进生成器。</li>
+  </ol>
+
+  <div class="tw"><table>
+    <thead><tr><th class="l">环节</th><th class="l">VBench Dynamic Degree（评测）</th><th class="l">ViRDM 动态正则（训练）</th><th class="l">一致？</th></tr></thead>
+    <tbody>
+      <tr><td>光流网络</td><td class="l">RAFT，raft-things.pth</td><td class="l">RAFT，raft-things.pth（同一下载包）</td><td class="l"><span class="rOk">相同</span></td></tr>
+      <tr><td>迭代次数</td><td class="l">iters = 20</td><td class="l">iters = 20</td><td class="l"><span class="rOk">相同</span></td></tr>
+      <tr><td>取帧</td><td class="l">interval = round(fps / 8)，16 fps → 每 2 帧取 1</td><td class="l">video_fps 16 / eval_fps 8 → 每 2 帧取 1</td><td class="l"><span class="rOk">相同</span></td></tr>
+      <tr><td>每对的分数</td><td class="l">幅值前 5% 像素的均值</td><td class="l">幅值前 5% 像素的均值</td><td class="l"><span class="rOk">相同</span></td></tr>
+      <tr><td>阈值</td><td class="l">6.0 × min(H,W) / 256 = 6 × 480 / 256 = 11.25</td><td class="l">flow_threshold = 11.25</td><td class="l"><span class="rOk">相同</span></td></tr>
+      <tr><td>「动」的判据</td><td class="l">超过阈值的帧对 ≥ round(4 × 41 / 16) = 10</td><td class="l">required_hits = 10，看第 10 高</td><td class="l"><span class="rOk">等价</span></td></tr>
+      <tr><td>输入画面</td><td class="l">Wan VAE 解码后存成 mp4</td><td class="l">TAEW2.1 解码，无压缩</td><td class="l"><span class="rY">不同</span></td></tr>
+    </tbody>
+  </table></div>
+  <p>「超过阈值的帧对至少 10 个」和「第 10 高的帧对超过阈值」是同一个条件。所以这个正则的 hinge 正好卡在 VBench 判「动 / 不动」的那条线上：一条视频只要被 VBench 判为不动，就会收到梯度；一旦被判为动，梯度立刻归零。VBench 的 DD 本身就是「被判为动的视频占比」。</p>
+
+  <figure class="fig" id="figG">
+    <div class="fh"><span class="no">图 G</span><span class="ti">DD 判据模拟器：40 个帧对的运动分、第 10 名、以及梯度落在哪</span></div>
+    <div class="ctl">
+      <span class="lbl">运动模式</span>
+      <div class="seg" id="gPreset" role="group" aria-label="运动模式">
+        <button type="button" data-v="steady" aria-pressed="true">匀速慢移</button>
+        <button type="button" data-v="burst" aria-pressed="false">一次急动作</button>
+        <button type="button" data-v="shake" aria-pressed="false">镜头抖动</button>
+        <button type="button" data-v="still" aria-pressed="false">近乎静止</button>
+      </div>
+      <label class="slider" for="gAmp">幅度 <input type="range" id="gAmp" min="0.4" max="2.2" step="0.05" value="1"><span class="v" id="gAmpv">1.00×</span></label>
+    </div>
+    <div class="scrollx"><svg id="figGsvg" viewBox="0 0 860 290" role="img" aria-label="DD 判据模拟"></svg></div>
+    <div class="readout" id="gRead"></div>
+    <figcaption>四种模式的运动分是示意数值，不来自论文。可以看到这个判据的几个性质：「一次急动作」即使动作很大，只要不足 10 个帧对就判为不动；「镜头抖动」来回晃，只要够 10 对就过线；hinge 的梯度只作用在第 10 名那一对上，把它推过 11.25 px 就停。在训练里，这会奖励「把运动铺满至少 10 个帧对」，而与 prompt 是否要求动无关。</figcaption>
+  </figure>
+
+  <h3>λ 扫描：Total 的变化几乎全由 DD 解释</h3>
+  <p>VBench 里每 1 点 DD 折合 0.0615 点 Total（下一节推导）。拿无正则的 83.41 加上「DD 变化 × 0.0615」作预测，和论文 Table 9 的实测比一下：</p>
+  <div class="tw"><table>
+    <thead><tr><th>λ<sub>dyn</sub></th><th>DD</th><th>实测 Total</th><th>只靠 DD 的预测</th><th>残差</th><th>运动平滑</th><th>时间闪烁</th><th>主体一致</th><th>背景一致</th></tr></thead>
+    <tbody>
+      <tr class="dim"><td>0</td><td class="num">48.61</td><td class="num">83.41</td><td class="num">83.41</td><td class="num">–</td><td class="num">98.11</td><td class="num">99.05</td><td class="num">96.56</td><td class="num">96.25</td></tr>
+      <tr><td>1×10⁻⁴</td><td class="num">54.17</td><td class="num">83.62</td><td class="num">83.75</td><td class="num">−0.13</td><td class="num">98.31</td><td class="num">98.98</td><td class="num">96.50</td><td class="num">96.19</td></tr>
+      <tr class="me"><td>5×10⁻⁴（默认）</td><td class="num">72.02</td><td class="num">84.87</td><td class="num">84.85</td><td class="num">+0.02</td><td class="num">98.29</td><td class="num">99.13</td><td class="num">96.41</td><td class="num">96.24</td></tr>
+      <tr><td>1×10⁻³</td><td class="num">88.89</td><td class="num">85.64</td><td class="num">85.89</td><td class="num">−0.25</td><td class="num">98.56</td><td class="num">98.14</td><td class="num">96.15</td><td class="num">95.36</td></tr>
+    </tbody>
+  </table></div>
+  <p>预测列与残差是本页算的<span class="inf">推算</span>，其余来自论文 Table 9。默认档的 +1.46 中，+1.44 可以由 DD 单独解释。作者选 5×10⁻⁴ 而不是分数更高的 1×10⁻³，理由是后者让闪烁、背景一致性明显变差，这个选择是克制的。但要注意：λ 是在评测基准本身上挑的，没有独立的验证集。</p>
+
+  <h3>人评：规模小，但方向一致</h3>
+  <div class="grid2">
+    <div class="card cQ"><div class="mono">四选一 · 20 个 prompt · 25 人</div>ViRDM 在文本对齐（40.4%）和画质（43.0%）上得票最多；Self Forcing 第二（论文写 32.6%），Causal Forcing 与 CausVid 在后。注意这里 SF 排在 CF 前面，与 VBench 的排序相反。</div>
+    <div class="card cY"><div class="mono">二选一 · 10 个 prompt · 同批 25 人</div>
+      <div class="bars" style="padding:6px 0 0" id="hBars"></div>
+      最终版对比无正则版的偏好率。prompt 怎么选的没有说明。</div>
+  </div>
+</section>
+
+<!-- ============================================================ NUMBERS -->
+<section class="sec" id="s-num">
+  <div class="eyebrow"><span class="n">H</span><span class="t">Arithmetic check</span><span class="line"></span></div>
+  <h2>数字复核：把 VBench 的账摊开</h2>
+  <p class="lead">VBench 的总分是加权平均，权重是公开的。把它写出来，就能把「+0.36」拆成几块，看清每块从哪来。</p>
+
+  <div class="eq">
+    Total = 0.8 · Quality + 0.2 · Semantic
+    <span class="cm">官方权重：Quality 4 份、Semantic 1 份。</span>
+  </div>
+  <div class="eq">
+    Quality = ( 主体一致 + 背景一致 + 时间闪烁 + 运动平滑 + 美学 + 成像 + <span class="hl-y">0.5 × DD</span> ) / 6.5
+    <span class="cm">各维先按官方 min/max 归一化；DD 的归一化区间是 [0, 1]，等于原值。所以每 1 点 DD = 0.5/6.5 = 0.0769 点 Quality = <b style="color:var(--ink)">0.0615 点 Total</b>。反过来，去掉 DD 后的 Quality = (6.5·Q − 0.5·DD) / 6。</span>
+  </div>
+
+  <p>用这两个式子复算论文 Table 4/6/8，所有给出的「w/o DD」列都能对上（误差 ≤ 0.01），也顺便从 Table 4 反推出 SF、CF 的 DD 与 Table 8 一致<span class="inf">推算</span>：</p>
+  <div class="tw"><table>
+    <thead><tr><th>配置</th><th>Quality</th><th>Semantic</th><th>DD</th><th>Total<br>论文 / 复算</th><th>Quality w/o DD<br>论文 / 复算</th><th>Total w/o DD<br>论文 / 复算</th></tr></thead>
+    <tbody>
+      <tr class="dim"><td>DINOv2 图像 RDM</td><td class="num">83.16</td><td class="num">80.88</td><td class="num">18.06</td><td class="num">82.70 / 82.70</td><td class="num">88.59 / 88.59</td><td class="num">87.04 / 87.04</td></tr>
+      <tr><td>V-JEPA 视频 RDM</td><td class="num">84.11</td><td class="num">80.61</td><td class="num">48.61</td><td class="num">83.41 / 83.41</td><td class="num">87.07 / 87.07</td><td class="num">85.77 / 85.78</td></tr>
+      <tr class="me"><td>+ 动态正则（ViRDM）</td><td class="num">85.82</td><td class="num">81.09</td><td class="num">72.02</td><td class="num">84.87 / 84.87</td><td class="num">86.97 / 86.97</td><td class="num">85.79 / 85.79</td></tr>
+      <tr><td>Self Forcing（复测）</td><td class="num">84.90</td><td class="num">81.39</td><td class="num">67.78</td><td class="num">84.20 / 84.20</td><td class="num">– / 86.33</td><td class="num">85.34 / 85.34</td></tr>
+      <tr><td>Causal Forcing（复测）</td><td class="num">85.36</td><td class="num">81.09</td><td class="num">83.33</td><td class="num">84.51 / 84.51</td><td class="num">– / 85.53</td><td class="num">84.64 / 84.64</td></tr>
+    </tbody>
+  </table></div>
+
+  <figure class="fig" id="figH">
+    <div class="fh"><span class="no">图 H</span><span class="ti">ViRDM 领先多少、从哪来（Total 分差拆成三块）</span></div>
+    <div class="ctl">
+      <span class="lbl">对比对象</span>
+      <div class="seg" id="hVs" role="group" aria-label="对比对象">
+        <button type="button" data-v="cf" aria-pressed="true">vs Causal Forcing</button>
+        <button type="button" data-v="sf" aria-pressed="false">vs Self Forcing</button>
+        <button type="button" data-v="noreg" aria-pressed="false">vs 自己的无正则版</button>
+      </div>
+    </div>
+    <div class="scrollx"><svg id="figHsvg" viewBox="0 0 860 220" role="img" aria-label="Total 分差分解"></svg></div>
+    <figcaption>三块分别是：6 个非 DD 质量维（按 6/6.5 × 0.8 折进 Total）、DD（每点 0.0615）、Semantic（× 0.2）。三块加起来等于论文里的 Total 差（舍入误差 ≤ 0.01）。<span class="inf">推算</span></figcaption>
+  </figure>
+
+  <p>对 Causal Forcing 的 +0.36，是「非 DD 质量维 +1.06」减去「DD −0.70」得到的，Semantic 恰好打平。所以问题变成：这 +1.06 从哪来？6 个非 DD 维里，主体一致、背景一致、时间闪烁、运动平滑这 4 个，画面越静止分越高。下面这张散点把同一篇论文里的 5 个配置放在一起：</p>
+
+  <figure class="fig" id="figS">
+    <div class="fh"><span class="no">图 S</span><span class="ti">DD 与「去掉 DD 后的 Total」：动得越少，其余维度越高</span></div>
+    <div class="scrollx"><svg id="figSsvg" viewBox="0 0 860 300" role="img" aria-label="DD 与其余维度的散点"></svg></div>
+    <figcaption>DD 只有 18 的 DINOv2 版在其余维度上最高（87.04），DD 最高的 Causal Forcing 最低（84.64）。5 个点不足以下结论，也可能有别的原因，但它说明「w/o DD」的比较（论文 Table 4）并不中立。论文没有给 16 维分项表，看不出 ViRDM 的 +1.06 有多少来自美学 / 成像质量这两个与运动无关的维度。</figcaption>
+  </figure>
+
+  <h3>同一个模型，在不同论文里差多少</h3>
+  <p>ViRDM 自己在同一环境下复测了所有基线，这比直接抄数字更可比。但作为参照，同一个 checkpoint 的 Total 在三篇论文之间的跨度如下：</p>
+  <div class="tw"><table>
+    <thead><tr><th>模型</th><th>Self Forcing 论文</th><th>Causal Forcing 论文</th><th>ViRDM 论文</th><th>最大差</th></tr></thead>
+    <tbody>
+      <tr><td>Wan2.1-1.3B（多步双向）</td><td class="num">84.26</td><td class="num">83.37</td><td class="num">84.23</td><td class="num">0.89</td></tr>
+      <tr><td>Self Forcing</td><td class="num">84.31</td><td class="num">83.74</td><td class="num">84.20</td><td class="num">0.57</td></tr>
+      <tr class="me"><td>Causal Forcing</td><td class="num">–</td><td class="num">84.04</td><td class="num">84.51</td><td class="num">0.47</td></tr>
+      <tr><td>CausVid</td><td class="num">81.20</td><td class="num">81.33</td><td class="num">81.15</td><td class="num">0.18</td></tr>
+      <tr><td>Pyramid Flow</td><td class="num">81.72</td><td class="num">80.75</td><td class="num">81.75</td><td class="num">1.00</td></tr>
+      <tr><td>SkyReels-V2-1.3B</td><td class="num">82.67</td><td class="num">81.97</td><td class="num">82.60</td><td class="num">0.70</td></tr>
+    </tbody>
+  </table></div>
+  <p>评测协议（是否用扩写 prompt、每 prompt 采样数、种子）不同就会差出 0.5–1 分。这不说明 ViRDM 的复测有问题，只说明 0.36 的领先量级落在「协议与种子方差」附近，论文只跑了一个训练 seed，没有给置信区间。<a class="dref" href="#d2">→ D2</a></p>
+
+  <h3>主结果（论文 Table 8）</h3>
+  <div class="tw"><table>
+    <thead><tr><th>模型</th><th>参数</th><th>分辨率</th><th>FPS</th><th>延迟 s</th><th>Total</th><th>Quality</th><th>Semantic</th></tr></thead>
+    <tbody>
+      <tr class="grp"><td colspan="8">双向视频扩散</td></tr>
+      <tr><td>LTX-Video</td><td class="num">1.9B</td><td class="num">768×512</td><td class="num">8.98</td><td class="num">13.5</td><td class="num">79.91</td><td class="num">82.20</td><td class="num">70.75</td></tr>
+      <tr><td>Wan2.1-1.3B</td><td class="num">1.3B</td><td class="num">832×480</td><td class="num">0.78</td><td class="num">103</td><td class="num">84.23</td><td class="num">85.26</td><td class="num">80.11</td></tr>
+      <tr class="grp"><td colspan="8">自回归视频扩散</td></tr>
+      <tr><td>NOVA</td><td class="num">0.6B</td><td class="num">768×480</td><td class="num">0.88</td><td class="num">4.1</td><td class="num">80.09</td><td class="num">80.33</td><td class="num">79.13</td></tr>
+      <tr><td>Pyramid Flow</td><td class="num">2.0B</td><td class="num">640×384</td><td class="num">6.70</td><td class="num">2.5</td><td class="num">81.75</td><td class="num">84.72</td><td class="num">69.87</td></tr>
+      <tr><td>SkyReels-V2-1.3B</td><td class="num">1.3B</td><td class="num">960×540</td><td class="num">0.49</td><td class="num">112</td><td class="num">82.60</td><td class="num">84.60</td><td class="num">74.60</td></tr>
+      <tr><td>MAGI-1-4.5B</td><td class="num">4.5B</td><td class="num">832×480</td><td class="num">0.19</td><td class="num">282</td><td class="num">79.09</td><td class="num">82.04</td><td class="num">67.29</td></tr>
+      <tr class="grp"><td colspan="8">4 步因果（同一 Wan2.1-1.3B 骨干）</td></tr>
+      <tr><td>CausVid</td><td class="num">1.3B</td><td class="num">832×480</td><td class="num">17.0</td><td class="num">0.69</td><td class="num">81.15</td><td class="num">83.99</td><td class="num">69.79</td></tr>
+      <tr><td>Self Forcing</td><td class="num">1.3B</td><td class="num">832×480</td><td class="num">17.0</td><td class="num">0.69</td><td class="num">84.20</td><td class="num">84.90</td><td class="num"><span class="bst">81.39</span></td></tr>
+      <tr><td>Causal Forcing</td><td class="num">1.3B</td><td class="num">832×480</td><td class="num">17.0</td><td class="num">0.69</td><td class="num">84.51</td><td class="num">85.36</td><td class="num">81.09</td></tr>
+      <tr class="me"><td>ViRDM</td><td class="num">1.3B</td><td class="num">832×480</td><td class="num">17.0</td><td class="num">0.69</td><td class="num"><span class="bst">84.87</span></td><td class="num"><span class="bst">85.82</span></td><td class="num">81.09</td></tr>
+    </tbody>
+  </table></div>
+  <p>吞吐和延迟四行完全相同，因为推理结构没有任何变化；这两列对本方法不提供信息。</p>
+
+  <h3>两个扩展实验</h3>
+  <div class="grid2">
+    <div class="card cG"><div class="mono">Table 10 · 更少步的因果生成</div>第一段 4 步（沿用 ASD 的首帧增强），之后每段 1 或 2 步。2 步：ViRDM 84.42，Causal Forcing++ 84.43，ASD 84.38；1 步：ViRDM 84.27，One-Forcing 84.01，ASD 83.97，CF++ 83.75。基线数字是复测还是引用没有说明，CF++ 与 One-Forcing 是逐帧模型，和逐段模型混在一起比。</div>
+    <div class="card cP"><div class="mono">Table 11 · 双向少步</div>1/2/4 步 Total 分别为 83.12 / 84.53 / 84.56。发布代码的 bid4 配方没有改初始化，默认加载的是因果 ODE checkpoint<span class="cod">代码</span>，只是把注意力换成整段 21 帧双向。所以这里的起点是一个已经少步化的模型，不是论文措辞里的「双向 Wan2.1-1.3B」。1/2 步双向的配方代码中没有。</div>
+  </div>
+</section>
+
+<!-- ============================================================ COST -->
+<section class="sec" id="s-cost">
+  <div class="eyebrow"><span class="n">I</span><span class="t">Cost</span><span class="line"></span></div>
+  <h2>效率账：11 倍是怎么来的</h2>
+  <p class="lead">Table 7 在同一台 8×A100 上比最后的分布匹配阶段：DMD（Self Forcing 配方，14B 教师 + 1.3B critic）120 次生成器更新、22 小时、每卡 77.1 GB；ViRDM 20 次更新、2 小时、48.3 GB。时间比是 11 倍，拆开看是两个因子相乘。</p>
+  <div class="grid3">
+    <div class="card cT"><div class="mono">每次更新</div><b style="color:var(--ink); font-size:20px">11 min vs 6 min</b><br>DMD 22 h / 120 次 ≈ 11 分钟（含 5 次 critic 更新）；ViRDM 约 6 分钟。只快 <b style="color:var(--ink)">1.8×</b><span class="inf">推算</span>。</div>
+    <div class="card cR"><div class="mono">更新次数</div><b style="color:var(--ink); font-size:20px">120 vs 20</b><br>剩下的 <b style="color:var(--ink)">6×</b> 来自更新次数。DMD 在同一初始化下是否真需要 120 次，论文没有扫。</div>
+    <div class="card cP"><div class="mono">显存</div><b style="color:var(--ink); font-size:20px">77.1 → 48.3 GB</b><br>这部分节省与更新次数无关，是结构性的：显存里少了两个视频扩散网络。</div>
+  </div>
+
+  <figure class="fig" id="figI">
+    <div class="fh"><span class="no">图 I</span><span class="ti">如果 DMD 只需要更少的生成器更新，差距还剩多少</span></div>
+    <div class="ctl">
+      <label class="slider" for="iN">DMD 生成器更新次数 <input type="range" id="iN" min="10" max="150" step="10" value="120"><span class="v" id="iNv">120</span></label>
+    </div>
+    <div class="bars" id="iBars"></div>
+    <div class="readout" id="iRead"></div>
+    <figcaption>按每次 DMD 更新 11 分钟、ViRDM 20 次共 2 小时估算，只作量级参考。Causal Forcing 的 README 提到有 ODE 初始化时 DMD「可以只训很少的步数（例如约 100 步）」，其 step 是否把 critic 更新计在内不明；Self Forcing 论文报告 DMD 在 64 张 H100 上约 1.5 小时收敛。两边都不含共享的初始化成本（teacher forcing 2K 步 + 因果 ODE 1K 步）。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ CODE vs PAPER -->
+<section class="sec" id="s-code">
+  <div class="eyebrow"><span class="n">K</span><span class="t">Code reading</span><span class="line"></span></div>
+  <h2>代码里有、论文没写的</h2>
+  <p class="lead">GitHub 上的 neu-vi/ViRDM 是一个很规整的发布：配置锁死、每个权重校验 sha256、重放偏差有断言。读下来有几处实现与论文的写法不同，复现时应以代码为准。</p>
+  <div class="tw"><table>
+    <thead><tr><th class="l">环节</th><th class="l">论文怎么写</th><th class="l">代码怎么做</th><th class="l">影响</th></tr></thead>
+    <tbody>
+      <tr><td>吸引项</td><td class="l wrap">式 3 精确求和，N = 6,505</td><td class="l wrap">4,096 个 Nyström 地标近似参考均值嵌入（同 iRDM）</td><td class="l wrap">小；近似误差应很低，但式 3 不再是实际目标</td></tr>
+      <tr><td>损失尺度</td><td class="l wrap">L = L<sub>RDM</sub> + λ·L<sub>dyn</sub></td><td class="l wrap">RDM 先除以自身的 detach 值：raw / (|raw| + 1e-7)，梯度 = ∇ log MMD²</td><td class="l wrap">λ = 5e-4 是相对「归一化后 ≈1」的 RDM 而言；若按式 7 用原始 MMD（Table 5 量级 0.006–0.03），动态项的相对权重会差 30–160 倍</td></tr>
+      <tr><td>动态分 s(v̂) 与 τ</td><td class="l wrap">「汇总高幅值光流」「τ 为最低动态水平」，未给值</td><td class="l wrap">VBench DD 的逐项复刻：raft-things、20 iters、8 fps、top-5%、第 10 高、τ = 11.25 px</td><td class="l wrap">正则直接对准评测判据（D1）</td></tr>
+      <tr><td>解码器</td><td class="l wrap">训练路径用 TAEW2.1</td><td class="l wrap">生成侧 TAEW2.1；参考侧用 Wan VAE 解码后再编码</td><td class="l wrap">训练时两侧解码器不同，存在恒定域差（D7）</td></tr>
+      <tr><td>训练 prompt</td><td class="l wrap">未说明</td><td class="l wrap">就是参考集的 6,505 条 caption，文本特征按行号查表</td><td class="l wrap">每条生成视频在联合核里与「同 prompt 的参考视频」完全对齐</td></tr>
+      <tr><td>参考视频来源</td><td class="l wrap">「Causal Forcing 构建的训练数据」</td><td class="l wrap">HF 上 zhuhz22/Causal-Forcing-data 的 clean latent，Wan VAE 解码</td><td class="l wrap">CF 论文称该数据由 Wan 双向模型合成；ViRDM 项目页写「real」（D5、D13）</td></tr>
+      <tr><td>双向扩展初始化</td><td class="l wrap">「bidirectional Wan2.1-1.3B generators」</td><td class="l wrap">bid4 配方默认加载因果 ODE checkpoint</td><td class="l wrap">起点是少步化模型（D10）</td></tr>
+      <tr><td>省显存手段</td><td class="l wrap">随机出口、分段 VJP、TAEW</td><td class="l wrap">另有 FSDP 全分片、gradient checkpointing、生成器激活 CPU offload</td><td class="l wrap">Table 1 的归因不完整</td></tr>
+      <tr><td>优化细节</td><td class="l wrap">AdamW 2e-6，β = (0.9, 0.95)，无 weight decay</td><td class="l wrap">另有梯度范数裁剪 10；只保存第 20 步</td><td class="l wrap">没有训练曲线可看（D3）</td></tr>
+      <tr><td>V-JEPA 输入</td><td class="l wrap">ViT-L/16，全局平均</td><td class="l wrap">原生 480×832，81 帧补到 82 帧，41×30×52 个 token 平均；权重是从 ViT-G 蒸馏的 384 版</td><td class="l wrap">补齐细节</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============================================================ DOUBTS -->
+<section class="sec" id="s-doubt">
+  <div class="eyebrow"><span class="n">D</span><span class="t">Open questions</span><span class="line"></span></div>
+  <h2>存疑清单</h2>
+  <p class="lead">按对结论的影响排序。「高」表示会改变对论文主张的判断；「中」影响解读或复现；「低」是表述与小问题。</p>
+  <div class="dfilter">
+    <div class="seg" id="dFilter" role="group" aria-label="按严重度筛选">
+      <button type="button" data-v="all" aria-pressed="true">全部 15</button>
+      <button type="button" data-v="hi" aria-pressed="false">高 4</button>
+      <button type="button" data-v="mid" aria-pressed="false">中 7</button>
+      <button type="button" data-v="lo" aria-pressed="false">低 4</button>
+    </div>
+    <button type="button" class="btn" id="dExpand">全部展开</button>
+  </div>
+
+  <details class="dt" id="d1" data-sev="hi" open>
+    <summary><span class="sev hi">高</span><span class="dn">D1</span><span class="dtt">动态正则就是可微版 VBench Dynamic Degree，而最终的 +1.46 几乎全来自它</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <span class="lb">现象</span>
+      <p>论文说正则「受 VBench 用光流衡量动态的启发」，没给 s(v̂) 的定义和 τ。发布代码里，光流网络、迭代次数、取帧率、每对的打分方式、阈值 11.25 px、「第 10 高的帧对」这 6 项与 VBench DD 的实现完全一致（见<a class="dref" href="#s-reg">动态正则一节</a>的对照表）。这不是受启发，是把评测判据直接变成训练损失。</p>
+      <span class="lb">为什么要紧</span>
+      <p>按 VBench 权重，每点 DD = 0.0615 点 Total。无正则 → 有正则的 +1.46 中 +1.44 可由 DD 单独解释；没有这个正则，ViRDM 的 Total 是 83.41，低于 Causal Forcing 复测的 84.51。论文 §4.3 用 4 个时序维度做「目标外诊断」、再加人评，这点值得肯定，但那 4 个维度本来就偏爱少动，分不清「真运动」和「为过线而加的运动」。另外，hinge 对所有训练 prompt 一视同仁，要求每条视频至少 10 个帧对过线，不管 prompt 是不是在描述静止场景。</p>
+      <span class="lb">建议</span>
+      <p>换一个与评测无关的运动度量（不同光流网络、不同阈值与取帧，或 Causal Forcing 那套 100 条动作 prompt 上的 DD）重训一遍；报告主表时同时给出去掉 DD 的分数。</p>
+    </div>
+  </details>
+
+  <details class="dt" id="d2" data-sev="hi">
+    <summary><span class="sev hi">高</span><span class="dn">D2</span><span class="dtt">「比 Causal Forcing 高 0.36」：构成偏向静止维度，且在种子与协议方差量级内</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <p>+0.36 = 非 DD 质量维 +1.06 − DD 0.70 + Semantic 0（图 H）。非 DD 质量维中 4 个（主体一致、背景一致、闪烁、运动平滑）静止画面天然高分，同一篇论文里 DD = 18 的 DINOv2 版在这些维度上最高（图 S）。论文没有 16 维分项，无法判断 +1.06 有多少来自美学和成像质量。</p>
+      <p>只跑了一个训练 seed，没有置信区间。同一个 Causal Forcing checkpoint 在 CF 原文是 84.04，本文复测 84.51，同一模型跨论文最大相差 0.47–1.00（见跨论文对照表）。同环境复测比抄数更可比，但 seed 方差没有报告。</p>
+    </div>
+  </details>
+
+  <details class="dt" id="d3" data-sev="hi">
+    <summary><span class="sev hi">高</span><span class="dn">D3</span><span class="dtt">缺「0 次更新」基线，也没有训练曲线</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <p>所有表都是 RDM 之后的分数，因果 ODE 初始化本身在同一协议下的 VBench 没有报告，而这个 checkpoint 是公开的。20 次 Adam 更新、学习率 2×10⁻⁶，每个参数的位移量级约 4×10⁻⁵<span class="inf">推算</span>，模型离初始化很近，「RDM 贡献了多少」目前读不出来。</p>
+      <p>结论写「ViRDM converges in 20 generator updates」，但发布代码只保存第 20 步，论文也没有损失或分数随更新次数的曲线。继续训下去会不会开始钻 V-JEPA 的空子，同样不知道（见 D9）。</p>
+    </div>
+  </details>
+
+  <details class="dt" id="d4" data-sev="hi">
+    <summary><span class="sev hi">高</span><span class="dn">D4</span><span class="dtt">Table 5 的「冻结动态」干预测的是卡顿，不能支撑「分不清中等与高动态」</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <p>保留 p% 均匀帧再重复补齐，总位移不变，只是走得一顿一顿（图 F）。在 VBench 的 8 fps 取帧下，p = 50% 与原视频完全一样，p = 25% 的单对位移反而翻倍。所以这组干预并没有造出「中等动态」与「高动态」的对照，也就无法检验 V-JEPA 能否区分二者。合适的干预应该改变运动幅度，例如慢放、或按实测光流分档的真实视频。</p>
+      <p>更直接的缺口：参考集自身的 DD 没有报告。若参考视频本身只有中等运动，RDM 停在 48.6 是在如实匹配靶子，而动态正则是把分布推离靶子。这会让「表征对动态不敏感」的叙事换一种解释。</p>
+    </div>
+  </details>
+
+  <details class="dt" id="d5" data-sev="mid">
+    <summary><span class="sev mid">中</span><span class="dn">D5</span><span class="dtt">「teacher- and critic-free」的边界：教师从在线挪到了离线</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <p>在线教师和 critic 确实去掉了，连 14B 模型都不需要加载，这是本文最实在的贡献。但靶子和起点都来自教师：参考集取自 Causal Forcing 的数据集，CF 论文附录 D 说这批数据由 Wan 双向模型用 VidProM 提示词合成（论文写约 3K，HF 上公开的是 6K 版本）；初始化是 CF 的 teacher forcing（2K 步）+ 因果 ODE 蒸馏（1K 步）。Table 7 只比最后一段，对和 CF 比较是公平的，但「不需要教师」更准确的说法是「不需要在线教师」。</p>
+    </div>
+  </details>
+
+  <details class="dt" id="d6" data-sev="mid">
+    <summary><span class="sev mid">中</span><span class="dn">D6</span><span class="dtt">论文公式与发布代码不一致（Nyström 近似、损失自归一化）</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <p>① 吸引项在代码里用 4,096 个 Nyström 地标近似 6,505 条参考，而式 3 写的是精确求和。② 代码把 RDM 除以它自己的 detach 值，梯度等于 ∇ log MMD²；式 7 的 λ = 5×10⁻⁴ 实际上是相对这个归一化后的量。照论文公式复现，动态项的相对权重会偏差 30–160 倍（取决于当时 MMD 的大小，Table 5 量级 0.006–0.03）。③ 梯度裁剪 10 也没写。这几处不影响结论本身，但会直接影响复现。</p>
+      <p>顺带一提：Adam 对单一损失的整体缩放基本不敏感，所以自归一化主要改变的是 RDM 与动态项之间的相对权重。这也意味着论文用「损失差值变小」来论证「优化信号变弱」（§3.5.1）说服力有限，在 Adam 下真正起作用的是梯度方向，而不是幅值。</p>
+    </div>
+  </details>
+
+  <details class="dt" id="d7" data-sev="mid">
+    <summary><span class="sev mid">中</span><span class="dn">D7</span><span class="dtt">训练时生成侧与参考侧用了不同的解码器</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <p>参考特征：Wan VAE 解码 → V-JEPA。生成特征：TAEW2.1 解码 → V-JEPA。推理和评测再换回 Wan VAE。于是 MMD 里含一个恒定的「解码器域差」，生成器可能被推去补偿 TAEW 的模糊或色偏，这种补偿在 Wan VAE 解码下未必有益。论文把解码器定位为「可微的桥」，但没有量化这座桥本身带来的偏差。最简单的检查：把同一批参考 latent 分别用两种解码器解码，算两组特征之间的 MMD。</p>
+    </div>
+  </details>
+
+  <details class="dt" id="d8" data-sev="mid">
+    <summary><span class="sev mid">中</span><span class="dn">D8</span><span class="dtt">「训练快 11 倍」主要来自更新次数，而 DMD 需要多少次没有扫</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <p>每次更新 DMD 约 11 分钟、ViRDM 约 6 分钟，只差 1.8 倍；另外 6 倍来自 120 对 20 次更新。同一因果 ODE 初始化下 DMD 的「更新次数–质量」曲线论文没有给。若 DMD 20–40 次更新就接近收敛，时间节省会缩到 2–4 倍（图 I）。显存节省（77.1 → 48.3 GB）是结构性的，不受影响。</p>
+    </div>
+  </details>
+
+  <details class="dt" id="d9" data-sev="mid">
+    <summary><span class="sev mid">中</span><span class="dn">D9</span><span class="dtt">只用一个视频编码器，也没有留出编码器上的评测</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <p>图像前作 iRDM（ref [17]）明确指出：任何单一表征都能被优化到「比真实数据还近」而样本仍然假，所以它用 10 个编码器加 Lagrangian 权重平衡，另留 4 个编码器专门评测。ViRDM 借用了它的 Nyström 估计，却只用 V-JEPA 2.1 一个视频编码器，评测只看 VBench，没有任何与训练编码器无关的分布距离（例如 I3D 的 FVD 或其他视频编码器上的 MMD）。20 次小步更新可能恰好停在「还没来得及刷」的区间，论文没有讨论这一点。</p>
+    </div>
+  </details>
+
+  <details class="dt" id="d10" data-sev="mid">
+    <summary><span class="sev mid">中</span><span class="dn">D10</span><span class="dtt">两个扩展实验的设置交代不清</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <p>Table 10：基线（Causal Forcing++、ASD、One-Forcing）的分数是复测还是引用没有说明，而且把逐帧模型和逐段模型放在一起比。Table 11：论文写「bidirectional Wan2.1-1.3B generators」，发布代码的 bid4 配方却沿用因果 ODE checkpoint 作初始化；1/2 步双向的训练配方代码里没有，可能是 4 步模型直接少步采样，也可能是未发布的配方。</p>
+    </div>
+  </details>
+
+  <details class="dt" id="d11" data-sev="mid">
+    <summary><span class="sev mid">中</span><span class="dn">D11</span><span class="dtt">种群大小的结论比数据更强</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <p>Table 2 各行 Total 相差不超过 0.38，单 seed。B = 1024 实际最高（83.57）。数据支持的是「大种群在视频上不划算」，而不是「图像的大批量处方不迁移」。另外 B 变了而学习率与更新次数不变，大 B 的估计更准却没有多拿到更新，这个设计本身就偏向小 B。</p>
+    </div>
+  </details>
+
+  <details class="dt" id="d12" data-sev="lo">
+    <summary><span class="sev lo">低</span><span class="dn">D12</span><span class="dtt">人评规模小，prompt 选择方式未说明</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <p>25 人；四选一 20 个 prompt，正则消融 10 个 prompt。四选一里 Self Forcing 第二、Causal Forcing 第三，与 VBench 的排序相反，这本身提醒 VBench 上零点几分的差距不一定对应主观偏好。</p>
+    </div>
+  </details>
+
+  <details class="dt" id="d13" data-sev="lo">
+    <summary><span class="sev lo">低</span><span class="dn">D13</span><span class="dtt">项目页称参考集为「real video-text pairs」</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <p>与 Causal Forcing 论文对这批数据的描述（由 Wan 双向模型合成）不符；论文正文只说是 CF 构建的训练数据。HF 数据集需要登录，本页无法直接核对，以 CF 原文为准。</p>
+    </div>
+  </details>
+
+  <details class="dt" id="d14" data-sev="lo">
+    <summary><span class="sev lo">低</span><span class="dn">D14</span><span class="dtt">Algorithm 2 的小笔误</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <p>Stage 1 只缓存 ẑ<sub>0</sub>、ĥ 和随机轨迹 T，但 Stage 3 第 14 行要在 v̂ 上重放 Φ。代码的做法是在 Stage 3 再用 TAEW 解码一次得到 v̂，算法框图里漏了这一步。</p>
+    </div>
+  </details>
+
+  <details class="dt" id="d15" data-sev="lo">
+    <summary><span class="sev lo">低</span><span class="dn">D15</span><span class="dtt">Semantic +0.48 的解释缺分项证据</span><span class="caret">▶</span></summary>
+    <div class="body">
+      <p>论文把加入正则后 Semantic 的 +0.48 归因于 Human Action 这类需要动作才能满足的语义维度，但没有给出 Semantic 下各维的分数，这个解释目前只是合理推测。</p>
+    </div>
+  </details>
+
+  <div class="verdict">
+    <p><b style="color:var(--ink)">综合判断。</b>成立的部分：RDM 在少步因果视频上可以训得动、训得快，只需要一个生成器在显存里；随机出口 + 分段 VJP 的重放设计干净、有断言校验，代码开放、可复现；因果兼容的初始化是必要前提，这个发现与 DMD 系工作互相印证。</p>
+    <p>要打折的部分：「质量超过 DMD 基线」的最后一段增益，来自一个与评测判据同构的正则；和 CF 的差距落在种子与协议方差量级；缺初始化基线和训练曲线。更稳妥的读法是：ViRDM 用约 1/10 的算力、不加载教师，得到了与 DMD 基线同一档次的 VBench。</p>
+  </div>
+</section>
+
+<!-- ============================================================ REPRO -->
+<section class="sec" id="s-repro">
+  <div class="eyebrow"><span class="n">R</span><span class="t">What to run next</span><span class="line"></span></div>
+  <h2>建议补的实验（按成本从低到高）</h2>
+  <div class="tw"><table>
+    <thead><tr><th class="l">实验</th><th class="l">回答什么问题</th><th class="l">成本</th></tr></thead>
+    <tbody>
+      <tr><td class="l wrap">直接评测因果 ODE checkpoint（0 次更新）</td><td class="l wrap">20 次 RDM 到底带来多少（D3）</td><td class="l">只推理 + VBench</td></tr>
+      <tr><td class="l wrap">公开 16 维 VBench 分项（ViRDM、无正则版、SF、CF）</td><td class="l wrap">+1.06 来自美学/成像还是静止维度（D2）</td><td class="l">零，已有视频</td></tr>
+      <tr><td class="l wrap">统计参考集的 DD 与光流分布</td><td class="l wrap">正则是在追靶子还是推离靶子（D4）</td><td class="l">6,505 条 RAFT</td></tr>
+      <tr><td class="l wrap">同一批参考 latent 用 Wan VAE 与 TAEW 解码，算特征 MMD</td><td class="l wrap">解码器域差有多大（D7）</td><td class="l">一次前向</td></tr>
+      <tr><td class="l wrap">留出编码器上的分布距离（I3D-FVD、其他视频编码器 MMD）</td><td class="l wrap">是否在刷 V-JEPA（D9）</td><td class="l">评测侧</td></tr>
+      <tr><td class="l wrap">3 个训练 seed × 3 个采样 seed</td><td class="l wrap">0.36 是否显著（D2）</td><td class="l">约 3 × 16 A100·h + 评测</td></tr>
+      <tr><td class="l wrap">把 s<sub>10</sub> hinge 换成与 VBench 无关的运动度量重训</td><td class="l wrap">正则的收益是否依赖与评测同构（D1）</td><td class="l">约 16 A100·h</td></tr>
+      <tr><td class="l wrap">训练到 50 / 100 次更新，记录 VBench 与留出指标</td><td class="l wrap">是否真的收敛、会不会退化（D3、D9）</td><td class="l">约 40–80 A100·h</td></tr>
+      <tr><td class="l wrap">同一因果 ODE 初始化下 DMD 的 20/40/80/120 次更新曲线</td><td class="l wrap">效率优势的真实倍数（D8）</td><td class="l">约 176 A100·h</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============================================================ PLACEMENT -->
+<section class="sec" id="s-place">
+  <div class="eyebrow"><span class="n">W</span><span class="t">Placement</span><span class="line"></span></div>
+  <h2>定位：对交互式视频世界模型意味着什么</h2>
+  <p class="lead">ViRDM 解决的是「少步因果生成器怎么便宜地后训练」，没有动作条件、没有长时记忆、只生成 81 帧。它对世界模型的价值主要在训练管线层面。</p>
+  <div class="grid2">
+    <div class="card cR"><div class="mono">可以直接用的</div><h5>后训练门槛大幅降低</h5>不需要加载 14B 教师，单张 80 GB 卡可跑（68.5 GB），一次后训练约 16 A100·h。对需要频繁换数据域、换条件、重新蒸馏的世界模型团队，这把迭代成本从「一天」降到「一顿饭」。推理结构完全不变，可与 KV cache 压缩、稀疏注意力等推理加速叠加。</div>
+    <div class="card cG"><div class="mono">需要先有的</div><h5>因果兼容的少步初始化</h5>RDM 精修不了一个非因果的模型。你仍然需要 teacher forcing + 因果 ODE（或因果 CD）这一段，而它依赖教师轨迹。ViRDM 替换的是 DMD 那一段，不是整条管线。</div>
+    <div class="card cP"><div class="mono">要改造的</div><h5>动作条件与时序对齐</h5>现在的联合特征只拼了文本。换成动作条件，需要把动作序列编码进 h（类似 β·τ(c)）。但全局平均池化会抹掉「动作在第几帧生效」的对齐信息，交互式世界模型最在意的正是这个。按时间窗口分块匹配、或保留 V-JEPA 的时序 token，是自然的扩展方向。</div>
+    <div class="card cY"><div class="mono">要小心的</div><h5>动态正则在世界模型里是错的方向</h5>世界模型里「动多少」由动作决定：动作是「停」时画面就该静止。一个要求每条视频至少 10 个帧对超过 11.25 px 的正则，在这里会直接违背动作条件。如果要借用 ViRDM，建议去掉这一项，或者把它条件化到动作上。</div>
+    <div class="card cT"><div class="mono">可以试的组合</div><h5>RDM 作为 DMD 之后的廉价精修</h5>论文把 RDM 当作 DMD 的替代品来比，没试两者叠加。RDM 的目标直接定义在终点分布上、只要一个网络，放在 DMD 之后做领域适配（比如换到游戏或机器人视频的参考集）可能更划算。</div>
+    <div class="card cQ"><div class="mono">长时程</div><h5>81 帧之外没有约束</h5>一条视频一个特征、训练只看 5 秒。长时 rollout 的漂移、记忆一致性都不在目标里。滚动窗口上的分布匹配（每个窗口一个特征）是把它用到长视频的直接思路，论文的 Limitations 也承认了这一点。</div>
+  </div>
+</section>
+
+<!-- ============================================================ APPENDIX -->
+<section class="sec" id="s-appendix">
+  <div class="eyebrow"><span class="n">Z</span><span class="t">Appendix</span><span class="line"></span></div>
+  <h2>附录速查：完整配方</h2>
+  <div class="tw"><table>
+    <thead><tr><th class="l">项目</th><th class="l">取值</th><th class="l">来源</th></tr></thead>
+    <tbody>
+      <tr><td>生成器</td><td class="l wrap">Wan2.1-T2V-1.3B，逐段因果（每段 3 个 latent 帧，共 7 段）</td><td class="l"><span class="src">论文</span></td></tr>
+      <tr><td>视频规格</td><td class="l wrap">81 帧 / 21 latent 帧 / 832×480 / 16 fps</td><td class="l"><span class="src">论文</span></td></tr>
+      <tr><td>去噪步</td><td class="l wrap">4 步，t ∈ {1, 0.9375, 0.8333, 0.625}（1000/750/500/250 经 shift 5）</td><td class="l"><span class="src">论文</span></td></tr>
+      <tr><td>初始化</td><td class="l wrap">Causal Forcing 公开的 chunkwise/causal_ode.pt（sha256 校验）</td><td class="l"><span class="src">论文</span><span class="cod">代码</span></td></tr>
+      <tr><td>优化器</td><td class="l wrap">AdamW，lr 2×10⁻⁶，β = (0.9, 0.95)，weight decay 0，梯度裁剪 10</td><td class="l"><span class="src">论文</span><span class="cod">代码</span></td></tr>
+      <tr><td>更新次数</td><td class="l wrap">20，只保存第 20 步</td><td class="l"><span class="src">论文</span><span class="cod">代码</span></td></tr>
+      <tr><td>生成种群</td><td class="l wrap">B = 64 = 8 卡 × 8 次累积 × 每卡 1 条</td><td class="l"><span class="src">论文</span></td></tr>
+      <tr><td>随机出口</td><td class="l wrap">每个累积微批从 {1,2,3,4} 均匀抽 S，rank 0 广播；7 段共享</td><td class="l"><span class="src">论文</span><span class="cod">代码</span></td></tr>
+      <tr><td>视频编码器</td><td class="l wrap">V-JEPA 2.1 ViT-L/16（ViT-G 蒸馏、384 版权重），原生 480×832，82 帧，41×30×52 token 全局平均，1024 维，不归一化</td><td class="l"><span class="src">论文</span><span class="cod">代码</span></td></tr>
+      <tr><td>文本编码器</td><td class="l wrap">SigLIP2 So400m/16-256 文本塔，1152 维，L2 归一化</td><td class="l"><span class="src">论文</span></td></tr>
+      <tr><td>核与带宽</td><td class="l wrap">高斯核；σ<sub>v</sub> = 26.09（中位数），文本中位距离 1.097，β = 23.77</td><td class="l"><span class="cod">代码</span></td></tr>
+      <tr><td>参考分布</td><td class="l wrap">6,505 条（Causal Forcing 数据），Wan VAE 解码后编码；Nyström 4,096 地标</td><td class="l"><span class="src">论文</span><span class="cod">代码</span></td></tr>
+      <tr><td>损失</td><td class="l wrap">MMD²（有偏估计），除以自身 detach 值后回传</td><td class="l"><span class="cod">代码</span></td></tr>
+      <tr><td>训练用解码器</td><td class="l wrap">TAEW2.1（推理与评测用 Wan VAE）</td><td class="l"><span class="src">论文</span></td></tr>
+      <tr><td>动态正则</td><td class="l wrap">RAFT raft-things、20 iters、8 fps、top-5% 幅值均值、第 10 高帧对、hinge 阈值 11.25 px，λ = 5×10⁻⁴</td><td class="l"><span class="cod">代码</span></td></tr>
+      <tr><td>硬件与耗时</td><td class="l wrap">8×A100 80GB，约 6 min/更新，共 2 h，峰值 48.3 GB/卡；单卡 68.5 GB</td><td class="l"><span class="src">论文</span></td></tr>
+      <tr><td>其他省显存</td><td class="l wrap">FSDP 全分片、gradient checkpointing、生成器激活 CPU offload、FlashAttention 2.8.3</td><td class="l"><span class="cod">代码</span></td></tr>
+      <tr><td>评测</td><td class="l wrap">VBench 官方协议；Self Forcing 的扩写 prompt（946 行、944 个唯一名），每 prompt 5 个样本，共 4,720 条</td><td class="l"><span class="cod">代码</span></td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="foot">
+    本页依据 arXiv 2609.28923v1（2026-09-24）与 GitHub neu-vi/ViRDM 的发布代码（2026-09-26 读取）。对照材料：Causal Forcing（arXiv 2602.02214v5）、Self Forcing（arXiv 2506.08009）、RDM / iRDM（arXiv 2607.02375）。标为<span class="inf">推算</span>的数字是本页按公开权重与论文表格计算的，不是论文给出的；标为<span class="cod">代码</span>的内容以发布仓库为准，论文正文可能没有写。
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+(function(){
+"use strict";
+const NS = "http://www.w3.org/2000/svg";
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+function el(tag, attrs, text){
+  const e = document.createElementNS(NS, tag);
+  if (attrs) for (const k in attrs){ if (attrs[k] !== null && attrs[k] !== undefined) e.setAttribute(k, attrs[k]); }
+  if (text !== undefined && text !== null) e.textContent = text;
+  return e;
+}
+function add(parent, tag, attrs, text){ const e = el(tag, attrs, text); parent.appendChild(e); return e; }
+function clear(node){ while (node.firstChild) node.removeChild(node.firstChild); }
+const f2 = v => Number(v).toFixed(2);
+const sgn = v => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2);
+function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function gauss(rng){ let u = 0, v = 0; while (u === 0) u = rng(); while (v === 0) v = rng(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function seg(id, cb){
+  const root = document.getElementById(id); if (!root) return;
+  const btns = $$("button", root);
+  btns.forEach(b => b.addEventListener("click", () => {
+    btns.forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    cb(b.dataset.v !== undefined ? b.dataset.v : b.dataset.a);
+  }));
+}
+const reduceMotion = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ---------------------------------------------------------- theme */
+const redrawHooks = [];
+const tb = $("#themeBtn");
+try { const st = localStorage.getItem("virdm-theme"); if (st) document.documentElement.setAttribute("data-theme", st); } catch (e) {}
+tb.addEventListener("click", () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const sysDark = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches;
+  const next = cur === "dark" ? "light" : (cur === "light" ? "dark" : (sysDark ? "light" : "dark"));
+  document.documentElement.setAttribute("data-theme", next);
+  try { localStorage.setItem("virdm-theme", next); } catch (e) {}
+  redrawHooks.forEach(f => f());
+});
+if (window.matchMedia){ const mq = matchMedia("(prefers-color-scheme: dark)"); if (mq.addEventListener) mq.addEventListener("change", () => redrawHooks.forEach(f => f())); }
+
+/* ---------------------------------------------------------- progress + scrollspy */
+const prog = $("#prog"), links = $$(".rail a"), secs = links.map(a => document.querySelector(a.getAttribute("href")));
+function onScroll(){
+  const h = document.documentElement;
+  prog.style.width = (h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight) * 100) + "%";
+  let best = 0;
+  secs.forEach((s, i) => { if (s && s.getBoundingClientRect().top < 140) best = i; });
+  links.forEach((a, i) => a.classList.toggle("on", i === best));
+}
+addEventListener("scroll", onScroll, {passive:true}); onScroll();
+
+/* ---------------------------------------------------------- hero cloud */
+(function(){
+  const svg = $("#heroCloud"); if (!svg) return;
+  const rng = mulberry32(3);
+  for (let i = 0; i < 46; i++){
+    const c = i % 2 ? [196, 86] : [214, 150];
+    add(svg, "circle", {cx: c[0] + gauss(rng) * 22, cy: c[1] + gauss(rng) * 16, r: 2.6, class: "mk-R", opacity: .7});
+  }
+  const pts = [];
+  for (let i = 0; i < 14; i++){ const p = [70 + gauss(rng) * 18, 150 + gauss(rng) * 18]; pts.push(p); }
+  pts.forEach((p, i) => {
+    if (i % 3 === 0) add(svg, "path", {d: `M${p[0]} ${p[1]} L${p[0] + 26} ${p[1] - 12}`, class: "l-G", "stroke-width": 1.2, opacity: .6, "marker-end": "url(#ar-G)"});
+    add(svg, "circle", {cx: p[0], cy: p[1], r: 3.6, class: "mk-G", opacity: .9});
+  });
+})();
+
+/* ============================================================ 图 A */
+(function(){
+  const read = $("#fA-read");
+  const txt = {
+    dmd: "显存里的视频扩散网络 <b>3 个</b>（生成器 1.3B + 教师 14B + critic 1.3B） · 峰值 <b>77.1 GB</b>/卡 · <b>22 h</b> · <b>120</b> 次生成器更新 · <b>176</b> A100·h",
+    virdm: "显存里的视频扩散网络 <b>1 个</b>（生成器 1.3B），另有冻结的 TAEW2.1 / V-JEPA 2.1 / SigLIP2 / RAFT · 峰值 <b>48.3 GB</b>/卡 · <b>2 h</b> · <b>20</b> 次更新 · <b>16</b> A100·h"
+  };
+  function show(m){
+    const d = $("#fA-dmd"), v = $("#fA-virdm");
+    if (m === "dmd"){ d.removeAttribute("hidden"); v.setAttribute("hidden", ""); }
+    else { v.removeAttribute("hidden"); d.setAttribute("hidden", ""); }
+    read.innerHTML = txt[m];
+  }
+  $$("#figA .seg button").forEach(b => b.addEventListener("click", () => {
+    $$("#figA .seg button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    show(b.dataset.a);
+  }));
+  show("virdm");
+})();
+
+/* ============================================================ 图 B：MMD 粒子玩具 */
+(function(){
+  const cv = $("#bCanvas"); if (!cv) return;
+  const ctx = cv.getContext("2d");
+  const N = 240;
+  const rngR = mulberry32(7);
+  const modes = [{c:[-1.7, 0.9], s:.32, w:.35}, {c:[1.5, 1.0], s:.38, w:.35}, {c:[0.3, -1.15], s:.30, w:.30}];
+  const ref = [];
+  for (let i = 0; i < N; i++){
+    const u = rngR(); const m = u < .35 ? modes[0] : (u < .70 ? modes[1] : modes[2]);
+    ref.push([m.c[0] + gauss(rngR) * m.s, m.c[1] + gauss(rngR) * m.s]);
+  }
+  const dists = [];
+  for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++){ const dx = ref[i][0] - ref[j][0], dy = ref[i][1] - ref[j][1]; dists.push(Math.sqrt(dx * dx + dy * dy)); }
+  dists.sort((a, b) => a - b);
+  const sigma0 = dists[Math.floor(dists.length / 2)];
+  let sigMul = 1, B = 64, mode = "full", gen = [], it = 0, playing = false, raf = 0, lastF = [];
+  let kRR = 0;
+  function computeKRR(){
+    const s2 = 2 * (sigma0 * sigMul) ** 2; let acc = 0;
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++){ const dx = ref[i][0] - ref[j][0], dy = ref[i][1] - ref[j][1]; acc += Math.exp(-(dx * dx + dy * dy) / s2); }
+    kRR = acc / (N * N);
+  }
+  function reset(){
+    const rng = mulberry32(11 + B);
+    gen = [];
+    for (let i = 0; i < B; i++) gen.push([-2.35 + gauss(rng) * .32, -1.25 + gauss(rng) * .28]);
+    it = 0; lastF = gen.map(() => [0, 0]);
+    computeKRR(); draw();
+  }
+  function mmd(){
+    const s2 = 2 * (sigma0 * sigMul) ** 2; let gg = 0, gr = 0;
+    for (let i = 0; i < B; i++){
+      for (let j = 0; j < B; j++){ const dx = gen[i][0] - gen[j][0], dy = gen[i][1] - gen[j][1]; gg += Math.exp(-(dx * dx + dy * dy) / s2); }
+      for (let m = 0; m < N; m++){ const dx = gen[i][0] - ref[m][0], dy = gen[i][1] - ref[m][1]; gr += Math.exp(-(dx * dx + dy * dy) / s2); }
+    }
+    return gg / (B * B) - 2 * gr / (B * N) + kRR;
+  }
+  function step(){
+    const sg = sigma0 * sigMul, s2 = 2 * sg * sg, eta = 0.12, cap = 0.12;
+    const F = gen.map(() => [0, 0]);
+    for (let i = 0; i < B; i++){
+      let ax = 0, ay = 0;
+      for (let m = 0; m < N; m++){ const dx = ref[m][0] - gen[i][0], dy = ref[m][1] - gen[i][1]; const k = Math.exp(-(dx * dx + dy * dy) / s2); ax += k * dx; ay += k * dy; }
+      ax /= N; ay /= N;
+      let rx = 0, ry = 0;
+      if (mode === "full"){
+        for (let j = 0; j < B; j++){ if (j === i) continue; const dx = gen[i][0] - gen[j][0], dy = gen[i][1] - gen[j][1]; const k = Math.exp(-(dx * dx + dy * dy) / s2); rx += k * dx; ry += k * dy; }
+        rx /= B; ry /= B;
+      }
+      let sx = eta * (ax + rx), sy = eta * (ay + ry);
+      const n = Math.hypot(sx, sy); if (n > cap){ sx *= cap / n; sy *= cap / n; }
+      F[i] = [sx, sy];
+    }
+    for (let i = 0; i < B; i++){ gen[i][0] += F[i][0]; gen[i][1] += F[i][1]; }
+    lastF = F; it++;
+  }
+  function draw(){
+    const dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)){ cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = cssVar("--surf"); ctx.fillRect(0, 0, w, h);
+    const sc = Math.min(w / 6.8, h / 4.4), ox = w / 2, oy = h / 2 + 4;
+    const X = x => ox + x * sc, Y = y => oy - y * sc;
+    // bandwidth ring around first mode centre
+    ctx.strokeStyle = cssVar("--rule2"); ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(X(1.5), Y(1.0), sigma0 * sigMul * sc, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = cssVar("--ink3"); ctx.font = "10.5px " + cssVar("--font-mono");
+    ctx.fillText("σ = " + (sigma0 * sigMul).toFixed(2), X(1.5) + 4, Y(1.0) - sigma0 * sigMul * sc - 4 > 12 ? Y(1.0) - sigma0 * sigMul * sc - 4 : 14);
+    ctx.globalAlpha = .6; ctx.fillStyle = cssVar("--ref");
+    for (const p of ref){ ctx.beginPath(); ctx.arc(X(p[0]), Y(p[1]), 2.3, 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = .55; ctx.strokeStyle = cssVar("--gen"); ctx.lineWidth = 1.2;
+    for (let i = 0; i < B; i++){ const f = lastF[i] || [0, 0]; ctx.beginPath(); ctx.moveTo(X(gen[i][0]), Y(gen[i][1])); ctx.lineTo(X(gen[i][0] + f[0] * 5), Y(gen[i][1] + f[1] * 5)); ctx.stroke(); }
+    ctx.globalAlpha = 1; ctx.fillStyle = cssVar("--gen"); ctx.strokeStyle = cssVar("--surf"); ctx.lineWidth = 1.2;
+    for (const p of gen){ ctx.beginPath(); ctx.arc(X(p[0]), Y(p[1]), 4.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    $("#bIt").textContent = it;
+    $("#bVal").textContent = mmd().toFixed(4);
+  }
+  function loop(){ if (!playing) return; step(); step(); draw(); if (it >= 900){ setPlay(false); return; } raf = requestAnimationFrame(loop); }
+  function setPlay(p){ playing = p; $("#bPlay").textContent = p ? "❚❚ 暂停" : "▶ 播放"; if (p){ cancelAnimationFrame(raf); raf = requestAnimationFrame(loop); } }
+  $("#bPlay").addEventListener("click", () => setPlay(!playing));
+  $("#bStep").addEventListener("click", () => { setPlay(false); for (let i = 0; i < 5; i++) step(); draw(); });
+  $("#bReset").addEventListener("click", () => { setPlay(false); reset(); });
+  seg("bSig", v => { sigMul = parseFloat(v); computeKRR(); draw(); });
+  seg("bB", v => { B = parseInt(v, 10); reset(); });
+  seg("bMode", v => { mode = v; draw(); });
+  window.addEventListener("resize", draw);
+  redrawHooks.push(draw);
+  reset();
+  // pre-roll a few steps so the resting frame already shows forces
+  for (let i = 0; i < 2; i++) step(); draw();
+})();
+
+/* ============================================================ 图 C：随机出口 */
+(function(){
+  const svg = $("#figCsvg"); if (!svg) return;
+  let S = 3, mode = "s4";
+  const ts = ["1.000", "0.9375", "0.8333", "0.625"];
+  function render(){
+    clear(svg);
+    const x0 = 124, cw = 104, w = 96, y0 = 40, rh = 46, h = 38;
+    for (let k = 0; k < 7; k++) add(svg, "text", {x: x0 + k * cw + w / 2, y: 24, "text-anchor": "middle", class: "s-lbb"}, "段 " + (k + 1));
+    for (let j = 0; j < 4; j++){
+      add(svg, "text", {x: 12, y: y0 + j * rh + 17, class: "s-lbb"}, "第 " + (j + 1) + " 步");
+      add(svg, "text", {x: 12, y: y0 + j * rh + 32, class: "s-sm"}, "t = " + ts[j]);
+    }
+    const ky = y0 + 4 * rh + 6;
+    add(svg, "text", {x: 12, y: ky + 15, class: "s-lbb"}, "写 KV");
+    add(svg, "text", {x: 12, y: ky + 29, class: "s-sm"}, "t = 0");
+    const exitStep = mode === "inf" ? 4 : S;
+    for (let k = 0; k < 7; k++){
+      const x = x0 + k * cw;
+      for (let j = 0; j < 4; j++){
+        const y = y0 + j * rh, st = j + 1;
+        if (st < exitStep){
+          add(svg, "rect", {x, y, width: w, height: h, rx: 7, class: "s-box3"});
+          add(svg, "text", {x: x + w / 2, y: y + 16, "text-anchor": "middle", class: "s-sm"}, "无梯度");
+          add(svg, "text", {x: x + w / 2, y: y + 30, "text-anchor": "middle", class: "s-sm"}, "x̂₀ → 加噪");
+        } else if (st === exitStep){
+          const cls = mode === "s4" ? "f-G" : (mode === "inf" ? "f-G" : "f-G dash");
+          const r = add(svg, "rect", {x, y, width: w, height: h, rx: 7, class: cls});
+          if (mode === "s4") r.setAttribute("stroke-width", "2.4");
+          const t1 = mode === "s4" ? "出口 · 带梯度" : (mode === "inf" ? "输出 x̂₀" : "出口 · 无梯度");
+          const t2 = mode === "s4" ? "∂L/∂ẑ₀ 从这进" : (mode === "inf" ? "推理不回传" : "缓存 ẑ₀");
+          add(svg, "text", {x: x + w / 2, y: y + 16, "text-anchor": "middle", class: "s-lbb", style: "font-size:11.5px"}, t1);
+          add(svg, "text", {x: x + w / 2, y: y + 30, "text-anchor": "middle", class: "s-sm"}, t2);
+        } else {
+          add(svg, "rect", {x: x + .5, y: y + .5, width: w - 1, height: h - 1, rx: 7, fill: "none", class: "l-N dash"});
+          add(svg, "text", {x: x + w / 2, y: y + 23, "text-anchor": "middle", class: "s-sm"}, "跳过");
+        }
+      }
+      add(svg, "rect", {x, y: ky, width: w, height: 34, rx: 7, class: "f-R"});
+      add(svg, "text", {x: x + w / 2, y: ky + 21, "text-anchor": "middle", class: "s-sm"}, "写入 KV");
+    }
+    add(svg, "path", {d: `M${x0} ${ky + 46} H${x0 + 7 * cw - 12}`, class: "l-R", "marker-end": "url(#ar-R)"});
+    add(svg, "text", {x: x0 + 3.5 * cw, y: ky + 61, "text-anchor": "middle", class: "s-sm"}, "KV cache 逐段累积，下一段在它之上去噪（写入无梯度，梯度不跨段）");
+    const calls = 7 * (exitStep + 1);
+    const r = $("#cRead");
+    if (mode === "inf") r.innerHTML = `推理：每段 4 步 + 1 次写 KV，共 <b>${calls}</b> 次生成器调用，全部无梯度`;
+    else if (mode === "s1") r.innerHTML = `Stage 1：<b>${calls}</b> 次调用 = 7 段 × (${S} 步去噪 + 1 次写 KV)，全部无梯度 · 同时记下所有随机数（初始噪声、每步加噪的噪声、S）`;
+    else r.innerHTML = `Stage 4：按记录的随机数把同样 <b>${calls}</b> 次调用重放一遍，其中只有 <b>7</b> 次（每段的出口）带梯度 · 一条训练视频合计 <b>${2 * calls}</b> 次前向；S 均匀抽取时平均 ${(2 * 7 * 3.5).toFixed(0)} 次，推理只需 35 次`;
+  }
+  seg("cS", v => { S = parseInt(v, 10); render(); });
+  seg("cMode", v => { mode = v; render(); });
+  render();
+})();
+
+/* ============================================================ 图 D：分段 VJP */
+(function(){
+  const mods = [
+    ["生成器 G_θ", "1.3B · 7 段 rollout"],
+    ["TAEW2.1 解码器 D", "冻结 · latent → 81 帧 RGB"],
+    ["V-JEPA 2.1 编码器 Φ", "冻结 · 约 6.4 万个 token"],
+    ["MMD 损失", "64 × 2176 特征 vs 4,096 地标"],
+    ["RAFT（动态正则，可选）", "冻结 · 40 个帧对"]
+  ];
+  const lab = {idle: "本阶段不用", fwd: "前向 · 无图", graph: "建图 → 反传", free: "已释放"};
+  const stages = [
+    { st: ["fwd", "fwd", "fwd", "idle", "idle"],
+      cache: ["ẑ₀（每条视频的 latent）", "ĥ（每条 2176 维）", "随机轨迹 T（初始噪声、各步噪声、出口 S）"],
+      tag: "Stage 1 · 无梯度生成",
+      title: "先把 64 条视频全生成出来，只留下「小东西」",
+      body: ["每张卡依次生成 8 条视频（每条 1 个微批），生成器、解码器、编码器都只做前向，不建计算图。", "只缓存三样：latent ẑ₀、特征 ĥ、以及能让 rollout 原样重放的全部随机数。显存占用接近推理。"] },
+    { st: ["idle", "idle", "idle", "graph", "idle"],
+      cache: ["ẑ₀", "T", "g_h = ∂L/∂ĥ（每条 2176 维）"],
+      tag: "Stage 2 · 算特征端梯度",
+      title: "MMD 只在 64 个特征向量上求导，很便宜",
+      body: ["把 8 张卡的特征 all-gather 成 64 × 2176，算 MMD（代码里还会除以它自己的数值做归一化），对每条视频的 ĥ 求梯度。", "这一步的计算图只涉及 64 个向量和 4,096 个地标，算完即释放。MMD 把 64 条视频耦合在一起，这正是必须先全部生成、再统一求导的原因。"] },
+    { st: ["idle", "graph", "graph", "free", "graph"],
+      cache: ["ẑ₀", "T", "g_z = ∂L/∂ẑ₀（每条一个 latent 大小）"],
+      tag: "Stage 3 · 逐条视频做 VJP",
+      title: "编码器、解码器轮流建图，各自用完就扔",
+      body: ["对每条视频：先用 TAEW 无梯度重新解码得到 v̂，再对 Φ 建图，用 g_h 做 VJP 得到 ∂L/∂v̂，释放 Φ 的图；然后对 D 建图，做 VJP 得到 ∂L/∂ẑ₀，释放 D 的图。", "开启动态正则时，同样在这里对「第 10 高的帧对」跑一次带梯度的 RAFT，把梯度经 D 送回 latent，与 RDM 梯度相加。任意时刻显存里只有一张冻结网络的图。"] },
+    { st: ["graph", "free", "free", "free", "free"],
+      cache: ["θ.grad（64 条累积）→ 裁剪到 10 → AdamW 一步"],
+      tag: "Stage 4 · 生成器重放",
+      title: "按记录的随机数重放 rollout，只在出口那一步建图",
+      body: ["逐条视频重放 Stage 1 的 rollout：出口之前的步仍无梯度，出口那一步带梯度，把 g_z 反传进 θ。代码会断言重放出的 latent 与 Stage 1 相差 ≤ 1×10⁻⁴。", "生成器激活值还被 offload 到 CPU、并开了 gradient checkpointing。64 条都累积完后做一次参数更新。"] }
+  ];
+  let cur = 0;
+  function render(){
+    const s = stages[cur];
+    const box = $("#dMods"); clear(box);
+    mods.forEach((m, i) => {
+      const row = document.createElement("div"); row.className = "mod";
+      const nm = document.createElement("div"); nm.className = "nm"; nm.innerHTML = `<b>${m[0]}</b><small>${m[1]}</small>`;
+      const st = document.createElement("span"); st.className = "st " + s.st[i]; st.textContent = lab[s.st[i]];
+      row.appendChild(nm); row.appendChild(st); box.appendChild(row);
+    });
+    const c = document.createElement("div"); c.className = "cache";
+    c.innerHTML = "阶段结束时缓存：" + s.cache.map(x => `<span>${x}</span>`).join("");
+    box.appendChild(c);
+    $("#dPane").innerHTML = `<div class="tagline">${s.tag}</div><h5>${s.title}</h5>` + s.body.map(p => `<p>${p}</p>`).join("");
+    $$("#dStage button").forEach((b, i) => b.setAttribute("aria-pressed", i === cur ? "true" : "false"));
+  }
+  seg("dStage", v => { cur = parseInt(v, 10); render(); });
+  $("#dNext").addEventListener("click", () => { cur = (cur + 1) % 4; render(); });
+  render();
+})();
+
+/* ============================================================ 图 M：显存阶梯 */
+(function(){
+  const svg = $("#figMsvg"); if (!svg) return;
+  const rows = [
+    ["完整 rollout · Wan VAE · 端到端", "8 卡", null],
+    ["随机出口 · Wan VAE · 端到端", "8 卡", null],
+    ["随机出口 · Wan VAE · 分段 VJP", "8 卡", null],
+    ["随机出口 · TAEW2.1 · 分段 VJP", "1 卡", 68.5],
+    ["随机出口 · TAEW2.1 · 分段 VJP（最终）", "8 卡", 48.3],
+    ["DMD 对照（Table 7）", "8 卡", 77.1]
+  ];
+  const X0 = 350, XS = 4.8, top = 26, rh = 34, bh = 20;
+  const X = g => X0 + g * XS;
+  [0, 20, 40, 60, 80].forEach(g => {
+    add(svg, "line", {x1: X(g), x2: X(g), y1: top - 4, y2: top + rows.length * rh, class: "s-grid"});
+    add(svg, "text", {x: X(g), y: top + rows.length * rh + 16, "text-anchor": "middle", class: "s-sm"}, g + " GB");
+  });
+  rows.forEach((r, i) => {
+    const y = top + i * rh;
+    add(svg, "text", {x: 12, y: y + 11, class: "s-lb"}, r[0]);
+    add(svg, "text", {x: 12, y: y + 25, class: "s-sm"}, r[1]);
+    if (r[2] === null){
+      add(svg, "rect", {x: X0, y, width: X(86) - X0, height: bh, rx: 4, style: "fill:url(#hatch); stroke:var(--bad); stroke-width:1"});
+      add(svg, "text", {x: X(86) + 8, y: y + 15, class: "s-mono", style: "fill:var(--bad-ink)"}, "OOM");
+    } else {
+      const cls = i === 5 ? "f-T" : "f-R";
+      add(svg, "rect", {x: X0, y, width: X(r[2]) - X0, height: bh, rx: 4, class: cls});
+      const inside = r[2] > 60;
+      add(svg, "text", {x: inside ? X(r[2]) - 7 : X(r[2]) + 8, y: y + 15, "text-anchor": inside ? "end" : "start", class: "s-mono", style: "fill:var(--ink)"}, r[2].toFixed(1) + " GB");
+    }
+  });
+  add(svg, "line", {x1: X(80), x2: X(80), y1: top - 8, y2: top + rows.length * rh + 2, class: "s-thr"});
+  add(svg, "text", {x: X(80) - 6, y: top - 10, "text-anchor": "end", class: "s-sm", style: "fill:var(--bad-ink)"}, "A100 80 GB");
+})();
+
+/* ============================================================ 图 E：种群大小 */
+(function(){
+  const svg = $("#figEsvg"); if (!svg) return;
+  const Bs = [8, 64, 256, 1024], acc = [1, 8, 32, 128], mins = [0.75, 6, 24, 96];
+  const data = [[83.19, 83.41, 83.33, 83.57], [83.89, 84.11, 84.02, 84.32], [80.39, 80.61, 80.57, 80.59]];
+  const names = ["Total", "Quality", "Semantic"];
+  let m = 0;
+  function render(){
+    clear(svg);
+    const L = 76, R = 440, T = 44, Bt = 232;
+    const vals = data[m];
+    let lo = Math.floor((Math.min(...vals) - .06) * 10) / 10, hi = Math.ceil((Math.max(...vals) + .06) * 10) / 10;
+    const Y = v => Bt - (v - lo) / (hi - lo) * (Bt - T);
+    const X = b => L + (Math.log2(b) - 3) / 7 * (R - L);
+    add(svg, "text", {x: L - 40, y: 22, class: "s-ttl"}, "20 次更新后的 VBench " + names[m]);
+    for (let v = lo; v <= hi + 1e-9; v += .1){
+      add(svg, "line", {x1: L, x2: R, y1: Y(v), y2: Y(v), class: "s-grid"});
+      add(svg, "text", {x: L - 8, y: Y(v) + 3.5, "text-anchor": "end", class: "s-sm"}, v.toFixed(1));
+    }
+    add(svg, "line", {x1: L, x2: R, y1: Bt, y2: Bt, class: "s-axis"});
+    let d = "";
+    Bs.forEach((b, i) => { d += (i ? " L" : "M") + X(b) + " " + Y(vals[i]); });
+    add(svg, "path", {d, class: "l-R"});
+    Bs.forEach((b, i) => {
+      if (b === 64) add(svg, "circle", {cx: X(b), cy: Y(vals[i]), r: 9, fill: "none", class: "l-R", "stroke-width": 1.2});
+      add(svg, "circle", {cx: X(b), cy: Y(vals[i]), r: 4.6, class: "mk-R"});
+      add(svg, "text", {x: X(b), y: Y(vals[i]) - 13, "text-anchor": "middle", class: "s-mono", style: "fill:var(--ink)"}, vals[i].toFixed(2));
+      add(svg, "text", {x: X(b), y: Bt + 17, "text-anchor": "middle", class: "s-lb"}, "B = " + b);
+      add(svg, "text", {x: X(b), y: Bt + 31, "text-anchor": "middle", class: "s-sm"}, "累积 " + acc[i] + " 次/卡");
+    });
+    // right panel: minutes per update
+    const L2 = 540, R2 = 840, Y2 = v => Bt - v / 100 * (Bt - T);
+    add(svg, "text", {x: L2 - 10, y: 22, class: "s-ttl"}, "每次更新耗时（分钟）");
+    [0, 25, 50, 75, 100].forEach(v => {
+      add(svg, "line", {x1: L2, x2: R2, y1: Y2(v), y2: Y2(v), class: "s-grid"});
+      add(svg, "text", {x: L2 - 8, y: Y2(v) + 3.5, "text-anchor": "end", class: "s-sm"}, v);
+    });
+    add(svg, "line", {x1: L2, x2: R2, y1: Bt, y2: Bt, class: "s-axis"});
+    const bw = 44, step = (R2 - L2) / 4;
+    mins.forEach((v, i) => {
+      const x = L2 + step * i + (step - bw) / 2;
+      add(svg, "rect", {x, y: Y2(v), width: bw, height: Math.max(1.5, Bt - Y2(v)), rx: 3, class: Bs[i] === 64 ? "f-R" : "f-N"});
+      add(svg, "text", {x: x + bw / 2, y: Y2(v) - 6, "text-anchor": "middle", class: "s-mono", style: "fill:var(--ink)"}, v < 1 ? "≈0.75" : (i === 3 ? "96" : "≈" + v));
+      add(svg, "text", {x: x + bw / 2, y: Bt + 17, "text-anchor": "middle", class: "s-lb"}, "B = " + Bs[i]);
+    });
+  }
+  seg("eMetric", v => { m = parseInt(v, 10); render(); });
+  render();
+})();
+
+/* ============================================================ 图 T：Table 5 */
+(function(){
+  const svg = $("#figTsvg"); if (!svg) return;
+  const xs = [0, 25, 50, 75, 100];
+  const D = [
+    {img: [0, -10.7, -10.7, -10.7, -10.7], vid: [0, -72.7, -84.9, -91.4, -93.8], rawI: [0.006830, 0.006098, 0.006099, 0.006102, 0.006101], rawV: [0.100708, 0.027522, 0.015179, 0.008694, 0.006240]},
+    {img: [0, -5.5, -5.5, -5.5, -5.5], vid: [0, -47.8, -61.2, -70.7, -75.2], rawI: [0.082579, 0.078036, 0.078043, 0.078067, 0.078058], rawV: [0.317327, 0.165731, 0.123037, 0.093041, 0.078604]}
+  ];
+  let m = 0;
+  function render(){
+    clear(svg);
+    const L = 96, R = 690, T = 26, Bt = 222;
+    const X = v => L + v / 100 * (R - L), Y = v => T + (-v) / 100 * (Bt - T);
+    [0, -20, -40, -60, -80, -100].forEach(v => {
+      add(svg, "line", {x1: L, x2: R, y1: Y(v), y2: Y(v), class: "s-grid"});
+      add(svg, "text", {x: L - 8, y: Y(v) + 3.5, "text-anchor": "end", class: "s-sm"}, v + "%");
+    });
+    xs.forEach(x => add(svg, "text", {x: X(x), y: Bt + 18, "text-anchor": "middle", class: "s-lb"}, "保留 " + x + "%"));
+    add(svg, "text", {x: (L + R) / 2, y: Bt + 38, "text-anchor": "middle", class: "s-sm"}, "0% = 整条视频重复第一帧；100% = 原视频");
+    const d = D[m];
+    [["img", "l-Q", "mk-Q", "图像边际 · DINOv2"], ["vid", "l-P", "mk-P", "视频表征 · V-JEPA 2.1"]].forEach(([k, lc, mc, name]) => {
+      let p = ""; xs.forEach((x, i) => { p += (i ? " L" : "M") + X(x) + " " + Y(d[k][i]); });
+      add(svg, "path", {d: p, class: lc, "stroke-width": 2.4});
+      xs.forEach((x, i) => {
+        add(svg, "circle", {cx: X(x), cy: Y(d[k][i]), r: 4, class: mc});
+        if (i > 0 && i < 4) add(svg, "text", {x: X(x), y: Y(d[k][i]) + (k === "img" ? -9 : 16), "text-anchor": "middle", class: "s-mono"}, d[k][i].toFixed(1) + "%");
+      });
+      const ly = Y(d[k][4]);
+      add(svg, "text", {x: R + 14, y: ly - 3, class: "s-lbb", style: "fill:var(--" + (k === "img" ? "qa" : "rep") + "-ink)"}, name);
+      const raw = k === "img" ? d.rawI : d.rawV;
+      add(svg, "text", {x: R + 14, y: ly + 13, class: "s-sm"}, "100% 处 " + d[k][4].toFixed(1) + "%");
+      add(svg, "text", {x: R + 14, y: ly + 26, class: "s-sm"}, (m ? "√RDM " : "RDM ") + raw[0].toFixed(4) + " → " + raw[4].toFixed(4));
+    });
+  }
+  seg("tMode", v => { m = parseInt(v, 10); render(); });
+  render();
+})();
+
+/* ============================================================ 图 F：冻结干预 */
+(function(){
+  const svg = $("#figFsvg"); if (!svg) return;
+  const v = 6, THR = 11.25;
+  function heldIndex(p){
+    const K = p === 0 ? 1 : Math.round(p / 100 * 80) + 1;
+    const idx = []; for (let k = 0; k < K; k++) idx.push(K === 1 ? 0 : Math.round(k * 80 / (K - 1)));
+    const held = []; let j = 0;
+    for (let t = 0; t <= 80; t++){ while (j + 1 < idx.length && idx[j + 1] <= t) j++; held.push(idx[j]); }
+    return held;
+  }
+  function pairDisp(pos){ const out = []; for (let m = 0; m < 40; m++) out.push(Math.abs(pos[2 * m + 2] - pos[2 * m])); return out; }
+  function s10(arr){ const s = arr.slice().sort((a, b) => b - a); return s[9]; }
+  function render(p){
+    clear(svg);
+    const held = heldIndex(p);
+    const orig = [], ret = [], slow = [];
+    for (let t = 0; t <= 80; t++){ orig.push(v * t); ret.push(v * held[t]); slow.push(v * p / 100 * t); }
+    // left plot
+    const L = 64, R = 500, T = 34, Bt = 250, X = t => L + t / 80 * (R - L), Y = y => Bt - y / (80 * v) * (Bt - T);
+    add(svg, "text", {x: L - 30, y: 18, class: "s-ttl"}, "物体位置随帧号变化");
+    [0, .25, .5, .75, 1].forEach(q => {
+      add(svg, "line", {x1: L, x2: R, y1: Y(q * 80 * v), y2: Y(q * 80 * v), class: "s-grid"});
+      add(svg, "text", {x: L - 8, y: Y(q * 80 * v) + 3.5, "text-anchor": "end", class: "s-sm"}, Math.round(q * 80 * v) + "px");
+    });
+    [0, 20, 40, 60, 80].forEach(t => add(svg, "text", {x: X(t), y: Bt + 16, "text-anchor": "middle", class: "s-sm"}, "帧 " + t));
+    add(svg, "line", {x1: L, x2: R, y1: Bt, y2: Bt, class: "s-axis"});
+    const path = arr => arr.map((y, t) => (t ? "L" : "M") + X(t) + " " + Y(y)).join(" ");
+    let st = "M" + X(0) + " " + Y(ret[0]);
+    for (let t = 1; t <= 80; t++){ st += " L" + X(t) + " " + Y(ret[t - 1]) + " L" + X(t) + " " + Y(ret[t]); }
+    add(svg, "path", {d: path(orig), class: "l-I dash"});
+    add(svg, "path", {d: path(slow), class: "l-R", "stroke-width": 2.2});
+    add(svg, "path", {d: st, class: "l-Y", "stroke-width": 2.2});
+    add(svg, "text", {x: X(80) - 4, y: Y(orig[80]) - 8, "text-anchor": "end", class: "s-sm"}, "原视频");
+    add(svg, "text", {x: X(56), y: Y(ret[56]) - 12, "text-anchor": "end", class: "s-lb", style: "fill:var(--dyn-ink)"}, "保留 " + p + "%（论文）");
+    add(svg, "text", {x: X(80) - 4, y: Y(slow[80]) + (p > 80 ? 18 : -8), "text-anchor": "end", class: "s-lb", style: "fill:var(--ref-ink)"}, "慢放到 " + p + "%（对照）");
+    // right: DD rows
+    const rows = [["原视频", orig, "l-I"], ["保留 " + p + "%（论文做法）", ret, "Y"], ["慢放到 " + p + "%（真的少动）", slow, "R"]];
+    const PL = 548, PW = 6.2, bw = 4.4, bh = 44, sc = bh / 30;
+    rows.forEach((r, i) => {
+      const y0 = 42 + i * 86;
+      const disp = pairDisp(r[1]), s = s10(disp), pass = s > THR;
+      add(svg, "text", {x: PL, y: y0 - 10, class: "s-lb", style: i ? ("fill:var(--" + (i === 1 ? "dyn" : "ref") + "-ink)") : null}, r[0]);
+      disp.forEach((d, m) => {
+        const hgt = Math.min(bh, d * sc);
+        add(svg, "rect", {x: PL + m * PW, y: y0 + bh - hgt, width: bw, height: Math.max(.8, hgt), class: d > THR ? "mk-R" : "mk-N"});
+      });
+      add(svg, "line", {x1: PL - 2, x2: PL + 40 * PW, y1: y0 + bh - THR * sc, y2: y0 + bh - THR * sc, class: "s-thr"});
+      add(svg, "line", {x1: PL - 2, x2: PL + 40 * PW, y1: y0 + bh, y2: y0 + bh, class: "s-axis"});
+      add(svg, "text", {x: PL, y: y0 + bh + 15, class: "s-sm"}, "s₁₀ = " + s.toFixed(1) + " px");
+      add(svg, "text", {x: PL + 40 * PW, y: y0 + bh + 15, "text-anchor": "end", class: "s-mono", style: "fill:var(--" + (pass ? "ok" : "bad") + "-ink)"}, pass ? "DD 判为「动」" : "DD 判为「不动」");
+    });
+    add(svg, "text", {x: PL, y: 292, class: "s-sm"}, "每根柱 = 8 fps 下一个帧对的位移；虚线 = 11.25 px");
+  }
+  const sl = $("#fP"), out = $("#fPv");
+  sl.addEventListener("input", () => { out.textContent = sl.value + "%"; render(parseInt(sl.value, 10)); });
+  render(25);
+})();
+
+/* ============================================================ 图 G：DD 判据模拟 */
+(function(){
+  const svg = $("#figGsvg"); if (!svg) return;
+  const THR = 11.25;
+  function base(preset){
+    const rng = mulberry32({steady: 21, burst: 22, shake: 23, still: 24}[preset]);
+    const r = () => (rng() - .5) * 2;
+    const a = [];
+    for (let m = 0; m < 40; m++){
+      if (preset === "steady") a.push(9.2 + 1.4 * r());
+      else if (preset === "burst") a.push(m >= 16 && m < 24 ? 20 + 4 * r() : 2.6 + 1 * r());
+      else if (preset === "shake") a.push(m % 2 === 0 ? 12.6 + 1.5 * r() : 3.5 + 1 * r());
+      else a.push(2.2 + 1 * r());
+    }
+    return a;
+  }
+  let preset = "steady", amp = 1;
+  function render(){
+    clear(svg);
+    const sc = base(preset).map(x => Math.max(0, x * amp));
+    const order = sc.map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]);
+    const s10 = order[9][0], i10 = order[9][1];
+    const hits = sc.filter(x => x > THR).length, pass = s10 > THR, hinge = Math.max(0, THR - s10);
+    const L = 58, R = 842, T = 30, Bt = 244, YM = 32;
+    const Y = v => Bt - Math.min(v, YM) / YM * (Bt - T);
+    const stepX = (R - L) / 40, bw = stepX * .74;
+    [0, 8, 16, 24, 32].forEach(v => {
+      add(svg, "line", {x1: L, x2: R, y1: Y(v), y2: Y(v), class: "s-grid"});
+      add(svg, "text", {x: L - 8, y: Y(v) + 3.5, "text-anchor": "end", class: "s-sm"}, v + "px");
+    });
+    add(svg, "line", {x1: L, x2: R, y1: Bt, y2: Bt, class: "s-axis"});
+    sc.forEach((v, m) => {
+      const x = L + m * stepX + (stepX - bw) / 2;
+      const cls = m === i10 ? "f-Y" : (v > THR ? "mk-R" : "mk-N");
+      const r = add(svg, "rect", {x, y: Y(v), width: bw, height: Math.max(1, Bt - Y(v)), rx: 2, class: cls});
+      if (m === i10) r.setAttribute("stroke-width", "2");
+      if (v > YM) add(svg, "text", {x: x + bw / 2, y: Y(YM) - 3, "text-anchor": "middle", class: "s-sm"}, "↑");
+      if (m % 5 === 0) add(svg, "text", {x: x + bw / 2, y: Bt + 15, "text-anchor": "middle", class: "s-sm"}, m + 1);
+    });
+    add(svg, "text", {x: (L + R) / 2, y: Bt + 32, "text-anchor": "middle", class: "s-sm"}, "帧对序号（81 帧按 8 fps 取 41 帧 → 40 对）；柱高 = 该对光流幅值前 5% 像素的均值");
+    add(svg, "line", {x1: L, x2: R, y1: Y(THR), y2: Y(THR), class: "s-thr"});
+    add(svg, "text", {x: R, y: Y(THR) - 6, "text-anchor": "end", class: "s-sm", style: "fill:var(--bad-ink)"}, "阈值 11.25 px = 6 × 480 / 256");
+    const xm = L + i10 * stepX + stepX / 2;
+    add(svg, "text", {x: xm, y: Math.max(14, Y(s10) - (pass ? 8 : 26)), "text-anchor": "middle", class: "s-mono", style: "fill:var(--dyn-ink)"}, "第 10 高");
+    if (!pass) add(svg, "path", {d: `M${xm} ${Y(s10) - 4} V${Y(THR) + 4}`, class: "l-Y", "stroke-width": 2, "marker-end": "url(#ar-Y)"});
+    $("#gRead").innerHTML =
+      `超过阈值的帧对 <b>${hits}</b> / 40 · s₁₀ = <b>${s10.toFixed(2)}</b> px · VBench 判定 <span class="pill ${pass ? "ok" : "bad"}">${pass ? "动" : "不动"}</span> · ` +
+      `hinge 损失 <b>${hinge.toFixed(2)}</b> · 梯度作用于 <b>${pass ? "无（已过线）" : "第 " + (i10 + 1) + " 对，仅此一对"}</b>`;
+  }
+  seg("gPreset", v => { preset = v; render(); });
+  const sl = $("#gAmp"), out = $("#gAmpv");
+  sl.addEventListener("input", () => { amp = parseFloat(sl.value); out.textContent = amp.toFixed(2) + "×"; render(); });
+  render();
+})();
+
+/* ============================================================ 人评条 */
+(function(){
+  const box = $("#hBars"); if (!box) return;
+  [["动态", 85.6], ["画质", 76.4], ["文本对齐", 60.8]].forEach(([n, v]) => {
+    const r = document.createElement("div"); r.className = "bar";
+    r.style.gridTemplateColumns = "64px minmax(0,1fr) 54px";
+    r.innerHTML = `<span>${n}</span><span class="trk"><span class="fill" style="display:block; width:${v}%; background:var(--dyn)"></span></span><span class="val">${v.toFixed(1)}%</span>`;
+    box.appendChild(r);
+  });
+})();
+
+/* ============================================================ 图 H：分差分解 */
+(function(){
+  const svg = $("#figHsvg"); if (!svg) return;
+  const M = {
+    virdm: {Q: 85.82, S: 81.09, DD: 72.02, n: "ViRDM"},
+    cf: {Q: 85.36, S: 81.09, DD: 83.33, n: "Causal Forcing"},
+    sf: {Q: 84.90, S: 81.39, DD: 67.78, n: "Self Forcing"},
+    noreg: {Q: 84.11, S: 80.61, DD: 48.61, n: "无正则版"}
+  };
+  const qwo = x => (6.5 * x.Q - 0.5 * x.DD) / 6;
+  const tot = x => 0.8 * x.Q + 0.2 * x.S;
+  function render(k){
+    clear(svg);
+    const a = M.virdm, b = M[k];
+    const c1 = (qwo(a) - qwo(b)) * (6 / 6.5) * 0.8, c2 = (a.DD - b.DD) * (0.5 / 6.5) * 0.8, c3 = (a.S - b.S) * 0.2;
+    const sum = c1 + c2 + c3, paper = tot(a) - tot(b);
+    const Z = 500, SC = 190;
+    const rows = [["6 个非 DD 质量维", c1, "f-G", `Δ(Quality w/o DD) = ${sgn(qwo(a) - qwo(b))}`], ["Dynamic Degree", c2, "f-Y", `ΔDD = ${sgn(a.DD - b.DD)}`], ["Semantic", c3, "f-Q", `ΔSemantic = ${sgn(a.S - b.S)}`], ["合计 = Total 差", sum, "f-R", `论文：${tot(a).toFixed(2)} − ${tot(b).toFixed(2)} = ${sgn(paper)}`]];
+    [-0.5, 0, 0.5, 1.0, 1.5].forEach(v => {
+      add(svg, "line", {x1: Z + v * SC, x2: Z + v * SC, y1: 14, y2: 192, class: v === 0 ? "s-axis" : "s-grid"});
+      add(svg, "text", {x: Z + v * SC, y: 208, "text-anchor": "middle", class: "s-sm"}, (v > 0 ? "+" : "") + v.toFixed(1));
+    });
+    rows.forEach((r, i) => {
+      const y = 22 + i * 42 + (i === 3 ? 8 : 0);
+      add(svg, "text", {x: 14, y: y + 12, class: i === 3 ? "s-lbb" : "s-lb"}, r[0]);
+      add(svg, "text", {x: 14, y: y + 26, class: "s-sm"}, r[3]);
+      const x = r[1] >= 0 ? Z : Z + r[1] * SC, w = Math.max(1.5, Math.abs(r[1]) * SC);
+      add(svg, "rect", {x, y, width: w, height: 24, rx: 4, class: r[2]});
+      const tx = r[1] >= 0 ? Z + r[1] * SC + 8 : Z + r[1] * SC - 8;
+      add(svg, "text", {x: tx, y: y + 16, "text-anchor": r[1] >= 0 ? "start" : "end", class: "s-mono", style: "fill:var(--ink)"}, sgn(r[1]));
+    });
+    add(svg, "line", {x1: 14, x2: 846, y1: 22 + 3 * 42 - 3, y2: 22 + 3 * 42 - 3, class: "s-rule", "stroke-dasharray": "3 4"});
+  }
+  seg("hVs", v => render(v));
+  render("cf");
+})();
+
+/* ============================================================ 图 S：散点 */
+(function(){
+  const svg = $("#figSsvg"); if (!svg) return;
+  const P = [
+    {n: "DINOv2 图像 RDM", dd: 18.06, y: 87.04, c: "G", dx: 10, dy: 4, a: "start"},
+    {n: "V-JEPA 视频 RDM（无正则）", dd: 48.61, y: 85.77, c: "G", dx: -10, dy: -12, a: "end"},
+    {n: "ViRDM（+ 动态正则）", dd: 72.02, y: 85.79, c: "R", dx: 10, dy: -12, a: "start"},
+    {n: "Self Forcing", dd: 67.78, y: 85.34, c: "T", dx: -10, dy: 16, a: "end"},
+    {n: "Causal Forcing", dd: 83.33, y: 84.64, c: "T", dx: -12, dy: -18, a: "end"}
+  ];
+  const L = 90, R = 820, T = 26, Bt = 250, lo = 84.4, hi = 87.3;
+  const X = v => L + v / 100 * (R - L), Y = v => Bt - (v - lo) / (hi - lo) * (Bt - T);
+  for (let v = 84.5; v <= 87.01; v += .5){
+    add(svg, "line", {x1: L, x2: R, y1: Y(v), y2: Y(v), class: "s-grid"});
+    add(svg, "text", {x: L - 8, y: Y(v) + 3.5, "text-anchor": "end", class: "s-sm"}, v.toFixed(1));
+  }
+  [0, 20, 40, 60, 80, 100].forEach(v => {
+    add(svg, "line", {x1: X(v), x2: X(v), y1: T, y2: Bt, class: "s-grid"});
+    add(svg, "text", {x: X(v), y: Bt + 16, "text-anchor": "middle", class: "s-sm"}, v);
+  });
+  add(svg, "line", {x1: L, x2: R, y1: Bt, y2: Bt, class: "s-axis"});
+  add(svg, "text", {x: (L + R) / 2, y: Bt + 34, "text-anchor": "middle", class: "s-lb"}, "Dynamic Degree");
+  add(svg, "text", {x: 18, y: T - 8, class: "s-lb"}, "Total w/o DD");
+  add(svg, "path", {d: `M${X(48.61) + 6} ${Y(85.77)} L${X(72.02) - 8} ${Y(85.79)}`, class: "l-Y dash", "marker-end": "url(#ar-Y)"});
+  add(svg, "text", {x: (X(48.61) + X(72.02)) / 2, y: Y(85.78) + 16, "text-anchor": "middle", class: "s-sm", style: "fill:var(--dyn-ink)"}, "加正则：DD +23.4，其余 +0.02");
+  P.forEach(p => {
+    add(svg, "circle", {cx: X(p.dd), cy: Y(p.y), r: 6, class: "mk-" + p.c});
+    add(svg, "text", {x: X(p.dd) + p.dx, y: Y(p.y) + p.dy, "text-anchor": p.a, class: "s-lbb", style: "font-size:11.5px"}, p.n);
+    add(svg, "text", {x: X(p.dd) + p.dx, y: Y(p.y) + p.dy + 13, "text-anchor": p.a, class: "s-sm"}, `DD ${p.dd.toFixed(1)} · ${p.y.toFixed(2)}`);
+  });
+})();
+
+/* ============================================================ 图 I：成本 */
+(function(){
+  const sl = $("#iN"); if (!sl) return;
+  const box = $("#iBars"), out = $("#iNv"), read = $("#iRead");
+  function render(){
+    const N = parseInt(sl.value, 10); out.textContent = N;
+    const dmdH = N * 11 / 60, virH = 2, maxH = 150 * 11 / 60;
+    box.innerHTML = "";
+    [["DMD", dmdH, "var(--dmd)"], ["ViRDM", virH, "var(--ref)"]].forEach(([n, h, c]) => {
+      const r = document.createElement("div"); r.className = "bar";
+      r.innerHTML = `<span>${n}</span><span class="trk"><span class="fill" style="display:block; width:${(h / maxH * 100).toFixed(1)}%; background:${c}"></span></span><span class="val">${h.toFixed(1)} h</span>`;
+      box.appendChild(r);
+    });
+    read.innerHTML = `DMD ${N} 次更新 ≈ <b>${dmdH.toFixed(1)} h</b>（${(dmdH * 8).toFixed(0)} A100·h） · ViRDM 20 次 = <b>2 h</b>（16 A100·h） · 时间比 <b>${(dmdH / virH).toFixed(1)}×</b>` + (N === 120 ? "（论文 Table 7 的设置）" : "");
+  }
+  sl.addEventListener("input", render); render();
+})();
+
+/* ============================================================ 存疑筛选 */
+(function(){
+  const items = $$(".dt");
+  seg("dFilter", v => { items.forEach(d => { if (v === "all" || d.dataset.sev === v) d.removeAttribute("hidden"); else d.setAttribute("hidden", ""); }); });
+  let open = false;
+  $("#dExpand").addEventListener("click", () => { open = !open; items.forEach(d => { d.open = open; }); $("#dExpand").textContent = open ? "全部收起" : "全部展开"; });
+  document.addEventListener("click", e => {
+    const a = e.target.closest && e.target.closest('a[href^="#d"]');
+    if (!a) return;
+    const t = document.getElementById(a.getAttribute("href").slice(1));
+    if (t && t.tagName === "DETAILS"){
+      t.removeAttribute("hidden"); t.open = true;
+      $$("#dFilter button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === "all" ? "true" : "false"));
+      items.forEach(d => d.removeAttribute("hidden"));
+    }
+  });
+})();
+})();
+</script>
+
+</body>
+</html>

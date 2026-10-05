@@ -317,6 +317,7 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * Parallel Decoding Distillation for Fast Image and Video Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.26004)] · ⚡`realtime`
 * **`ABot-World-0`**, Infinite Interactive World Rollout on a Single Desktop GPU. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.19191)] · 🌍`systems`
 * Surprise Forcing: What to Remember, When to Skip in Long Video Generation. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.18436)] · 🧠`memory` ⚡`realtime`
+* **`TANGO`**, Test-Time Noise Guided Adaptation for Realistic Autoregressive Video Generation. **`ECCV 2026`** [[Paper](https://arxiv.org/abs/2607.15849)] [[Website](https://eccv.ecva.net/virtual/2026/poster/5734)] [[Code](https://github.com/mever-team/tango)] · ⚡`realtime` 🧠`memory`
 * **`FlashDecoder`**, Real-Time Latent-to-Pixel Streaming Decoder with Transformers. **`CVPR 2026`** [[Paper](https://arxiv.org/abs/2607.14898)] · ⚡`realtime`
 * **`WanToFight`**, Real-Time Generative Game Engine for Multi-Player Combat Interaction. **`arXiv 2026.07`** [[Paper](https://arxiv.org/abs/2607.12592)] · 🌍`systems` ⚡`realtime`
 * **`Cycle-World`**, Mitigating Error Accumulation in Long-term Video World Models via Reverse-Prediction Cycle Consistency. **`ECCV 2026`** [[Paper](https://arxiv.org/abs/2607.11836)] · 🧠`memory`
@@ -419,6 +420,7 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * Head Forcing: Long Autoregressive Video Generation via Head Heterogeneity. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.14487)] · 🧠`memory`
 * Delta Forcing: Trust Region Steering for Interactive Autoregressive Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.14382)] · ⚡`realtime`
 * **`KVPO`**, ODE-Native GRPO for Autoregressive Video Alignment via KV Semantic Exploration. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.14278)] · ⚡`realtime`
+* **`AnyFlow`**, Any-Step Video Diffusion Model with On-Policy Flow Map Distillation. **`ECCV 2026`** [[Paper](https://arxiv.org/abs/2605.13724)] [[Website](https://eccv.ecva.net/virtual/2026/poster/5144)] [[Code](https://github.com/NVlabs/AnyFlow)] · ⚡`realtime`
 * Pyramid Forcing: Head-Aware Pyramid KV Cache Policy for High-Quality Long Video Generation. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.13111)] · ⚡`realtime`
 * Composition of Memory Experts for Diffusion World Models. **`ICLR 2026`** [[Paper](https://arxiv.org/abs/2605.18813)] · 🧠`memory`
 * **`CausalCine`**, Real-Time Autoregressive Generation for Multi-Shot Video Narratives. **`arXiv 2026.05`** [[Paper](https://arxiv.org/abs/2605.12496)] · 🌍`systems` 🕹️`control` ⚡`realtime`
@@ -468,6 +470,7 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * **`LiveWorld`**, Simulating Out-of-Sight Dynamics in Generative Video World Models. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.07145)] [[Website](https://zichengduan.github.io/LiveWorld/index.html)] · 🧠`memory`
 * **`WorldCache`**, Accelerating World Models for Free via Heterogeneous Token Caching. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.06331)] [[Website](https://github.com/FofGofx/WorldCache)] · ⚡`realtime`
 * Hierarchical Latent Action Model. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.05815)] · 🕹️`control`
+* **`CalibAtt`**, Accelerating Text-to-Video Generation with Calibrated Sparse Attention. **`ECCV 2026`** [[Paper](https://arxiv.org/abs/2603.05503)] [[Website](https://eccv.ecva.net/virtual/2026/poster/3436)] [[Code](https://github.com/apple-aiml-research/ml-calibatt)] · ⚡`realtime`
 * **`RealWonder`**, Real-Time Physical Action-Conditioned Video Generation. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.05449)] · 🌍`systems` 🕹️`control` ⚡`realtime`
 * **`Helios`**, Real Real-Time Long Video Generation Model. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.04379)] [[Website](https://pku-yuangroup.github.io/Helios-Page/)] [[Code](https://github.com/PKU-YuanGroup/Helios)] · ⚡`realtime`
 * **`MultiGen`**, Level-Design for Editable Multiplayer Worlds in Diffusion Game Engines. **`arXiv 2026.03`** [[Paper](https://arxiv.org/abs/2603.06679)] · 🌍`systems`
@@ -716,6 +719,7 @@ So this is a second index, not a second list: every paper here that has a date i
 * Ring Forcing: Towards Precise Long-Term Memory for Autoregressive Video Diffusion. [[Paper](https://arxiv.org/abs/2608.26794)] · 🧠`memory`
 * **`BeyondMasks`**, Evaluating Causal and Physical Consistency in Video Object Removal. [[Paper](https://arxiv.org/abs/2608.20107)] · 🧠`memory` 📊`benchmarks`
 * **`LinCa`**, Accelerating Diffusion Models via Learnable Decomposed Feature Caching. [[Paper](https://arxiv.org/abs/2608.17973)] · ⚡`realtime`
+* **`TANGO`**, Test-Time Noise Guided Adaptation for Realistic Autoregressive Video Generation. [[Paper](https://arxiv.org/abs/2607.15849)] [[Website](https://eccv.ecva.net/virtual/2026/poster/5734)] [[Code](https://github.com/mever-team/tango)] · ⚡`realtime` 🧠`memory`
 * **`Cycle-World`**, Mitigating Error Accumulation in Long-term Video World Models via Reverse-Prediction Cycle Consistency. [[Paper](https://arxiv.org/abs/2607.11836)] · 🧠`memory`
 * Towards Memory-Efficient Autoregressive Video Generation via Instance-Specific Parametric Absorption. [[Paper](https://arxiv.org/abs/2607.00712)] · ⚡`realtime`
 * **`MemLearner`**, Learning to Query Context memory for Video World Models. [[Paper](https://arxiv.org/abs/2606.31734)] · 🧠`memory`
@@ -723,6 +727,7 @@ So this is a second index, not a second list: every paper here that has a date i
 * **`MemoBench`**, Benchmarking World Modeling in Dynamically Changing Environments. [[Paper](https://arxiv.org/abs/2606.27537)] · 📊`benchmarks`
 * **`LiveEdit`**, Towards Real-Time Diffusion-Based Streaming Video Editing. [[Paper](https://arxiv.org/abs/2606.26740)] · 🕹️`control` ⚡`realtime`
 * **`UniTemp`**, Unlocking Video Generation in Any Temporal Order via Bidirectional Distillation. [[Paper](https://arxiv.org/abs/2606.18702)] [[Website](https://lzhangbj.github.io/projects/unitemp/)] [[Code](https://github.com/lzhangbj/UniTemp)] · ⚡`realtime`
+* **`AnyFlow`**, Any-Step Video Diffusion Model with On-Policy Flow Map Distillation. [[Paper](https://arxiv.org/abs/2605.13724)] [[Website](https://eccv.ecva.net/virtual/2026/poster/5144)] [[Code](https://github.com/NVlabs/AnyFlow)] · ⚡`realtime`
 * **`DiT as Real-Time Rerenderer`**, Streaming Video Stylization with Autoregressive Diffusion Transformer. [[Paper](https://arxiv.org/abs/2604.13509)] · ⚡`realtime`
 * **`ActionParty`**, Multi-Subject Action Binding in Generative Video Games. [[Paper](https://arxiv.org/abs/2604.02330)] · 🌍`systems`
 * **`ShotStream`**, Streaming Multi-Shot Video Generation for Interactive Storytelling. [[Paper](https://arxiv.org/abs/2603.25746)] · 🌍`systems` 🕹️`control` ⚡`realtime`
@@ -734,12 +739,12 @@ So this is a second index, not a second list: every paper here that has a date i
 * Anchor Forcing: Anchor Memory and Tri-Region RoPE for Interactive Streaming Video Diffusion. [[Paper](https://arxiv.org/abs/2603.13405)] · ⚡`realtime` 🧠`memory`
 * **`MemRoPE`**, Training-Free Infinite Video Generation via Evolving Memory Tokens. [[Paper](https://arxiv.org/abs/2603.12513)] · 🧠`memory`
 * **`OmniForcing`**, Unleashing Real-time Joint Audio-Visual Generation. [[Paper](https://arxiv.org/abs/2603.11647)] · ⚡`realtime`
+* **`CalibAtt`**, Accelerating Text-to-Video Generation with Calibrated Sparse Attention. [[Paper](https://arxiv.org/abs/2603.05503)] [[Website](https://eccv.ecva.net/virtual/2026/poster/3436)] [[Code](https://github.com/apple-aiml-research/ml-calibatt)] · ⚡`realtime`
 * **`AnchorWeave`**, World-Consistent Video Generation with Retrieved Local Spatial Memories. [[Paper](https://arxiv.org/abs/2602.14941)] · 🧠`memory`
 * **`TinyHistory`**, Lightweight Video History Embeddings via Two-Stage Context Learning. [[Paper](https://arxiv.org/abs/2512.23851)] · 🧠`memory`
 * **`CustomX`**, Unified Character, Action, and Scene Customization in Video World Models. [[Paper](https://arxiv.org/abs/2512.17796)] · 🌍`systems` 🕹️`control`
 * End-to-End Training for Autoregressive Video Diffusion via Self-Resampling. [[Paper](https://arxiv.org/abs/2512.15702)] · 🧠`memory`
 * Recurrent Autoregressive Diffusion: Global Memory Meets Local Attention. [[Paper](https://arxiv.org/abs/2511.12940)] · 🧠`memory`
-* Test-Time Noise Guided Adaptation for Realistic Autoregressive Video Generation. [[Paper](https://eccv.ecva.net/virtual/2026/poster/5734)] [[Code](https://github.com/mever-team/tango)] · ⚡`realtime` 🧠`memory`
 * **`SSBP`**, Stage-Specialized Block Pruning for Video Diffusion Models. [[Paper](https://eccv.ecva.net/virtual/2026/poster/3369)] · ⚡`realtime`
 * **`EFlow`**, Fast Few-Step Video Generator Training from Scratch via Efficient Solution Flow. [[Paper](https://eccv.ecva.net/virtual/2026/poster/5488)] · ⚡`realtime`
 * Surprise Forcing: What to Remember, When to Skip in Long Video Generation. [[Paper](https://eccv.ecva.net/virtual/2026/poster/3534)] · ⚡`realtime` 🧠`memory`
@@ -748,7 +753,6 @@ So this is a second index, not a second list: every paper here that has a date i
 * **`WorldWander`**, Bridging Egocentric and Exocentric Worlds in Video Generation. [[Paper](https://eccv.ecva.net/virtual/2026/poster/4650)] [[Code](https://github.com/showlab/WorldWander)] · 🕹️`control` 🧠`memory`
 * **`DualCamCtrl`**, Dual-Branch Diffusion Model for Geometry-Aware Camera-Controlled Video Generation. [[Paper](https://eccv.ecva.net/virtual/2026/poster/3378)] [[Code](https://github.com/EnVision-Research/DualCamCtrl)] · 🕹️`control`
 * **`FastSTAR`**, Spatiotemporal Token Pruning for Efficient Autoregressive Video Synthesis. [[Paper](https://eccv.ecva.net/virtual/2026/poster/5679)] · ⚡`realtime`
-* **`AnyFlow`**, Any-Step Video Diffusion Model with On-Policy Flow Map Distillation. [[Paper](https://eccv.ecva.net/virtual/2026/poster/5144)] [[Code](https://github.com/NVlabs/AnyFlow)] · ⚡`realtime`
 * **`SVG-EAR`**, Parameter-Free Linear Compensation for Sparse Video Generation via Error-aware Routing. [[Paper](https://eccv.ecva.net/virtual/2026/poster/3530)] · ⚡`realtime`
 * **`DreamWorld`**, Geometry-Grounded Video Diffusion for 3D-Consistent World Modeling. [[Paper](https://eccv.ecva.net/virtual/2026/poster/5879)] · 🧠`memory`
 * Grounding World Simulation Models in a Real-World Metropolis. [[Paper](https://eccv.ecva.net/virtual/2026/poster/4936)] [[Code](https://github.com/naver-ai/seoul-world-model)] · 🕹️`control` 🧠`memory`
@@ -761,7 +765,6 @@ So this is a second index, not a second list: every paper here that has a date i
 * **`GimbalDiffusion`**, Gravity-Aware Camera Control for Video Generation. [[Paper](https://eccv.ecva.net/virtual/2026/poster/3735)] [[Code](https://github.com/lvsn/GimbalDiffusion)] · 🕹️`control`
 * **`SALT`**, Self-Consistent Distribution Matching with Cache-Aware Training for Few-Step Video Generation. [[Paper](https://eccv.ecva.net/virtual/2026/poster/3473)] · ⚡`realtime`
 * Pathwise Test-Time Correction for Autoregressive Long Video Generation. [[Paper](https://eccv.ecva.net/virtual/2026/poster/4396)] · ⚡`realtime` 🧠`memory`
-* Accelerating Text-to-Video Generation with Calibrated Sparse Attention. [[Paper](https://eccv.ecva.net/virtual/2026/poster/3436)] [[Code](https://github.com/apple-aiml-research/ml-calibatt)] · ⚡`realtime`
 
 #### CVPR 2026
 

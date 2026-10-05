@@ -1,0 +1,1580 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AnyFlow 精读</title>
+<meta name="description" content="AnyFlow：把蒸馏目标从 z_t→z_0 的终点映射换成 z_t→z_r 的区间转移，用三段 shortcut 代替整条 rollout 做 on-policy 蒸馏。方法精读、代码核对与交互图解。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+/* ============================================================
+   AnyFlow 精读 — design tokens
+   角色色：fm = flow map / AnyFlow（主角）
+           cm = consistency 家族（rCM / Self-Forcing / ODE-Init）
+           te = 教师 PF-ODE / Euler 轨迹
+           gr = 带梯度的段（backward simulation）
+           dv = 数据分布 / 多样性 / 隐患
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0c0f13; --surf:#12161b; --surf2:#181d24; --surf3:#212832;
+  --rule:#232a33; --rule2:#374250;
+  --ink:#e9eef4; --ink2:#a4aebb; --ink3:#76818e;
+
+  --fm:#25b8cc;  --fm-ink:#54d8e8;  --fm-soft:rgba(37,184,204,.16);
+  --cm:#ef8154;  --cm-ink:#ff9f78;  --cm-soft:rgba(239,129,84,.16);
+  --te:#9a89ef;  --te-ink:#b6a6ff;  --te-soft:rgba(154,137,239,.17);
+  --gr:#e0ad38;  --gr-ink:#f2c862;  --gr-soft:rgba(224,173,56,.16);
+  --dv:#ec6a92;  --dv-ink:#ff8eb0;  --dv-soft:rgba(236,106,146,.16);
+
+  --ok:#3fb27a; --ok-ink:#62cf95; --ok-soft:rgba(63,178,122,.14);
+  --bad:#e0605a; --bad-ink:#f0857f; --bad-soft:rgba(224,96,90,.14);
+  --warn:#e3b341; --warn-ink:#f0c766; --warn-soft:rgba(227,179,65,.14);
+
+  --grid:#1d222a; --axis:#374250; --tint:rgba(255,255,255,.03);
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 30px rgba(0,0,0,.34);
+  --font-display:"Familjen Grotesk","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"Source Serif 4",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f1f3f5; --surf:#ffffff; --surf2:#e9edf1; --surf3:#dee3e9;
+    --rule:#dbdfe5; --rule2:#bfc6cf;
+    --ink:#10151a; --ink2:#454e57; --ink3:#6d7784;
+    --fm:#0c8ea0;  --fm-ink:#08707f;  --fm-soft:rgba(12,142,160,.13);
+    --cm:#cf5c28;  --cm-ink:#ab4919;  --cm-soft:rgba(207,92,40,.12);
+    --te:#6a52d8;  --te-ink:#5540bd;  --te-soft:rgba(106,82,216,.12);
+    --gr:#a97f08;  --gr-ink:#886506;  --gr-soft:rgba(169,127,8,.14);
+    --dv:#c93a70;  --dv-ink:#a72c5c;  --dv-soft:rgba(201,58,112,.12);
+    --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+    --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+    --warn:#b98512; --warn-ink:#8f6608; --warn-soft:rgba(185,133,18,.14);
+    --grid:#e1e5ea; --axis:#bfc6cf; --tint:rgba(16,20,28,.028);
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 26px rgba(16,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f1f3f5; --surf:#ffffff; --surf2:#e9edf1; --surf3:#dee3e9;
+  --rule:#dbdfe5; --rule2:#bfc6cf;
+  --ink:#10151a; --ink2:#454e57; --ink3:#6d7784;
+  --fm:#0c8ea0;  --fm-ink:#08707f;  --fm-soft:rgba(12,142,160,.13);
+  --cm:#cf5c28;  --cm-ink:#ab4919;  --cm-soft:rgba(207,92,40,.12);
+  --te:#6a52d8;  --te-ink:#5540bd;  --te-soft:rgba(106,82,216,.12);
+  --gr:#a97f08;  --gr-ink:#886506;  --gr-soft:rgba(169,127,8,.14);
+  --dv:#c93a70;  --dv-ink:#a72c5c;  --dv-soft:rgba(201,58,112,.12);
+  --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+  --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+  --warn:#b98512; --warn-ink:#8f6608; --warn-soft:rgba(185,133,18,.14);
+  --grid:#e1e5ea; --axis:#bfc6cf; --tint:rgba(16,20,28,.028);
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 26px rgba(16,20,28,.08);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html{scroll-behavior:smooth; scroll-padding-top:86px}
+body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:16px; line-height:1.82;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility}
+h1,h2,h3,h4{margin:0; line-height:1.26; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--fm-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--fm); outline-offset:2px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.88em; background:var(--surf2); border:1px solid var(--rule); border-radius:5px; padding:1px 5px; color:var(--ink2)}
+svg{max-width:100%; height:auto}
+#prog{position:fixed; top:0; left:0; height:2px; width:0; background:var(--fm); z-index:60}
+
+.top{position:fixed; top:0; left:0; right:0; height:52px; z-index:50; display:flex; align-items:center; gap:14px;
+  padding:0 22px; background:color-mix(in srgb,var(--bg) 85%,transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2)}
+@media (max-width:640px){
+  code{white-space:normal; word-break:break-word}
+  .top{padding:0 14px; gap:10px}
+  .brand{font-size:13px; min-width:0; overflow:hidden; text-overflow:ellipsis}
+  .brand em{display:none}
+}
+
+.shell{display:grid; grid-template-columns:238px minmax(0,1fr); max-width:1260px; margin:0 auto; padding:82px 26px 120px}
+.rail{position:sticky; top:82px; align-self:start; max-height:calc(100vh - 100px); overflow:auto; padding-right:16px}
+.rail .rl{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); margin:0 0 10px}
+.rail ol{list-style:none; margin:0; padding:0; border-left:1px solid var(--rule)}
+.rail a{display:block; padding:5px 0 5px 14px; margin-left:-1px; font-size:12.5px; line-height:1.4; color:var(--ink3);
+  border-left:2px solid transparent; border-bottom:0; transition:.15s}
+.rail a:hover{color:var(--ink)}
+.rail a.on{color:var(--ink); border-left-color:var(--fm)}
+main{min-width:0; max-width:880px; padding-left:44px}
+@media (max-width:980px){
+  .shell{grid-template-columns:minmax(0,1fr); padding:70px 16px 90px}
+  .rail{display:none}
+  main{padding-left:0}
+}
+
+/* ============================================================ hero */
+.hero{padding:6px 0 30px; border-bottom:1px solid var(--rule); margin-bottom:38px}
+.kick{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--fm-ink); margin-bottom:16px}
+h1{font-size:clamp(30px,5.4vw,50px); font-weight:700; letter-spacing:-.022em; margin-bottom:8px}
+.sub{font-size:clamp(17px,2.4vw,21px); color:var(--ink2); font-family:var(--font-display); font-weight:500; line-height:1.45; max-width:32em; margin-bottom:20px}
+.meta{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:20px}
+.chip{font-family:var(--font-mono); font-size:11.5px; padding:4px 9px; border-radius:7px; background:var(--surf2); border:1px solid var(--rule); color:var(--ink2)}
+.chip b{color:var(--ink); font-weight:500}
+.lede{font-size:17.5px; color:var(--ink2); max-width:34em}
+.lede strong{color:var(--ink); font-weight:600}
+
+/* ============================================================ sections */
+section{margin:0 0 66px; scroll-margin-top:86px}
+.sh{display:flex; align-items:baseline; gap:12px; margin-bottom:8px}
+.sn{font-family:var(--font-mono); font-size:12px; color:var(--fm-ink); flex:none; padding-top:2px}
+h2{font-size:clamp(21px,3.1vw,27px); letter-spacing:-.014em; font-weight:600}
+h3{font-size:17px; margin:28px 0 8px; letter-spacing:-.008em; color:var(--ink)}
+h4{font-size:14.5px; margin:20px 0 6px; color:var(--ink2); font-weight:600}
+section > p, .body > p{margin:0 0 15px; max-width:38em}
+.dek{color:var(--ink3); font-size:14.5px; margin:0 0 22px; max-width:38em; line-height:1.7}
+ul,ol.num{margin:0 0 16px; padding-left:20px; max-width:38em}
+li{margin:0 0 7px}
+li::marker{color:var(--ink3)}
+strong{font-weight:600; color:var(--ink)}
+em.t{font-style:normal; font-family:var(--font-math); font-size:1.03em}
+
+/* ============================================================ figure / panel */
+figure{margin:24px 0; padding:0}
+figcaption{font-size:13px; color:var(--ink3); line-height:1.64; margin-top:10px; max-width:42em}
+figcaption b{color:var(--ink2); font-weight:600}
+.panel{background:var(--surf); border:1px solid var(--rule); border-radius:14px; padding:20px; box-shadow:var(--shadow)}
+.panel.flush{padding:16px}
+.phead{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px}
+.ptitle{font-family:var(--font-display); font-weight:600; font-size:14.5px}
+.ptag{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3);
+  border:1px solid var(--rule); border-radius:5px; padding:2px 7px}
+.phead .spacer{flex:1}
+
+/* controls */
+.ctrls{display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin:2px 0 14px}
+.ctrl{display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:11.5px; color:var(--ink3)}
+.ctrl label{white-space:nowrap}
+input[type=range]{-webkit-appearance:none; appearance:none; height:4px; border-radius:3px; background:var(--surf3); outline:none; width:112px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:var(--fm); cursor:pointer; border:2px solid var(--bg)}
+input[type=range]::-moz-range-thumb{width:14px; height:14px; border-radius:50%; background:var(--fm); cursor:pointer; border:2px solid var(--bg)}
+.seg{display:inline-flex; background:var(--surf2); border:1px solid var(--rule); border-radius:8px; overflow:hidden}
+.seg button{background:transparent; border:0; color:var(--ink3); font-family:var(--font-mono); font-size:11.5px;
+  padding:5px 10px; cursor:pointer; transition:.14s; border-right:1px solid var(--rule)}
+.seg button:last-child{border-right:0}
+.seg button:hover{color:var(--ink)}
+.seg button.on{background:var(--fm-soft); color:var(--fm-ink)}
+.btn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); border-radius:8px;
+  font-family:var(--font-mono); font-size:11.5px; padding:5px 11px; cursor:pointer; transition:.14s}
+.btn:hover{color:var(--ink); border-color:var(--rule2)}
+.tog{display:inline-flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); cursor:pointer}
+.tog input{accent-color:var(--fm); width:13px; height:13px; cursor:pointer}
+.swatch{width:11px; height:11px; border-radius:3px; flex:none; display:inline-block}
+
+/* readouts */
+.reads{display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:9px; margin-top:14px}
+.read{background:var(--surf2); border:1px solid var(--rule); border-radius:9px; padding:8px 11px}
+.read .rk{font-family:var(--font-mono); font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink3)}
+.read .rv{font-family:var(--font-mono); font-size:17px; font-weight:500; color:var(--ink); margin-top:2px; font-variant-numeric:tabular-nums}
+.read .rv small{font-size:11px; color:var(--ink3); font-weight:400}
+
+/* legend */
+.lgd{display:flex; flex-wrap:wrap; gap:6px 16px; margin-top:12px; font-family:var(--font-mono); font-size:11px; color:var(--ink3)}
+.lgd span{display:inline-flex; align-items:center; gap:6px}
+
+/* tables */
+.tw{overflow-x:auto; margin:18px 0; border:1px solid var(--rule); border-radius:12px; background:var(--surf)}
+table{border-collapse:collapse; width:100%; font-size:13.5px; font-variant-numeric:tabular-nums}
+th,td{padding:8px 12px; text-align:right; border-bottom:1px solid var(--rule); white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--ink3); font-weight:500; background:var(--surf2)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--tint)}
+td.hi{color:var(--fm-ink); font-weight:600}
+td.lo{color:var(--bad-ink)}
+tr.ours td{background:var(--fm-soft)}
+tr.ours td:first-child{font-weight:600}
+td.mark{position:relative}
+td.mark::after{content:""; position:absolute; inset:2px; border:1.5px solid var(--warn); border-radius:5px; pointer-events:none}
+
+/* callouts */
+.note{border-left:2px solid var(--rule2); padding:2px 0 2px 16px; margin:18px 0; color:var(--ink2); font-size:14.5px; max-width:38em}
+.flag{background:var(--surf); border:1px solid var(--rule); border-left:3px solid var(--warn); border-radius:0 11px 11px 0;
+  padding:14px 18px; margin:18px 0; max-width:42em}
+.flag .ft{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.11em; text-transform:uppercase; color:var(--warn-ink); margin-bottom:6px}
+.flag p{font-size:14.5px; color:var(--ink2); margin:0}
+.flag.dig{border-left-color:var(--fm)}
+.flag.dig .ft{color:var(--fm-ink)}
+
+/* math block */
+.math{font-family:var(--font-math); font-size:16.5px; background:var(--surf2); border:1px solid var(--rule);
+  border-radius:11px; padding:15px 18px; margin:16px 0; overflow-x:auto; color:var(--ink); line-height:1.9}
+.math .an{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); font-style:normal}
+sub,sup{font-size:.7em; line-height:0}
+
+/* code */
+pre{background:var(--surf2); border:1px solid var(--rule); border-radius:11px; padding:14px 16px; overflow-x:auto;
+  font-family:var(--font-mono); font-size:12.5px; line-height:1.72; margin:16px 0; color:var(--ink2)}
+pre b{color:var(--fm-ink); font-weight:500}
+pre i{color:var(--ink3); font-style:normal}
+pre u{color:var(--gr-ink); text-decoration:none}
+pre s{color:var(--cm-ink); text-decoration:none}
+
+/* diff cards */
+.diff{display:grid; gap:14px; margin:20px 0}
+.dcard{background:var(--surf); border:1px solid var(--rule); border-radius:13px; overflow:hidden}
+.dcard .dh{display:flex; align-items:center; gap:9px; padding:10px 15px; background:var(--surf2); border-bottom:1px solid var(--rule); flex-wrap:wrap}
+.dcard .dh .lvl{font-family:var(--font-mono); font-size:10px; letter-spacing:.09em; text-transform:uppercase; padding:2px 7px; border-radius:5px}
+.lvl.hi{background:var(--bad-soft); color:var(--bad-ink)}
+.lvl.md{background:var(--warn-soft); color:var(--warn-ink)}
+.lvl.lo{background:var(--surf3); color:var(--ink3)}
+.dcard .dh .dt{font-family:var(--font-display); font-weight:600; font-size:14px}
+.dgrid{display:grid; grid-template-columns:1fr 1fr; gap:0}
+.dgrid > div{padding:13px 15px; font-size:13.5px; color:var(--ink2); line-height:1.7}
+.dgrid > div:first-child{border-right:1px solid var(--rule)}
+.dgrid .dl{font-family:var(--font-mono); font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink3); margin-bottom:5px}
+.dcard .dw{padding:12px 15px; border-top:1px solid var(--rule); font-size:13.5px; color:var(--ink2); background:var(--tint)}
+.dcard .dw b{color:var(--ink)}
+@media (max-width:640px){
+  .dgrid{grid-template-columns:1fr}
+  .dgrid > div:first-child{border-right:0; border-bottom:1px solid var(--rule)}
+}
+
+/* kv list */
+.kv{display:grid; grid-template-columns:auto 1fr; gap:4px 18px; font-size:13.5px; margin:14px 0; max-width:42em}
+.kv dt{font-family:var(--font-mono); font-size:12px; color:var(--ink3); white-space:nowrap}
+.kv dd{margin:0; color:var(--ink2)}
+
+/* tooltip */
+.tip{position:absolute; pointer-events:none; background:var(--surf3); border:1px solid var(--rule2); border-radius:9px;
+  padding:7px 10px; font-family:var(--font-mono); font-size:11px; color:var(--ink); box-shadow:var(--shadow); z-index:30;
+  line-height:1.6; white-space:nowrap; opacity:0; transition:opacity .12s}
+.tip.on{opacity:1}
+.relbox{position:relative}
+
+footer{border-top:1px solid var(--rule); padding-top:24px; color:var(--ink3); font-size:13px; line-height:1.8}
+footer a{color:var(--ink2)}
+@media (prefers-reduced-motion: reduce){*{animation:none !important; transition:none !important} html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<div class="top">
+  <div class="brand">AnyFlow <em>arXiv 2605.13724 · ECCV 2026</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" title="切换主题">◐</button>
+</div>
+
+<div class="shell">
+<nav class="rail">
+  <p class="rl">目录</p>
+  <ol id="toc"></ol>
+</nav>
+
+<main>
+
+<header class="hero">
+  <p class="kick">Flow Map Distillation · Any-Step Video Diffusion</p>
+  <h1>把「跳到终点」换成「跳一段」</h1>
+  <p class="sub">AnyFlow 的全部赌注压在一件事上：蒸馏目标从 <em class="t">z<sub>t</sub> → z<sub>0</sub></em> 改成 <em class="t">z<sub>t</sub> → z<sub>r</sub></em>，于是多步采样不再需要「重新加噪」这个动作。</p>
+  <div class="meta">
+    <span class="chip">NVIDIA · <b>Show Lab, NUS</b> · MIT</span>
+    <span class="chip">底座 <b>Wan2.1</b> 1.3B / 14B</span>
+    <span class="chip">480×832 · 81 帧</span>
+    <span class="chip">LoRA <b>r=256</b></span>
+    <span class="chip">代码 <b>NVLabs/AnyFlow</b></span>
+  </div>
+  <p class="lede">一致性蒸馏（rCM、Self-Forcing）在 2–4 步很强，但<strong>给它更多步反而更差</strong>：rCM 在 1.3B 上从 4 步的 82.51 一路掉到 32 步的 75.72。AnyFlow 说这不是调参问题，是<strong>结构问题</strong>——一致性采样每一步都要把状态打回 <em class="t">z<sub>0</sub></em> 再用<strong>新噪声</strong>加回去，这个动作本身就在把轨迹推离 PF-ODE。换成 flow map 之后，多步采样退化成普通 Euler，曲线就单调了。本页把两阶段训练拆开，逐条对着 NVLabs 放出的代码核对，并列出 <a href="#doubts">14 条存疑</a>——其中 3 条是论文公式与代码<strong>直接矛盾</strong>。</p>
+</header>
+
+<!-- ============================================================ 1 -->
+<section id="tldr">
+  <div class="sh"><span class="sn">01</span><h2>一图看懂：多出来的那根虚线箭头</h2></div>
+  <p class="dek">两种采样器画在同一张状态空间图上。唯一的结构差别是一致性采样里那根「重新加噪」的虚线——它是后面所有问题的源头。</p>
+
+  <figure>
+  <div class="panel flush">
+    <svg viewBox="0 0 880 400" role="img" aria-label="一致性采样每一步都要跳到 z0 再用新噪声加回中间态，轨迹因此偏离 PF-ODE；flow map 采样在噪声轴上单向推进，从不重新加噪。">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+        <marker id="ahc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#ef8154"/>
+        </marker>
+        <marker id="ahf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#25b8cc"/>
+        </marker>
+      </defs>
+      <!-- axes -->
+      <g stroke="var(--axis)" stroke-width="1">
+        <line x1="70" y1="352" x2="840" y2="352"/>
+      </g>
+      <text x="70" y="374" font-family="var(--font-mono)" font-size="11" fill="var(--ink3)">σ = 1（纯噪声）</text>
+      <text x="840" y="374" text-anchor="end" font-family="var(--font-mono)" font-size="11" fill="var(--ink3)">σ = 0（视频）</text>
+      <text x="455" y="392" text-anchor="middle" font-family="var(--font-mono)" font-size="10.5" fill="var(--ink3)">噪声水平轴 →</text>
+
+      <!-- data manifold line -->
+      <line x1="70" y1="300" x2="840" y2="300" stroke="var(--rule2)" stroke-width="1" stroke-dasharray="2 5"/>
+      <text x="76" y="293" font-family="var(--font-mono)" font-size="10.5" fill="var(--ink3)">数据流形 z₀</text>
+
+      <!-- teacher PF-ODE -->
+      <path d="M100,80 C260,110 420,180 600,248 C700,284 780,298 830,300" fill="none" stroke="var(--te)" stroke-width="2.4" opacity=".85"/>
+      <text x="612" y="228" font-family="var(--font-mono)" font-size="11" fill="var(--te-ink)">教师 PF-ODE 轨迹</text>
+
+      <!-- consistency zigzag -->
+      <g stroke="#ef8154" fill="none">
+        <path d="M100,80 C180,150 260,250 336,297" stroke-width="2" marker-end="url(#ahc)"/>
+        <path d="M336,300 C360,250 372,190 382,132" stroke-width="1.6" stroke-dasharray="4 4" opacity=".85" marker-end="url(#ahc)"/>
+        <path d="M382,132 C440,190 490,262 540,296" stroke-width="2" marker-end="url(#ahc)"/>
+        <path d="M540,300 C566,262 580,224 592,186" stroke-width="1.6" stroke-dasharray="4 4" opacity=".85" marker-end="url(#ahc)"/>
+        <path d="M592,186 C640,228 690,272 738,296" stroke-width="2" marker-end="url(#ahc)"/>
+      </g>
+      <circle cx="100" cy="80" r="5" fill="#ef8154"/>
+      <circle cx="336" cy="299" r="4" fill="#ef8154"/><circle cx="540" cy="299" r="4" fill="#ef8154"/>
+      <circle cx="738" cy="298" r="5.5" fill="#ef8154"/>
+      <text x="748" y="292" font-family="var(--font-mono)" font-size="11" fill="#ef8154">ẑ₀ 偏了</text>
+      <text x="352" y="205" font-family="var(--font-mono)" font-size="10.5" fill="#ef8154">重新加噪</text>
+      <text x="352" y="220" font-family="var(--font-mono)" font-size="10.5" fill="#ef8154">（新的 ε）</text>
+      <text x="120" y="66" font-family="var(--font-mono)" font-size="11" fill="#ef8154">一致性采样：每步都打到 z₀，再跳回去</text>
+
+      <!-- flow map path -->
+      <g stroke="#25b8cc" fill="none">
+        <path d="M100,80 L196,110" stroke-width="2.6" marker-end="url(#ahf)"/>
+        <path d="M204,112 L330,160" stroke-width="2.6" marker-end="url(#ahf)"/>
+        <path d="M338,163 L560,243" stroke-width="2.6" marker-end="url(#ahf)"/>
+        <path d="M568,246 L820,300" stroke-width="2.6" marker-end="url(#ahf)"/>
+      </g>
+      <circle cx="200" cy="111" r="4" fill="#25b8cc"/><circle cx="334" cy="161" r="4" fill="#25b8cc"/>
+      <circle cx="564" cy="244" r="4" fill="#25b8cc"/><circle cx="826" cy="300" r="5.5" fill="#25b8cc"/>
+      <text x="150" y="146" font-family="var(--font-mono)" font-size="11" fill="#25b8cc">flow map 采样：沿轴单向推进，步长任意</text>
+      <text x="676" y="326" font-family="var(--font-mono)" font-size="10.5" fill="#25b8cc">f(z_t, t, r) 一次跨 0.625 的噪声</text>
+
+      <!-- tick marks -->
+      <g font-family="var(--font-mono)" font-size="10" fill="var(--ink3)">
+        <line x1="100" y1="348" x2="100" y2="356" stroke="var(--axis)"/>
+        <line x1="336" y1="348" x2="336" y2="356" stroke="var(--axis)"/>
+        <line x1="540" y1="348" x2="540" y2="356" stroke="var(--axis)"/>
+        <line x1="738" y1="348" x2="738" y2="356" stroke="var(--axis)"/>
+      </g>
+    </svg>
+  </div>
+  <figcaption><b>图 1</b>　同一个起点，两种走法。一致性模型学的是 <em class="t">z<sub>t</sub> ↦ z<sub>0</sub></em>，多步采样时唯一能构造中间态的办法是<strong>重新加噪</strong>（橙色虚线），而新采的 ε 与原轨迹无关，落点系统性地离开教师的 PF-ODE；步数越多，跳得越多，漂得越远。flow map 学的是 <em class="t">z<sub>t</sub> ↦ z<sub>r</sub></em>，中间态由模型直接给出，多步采样就是普通 Euler，没有任何重新采样的随机注入。</figcaption>
+  </figure>
+
+  <h3>三句话版本</h3>
+  <ul>
+    <li><strong>Stage 1（前向）</strong>：用 MeanFlow 目标把预训练的 Wan2.1 改造成两时刻模型 <em class="t">u<sub>θ</sub>(z<sub>t</sub>, t, r)</em>。JVP 用中心差分绕开（TiM 的做法），外加四个改装：插值式时间条件、Beta(2,1.5) 时间加权、CFG 融合、以边界样本为基准的自适应损失归一。</li>
+    <li><strong>Stage 2（on-policy）</strong>：DMD，但 rollout 用 <strong>Flow Map Backward Simulation</strong>——不跑完整的 N 步，而是靠 flow map 的复合性把整条轨迹压成 <strong>3 段</strong>：<em class="t">T→t</em>（抄近路）、<em class="t">t→r</em>（真正要学的那一步）、<em class="t">r→0</em>（抄近路）。三段<strong>全部带梯度</strong>。于是无论 N=4 还是 N=50，训练代价恒定。</li>
+    <li><strong>结果</strong>：VBench 曲线从「越采越差」变成「单调但很快饱和」。1.3B 双向 4→32 步涨 0.48；<strong>14B 双向只涨 0.06</strong>。真正的卖点不是 scaling 有多强，而是<strong>不再崩</strong>，外加一个模型同时覆盖 2 步预览和 32 步交付。</li>
+  </ul>
+</section>
+
+<!-- ============================================================ 2 -->
+<section id="problem">
+  <div class="sh"><span class="sn">02</span><h2>为什么一致性模型「越采越差」：一个能自己跑出来的玩具</h2></div>
+  <p class="dek">论文用 Fig. 2 讲这个道理，但没给可验证的机制。下面这个二维玩具把误差模型摊开写明白：拖动步数，看两条曲线各自往哪儿走。</p>
+
+  <figure>
+  <div class="panel">
+    <div class="phead">
+      <span class="ptitle">重新加噪 vs 单向推进</span>
+      <span class="ptag">toy model · 交互</span>
+      <span class="spacer"></span>
+      <button class="btn" id="tSeed">换一组噪声</button>
+    </div>
+    <div class="ctrls">
+      <div class="ctrl"><label>采样步数 N</label><input type="range" id="tN" min="1" max="16" step="1" value="4"><span id="tNv" style="color:var(--ink); min-width:22px">4</span></div>
+      <div class="seg" id="tShow">
+        <button data-k="both" class="on">两者</button><button data-k="cm">仅一致性</button><button data-k="fm">仅 flow map</button>
+      </div>
+    </div>
+    <div class="relbox">
+      <svg id="toySvg" viewBox="0 0 860 372" role="img" aria-label="玩具模型：纵轴是噪声水平，横轴是偏离原始种子的程度。一致性采样每步打到 z0 再用新噪声跳回，随步数增加而漂移；flow map 采样单向下行，随步数增加而收敛。"></svg>
+    </div>
+    <div class="reads">
+      <div class="read"><div class="rk">一致性终点误差</div><div class="rv" id="tEc">—</div></div>
+      <div class="read"><div class="rk">flow map 终点误差</div><div class="rv" id="tEf">—</div></div>
+      <div class="read"><div class="rk">重新加噪次数</div><div class="rv" id="tRe">—</div></div>
+      <div class="read"><div class="rk">模型前向次数</div><div class="rv" id="tNfe">—</div></div>
+    </div>
+    <div class="lgd">
+      <span><i class="swatch" style="background:var(--te)"></i>真实 PF-ODE 解</span>
+      <span><i class="swatch" style="background:var(--cm)"></i>一致性多步</span>
+      <span><i class="swatch" style="background:var(--fm)"></i>flow map 多步</span>
+      <span><i class="swatch" style="background:var(--ink3)"></i>目标 x⋆</span>
+    </div>
+  </div>
+  <figcaption><b>图 2</b>　纵轴是噪声水平 σ，横轴是<strong>「你最后落到哪个视频上」</strong>——离中线越远，离原始种子该生成的那段视频越远。误差模型是我按两族方法的已知失效模式构造的，<strong>不是论文给的</strong>：flow map 学生的单次偏角 ∝ |t−r|<sup>1.5</sup>，所以 N 步复合后总偏差 ∝ N<sup>−0.5</sup>，<strong>越采越准</strong>；一致性学生每步先打到 σ=0 给出 ẑ₀（实线），再用<strong>全新的 ε</strong> 加噪回到 σ<sub>k+1</sub>（虚线），而新 ε 指向一个与原种子无关的方向，于是每次跳跃都把落点朝随机方向推一点——这是一个<strong>随机游走</strong>，步数越多走得越远。把 N 拉到 12 以上，两个读数会复现论文 Fig. 1 的定性形状：一条向下、一条向上。</figcaption>
+  </figure>
+
+  <div class="flag">
+    <div class="ft">这不是训练不足</div>
+    <p>关键在于：一致性模型的多步采样器<strong>需要一个它从未被训练过的状态分布</strong>。训练时 <em class="t">z<sub>t</sub></em> 来自「干净视频 + 噪声」，推理时第 2 步之后的 <em class="t">z<sub>t</sub></em> 来自「学生自己的 ẑ₀ + 新噪声」。学生的 ẑ₀ 本身带偏置，于是喂进去的是一个偏移过的分布，误差被反复放大。步数越多，这个循环转得越多次。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 3 -->
+<section id="flowmap">
+  <div class="sh"><span class="sn">03</span><h2>Flow map：一个把三种目标装进同一个函数的参数化</h2></div>
+  <p class="dek">形式上极简：给模型多喂一个时间戳。但这一步把「一致性模型」「流匹配」「区间转移」统一成了 (t, r) 平面上的三块区域。</p>
+
+  <div class="math">
+    精确流映射　<em class="t">Φ<sub>r←t</sub>(z<sub>t</sub>) = z<sub>r</sub></em>，　1 ≥ t ≥ r ≥ 0<br>
+    <span class="an">恒等性</span>　<em class="t">Φ<sub>t←t</sub>(z) = z</em>　　<span class="an">复合性（整篇论文的支点）</span>　<em class="t">Φ<sub>q←r</sub> ∘ Φ<sub>r←t</sub> = Φ<sub>q←t</sub></em><br><br>
+    神经网络近似　<em class="t">f<sub>θ</sub>(z<sub>t</sub>, t, r) = z<sub>t</sub> − (t − r)·u<sub>θ</sub>(z<sub>t</sub>, r, t)</em>　<span class="an">u 是区间 [r,t] 上的平均速度</span>
+  </div>
+
+  <p><strong>两个退化情形</strong>决定了这个参数化的全部张力：令 <em class="t">r = 0</em>，<em class="t">f<sub>θ</sub></em> 就是一致性模型的终点映射；令 <em class="t">t = r</em>，<em class="t">u<sub>θ</sub></em> 就是瞬时速度场，也就是原始的流匹配。AnyFlow 的主张是：<strong>预训练模型已经把 t = r 这条对角线学得很好了</strong>，蒸馏要做的是把它向内部区域外推，而不是像一致性蒸馏那样只盯住 r = 0 这条边。</p>
+
+  <figure>
+  <div class="panel">
+    <div class="phead">
+      <span class="ptitle">(t, r) 平面：一个函数，三块区域</span>
+      <span class="ptag">交互 · 悬停取点</span>
+      <span class="spacer"></span>
+      <div class="seg" id="trMode"><button data-k="paper" class="on">论文所述采样</button><button data-k="code">代码实际采样</button></div>
+    </div>
+    <div class="relbox">
+      <svg id="trSvg" viewBox="0 0 520 420" role="img" aria-label="(t,r) 平面上 r≤t 的三角形：对角线是流匹配，底边是一致性，内部是一般流映射；叠加训练时实际采样的时间对密度。"></svg>
+      <div class="tip" id="trTip"></div>
+    </div>
+    <div id="trNote" style="margin-top:12px; font-size:13.5px; color:var(--ink2); line-height:1.7"></div>
+  </div>
+  <figcaption><b>图 3</b>　三角形内每个点是一个训练样本的 <em class="t">(t, r)</em>。切到「代码实际采样」看一个论文<strong>完全没有提到</strong>的事实：<code>far/trainers/trainer_wan_anyflow_pretrain.py</code> 的 <code>sample_timestep()</code> 按 <code>diffusion_ratio=0.5</code> 把一半 batch 强制置为 <em class="t">r = t</em>（论文说了），又按 <code>consistency_ratio=0.25</code> 把<strong>四分之一 batch 强制置为 <em class="t">r = 0</em></strong>（论文没说）。也就是说，真正落在「一般区间转移」内部的样本只有 25%，而 25% 的前向训练<strong>本身就是一致性训练</strong>。</figcaption>
+  </figure>
+
+  <h3>MeanFlow 目标与它的 JVP 麻烦</h3>
+  <div class="math">
+    <em class="t">ℒ(θ) = 𝔼 ‖ u<sub>θ</sub>(z<sub>t</sub>, r, t) − sg(u<sub>tgt</sub>) ‖²</em>，
+    <em class="t">u<sub>tgt</sub> = v(z<sub>t</sub>, t) − (t − r)· d u<sub>θ</sub>(z<sub>t</sub>, r, t) / d t</em>
+  </div>
+  <p>那个 <em class="t">d/dt</em> 是 Jacobian-vector product，在 FSDP 下难搞。AnyFlow 采用 Transition Model（TiM）的中心差分近似，每步多两次前向：</p>
+  <div class="math">
+    <em class="t">d u / d t ≈ [ u(z<sub>t+Δ</sub>, r, t+Δ) − u(z<sub>t−Δ</sub>, r, t−Δ) ] / (2Δ)</em>　<span class="an">代码里 Δ = 5/1000，且整段在 torch.no_grad() 下算</span>
+  </div>
+  <p class="note">代码细节：扰动点用的是<strong>真实</strong>速度 <em class="t">v = ε − x</em> 来构造 <em class="t">z<sub>t±Δ</sub> = z<sub>t</sub> ± Δ·v</em>。在线性插值路径 <em class="t">z<sub>t</sub> = (1−t)x + tε</em> 上这恰好是精确的 <em class="t">dz/dt</em>，所以这一步没有额外近似误差——近似只来自有限差分本身。</p>
+</section>
+
+<!-- ============================================================ 4 -->
+<section id="stage1">
+  <div class="sh"><span class="sn">04</span><h2>Stage 1 的四个改装：哪些是真设计，哪些是论文写错了</h2></div>
+  <p class="dek">MeanFlow 是为「从零预训练」设计的，直接搬到「后训练一个已有的视频扩散模型」会炸。AnyFlow 加了四件东西，其中第一件的公式与开源代码<strong>系数是反的</strong>。</p>
+
+  <h3>① 插值式时间条件 —— 论文与代码对不上</h3>
+  <p>要把单时间戳模型改成两时间戳，得新加一个 <em class="t">r</em> 的嵌入。MeanFlow 用 <em class="t">emb(t) + emb′(t−r)</em>；TMD 用零初始化的输出投影。AnyFlow 说这两者都会让嵌入范数越训越大、画面过饱和（Fig. 11），改用插值：</p>
+  <div class="diff">
+    <div class="dcard">
+      <div class="dh"><span class="lvl hi">系数矛盾</span><span class="dt">Interpolated Timestep Conditioning</span></div>
+      <div class="dgrid">
+        <div><div class="dl">论文 §4.2.1 正文</div><em class="t">g · emb(t) + (1 − g) · emb′(r)</em>，「g 固定为 0.25」<br><span style="color:var(--bad-ink)">→ t 只占 0.25，r 占 0.75</span></div>
+        <div><div class="dl">代码 transformer_far_wan_model.py</div><code>rt_emb = (1 - gate) * temb + gate * delta_emb</code>，<code>gate_value: 0.25</code><br><span style="color:var(--ok-ink)">→ t 占 0.75，r 占 0.25</span></div>
+      </div>
+      <div class="dw"><b>谁是对的：</b>代码。让主时间戳 <em class="t">t</em> 占大头才符合「轻微改装预训练模型」的意图，也才解释得了为什么它比零初始化更稳。两者在边界 <em class="t">t = r</em> 处等价（因为 <code>delta_embedder</code> 是 <code>time_embedder</code> 的 deepcopy，插值退化为预训练嵌入本身），所以论文的稳定性论证仍然成立——但<strong>写出来的那个式子在 t ≠ r 时给的是相反的权重</strong>。</div>
+    </div>
+    <div class="dcard">
+      <div class="dh"><span class="lvl hi">符号撞车</span><span class="dt">同一个 g，两个含义</span></div>
+      <div class="dgrid">
+        <div><div class="dl">§4.2.1 插值门控</div><em class="t">g</em> = 0.25，无量纲插值系数<br><code>flowmap_cfg.gate_value: 0.25</code></div>
+        <div><div class="dl">式 (6) 引导融合</div><em class="t">g</em> = CFG 引导强度<br><code>text_encoder_cfg.fuse_guidance_scale: 3.0</code></div>
+      </div>
+      <div class="dw">论文在相邻两段里用同一个字母 <em class="t">g</em> 指代两个数值完全不同的量（0.25 与 3.0），且都只说「fixed to」。Alg. 1 里的 <code>g</code> 是后者。读的时候必须自己分辨。</div>
+    </div>
+  </div>
+
+  <h3>② 引导融合训练：CFG 被烤进权重</h3>
+  <p>训练时不是直接监督模型输出，而是先把条件与无条件预测按 CFG 公式合成，再去回归目标：</p>
+  <div class="math">
+    <em class="t">u = (1/g)·( u<sub>c</sub> − (1 − g)·sg(u<sub>∅</sub>) )</em>，　<em class="t">t = r</em> 时监督 <em class="t">u = v</em><br>
+    <span class="an">反解 →</span>　<em class="t">u<sub>c</sub> = g·v + (1 − g)·u<sub>∅</sub> = u<sub>∅</sub> + g·(v − u<sub>∅</sub>)</em>　<span class="an">这正是 CFG 的形式</span>
+  </div>
+  <p>也就是说，学生的<strong>条件输出直接等于教师做完 CFG 之后的结果</strong>。推理时 <code>guidance_scale=1.0</code>，一步只前向一次。这是 AnyFlow 的 NFE 能和 Wan2.1 的 <code>50×2</code> 直接比较的原因——分母里那个 ×2 被它省掉了。</p>
+  <div class="flag">
+    <div class="ft">代价：引导强度被固化</div>
+    <p>代价有两个，论文都没讨论。其一，<code>fuse_guidance_scale=3.0</code> 被烤死，用户在推理时<strong>无法调节引导强度</strong>。其二，式 (6) 里被称作「null conditioning」的 <em class="t">u<sub>∅</sub></em>，在代码里其实是 <code>assets/negative_embedding/wan_negemb_cn.pth</code>——Wan 官方那段很长的中文负面提示词嵌入，不是空条件。这意味着那段负面提示词的效果也被固化进了权重。</p>
+  </div>
+  <p class="note"><strong>一个被跳过的项。</strong>Alg. 1 里 <em class="t">du/dt</em> 的有限差分只对<strong>条件分支</strong>求差，再除以 <em class="t">g</em>；而被训练的对象是融合后的 <em class="t">u</em>，它的时间导数应当是 <em class="t">(du<sub>c</sub>/dt − (1−g)·du<sub>∅</sub>/dt)/g</em>。缺的那一项在 <em class="t">g = 3</em> 时系数是 <em class="t">2/3</em>，不小。代码与论文在这里是一致的（都这么做），所以它不是笔误，而是一个<strong>未被承认的近似</strong>。</p>
+
+  <h3>③ 时间采样器：三个选项差 0.21 分</h3>
+  <p><em class="t">t, r</em> 先各自从 U(0,1) 采样再排序，因此 <em class="t">t = max</em> 的边缘密度是 <em class="t">p(t) = 2t</em>。在此之上再乘一个重加权 <em class="t">w(t)</em>。</p>
+
+  <figure>
+  <div class="panel">
+    <div class="phead">
+      <span class="ptitle">w(t) 的三个候选与它们的实际收益</span>
+      <span class="ptag">Fig. 10 复现</span>
+      <span class="spacer"></span>
+      <div class="seg" id="wSel"><button data-k="beta" class="on">Beta(2,1.5)</button><button data-k="norm">Normal(.5,.25)</button><button data-k="unif">Uniform</button></div>
+    </div>
+    <svg id="wSvg" viewBox="0 0 820 300" role="img" aria-label="三种时间加权函数导致的训练密度 f(t)=p(t)w(t)，以及对应的 VBench 分数。"></svg>
+    <div class="tw" style="margin-top:14px">
+      <table>
+        <thead><tr><th>w(t)</th><th>双向 4 NFE</th><th>双向 32 NFE</th><th>因果 4 NFE</th><th>因果 32 NFE</th></tr></thead>
+        <tbody id="wTbl"></tbody>
+      </table>
+    </div>
+  </div>
+  <figcaption><b>图 4</b>　论文选了 Beta(2,1.5)（代码里叫 <code>weight_type: beta08</code>，即 <em class="t">t<sup>1.0</sup>(1−t)<sup>0.5</sup></em>）。但整张消融表的极差只有 <strong>0.21 分</strong>，而且在<strong>因果 4 NFE 这一格，Uniform 的 83.58 反而是最高的</strong>。VBench 上 0.2 分的差距没有误差棒支撑，这条结论的强度应当按「无所谓」读，而不是按「最佳」读。</figcaption>
+  </figure>
+
+  <h3>④ 自适应损失重加权：拿对角线当尺子</h3>
+  <p>MeanFlow 预训练用 <em class="t">w = 1/(‖Δ‖² + c)</em>。AnyFlow 认为后训练场景下 <em class="t">t = r</em> 的瞬时速度场<strong>已经是可信的</strong>，于是拿它的平均损失当基准去缩放其它时间对：</p>
+  <div class="math">
+    <em class="t">w<sub>t,r</sub> = 1</em>（当 <em class="t">t = r</em>）；　<em class="t">w<sub>t,r</sub> = μ<sub>t=r</sub> / (‖Δ‖² + c)</em>（当 <em class="t">t ≠ r</em>）
+  </div>
+  <pre><i># trainer_wan_anyflow_pretrain.py · train_bidirection()</i>
+global_loss  = torch.cat(dist.nn.all_gather(loss), dim=0)        <i># 跨 rank 收集</i>
+scale_weight = global_loss[global_diffusion_mask].mean() / (loss[~is_diffusion] + 1e-5)
+loss[~is_diffusion] = loss[~is_diffusion] * scale_weight          <u># 整段在 no_grad 下算 → 只改幅度不改方向</u></pre>
+  <p>效果上等价于把 <em class="t">t ≠ r</em> 的梯度幅度<strong>钳到 <em class="t">μ<sub>t=r</sub></em> 这个量级</strong>：损失越大，缩放越狠，上限恒为 μ。注意 <em class="t">μ</em> 是<strong>全局</strong>（跨所有 rank）统计量，单卡复现时这里的数值会不一样。</p>
+</section>
+
+<!-- ============================================================ 5 -->
+<section id="shift">
+  <div class="sh"><span class="sn">05</span><h2>论文没画的那根轴：shift = 5 把「4 步」变成了什么样</h2></div>
+  <p class="dek">所有图里的时间轴都画成均匀的。但 Wan2.1 用 flow shift = 5，模型真正看到的噪声水平被严重拉向高噪声端。这件事决定了 flow map 到底在解什么。</p>
+
+  <p>调度器的采样格点是先在 <em class="t">u</em> 上取均匀 linspace，再做 shift 映射：</p>
+  <div class="math"><em class="t">σ = s·u / (1 + (s − 1)·u)</em>，　<em class="t">s = 5</em>　<span class="an">（scheduling_flowmap_euler_discrete.py · apply_shift）</span></div>
+
+  <figure>
+  <div class="panel">
+    <div class="phead">
+      <span class="ptitle">均匀格点 → shift-5 之后的真实噪声格点</span>
+      <span class="ptag">交互</span>
+      <span class="spacer"></span>
+      <div class="seg" id="shN"><button data-k="2">N=2</button><button data-k="4" class="on">N=4</button><button data-k="8">N=8</button><button data-k="16">N=16</button><button data-k="32">N=32</button><button data-k="50">N=50</button></div>
+    </div>
+    <svg id="shSvg" viewBox="0 0 840 260" role="img" aria-label="均匀 linspace 网格经 shift=5 映射后，格点集中在高噪声端，最后一步跨越大半个噪声轴。"></svg>
+    <div class="reads">
+      <div class="read"><div class="rk">最大单步跨度</div><div class="rv" id="shMax">—</div></div>
+      <div class="read"><div class="rk">它占整根轴</div><div class="rv" id="shPct">—</div></div>
+      <div class="read"><div class="rk">σ &gt; 0.8 的格点</div><div class="rv" id="shHi">—</div></div>
+      <div class="read"><div class="rk">最小单步跨度</div><div class="rv" id="shMin">—</div></div>
+    </div>
+  </div>
+  <figcaption><b>图 5</b>　N=4 时真实格点是 <code>σ = [1.000, 0.938, 0.833, 0.625] → 0</code>。前三步挤在噪声轴的顶端 37.5% 里，<strong>最后一步一口气跨越 62.5%</strong>。这解释了两件论文没明说的事：其一，「少步采样」的画质几乎全押在那一次巨跳上，而巨跳正是一致性模型（只会 <em class="t">z<sub>t</sub>→z<sub>0</sub></em>）和流匹配（只会小步 Euler）都不擅长的区间——flow map 的<strong>任意区间转移能力恰好命中这里</strong>；其二，Fig. 10a 那张密度图画在 shift <strong>之前</strong>的轴上，模型实际经历的噪声分布比图上更偏向高噪声端，所以三个 w(t) 的差别被进一步压扁。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 6 -->
+<section id="stage2">
+  <div class="sh"><span class="sn">06</span><h2>Flow Map Backward Simulation：用复合性把整条 rollout 压成三段</h2></div>
+  <p class="dek">这是论文真正的技术贡献。DMD 要求学生先自己走完一条 rollout 到 <em class="t">z<sub>0</sub></em> 才能算 KL 梯度；N 步 rollout 就要 N 次前向。AnyFlow 用 flow map 的复合性把它压成恒定的 3 次。</p>
+
+  <div class="math">
+    <em class="t">f<sub>θ</sub>(z<sub>t</sub>, t, q) ≈ f<sub>θ</sub>( f<sub>θ</sub>(z<sub>t</sub>, t, r), r, q )</em>，　<em class="t">t &gt; r &gt; q</em>　<span class="an">式 (8)：一切的支点</span>
+  </div>
+
+  <figure>
+  <div class="panel">
+    <div class="phead">
+      <span class="ptitle">两种 backward simulation 的开销与梯度路径</span>
+      <span class="ptag">交互 · 核心机制</span>
+    </div>
+    <div class="ctrls">
+      <div class="ctrl"><label>训练时模拟的步数 N</label>
+        <div class="seg" id="bsN"><button data-k="2">2</button><button data-k="4" class="on">4</button><button data-k="8">8</button><button data-k="16">16</button><button data-k="50">50</button></div>
+      </div>
+      <div class="ctrl"><label>梯度步 grad_timestep</label><input type="range" id="bsG" min="0" max="3" step="1" value="1"><span id="bsGv" style="color:var(--ink); min-width:20px">1</span></div>
+    </div>
+    <svg id="bsSvg" viewBox="0 0 860 400" role="img" aria-label="一致性 backward simulation 需要完整 N 步 rollout，flow map backward simulation 用两次 shortcut 把它压成三段，三段全部带梯度。"></svg>
+    <div class="reads">
+      <div class="read"><div class="rk">一致性 · 总前向</div><div class="rv" id="bsC1">—</div></div>
+      <div class="read"><div class="rk">一致性 · 带梯度</div><div class="rv" id="bsC2">—</div></div>
+      <div class="read"><div class="rk">flow map · 总前向</div><div class="rv" id="bsF1">—</div></div>
+      <div class="read"><div class="rk">flow map · 带梯度</div><div class="rv" id="bsF2">—</div></div>
+    </div>
+    <div class="lgd">
+      <span><i class="swatch" style="background:var(--gr)"></i>带梯度的前向</span>
+      <span><i class="swatch" style="background:var(--ink3)"></i>detach（不回传）</span>
+      <span><i class="swatch" style="background:var(--fm)"></i>shortcut 跳跃</span>
+      <span><i class="swatch" style="background:var(--cm)"></i>重新加噪</span>
+    </div>
+  </div>
+  <figcaption><b>图 6</b>　拖动 grad_timestep 看那一小段目标转移在轴上滑动。<strong>一致性路线</strong>必须逐步走完（为省显存把前面的步截断梯度，图中灰色），代价随 N 线性增长。<strong>flow map 路线</strong>只有三次前向：<em class="t">T→t</em> 抄近路、<em class="t">t→r</em> 是这次要学的那一步、<em class="t">r→0</em> 抄近路——而且三次<strong>全部保留梯度</strong>（代码 <code>training_rollout()</code> 里三段都不在 <code>no_grad</code> 下）。所以 N 从 4 换到 50，训练代价<strong>一模一样</strong>。</figcaption>
+  </figure>
+
+  <pre><i># far/pipelines/pipeline_wan_anyflow.py · training_rollout()　（删去无关行）</i>
+timesteps = self.scheduler.timesteps                 <i># shift 后的 N 个格点</i>
+timesteps = torch.cat([timesteps, timesteps.new_tensor([0])])
+
+prev_timestep    = [timesteps[0],              timesteps[grad_timestep]]      <b># T → t  shortcut</b>
+current_timestep = [timesteps[grad_timestep],  timesteps[grad_timestep + 1]]  <u># t → r  目标转移</u>
+post_timestep    = [timesteps[grad_timestep+1], timesteps[-1]]                <b># r → 0  shortcut</b>
+
+latents = inference_range(latents, prev_timestep)     <u># 三段都带梯度：整个函数里没有 no_grad</u>
+latents = inference_range(latents, current_timestep)
+latents = inference_range(latents, post_timestep)</pre>
+
+  <div class="flag">
+    <div class="ft">最该追问的一条：这个 on-policy 是近似的</div>
+    <p>训练时喂给目标转移的那个 <em class="t">z<sub>t</sub></em>，是<strong>一次大跳</strong> <em class="t">f<sub>θ</sub>(z<sub>T</sub>, T, t)</em> 的产物；推理时 N 步采样走到 <em class="t">t</em> 的那个状态，是<strong>若干次小步复合</strong>的产物。两者相等，当且仅当式 (8) 的复合性精确成立。而复合性不精确，<strong>正是整篇论文要修的那个误差</strong>——如果大跳和小步复合已经一样准，一步生成就等于 N 步生成，也就不需要 any-step 了。</p>
+    <p style="margin-top:8px">所以这套 on-policy 的「on-policy 性」是<strong>自举的</strong>：它用模型自己的复合近似来生成「模型自己的轨迹」。N 越大、shortcut 跨度越大，训练分布与真实 rollout 分布的偏差越大。这大概率是 32 步收益很快饱和（1.3B +0.48，14B 只有 +0.06）的一个结构性原因。论文没有度量过这个偏差——最直接的诊断是把 shortcut 得到的 <em class="t">z<sub>t</sub></em> 与真实 N 步 rollout 的 <em class="t">z<sub>t</sub></em> 做距离统计，论文与代码里都没有。</p>
+  </div>
+
+  <div class="note"><strong>另一处正文与算法框对不上。</strong>Alg. 2 写的是 <em class="t">s ∼ Uniform(1, 2, …, T)</em>，即从所有可能的步数里均匀采。代码里是 <code>num_inference_steps_list: [2, 4, 8, 16, 50]</code>，<strong>只有五个离散预算</strong>。评测用的 32 步不在这个列表里——这一点其实对论文有利（说明确实泛化到了没训过的预算），但<strong>训过的最大预算 50 从未被汇报</strong>，1 步、3 步、5 步这些「任意步」最该验证的点也一个都没给。</div>
+</section>
+
+<!-- ============================================================ 7 -->
+<section id="causal">
+  <div class="sh"><span class="sn">07</span><h2>因果版：chunk、KV cache，和一堵梯度墙</h2></div>
+  <p class="dek">AnyFlow-FAR 把同一套东西搬到自回归模型上。这里的「on-policy」含义变了：它修的不再只是离散化误差，还有逐块生成的曝光偏差。</p>
+
+  <figure>
+  <div class="panel">
+    <div class="phead">
+      <span class="ptitle">21 个潜在帧 → 8 个 chunk 的逐块 rollout</span>
+      <span class="ptag">交互 · 点按推进</span>
+      <span class="spacer"></span>
+      <button class="btn" id="cbStep">下一块 ▸</button>
+      <button class="btn" id="cbReset">重置</button>
+    </div>
+    <svg id="cbSvg" viewBox="0 0 860 330" role="img" aria-label="因果 rollout：8 个 chunk 依次生成，最近 3 块保持全分辨率 token，更早的块用 4×4 patch 压缩进 KV cache，块之间的 KV 写入在 no_grad 下进行。"></svg>
+    <div class="reads">
+      <div class="read"><div class="rk">已生成 chunk</div><div class="rv" id="cbDone">0 <small>/ 8</small></div></div>
+      <div class="read"><div class="rk">全 token 上下文</div><div class="rv" id="cbFull">—</div></div>
+      <div class="read"><div class="rk">压缩上下文</div><div class="rv" id="cbComp">—</div></div>
+      <div class="read"><div class="rk">本轮带梯度前向</div><div class="rv" id="cbFwd">—</div></div>
+    </div>
+  </div>
+  <figcaption><b>图 7</b>　<code>chunk_partition: [1,3,3,3,3,3,3,2]</code>——首块大小 1 是为了精确的首帧条件（I2V），其余为 3，<strong>末块是 2</strong>（论文只说「后续 chunk 用 3」，没提这个）。<code>full_chunk_limit: 3</code>：只有最近 3 块保留标准 2×2 patch，更早的块用 <code>compressed_patch_size: [1,4,4]</code> 重新切块，空间 token 数降到 1/4。每块内部跑一遍图 6 的三段 shortcut；块与块之间，<code>encode_kv_cache()</code> 带 <code>@torch.no_grad()</code> 装饰器——<strong>梯度不跨块回传</strong>。</figcaption>
+  </figure>
+
+  <p>这堵梯度墙的意义值得说清楚：第 k 块的生成条件是<strong>学生自己生成的</strong>前 k−1 块（所以是 on-policy，曝光偏差被暴露出来了），但 DMD 梯度只修正「给定这个有瑕疵的上下文，第 k 块该怎么画」，<strong>不会</strong>反过来要求前面的块为后面的错误负责。这与 Self-Forcing 的做法一致，不是 AnyFlow 的新选择。</p>
+
+  <div class="kv">
+    <dt>一次 generator step</dt><dd>8 块 × 3 段 = <strong>24 次带梯度前向</strong>（N 无关）。对比一致性路线在 N=16 时的 8×16=128 次前向。</dd>
+    <dt>bidirectional_modeling_prob</dt><dd><code>0.1</code>——10% 的训练步把因果模型当双向模型训。论文<strong>没有提及</strong>。</dd>
+    <dt>long_context_training_ratio</dt><dd><code>0.5</code>。同样未在论文出现。</dd>
+    <dt>DMD 的两个评分网络</dt><dd>均以 <code>is_causal=False</code> 调用，即<strong>双向</strong>地看完整段视频再给梯度。与 Self-Forcing「用双向教师指导因果学生」同构。</dd>
+  </div>
+
+  <h3>续训能力：论文里被低估的那个卖点</h3>
+  <p>Fig. 7–8 讲的是一件很实用的事：Self-Forcing 蒸出来的因果模型<strong>很难再往下游数据上接着训</strong>（它的参数化已经绑死在一致性采样器上）；AnyFlow 因为保留了 <em class="t">t = r</em> 这条对角线上的瞬时速度场，等于保留了一个完整可用的流匹配模型，可以直接在机器人、驾驶、游戏数据上继续微调。对「交互式世界模型」这个方向来说，这比 VBench 上那 0.5 分重要得多——它意味着<strong>蒸馏不再是管线的终点</strong>。</p>
+</section>
+
+<!-- ============================================================ 8 -->
+<section id="dmd">
+  <div class="sh"><span class="sn">08</span><h2>DMD 那一半：谁是 real、谁是 fake，以及一个命名陷阱</h2></div>
+  <p class="dek">on-policy 阶段的损失本身是标准 DMD2，没有创新。但代码里的命名会让人读错，而且「教师」的身份比论文正文说的复杂。</p>
+
+  <div class="math">
+    <em class="t">∇<sub>θ</sub> ℒ<sub>DMD</sub> = −𝔼<sub>t,z</sub> [ ( s<sub>real</sub>(z<sub>t</sub>, t) − s<sub>fake</sub>(z<sub>t</sub>, t) ) · ∂f<sub>θ</sub>(z)/∂θ ]</em>
+  </div>
+
+  <div class="flag dig">
+    <div class="ft">命名陷阱</div>
+    <p>代码里那个叫 <code>self.discriminator</code> 的模型<strong>不是 GAN 判别器</strong>。<code>discriminator_loss()</code> 算的是标准流匹配去噪损失 <code>(noise_pred − (noise − latents))²</code>，训练对象是学生生成样本上的<strong>分数函数</strong>——也就是 DMD 里的 <em class="t">s<sub>fake</sub></em>（critic）。论文 Tab. 1 把 APT 系列标为 "GAN Loss"、把自己标为 "DMD Loss" 是对的；只是读代码时别被这个变量名带偏。<code>discriminator_update_ratio: 1</code>，即 critic 与 generator 1:1 交替更新。</p>
+  </div>
+
+  <div class="kv">
+    <dt>s<sub>real</sub> 是谁</dt><dd><strong>不是原始 Wan2.1</strong>，而是 Wan2.1 在同一份 256K 合成数据上 LoRA 微调后的版本（<code>real_cfg.pretrained_path</code> 指向 <code>train_wan1b_teacher_*/step_6000.pt</code> 的 EMA 权重）。论文只在 ODE-Init 对照那一小节提过一句「我们在同一合成数据上微调了教师，因为拿不到 Wan 的原始训练数据」，但实际上<strong>整个 stage 2 的 real score 都是这个微调版教师</strong>。</dd>
+    <dt>real_guidance_scale</dt><dd><code>3.0</code>——real score 自己再做一次 CFG 才作为目标。与 stage 1 的 <code>fuse_guidance_scale: 3.0</code> 同值，保证两阶段的等效引导强度一致。</dd>
+    <dt>梯度归一化</dt><dd><code>grad / |pred_video − pred_real_video|.mean()</code>，逐样本。沿用 DMD2 / Self-Forcing 的实现。</dd>
+    <dt>co-train</dt><dd><code>cotrain_forward_kl</code> 默认 <code>True</code>：stage 2 每个 generator step <strong>同时</strong>跑一次 stage 1 的前向 flow map 损失。所以 stage 2 不是纯 on-policy，是前向正则 + 反向 KL 的混合。</dd>
+    <dt>DMD 加噪时刻</dt><dd>generator 用 <code>t ~ U(0,1)</code> 再 shift；critic 用 <code>logit_normal(0, 1.0)</code> 再 shift。两者不同，论文未提。</dd>
+  </div>
+
+  <div class="note"><strong>数据来源的混淆风险。</strong>stage 1 的 256K 合成视频全部由 <strong>Wan2.1-T2V-14B</strong> 生成，而 1.3B 学生和 14B 学生用的是<strong>同一份</strong>数据。对 14B 来说这是自蒸馏；对 1.3B 来说，它的 stage 1 目标分布来自一个<strong>比它自己的教师更强的模型</strong>。因此「AnyFlow-1.3B 4 步 83.48 &gt; Wan2.1-1.3B 50×2 步 83.24」这个结论里，有多少来自 flow map 蒸馏、有多少来自 14B 数据的隐性跨尺寸蒸馏，论文<strong>没有做区分实验</strong>。与 rCM-1.3B（82.51）的比较也因此不是同一训练协议下的对照。</div>
+</section>
+
+<!-- ============================================================ 9 -->
+<section id="results">
+  <div class="sh"><span class="sn">09</span><h2>结果怎么读：单调 ≠ scaling</h2></div>
+  <p class="dek">论文的核心图是那条「不再下坠」的曲线。把它和教师曲线放在同一张图上看，论断需要重新措辞。</p>
+
+  <figure>
+  <div class="panel">
+    <div class="phead">
+      <span class="ptitle">VBench Total vs 采样步数（Wan2.1-1.3B 系列）</span>
+      <span class="ptag">Fig. 1 复现</span>
+      <span class="spacer"></span>
+      <div class="seg" id="scZoom"><button data-k="full" class="on">含教师</button><button data-k="zoom">聚焦蒸馏模型</button></div>
+    </div>
+    <div class="relbox">
+      <svg id="scSvg" viewBox="0 0 840 400" role="img" aria-label="VBench 总分随采样步数变化：AnyFlow 单调上升并很快饱和，rCM 与 Self-Forcing 随步数下降，教师从 62.65 一路升到 83.41。"></svg>
+      <div class="tip" id="scTip"></div>
+    </div>
+    <div class="lgd" id="scLgd"></div>
+  </div>
+  <figcaption><b>图 8</b>　三种形状：<strong>教师</strong>（紫）从 62.65 涨到 83.41，这才叫 test-time scaling——16 倍算力换 20.8 分。<strong>一致性家族</strong>（橙 / 粉）是倒 U，rCM 在 32 步塌到 75.72。<strong>AnyFlow</strong>（青）单调，但 2→32 步只涨 1.04 分，其中 4→32 步只涨 0.48。准确的表述应当是「<strong>保住了单调性</strong>」，而不是「具备 test-time scaling」——它在 4 步就已经接近自己的天花板了。</figcaption>
+  </figure>
+
+  <h3>主表：T2V（VBench，† 为作者用官方增强提示词统一复测）</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>模型</th><th>参数</th><th>NFE</th><th>Quality</th><th>Semantic</th><th>Total</th></tr></thead>
+      <tbody>
+        <tr><td colspan="6" style="text-align:left; color:var(--ink3); font-family:var(--font-mono); font-size:11px; background:var(--surf2)">双向</td></tr>
+        <tr><td>Wan2.1-T2V-1.3B †（教师）</td><td>1.3B</td><td>50×2</td><td>84.99</td><td>76.23</td><td>83.24</td></tr>
+        <tr><td>rCM-Wan2.1-T2V-1.3B †</td><td>1.3B</td><td>4</td><td>84.71</td><td>73.74</td><td>82.51</td></tr>
+        <tr class="ours"><td>AnyFlow-Wan2.1-T2V-1.3B</td><td>1.3B</td><td>4</td><td>85.24</td><td>76.41</td><td class="hi">83.48</td></tr>
+        <tr class="ours"><td>AnyFlow-Wan2.1-T2V-1.3B</td><td>1.3B</td><td>32</td><td>85.70</td><td>76.99</td><td class="hi">83.96</td></tr>
+        <tr><td>Wan2.1-T2V-14B †（教师）</td><td>14B</td><td>50×2</td><td>85.77</td><td>75.58</td><td>83.74</td></tr>
+        <tr><td>rCM-Wan2.1-T2V-14B †</td><td>14B</td><td>4</td><td>85.47</td><td>76.72</td><td>83.73</td></tr>
+        <tr class="ours"><td>AnyFlow-Wan2.1-T2V-14B</td><td>14B</td><td>4</td><td>85.70</td><td>77.38</td><td class="hi">84.04</td></tr>
+        <tr class="ours"><td>AnyFlow-Wan2.1-T2V-14B</td><td>14B</td><td>32</td><td>85.76</td><td>77.44</td><td class="hi">84.10</td></tr>
+        <tr><td colspan="6" style="text-align:left; color:var(--ink3); font-family:var(--font-mono); font-size:11px; background:var(--surf2)">因果</td></tr>
+        <tr><td>Self-Forcing †</td><td>1.3B</td><td>4</td><td>85.23</td><td>76.01</td><td>83.39</td></tr>
+        <tr class="ours"><td>AnyFlow-FAR-Wan2.1-1.3B</td><td>1.3B</td><td>4</td><td>85.60</td><td>75.30</td><td class="hi">83.54</td></tr>
+        <tr class="ours"><td>AnyFlow-FAR-Wan2.1-1.3B</td><td>1.3B</td><td>32</td><td>85.92</td><td>76.12</td><td class="hi">83.96</td></tr>
+        <tr><td>LightX2V-Wan2.1-14B-CausVid †</td><td>14B</td><td>9</td><td>85.29</td><td>75.96</td><td>83.42</td></tr>
+        <tr><td>FastVideo-CausalWan2.2-A14B †</td><td>14B</td><td>8</td><td>84.28</td><td>78.49</td><td>83.12</td></tr>
+        <tr><td>Krea-Realtime-Wan2.1-14B †</td><td>14B</td><td>4</td><td>84.80</td><td>77.07</td><td>83.25</td></tr>
+        <tr class="ours"><td>AnyFlow-FAR-Wan2.1-14B</td><td>14B</td><td>4</td><td>85.82</td><td>76.97</td><td class="hi">84.05</td></tr>
+        <tr class="ours"><td>AnyFlow-FAR-Wan2.1-14B</td><td>14B</td><td>32</td><td>86.12</td><td>77.55</td><td class="hi">84.41</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note"><strong>一个值得停一下的数：</strong>14B 双向从 4 步到 32 步只涨 <strong>0.06</strong>（84.04 → 84.10）。也就是说在 14B 规模上，双向 AnyFlow 的「any-step」几乎退化成了「4 步就够了」。因果 14B 还有 +0.36，是全表里 scaling 最明显的一格。论文摘要把 84.05 → 84.41 这条拿出来说，但没提双向 14B 那条几乎是平的。</p>
+
+  <h3>I2V：摘要挑了一个对自己有利的比较对象</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>模型</th><th>参数</th><th>NFE</th><th>Quality</th><th>I2V</th><th>Total</th></tr></thead>
+      <tbody>
+        <tr><td>MAGI-1</td><td>24B</td><td>32×2</td><td>82.44</td><td>96.12</td><td class="hi">89.28</td></tr>
+        <tr><td>Step-Video-TI2V</td><td>30B</td><td>50×2</td><td>81.22</td><td>95.50</td><td>88.36</td></tr>
+        <tr><td>HunyuanVideo-I2V</td><td>13B</td><td>50×2</td><td>78.54</td><td>95.10</td><td>86.82</td></tr>
+        <tr><td>Wan2.1-I2V-14B †</td><td>14B</td><td>50×2</td><td>80.30</td><td>95.12</td><td>87.71</td></tr>
+        <tr><td>FastVideo-CausalWan2.2-A14B †</td><td>14B</td><td>8</td><td>78.82</td><td>94.81</td><td>86.82</td></tr>
+        <tr class="ours"><td>AnyFlow-FAR-Wan2.1-14B</td><td>14B</td><td>4</td><td>80.39</td><td>95.35</td><td>87.87</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>「4 NFE 的 87.87 ≈ Wan2.1-I2V-14B 50×2 的 87.71」是一个漂亮的效率论断，但同表里 MAGI-1（24B，32×2）是 <strong>89.28</strong>。AnyFlow 在 VBench-I2V 上<strong>不是 SOTA</strong>，它的主张应该限定为「相对自己的底座做到了 25 倍效率而不掉分」。另外值得注意：这个 I2V 能力是<strong>因果模型复用</strong>来的——靠把首个 chunk 设成大小 1 来做精确首帧条件，一个模型同时覆盖 T2V / I2V / V2V，这在工程上比多 0.5 分有用。</p>
+
+  <h3>消融表：作者自己的数字不支持正文那句话</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>配置</th><th>NFE</th><th>双向 Q</th><th>双向 S</th><th>双向 Total</th><th>因果 Q</th><th>因果 S</th><th>因果 Total</th></tr></thead>
+      <tbody>
+        <tr><td colspan="8" style="text-align:left; color:var(--ink3); font-family:var(--font-mono); font-size:11px; background:var(--surf2)">仅前向训练</td></tr>
+        <tr><td>流匹配训练</td><td>4×2</td><td>77.82</td><td>61.91</td><td class="lo">74.64</td><td>79.05</td><td>67.79</td><td class="lo">76.80</td></tr>
+        <tr><td>流匹配训练</td><td>32×2</td><td>85.48</td><td>77.24</td><td>83.83</td><td>85.21</td><td>76.65</td><td>83.50</td></tr>
+        <tr><td>一致性 ODE-Init</td><td>4</td><td>83.01</td><td>70.13</td><td>80.44</td><td>76.99</td><td>61.88</td><td class="lo">73.97</td></tr>
+        <tr><td>一致性 ODE-Init</td><td>32</td><td>84.78</td><td>75.15</td><td>82.86</td><td>79.73</td><td>68.81</td><td class="lo">77.55</td></tr>
+        <tr><td>Flow map 训练</td><td>4</td><td>84.39</td><td>71.20</td><td>81.75</td><td>82.80</td><td>71.16</td><td>80.48</td></tr>
+        <tr><td>Flow map 训练</td><td>32</td><td>85.35</td><td>75.63</td><td>83.40</td><td>85.23</td><td>74.71</td><td>83.13</td></tr>
+        <tr><td colspan="8" style="text-align:left; color:var(--ink3); font-family:var(--font-mono); font-size:11px; background:var(--surf2)">前向训练 + on-policy 蒸馏</td></tr>
+        <tr><td>ODE-Init + 一致性 BS</td><td>4</td><td>84.77</td><td>75.71</td><td>82.96</td><td>84.37</td><td>74.97</td><td>82.49</td></tr>
+        <tr><td>ODE-Init + 一致性 BS</td><td>32</td><td>83.70</td><td>64.18</td><td class="lo">79.80</td><td>82.43</td><td>68.48</td><td class="lo">79.64</td></tr>
+        <tr><td>Flow map + 一致性 BS</td><td>4</td><td>85.47</td><td>75.88</td><td class="mark">83.55</td><td>84.99</td><td>74.97</td><td>82.99</td></tr>
+        <tr><td>Flow map + 一致性 BS</td><td>32</td><td>85.15</td><td>74.19</td><td>82.96</td><td>85.67</td><td>74.78</td><td>83.49</td></tr>
+        <tr class="ours"><td>Flow map + Flow map BS（本文）</td><td>4</td><td>85.24</td><td>76.41</td><td class="mark">83.48</td><td>85.60</td><td>75.30</td><td class="hi">83.54</td></tr>
+        <tr class="ours"><td>Flow map + Flow map BS（本文）</td><td>32</td><td>85.70</td><td>76.99</td><td class="hi">83.96</td><td>85.92</td><td>76.12</td><td class="hi">83.96</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>正文写：「By further adopting our flow map backward simulation, <strong>both few-step and multi-step performance are improved</strong>.」但看框出来的两格：<strong>双向 4 NFE 上，一致性 BS 的 83.55 高于本文的 83.48</strong>（Quality 85.47 vs 85.24 也是一致性 BS 更好，只有 Semantic 反过来）。flow map BS 的真实优势集中在<strong>多步</strong>（82.96 → 83.96）和<strong>因果</strong>（82.99 → 83.54），少步双向这一格是打平甚至微负。</p>
+
+  <p class="note"><strong>把这张表读透还能得到一个更重要的结论：</strong>「flow map 训练」这个前向阶段的贡献被低估了。对因果模型，一致性 ODE-Init 在 4 步只有 73.97，换成 flow map 训练直接到 80.48（+6.5），这比后面整个 on-policy 阶段的增量（80.48 → 83.54）性质不同——前者是「初始化不崩了」，后者才是「误差被修了」。反过来说，<strong>如果只能做一件事，换初始化比换 backward simulation 收益大得多</strong>。</p>
+</section>
+
+<!-- ============================================================ 10 -->
+<section id="cost">
+  <div class="sh"><span class="sn">10</span><h2>训练成本账：在 N ≈ 6 附近交叉</h2></div>
+  <p class="dek">Tab. 5 是论文里最诚实的一张表：它承认 flow map BS 在 4 步时<strong>更贵</strong>。</p>
+
+  <figure>
+  <div class="panel">
+    <div class="phead">
+      <span class="ptitle">on-policy 每迭代耗时（Wan2.1-1.3B，bs=16，8×H100）</span>
+      <span class="ptag">Tab. 5</span>
+      <span class="spacer"></span>
+      <div class="seg" id="cArch"><button data-k="causal" class="on">因果</button><button data-k="bidir">双向</button></div>
+    </div>
+    <svg id="cSvg" viewBox="0 0 820 320" role="img" aria-label="一致性 backward simulation 的训练代价随步数线性增长，flow map backward simulation 恒定，两者在 6 步附近交叉。"></svg>
+    <div class="reads">
+      <div class="read"><div class="rk">4 步</div><div class="rv" id="c4">—</div></div>
+      <div class="read"><div class="rk">16 步</div><div class="rv" id="c16">—</div></div>
+      <div class="read"><div class="rk">交叉点（线性外推）</div><div class="rv" id="cX">—</div></div>
+    </div>
+  </div>
+  <figcaption><b>图 9</b>　实测点只有 4 步和 16 步两个，虚线是线性外推（一致性 BS 的代价确实应当随步数近似线性）。flow map BS 恒定 53.1 / 51.2 s，因为它永远只跑 3 段。4 步时它贵 15.7% / 22.5%——<strong>因为三段全部带梯度，反传比一致性路线的单段截断贵</strong>；16 步时便宜 43.4% / 47.0%。交叉点约在 6 步。前向训练阶段的开销也值得记一笔：引导融合（多一次无条件前向）+ 中心差分（多两次前向）把因果模型的 5.8 s/iter 推到 10.4，几乎翻倍。</figcaption>
+  </figure>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>阶段 / 配置</th><th>因果 s/iter</th><th>双向 s/iter</th></tr></thead>
+      <tbody>
+        <tr><td>前向：标准流匹配</td><td>5.8</td><td>9.7</td></tr>
+        <tr><td>前向：+ 引导融合</td><td>7.8</td><td>12.3</td></tr>
+        <tr><td>前向：+ 引导融合 + 中心差分</td><td>10.4</td><td>16.8</td></tr>
+        <tr><td>on-policy：一致性 BS（4 步）</td><td>45.9</td><td>41.8</td></tr>
+        <tr class="ours"><td>on-policy：flow map BS（4 步）</td><td>53.1 <span style="color:var(--bad-ink)">+15.7%</span></td><td>51.2 <span style="color:var(--bad-ink)">+22.5%</span></td></tr>
+        <tr><td>on-policy：一致性 BS（16 步）</td><td>93.8</td><td>96.6</td></tr>
+        <tr class="ours"><td>on-policy：flow map BS（16 步）</td><td>53.1 <span style="color:var(--ok-ink)">−43.4%</span></td><td>51.2 <span style="color:var(--ok-ink)">−47.0%</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">全表没有<strong>任何推理端</strong>的数字：没有 s/video，没有 FPS，没有首帧延迟。对一篇把「少步」和「test-time 算力权衡」当卖点的论文，只给 NFE 是不够的——因果模型带 KV cache、上下文压缩，双向模型每步要跑全序列，同样是 4 NFE，两者的墙钟时间不在一个量级。</p>
+</section>
+
+<!-- ============================================================ 11 -->
+<section id="doubts">
+  <div class="sh"><span class="sn">11</span><h2>存疑清单：14 条，按严重度排序</h2></div>
+  <p class="dek">前 5 条是论文与开源代码<strong>直接冲突</strong>或影响结论归因的；中间 7 条影响结论强度；最后 2 条是记录性的。所有代码引用来自 <code>github.com/NVLabs/AnyFlow</code> 主分支。</p>
+
+  <div class="diff">
+
+    <div class="dcard">
+      <div class="dh"><span class="lvl hi">高 · 01</span><span class="dt">插值时间条件的系数，论文与代码相反</span></div>
+      <div class="dgrid">
+        <div><div class="dl">论文</div><em class="t">g·emb(t) + (1−g)·emb′(r)</em>，g = 0.25 → <strong>r 占 0.75</strong></div>
+        <div><div class="dl">代码</div><code>(1-gate)*temb + gate*delta_emb</code>，gate = 0.25 → <strong>t 占 0.75</strong></div>
+      </div>
+      <div class="dw">按论文写法，主时间戳的权重只有 1/4，这与「轻改装预训练模型、保住 <em class="t">t=r</em> 边界」的论证方向矛盾。<b>以代码为准。</b></div>
+    </div>
+
+    <div class="dcard">
+      <div class="dh"><span class="lvl hi">高 · 02</span><span class="dt">同一个符号 g 指代两个量</span></div>
+      <div class="dgrid">
+        <div><div class="dl">§4.2.1</div>插值门控 g = 0.25（<code>gate_value</code>）</div>
+        <div><div class="dl">式 (6) / Alg. 1</div>CFG 引导强度 g = 3.0（<code>fuse_guidance_scale</code>）</div>
+      </div>
+      <div class="dw">两段相隔不到一页，且都说「fixed to」。复现时若把 Alg. 1 里的 g 当成 0.25，引导融合会完全失效。</div>
+    </div>
+
+    <div class="dcard">
+      <div class="dh"><span class="lvl hi">高 · 03</span><span class="dt">25% 的前向训练其实是一致性训练，论文未披露</span></div>
+      <div class="dgrid">
+        <div><div class="dl">论文</div>「我们在每次迭代中让 50% 的 batch 来自边界情形 <em class="t">t = r</em>」——只说了这一条</div>
+        <div><div class="dl">代码</div><code>diffusion_ratio: 0.5</code>（r ← t）<b>+</b> <code>consistency_ratio: 0.25</code>（<b>r ← 0</b>）</div>
+      </div>
+      <div class="dw">真正落在「一般区间转移」内部的训练样本只有 <b>25%</b>。这对全文叙事有直接影响：论文的立论是「一致性公式是问题根源，我们换成 flow map」，而实现里四分之一的前向监督<b>就是</b>终点一致性监督。它很可能是让 4 步性能站住的关键——也意味着「flow map vs consistency」不是一次干净的替换，而是一次<b>配比</b>。这个配比没有任何消融。</div>
+    </div>
+
+    <div class="dcard">
+      <div class="dh"><span class="lvl hi">高 · 04</span><span class="dt">on-policy 的「on-policy 性」是自举近似，且没有被度量</span></div>
+      <div class="dgrid">
+        <div><div class="dl">训练时的 z_t</div>由<b>一次大跳</b> <em class="t">f<sub>θ</sub>(z<sub>T</sub>, T, t)</em> 得到</div>
+        <div><div class="dl">推理时的 z_t</div>由 <b>grad_timestep 次小步复合</b>得到</div>
+      </div>
+      <div class="dw">二者相等当且仅当复合性式 (8) 精确成立，而它不精确恰恰是本文要修的误差。N 越大、shortcut 跨度越大，训练分布偏得越多。<b>最直接的诊断是统计两者的距离随 N 的变化，论文与代码里都没有。</b>这很可能是 32 步收益迅速饱和的结构性原因。</div>
+    </div>
+
+    <div class="dcard">
+      <div class="dh"><span class="lvl hi">高 · 05</span><span class="dt">1.3B 的对比不是同协议：stage-1 数据来自 14B</span></div>
+      <div class="dgrid">
+        <div><div class="dl">事实</div>256K 合成视频全部由 Wan2.1-T2V-<b>14B</b> 生成，1.3B 与 14B 学生共用</div>
+        <div><div class="dl">后果</div>「AnyFlow-1.3B@4 = 83.48 &gt; 自己教师 50×2 = 83.24」里混进了跨尺寸蒸馏的收益</div>
+      </div>
+      <div class="dw">与 rCM-1.3B（82.51）、Self-Forcing（83.39）的比较因此不是同一训练协议下的对照。论文的 Limitations 承认了「依赖外部数据、可能引入分布偏移」，但<b>没有做「用 1.3B 自己生成的数据重跑一遍」这个关键对照</b>。</div>
+    </div>
+
+    <div class="dcard">
+      <div class="dh"><span class="lvl md">中 · 06</span><span class="dt">正文的「few-step 与 multi-step 都改善」与自家 Tab. 2 冲突</span></div>
+      <div class="dgrid">
+        <div><div class="dl">一致性 BS，双向 4 NFE</div>Q 85.47 · S 75.88 · <b>Total 83.55</b></div>
+        <div><div class="dl">flow map BS（本文），双向 4 NFE</div>Q 85.24 · S 76.41 · <b>Total 83.48</b></div>
+      </div>
+      <div class="dw">这一格本文<b>低 0.07</b>。真实优势在多步（+1.00）与因果（+0.55），少步双向是打平。措辞应当收窄。</div>
+    </div>
+
+    <div class="dcard">
+      <div class="dh"><span class="lvl md">中 · 07</span><span class="dt">「任意步」的训练与评测都只覆盖少数几个点</span></div>
+      <div class="dgrid">
+        <div><div class="dl">Alg. 2</div><em class="t">s ∼ Uniform(1, 2, …, T)</em></div>
+        <div><div class="dl">代码</div><code>num_inference_steps_list: [2, 4, 8, 16, 50]</code></div>
+      </div>
+      <div class="dw">评测点是 2/4/8/16/32——<b>32 没训过</b>（对论文有利，说明有泛化），但<b>训过的 50 从未汇报</b>，而 1 / 3 / 5 / 7 这些最能证明「任意」的奇数预算一个都没测。对一篇标题就是 "Any-Step" 的论文，这是最该补的实验。</div>
+    </div>
+
+    <div class="dcard">
+      <div class="dh"><span class="lvl md">中 · 08</span><span class="dt">stage-2 迭代数对不上，且 checkpoint 可能按 VBench 选</span></div>
+      <div class="dgrid">
+        <div><div class="dl">论文 §5.1</div>on-policy 阶段 <b>800</b> iterations，lr 2e-6</div>
+        <div><div class="dl">代码 config</div><code>total_iter: 1200</code>，<code>eval_freq: 400</code>，<code>save_eval_checkpoint_freq: 400</code></div>
+      </div>
+      <div class="dw">配置里训练 1200 步、每 400 步在 VBench 上评一次并存 checkpoint。若最终报告的是其中<b>按 VBench 挑出的最好一档</b>，那么报告分数与选择指标是同一个，差值 0.1 量级的结论会被系统性抬高。论文未说明选择规则。</div>
+    </div>
+
+    <div class="dcard">
+      <div class="dh"><span class="lvl md">中 · 09</span><span class="dt">评测只有 VBench：没有多样性、没有误差棒，第三方复测有差</span></div>
+      <div class="dgrid">
+        <div><div class="dl">本文报告</div>AnyFlow-1.3B@4 → <b>83.48</b></div>
+        <div><div class="dl">第三方复测（CrossDistill, 2609.14725）</div>同一模型同设定 → <b>83.41</b>；并测得<b>多样性仅为教师的 66%</b></div>
+      </div>
+      <div class="dw">DMD 的反向 KL 是 mode-seeking，会系统性砍多样性，而 VBench 不惩罚这件事。AnyFlow 全文<b>没有任何多样性、FVD 或人评指标</b>，也没有种子间方差。对「交互式世界模型」这个用途来说，多样性掉到 66% 比 VBench 涨 0.5 分重要得多——同一个 prompt 反复 rollout 会越来越像确定性回放。</div>
+    </div>
+
+    <div class="dcard">
+      <div class="dh"><span class="lvl md">中 · 10</span><span class="dt">融合目标的时间导数漏了一项</span></div>
+      <div class="dgrid">
+        <div><div class="dl">被训练的对象</div><em class="t">u = (u<sub>c</sub> − (1−g)u<sub>∅</sub>)/g</em></div>
+        <div><div class="dl">Alg. 1 / 代码的 du/dt</div>只对 <em class="t">u<sub>c</sub></em> 做中心差分再除以 g</div>
+      </div>
+      <div class="dw">正确的应为 <em class="t">(du<sub>c</sub>/dt − (1−g)·du<sub>∅</sub>/dt)/g</em>，缺项系数在 g=3 时为 2/3。论文与代码一致，所以不是笔误，而是一个<b>未被承认的近似</b>——它会给 <em class="t">u<sub>tgt</sub></em> 引入与无条件分支曲率成正比的偏置。</div>
+    </div>
+
+    <div class="dcard">
+      <div class="dh"><span class="lvl md">中 · 11</span><span class="dt">「null conditioning」其实是中文负面提示词；CFG 强度被固化</span></div>
+      <div class="dgrid">
+        <div><div class="dl">论文</div>「<em class="t">u<sub>∅</sub></em> is the model prediction with null conditioning」</div>
+        <div><div class="dl">代码</div><code>negative_embedding_path: wan_negemb_cn.pth</code>（Wan 官方那段长负面提示词）</div>
+      </div>
+      <div class="dw">被烤进权重的不只是 g=3.0 的引导强度，还有这段具体的负面提示词语义。推理时用户<b>既不能调引导强度，也不能换负面提示词</b>。这对下游使用是实打实的限制，论文没讨论。</div>
+    </div>
+
+    <div class="dcard">
+      <div class="dh"><span class="lvl md">中 · 12</span><span class="dt">全文没有一个推理延迟数字</span></div>
+      <div class="dgrid">
+        <div><div class="dl">给了什么</div>NFE 计数、训练 s/iter</div>
+        <div><div class="dl">没给什么</div>s/video、FPS、首帧延迟、显存</div>
+      </div>
+      <div class="dw">NFE 只是代理量。因果模型有 KV cache 与上下文压缩、双向模型每步跑全序列，同为 4 NFE 墙钟时间差很多；而「用更多步换更好质量」这个卖点本身就是一个延迟-质量权衡，不给延迟就无法评估。</div>
+    </div>
+
+    <div class="dcard">
+      <div class="dh"><span class="lvl lo">低 · 13</span><span class="dt">Fig. 1 中「Teacher Model」曲线的身份与 NFE 口径未说明</span></div>
+      <div class="dgrid">
+        <div><div class="dl">Fig. 1</div>教师 @32 = <b>83.41</b></div>
+        <div><div class="dl">Tab. 3</div>Wan2.1-T2V-1.3B @50×2 = <b>83.24</b></div>
+      </div>
+      <div class="dw">两处口径不一致：Fig. 1 的「32 NFE」是 32 步无 CFG 还是 16 步带 CFG？这条曲线是原始 Wan2.1 还是在 256K 合成数据上微调过的那个教师（代码里 <code>real_score</code> 用的是后者）？都没写。另：Fig. 1 的 Self-Forcing @4 = 83.40，Tab. 3 是 83.39。</div>
+    </div>
+
+    <div class="dcard">
+      <div class="dh"><span class="lvl lo">低 · 14</span><span class="dt">一批影响复现的超参只在 config 里</span></div>
+      <div class="dgrid">
+        <div><div class="dl">论文未提</div>EMA（前向 0.999 / on-policy 0.99，且 stage 2 载入的是 <b>EMA 权重</b>）、<code>bidirectional_modeling_prob: 0.1</code>、<code>long_context_training_ratio: 0.5</code>、<code>epsilon: 5</code>、<code>drop_text_ratio: 0.1</code>、<code>cotrain_forward_kl</code> 默认开</div>
+        <div><div class="dl">与论文表述有出入</div>chunk 划分论文说「首块 1，其余 3」，实际是 <code>[1,3,3,3,3,3,3,2]</code>（末块为 2）；DMD 的加噪时刻 generator 用 U(0,1)、critic 用 logit-normal，论文未区分</div>
+      </div>
+      <div class="dw">单独看都不致命，合起来足以让一次独立复现对不上 0.1–0.3 分。</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================ 12 -->
+<section id="repro">
+  <div class="sh"><span class="sn">12</span><h2>谱系、定位与复现速查</h2></div>
+
+  <figure>
+  <div class="panel flush">
+    <svg viewBox="0 0 860 300" role="img" aria-label="AnyFlow 的两条技术血统：一致性模型线（CM→sCM→rCM / Self-Forcing）与流映射线（Flow Map Matching→MeanFlow→TiM），AnyFlow 承接后者并借用前者的 DMD on-policy 框架。">
+      <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+      <g font-family="var(--font-mono)" font-size="11.5" fill="var(--ink3)">
+        <text x="16" y="60">一致性线</text>
+        <text x="16" y="182">流映射线</text>
+        <text x="16" y="266">on-policy</text>
+      </g>
+      <g stroke="var(--rule2)" stroke-width="1.2" fill="none" color="var(--ink3)">
+        <line x1="150" y1="56" x2="212" y2="56" marker-end="url(#a2)"/>
+        <line x1="286" y1="56" x2="348" y2="56" marker-end="url(#a2)"/>
+        <line x1="430" y1="56" x2="492" y2="56" marker-end="url(#a2)"/>
+        <line x1="150" y1="178" x2="212" y2="178" marker-end="url(#a2)"/>
+        <line x1="300" y1="178" x2="362" y2="178" marker-end="url(#a2)"/>
+        <line x1="452" y1="178" x2="600" y2="178" marker-end="url(#a2)"/>
+        <line x1="256" y1="262" x2="600" y2="200" marker-end="url(#a2)"/>
+      </g>
+      <g font-family="var(--font-mono)" font-size="12">
+        <rect x="96" y="40" width="56" height="30" rx="7" fill="var(--cm-soft)" stroke="var(--cm)"/><text x="124" y="60" text-anchor="middle" fill="var(--cm-ink)">CM</text>
+        <rect x="212" y="40" width="74" height="30" rx="7" fill="var(--cm-soft)" stroke="var(--cm)"/><text x="249" y="60" text-anchor="middle" fill="var(--cm-ink)">sCM</text>
+        <rect x="348" y="40" width="82" height="30" rx="7" fill="var(--cm-soft)" stroke="var(--cm)"/><text x="389" y="60" text-anchor="middle" fill="var(--cm-ink)">rCM</text>
+        <rect x="492" y="40" width="130" height="30" rx="7" fill="var(--cm-soft)" stroke="var(--cm)"/><text x="557" y="60" text-anchor="middle" fill="var(--cm-ink)">Self-Forcing</text>
+
+        <rect x="76" y="162" width="76" height="30" rx="7" fill="var(--fm-soft)" stroke="var(--fm)"/><text x="114" y="182" text-anchor="middle" fill="var(--fm-ink)">Flow Map</text>
+        <rect x="212" y="162" width="88" height="30" rx="7" fill="var(--fm-soft)" stroke="var(--fm)"/><text x="256" y="182" text-anchor="middle" fill="var(--fm-ink)">MeanFlow</text>
+        <rect x="362" y="162" width="90" height="30" rx="7" fill="var(--fm-soft)" stroke="var(--fm)"/><text x="407" y="182" text-anchor="middle" fill="var(--fm-ink)">TiM 差分</text>
+        <rect x="600" y="140" width="180" height="76" rx="11" fill="var(--fm-soft)" stroke="var(--fm)" stroke-width="2"/>
+        <text x="690" y="170" text-anchor="middle" fill="var(--fm-ink)" font-size="15" font-weight="700">AnyFlow</text>
+        <text x="690" y="192" text-anchor="middle" fill="var(--ink3)" font-size="10.5">flow map + 三段 shortcut</text>
+
+        <rect x="130" y="246" width="126" height="30" rx="7" fill="var(--te-soft)" stroke="var(--te)"/><text x="193" y="266" text-anchor="middle" fill="var(--te-ink)">DMD / DMD2</text>
+        <rect x="600" y="248" width="180" height="30" rx="7" fill="var(--surf2)" stroke="var(--rule2)"/><text x="690" y="268" text-anchor="middle" fill="var(--ink3)" font-size="10.5">TMD（并行工作，NVIDIA）</text>
+      </g>
+      <text x="470" y="238" font-family="var(--font-mono)" font-size="10.5" fill="var(--ink3)">借用 on-policy 框架，只换 rollout 方式</text>
+      <text x="620" y="300" font-family="var(--font-mono)" font-size="10.5" fill="var(--ink3)">TMD 走架构路线（共享骨干 + flow head）</text>
+    </svg>
+  </div>
+  <figcaption><b>图 10</b>　AnyFlow 不在损失上创新，它承接 MeanFlow / TiM 的流映射参数化，沿用 Self-Forcing 的 DMD on-policy 框架，<strong>唯一替换的是 rollout 的构造方式</strong>。与并行工作 TMD 的分工很清楚：TMD 从<strong>架构</strong>侧提速（共享骨干加一个 flow head），AnyFlow 从<strong>轨迹</strong>侧提速（用复合性把轨迹拆成 shortcut）。后者的副产品是天然支持任意步数和因果架构。</figcaption>
+  </figure>
+
+  <h3>对交互式世界模型这条线意味着什么</h3>
+  <p>AnyFlow 本身不是世界模型，是<strong>使能层</strong>，它解决的是交互式 rollout 的一个具体矛盾：实时交互要求 2–4 步，但用户偶尔需要一次高质量渲染；过去这需要两个模型（一个蒸馏版、一个原版），而蒸馏版<strong>还不能继续微调</strong>。AnyFlow 把这两件事合成一个模型，并保住了续训能力（图 7–8 的机器人、驾驶、游戏微调）。真正的未决问题是<strong>多样性</strong>：第三方复测显示它只剩教师的 66%，而交互式世界模型一旦失去 seed 级分岔，就退化成了确定性回放。</p>
+
+  <h3>复现速查</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>项</th><th>Stage 1 前向 flow map</th><th>Stage 2 on-policy</th></tr></thead>
+      <tbody>
+        <tr><td>迭代数</td><td>6000（1.3B）/ 4000（14B）</td><td>论文 800；config <code>total_iter: 1200</code></td></tr>
+        <tr><td>lr / betas</td><td>5e-5 / (0.9, 0.95)，warmup 1000</td><td>2e-6 / (0.0, 0.999)，warmup 0</td></tr>
+        <tr><td>global batch</td><td>32（1.3B）/ 16（14B）</td><td>同左，<code>dmd_batch_size: 2</code>/卡</td></tr>
+        <tr><td>EMA</td><td>0.999，warmup 1000</td><td>0.99，warmup 200；载入 stage1 的 <b>EMA</b> 权重</td></tr>
+        <tr><td>LoRA</td><td colspan="2">r=256, α=256；attn1 的 q/k/v/o + ffn + <code>delta_embedder</code> + <code>time_embedder</code>；仅优化 <code>lora_A/B</code>（因果另加 <code>far_patch_embedding</code>）</td></tr>
+        <tr><td>时间对采样</td><td colspan="2"><code>diffusion_ratio 0.5</code>（r=t）· <code>consistency_ratio 0.25</code>（r=0）· 余 0.25 一般区间</td></tr>
+        <tr><td>噪声调度</td><td colspan="2"><code>shift: 5.0</code>，<code>weight_type: beta08</code> = <em class="t">t(1−t)<sup>0.5</sup></em> ≡ Beta(2, 1.5)</td></tr>
+        <tr><td>引导</td><td colspan="2"><code>fuse_guidance_scale 3.0</code>（stage1）· <code>real_guidance_scale 3.0</code>（DMD）· 推理 <code>guidance_scale 1.0</code></td></tr>
+        <tr><td>中心差分</td><td colspan="2"><code>epsilon: 5</code>（即 Δt = 0.005，在 1000 刻度上）</td></tr>
+        <tr><td>rollout 预算</td><td>—</td><td><code>num_inference_steps_list: [2,4,8,16,50]</code></td></tr>
+        <tr><td>因果配置</td><td colspan="2"><code>full_chunk_limit 3</code> · <code>chunk_partition [1,3,3,3,3,3,3,2]</code> · <code>compressed_patch_size [1,4,4]</code> · <code>bidirectional_modeling_prob 0.1</code></td></tr>
+        <tr><td>数据</td><td colspan="2">256K prompt–video，全部由 Wan2.1-T2V-<b>14B</b> 生成，≤81 帧 @ 480×832</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>如果要接着做，这四个实验最值钱</h3>
+  <ol class="num">
+    <li><strong>量化 shortcut 偏差</strong>（对应存疑 04）：统计 <em class="t">‖f<sub>θ</sub>(z<sub>T</sub>,T,t) − Euler<sub>N</sub>(z<sub>T</sub>→t)‖</em> 随 N 的曲线。如果它随 N 显著增长，就能解释饱和，也给出「shortcut 该跨多远」的设计依据。</li>
+    <li><strong>扫 <code>consistency_ratio</code></strong>（对应存疑 03）：0 / 0.125 / 0.25 / 0.5。这是论文叙事与实现之间最大的缝，也最可能是少步性能的真实来源。</li>
+    <li><strong>同协议对照</strong>（对应存疑 05）：用 1.3B 自己生成的数据重跑 stage 1，再和 rCM-1.3B 比。</li>
+    <li><strong>补多样性与延迟</strong>（对应存疑 09、12）：固定 prompt 多 seed 的成对距离 + 实测 s/video。这两条决定了它在交互式 rollout 里是否真的可用。</li>
+  </ol>
+</section>
+
+<footer>
+  <p><strong>来源</strong>　论文：<a href="https://arxiv.org/abs/2605.13724">arXiv:2605.13724</a>（AnyFlow: Any-Step Video Diffusion Model with On-Policy Flow Map Distillation，Gu, Fang, Jiang, Mao, Han, Cai, Shou；NVIDIA / Show Lab NUS / MIT）· 会场页：<a href="https://eccv.ecva.net/virtual/2026/poster/5144">ECCV 2026 Poster 5144</a> · 代码：<a href="https://github.com/NVLabs/AnyFlow">NVLabs/AnyFlow</a> · 项目页：<a href="https://nvlabs.github.io/AnyFlow/">nvlabs.github.io/AnyFlow</a></p>
+  <p style="margin-top:10px">所有表格数字抄自论文 Tab. 2–5 与 Fig. 1、Fig. 10b。所有代码引用来自 NVLabs/AnyFlow 主分支的 <code>far/trainers/</code>、<code>far/pipelines/</code>、<code>far/schedulers/</code>、<code>options/train/anyflow/</code>。图 2 是我构造的玩具模型，误差假设已在图注中写明，<strong>不代表论文的分析</strong>。第三方复测数字引自 CrossDistill（arXiv:2609.14725）。</p>
+</footer>
+
+</main>
+</div>
+
+<script>
+/* ============================================================ 通用工具 */
+const SVGNS="http://www.w3.org/2000/svg";
+function el(tag,attrs,txt){const n=document.createElementNS(SVGNS,tag);for(const k in attrs)n.setAttribute(k,attrs[k]);if(txt!=null)n.textContent=txt;return n;}
+function clear(n){while(n.firstChild)n.removeChild(n.firstChild);}
+function cvar(name){return getComputedStyle(document.documentElement).getPropertyValue(name).trim();}
+const MONO='var(--font-mono),ui-monospace,monospace';
+function seg(id,cb){const box=document.getElementById(id);if(!box)return;box.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;[...box.querySelectorAll('button')].forEach(x=>x.classList.toggle('on',x===b));cb(b.dataset.k);});}
+const SHIFT=5;
+function shiftFn(u){return SHIFT*u/(1+(SHIFT-1)*u);}
+function grid(N){const a=[];for(let k=0;k<N;k++)a.push(shiftFn(1-k/N));a.push(0);return a;}
+
+/* 主题切换 */
+(function(){
+  const btn=document.getElementById('themeBtn');
+  btn.addEventListener('click',()=>{
+    const cur=document.documentElement.getAttribute('data-theme');
+    const dark=cur? cur==='dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.setAttribute('data-theme',dark?'light':'dark');
+    redrawAll();
+  });
+})();
+
+/* 目录 + 进度 */
+(function(){
+  const toc=document.getElementById('toc');
+  const secs=[...document.querySelectorAll('main section')];
+  secs.forEach(s=>{
+    const h=s.querySelector('h2'); if(!h)return;
+    const n=s.querySelector('.sn').textContent;
+    const li=document.createElement('li');
+    const a=document.createElement('a');
+    a.href='#'+s.id; a.textContent=n+'　'+h.textContent.split('：')[0];
+    li.appendChild(a); toc.appendChild(li);
+  });
+  const links=[...toc.querySelectorAll('a')];
+  const prog=document.getElementById('prog');
+  function onScroll(){
+    const h=document.documentElement;
+    prog.style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight)*100)+'%';
+    let cur=0;
+    secs.forEach((s,i)=>{ if(s.getBoundingClientRect().top<200) cur=i; });
+    links.forEach((a,i)=>a.classList.toggle('on',i===cur));
+  }
+  addEventListener('scroll',onScroll,{passive:true}); onScroll();
+})();
+</script>
+
+<script>
+/* ============================================================ 图2 · 玩具模型 */
+const TOY={N:4,seed:7,show:'both'};
+function rnd(s){let x=Math.sin(s*12.9898)*43758.5453;return x-Math.floor(x);}
+function wrapPi(d){while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return d;}
+function drawToy(){
+  const svg=document.getElementById('toySvg'); if(!svg) return; clear(svg);
+  const ink=cvar('--ink'),ink3=cvar('--ink3'),rule=cvar('--rule2');
+  const C_fm=cvar('--fm'),C_cm=cvar('--cm'),C_te=cvar('--te');
+  const CX=452,SPAN=345,RANGE=0.9,Y1=62,Y0=306;
+  const xs=d=>CX+Math.max(-RANGE,Math.min(RANGE,d))/RANGE*SPAN;
+  const ys=g=>Y0-g*(Y0-Y1);
+
+  const s=TOY.seed, N=TOY.N, sig=k=>1-k/N;
+
+  /* 背景：噪声轴 + 数据流形 */
+  svg.appendChild(el('line',{x1:CX-SPAN-14,y1:Y0,x2:CX+SPAN+14,y2:Y0,stroke:rule,'stroke-width':1.4,'stroke-dasharray':'3 4'}));
+  svg.appendChild(el('text',{x:CX-SPAN-14,y:Y0+20,'font-family':MONO,'font-size':11,fill:ink3},'数据流形 σ = 0'));
+  [[1,'σ = 1　纯噪声'],[0.5,'σ = 0.5'],[0,'']].forEach(([g,lab])=>{
+    if(!lab)return;
+    svg.appendChild(el('line',{x1:CX-SPAN-14,y1:ys(g),x2:CX+SPAN+14,y2:ys(g),stroke:cvar('--grid'),'stroke-width':1}));
+    svg.appendChild(el('text',{x:CX-SPAN-14,y:ys(g)-6,'font-family':MONO,'font-size':10.5,fill:ink3},lab));
+  });
+  svg.appendChild(el('text',{x:CX,y:356,'font-family':MONO,'font-size':11,fill:ink3,'text-anchor':'middle'},'← 偏离原始种子对应的那个视频 →'));
+  svg.appendChild(el('line',{x1:CX,y1:Y1,x2:CX,y2:Y0,stroke:C_te,'stroke-width':2.6,opacity:.9}));
+  svg.appendChild(el('text',{x:CX+8,y:Y1+16,'font-family':MONO,'font-size':11,fill:C_te},'真 PF-ODE 解'));
+
+  /* --- flow map 学生：只在角度上漂，且步长越小越准 --- */
+  let th=0, fm=[[0,1]], aFM=0.85;
+  for(let k=0;k<N;k++){
+    const t=sig(k), r=sig(k+1);
+    th += aFM*Math.pow(t-r,1.5)*Math.sin(37.1*t+91.3*r+s);
+    fm.push([th,r]);
+  }
+  const fmErr=Math.abs(wrapPi(th));
+
+  /* --- 一致性学生：每步打到 z0，再用新 ε 加噪回去 --- */
+  let cTh=0, legs=[], zh=[], reno=[], bCM=0.17, eta=0.13, prev=[0,1];
+  for(let k=0;k<N;k++){
+    cTh += bCM*sig(k)*Math.sin(5.7*k+3.1*s)*0.55;
+    legs.push([prev,[cTh,0],'solid']); zh.push([cTh,0]);
+    if(k<N-1){
+      const sp=sig(k+1);
+      /* 新 ε 与原种子无关：落点相对当前 ẑ₀ 做一次随机游走，幅度 ∝ σ */
+      cTh += eta*sp*(rnd(s*31+k*7.7)*2-1)*Math.PI;
+      legs.push([[zh[k][0],0],[cTh,sp],'dash']); reno.push([cTh,sp]);
+      prev=[cTh,sp];
+    }
+  }
+  const cmErr=Math.abs(wrapPi(cTh));
+
+  const endF=xs(fm[fm.length-1][0]), endC=xs(zh[zh.length-1][0]);
+  const stack=(TOY.show==='both') && Math.abs(endF-endC)<100;
+
+  if(TOY.show!=='fm'){
+    legs.forEach(L=>{
+      svg.appendChild(el('line',{x1:xs(L[0][0]),y1:ys(L[0][1]),x2:xs(L[1][0]),y2:ys(L[1][1]),
+        stroke:C_cm,'stroke-width':L[2]==='dash'?1.6:2,opacity:L[2]==='dash'?.8:1,
+        'stroke-dasharray':L[2]==='dash'?'4 4':'none'}));
+    });
+    reno.forEach((q,i)=>{
+      svg.appendChild(el('circle',{cx:xs(q[0]),cy:ys(q[1]),r:4.2,fill:'none',stroke:C_cm,'stroke-width':1.6,'stroke-dasharray':'2 2'}));
+      if(i===0) svg.appendChild(el('text',{x:xs(q[0])+10,y:ys(q[1])+4,'font-family':MONO,'font-size':10.5,fill:C_cm},'重新加噪：新的 ε'));
+    });
+    zh.forEach((q,i)=>svg.appendChild(el('circle',{cx:xs(q[0]),cy:ys(0),r:i===zh.length-1?6.5:3.2,fill:C_cm,opacity:i===zh.length-1?1:.5})));
+    svg.appendChild(el('text',{x:xs(zh[zh.length-1][0])-11,y:Y0+22,'font-family':MONO,'font-size':11,fill:C_cm,'text-anchor':'end'},'一致性终点'));
+  }
+
+  if(TOY.show!=='cm'){
+    svg.appendChild(el('polyline',{points:fm.map(q=>xs(q[0]).toFixed(1)+','+ys(q[1]).toFixed(1)).join(' '),fill:'none',stroke:C_fm,'stroke-width':2.8}));
+    fm.forEach((q,i)=>svg.appendChild(el('circle',{cx:xs(q[0]),cy:ys(q[1]),r:i===fm.length-1?6.5:3.4,fill:C_fm,opacity:i===fm.length-1?1:.75})));
+    svg.appendChild(el('text',{x:endF+11,y:Y0+(stack?40:22),'font-family':MONO,'font-size':11,fill:C_fm},'flow map 终点'));
+  }
+
+  svg.appendChild(el('circle',{cx:CX,cy:Y0,r:6,fill:'none',stroke:ink,'stroke-width':2}));
+  svg.appendChild(el('text',{x:CX+12,y:Y0-16,'font-family':MONO,'font-size':11.5,fill:ink},'x⋆ 正确答案'));
+  svg.appendChild(el('circle',{cx:CX,cy:Y1,r:5,fill:ink3}));
+  svg.appendChild(el('text',{x:CX-10,y:Y1+4,'font-family':MONO,'font-size':11,fill:ink3,'text-anchor':'end'},'z_T'));
+
+  document.getElementById('tEc').textContent=(cmErr*180/Math.PI).toFixed(1)+'°';
+  document.getElementById('tEf').textContent=(fmErr*180/Math.PI).toFixed(1)+'°';
+  document.getElementById('tRe').textContent=Math.max(0,N-1);
+  document.getElementById('tNfe').textContent=N;
+  document.getElementById('tNv').textContent=N;
+}
+(function(){
+  const r=document.getElementById('tN'); if(!r) return;
+  r.addEventListener('input',()=>{TOY.N=+r.value;drawToy();});
+  document.getElementById('tSeed').addEventListener('click',()=>{TOY.seed=Math.floor(Math.random()*900)+3;drawToy();});
+  seg('tShow',k=>{TOY.show=k;drawToy();});
+})();
+
+/* ============================================================ 图3 · (t,r) 平面 */
+const TR={mode:'paper'};
+function drawTR(){
+  const svg=document.getElementById('trSvg'); if(!svg) return; clear(svg);
+  const X0=72,X1=468,Y0=350,Y1=54;
+  const ink=cvar('--ink'),ink3=cvar('--ink3'),rule=cvar('--rule2'),axis=cvar('--axis');
+  const C_fm=cvar('--fm'),C_cm=cvar('--cm'),C_te=cvar('--te');
+  const x=t=>X0+t*(X1-X0), y=r=>Y0-r*(Y0-Y1);
+
+  svg.appendChild(el('polygon',{points:`${x(0)},${y(0)} ${x(1)},${y(0)} ${x(1)},${y(1)}`,fill:cvar('--tint'),stroke:rule,'stroke-width':1}));
+  /* 轴 */
+  svg.appendChild(el('line',{x1:X0,y1:Y0,x2:X1,y2:Y0,stroke:axis,'stroke-width':1.2}));
+  svg.appendChild(el('line',{x1:X0,y1:Y0,x2:X0,y2:Y1,stroke:axis,'stroke-width':1.2}));
+  svg.appendChild(el('text',{x:(X0+X1)/2,y:Y0+34,'font-family':MONO,'font-size':11.5,fill:ink3,'text-anchor':'middle'},'起始时刻 t →'));
+  svg.appendChild(el('text',{x:X0-14,y:(Y0+Y1)/2,'font-family':MONO,'font-size':11.5,fill:ink3,'text-anchor':'middle',transform:`rotate(-90 ${X0-14} ${(Y0+Y1)/2})`},'目标时刻 r →'));
+  [0,0.5,1].forEach(v=>{
+    svg.appendChild(el('text',{x:x(v),y:Y0+16,'font-family':MONO,'font-size':10,fill:ink3,'text-anchor':'middle'},v));
+    svg.appendChild(el('text',{x:X0-8,y:y(v)+4,'font-family':MONO,'font-size':10,fill:ink3,'text-anchor':'end'},v));
+  });
+
+  /* 采样点 */
+  const dots=[]; let seed=11;
+  function rr(){seed+=1;return rnd(seed*3.77);}
+  const nDiag=100, nEdge=TR.mode==='code'?50:0, nIn=TR.mode==='code'?50:100;
+  for(let i=0;i<nDiag;i++){const a=rr(),b=rr();const t=Math.max(a,b);dots.push([t,t,'diag']);}
+  for(let i=0;i<nEdge;i++){const a=rr(),b=rr();const t=Math.max(a,b);dots.push([t,0,'edge']);}
+  for(let i=0;i<nIn;i++){const a=rr(),b=rr();dots.push([Math.max(a,b),Math.min(a,b),'in']);}
+  dots.forEach(d=>{
+    const col=d[2]==='diag'?C_te:(d[2]==='edge'?C_cm:C_fm);
+    svg.appendChild(el('circle',{cx:x(d[0]),cy:y(d[1]),r:2.8,fill:col,opacity:.62}));
+  });
+
+  /* 区域强调 */
+  svg.appendChild(el('line',{x1:x(0),y1:y(0),x2:x(1),y2:y(1),stroke:C_te,'stroke-width':2.6}));
+  svg.appendChild(el('line',{x1:x(0),y1:y(0),x2:x(1),y2:y(0),stroke:C_cm,'stroke-width':2.6}));
+  svg.appendChild(el('text',{x:x(.5)-40,y:y(.5)-12,'font-family':MONO,'font-size':11.5,fill:C_te,transform:`rotate(-36.5 ${x(.5)-40} ${y(.5)-12})`},'t = r：流匹配'));
+  svg.appendChild(el('text',{x:x(.55),y:Y0-10,'font-family':MONO,'font-size':11.5,fill:C_cm},'r = 0：一致性模型'));
+  svg.appendChild(el('text',{x:x(.78),y:y(.30),'font-family':MONO,'font-size':11.5,fill:C_fm,'text-anchor':'middle'},'一般区间转移'));
+
+  /* 交互 */
+  const tip=document.getElementById('trTip');
+  svg.onmousemove=e=>{
+    const r0=svg.getBoundingClientRect();
+    const sx=(e.clientX-r0.left)/r0.width*520, sy=(e.clientY-r0.top)/r0.height*420;
+    const t=(sx-X0)/(X1-X0), r=(Y0-sy)/(Y0-Y1);
+    if(t<0||t>1||r<0||r>t+0.03){tip.classList.remove('on');return;}
+    let kind,f;
+    if(Math.abs(t-r)<0.035){kind='流匹配（预训练已学会）';f='u_θ(z,t,t) = v(z,t)';}
+    else if(r<0.035){kind='一致性 / 终点映射';f='f_θ(z,t,0) = ẑ₀';}
+    else{kind='一般流映射转移';f='f_θ(z,t,r) = z − (t−r)·u_θ';}
+    tip.innerHTML=`t = ${t.toFixed(2)}　r = ${r.toFixed(2)}<br>${kind}<br><span style="color:var(--ink3)">${f}</span>`;
+    tip.style.left=Math.min(r0.width-190,sx/520*r0.width+14)+'px';
+    tip.style.top=(sy/420*r0.height-46)+'px';
+    tip.classList.add('on');
+  };
+  svg.onmouseleave=()=>tip.classList.remove('on');
+
+  document.getElementById('trNote').innerHTML = TR.mode==='paper'
+    ? '<b style="color:var(--ink)">论文所述</b>：t、r 各自从 U(0,1) 采样后排序（<code>t = max</code>, <code>r = min</code>），另有 50% 的 batch 强制置于边界 t = r。按这个描述，<b>一半样本在对角线上，另一半均匀铺满三角形内部</b>。'
+    : '<b style="color:var(--ink)">代码实际</b>：<code>diffusion_ratio 0.5</code> → r ← t（对角线，紫）；<code>consistency_ratio 0.25</code> → <b style="color:var(--cm-ink)">r ← 0（底边，橙）——论文完全没写</b>；剩下 25% 才是一般区间转移（青）。也就是说，<b>四分之一的前向监督本身就是终点一致性监督</b>，而真正的「任意区间」样本只占四分之一。';
+}
+seg('trMode',k=>{TR.mode=k;drawTR();});
+
+/* ============================================================ 图4 · w(t) */
+const WT={k:'beta'};
+const W_ROWS=[
+  {k:'unif',n:'Uniform(0, 1)',v:[83.46,83.75,83.58,83.91]},
+  {k:'norm',n:'Normal(0.5, 0.25)',v:[83.40,83.79,83.54,83.93]},
+  {k:'beta',n:'Beta(2, 1.5)　← 采用',v:[83.48,83.96,83.54,83.96]}
+];
+const W_MAX=[83.48,83.96,83.58,83.96];
+function wfun(k,t){
+  if(k==='unif')return 1;
+  if(k==='norm')return Math.exp(-2*Math.pow(t-0.5,2))-Math.exp(-0.5);
+  return Math.pow(t,1.0)*Math.pow(1-t,0.5);
+}
+function drawW(){
+  const svg=document.getElementById('wSvg'); if(!svg) return; clear(svg);
+  const X0=64,X1=780,Y0=250,Y1=34;
+  const ink3=cvar('--ink3'),axis=cvar('--axis'),grd=cvar('--grid');
+  const cols={unif:cvar('--ink3'),norm:cvar('--te'),beta:cvar('--fm')};
+  const xs=t=>X0+t*(X1-X0);
+  for(let i=0;i<=4;i++){const yy=Y0-(Y0-Y1)*i/4;svg.appendChild(el('line',{x1:X0,y1:yy,x2:X1,y2:yy,stroke:grd,'stroke-width':1}));}
+  svg.appendChild(el('line',{x1:X0,y1:Y0,x2:X1,y2:Y0,stroke:axis,'stroke-width':1.2}));
+  [0,.25,.5,.75,1].forEach(v=>svg.appendChild(el('text',{x:xs(v),y:Y0+18,'font-family':MONO,'font-size':10.5,fill:ink3,'text-anchor':'middle'},'t='+v)));
+  svg.appendChild(el('text',{x:X0,y:Y1-12,'font-family':MONO,'font-size':11,fill:ink3},'训练密度 f(t) = p(t)·w(t)，p(t) = 2t（归一化后）'));
+  ['unif','norm','beta'].forEach(k=>{
+    const pts=[]; let mx=0; const ys=[];
+    for(let i=0;i<=200;i++){const t=i/200;const v=2*t*Math.max(0,wfun(k,t));ys.push(v);if(v>mx)mx=v;}
+    for(let i=0;i<=200;i++){const t=i/200;pts.push(xs(t).toFixed(1)+','+(Y0-(Y0-Y1)*ys[i]/mx).toFixed(1));}
+    const on=(k===WT.k);
+    svg.appendChild(el('polyline',{points:pts.join(' '),fill:'none',stroke:cols[k],'stroke-width':on?3:1.4,opacity:on?1:.35}));
+    if(on){
+      let am=0,ai=0; ys.forEach((v,i)=>{if(v>am){am=v;ai=i;}});
+      const px=xs(ai/200), py=Y0-(Y0-Y1);
+      svg.appendChild(el('line',{x1:px,y1:Y0,x2:px,y2:py+4,stroke:cols[k],'stroke-width':1,'stroke-dasharray':'3 3',opacity:.6}));
+      svg.appendChild(el('text',{x:px+7,y:py+16,'font-family':MONO,'font-size':11,fill:cols[k]},'峰值 t ≈ '+(ai/200).toFixed(2)));
+    }
+  });
+  svg.appendChild(el('text',{x:X1,y:Y0-6,'font-family':MONO,'font-size':11,fill:ink3,'text-anchor':'end'},'← 低噪声　高噪声 →'));
+  /* 表 */
+  const tb=document.getElementById('wTbl'); tb.innerHTML='';
+  W_ROWS.forEach(r=>{
+    const tr=document.createElement('tr');
+    if(r.k===WT.k) tr.className='ours';
+    let h='<td>'+r.n+'</td>';
+    r.v.forEach((v,i)=>{h+='<td'+(Math.abs(v-W_MAX[i])<1e-9?' class="hi"':'')+'>'+v.toFixed(2)+'</td>';});
+    tr.innerHTML=h; tb.appendChild(tr);
+  });
+}
+seg('wSel',k=>{WT.k=k;drawW();});
+
+/* ============================================================ 图5 · shift 网格 */
+const SH={N:4};
+function drawSh(){
+  const svg=document.getElementById('shSvg'); if(!svg) return; clear(svg);
+  const X0=70,X1=800,YT=78,YB=190;
+  const ink=cvar('--ink'),ink3=cvar('--ink3'),axis=cvar('--axis'),C_fm=cvar('--fm'),C_gr=cvar('--gr');
+  const xs=v=>X0+(1-v)*(X1-X0);
+  const N=SH.N, g=grid(N), us=[]; for(let k=0;k<N;k++)us.push(1-k/N); us.push(0);
+
+  svg.appendChild(el('text',{x:X0,y:YT-26,'font-family':MONO,'font-size':11.5,fill:ink3},'linspace 均匀网格 u'));
+  svg.appendChild(el('text',{x:X0,y:YB+46,'font-family':MONO,'font-size':11.5,fill:ink3},'shift(5) 之后模型真正看到的噪声水平 σ'));
+  svg.appendChild(el('line',{x1:X0,y1:YT,x2:X1,y2:YT,stroke:axis,'stroke-width':1.2}));
+  svg.appendChild(el('line',{x1:X0,y1:YB,x2:X1,y2:YB,stroke:axis,'stroke-width':1.6}));
+  svg.appendChild(el('text',{x:X0-6,y:YB+18,'font-family':MONO,'font-size':10.5,fill:ink3,'text-anchor':'middle'},'1.0'));
+  svg.appendChild(el('text',{x:X1+6,y:YB+18,'font-family':MONO,'font-size':10.5,fill:ink3,'text-anchor':'middle'},'0'));
+
+  /* 最大间隔 */
+  let gi=0,gm=0; for(let k=0;k<g.length-1;k++){const d=g[k]-g[k+1]; if(d>gm){gm=d;gi=k;}}
+  let gmin=1; for(let k=0;k<g.length-1;k++){const d=g[k]-g[k+1]; if(d<gmin)gmin=d;}
+
+  svg.appendChild(el('rect',{x:xs(g[gi]),y:YB-26,width:Math.max(1,xs(g[gi+1])-xs(g[gi])),height:52,fill:C_gr,opacity:.16,rx:5}));
+
+  for(let k=0;k<us.length;k++){
+    const xu=xs(us[k]), xg=xs(g[k]);
+    svg.appendChild(el('line',{x1:xu,y1:YT,x2:xg,y2:YB,stroke:ink3,'stroke-width':.9,opacity:.35}));
+    svg.appendChild(el('circle',{cx:xu,cy:YT,r:3,fill:ink3,opacity:.7}));
+    svg.appendChild(el('circle',{cx:xg,cy:YB,r:N<=16?4.5:2.6,fill:C_fm}));
+  }
+  if(N<=8){
+    for(let k=0;k<g.length;k++){
+      svg.appendChild(el('text',{x:xs(g[k]),y:YB-14,'font-family':MONO,'font-size':10,fill:ink,'text-anchor':'middle'},g[k].toFixed(3)));
+    }
+  }
+  const mx=(xs(g[gi])+xs(g[gi+1]))/2;
+  svg.appendChild(el('text',{x:mx,y:YB+40,'font-family':MONO,'font-size':11.5,fill:C_gr,'text-anchor':'middle'},'最大一跳：Δσ = '+gm.toFixed(3)));
+
+  document.getElementById('shMax').textContent=gm.toFixed(3);
+  document.getElementById('shPct').textContent=(gm*100).toFixed(1)+'%';
+  document.getElementById('shHi').textContent=g.filter(v=>v>0.8).length+' / '+g.length;
+  document.getElementById('shMin').textContent=gmin.toFixed(4);
+}
+seg('shN',k=>{SH.N=+k;drawSh();});
+
+/* ============================================================ 图6 · backward simulation */
+const BS={N:4,g:1};
+function drawBS(){
+  const svg=document.getElementById('bsSvg'); if(!svg) return; clear(svg);
+  const ink=cvar('--ink'),ink3=cvar('--ink3'),axis=cvar('--axis');
+  const C_fm=cvar('--fm'),C_cm=cvar('--cm'),C_gr=cvar('--gr');
+  const X0=92,X1=822;
+  const xs=v=>X0+(1-v)*(X1-X0);
+  const N=BS.N, g=grid(N), gt=Math.min(BS.g,N-1);
+
+  const defs=el('defs');
+  [['bsA',ink3],['bsB',C_gr],['bsC',C_fm],['bsD',C_cm]].forEach(([id,c])=>{
+    const m=el('marker',{id,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:5,markerHeight:5,orient:'auto-start-reverse'});
+    m.appendChild(el('path',{d:'M0,0 L10,5 L0,10 z',fill:c})); defs.appendChild(m);
+  });
+  svg.appendChild(defs);
+
+  /* ---- Lane A：一致性 ---- */
+  const AY=102, AD=156;
+  svg.appendChild(el('text',{x:X0-8,y:38,'font-family':MONO,'font-size':12,fill:C_cm},'一致性 backward simulation：必须逐步走完 '+N+' 步'));
+  svg.appendChild(el('line',{x1:X0,y1:AY,x2:X1,y2:AY,stroke:axis,'stroke-width':1.2}));
+  svg.appendChild(el('line',{x1:X0,y1:AD,x2:X1,y2:AD,stroke:axis,'stroke-width':1,'stroke-dasharray':'2 5'}));
+  svg.appendChild(el('text',{x:X1+6,y:AD+4,'font-family':MONO,'font-size':10,fill:ink3},'z₀'));
+  svg.appendChild(el('text',{x:X0-8,y:AY-8,'font-family':MONO,'font-size':10,fill:ink3},'σ 轴'));
+  for(let k=0;k<N;k++){
+    const xk=xs(g[k]), xn=xs(g[k+1]);
+    const on=(k===gt);
+    const col=on?C_gr:ink3, w=on?2.6:1.1, op=on?1:.4;
+    svg.appendChild(el('line',{x1:xk,y1:AY,x2:xk,y2:AD,stroke:col,'stroke-width':w,opacity:op}));
+    if(k<N-1) svg.appendChild(el('line',{x1:xk,y1:AD,x2:xn,y2:AY,stroke:C_cm,'stroke-width':1.3,opacity:.55,'stroke-dasharray':'3 3'}));
+    svg.appendChild(el('circle',{cx:xk,cy:AY,r:N<=16?3.4:2,fill:col,opacity:on?1:.6}));
+    svg.appendChild(el('circle',{cx:xk,cy:AD,r:N<=16?3:1.8,fill:col,opacity:op}));
+  }
+  svg.appendChild(el('text',{x:X0,y:AD+24,'font-family':MONO,'font-size':10.5,fill:C_cm},'斜虚线 = 重新加噪 ×'+(N-1)));
+  svg.appendChild(el('text',{x:X1,y:AD+24,'font-family':MONO,'font-size':10.5,fill:C_gr,'text-anchor':'end'},'仅第 '+(gt+1)+' 步带梯度（其余 detach）'));
+
+  /* ---- Lane B：flow map ---- */
+  const BY=340;
+  svg.appendChild(el('text',{x:X0-8,y:216,'font-family':MONO,'font-size':12,fill:C_fm},'Flow map backward simulation：恒定 3 段，全部带梯度'));
+  svg.appendChild(el('line',{x1:X0,y1:BY,x2:X1,y2:BY,stroke:axis,'stroke-width':1.2}));
+  for(let k=0;k<=N;k++) svg.appendChild(el('circle',{cx:xs(g[k]),cy:BY,r:2,fill:ink3,opacity:.45}));
+
+  const segsB=[
+    {a:g[0],b:g[gt],c:C_fm,lab:'T → t　shortcut',h:40},
+    {a:g[gt],b:g[gt+1],c:C_gr,lab:'t → r　目标转移',h:22},
+    {a:g[gt+1],b:0,c:C_fm,lab:'r → 0　shortcut',h:40}
+  ];
+  let nGrad=0;
+  segsB.forEach((s,i)=>{
+    if(Math.abs(s.a-s.b)<1e-9){return;}
+    nGrad++;
+    const xa=xs(s.a), xb=xs(s.b), mid=(xa+xb)/2;
+    svg.appendChild(el('path',{d:`M${xa},${BY-4} Q${mid},${BY-s.h-16} ${xb},${BY-4}`,fill:'none',stroke:s.c,'stroke-width':i===1?3.2:2.4,'marker-end':'url(#'+(i===1?'bsB':'bsC')+')'}));
+    svg.appendChild(el('text',{x:mid,y:BY-s.h-24,'font-family':MONO,'font-size':11,fill:s.c,'text-anchor':'middle'},s.lab));
+    svg.appendChild(el('circle',{cx:xa,cy:BY,r:4.5,fill:s.c}));
+  });
+  svg.appendChild(el('circle',{cx:xs(0),cy:BY,r:5.5,fill:C_fm}));
+  svg.appendChild(el('text',{x:X0-8,y:BY+22,'font-family':MONO,'font-size':10.5,fill:ink3},'σ = 1'));
+  svg.appendChild(el('text',{x:X1,y:BY+22,'font-family':MONO,'font-size':10.5,fill:ink3,'text-anchor':'end'},'σ = 0　→ DMD 在这里算 KL 梯度，回传穿过全部 '+nGrad+' 段'));
+
+  document.getElementById('bsC1').textContent=N;
+  document.getElementById('bsC2').textContent='1';
+  document.getElementById('bsF1').textContent=nGrad;
+  document.getElementById('bsF2').textContent=nGrad;
+  document.getElementById('bsGv').textContent=gt;
+}
+(function(){
+  const sl=document.getElementById('bsG'); if(!sl) return;
+  sl.addEventListener('input',()=>{BS.g=+sl.value;drawBS();});
+  seg('bsN',k=>{BS.N=+k; sl.max=BS.N-1; if(BS.g>BS.N-1)BS.g=BS.N-1; sl.value=BS.g; drawBS();});
+})();
+
+/* ============================================================ 图7 · 因果 chunk */
+const CHUNKS=[1,3,3,3,3,3,3,2], CB={done:0};
+function drawCB(){
+  const svg=document.getElementById('cbSvg'); if(!svg) return; clear(svg);
+  const ink=cvar('--ink'),ink3=cvar('--ink3'),rule=cvar('--rule2'),surf=cvar('--surf2');
+  const C_fm=cvar('--fm'),C_gr=cvar('--gr'),C_cm=cvar('--cm'),C_te=cvar('--te');
+  const X0=54,X1=812,Y=126,H=44;
+  const total=21, cw=(X1-X0)/total;
+  const done=CB.done;
+  let idx=0;
+  const starts=[]; CHUNKS.forEach(c=>{starts.push(idx);idx+=c;});
+
+  svg.appendChild(el('text',{x:X0,y:52,'font-family':MONO,'font-size':12,fill:ink3},'21 个潜在帧 · chunk_partition = [1,3,3,3,3,3,3,2]'));
+
+  CHUNKS.forEach((c,ci)=>{
+    const x=X0+starts[ci]*cw, w=c*cw-4;
+    let fill=surf, stroke=rule, op=1, tag='';
+    if(ci<done){
+      if(ci>=done-3){fill=cvar('--fm-soft'); stroke=C_fm; tag='全 token';}
+      else{fill=cvar('--te-soft'); stroke=C_te; tag='压缩 4×4';}
+    }else if(ci===done){fill=cvar('--gr-soft'); stroke=C_gr; tag='生成中';}
+    else{op=.35; tag='';}
+    svg.appendChild(el('rect',{x,y:Y,width:w,height:H,rx:7,fill,stroke,'stroke-width':ci===done?2.2:1.2,opacity:op}));
+    svg.appendChild(el('text',{x:x+w/2,y:Y+27,'font-family':MONO,'font-size':11.5,fill:ci<=done?ink:ink3,'text-anchor':'middle',opacity:op},'c'+ci));
+    if(tag) svg.appendChild(el('text',{x:x+w/2,y:Y-8,'font-family':MONO,'font-size':9.5,fill:stroke,'text-anchor':'middle'},tag));
+    svg.appendChild(el('text',{x:x+w/2,y:Y+H+16,'font-family':MONO,'font-size':9.5,fill:ink3,'text-anchor':'middle',opacity:op},c+'帧'));
+  });
+
+  /* 当前块的三段 rollout */
+  if(done<CHUNKS.length){
+    const x=X0+starts[done]*cw, w=CHUNKS[done]*cw-4, cxm=x+w/2;
+    svg.appendChild(el('text',{x:Math.min(cxm,X1-190),y:238,'font-family':MONO,'font-size':11.5,fill:C_gr},'本块内部：T→t → t→r → r→0（3 次带梯度前向）'));
+    for(let i=0;i<3;i++){
+      const bx=Math.min(cxm,X1-190)+i*62;
+      svg.appendChild(el('rect',{x:bx,y:250,width:52,height:24,rx:6,fill:cvar('--gr-soft'),stroke:C_gr,'stroke-width':1.2}));
+      svg.appendChild(el('text',{x:bx+26,y:266,'font-family':MONO,'font-size':10,fill:C_gr,'text-anchor':'middle'},['T→t','t→r','r→0'][i]));
+    }
+    svg.appendChild(el('line',{x1:cxm,y1:Y+H+22,x2:cxm,y2:246,stroke:C_gr,'stroke-width':1,'stroke-dasharray':'3 3',opacity:.6}));
+  }
+
+  /* KV cache 与梯度墙 */
+  if(done>0){
+    const wx=X0+starts[done]*cw-2;
+    svg.appendChild(el('line',{x1:wx,y1:Y-36,x2:wx,y2:Y+H+30,stroke:C_cm,'stroke-width':2.4,'stroke-dasharray':'5 4'}));
+    svg.appendChild(el('text',{x:wx-6,y:Y-42,'font-family':MONO,'font-size':10.5,fill:C_cm,'text-anchor':'end'},'梯度墙：encode_kv_cache 在 @torch.no_grad() 下'));
+  }
+  svg.appendChild(el('text',{x:X0,y:308,'font-family':MONO,'font-size':10.5,fill:ink3},'条件来自学生自己已生成的块 → 曝光偏差被暴露；但梯度不跨块回传'));
+
+  let full=0,comp=0;
+  for(let ci=0;ci<done;ci++){ if(ci>=done-3) full+=CHUNKS[ci]; else comp+=CHUNKS[ci]; }
+  document.getElementById('cbDone').innerHTML=done+' <small>/ 8</small>';
+  document.getElementById('cbFull').textContent=full+' 帧';
+  document.getElementById('cbComp').textContent=comp+' 帧';
+  document.getElementById('cbFwd').textContent=done<8?'3':'—';
+}
+(function(){
+  const b=document.getElementById('cbStep'); if(!b) return;
+  b.addEventListener('click',()=>{CB.done=Math.min(8,CB.done+1);drawCB();});
+  document.getElementById('cbReset').addEventListener('click',()=>{CB.done=0;drawCB();});
+})();
+
+/* ============================================================ 图8 · scaling */
+const SC_SERIES=[
+  {k:'afb',n:'AnyFlow 双向',c:'--fm',v:[82.92,83.48,83.77,83.90,83.96],on:true},
+  {k:'afc',n:'AnyFlow 因果',c:'--ok',v:[83.17,83.54,83.83,83.89,83.96],on:true},
+  {k:'rcm',n:'rCM 双向',c:'--cm',v:[82.81,82.51,81.43,79.38,75.72],on:true},
+  {k:'sf', n:'Self-Forcing 因果',c:'--dv',v:[82.38,83.40,83.14,82.66,82.24],on:true},
+  {k:'te', n:'教师（双向）',c:'--te',v:[62.65,72.38,80.16,82.74,83.41],on:true}
+];
+const SC_X=[2,4,8,16,32], SC={zoom:'full'};
+function drawSC(){
+  const svg=document.getElementById('scSvg'); if(!svg) return; clear(svg);
+  const ink3=cvar('--ink3'),axis=cvar('--axis'),grd=cvar('--grid'),ink=cvar('--ink');
+  const X0=66,X1=756,Y0=340,Y1=44;
+  const lo=SC.zoom==='full'?61:79.0, hi=SC.zoom==='full'?85.5:84.4;
+  const xs=i=>X0+i/(SC_X.length-1)*(X1-X0);
+  const ys=v=>Y0-(v-lo)/(hi-lo)*(Y0-Y1);
+  const nTick=SC.zoom==='full'?5:6;
+  for(let i=0;i<=nTick;i++){
+    const v=lo+(hi-lo)*i/nTick, yy=ys(v);
+    svg.appendChild(el('line',{x1:X0,y1:yy,x2:X1,y2:yy,stroke:grd,'stroke-width':1}));
+    svg.appendChild(el('text',{x:X0-8,y:yy+4,'font-family':MONO,'font-size':10.5,fill:ink3,'text-anchor':'end'},v.toFixed(1)));
+  }
+  svg.appendChild(el('line',{x1:X0,y1:Y0,x2:X1,y2:Y0,stroke:axis,'stroke-width':1.2}));
+  SC_X.forEach((v,i)=>svg.appendChild(el('text',{x:xs(i),y:Y0+20,'font-family':MONO,'font-size':11,fill:ink3,'text-anchor':'middle'},v+' NFE')));
+  svg.appendChild(el('text',{x:X0,y:Y1-16,'font-family':MONO,'font-size':11,fill:ink3},'VBench Total（越高越好）'));
+
+  const labs=[];
+  SC_SERIES.forEach(s=>{
+    if(!s.on)return;
+    const col=cvar(s.c);
+    const pts=s.v.map((v,i)=>xs(i).toFixed(1)+','+ys(Math.max(lo,Math.min(hi,v))).toFixed(1));
+    svg.appendChild(el('polyline',{points:pts.join(' '),fill:'none',stroke:col,'stroke-width':s.k.startsWith('af')?3:1.9,opacity:s.k.startsWith('af')?1:.85}));
+    s.v.forEach((v,i)=>{
+      if(v<lo)return;
+      svg.appendChild(el('circle',{cx:xs(i),cy:ys(Math.min(hi,v)),r:s.k.startsWith('af')?4.6:3.4,fill:col}));
+    });
+    const last=s.v[s.v.length-1];
+    labs.push({y:last>=lo?ys(Math.min(hi,last)):Y0-2,col,txt:(last<lo?'↓ ':'')+last.toFixed(2)});
+  });
+  labs.sort((a,b)=>a.y-b.y);
+  for(let i=1;i<labs.length;i++){ if(labs[i].y-labs[i-1].y<14) labs[i].y=labs[i-1].y+14; }
+  labs.forEach(L=>svg.appendChild(el('text',{x:X1+10,y:L.y+4,'font-family':MONO,'font-size':10.5,fill:L.col},L.txt)));
+  /* 标注 */
+  if(SC.zoom==='full'){
+    svg.appendChild(el('text',{x:xs(0)+10,y:ys(62.65)-10,'font-family':MONO,'font-size':10.5,fill:cvar('--te')},'教师 2 步 = 62.65'));
+    svg.appendChild(el('text',{x:xs(3.1),y:ys(76.5),'font-family':MONO,'font-size':10.5,fill:cvar('--cm')},'rCM 塌方'));
+  }
+  const lgd=document.getElementById('scLgd'); lgd.innerHTML='';
+  SC_SERIES.forEach(s=>{
+    const b=document.createElement('span');
+    b.style.cursor='pointer'; b.style.opacity=s.on?1:.4;
+    b.innerHTML='<i class="swatch" style="background:var('+s.c+')"></i>'+s.n;
+    b.onclick=()=>{s.on=!s.on;drawSC();};
+    lgd.appendChild(b);
+  });
+}
+seg('scZoom',k=>{SC.zoom=k;drawSC();});
+
+/* ============================================================ 图9 · 训练成本 */
+const CST={arch:'causal'};
+const CST_D={causal:{c4:45.9,c16:93.8,f:53.1},bidir:{c4:41.8,c16:96.6,f:51.2}};
+function drawCost(){
+  const svg=document.getElementById('cSvg'); if(!svg) return; clear(svg);
+  const ink=cvar('--ink'),ink3=cvar('--ink3'),axis=cvar('--axis'),grd=cvar('--grid');
+  const C_fm=cvar('--fm'),C_cm=cvar('--cm'),C_gr=cvar('--gr');
+  const d=CST_D[CST.arch];
+  const slope=(d.c16-d.c4)/12, icept=d.c4-4*slope, xStar=(d.f-icept)/slope;
+  const X0=66,X1=780,Y0=252,Y1=40, NMAX=20, VMAX=120;
+  const xs=n=>X0+(n-1)/(NMAX-1)*(X1-X0), ys=v=>Y0-v/VMAX*(Y0-Y1);
+  for(let v=0;v<=VMAX;v+=30){
+    svg.appendChild(el('line',{x1:X0,y1:ys(v),x2:X1,y2:ys(v),stroke:grd,'stroke-width':1}));
+    svg.appendChild(el('text',{x:X0-8,y:ys(v)+4,'font-family':MONO,'font-size':10.5,fill:ink3,'text-anchor':'end'},v));
+  }
+  svg.appendChild(el('line',{x1:X0,y1:Y0,x2:X1,y2:Y0,stroke:axis,'stroke-width':1.2}));
+  [2,4,6,8,12,16,20].forEach(n=>svg.appendChild(el('text',{x:xs(n),y:Y0+19,'font-family':MONO,'font-size':10.5,fill:ink3,'text-anchor':'middle'},n)));
+  svg.appendChild(el('text',{x:(X0+X1)/2,y:Y0+38,'font-family':MONO,'font-size':11,fill:ink3,'text-anchor':'middle'},'模拟的采样步数 N'));
+  svg.appendChild(el('text',{x:X0,y:Y1-14,'font-family':MONO,'font-size':11,fill:ink3},'s / iter（8×H100，bs=16）'));
+
+  svg.appendChild(el('line',{x1:xs(1),y1:ys(icept+slope),x2:xs(NMAX),y2:ys(icept+slope*NMAX),stroke:C_cm,'stroke-width':2,'stroke-dasharray':'5 4',opacity:.75}));
+  svg.appendChild(el('line',{x1:xs(4),y1:ys(d.c4),x2:xs(16),y2:ys(d.c16),stroke:C_cm,'stroke-width':3}));
+  svg.appendChild(el('line',{x1:xs(1),y1:ys(d.f),x2:xs(NMAX),y2:ys(d.f),stroke:C_fm,'stroke-width':3}));
+
+  [[4,d.c4],[16,d.c16]].forEach(p=>{svg.appendChild(el('circle',{cx:xs(p[0]),cy:ys(p[1]),r:5,fill:C_cm}));
+    svg.appendChild(el('text',{x:xs(p[0]),y:ys(p[1])-12,'font-family':MONO,'font-size':11,fill:C_cm,'text-anchor':'middle'},p[1].toFixed(1)));});
+  [4,16].forEach(n=>{svg.appendChild(el('circle',{cx:xs(n),cy:ys(d.f),r:5,fill:C_fm}));});
+  svg.appendChild(el('text',{x:xs(18),y:ys(d.f)-12,'font-family':MONO,'font-size':11,fill:C_fm,'text-anchor':'end'},'flow map BS 恒定 '+d.f.toFixed(1)));
+  svg.appendChild(el('text',{x:xs(17),y:ys(icept+slope*17)-10,'font-family':MONO,'font-size':11,fill:C_cm,'text-anchor':'end'},'一致性 BS ∝ N'));
+
+  svg.appendChild(el('line',{x1:xs(xStar),y1:Y0,x2:xs(xStar),y2:ys(d.f),stroke:C_gr,'stroke-width':1.6,'stroke-dasharray':'3 3'}));
+  svg.appendChild(el('circle',{cx:xs(xStar),cy:ys(d.f),r:4.5,fill:C_gr}));
+  svg.appendChild(el('text',{x:xs(xStar),y:Y0-8,'font-family':MONO,'font-size':11,fill:C_gr,'text-anchor':'middle'},'N* ≈ '+xStar.toFixed(1)));
+
+  document.getElementById('c4').innerHTML=d.c4.toFixed(1)+' → '+d.f.toFixed(1)+' <small>'+(d.f>d.c4?'+':'')+((d.f/d.c4-1)*100).toFixed(1)+'%</small>';
+  document.getElementById('c16').innerHTML=d.c16.toFixed(1)+' → '+d.f.toFixed(1)+' <small>'+((d.f/d.c16-1)*100).toFixed(1)+'%</small>';
+  document.getElementById('cX').textContent='N ≈ '+xStar.toFixed(1);
+}
+seg('cArch',k=>{CST.arch=k;drawCost();});
+
+/* ============================================================ */
+function redrawAll(){drawToy();drawTR();drawW();drawSh();drawBS();drawCB();drawSC();drawCost();}
+redrawAll();
+addEventListener('resize',()=>{drawTR();});
+</script>
+
+</body>
+</html>

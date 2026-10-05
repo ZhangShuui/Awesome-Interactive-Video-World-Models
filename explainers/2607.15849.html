@@ -1,0 +1,2287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TANGO 精读</title>
+<meta name="description" content="TANGO：让扩散模型当自己的裁判——往前多看一块，检查预测出的噪声还像不像各向同性高斯，用偏差反推出一条不撞死胡同的轨迹。方法精读、数值复核与交互图解。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+/* ============================================================
+   TANGO 精读 — design tokens
+   角色色：td = 生成轨迹 / 当前块 x̂₀ⁱ
+           dm = 冻结裁判 ε_θ / 前瞻一步
+           na = 真实流形 / 各向同性高斯先验（强调色）
+           cr = 终点 terminal point
+           dv = 噪声残差 r̂ / 四项统计检验
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0d1014; --surf:#13171c; --surf2:#191e25; --surf3:#222932;
+  --rule:#252c35; --rule2:#38414d;
+  --ink:#ebeff4; --ink2:#a7b1bd; --ink3:#78838f;
+
+  --td:#5a9bf6;  --td-ink:#82b6ff;  --td-soft:rgba(90,155,246,.16);
+  --dm:#9d7bf0;  --dm-ink:#b79dff;  --dm-soft:rgba(157,123,240,.17);
+  --na:#1fbfae;  --na-ink:#4fd9c8;  --na-soft:rgba(31,191,174,.16);
+  --cr:#e0a53a;  --cr-ink:#f0bd5c;  --cr-soft:rgba(224,165,58,.16);
+  --dv:#ec6a9c;  --dv-ink:#ff8fb6;  --dv-soft:rgba(236,106,156,.16);
+
+  --ok:#3fb27a; --ok-ink:#62cf95; --ok-soft:rgba(63,178,122,.14);
+  --bad:#e0605a; --bad-ink:#f0857f; --bad-soft:rgba(224,96,90,.14);
+  --warn:#e3b341; --warn-ink:#f0c766; --warn-soft:rgba(227,179,65,.14);
+
+  --grid:#1f242c; --axis:#38414d; --tint:rgba(255,255,255,.03);
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 32px rgba(0,0,0,.36);
+  --font-display:"Bricolage Grotesque","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"IBM Plex Serif",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f3f5; --surf:#ffffff; --surf2:#eaedf1; --surf3:#dfe3e9;
+    --rule:#dcdfe5; --rule2:#c1c7d0;
+    --ink:#12161b; --ink2:#485058; --ink3:#6f7986;
+    --td:#2b6fd6;  --td-ink:#1f58b0;  --td-soft:rgba(43,111,214,.12);
+    --dm:#6f4fd6;  --dm-ink:#5b3cc4;  --dm-soft:rgba(111,79,214,.12);
+    --na:#0d8f81;  --na-ink:#0a7469;  --na-soft:rgba(13,143,129,.13);
+    --cr:#b07908;  --cr-ink:#8d6106;  --cr-soft:rgba(176,121,8,.13);
+    --dv:#c93a72;  --dv-ink:#a72c5d;  --dv-soft:rgba(201,58,114,.12);
+    --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+    --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+    --warn:#b98512; --warn-ink:#8f6608; --warn-soft:rgba(185,133,18,.14);
+    --grid:#e2e5ea; --axis:#c1c7d0; --tint:rgba(16,20,28,.028);
+    --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f3f5; --surf:#ffffff; --surf2:#eaedf1; --surf3:#dfe3e9;
+  --rule:#dcdfe5; --rule2:#c1c7d0;
+  --ink:#12161b; --ink2:#485058; --ink3:#6f7986;
+  --td:#2b6fd6;  --td-ink:#1f58b0;  --td-soft:rgba(43,111,214,.12);
+  --dm:#6f4fd6;  --dm-ink:#5b3cc4;  --dm-soft:rgba(111,79,214,.12);
+  --na:#0d8f81;  --na-ink:#0a7469;  --na-soft:rgba(13,143,129,.13);
+  --cr:#b07908;  --cr-ink:#8d6106;  --cr-soft:rgba(176,121,8,.13);
+  --dv:#c93a72;  --dv-ink:#a72c5d;  --dv-soft:rgba(201,58,114,.12);
+  --ok:#138a54; --ok-ink:#0e6f43; --ok-soft:rgba(19,138,84,.12);
+  --bad:#c8362f; --bad-ink:#a92a24; --bad-soft:rgba(200,54,47,.11);
+  --warn:#b98512; --warn-ink:#8f6608; --warn-soft:rgba(185,133,18,.14);
+  --grid:#e2e5ea; --axis:#c1c7d0; --tint:rgba(16,20,28,.028);
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 10px 28px rgba(16,20,28,.08);
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html{scroll-behavior:smooth; scroll-padding-top:88px}
+body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:16px; line-height:1.85;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;}
+h1,h2,h3,h4,h5{margin:0; line-height:1.28; font-family:var(--font-display); text-wrap:balance; font-weight:600}
+p{margin:0}
+a{color:var(--na-ink); text-decoration:none; border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+:focus-visible{outline:2px solid var(--na); outline-offset:2px; border-radius:4px}
+code{font-family:var(--font-mono); font-size:.9em; background:var(--surf2); border:1px solid var(--rule); border-radius:5px; padding:1px 5px; color:var(--ink2)}
+sup{font-size:.72em}
+#prog{position:fixed; top:0; left:0; height:2px; width:0; background:var(--na); z-index:60}
+
+.top{position:fixed; top:0; left:0; right:0; height:52px; z-index:50; display:flex; align-items:center; gap:14px;
+  padding:0 22px; background:color-mix(in srgb,var(--bg) 84%,transparent);
+  backdrop-filter:saturate(1.5) blur(14px); border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:-.01em; white-space:nowrap}
+.brand em{font-style:normal; color:var(--ink3); font-weight:500; margin-left:8px; font-size:13px}
+.top .spacer{flex:1}
+.tbtn{background:var(--surf2); border:1px solid var(--rule); color:var(--ink2); height:34px; min-width:34px;
+  padding:0 10px; border-radius:9px; cursor:pointer; display:inline-grid; place-items:center;
+  font-family:var(--font-mono); font-size:12px; transition:.16s}
+.tbtn:hover{color:var(--ink); border-color:var(--rule2)}
+@media (max-width:640px){
+  code{white-space:normal; word-break:break-word}
+  .top{padding:0 14px; gap:10px}
+  .brand{font-size:13px; min-width:0; overflow:hidden; text-overflow:ellipsis}
+  .brand em{display:none}
+}
+
+.shell{display:grid; grid-template-columns:250px minmax(0,1fr); gap:0; max-width:1270px; margin:0 auto; padding:84px 28px 120px}
+.rail{position:sticky; top:84px; align-self:start; max-height:calc(100vh - 100px); overflow:auto; padding-right:18px}
+.rail .rl{font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink3); margin:0 0 10px}
+.rail ol{list-style:none; margin:0; padding:0; border-left:1px solid var(--rule)}
+.rail li{margin:0}
+.rail a{display:block; padding:5px 0 5px 14px; margin-left:-1px; font-size:12.5px; line-height:1.4; color:var(--ink3);
+  border-left:2px solid transparent; border-bottom:0; transition:.15s}
+.rail a:hover{color:var(--ink)}
+.rail a.on{color:var(--ink); border-left-color:var(--na)}
+main{min-width:0; max-width:880px; padding-left:44px}
+@media (max-width:980px){
+  .shell{grid-template-columns:1fr; padding:76px 16px 90px}
+  .rail{display:none}
+  main{padding-left:0}
+}
+
+/* ============================================================ hero */
+.hero{padding:10px 0 34px; border-bottom:1px solid var(--rule); margin-bottom:56px; position:relative}
+.hero .fieldpat{position:absolute; right:-20px; top:118px; width:236px; height:236px; opacity:.32; pointer-events:none; z-index:0}
+.hero > *:not(.fieldpat){position:relative; z-index:1}
+@media (max-width:1024px){.hero .fieldpat{display:none}}
+.kicker{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px}
+.tag{font-family:var(--font-mono); font-size:11.5px; color:var(--ink2); background:var(--surf2); border:1px solid var(--rule);
+  padding:3px 9px; border-radius:6px; letter-spacing:.01em}
+.tag.hl{color:var(--na-ink); border-color:color-mix(in srgb,var(--na) 45%,transparent); background:var(--na-soft)}
+.hero h1{font-size:clamp(38px,5.6vw,58px); font-weight:700; letter-spacing:-.025em; line-height:1.03}
+.hero .zh{font-size:clamp(18px,2.2vw,22px); color:var(--ink2); margin-top:14px; line-height:1.55; max-width:52ch; font-weight:500; text-wrap:balance}
+.hero .thesis{margin-top:22px; font-size:16.5px; color:var(--ink2); max-width:68ch}
+.hero .thesis b{color:var(--ink)}
+.authors{margin-top:20px; font-size:13.5px; color:var(--ink3); line-height:1.7}
+.authors b{color:var(--ink2); font-weight:500}
+.links{display:flex; flex-wrap:wrap; gap:10px; margin-top:16px}
+.links a,.links span{font-family:var(--font-mono); font-size:12.5px; padding:6px 12px; border:1px solid var(--rule); border-radius:8px; color:var(--ink2); background:var(--surf)}
+.links a:hover{color:var(--ink); border-color:var(--rule2)}
+.links span{color:var(--ink3); border-style:dashed}
+.stats{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:28px}
+.stat{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:14px 16px 12px}
+.stat .lb{font-family:var(--font-mono); font-size:11px; color:var(--ink3); letter-spacing:.06em; text-transform:uppercase}
+.stat .vl{font-family:var(--font-display); font-size:27px; font-weight:700; letter-spacing:-.02em; margin-top:6px}
+.stat .dl{font-size:12.5px; color:var(--ink3); margin-top:4px; line-height:1.5}
+.stat .dl b{color:var(--ink2); font-weight:500}
+@media (max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
+
+/* role text */
+.rT{color:var(--td-ink); font-weight:600}
+.rD{color:var(--dm-ink); font-weight:600}
+.rN{color:var(--na-ink); font-weight:600}
+.rX{color:var(--cr-ink); font-weight:600}
+.rV{color:var(--dv-ink); font-weight:600}
+.rB{color:var(--bad-ink); font-weight:600}
+.rK{color:var(--ok-ink); font-weight:600}
+
+/* ============================================================ sections */
+.sec{margin:0 0 84px; scroll-margin-top:84px}
+.eyebrow{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.eyebrow .n{font-family:var(--font-mono); font-size:12px; color:var(--na-ink); font-weight:600}
+.eyebrow .t{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); letter-spacing:.12em; text-transform:uppercase}
+.eyebrow .line{flex:1; height:1px; background:var(--rule)}
+.sec h2{font-size:clamp(24px,3vw,31px); letter-spacing:-.02em; margin-bottom:16px}
+.sec h3{font-size:19px; margin:38px 0 12px; letter-spacing:-.01em; display:flex; align-items:baseline; gap:10px}
+.sec h3 .ix{font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-weight:500}
+.sec h4{font-size:15.5px; margin:22px 0 8px}
+.lead{font-size:17px; color:var(--ink2); max-width:70ch; margin-bottom:22px}
+.lead b{color:var(--ink)}
+.prose{max-width:72ch; color:var(--ink2)}
+.prose p{margin:0 0 14px}
+.prose b,.prose strong{color:var(--ink)}
+.prose ul,.prose ol{margin:0 0 14px}
+.prose li{margin:4px 0}
+.note{font-size:13.5px; color:var(--ink3); max-width:72ch; margin-top:10px}
+.note b{color:var(--ink2); font-weight:500}
+
+/* ============================================================ figure */
+.fig{margin:26px 0 30px; background:var(--surf); border:1px solid var(--rule); border-radius:14px; box-shadow:var(--shadow); overflow:hidden}
+.fh{display:flex; align-items:baseline; gap:12px; padding:12px 18px 10px; border-bottom:1px solid var(--rule)}
+.fh .no{font-family:var(--font-mono); font-size:11.5px; color:var(--na-ink); letter-spacing:.06em; white-space:nowrap}
+.fh .ti{font-family:var(--font-display); font-size:14px; font-weight:600; color:var(--ink)}
+.figbody{padding:16px 18px 12px; background:var(--surf)}
+.figbody svg{display:block; width:100%; height:auto; max-width:100%; font-family:var(--font-body)}
+figcaption{padding:12px 18px 14px; font-size:13.5px; line-height:1.65; color:var(--ink3); border-top:1px solid var(--rule)}
+figcaption b{color:var(--ink2); font-weight:500}
+.tabs{display:flex; flex-wrap:wrap; gap:6px; padding:10px 14px 0; background:var(--surf)}
+.tab{background:var(--surf2); border:1px solid var(--rule); color:var(--ink3); font-family:var(--font-body); font-size:12.5px;
+  padding:6px 12px; border-radius:8px 8px 0 0; cursor:pointer; transition:.15s; border-bottom:0}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--ink); background:var(--surf3); border-color:var(--rule2)}
+.scrollx{overflow-x:auto}
+
+/* svg utility classes */
+.f-ink{fill:var(--ink)} .f-ink2{fill:var(--ink2)} .f-ink3{fill:var(--ink3)}
+.f-surf{fill:var(--surf)} .f-surf2{fill:var(--surf2)} .f-surf3{fill:var(--surf3)} .f-bg{fill:var(--bg)}
+.s-rule{stroke:var(--rule2)} .s-rule1{stroke:var(--rule)} .s-ink3{stroke:var(--ink3)} .s-ink2{stroke:var(--ink2)} .s-ink{stroke:var(--ink)}
+.nofill{fill:none}
+.f-T{fill:var(--td)} .f-Ti{fill:var(--td-ink)} .fs-T{fill:var(--td-soft)} .s-T{stroke:var(--td)}
+.f-D{fill:var(--dm)} .f-Di{fill:var(--dm-ink)} .fs-D{fill:var(--dm-soft)} .s-D{stroke:var(--dm)}
+.f-N{fill:var(--na)} .f-Ni{fill:var(--na-ink)} .fs-N{fill:var(--na-soft)} .s-N{stroke:var(--na)}
+.f-X{fill:var(--cr)} .f-Xi{fill:var(--cr-ink)} .fs-X{fill:var(--cr-soft)} .s-X{stroke:var(--cr)}
+.f-V{fill:var(--dv)} .f-Vi{fill:var(--dv-ink)} .fs-V{fill:var(--dv-soft)} .s-V{stroke:var(--dv)}
+.f-B{fill:var(--bad)} .f-Bi{fill:var(--bad-ink)} .fs-B{fill:var(--bad-soft)} .s-B{stroke:var(--bad)}
+.f-K{fill:var(--ok)} .f-Ki{fill:var(--ok-ink)} .fs-K{fill:var(--ok-soft)} .s-K{stroke:var(--ok)}
+.mk-T{fill:var(--td)} .mk-D{fill:var(--dm)} .mk-N{fill:var(--na)} .mk-X{fill:var(--cr)} .mk-V{fill:var(--dv)} .mk-n{fill:var(--ink3)} .mk-B{fill:var(--bad)} .mk-K{fill:var(--ok)}
+svg text{font-family:var(--font-body)}
+svg .big{font-size:13px; font-weight:600}
+svg .lbl{font-size:12px}
+svg .sml{font-size:10.5px}
+svg .xs{font-size:9.5px}
+svg .mono{font-family:var(--font-mono)}
+svg .math{font-family:var(--font-math); font-style:italic; font-size:13px}
+.dash{stroke-dasharray:5 4}
+.dash2{stroke-dasharray:2 3}
+
+/* ============================================================ cards & callouts */
+.grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:22px 0}
+.grid2{display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin:22px 0}
+.grid4{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:22px 0}
+@media (max-width:760px){.grid3,.grid2,.grid4{grid-template-columns:1fr}}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:16px 18px; font-size:14px; color:var(--ink2); line-height:1.7}
+.card .mono{font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3); margin-bottom:6px}
+.card h5{font-size:15px; margin-bottom:8px; color:var(--ink)}
+.card b{color:var(--ink)}
+.card.cT{border-top:3px solid var(--td)} .card.cT .mono{color:var(--td-ink)}
+.card.cD{border-top:3px solid var(--dm)} .card.cD .mono{color:var(--dm-ink)}
+.card.cN{border-top:3px solid var(--na)} .card.cN .mono{color:var(--na-ink)}
+.card.cX{border-top:3px solid var(--cr)} .card.cX .mono{color:var(--cr-ink)}
+.card.cV{border-top:3px solid var(--dv)} .card.cV .mono{color:var(--dv-ink)}
+.card.cB{border-top:3px solid var(--bad)} .card.cB .mono{color:var(--bad-ink)}
+.call{border:1px solid var(--rule); border-left:3px solid var(--ink3); background:var(--surf); border-radius:10px; padding:14px 18px; margin:22px 0; font-size:14.5px; color:var(--ink2); max-width:80ch}
+.call .hd{font-family:var(--font-display); font-weight:600; font-size:14px; color:var(--ink); margin-bottom:6px}
+.call p{margin:0 0 6px} .call p:last-child{margin:0}
+.call b{color:var(--ink)}
+.call.key{border-left-color:var(--na); background:color-mix(in srgb,var(--na-soft) 55%,var(--surf))}
+.call.warn{border-left-color:var(--bad); background:color-mix(in srgb,var(--bad-soft) 60%,var(--surf))}
+.call.mine{border-left-color:var(--dm); background:color-mix(in srgb,var(--dm-soft) 48%,var(--surf))}
+.call.ok{border-left-color:var(--ok); background:color-mix(in srgb,var(--ok-soft) 55%,var(--surf))}
+
+.eq{font-family:var(--font-math); font-size:19px; text-align:center; padding:16px 18px; margin:18px 0; background:var(--surf); border:1px solid var(--rule); border-radius:10px; color:var(--ink); overflow-x:auto; line-height:1.7}
+.eq i{font-style:italic}
+.eq .r{font-style:normal}
+.eq .tagno{float:right; font-family:var(--font-mono); font-style:normal; font-size:12px; color:var(--ink3); padding-top:6px}
+.eq small{display:block; font-family:var(--font-body); font-style:normal; font-size:12.5px; color:var(--ink3); margin-top:10px; line-height:1.65; text-align:left}
+.eq small b{color:var(--ink2); font-weight:500}
+
+/* tables */
+table{border-collapse:collapse; width:100%; font-size:13.5px; margin:16px 0}
+th,td{padding:9px 10px; border-bottom:1px solid var(--rule); text-align:left; vertical-align:top; line-height:1.55}
+th{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); font-weight:500; border-bottom:1px solid var(--rule2)}
+td{color:var(--ink2)} td b{color:var(--ink)}
+td.num,th.num{font-family:var(--font-mono); font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right}
+th.srt{cursor:pointer; user-select:none}
+th.srt:hover{color:var(--ink)}
+th.srt.act{color:var(--na-ink)}
+tr.hl td{background:var(--tint)}
+tr.me td{background:color-mix(in srgb,var(--na-soft) 42%,transparent)}
+tr.tea td{background:color-mix(in srgb,var(--cr-soft) 30%,transparent)}
+td.best{color:var(--ok-ink); font-weight:600}
+td.worst{color:var(--bad-ink)}
+td.flag{color:var(--bad-ink); font-weight:600}
+.tbl{overflow-x:auto; border:1px solid var(--rule); border-radius:12px; background:var(--surf); padding:0 14px; margin:18px 0}
+.tbl table{margin:0}
+
+/* pills */
+.pill{display:inline-block; font-family:var(--font-mono); font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--rule2); color:var(--ink2); background:var(--surf2); white-space:nowrap}
+.pill.T{color:var(--td-ink); border-color:color-mix(in srgb,var(--td) 50%,transparent); background:var(--td-soft)}
+.pill.D{color:var(--dm-ink); border-color:color-mix(in srgb,var(--dm) 50%,transparent); background:var(--dm-soft)}
+.pill.N{color:var(--na-ink); border-color:color-mix(in srgb,var(--na) 50%,transparent); background:var(--na-soft)}
+.pill.X{color:var(--cr-ink); border-color:color-mix(in srgb,var(--cr) 50%,transparent); background:var(--cr-soft)}
+.pill.V{color:var(--dv-ink); border-color:color-mix(in srgb,var(--dv) 50%,transparent); background:var(--dv-soft)}
+.pill.B{color:var(--bad-ink); border-color:color-mix(in srgb,var(--bad) 50%,transparent); background:var(--bad-soft)}
+.pill.K{color:var(--ok-ink); border-color:color-mix(in srgb,var(--ok) 50%,transparent); background:var(--ok-soft)}
+
+/* ============================================================ interactive widgets */
+.ctl{display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; padding:10px 18px; border-bottom:1px solid var(--rule); background:var(--surf2); font-size:13px; color:var(--ink2)}
+.ctl label{display:inline-flex; align-items:center; gap:8px; white-space:nowrap}
+.ctl input[type=range]{width:132px; accent-color:var(--na)}
+.ctl input[type=checkbox]{accent-color:var(--na)}
+.ctl .val{font-family:var(--font-mono); font-size:12px; color:var(--ink); min-width:5ch; font-variant-numeric:tabular-nums}
+.ctl .sp{flex:1}
+.seg{display:inline-flex; border:1px solid var(--rule2); border-radius:8px; overflow:hidden; flex-wrap:wrap}
+.seg button{background:var(--surf); border:0; color:var(--ink3); font-family:var(--font-body); font-size:12.5px; padding:5px 11px; cursor:pointer; transition:.15s}
+.seg button + button{border-left:1px solid var(--rule2)}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--surf3); color:var(--ink); font-weight:600}
+.btn{background:var(--surf3); border:1px solid var(--rule2); color:var(--ink); font-family:var(--font-body); font-size:12.5px; padding:5px 12px; border-radius:8px; cursor:pointer}
+.btn:hover{border-color:var(--ink3)}
+.readout{display:grid; grid-template-columns:repeat(auto-fit,minmax(128px,1fr)); gap:10px; padding:12px 18px; border-top:1px solid var(--rule); background:var(--surf)}
+.readout .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.04em; color:var(--ink3)}
+.readout .v{font-family:var(--font-display); font-size:19px; font-weight:600; letter-spacing:-.01em; font-variant-numeric:tabular-nums; margin-top:2px}
+.readout .v small{font-family:var(--font-mono); font-size:11px; color:var(--ink3); margin-left:4px; font-weight:400}
+.readout .v.ok{color:var(--ok-ink)} .readout .v.bad{color:var(--bad-ink)} .readout .v.n{color:var(--na-ink)} .readout .v.t{color:var(--td-ink)} .readout .v.d{color:var(--dm-ink)} .readout .v.x{color:var(--cr-ink)} .readout .v.vv{color:var(--dv-ink)}
+
+.legend{display:flex; flex-wrap:wrap; gap:6px 16px; padding:10px 18px; border-top:1px solid var(--rule); background:var(--surf); font-size:12.5px; color:var(--ink3)}
+.legend span{display:inline-flex; align-items:center; gap:6px}
+.legend i{display:inline-block; width:14px; height:14px; border-radius:3px; border:1px solid var(--rule2)}
+
+.explore{display:grid; grid-template-columns:minmax(0,1.42fr) minmax(232px,1fr); gap:0}
+@media (max-width:760px){.explore{grid-template-columns:1fr}}
+.explore .pane{border-left:1px solid var(--rule); padding:14px 18px; font-size:13.5px; color:var(--ink2); background:var(--surf)}
+@media (max-width:760px){.explore .pane{border-left:0; border-top:1px solid var(--rule)}}
+.pane h5{font-family:var(--font-display); font-size:15px; color:var(--ink); margin-bottom:8px}
+.pane .row{margin:8px 0}
+.pane .k{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); display:block}
+.pane ul{padding-left:1.1em; margin:2px 0 0}
+.pane li{margin:2px 0}
+.pane b{color:var(--ink)}
+
+/* canvas panels */
+.cvwrap{display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); gap:14px; padding:14px 18px}
+.cvcell{text-align:center}
+.cvcell canvas{width:100%; max-width:220px; height:auto; image-rendering:pixelated; border:1px solid var(--rule2); border-radius:8px; background:var(--surf2)}
+.cvcell .cl{font-family:var(--font-mono); font-size:10.5px; color:var(--ink3); margin-top:6px; letter-spacing:.04em}
+.cvcell .cl b{color:var(--ink2); font-weight:500}
+
+/* algorithm stepper */
+.algo{font-family:var(--font-mono); font-size:12.2px; line-height:1.72; padding:12px 6px 14px; background:var(--surf); overflow-x:auto}
+.algo .ln{display:grid; grid-template-columns:30px 1fr; gap:10px; padding:1px 12px; border-left:2px solid transparent; cursor:pointer; white-space:pre}
+.algo .ln:hover{background:var(--surf2)}
+.algo .ln .no{color:var(--ink3); text-align:right; font-size:11px}
+.algo .ln .co{color:var(--ink2)}
+.algo .ln.cm .co{color:var(--ink3); font-style:italic}
+.algo .ln.on{background:color-mix(in srgb,var(--na-soft) 45%,transparent); border-left-color:var(--na)}
+.algo .ln.on .co{color:var(--ink)}
+.algo .ln.gT{border-left-color:color-mix(in srgb,var(--td) 60%,transparent)}
+.algo .ln.gD{border-left-color:color-mix(in srgb,var(--dm) 60%,transparent)}
+.algo .ln.gC{border-left-color:color-mix(in srgb,var(--dv) 60%,transparent)}
+.algo .kw{color:var(--dm-ink)} .algo .fn{color:var(--na-ink)} .algo .cmt{color:var(--ink3)}
+
+/* bars */
+.bars{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:10px 14px; padding:12px 18px 14px}
+.bars .pnl{border:1px solid var(--rule); border-radius:10px; padding:10px 12px 8px; background:var(--surf)}
+.bars .pt{font-family:var(--font-mono); font-size:11px; color:var(--ink2); margin-bottom:8px; display:flex; justify-content:space-between; gap:8px}
+.bars .pt span:last-child{color:var(--ink3)}
+.brow{display:grid; grid-template-columns:var(--labw,150px) 1fr auto; align-items:center; gap:8px; margin:5px 0}
+.brow .bl{font-size:11.5px; color:var(--ink2); text-align:right; line-height:1.3}
+.brow .bt{height:11px; position:relative}
+.brow .bt i{display:block; height:100%; border-radius:3px; background:var(--ink3); opacity:.42; min-width:2px}
+.brow.hl .bl{color:var(--ink); font-weight:600}
+.brow.hl .bt i{background:var(--ok); opacity:1}
+.brow.dim .bt i{background:var(--bad); opacity:.62}
+.brow .bv{font-family:var(--font-mono); font-size:11px; color:var(--ink2); font-variant-numeric:tabular-nums; min-width:6ch}
+.brow.hl .bv{color:var(--ok-ink); font-weight:600}
+
+/* doubts */
+.dfilter{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:18px 0 14px; font-size:13px; color:var(--ink3)}
+.dt{background:var(--surf); border:1px solid var(--rule); border-radius:12px; margin:10px 0; overflow:hidden}
+.dt > summary{list-style:none; cursor:pointer; padding:13px 16px; display:grid; grid-template-columns:auto auto 1fr auto; gap:10px; align-items:center; font-size:14.5px; color:var(--ink)}
+.dt > summary::-webkit-details-marker{display:none}
+.dt > summary:hover{background:var(--surf2)}
+.dt .sev{font-family:var(--font-mono); font-size:10.5px; padding:2px 8px; border-radius:999px; white-space:nowrap; letter-spacing:.04em}
+.dt .sev.hi{color:#fff; background:var(--bad)}
+.dt .sev.mid{color:var(--ink); background:color-mix(in srgb,var(--warn) 58%, var(--surf3))}
+.dt .sev.lo{color:var(--ink2); background:var(--surf3); border:1px solid var(--rule2)}
+.dt .dn{font-family:var(--font-mono); font-size:11.5px; color:var(--ink3)}
+.dt .caret{color:var(--ink3); font-size:12px; transition:.15s}
+.dt[open] .caret{transform:rotate(90deg)}
+.dt .body{padding:2px 16px 16px; border-top:1px solid var(--rule); font-size:14px; color:var(--ink2); line-height:1.75}
+.dt .body .lb{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3); display:block; margin:14px 0 3px}
+.dt .body blockquote{margin:0; padding:8px 14px; border-left:2px solid var(--rule2); background:var(--surf2); border-radius:0 8px 8px 0; font-size:13px; color:var(--ink3); font-family:var(--font-math)}
+.dt .body b{color:var(--ink)}
+.dt .body p{margin:0 0 8px}
+.dt .body ul{padding-left:1.15em; margin:4px 0 8px}
+
+/* appendix */
+.gloss dt{font-family:var(--font-display); font-weight:600; font-size:14.5px; margin-top:14px; color:var(--ink)}
+.gloss dd{margin:2px 0 0; font-size:14px; color:var(--ink2); max-width:74ch}
+pre{font-family:var(--font-mono); font-size:12px; line-height:1.6; background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:14px 16px; overflow-x:auto; color:var(--ink2); margin:14px 0; white-space:pre-wrap; word-break:break-word}
+pre .cm{color:var(--ink3)} pre .kw{color:var(--dm-ink)} pre .sv{color:var(--na-ink)} pre .nv{color:var(--cr-ink)}
+.foot{margin-top:60px; padding-top:20px; border-top:1px solid var(--rule); font-size:12.5px; color:var(--ink3); line-height:1.7}
+
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{transition:none !important; animation:none !important}
+}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<header class="top">
+  <div class="brand">TANGO<em>用「预测噪声像不像高斯」躲开终点 · 精读</em></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="切换深色/浅色主题">◐ 主题</button>
+</header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <marker id="ar-n" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-n"/></marker>
+  <marker id="ar-N" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-N"/></marker>
+  <marker id="ar-T" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-T"/></marker>
+  <marker id="ar-D" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-D"/></marker>
+  <marker id="ar-X" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-X"/></marker>
+  <marker id="ar-V" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-V"/></marker>
+  <marker id="ar-B" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="6.3" orient="auto"><path d="M0 0 L10 3.5 L0 7 Z" class="mk-B"/></marker>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" class="s-rule" stroke-width="2.2"/>
+  </pattern>
+  <pattern id="noisepat" width="34" height="34" patternUnits="userSpaceOnUse">
+    <rect width="34" height="34" fill="none"/>
+    <circle cx="6" cy="8" r="1.7" fill="var(--dv)" opacity=".5"/>
+    <circle cx="20" cy="4" r="1.2" fill="var(--na)" opacity=".5"/>
+    <circle cx="28" cy="17" r="1.8" fill="var(--cr)" opacity=".45"/>
+    <circle cx="12" cy="24" r="1.3" fill="var(--td)" opacity=".5"/>
+    <circle cx="25" cy="29" r="1.5" fill="var(--dm)" opacity=".5"/>
+    <circle cx="3" cy="30" r="1.1" fill="var(--dv)" opacity=".4"/>
+  </pattern>
+</defs></svg>
+
+<div class="shell">
+<nav class="rail" aria-label="目录">
+  <p class="rl">Contents</p>
+  <ol id="toc">
+    <li><a href="#s-tldr">00 · 一图看懂（可切换）</a></li>
+    <li><a href="#s-why">01 · 两种跑偏，它只治第二种</a></li>
+    <li><a href="#s-toy">02 · 终点是什么（可玩）</a></li>
+    <li><a href="#s-critic">03 · 裁判从哪来（可拖 t）</a></li>
+    <li><a href="#s-tests">04 · 四项检验实时拆解（核心）</a></li>
+    <li><a href="#s-algo">05 · 每生成一块就训练一次</a></li>
+    <li><a href="#s-drift">06 · 漂移曲线：它改的是斜率</a></li>
+    <li><a href="#s-res">07 · VBench 怎么读（可排序）</a></li>
+    <li><a href="#s-abl">08 · 消融：正则才是主角</a></li>
+    <li><a href="#s-cost">09 · 算力账（可切换）</a></li>
+    <li><a href="#s-doubt">10 · 我的存疑清单</a></li>
+    <li><a href="#s-missing">11 · 复现清单（未给）</a></li>
+    <li><a href="#s-place">12 · 谱系与定位</a></li>
+    <li><a href="#s-appendix">13 · 附录速查</a></li>
+  </ol>
+</nav>
+<main>
+
+<!-- ============================================================ HERO -->
+<section class="hero">
+  <svg class="fieldpat" viewBox="0 0 200 200" aria-hidden="true"><rect width="200" height="200" fill="url(#noisepat)"/></svg>
+  <div class="kicker">
+    <span class="tag">ECCV 2026 · Poster 5734</span>
+    <span class="tag">arXiv:2607.15849v1 · 2026-07-17</span>
+    <span class="tag hl">测试时自适应 / Test-Time Adaptation</span>
+    <span class="tag">基座 = Self-Forcing (Wan2.1-T2V-1.3B)</span>
+    <span class="tag">无需任何额外数据</span>
+  </div>
+  <h1>TANGO</h1>
+  <p class="zh">让扩散模型当<span class="rD">自己的裁判</span>：往前多生成一块，检查它预测出来的<span class="rV">噪声</span>还像不像各向同性高斯；不像，就说明脚下是<span class="rX">死胡同</span>，于是就地搜一条别的路。</p>
+  <p class="thesis">这篇论文提出的<b>不是一个新损失，也不是一次新训练</b>。它提出的是一个<b>诊断信号</b>：自回归视频扩散模型在条件序列跑出训练分布时，它预测出的噪声残差<b>会失去高斯性</b>——因为在那些区域，训练目标从来没有约束过它的输出。把这个偏差当成可微的分数，在推理时用 LoRA 做一次带约束的小幅优化，就能把轨迹从死胡同里拽出来。<b>代价是每生成一块画面都要顺带训练一次</b>，端到端慢约 7 倍。</p>
+  <p class="authors"><b>Dimitrios Karageorgiou</b><sup>1,2</sup>, <b>Symeon Papadopoulos</b><sup>1</sup>, <b>Ioannis Kompatsiaris</b><sup>1</sup>, <b>Efstratios Gavves</b><sup>2</sup>　·　<sup>1</sup>CERTH 信息技术研究所（希腊 塞萨洛尼基） · <sup>2</sup>阿姆斯特丹大学</p>
+  <div class="links">
+    <a href="https://arxiv.org/abs/2607.15849" target="_blank" rel="noopener">arXiv abs</a>
+    <a href="https://arxiv.org/pdf/2607.15849" target="_blank" rel="noopener">PDF</a>
+    <a href="https://mever-team.github.io/tango/" target="_blank" rel="noopener">项目页</a>
+    <a href="https://eccv.ecva.net/virtual/2026/poster/5734" target="_blank" rel="noopener">ECCV poster</a>
+    <span>代码 · 摘要称已开源，项目页写 “Code soon”</span>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="lb">VBench 总分</div><div class="vl" style="color:var(--na-ink)">0.863</div><div class="dl">15 s 视频；前 SOTA（LongLive）<b>0.832</b>，绝对 <b>+3.1</b> 分</div></div>
+    <div class="stat"><div class="lb">FVD 降幅</div><div class="vl" style="color:var(--ok-ink)">−28.3%</div><div class="dl">576.8 → 413.3，<b>相对自家 baseline</b>，不是相对 SOTA（见 §10‑D5）</div></div>
+    <div class="stat"><div class="lb">推理耗时</div><div class="vl" style="color:var(--bad-ink)">×7.2</div><div class="dl">1.2 min → <b>8.6 min</b>；显存 23.4 → <b>37.6 GiB</b></div></div>
+    <div class="stat"><div class="lb">每块优化量</div><div class="vl">5 步</div><div class="dl">B=10 个噪声向量 / batch 2 / 1 epoch，LoRA <b>rank 8</b></div></div>
+  </div>
+</section>
+
+<!-- ============================================================ 00 TLDR -->
+<section class="sec" id="s-tldr">
+  <div class="eyebrow"><span class="n">00</span><span class="t">The whole thing in one figure</span><span class="line"></span></div>
+  <h2>一图看懂：多看一步，然后就地改权重</h2>
+  <p class="lead">自回归视频扩散的正常循环是「读 KV cache → 去噪出下一块 → 写回 cache」。TANGO 在「写回 cache」之前插了一个<b>回路</b>：拿还没定稿的 <span class="rT">x̂₀ⁱ</span> 当条件，让<span class="rD">冻结的自己</span>再往前试一块，把试出来的<span class="rV">噪声残差</span>丢进四项统计检验；检验分数对 <span class="rD">LoRA 参数 φ</span> 可微，于是反传、更新、重出一版 <span class="rT">x̂₀ⁱ(φ)</span>，这一版才是真正写进 cache 的结果。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 0</span><span class="ti">一个自回归步内部发生的事（点标签切换视角）</span></div>
+    <div class="tabs" id="t0Tabs" role="tablist">
+      <button class="tab" role="tab" data-k="e" aria-selected="true">全景</button>
+      <button class="tab" role="tab" data-k="a">① 正常去噪</button>
+      <button class="tab" role="tab" data-k="b">② 前瞻一块</button>
+      <button class="tab" role="tab" data-k="c">③ 四项检验</button>
+      <button class="tab" role="tab" data-k="d">④ 约束优化</button>
+    </div>
+    <div class="figbody">
+      <svg viewBox="0 0 880 380" role="img" aria-label="TANGO 单步流程图">
+        <!-- lane labels -->
+        <text x="8" y="26" class="mono sml f-ink3">视频时间 i →</text>
+
+        <!-- group a: normal denoise -->
+        <g id="t0-a">
+          <rect x="18" y="44" width="196" height="120" rx="12" class="fs-T" stroke="var(--td)" stroke-width="1.3"/>
+          <text x="32" y="66" class="big f-Ti">① 因果去噪</text>
+          <text x="32" y="86" class="sml f-ink2">KV cache（21 潜帧 ≈ 5 s）</text>
+          <text x="32" y="103" class="sml f-ink2">+ 文本条件 umT5-xxl</text>
+          <text x="32" y="125" class="mono xs f-ink3">4 个去噪时刻，每块 3 潜帧</text>
+          <rect x="32" y="134" width="168" height="20" rx="6" class="f-surf2" stroke="var(--rule2)" stroke-width="1"/>
+          <text x="40" y="148" class="mono xs f-ink2">x̂₀ⁱ(θ) — 还没定稿的候选块</text>
+          <path d="M214 104 L248 104" stroke="var(--td)" stroke-width="1.6" marker-end="url(#ar-T)"/>
+        </g>
+
+        <!-- group b: look ahead -->
+        <g id="t0-b">
+          <rect x="250" y="44" width="212" height="120" rx="12" class="fs-D" stroke="var(--dm)" stroke-width="1.3"/>
+          <text x="264" y="66" class="big f-Di">② 冻结裁判前瞻</text>
+          <text x="264" y="86" class="sml f-ink2">条件 = {x₍&lt;i₎, <tspan class="f-Ti">x̂₀ⁱ</tspan>}</text>
+          <text x="264" y="103" class="sml f-ink2">对第 i+1 块走一步去噪</text>
+          <rect x="264" y="112" width="184" height="42" rx="6" class="f-surf2" stroke="var(--rule2)" stroke-width="1"/>
+          <text x="272" y="127" class="mono xs f-ink2">r̂ᵢ₊₁ = x_t^{i+1} + (1−t)·v_θ</text>
+          <text x="272" y="143" class="mono xs f-ink3">B = 10 个不同的 ε 各算一次</text>
+          <path d="M462 104 L496 104" stroke="var(--dm)" stroke-width="1.6" marker-end="url(#ar-D)"/>
+        </g>
+
+        <!-- group c: four tests -->
+        <g id="t0-c">
+          <rect x="498" y="44" width="366" height="120" rx="12" class="fs-V" stroke="var(--dv)" stroke-width="1.3"/>
+          <text x="512" y="66" class="big f-Vi">③ 它还像各向同性高斯吗</text>
+          <g>
+            <rect x="512" y="78" width="82" height="34" rx="7" class="f-surf2" stroke="var(--rule2)"/>
+            <text x="520" y="92" class="mono xs f-ink2">ℒa 均值·方差</text>
+            <text x="520" y="105" class="mono xs f-ink3">→ 0 / 1</text>
+            <rect x="602" y="78" width="88" height="34" rx="7" class="f-surf2" stroke="var(--rule2)"/>
+            <text x="610" y="92" class="mono xs f-ink2">ℒb 偏度·峰度</text>
+            <text x="610" y="105" class="mono xs f-ink3">→ 0 / 3</text>
+            <rect x="698" y="78" width="80" height="34" rx="7" class="f-surf2" stroke="var(--rule2)"/>
+            <text x="706" y="92" class="mono xs f-ink2">ℒs 谱平坦度</text>
+            <text x="706" y="105" class="mono xs f-ink3">→ 1.0 ?</text>
+            <rect x="786" y="78" width="70" height="34" rx="7" class="f-surf2" stroke="var(--rule2)"/>
+            <text x="794" y="92" class="mono xs f-ink2">ℒl 低频矩</text>
+            <text x="794" y="105" class="mono xs f-ink3">→ 0 / 3</text>
+          </g>
+          <rect x="512" y="122" width="344" height="30" rx="7" class="f-surf2" stroke="var(--dv)" stroke-width="1.1"/>
+          <text x="522" y="141" class="mono sml f-Vi">ℒ_N = ℒa + ℒb + ℒs + ℒl　—　偏离越大，越像终点</text>
+        </g>
+
+        <!-- group d: constrained optimisation -->
+        <g id="t0-d">
+          <path d="M684 164 L684 196" stroke="var(--dv)" stroke-width="1.6" marker-end="url(#ar-V)"/>
+          <rect x="332" y="200" width="532" height="88" rx="12" class="fs-N" stroke="var(--na)" stroke-width="1.3"/>
+          <text x="346" y="222" class="big f-Ni">④ 带约束的测试时优化（只动 LoRA φ，不动 θ）</text>
+          <text x="346" y="244" class="math f-ink">𝒥(φ) = 𝔼<tspan class="mono xs" dy="3">ε</tspan><tspan dy="-3">[ℒ_N]</tspan> + λ_reg ‖ x̂₀ⁱ(φ) − x̂₀ⁱ(θ) ‖²</text>
+          <text x="346" y="266" class="sml f-ink2">λ_reg = 0.9，比任何一项噪声权重（0.1 ~ 0.2）都大 —— <tspan class="f-Ki">这是一次被拴住的小幅修正，不是自由搜索</tspan></text>
+          <text x="346" y="282" class="mono xs f-ink3">AdamW · lr 2e−6 · rank-8 LoRA 挂在 self-attention 的 Q/K/V · 每块 5 个梯度步</text>
+          <path d="M332 244 L298 244" stroke="var(--na)" stroke-width="1.6" marker-end="url(#ar-N)"/>
+        </g>
+
+        <!-- output -->
+        <g id="t0-out">
+          <rect x="18" y="200" width="296" height="88" rx="12" class="f-surf2" stroke="var(--rule2)" stroke-width="1.2"/>
+          <text x="32" y="222" class="big f-ink">最终写回 cache 的是 <tspan class="f-Ki">x̂₀ⁱ(φ)</tspan></text>
+          <text x="32" y="243" class="sml f-ink2">不是 ①，是 ④ 优化之后重新前向的那一版</text>
+          <text x="32" y="262" class="sml f-ink2">然后 i ← i+1，整个回路<tspan class="f-Bi"> 再来一遍</tspan></text>
+          <text x="32" y="280" class="mono xs f-ink3">15 s 视频 ≈ 20 块 ⇒ 20 次微型训练</text>
+        </g>
+
+        <!-- footnote strip -->
+        <g id="t0-note">
+          <line x1="18" y1="308" x2="862" y2="308" stroke="var(--rule)" stroke-width="1"/>
+          <text x="18" y="330" class="sml f-ink3">整条回路里<tspan class="f-Di"> 没有任何外部监督</tspan>：没有真实视频、没有奖励模型、没有判别器。唯一的监督来自「噪声应该长什么样」这个先验。</text>
+          <text x="18" y="350" class="sml f-ink3">裁判 ε_θ 始终<tspan class="f-Di"> 冻结</tspan>；被优化的只有挂在生成器上的 LoRA φ。裁判和生成器是<tspan class="f-Xi"> 同一个模型的两份拷贝</tspan> —— 这既是这篇论文最漂亮的地方，也是它最容易被质疑的地方（§10‑D2）。</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption id="t0Cap"></figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card cT"><div class="mono">一句话 · 问题</div>自回归模型只被教过「给定<b>真实</b>历史，接下一帧」。推理时历史是它自己造的，越走越不像训练数据，最后崩。</div>
+    <div class="card cX"><div class="mono">一句话 · 新诊断</div>已有方法都在保证<b>每一帧</b>像真的。作者说：每帧都像真的<b>也不够</b>——存在「本身合法、但接不下去」的状态，即<b>终点</b>。</div>
+    <div class="card cN"><div class="mono">一句话 · 新手段</div>模型在没学过的条件下，预测出的噪声会<b>失去高斯性</b>。把这份偏差当损失，推理时小幅改权重，换一条走得通的路。</div>
+  </div>
+</section>
+
+<!-- ============================================================ 01 WHY -->
+<section class="sec" id="s-why">
+  <div class="eyebrow"><span class="n">01</span><span class="t">Two ways to drift</span><span class="line"></span></div>
+  <h2>两种跑偏方式，这篇只治第二种</h2>
+  <p class="lead">长视频自回归生成崩掉这件事，大家都知道。分歧在于<b>为什么崩</b>。作者把原因拆成两条，并且明确说：现有工作全在修第一条，而第一条修到极致也不够。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 1</span><span class="ti">同样是「跑出流形」，两种机制完全不同</span></div>
+    <div class="ctl" id="f1Ctl">
+      <span class="mono sml" style="color:var(--ink3)">视角</span>
+      <span class="seg" id="f1Seg">
+        <button aria-pressed="true" data-k="a">① 单帧掉出流形（已有工作）</button>
+        <button aria-pressed="false" data-k="b">② 帧帧合法但无路可走（本文）</button>
+        <button aria-pressed="false" data-k="c">对照</button>
+      </span>
+    </div>
+    <div class="figbody">
+      <svg viewBox="0 0 880 300" role="img" aria-label="两种跑偏机制对比">
+        <!-- panel A -->
+        <g id="f1-a">
+          <text x="24" y="26" class="big f-ink">① 逐帧误差累积：每一步都掉出去一点点</text>
+          <path d="M40 150 C 120 80, 240 80, 320 150 C 380 202, 300 246, 220 232 C 130 216, 34 206, 40 150 Z" class="fs-N" stroke="var(--na)" stroke-width="1.4"/>
+          <text x="140" y="120" class="sml f-Ni">学到的「真实帧」流形</text>
+          <g class="mk-T">
+            <circle cx="90" cy="168" r="4.5" class="f-T"/><circle cx="130" cy="163" r="4.5" class="f-T"/>
+            <circle cx="172" cy="161" r="4.5" class="f-T"/><circle cx="214" cy="164" r="4.5" class="f-T"/>
+            <circle cx="256" cy="176" r="4.5" class="f-B"/><circle cx="296" cy="200" r="4.5" class="f-B"/>
+            <circle cx="330" cy="236" r="4.5" class="f-B"/>
+          </g>
+          <path d="M90 168 L130 163 L172 161 L214 164 L256 176 L296 200 L330 236" class="nofill s-T" stroke-width="1.8"/>
+          <text x="316" y="258" class="sml f-Bi">越走越偏</text>
+          <text x="410" y="70" class="lbl f-ink2">病因：去噪本身不完美。</text>
+          <text x="410" y="92" class="sml f-ink2">采样的随机性 + 模型容量有限 ⇒ 每一帧都带一点</text>
+          <text x="410" y="110" class="sml f-ink2">残余误差，写回 KV cache 后成为下一步的条件。</text>
+          <text x="410" y="140" class="lbl f-ink2">已有解法（全在把单帧拉回流形）：</text>
+          <text x="410" y="162" class="sml f-ink3">· 训练时展开自己的预测 —— Self-Forcing / BlockVid</text>
+          <text x="410" y="180" class="sml f-ink3">· 注意力 sink 锚在开头几帧 —— RollingForcing / LongLive</text>
+          <text x="410" y="198" class="sml f-ink3">· 测试时重复去噪步 —— Self-Refining Video Sampling</text>
+          <text x="410" y="216" class="sml f-ink3">· 微调一个「提纯网络」—— AutoRefiner</text>
+          <text x="410" y="244" class="sml f-Ni">共同前提：只要每帧都像真的，轨迹就安全。</text>
+        </g>
+        <!-- panel B -->
+        <g id="f1-b">
+          <text x="24" y="26" class="big f-ink">② 终点：每一帧都在流形里，可就是接不下去</text>
+          <path d="M40 150 C 120 80, 240 80, 320 150 C 380 202, 300 246, 220 232 C 130 216, 34 206, 40 150 Z" class="fs-N" stroke="var(--na)" stroke-width="1.4"/>
+          <text x="118" y="112" class="sml f-Ni">学到的流形（由有限训练轨迹支撑）</text>
+          <!-- training trajectories inside -->
+          <path d="M62 178 C 110 150, 150 152, 196 140" class="nofill s-ink3 dash2" stroke-width="1.3"/>
+          <path d="M70 200 C 130 196, 180 176, 236 170" class="nofill s-ink3 dash2" stroke-width="1.3"/>
+          <path d="M96 214 C 150 214, 196 206, 244 194" class="nofill s-ink3 dash2" stroke-width="1.3"/>
+          <text x="60" y="236" class="xs f-ink3">灰虚线 = 训练集里真实出现过的轨迹</text>
+          <g>
+            <circle cx="86" cy="172" r="4.5" class="f-T"/><circle cx="128" cy="160" r="4.5" class="f-T"/>
+            <circle cx="170" cy="150" r="4.5" class="f-T"/><circle cx="212" cy="142" r="4.5" class="f-T"/>
+            <circle cx="252" cy="148" r="6" class="f-X"/>
+          </g>
+          <path d="M86 172 L128 160 L170 150 L212 142 L252 148" class="nofill s-T" stroke-width="1.8"/>
+          <path d="M252 148 L316 170" class="nofill s-B dash" stroke-width="1.8" marker-end="url(#ar-B)"/>
+          <circle cx="252" cy="148" r="13" class="nofill s-X dash" stroke-width="1.3"/>
+          <text x="238" y="128" class="sml f-Xi">终点</text>
+          <text x="300" y="196" class="sml f-Bi">被迫继续 ⇒ 出界</text>
+          <text x="410" y="70" class="lbl f-ink2">病因：训练集是<tspan class="f-ink" font-weight="600">有限</tspan>的。</text>
+          <text x="410" y="92" class="sml f-ink2">真实世界里任何一段视频都有后续；但模型只见过有限条</text>
+          <text x="410" y="110" class="sml f-ink2">有限长的轨迹，于是存在这样的状态 v = {x₍&lt;i₎, xᵢ}：</text>
+          <text x="410" y="132" class="sml f-ink2">xᵢ 本身完全合法（在条件分布的支撑集里），</text>
+          <text x="410" y="150" class="sml f-Xi">但整条 v 后面没有任何合法的 xᵢ₊₁。</text>
+          <text x="410" y="180" class="lbl f-ink2">关键差别：</text>
+          <text x="410" y="202" class="sml f-ink2">第 ① 类是<tspan class="f-ink" font-weight="600">边缘分布</tspan>的问题（这一帧像不像真的）；</text>
+          <text x="410" y="220" class="sml f-ink2">第 ② 类是<tspan class="f-ink" font-weight="600">联合分布</tspan>的问题（这串帧合在一起像不像真的）。</text>
+          <text x="410" y="248" class="sml f-Ni">所以「把每帧拉回流形」这类方法对 ② 结构上无效。</text>
+        </g>
+        <!-- panel C compare -->
+        <g id="f1-c">
+          <text x="24" y="26" class="big f-ink">对照：两种病、两种药、以及它们为什么会互相打架</text>
+          <rect x="24" y="44" width="404" height="236" rx="10" class="f-surf2" stroke="var(--rule)"/>
+          <rect x="452" y="44" width="404" height="236" rx="10" class="f-surf2" stroke="var(--rule)"/>
+          <text x="44" y="70" class="big f-Bi">把流形收窄（sink / anchor 类）</text>
+          <text x="44" y="94" class="sml f-ink2">强行把每一帧拉回最初几帧附近。</text>
+          <text x="44" y="114" class="sml f-ink2">好处：几乎不会跑出去。</text>
+          <text x="44" y="134" class="sml f-ink2">代价：探索空间被压扁，画面趋于静止。</text>
+          <text x="44" y="162" class="sml f-ink3">证据（VBench dynamic degree，15 s）：</text>
+          <text x="44" y="184" class="mono sml f-ink2">LongLive 0.361　RollingForcing 0.403</text>
+          <text x="44" y="204" class="mono sml f-ink2">Self-Forcing 0.611　RewardForcing 0.625</text>
+          <text x="44" y="224" class="mono sml f-Ki">TANGO 0.769　CausVid 0.872（但语义最差）</text>
+          <text x="44" y="256" class="sml f-Bi">越安全 → 越不动。这是本文反复敲打的权衡。</text>
+          <text x="472" y="70" class="big f-Ni">换一条路（TANGO）</text>
+          <text x="472" y="94" class="sml f-ink2">不收窄流形，而是在流形<tspan class="f-ink" font-weight="600">内部</tspan>换方向。</text>
+          <text x="472" y="114" class="sml f-ink2">好处：整个流形都还能探索，动态度保住。</text>
+          <text x="472" y="134" class="sml f-ink2">代价：需要一个「这条路能不能走通」的<tspan class="f-Di" font-weight="600">检测器</tspan>。</text>
+          <text x="472" y="162" class="sml f-ink3">这个检测器就是本文的全部技术内容：</text>
+          <text x="472" y="186" class="sml f-Di">用模型预测出的噪声是否仍是各向同性高斯，</text>
+          <text x="472" y="206" class="sml f-Di">来判断当前条件序列是否已经出了训练分布。</text>
+          <text x="472" y="238" class="sml f-Xi">它是否真的测到了这件事 —— 论文没有直接验证。</text>
+          <text x="472" y="258" class="sml f-ink3">见 §10‑D2。</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption id="f1Cap"></figcaption>
+  </figure>
+
+  <div class="prose">
+    <p>把这个区分讲得再直白一点。想象模型学过一万段「人在厨房切菜」的视频。生成到第 8 秒时，画面里的人举着刀、身体转了 40 度、锅在冒烟——<b>每一帧单独看都毫无问题</b>，任何单帧判别器都会说「真」。但训练集里从来没有「举刀 + 转 40 度 + 锅冒烟」这个组合往下继续的样本。模型这时只有两个选择：要么原地冻住（于是 dynamic degree 掉到 0.36），要么硬编一个后续（于是画面开始融化）。</p>
+    <p>作者的正式表述是：真实分布 <i>p</i>(𝒱) 在无限时间视野下，任何前缀都有非空的后续支撑集；但模型学的是有限训练集上的 <i>p</i><sub>D</sub>(𝒱)，这个保证没了。于是存在 <span class="rX">终点（terminal point）</span>——支撑集内部的「悬崖」。</p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">我的读法：这个概念是有用的，但论文给的形式化撑不住它</div>
+    <p>严格按定义走，有限训练集的支撑集<b>就是那有限条有限长的轨迹本身</b>：那么每条训练视频的最后一帧都是终点，而任何一个生成出来的连续值帧几乎必然<b>根本不在</b>支撑集里。论证在「经验分布的支撑集」和「模型学到的流形」之间悄悄换了一次概念——后者是被网络平滑过的、大得多的集合，而「模型流形里是否真的存在终点」恰恰是需要证明的那件事，论文是断言的。</p>
+    <p>这不影响方法能不能用（实验是独立成立的），但意味着<b>第 3.1 节是装饰性的，不是承重的</b>。真正承重的是 §03 那个噪声先验。详见 §10‑D4。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 02 TOY -->
+<section class="sec" id="s-toy">
+  <div class="eyebrow"><span class="n">02</span><span class="t">Play with it</span><span class="line"></span></div>
+  <h2>终点到底长什么样：一个可以自己走两遍的玩具</h2>
+  <p class="lead">把「学到的流形」抽象成一张<b>有向图</b>：节点是状态，边是「训练数据支持的合法后续」。<span class="rT">基线走法</span>只看下一步好不好；<span class="rK">TANGO 走法</span>在落脚之前先看一眼「落脚点还有没有出边」，没有就在<b>半径 r 的球里</b>换一个有出边的落点——这个球就是 λ<sub>reg</sub> 那一项。拖动滑块看两者的分岔。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 2</span><span class="ti">图上的自回归游走：终点、前瞻、约束搜索</span></div>
+    <div class="ctl">
+      <label>训练覆盖度 <input type="range" id="f2Cov" min="30" max="100" step="5" value="62"><span class="val" id="f2CovV">62%</span></label>
+      <label>搜索半径 r <input type="range" id="f2Rad" min="0" max="120" step="5" value="52"><span class="val" id="f2RadV">52</span></label>
+      <label><input type="checkbox" id="f2Base" checked> 显示基线</label>
+      <span class="sp"></span>
+      <button class="btn" id="f2New">换一张图</button>
+    </div>
+    <div class="explore">
+      <div class="figbody" style="padding-bottom:6px">
+        <svg id="f2Svg" viewBox="0 0 560 330" role="img" aria-label="图上游走模拟"></svg>
+      </div>
+      <div class="pane">
+        <h5>读数</h5>
+        <div class="row"><span class="k">基线存活步数</span><span id="f2A" style="font-family:var(--font-mono);font-size:18px;color:var(--bad-ink)">–</span></div>
+        <div class="row"><span class="k">TANGO 存活步数</span><span id="f2B" style="font-family:var(--font-mono);font-size:18px;color:var(--ok-ink)">–</span></div>
+        <div class="row"><span class="k">前瞻避让 / 半径搜索</span><span id="f2C" style="font-family:var(--font-mono);font-size:18px;color:var(--na-ink)">–</span></div>
+        <div class="row" style="margin-top:14px"><span class="k">图里的死胡同</span><span id="f2D" style="font-family:var(--font-mono);font-size:15px;color:var(--cr-ink)">–</span></div>
+        <hr style="border:0;border-top:1px solid var(--rule);margin:14px 0">
+        <p style="font-size:12.5px;line-height:1.7;color:var(--ink3)"><b>前瞻避让</b>＝落脚前发现候选点没有出边、于是换一个方向的次数；<b>半径搜索</b>＝所有直接候选都是死胡同、只能在球内另找落点的次数。前者对应 ℒ_N 的判据，后者对应 λ<sub>reg</sub> 允许的搜索范围。<br><br>把 <b>r</b> 拖到 0：TANGO 退化成基线（λ<sub>reg</sub> → ∞，一步都不许改）。<br><br>把 <b>r</b> 拖到很大：它可以瞬移到任何地方——对应论文里 λ<sub>reg</sub> = 0.1 时 FVD 反而涨到 <b>656.5</b>，比不用这方法还差。<br><br>把<b>覆盖度</b>拉满：几乎没有死胡同，两条路一样长——对应「数据和模型规模是互补方向，不是竞争方向」那句结论。</p>
+      </div>
+    </div>
+    <figcaption><b>这不是论文里的图</b>，是我为了把 §3.1 那段集合论讲清楚做的示意。它对应的是方法的<b>结构</b>而不是实现：论文里「有没有出边」这个判断不是查表，而是靠 §03 的噪声统计<b>估</b>出来的；「半径 r 的球」也不是硬约束，而是 λ<sub>reg</sub>‖·‖² 这个软惩罚。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ 03 CRITIC -->
+<section class="sec" id="s-critic">
+  <div class="eyebrow"><span class="n">03</span><span class="t">Where the critic comes from</span><span class="line"></span></div>
+  <h2>裁判是怎么凭空长出来的：一条没人约束过的输出</h2>
+  <p class="lead">这是全文最漂亮的一步。它没有引入任何新模型，而是指出：<b>扩散模型的训练损失从来没有规定过它在 OOD 条件下该输出什么</b>——那片区域是自由的。既然自由，就会露馅；露的馅正好可以测。</p>
+
+  <h3><span class="ix">3.1</span>先看训练目标里到底写了什么</h3>
+  <div class="prose">
+    <p>前向加噪把真实样本 <i>x</i>₀ 和各向同性高斯噪声混在一起，模型学着把噪声认出来：</p>
+  </div>
+  <div class="eq"><span class="tagno">(1)(3)</span><i>x<sub>t</sub></i> = α<sub><i>t</i></sub><i>x</i>₀ + σ<sub><i>t</i></sub>ε,　ε ~ 𝒩(0, <b>I</b>)　　⟹　　ℒ(θ) = 𝔼<sub><i>t</i>,<i>x</i>₀,ε</sub> ‖ ε<sub>θ</sub>(<i>x<sub>t</sub></i>, <i>t</i>) − ε ‖²
+  <small>全局去噪时，测试期 ℒ(θ) &gt; 0 的唯一来源是「模型没学好」。这时噪声预测的统计性质是<b>被训练目标直接约束</b>的。</small></div>
+  <div class="prose"><p>换成自回归分解，条件里多了一段历史 <i>x</i>⁰<sub>&lt;<i>i</i></sub>：</p></div>
+  <div class="eq"><span class="tagno">(4)</span><i>s</i>(<i>x<sub>t</sub></i><sup><i>i</i></sup>, <i>t</i>, <i>x</i>⁰<sub>&lt;<i>i</i></sub>) = ∇ log <i>p</i>(<i>x<sub>t</sub></i><sup><i>i</i></sup> | <i>x</i>⁰<sub>&lt;<i>i</i></sub>) ≈ − ε<sub>θ</sub>(<i>x<sub>t</sub></i><sup><i>i</i></sup>, <i>t</i>, <i>x</i>⁰<sub>&lt;<i>i</i></sub>) / σ<sub><i>t</i></sub>
+  <small><b>关键：</b>任何 <i>x</i>⁰<sub>&lt;<i>i</i></sub> ∉ supp(<i>p</i><sub>D</sub>(𝒱)) 的历史，从来没有参与过 ℒ(θ) 的最小化。即使假设无限噪声样本、无限模型容量，ε<sub>θ</sub> 在这些区域依然<b>完全没有定义</b>，可以随便输出任何东西 —— 包括不再像高斯的东西。</small></div>
+
+  <div class="call key">
+    <div class="hd">核心假设，用大白话</div>
+    <p>「模型在它<b>熟悉</b>的地方，会老老实实吐出白噪声；在它<b>陌生</b>的地方，吐出来的东西会带上结构。」所以不用外部判别器——<b>让模型自己往前踩一步，看它吐出来的噪声脏不脏</b>就行。</p>
+  </div>
+
+  <h3><span class="ix">3.2</span>flow matching 下这句话怎么落地（以及一个被掩盖的衰减项）</h3>
+  <div class="prose">
+    <p>正文用 score matching 推导，但实现用的是 Wan2.1 的最优传输 flow matching。附录 A1 给了转换：路径是直线插值，模型回归的是速度场。</p>
+  </div>
+  <div class="eq"><span class="tagno">(A1)(A5)</span><i>x<sub>t</sub></i> = (1−<i>t</i>)<i>x</i>₀ + <i>t</i>ε　　⟹　　<span class="r">推出隐含噪声：</span>　ε̂ = <i>x<sub>t</sub></i> + (1−<i>t</i>) <i>v</i><sub>θ</sub>(<i>x<sub>t</sub></i>, <i>t</i>)
+  <small>代入 <i>v</i>* = ε − <i>x</i>₀ 可以验证这是恒等式：ε = <i>x<sub>t</sub></i> + (1−<i>t</i>)<i>v</i>*。所以 ε̂ 只有在 <i>v</i><sub>θ</sub> 犯错时才偏离真正的 ε。</small></div>
+  <div class="prose"><p>于是前瞻残差就是把第 i+1 块的状态喂进去，条件挂上刚生成的候选块：</p></div>
+  <div class="eq"><span class="tagno">(A6)</span>r̂<sub><i>i</i>+1</sub> = <i>x<sub>t</sub></i><sup><i>i</i>+1</sup> + (1−<i>t</i>) <i>v</i><sub>θ</sub>( <i>x<sub>t</sub></i><sup><i>i</i>+1</sup>, <i>t</i>, {<i>x</i>⁰<sub>&lt;<i>i</i></sub>, <span class="r" style="color:var(--td-ink)">x̂₀<sup><i>i</i></sup></span>} )</div>
+
+  <div class="prose">
+    <p>两边减一下，就能看清这个裁判的灵敏度写在哪里：</p>
+  </div>
+  <div class="eq" style="border-color:var(--dm)">ε̂ − ε = (1−<i>t</i>) · ( <i>v</i><sub>θ</sub> − <i>v</i>* )
+  <small><b>这一项是我自己推的，论文没写。</b>它说明：flow matching 版本的裁判灵敏度<b>正比于 (1−t)</b>。在块的起点 <i>t</i> = 1（纯噪声）处，<b>系数是 0</b> —— 无论模型错得多离谱，ε̂ 都恒等于输入的 ε，损失是常数，梯度为零。</small></div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 3</span><span class="ti">裁判在哪个去噪时刻才睁得开眼（拖 t）</span></div>
+    <div class="ctl">
+      <label>去噪时刻 t <input type="range" id="f3T" min="0" max="100" step="1" value="75"><span class="val" id="f3TV">0.75</span></label>
+      <label>模型误差 ‖v<sub>θ</sub>−v*‖ <input type="range" id="f3E" min="0" max="100" step="1" value="45"><span class="val" id="f3EV">0.45</span></label>
+    </div>
+    <div class="figbody"><svg id="f3Svg" viewBox="0 0 860 260" role="img" aria-label="灵敏度随 t 变化"></svg></div>
+    <div class="readout" id="f3Ro"></div>
+    <figcaption><b>论文从头到尾没有说 look-ahead 用的是哪个 <i>t</i>。</b>它只写了「预测一步向前」（predicting one step forward）。但上面这条曲线说明：<i>t</i> 的选择会把这个信号的幅度<b>从 0 连续拉到满值</b>。全文只说「采用 4 个去噪时刻」，没说裁判站在其中哪一个上。这是我认为最该被补上的实现细节（§10‑D3）。</figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">一个顺手的重建：这个「高斯性检验」实际上在测什么</div>
+    <p>论文没说 <i>x<sub>t</sub></i><sup><i>i</i>+1</sup> 是怎么造出来的（第 i+1 块还没生成，哪来的干净信号去加噪？）。最自然的重建是：从纯噪声 <i>x</i>₁ = ε 出发，用模型自己走<b>一个欧拉步</b>到 <i>x<sub>t</sub></i>₂，然后在那里问隐含噪声。代进去算：</p>
+    <div class="eq" style="margin:12px 0;font-size:17px;background:var(--surf2)">ε̂ = ε + (1−<i>t</i>₂) · [ <i>v</i><sub>θ</sub>(<i>x<sub>t</sub></i>₂, <i>t</i>₂) − <i>v</i><sub>θ</sub>(<i>x</i>₁, 1) ]</div>
+    <p>也就是说，在这个读法下 TANGO 测的其实是<b>模型自己相邻两步的速度预测差</b>——一个关于「它的 ODE 直不直、自不自洽」的量。条件正常时流是直的，两步一致，ε̂ 就是当初抽的那个 ε，四项统计自然全过；条件是终点时速度场前后打架，差值 Δ<i>v</i> 带着<b>内容状的低频结构</b>叠到残差上，于是偏度、峰度、谱平坦度同时报警。</p>
+    <p>这个重建也解释了为什么<b>低频那一项</b>必须单独加（§04）：Δ<i>v</i> 是图像内容，能量压在低频；而 r̂ 整体被高频的 ε 主导，不单独看低频就被淹了。作者在 (8) 式的动机里正是这么说的。</p>
+    <p style="margin-top:8px"><b>但请注意这只是重建。</b>另一个同样说得通的读法是 <i>x<sub>t</sub></i><sup><i>i</i>+1</sup> = (1−<i>t</i>)x̂₀<sup><i>i</i></sup> + <i>t</i>ε，即「把刚生成的块当作下一块的干净信号去加噪」。两种读法的梯度含义不一样，而论文的记号无法区分。</p>
+  </div>
+
+  <div class="call warn">
+    <div class="hd">附录 A1 那句「可以直接 drop-in 替换」并不成立</div>
+    <p>论文说，flow matching 推出的 r̂ 可以作为正文 ε<sub>θ</sub> 的 drop-in replacement 去喂 ℒ_N。但两者在<b>信息量上并不等价</b>：</p>
+    <ul style="margin:6px 0 0;padding-left:1.2em">
+      <li><b>ε-参数化</b>：ε<sub>θ</sub>(<i>x<sub>T</sub></i>, <i>T</i>, hist) 是网络的直接输出，哪怕输入是纯噪声，输出也带满信息，误差 1:1 传递。</li>
+      <li><b>flow 参数化</b>：ε̂ := <i>x<sub>t</sub></i> + (1−<i>t</i>)<i>v</i><sub>θ</sub>，在 <i>t</i>=1 处恒等于输入，误差被乘以 0。</li>
+    </ul>
+    <p style="margin-top:6px">两者只有在模型完美时才重合。既然作者<b>只实现了 flow 版本</b>，那么「在哪个 t 上取 r̂」就不是细节而是方法的一部分。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 04 TESTS -->
+<section class="sec" id="s-tests">
+  <div class="eyebrow"><span class="n">04</span><span class="t">The four probes, live</span><span class="line"></span></div>
+  <h2>四项检验拆开看：哪一项在什么时候报警</h2>
+  <p class="lead">ℒ_N 由四块拼成，测的都是「r̂ 还像不像 𝒩(0, I)」，但各管一个方向。下面这个面板是<b>在你的浏览器里真算</b>的：现场生成 64×64 的残差场 <span class="rV">r̂ = ε + a·Δv</span>，做二维 FFT，按论文的公式和权重算出每一项。拖 <b>a</b> 就是在模拟「条件序列有多接近终点」。</p>
+
+  <div class="eq"><span class="tagno">(5)(6)</span>ℒ<sub>a</sub> = λ<sub>μ</sub>(μ<sub>r̂</sub>)² + λ<sub>σ</sub>(σ²<sub>r̂</sub> − 1)²　　　ℒ<sub>b</sub> = λ<sub>γ</sub> μ(<i>z</i>³)² + λ<sub>κ</sub>(μ(<i>z</i>⁴) − 3)²
+  <small><i>z</i> 是 r̂ 的 z-score。一阶二阶管「整体偏没偏、能量对不对」；三阶四阶管「对不对称、有没有重尾」——重尾正是结构化伪影的签名。</small></div>
+  <div class="eq"><span class="tagno">(7)(8)</span>ℒ<sub>s</sub> = λ<sub>s</sub>( 1 − <span style="display:inline-block;text-align:center;font-size:15px;vertical-align:middle">exp(<sup>1</sup>⁄<sub>|F|</sub> Σ ln(S(f)+ζ))<hr style="margin:1px 0;border:0;border-top:1px solid currentColor"><sup>1</sup>⁄<sub>|F|</sub> Σ (S(f)+ζ)</span> )²　　　ℒ<sub>l</sub> = λ<sub>lμ</sub> μ((<i>z<sup>l</sup></i>)³)² + λ<sub>lσ</sub>(μ((<i>z<sup>l</sup></i>)⁴) − 3)²
+  <small>ℒ<sub>s</sub>：白噪声在所有频率上能量相等，功率谱应当是平的；一旦不平，说明残差里有<b>空间相关性</b>，即模型把内容当噪声一起减掉了。ℒ<sub>l</sub>：r̂ 被高频主导，所以再对<b>低通滤波后</b>的版本单独算一次三阶四阶矩。</small></div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 4</span><span class="ti">残差场 → 四项检验（浏览器现场计算，64×64，FFT 实做）</span></div>
+    <div class="ctl">
+      <label>结构强度 a <input type="range" id="f4A" min="0" max="80" step="1" value="0"><span class="val" id="f4AV">0.00</span></label>
+      <label>结构类型
+        <span class="seg" id="f4Kind">
+          <button aria-pressed="true" data-k="lf">低频内容状</button>
+          <button aria-pressed="false" data-k="st">条纹/伪影</button>
+          <button aria-pressed="false" data-k="sp">稀疏亮斑</button>
+        </span>
+      </label>
+      <span class="sp"></span>
+      <label><input type="checkbox" id="f4Avg"> 功率谱先在 48 个通道上平均</label>
+      <button class="btn" id="f4Re">重抽 ε</button>
+    </div>
+    <div class="cvwrap">
+      <div class="cvcell"><canvas id="f4C1" width="64" height="64"></canvas><div class="cl">r̂ = ε + a·Δv<br><b>残差场</b></div></div>
+      <div class="cvcell"><canvas id="f4C2" width="64" height="64"></canvas><div class="cl">|F(r̂)|²（log，中心化）<br><b>功率谱</b></div></div>
+      <div class="cvcell"><canvas id="f4C3" width="64" height="64"></canvas><div class="cl">低通后的 r̂<br><b>ℒ<sub>l</sub> 看的东西</b></div></div>
+      <div class="cvcell"><canvas id="f4C4" width="64" height="64"></canvas><div class="cl">a·Δv 本身<br><b>被叠进去的结构</b></div></div>
+    </div>
+    <div class="readout" id="f4Ro"></div>
+    <div class="bars" style="padding-top:4px"><div class="pnl" style="grid-column:1/-1">
+      <div class="pt"><span>四项损失的相对量级（对数刻度，权重已按论文取值）</span><span id="f4Tot">ℒ_N = –</span></div>
+      <div id="f4Bars"></div>
+    </div></div>
+    <figcaption id="f4Cap"></figcaption>
+  </figure>
+
+  <div class="call warn">
+    <div class="hd">把 a 拖回 0，看一眼 SFM 的读数 —— 这是我对本文最实在的一条技术质疑</div>
+    <p>a = 0 时残差<b>就是</b>一份完美的白高斯噪声，按论文的期望，ℒ<sub>s</sub> 应该归零。但读数停在 <b>SFM ≈ 0.56</b>，ℒ<sub>s</sub> ≈ <b>1.9×10⁻²</b>，而其余三项都在 10⁻⁶ ~ 10⁻⁵。</p>
+    <p>原因是纯数学的：单次实现的周期图在各频点上近似独立同分布的指数变量，几何均值 / 算术均值 → <b>e<sup>−γ</sup> = 0.5615</b>（γ 是欧拉常数），而不是 1.0。我按论文的张量尺寸（3×16×60×104）模拟验证过：<b>0.5620 ± 0.0010</b>。</p>
+    <p style="margin-top:8px"><b>提示：</b>上面的面板是 64×64 的演示；论文的真实张量是 3×16×60×104，那里 ℒa/ℒb/ℒl 在理想点上分别是 1.5×10⁻⁶ / 4.4×10⁻⁵ / 4.9×10⁻⁵，而 ℒs 仍然是 1.9×10⁻²。</p>
+    <p>后果有两层：<b>（一）目标值错了</b>——把 SFM 往 1.0 推，是在要求周期图的幅度<b>处处相等</b>，那是一个随机相位、恒定模长的信号，恰恰<b>不是</b>高斯噪声；<b>（二）量级失衡</b>——ℒ<sub>s</sub> 在理想点上就比其他三项大 2~4 个数量级，会直接吃掉整个 ℒ_N 的梯度。</p>
+    <p style="margin-top:8px">现在把上面那个 <b>「功率谱先在 48 个通道上平均」</b> 勾上：SFM 跳到 <b>≈ 0.99</b>，ℒ<sub>s</sub> 落到 1.1×10⁻⁵，和另外三项<b>刚好同量级</b>。所以我的判断是：<b>作者的实现几乎一定做了这一步平均，而论文的公式 (7) 没写。</b>否则消融表里四项贡献不可能是那种均衡分布。这对想复现的人是决定性的一行代码。</p>
+  </div>
+
+  <div class="grid2">
+    <div class="card cV"><div class="mono">为什么需要低频那一项</div>按 §03 的重建，叠进残差的 Δ<i>v</i> 是<b>图像内容</b>，能量集中在低频（Field 1987 的自然图像统计）。而 r̂ 整体被 ε 的高频主导，直接算矩几乎测不到低频的异常。消融也支持：去掉 ℒ<sub>l</sub>，FVD 从 413.3 涨到 <b>486.3</b>。</div>
+    <div class="card cX"><div class="mono">但这个理由有个跳跃</div>Field 1987 说的是<b>自然图像</b>的 1/f 谱。TANGO 的一切计算都在 3D VAE 的<b>潜空间</b>里（8× 空间 / 4× 时间压缩，16 通道）。VAE 编码器本身就有部分白化/去相关作用，潜空间的「低频」没有既定的物理含义。这一项<b>经验上有效</b>（消融摆在那里），但给出的理论依据搬错了地方。详见 §10‑D6。</div>
+  </div>
+</section>
+
+<!-- ============================================================ 05 ALGO -->
+<section class="sec" id="s-algo">
+  <div class="eyebrow"><span class="n">05</span><span class="t">The loop, line by line</span><span class="line"></span></div>
+  <h2>每生成一块，就地训练一次：逐行点开看</h2>
+  <p class="lead">这不是 classifier guidance 那种「加一个梯度项」的便宜做法。它是<b>在推理循环里嵌了一段真正的训练</b>：前向、反传、AdamW 更新、再前向。点任意一行看它在干什么。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 5</span><span class="ti">单个自回归块的测试时自适应（按论文 §3.3 + 附录 A2 重建）</span></div>
+    <div class="explore">
+      <div class="algo" id="f5Algo"></div>
+      <div class="pane"><div id="f5Pane"></div></div>
+    </div>
+    <figcaption>论文没有给形式化的 Algorithm 框，这是我按 §3.3、§4.1 与附录 A2 的文字重建的。带 <span class="pill">?</span> 的行是论文<b>没有明确规定</b>的地方。</figcaption>
+  </figure>
+
+  <div class="eq"><span class="tagno">(10)</span>𝒥(φ) = 𝔼<sub>ε~𝒩(0,I)</sub>[ ℒ<sub>N</sub> ] + λ<sub>reg</sub> ‖ x̂₀<sup><i>i</i></sup>(φ) − x̂₀<sup><i>i</i></sup>(θ) ‖²₂
+  <small>第二项把搜索<b>拴在原始预测的邻域里</b>，防止优化跑向「让噪声看起来高斯」的平凡解。λ<sub>reg</sub> = <b>0.9</b>，而所有噪声项的权重是 0.1 ~ 0.2 —— <b>正则项的权重比任何一个目标项都大 4.5 ~ 9 倍</b>。</small></div>
+
+  <div class="call mine">
+    <div class="hd">一个没写清楚、但会决定复现成败的尺度问题</div>
+    <p>ℒ_N 的四项都是<b>统计量</b>（均值、方差、偏度、峰度、谱比），天然是 O(1) 的无量纲数，它们的平方偏差在理想点上是 10⁻⁶ 量级。而正则项写的是 ‖·‖²₂ —— 如果这是在 3×16×60×104 ≈ <b>30 万维</b>张量上的<b>求和</b>，那么 λ<sub>reg</sub>=0.9 会让它比 ℒ_N 大五个数量级，优化等于什么都不做；只有当它是<b>均值</b>平方误差时，0.9 : 0.1 这个配比才说得通。</p>
+    <p>论文没有写任何一项的归一化约定。加上 §04 那个谱平坦度的量级问题，这两处合起来意味着：<b>照着公式抄，得不到论文的行为。</b></p>
+  </div>
+
+  <div class="grid3">
+    <div class="card cT"><div class="mono">被优化的是什么</div>rank-8 LoRA，挂在因果 DiT 的 <b>self-attention 的 Q/K/V</b> 上。lr 2×10⁻⁶，AdamW，梯度检查点省显存。裁判 ε<sub>θ</sub> 全程冻结。</div>
+    <div class="card cD"><div class="mono">优化多久</div>B = 10 个噪声向量、batch size 2、<b>1 个 epoch</b> ⇒ 每块 <b>5 个梯度步</b>。B=20 时 FVD 更好（399.4 vs 413.3），作者为了算力选了 10。</div>
+    <div class="card cX"><div class="mono">论文没说的一件事</div>φ 在下一块开始时<b>会不会重置回 θ</b>。若不重置，LoRA 本身就成了一条新的累积通道——而这篇论文的主题恰恰是累积误差。见 §10‑D7。</div>
+  </div>
+</section>
+
+<!-- ============================================================ 06 DRIFT -->
+<section class="sec" id="s-drift">
+  <div class="eyebrow"><span class="n">06</span><span class="t">What actually changed</span><span class="line"></span></div>
+  <h2>漂移曲线：它改的不是起点，是斜率</h2>
+  <p class="lead">消融表（Tab. 2）里最有信息量的不是哪一行最低，而是<b>每一行随时间怎么涨</b>。把每 3 秒一段的 FVD 画成折线，基线和 TANGO 的差别一眼就出来了：<b>两条线的起点几乎重合，斜率完全不同</b>。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 6</span><span class="ti">每 3 秒一段的 FVD（vs LV-Bench 真实片段，越低越好）</span></div>
+    <div class="ctl">
+      <span class="mono sml" style="color:var(--ink3)">显示</span>
+      <span class="seg" id="f6Seg">
+        <button aria-pressed="true" data-k="main">主对比</button>
+        <button aria-pressed="false" data-k="abl">全部消融</button>
+        <button aria-pressed="false" data-k="rel">相对首段的增幅</button>
+      </span>
+    </div>
+    <div class="figbody"><svg id="f6Svg" viewBox="0 0 860 340" role="img" aria-label="FVD 随时间变化"></svg></div>
+    <div class="readout" id="f6Ro"></div>
+    <figcaption id="f6Cap"></figcaption>
+  </figure>
+
+  <div class="prose">
+    <p>算一下增幅就更清楚：baseline 从 367.9 涨到 715.6（<b>+94%</b>），TANGO 从 365.1 涨到 438.8（<b>+20%</b>）。所以这个方法的作用<b>不是把画质整体提一档</b>，而是<b>把随时间的劣化压平</b>——这跟「避免终点」的叙事是自洽的，也是我认为全文最站得住的一条证据。</p>
+  </div>
+
+  <div class="call mine">
+    <div class="hd">但这条曲线同时也戳了论文自己的一句话</div>
+    <p>1–3 s 段：TANGO <b>365.1</b> vs baseline <b>367.9</b>，差 0.8%；连所有消融变体（除了去掉正则的那个）都挤在 363.7 ~ 380.3 之间。也就是说，<b>按论文自己最细粒度的仪器看，噪声引导在前 3 秒几乎什么也没做</b>。</p>
+    <p>而附录 A3 用 VBench 得出的结论是「终点<b>在任何时刻</b>都可能出现，不是长视频专属」，依据是 5 s 视频上 TANGO 也领先（0.868 vs 0.836）。两个结论可以并存（不同指标、不同 pipeline：Tab. 2 是 v2v + FVD，Tab. A1 是 t2v + VBench），但论文没有指出这个张力，而是各说各的。我倾向于相信 Tab. 2：<b>它的真正战场在中后段</b>。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 07 RESULTS -->
+<section class="sec" id="s-res">
+  <div class="eyebrow"><span class="n">07</span><span class="t">Reading the table</span><span class="line"></span></div>
+  <h2>VBench 怎么读：+3.1 分是怎么来的，以及别读错的三处</h2>
+  <p class="lead">全部对比方法都是从 <b>同一个 Wan2.1-T2V-1.3B</b> 出发的自回归蒸馏模型（CausVid / Self-Forcing / RollingForcing / LongLive / RewardForcing），训练数据和规模被刻意对齐，这点值得肯定——比较的确实是算法。点表头可排序。</p>
+
+  <div class="tbl scrollx">
+    <table id="tRes">
+      <thead><tr>
+        <th class="srt" data-c="0">方法</th>
+        <th class="srt num" data-c="1">美学</th><th class="srt num" data-c="2">风格</th>
+        <th class="srt num" data-c="3">背景一致</th><th class="srt num" data-c="4">颜色</th>
+        <th class="srt num" data-c="5">动态度</th><th class="srt num" data-c="6">人物动作</th>
+        <th class="srt num" data-c="7">成像质量</th><th class="srt num" data-c="8">运动平滑</th>
+        <th class="srt num" data-c="9">多物体</th><th class="srt num" data-c="10">物体类别</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div class="tbl scrollx">
+    <table id="tRes2">
+      <thead><tr>
+        <th class="srt" data-c="0">方法</th>
+        <th class="srt num" data-c="1">整体一致</th><th class="srt num" data-c="2">场景</th>
+        <th class="srt num" data-c="3">空间关系</th><th class="srt num" data-c="4">主体一致</th>
+        <th class="srt num" data-c="5">时序闪烁</th><th class="srt num" data-c="6">时序风格</th>
+        <th class="srt num" data-c="7">Quality</th><th class="srt num" data-c="8">Semantic</th>
+        <th class="srt num" data-c="9">Total</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 7</span><span class="ti">复核：VBench 的 Total 是 Quality 与 Semantic 的 4:1 加权（我验过了）</span></div>
+    <div class="ctl">
+      <label>Quality <input type="range" id="f7Q" min="700" max="950" step="1" value="864"><span class="val" id="f7QV">0.864</span></label>
+      <label>Semantic <input type="range" id="f7S" min="700" max="950" step="1" value="860"><span class="val" id="f7SV">0.860</span></label>
+    </div>
+    <div class="figbody"><svg id="f7Svg" viewBox="0 0 860 190" role="img" aria-label="VBench total 加权验证"></svg></div>
+    <figcaption>六个方法的 (Quality×4 + Semantic)/5 与表里的 Total <b>逐位吻合</b>（TANGO: (0.864×4+0.860)/5 = 0.8632；LongLive: 0.8328；Self-Forcing: 0.8272 …）。这说明两张表内部是一致的，不是手抄的。个别维度的加权归一化则无法从公开数字反推（VBench 对各维度做过 min-max 归一），所以我没有去核对 16 个子项到 Quality/Semantic 的聚合。</figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card cN"><div class="mono">读法一 · 涨在哪</div>涨幅最大的是<b>语义类</b>：空间关系 0.801→<b>0.859</b>，场景 0.591→<b>0.603</b>，时序风格 0.242→<b>0.275</b>，整体一致 0.268→<b>0.283</b>。质量类里美学 0.660→<b>0.690</b>、成像 0.695→<b>0.727</b>。<b>这些都是「画面还在讲同一件事」的指标</b>，与「避免走进接不下去的状态」是吻合的。</div>
+    <div class="card cX"><div class="mono">读法二 · 动态度的位置</div>TANGO 的 dynamic degree <b>0.769</b>，仅次于 CausVid 的 0.872——而 CausVid 的语义分是全场最低（0.794）。锚定类方法（LongLive 0.361 / RollingForcing 0.403）拿稳定性换掉了运动。<b>TANGO 确实同时守住了两头</b>，这是它最有说服力的一格。</div>
+    <div class="card cB"><div class="mono">读法三 · 「4.8%」的口径</div>正文说语义分比前 SOTA 高 4.8 个点。但语义列的最高基线是 RollingForcing 的 <b>0.814</b>，0.860 − 0.814 = <b>4.6</b>。4.8 这个数是相对 <b>LongLive（0.812）</b>算的——即把「前 SOTA」统一钉在总分最高的那个方法上。口径本身可辩护，但与「逐列最优」的直觉读法不一致。</div>
+  </div>
+
+  <div class="call warn">
+    <div class="hd">附录 A1 里一个反直觉的非单调，值得警惕</div>
+    <p>RewardForcing 的 Quality：5 s <b>0.808</b> → 10 s <b>0.807</b> → 15 s <b>0.835</b>。Self-Forcing：0.834 → 0.817 → <b>0.832</b>。<b>视频越长，画质分越高</b>。</p>
+    <p>这几乎一定是度量伪影：VBench 的 quality 里有 motion smoothness（0.98+）和 temporal flickering（0.99+）这类「越静止分越高」的项，一个崩到几乎静止的长视频反而在这些项上刷分。<b>所以跨长度比较 VBench 总分，本身就不太可靠</b>——这反过来说明 §06 那张 FVD 曲线才是这篇论文更硬的证据，而那张表里<b>没有任何外部基线</b>（§10‑D5）。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 08 ABLATION -->
+<section class="sec" id="s-abl">
+  <div class="eyebrow"><span class="n">08</span><span class="t">What the ablations really say</span><span class="line"></span></div>
+  <h2>消融：四项检验各有贡献，但真正的主角是那个正则项</h2>
+  <p class="lead">论文把消融解读成「四项都重要，尤其是高阶矩」。这没错。但同一张表里还藏着一个更大的数字：<b>去掉正则项之后，结果比完全不用这个方法还差 15%</b>。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 8</span><span class="ti">Tab. 2 重排：按「去掉之后有多糟」排序（15 s 全片 FVD）</span></div>
+    <div class="figbody" style="padding:0"><div class="bars"><div class="pnl" style="grid-column:1/-1">
+      <div class="pt"><span>FVD ↓（越短越好）</span><span>TANGO 完整 = 413.3</span></div>
+      <div id="f8Bars" style="--labw:132px"></div>
+    </div></div></div>
+    <figcaption>虚线是「完全不用 TANGO」的基线 576.8。<b>只有 w/o ℒ<sub>reg</sub> 一条越过了它</b>：放开约束的噪声引导不是无效，而是<b>有害</b>——优化会直奔「让残差看起来像高斯」的平凡解，把画面本身毁掉。</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <div class="card cN"><div class="mono">这说明方法的实质是什么</div>ℒ_N 提供<b>方向</b>，λ<sub>reg</sub> 提供<b>幅度上限</b>。权重配比（0.9 对 0.1~0.2）也指向同一件事：这是<b>一次被拴得很紧的小幅修正</b>，不是自由的轨迹搜索。论文的叙事（「搜索一条不通向终点的替代轨迹」）比实际做的事听起来更激进。</div>
+    <div class="card cB"><div class="mono">而这个上限的窗口不宽</div>λ<sub>reg</sub>：0.1 → <b>656.5</b>（比基线差）、0.5 → 449.3、<b>0.9 → 413.3</b>、10 → 475.6。一个跨两个数量级只有中间一段能用的超参，而它是在 <b>MSR-VTT 上 5 秒 v2v</b> 调出来的，却用在 <b>15 秒</b>的评测上。迁移性是假设，不是验证过的。</div>
+  </div>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 8b</span><span class="ti">超参敏感度：每一个都是 U 形，而且默认值恰好在谷底</span></div>
+    <div class="figbody"><svg id="f8bSvg" viewBox="0 0 860 300" role="img" aria-label="超参敏感度"></svg></div>
+    <div class="legend"><span><i style="background:var(--na)"></i>论文采用值</span><span><i style="background:var(--ink3)"></i>其他试过的值</span><span><i style="background:var(--bad)"></i>三处在表中完全重复的 FVD 值</span></div>
+    <figcaption id="f8bCap"></figcaption>
+  </figure>
+
+  <div class="call mine">
+    <div class="hd">一个我确实介意的表格细节：三处精确到 0.1 的重复值</div>
+    <p>Tab. 3 的这些格子本应来自互相独立的跑：</p>
+    <ul style="margin:6px 0 0;padding-left:1.2em">
+      <li>λ<sub>σ</sub> = 0.01 → <b>482.8</b>　与　λ<sub>lσ</sub> = 0.02 → <b>482.8</b></li>
+      <li>λ<sub>lμ</sub> = 2 → <b>464.7</b>　与　λ<sub>lσ</sub> = 2 → <b>464.7</b></li>
+      <li>λ<sub>μ</sub> = 1 → <b>449.3</b>　与　λ<sub>reg</sub> = 0.5 → <b>449.3</b>（后者在 Tab. 3a）</li>
+    </ul>
+    <p style="margin-top:8px">FVD 值域约 400~660，保留一位小数即约 2600 个可能取值；约 20 次独立跑里出现一次碰撞的期望约 <b>0.07 次</b>，出现三次的概率在 10⁻⁴ 量级。三种可能：(a) 实现里 λ<sub>lμ</sub> 与 λ<sub>lσ</sub> 其实绑在同一个「低频权重」上（能解释第二条，解释不了另外两条）；(b) 表格有复制粘贴；(c) 某些行共用了同一次跑。</p>
+    <p>顺带一提，同一张表里 λ<sub>κ</sub>=0.01 那格写的是「479」而不是「479.0」——小事，但说明这张表是手工拼的。<b>我不认为这动摇主结论</b>（主结论靠 Tab. 1 和 Tab. 2），但超参敏感度这一节的可信度要打个折。</p>
+  </div>
+</section>
+
+<!-- ============================================================ 09 COST -->
+<section class="sec" id="s-cost">
+  <div class="eyebrow"><span class="n">09</span><span class="t">The bill</span><span class="line"></span></div>
+  <h2>算力账：用 1.3B 打到 27B 的分数，代价是推理慢 7 倍</h2>
+  <p class="lead">Tab. 4 是这篇论文最好的卖点，也是最容易被误读的一张表。它把 TANGO 放在「把模型做大」的那条曲线旁边比——1.3B + 测试时优化 <b>0.863</b>，对上 27B 的 SVI-2.0-Pro <b>0.869</b>，而耗时只有五分之一。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 9</span><span class="ti">性能 / 耗时 / 显存（气泡面积 = 显存；横轴对数）</span></div>
+    <div class="ctl">
+      <span class="mono sml" style="color:var(--ink3)">标注</span>
+      <span class="seg" id="f9Seg">
+        <button aria-pressed="true" data-k="off">仅论文数据</button>
+        <button aria-pressed="false" data-k="on">加上「缺失的对照点」</button>
+      </span>
+    </div>
+    <div class="figbody"><svg id="f9Svg" viewBox="0 0 860 360" role="img" aria-label="性能耗时散点"></svg></div>
+    <div class="readout" id="f9Ro"></div>
+    <figcaption id="f9Cap"></figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card cT"><div class="mono">粗算一下这 7 倍花在哪</div>每块 5 个梯度步 × batch 2 ≈ 10 个样本；每个样本要「生成器前向 + 裁判前瞻前向」，再加约 2 倍前向代价的反传 ⇒ <b>≈ 40 次前向当量</b>，对比正常去噪的 4 步。量级对得上实测的 7.2×（其余差距来自 KV cache 复用与优化器开销）。</div>
+    <div class="card cX"><div class="mono">一处对不上的数字</div>附录 A2 说「每生成一 RGB 帧约 <b>900 ms</b>」。15 s × 16 fps = 240 帧 ⇒ <b>3.6 min</b>，但 Tab. 4 写的是 <b>8.6 min</b>（其 VBench 值 0.863 / 0.827 正好对应 15 s 设定）。要么 900 ms 不含优化，要么两张表不是同一配置。论文没有交代。</div>
+    <div class="card cB"><div class="mono">最该有却没有的那一列</div>所有基线都是<b>零额外算力</b>跑的。没有任何一个「把这 7 倍算力花在别处」的对照：更多去噪步、更大 NFE、或者最朴素的 best-of-B。这是我认为全文最大的实验缺口，见 §10‑D1。</div>
+  </div>
+</section>
+
+<!-- ============================================================ 10 DOUBTS -->
+<section class="sec" id="s-doubt">
+  <div class="eyebrow"><span class="n">10</span><span class="t">Where I'd push back</span><span class="line"></span></div>
+  <h2>我的存疑清单</h2>
+  <p class="lead">先说清楚立场：<b>我认为这篇论文的核心观察是真的、也是新的</b>——「模型在没学过的条件下，预测噪声会失去高斯性」是一个干净、可操作、不需要任何额外数据的信号。下面的质疑针对的是<b>论证的完整性和实现的可复现性</b>，不是针对这个想法。按严重程度排序，点开看依据。</p>
+
+  <div class="dfilter">
+    <span class="seg" id="dvFilter">
+      <button aria-pressed="true" data-s="all">全部</button>
+      <button aria-pressed="false" data-s="hi">影响结论</button>
+      <button aria-pressed="false" data-s="mid">影响复现</button>
+      <button aria-pressed="false" data-s="lo">值得留意</button>
+    </span>
+    <button class="btn" id="dvAll">全部展开 / 收起</button>
+  </div>
+
+  <div id="dvList">
+
+    <details class="dt" data-s="hi">
+      <summary><span class="dn">D1</span><span class="sev hi">影响结论</span><span>没有算力对齐的对照，也没有和任何一个同类 test-time 方法比过</span><span class="caret">▸</span></summary>
+      <div class="body">
+        <span class="lb">事实</span>
+        <p>TANGO 的推理耗时是基线的 <b>7.2 倍</b>（8.6 min vs 1.2 min），显存 +61%。Tab. 1 里所有基线都是零额外算力跑的。而论文自己在相关工作里引了至少四个测试时方法——Self-Refining Video Sampling [24]（ICML 2026）、Pathwise Test-Time Correction for Autoregressive Long Video Generation [56]、TTOM [44]、test-time alignment [27]——<b>一个都没有进对比表</b>。其中 [56] 的题目几乎就是同一个问题。</p>
+        <span class="lb">为什么要紧</span>
+        <p>现在无法区分两个解释：(A) 噪声一致性这个<b>信号</b>是有价值的；(B) 在推理时多花 7 倍算力做任何合理的搜索都会涨这么多。</p>
+        <span class="lb">最便宜的反驳实验（作者本可以做）</span>
+        <p><b>best-of-B</b>：抽 B 条候选续写，用 ℒ_N 挑最小的那条，<b>一个梯度都不算</b>。这能把「判据是否有信息量」从「优化是否有用」里剥出来。它几乎免费，而且正好复用已有代码。论文里已经有一个提示：B 从 10 加到 20，FVD 从 413.3 降到 <b>399.4</b>——再增加采样就还在涨，这恰恰是 best-of-N 式收益的形状。</p>
+        <span class="lb">我的判断</span>
+        <p>主结论（能涨分）不受影响；<b>归因</b>（是因为终点避免）没有被证明。</p>
+      </div>
+    </details>
+
+    <details class="dt" data-s="hi">
+      <summary><span class="dn">D2</span><span class="sev hi">影响结论</span><span>全文的中心假设，从头到尾没有被直接测量过一次</span><span class="caret">▸</span></summary>
+      <div class="body">
+        <span class="lb">假设</span>
+        <blockquote>for well-modeled future trajectories the distribution of the predicted noise should match the one of the forward noising process.</blockquote>
+        <span class="lb">缺的是什么</span>
+        <p>一个直接的诊断：把 ℒ_N 分别画在 (a) <b>真实</b>留出视频的条件序列上、(b) 后来崩掉的生成序列上、(c) 没崩的生成序列上。如果假设成立，三条曲线应该分得很开，而且 (b) 的 ℒ_N <b>在崩之前</b>就该抬头。哪怕只是一张 ℒ_N-随时间 的折线图，或者一个 AUROC 数字，都能把这篇论文从「有效的启发式」抬成「被验证的机制」。</p>
+        <p>现在的所有证据都是<b>下游</b>的：FVD 降了、VBench 涨了。但下游改善可以由很多原因造成（见 D1），并不能回推「ℒ_N 确实识别出了终点」。</p>
+        <span class="lb">附带的一个理论隐患</span>
+        <p>即使在<b>分布内</b>，ℒ_N 也不会是 0——模型永远不完美。论文把目标钉在「完美高斯」上，意味着优化在条件<b>完全正常</b>时也一直在推。没有任何校准（比如「先在真实条件上测出 ℒ_N 的基线水平，只惩罚超出部分」）。唯一拦着它乱动的是 λ<sub>reg</sub>。</p>
+      </div>
+    </details>
+
+    <details class="dt" data-s="hi">
+      <summary><span class="dn">D3</span><span class="sev hi">影响结论</span><span>谱平坦度这一项：目标值 1.0 是错的，而且量级上会压垮其余三项</span><span class="caret">▸</span></summary>
+      <div class="body">
+        <span class="lb">数学</span>
+        <p>白高斯噪声的周期图在各频点上近似 i.i.d. 指数分布。SFM = 几何均值 / 算术均值 → exp(𝔼[ln X]) / 𝔼[X] = <b>e<sup>−γ</sup> ≈ 0.5615</b>，不是 1.0。</p>
+        <span class="lb">我的复核</span>
+        <p>按论文张量尺寸（T=3, C=16, H=60, W=104）模拟 20 次：逐场 SFM = <b>0.5620 ± 0.0010</b>。而理想残差下四项损失的量级是</p>
+        <pre>ℒa = 1.5e-06   ℒb = 4.4e-05   <span class="nv">ℒs = 1.9e-02</span>   ℒl = 4.9e-05</pre>
+        <p>ℒ<sub>s</sub> 比 ℒ<sub>a</sub> 大 <b>四个数量级</b>，比 ℒ<sub>b</sub>/ℒ<sub>l</sub> 大 <b>两个半数量级</b>。若真按公式 (7) 字面实现，ℒ_N 的梯度基本就等于 ℒ<sub>s</sub> 的梯度，而这个梯度<b>指向一个错误的目标</b>：周期图幅度处处相等的信号是随机相位恒模信号，并不服从高斯分布。</p>
+        <span class="lb">但更可能的真相</span>
+        <p>如果功率谱<b>先在 48 个（16 通道 × 3 潜帧）实现上平均</b>再算比值，SFM → exp(ψ(48) − ln 48) = <b>0.9896</b>，ℒ<sub>s</sub> 落到 1.1e-05，和另外三项同量级、配比合理。<b>所以我判断作者的实现做了这一步平均，只是公式没写</b>——(7) 式里 S(f) = |F(r̂)|² 是对单个场写的。§04 的面板可以直接切换两种模式验证这个差别。</p>
+        <span class="lb">对复现者的意思</span>
+        <p>照公式抄会得到一个既跑偏又压过其它项的损失。这一行必须猜对。</p>
+      </div>
+    </details>
+
+    <details class="dt" data-s="mid">
+      <summary><span class="dn">D4</span><span class="sev mid">影响复现</span><span>前瞻用哪个去噪时刻 t 没说；flow matching 版在 t=1 处梯度恒为零</span><span class="caret">▸</span></summary>
+      <div class="body">
+        <span class="lb">推导</span>
+        <p>由 ε̂ = x<sub>t</sub> + (1−t)v<sub>θ</sub> 得 <b>ε̂ − ε = (1−t)(v<sub>θ</sub> − v*)</b>。在块的起点 t = 1（纯噪声）处系数为 0，ε̂ ≡ ε，ℒ_N 变成一个与 φ 无关的常数。</p>
+        <span class="lb">缺口</span>
+        <p>论文只说「采用四个去噪时刻」，没说裁判站在哪一个上；也没说 x<sub>t</sub><sup>i+1</sup> 是怎么构造的（第 i+1 块还没有干净信号可加噪）。我在 §03 给了两种自洽的重建，二者的梯度含义并不相同。</p>
+        <span class="lb">连带问题</span>
+        <p>附录 A1 称 flow 版可以「drop-in replacement」替换正文的 ε<sub>θ</sub>。不成立：ε-参数化里网络输出直接就是噪声预测，误差 1:1 传递；flow 参数化里误差被乘上 (1−t)。二者只有在模型完美时才等价，而整个方法恰恰建立在模型不完美之上。</p>
+        <span class="lb">状态</span>
+        <p>代码可以解决这个问题——但摘要说「code is available」，项目页目前写的是 <b>Code soon</b>。</p>
+      </div>
+    </details>
+
+    <details class="dt" data-s="mid">
+      <summary><span class="dn">D5</span><span class="sev mid">影响复现</span><span>「FVD 降低 28.3%」是相对自家 baseline，不是相对 SOTA，而摘要把两句并排放</span><span class="caret">▸</span></summary>
+      <div class="body">
+        <span class="lb">核对</span>
+        <p>(576.8 − 413.3)/576.8 = <b>28.35%</b>，其中 576.8 是 Tab. 2 里的「w/o ℒ_N (baseline)」，也就是 <b>Self-Forcing 本身</b>。13–15 s 段的 38.7% 同理：(715.6 − 438.8)/715.6。数字本身准确。</p>
+        <span class="lb">问题</span>
+        <p>摘要写的是「achieves a 3.1% absolute improvement on VBench over state-of-the-art, <b>while</b> reducing Fréchet Video Distance by 28.3%」。两句并列，很容易读成两个都是对 SOTA 的。而 <b>Tab. 2 里只有 TANGO 自己的消融</b>：RollingForcing / LongLive / CausVid / RewardForcing 的 FVD <b>一个都没报</b>。</p>
+        <p>这不是造假，是口径没写清。但它让「FVD 上也是 SOTA」这个印象缺乏支撑——尤其考虑到 §07 说的，跨长度 VBench 本身就不太可靠，FVD 才应该是这篇的主证据。</p>
+      </div>
+    </details>
+
+    <details class="dt" data-s="mid">
+      <summary><span class="dn">D6</span><span class="sev mid">影响复现</span><span>「终点」的形式化在支撑集和学到的流形之间换了概念</span><span class="caret">▸</span></summary>
+      <div class="body">
+        <span class="lb">论文的论证</span>
+        <p>训练集 D 有限 ⇒ supp(p<sub>D</sub>(𝒱)) ⊂ supp(p(𝒱)) ⇒ 存在 v = {x<sub>&lt;i</sub>, x<sub>i</sub>}，x<sub>i</sub> ∈ supp(p<sub>D</sub>(x<sub>i</sub>|x<sub>&lt;i</sub>)) 但不存在合法的 x<sub>i+1</sub>。</p>
+        <span class="lb">两个问题</span>
+        <ul>
+          <li><b>过强的结论</b>：严格按有限集算，supp(p<sub>D</sub>(𝒱)) 就是那有限条有限长轨迹本身。那么每条训练视频的最后一帧都是终点，而任何生成出来的连续值帧几乎<b>处处</b>不在支撑集里——这个框架下「终点」不再是稀有的陷阱，而是常态，也就不解释任何现象。</li>
+          <li><b>概念替换</b>：真正相关的是<b>模型学到的流形</b>（被网络平滑过、大得多的集合），而不是经验分布的支撑集。「模型流形里存在终点」是需要论证的命题，论文是从前者直接断言到后者的。</li>
+        </ul>
+        <span class="lb">还缺一个尺度</span>
+        <p>定义里只有「存在 / 不存在」，没有测度。一个概率极小但非零的续写按定义不算终点，实际效果却和终点一样糟。真正想刻画的多半是「条件密度在某处坍缩得很低」，那是<b>连续</b>的量——而 ℒ_N 恰好也是连续的量。所以方法其实比它的理论更合理。</p>
+        <span class="lb">影响</span>
+        <p>不影响实验结论。但 §3.1 是装饰性的：真正承重的是 §3.2 那个「训练目标没约束 OOD 输出」的观察，那一段是扎实的。</p>
+      </div>
+    </details>
+
+    <details class="dt" data-s="mid">
+      <summary><span class="dn">D7</span><span class="sev mid">影响复现</span><span>把自然图像的低频先验直接搬进 VAE 潜空间</span><span class="caret">▸</span></summary>
+      <div class="body">
+        <span class="lb">论文的理由</span>
+        <p>ℒ<sub>l</sub> 的动机引的是 Field (1987)：真实视觉内容的能量主要在低频。</p>
+        <span class="lb">问题</span>
+        <p>TANGO 的所有计算都在 3D VAE 的潜空间（8× 空间 / 4× 时间压缩，16 通道，h=60, w=104）。1/f 统计是<b>像素空间</b>自然图像的性质；VAE 编码器为了让潜变量接近各向同性先验，本身就带有部分去相关/白化的作用。潜图的「低频band」没有既定含义，DFT 的坐标轴也不是像素坐标轴。</p>
+        <span class="lb">附带的统计问题</span>
+        <p>低通滤波会把独立自由度砍掉一大截（按 §04 面板里的 1/8 半径，约剩 1.6%），于是 <b>z<sup>l</sup> 的三阶/四阶矩估计方差大幅上升</b>：即使残差完美，ℒ<sub>l</sub> 也有一个不可忽略的噪声地板，梯度会很抖。这和 D3 是同构的问题，只是轻一些。</p>
+        <span class="lb">但要公平地说</span>
+        <p>消融是站得住的：去掉 ℒ<sub>l</sub>，FVD 413.3 → 486.3。所以这一项<b>确实有用</b>，只是给出的理由搬错了地方，正确的解释多半是「低频是 Δv（内容残留）能量所在，而不是自然图像先验」。</p>
+      </div>
+    </details>
+
+    <details class="dt" data-s="mid">
+      <summary><span class="dn">D8</span><span class="sev mid">影响复现</span><span>LoRA 参数 φ 每块重置吗？没说。不重置的话，它自己就是一条新的累积通道</span><span class="caret">▸</span></summary>
+      <div class="body">
+        <span class="lb">原文</span>
+        <blockquote>we introduce a set of adaptive parameters φ, initialized with the pre-trained weights θ. At each autoregressive step i, we optimize φ …</blockquote>
+        <p>「initialized with θ」只交代了<b>最开始</b>；每个新块开始时 φ 是回到 θ 还是接着上一块的结果，全文没有一句话。</p>
+        <span class="lb">两种读法后果完全不同</span>
+        <ul>
+          <li><b>每块重置</b>：每块 5 个梯度步、lr 2e−6 的更新量极小，方法几乎等价于一个可微的小幅修正算子；也更贵（优化器状态反复丢弃）。</li>
+          <li><b>持续累积</b>：20 块 × 5 步 = 100 步的持续漂移。那么这篇治的是「条件序列的累积漂移」，却引入了「模型权重的累积漂移」——需要证明后者不会自己变成问题。</li>
+        </ul>
+        <span class="lb">一个间接线索</span>
+        <p>Tab. 3a 里 LoRA rank 从 8 升到 16 反而变差（413.3 → 425.6）。更大的容量更容易过拟合到「让残差像高斯」的捷径上——这更像是<b>持续累积</b>读法下会出现的现象，但只是猜测。</p>
+      </div>
+    </details>
+
+    <details class="dt" data-s="mid">
+      <summary><span class="dn">D9</span><span class="sev mid">影响复现</span><span>全文没有一个误差棒；而 Tab. 3 里有三处精确到 0.1 的重复值</span><span class="caret">▸</span></summary>
+      <div class="body">
+        <span class="lb">随机性来源</span>
+        <p>每块抽 B=10 个噪声向量、AdamW 的更新、生成本身的采样——这是一个<b>随机</b>的推理过程。论文报的是单次结果，没有种子数、没有方差、没有置信区间；LV-Bench 上用来算 FVD 的样本量也没报。</p>
+        <p>FVD 本身在小样本下偏差和方差都很大，且高度依赖 I3D 特征提取器。在这种情况下把 413.3 与 425.6（rank 8 vs 16）的差异当成结论，是超出了数据的分辨率的。</p>
+        <span class="lb">重复值</span>
+        <p>λ<sub>σ</sub>=.01 与 λ<sub>lσ</sub>=.02 都是 <b>482.8</b>；λ<sub>lμ</sub>=2 与 λ<sub>lσ</sub>=2 都是 <b>464.7</b>；λ<sub>μ</sub>=1 与 λ<sub>reg</sub>=0.5 都是 <b>449.3</b>。粗估：值域 ~400–660、精度 0.1 ⇒ 约 2600 格，约 20 次独立跑的期望碰撞数 ≈ 0.07，出现三次的概率 ~10⁻⁴。</p>
+        <p>可能的良性解释：实现里把 λ<sub>lμ</sub> 和 λ<sub>lσ</sub> 绑成了同一个「低频权重」（能解释第二条）。另外两条解释不了。<b>不必上纲上线，但这一节的数字不该被当成精确证据引用。</b></p>
+      </div>
+    </details>
+
+    <details class="dt" data-s="lo">
+      <summary><span class="dn">D10</span><span class="sev lo">值得留意</span><span>高斯性是必要条件不是充分条件；真正在兜底的是正则项</span><span class="caret">▸</span></summary>
+      <div class="body">
+        <p>残差完全可以「统计上像高斯」而内容一塌糊涂——ℒ_N 里没有任何一项关心画面对不对。论文自己也意识到了，所以才有 (10) 式的约束。但证据表明这个约束不是保险丝而是<b>主承重</b>：</p>
+        <ul>
+          <li>权重上：λ<sub>reg</sub> = 0.9 vs 噪声项 0.1~0.2；</li>
+          <li>消融上：w/o ℒ<sub>reg</sub> 的 FVD <b>664.2</b>，比完全不用这套方法（576.8）还差 15%。</li>
+        </ul>
+        <p>所以更准确的描述是：<b>ℒ_N 提供一个方向，λ<sub>reg</sub> 决定允许走多远，而后者决定了绝大部分结果。</b>论文标题里的「search for an alternative trajectory」听上去比实际做的事激进不少。</p>
+      </div>
+    </details>
+
+    <details class="dt" data-s="lo">
+      <summary><span class="dn">D11</span><span class="sev lo">值得留意</span><span>为什么是改权重，而不是改隐变量？没有对照</span><span class="caret">▸</span></summary>
+      <div class="body">
+        <p>名字叫 <b>noise guided optimization</b>，做的却是在 self-attention 的 Q/K/V 上挂 LoRA 做权重更新。测试时引导更常见、也更便宜的做法是<b>直接优化样本或初始噪声</b>（FreeNoise 一系、test-time noise optimization 一系）——既然 (10) 式本来就用 ‖x̂₀(φ) − x̂₀(θ)‖² 把<b>输出</b>拴住了，直接在输出/噪声空间做约束优化是更直接的路线。</p>
+        <p>论文消融了 LoRA 的 rank，但<b>没有对照「优化 φ」和「优化隐变量」</b>。权重空间的好处（隐式平滑先验、能改变整个块的生成过程而不只是终点）是可以论证的，但论文没有论证。</p>
+      </div>
+    </details>
+
+    <details class="dt" data-s="lo">
+      <summary><span class="dn">D12</span><span class="sev lo">值得留意</span><span>超参在 MSR-VTT / 5 秒 / v2v 上调，用在 15 秒 / t2v 的评测上</span><span class="caret">▸</span></summary>
+      <div class="body">
+        <p>附录 A2 交代得很坦白：λ 们是在 MSR-VTT <b>test split</b> 上、<b>5 秒 v2v</b> 设定下、以最小化 FVD 为目标调出来的，之后不再使用该数据以避免过拟合。这个做法是干净的。</p>
+        <p>但要注意迁移的跨度：5 s → 15 s、v2v → t2v/i2v/v2v 全都用同一组值。而 §08 显示 λ<sub>reg</sub> 的可用窗口并不宽（0.1 崩、0.5 次优、0.9 最佳、10 明显变差）。<b>在长视频上是否仍然是 0.9 最优，是假设而非结论</b>——尤其是如果 φ 不重置（D8），有效学习率其实随时间在变。</p>
+      </div>
+    </details>
+
+    <details class="dt" data-s="lo">
+      <summary><span class="dn">D13</span><span class="sev lo">值得留意</span><span>跨视频长度比较 VBench 总分，方法论上不成立</span><span class="caret">▸</span></summary>
+      <div class="body">
+        <p>Tab. A1 里 RewardForcing 的 quality 从 5 s 的 0.808 升到 15 s 的 <b>0.835</b>，Self-Forcing 也是先降后升。视频越长质量分越高，只能是度量伪影：motion smoothness（0.98+）、temporal flickering（0.99+）这些项对「几乎静止」的视频给高分，而崩坏的长视频往往趋于静止或高度相关。</p>
+        <p>论文用这张表论证「终点在任何长度都会出现」。结论我信（§06 的 FVD 曲线也不反对），但<b>这张表支撑不了它</b>，而且和 Tab. 2 「前 3 秒几乎无差别」的细粒度证据存在张力。</p>
+      </div>
+    </details>
+
+  </div>
+</section>
+
+<!-- ============================================================ 11 MISSING -->
+<section class="sec" id="s-missing">
+  <div class="eyebrow"><span class="n">11</span><span class="t">If you want to reproduce it</span><span class="line"></span></div>
+  <h2>复现清单：这些论文没给，而且每一条都会改变结果</h2>
+  <p class="lead">代码状态：摘要写「Our code is available on mever-team.github.io/tango」，但项目页当前标的是 <b>Code soon</b>。在代码出来之前，以下是必须自己猜的部分。</p>
+
+  <div class="tbl scrollx"><table>
+    <thead><tr><th>缺失项</th><th>为什么致命</th><th>我的猜测</th></tr></thead>
+    <tbody>
+      <tr><td><b>前瞻的去噪时刻 t</b></td><td>灵敏度正比 (1−t)；t=1 时梯度恒为 0</td><td>4 步调度里的第二个时刻（即走完一个欧拉步之后）</td></tr>
+      <tr><td><b>x<sub>t</sub><sup>i+1</sup> 如何构造</b></td><td>下一块还没有干净信号；两种构造的梯度含义不同</td><td>从纯噪声走一步；或把 x̂₀<sup>i</sup> 当作下一块的干净信号加噪</td></tr>
+      <tr><td><b>ℒ<sub>s</sub> 里 S(f) 在哪些轴上做平均</b></td><td>决定目标 1.0 是对是错，以及这一项是否压垮其余三项</td><td>先对 16 通道 × 3 潜帧平均周期图，再算 GM/AM</td></tr>
+      <tr><td><b>各损失项的归一化约定</b></td><td>‖·‖²₂ 是求和还是均值，决定 λ<sub>reg</sub>=0.9 是「拴住」还是「冻死」</td><td>均值平方误差</td></tr>
+      <tr><td><b>ℒ<sub>l</sub> 的低通截止频率</b></td><td>直接决定有效自由度和梯度噪声</td><td>论文未给任何数值</td></tr>
+      <tr><td><b>φ 每块是否重置为 θ</b></td><td>决定这是「局部修正算子」还是「持续在线微调」</td><td>倾向于持续累积（与 rank 16 变差的现象一致）</td></tr>
+      <tr><td><b>B 的用法自相矛盾</b></td><td>正文说「每个优化步用 B 个噪声向量」，A2 说「总共 B=10、batch 2、1 epoch」（= 5 步 × 2）</td><td>以 A2 为准</td></tr>
+      <tr><td><b>Tab. 4 的视频长度与 900 ms/帧 的关系</b></td><td>3.6 min vs 8.6 min 对不上</td><td>900 ms 可能不含优化开销</td></tr>
+      <tr><td><b>FVD 的样本量、种子、特征提取器</b></td><td>FVD 在小样本下极不稳定</td><td>未给</td></tr>
+      <tr><td><b>ℒ<sub>l</sub> 里 λ<sub>lμ</sub>/λ<sub>lσ</sub> 是否绑定</b></td><td>能解释 Tab. 3 的一处重复值</td><td>可能绑在同一个标量上</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============================================================ 12 PLACE -->
+<section class="sec" id="s-place">
+  <div class="eyebrow"><span class="n">12</span><span class="t">Where it sits</span><span class="line"></span></div>
+  <h2>谱系与定位：同一个病，五条治法</h2>
+  <p class="lead">所有对比方法都从 Wan2.1-T2V-1.3B 出发，差别只在「怎么对付自回归漂移」。把它们按<b>在哪个阶段动手</b>排开，TANGO 的位置就很清楚了。</p>
+
+  <figure class="fig">
+    <div class="fh"><span class="no">FIG 10</span><span class="ti">按干预阶段排列（悬停/点击看每一类的代价）</span></div>
+    <div class="figbody"><svg id="f10Svg" viewBox="0 0 860 300" role="img" aria-label="方法谱系"></svg></div>
+    <figcaption>TANGO 是唯一一个<b>把算力全部花在推理侧、且不收窄探索空间</b>的方案。它的直接邻居其实不在对比表里：Self-Refining Video Sampling [24]、Pathwise Test-Time Correction [56] 都在同一格，而论文只在相关工作里提到它们。</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <div class="card cN"><div class="mono">它真正的贡献</div>把「OOD 检测」这件事<b>免费</b>地接到了扩散模型自身的训练目标上。不需要判别器、奖励模型或真实视频：训练损失约束了分布内的噪声统计，那么统计失效的地方就是分布外。这个观察本身干净、通用，而且可以搬到其它自回归扩散场景（音频、动作序列）。</div>
+    <div class="card cX"><div class="mono">它的边界（作者自己说得很诚实）</div>测试时搜索只能在<b>已学到的流形内</b>找更好的解；流形里没有的东西，搜不出来。Fig. 4 的失败案例是「异域物理」和「纳米生物学」两个冷门题材——画面赏心悦目，但技术上完全错误。作者的结论是「测试时自适应与数据/模型扩展是互补而非竞争」，这个定位我认为是准确的。</div>
+  </div>
+</section>
+
+<!-- ============================================================ 13 APPENDIX -->
+<section class="sec" id="s-appendix">
+  <div class="eyebrow"><span class="n">13</span><span class="t">Cheat sheet</span><span class="line"></span></div>
+  <h2>附录速查</h2>
+
+  <h3><span class="ix">A</span>配置一览</h3>
+  <div class="tbl scrollx"><table>
+    <thead><tr><th>项</th><th>取值</th><th>出处</th></tr></thead>
+    <tbody>
+      <tr><td>基座</td><td>Self-Forcing 式 DMD 蒸馏（自展开 + 因果注意力 + KV cache），起点 Wan2.1-T2V-1.3B；推理优化沿用 RewardForcing</td><td>§4.1 / A2</td></tr>
+      <tr><td>文本编码</td><td>umT5-xxl</td><td>A2</td></tr>
+      <tr><td>分辨率 / 帧率</td><td>832×480 @ 16 FPS，时间视野无限</td><td>§4.1</td></tr>
+      <tr><td>KV cache</td><td>滚动保留最近 <b>21</b> 个潜帧 ≈ 5 s</td><td>§4.1</td></tr>
+      <tr><td>潜空间</td><td>3D VAE，8× 空间 / 4× 时间压缩（首帧不做时间压缩）；h=60, w=104, c=16</td><td>§4.1</td></tr>
+      <tr><td>去噪块</td><td>每次联合去噪 <b>3 个潜帧</b>；<b>4</b> 个去噪时刻</td><td>A2</td></tr>
+      <tr><td>可训练参数</td><td>rank-<b>8</b> LoRA，挂在 self-attention 的 <b>Q/K/V</b></td><td>A2</td></tr>
+      <tr><td>优化</td><td>AdamW，lr <b>2×10⁻⁶</b>，B=<b>10</b> 噪声向量，batch <b>2</b>，1 epoch（= 5 步）</td><td>§4.1 / A2</td></tr>
+      <tr><td>权重</td><td>λ<sub>μ</sub>=λ<sub>σ</sub>=λ<sub>γ</sub>=λ<sub>κ</sub>=λ<sub>s</sub>=<b>0.1</b>；λ<sub>lμ</sub>=λ<sub>lσ</sub>=<b>0.2</b>；λ<sub>reg</sub>=<b>0.9</b></td><td>§4.1</td></tr>
+      <tr><td>调参数据</td><td>MSR-VTT test，5 s v2v，目标 = 最小化 FVD；此后不再使用</td><td>A2</td></tr>
+      <tr><td>生成模式</td><td>cache 空 = t2v；1 帧 = i2v；多帧 = v2v（实验用 <b>9</b> 个 RGB 帧，且做帧率对齐）</td><td>A2</td></tr>
+      <tr><td>硬件</td><td>单卡 Nvidia RTX Pro 6000（96 GB），FlashAttention，梯度检查点</td><td>A2</td></tr>
+      <tr><td>评测</td><td>VBench（946 prompt / 16 指标，t2v）；FVD vs LV-Bench（DanceTrack + GOT-10k + HD-VILA-100M + ShareGPT4V，v2v）</td><td>§4.2</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="ix">B</span>关键数字（可直接引用的）</h3>
+  <div class="tbl scrollx"><table>
+    <thead><tr><th>数字</th><th>含义</th><th>核对</th></tr></thead>
+    <tbody>
+      <tr><td class="num"><b>0.863</b></td><td>TANGO VBench 总分（15 s）</td><td class="best">= (0.864×4 + 0.860)/5 ✔</td></tr>
+      <tr><td class="num"><b>+3.1</b></td><td>相对 LongLive（0.832）的绝对提升</td><td class="best">✔</td></tr>
+      <tr><td class="num">+4.8 / +4.6</td><td>语义分提升：相对 LongLive / 相对逐列最优 RollingForcing</td><td class="flag">口径差异，见 §07</td></tr>
+      <tr><td class="num"><b>−28.3%</b></td><td>全片 FVD：576.8 → 413.3</td><td class="flag">相对自家 baseline，非 SOTA</td></tr>
+      <tr><td class="num">−38.7%</td><td>13–15 s 段 FVD：715.6 → 438.8</td><td class="best">✔</td></tr>
+      <tr><td class="num">+94% / +20%</td><td>首段→末段 FVD 增幅：baseline / TANGO</td><td class="best">斜率被压平，本文最硬的证据</td></tr>
+      <tr><td class="num"><b>8.6 min</b></td><td>15 s 视频的生成耗时（基线 1.2 min）</td><td class="flag">与「900 ms/帧」对不上</td></tr>
+      <tr><td class="num">664.2</td><td>w/o ℒ<sub>reg</sub> 的 FVD</td><td class="worst">比不用本方法（576.8）更差</td></tr>
+      <tr><td class="num">0.5615</td><td>真白噪声的谱平坦度期望（e<sup>−γ</sup>）</td><td class="flag">论文的目标值写的是 1.0</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="ix">C</span>名词对照</h3>
+  <dl class="gloss">
+    <dt>终点（terminal point）</dt><dd>本文自创概念：一个位于学到的流形内部、但没有任何合法后续的状态。与「掉出流形」区分开——终点本身是合法的。</dd>
+    <dt>噪声一致性（noise consistency）</dt><dd>本文的核心先验：如果条件序列在分布内，模型预测出的噪声残差应当保持各向同性高斯的性质（零均值、单位方差、零偏度、峰度 3、谱平坦）。</dd>
+    <dt>隐含噪声（implied noise）</dt><dd>flow matching 模型不直接预测噪声，需从速度场反解：ε̂ = x<sub>t</sub> + (1−t)v<sub>θ</sub>。</dd>
+    <dt>谱平坦度 SFM</dt><dd>功率谱的几何均值 / 算术均值。1.0 = 完全平坦。注意：单次白噪声实现的期望是 e<sup>−γ</sup> ≈ 0.56，不是 1.0。</dd>
+    <dt>自回归漂移 / exposure bias</dt><dd>训练时喂真实历史、推理时喂自己生成的历史，两者分布不同，误差逐步累积。</dd>
+    <dt>注意力 sink / 锚定</dt><dd>RollingForcing、LongLive 等把注意力固定在开头若干帧，以收窄生成流形换取稳定性——代价是动态度下降。</dd>
+    <dt>DMD 蒸馏</dt><dd>Distribution Matching Distillation。把多步双向扩散模型蒸成少步因果模型的主流路线，CausVid / Self-Forcing / 本文基座都建立在它之上。</dd>
+  </dl>
+
+  <h3><span class="ix">D</span>一眼看完的判断</h3>
+  <div class="grid3">
+    <div class="card cN"><div class="mono">值得抄的</div>「训练目标没约束过 OOD 输出 ⇒ 那里的噪声统计会失效」这个观察。它不依赖视频，任何条件扩散模型都能用来做<b>免费的 OOD 自检</b>。</div>
+    <div class="card cX"><div class="mono">要小心的</div>公式 (7) 的目标值与量级；所有损失项的归一化约定；前瞻时刻 t。三处都会让照抄的实现跑不出论文结果。</div>
+    <div class="card cB"><div class="mono">等作者补的</div>一张「ℒ_N 在真实 / 崩坏 / 正常生成序列上的分布」图（D2），以及一个算力对齐的 best-of-B 对照（D1）。这两个做出来，这篇就从启发式升级成机制。</div>
+  </div>
+
+  <p class="foot">本页是对 <b>Karageorgiou et al., “Test-Time Noise Guided Adaptation for Realistic Autoregressive Video Generation”, ECCV 2026</b>（arXiv:2607.15849v1）的独立精读与复核，不隶属于原作者。所有数字取自论文正文、表格与附录；标注为「我的复核」「我推的」「我的重建」的部分是本页作者的分析，可能出错，请以原文与将来公开的代码为准。§04 的面板在浏览器本地做 FFT 与统计，是独立实现的演示，不是论文代码。<br>生成时间：2026-09-20。</p>
+</section>
+
+</main>
+</div>
+
+<script>
+"use strict";
+var NS="http://www.w3.org/2000/svg";
+function el(n,a,t){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);if(t!=null)e.textContent=t;return e;}
+function clr(n){while(n&&n.firstChild)n.removeChild(n.firstChild);}
+function seg(container,cb){
+  if(!container)return;
+  var btns=[].slice.call(container.querySelectorAll("button"));
+  btns.forEach(function(b){b.addEventListener("click",function(){
+    btns.forEach(function(x){x.setAttribute("aria-pressed",String(x===b));});cb(b);});});
+}
+function tabset(nodes,cb){
+  nodes.forEach(function(b){b.addEventListener("click",function(){
+    nodes.forEach(function(x){x.setAttribute("aria-selected",String(x===b));});cb(b);});});
+}
+function ro(host,items){
+  clr(host);
+  items.forEach(function(it){
+    var d=document.createElement("div");
+    d.innerHTML='<div class="k">'+it[0]+'</div><div class="v '+(it[2]||"")+'">'+it[1]+'</div>';
+    host.appendChild(d);
+  });
+}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function fmt(x,n){return (x<0?"":"")+x.toFixed(n==null?3:n);}
+function expo(x){
+  if(x===0)return "0";
+  var e=Math.floor(Math.log(Math.abs(x))/Math.LN10);
+  var m=x/Math.pow(10,e);
+  return m.toFixed(2)+"e"+(e<0?"":"+")+e;
+}
+
+/* ===================== theme ===================== */
+(function(){
+  var root=document.documentElement, btn=document.getElementById("themeBtn");
+  try{var s=localStorage.getItem("tango-theme"); if(s==="light"||s==="dark")root.setAttribute("data-theme",s);}catch(e){}
+  btn.addEventListener("click",function(){
+    var cur=root.getAttribute("data-theme");
+    if(!cur)cur=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";
+    var next=cur==="dark"?"light":"dark";
+    root.setAttribute("data-theme",next);
+    try{localStorage.setItem("tango-theme",next);}catch(e){}
+    window.dispatchEvent(new Event("themechange"));
+  });
+})();
+
+/* ===================== progress + scrollspy ===================== */
+(function(){
+  var prog=document.getElementById("prog");
+  var links=[].slice.call(document.querySelectorAll(".rail a"));
+  var secs=links.map(function(a){return document.getElementById(a.getAttribute("href").slice(1));});
+  function tick(){
+    var h=document.documentElement,max=h.scrollHeight-h.clientHeight;
+    prog.style.width=(max>0?(h.scrollTop/max*100):0)+"%";
+    var y=h.scrollTop+140,cur=0;
+    for(var i=0;i<secs.length;i++){if(secs[i]&&secs[i].offsetTop<=y)cur=i;}
+    links.forEach(function(a,i){a.classList.toggle("on",i===cur);});
+  }
+  addEventListener("scroll",tick,{passive:true});addEventListener("resize",tick);tick();
+})();
+
+/* ===================== FIG 0 tabs ===================== */
+(function(){
+  var caps={
+    a:"<b>① 正常的因果去噪。</b>读 KV cache（最近 21 个潜帧 ≈ 5 s）+ 文本条件，对 3 个潜帧一块做 4 步去噪，得到候选块 x̂₀ⁱ(θ)。到这里为止和 Self-Forcing 一模一样 —— <b>TANGO 不改训练，也不改这一步</b>。",
+    b:"<b>② 冻结裁判前瞻一块。</b>把还没定稿的 x̂₀ⁱ 挂进条件，让同一个模型（权重冻结）去处理<b>第 i+1 块</b>，然后从它的速度预测里反解出隐含噪声 r̂ᵢ₊₁ = x_t + (1−t)v_θ。这一步会用 B=10 个不同的 ε 各做一遍，取期望。<b>论文没说这里的 t 取哪一个</b>（§10‑D4）。",
+    c:"<b>③ 四项统计检验。</b>问一个很朴素的问题：r̂ 还像不像各向同性高斯？一二阶矩管整体偏移和能量；三四阶矩管不对称和重尾（结构化伪影的签名）；谱平坦度管空间相关性（模型是不是把内容当噪声一起减了）；最后再对低通版本单独算一次高阶矩，因为内容能量压在低频。四项求和得 ℒ_N。<b>谱平坦度那一项的目标值 1.0 在数学上是错的</b>（§04 面板可现场验证）。",
+    d:"<b>④ 带约束的测试时优化。</b>ℒ_N 对 LoRA 参数 φ 可微（梯度要穿过裁判的前向，因此需要梯度检查点）。目标里还有一项 λ_reg‖x̂₀(φ) − x̂₀(θ)‖²，把搜索拴在原始预测附近，防止优化直奔「让残差看起来像高斯」的平凡解。<b>λ_reg=0.9 比任何噪声项权重都大</b>，而消融显示去掉它会比完全不用这方法还差 —— 它才是主承重（§10‑D10）。",
+    e:"<b>全景。</b>一个自回归步被拆成四段：正常去噪出候选 → 冻结的自己往前试一块 → 用四项统计给这次试探打分 → 分数反传更新 LoRA，重新出一版候选写回 cache。整条回路<b>没有任何外部监督</b>：没有真实视频、没有奖励模型、没有判别器，唯一的先验是「噪声该长什么样」。代价是每块都要跑 5 个梯度步，端到端慢 7.2 倍。"
+  };
+  var ids=["t0-a","t0-b","t0-c","t0-d"],map={a:0,b:1,c:2,d:3};
+  var cap=document.getElementById("t0Cap");
+  function show(k){
+    ids.forEach(function(id,i){
+      var g=document.getElementById(id); if(!g)return;
+      g.setAttribute("opacity",(k==="e"||map[k]===i)?1:0.14);
+    });
+    var o=document.getElementById("t0-out"); if(o)o.setAttribute("opacity",(k==="e"||k==="d")?1:0.14);
+    var n=document.getElementById("t0-note"); if(n)n.setAttribute("opacity",k==="e"?1:0.35);
+    cap.innerHTML=caps[k];
+  }
+  tabset([].slice.call(document.querySelectorAll("#t0Tabs .tab")),function(b){show(b.dataset.k);});
+  show("e");
+})();
+
+/* ===================== FIG 1 panels ===================== */
+(function(){
+  var caps={
+    a:"<b>已有工作的诊断。</b>去噪不完美 ⇒ 每帧带一点残余误差 ⇒ 写回 cache 成为下一步条件 ⇒ 误差滚雪球。所有解法的共同形状是「把单帧拉回真实帧的流形」：训练时展开、注意力 sink、测试时重复去噪、外挂提纯网络。<b>它们共享一个前提：每帧都像真的，轨迹就安全。</b>",
+    b:"<b>本文的诊断。</b>那个前提是假的。因为训练集有限，存在这样的状态：它本身完全合法，但<b>联合</b>地看，训练数据里没有任何后续。模型要么冻住，要么硬编一个后续并开始融化。这是<b>联合分布</b>的问题，用任何逐帧的手段都修不了。",
+    c:"<b>两条路的代价结构不同。</b>锚定类方法（把流形收窄）几乎不会出界，代价是动态度崩到 0.36~0.40；TANGO 不收窄流形，而是在流形内部换方向，因此能同时保住动态度（0.769）和语义分（0.860）。但它需要一个「这条路走不走得通」的检测器 —— 这个检测器是否真的测到了那件事，论文没有直接验证（§10‑D2）。"
+  };
+  var cap=document.getElementById("f1Cap");
+  function show(k){
+    ["a","b","c"].forEach(function(x){
+      var g=document.getElementById("f1-"+x); if(g)g.setAttribute("display",x===k?"inline":"none");
+    });
+    cap.innerHTML=caps[k];
+  }
+  seg(document.getElementById("f1Seg"),function(b){show(b.dataset.k);});
+  show("a");
+})();
+
+/* ===================== FIG 2 graph walk ===================== */
+(function(){
+  var svg=document.getElementById("f2Svg"); if(!svg)return;
+  var COLS=9, ROWS=5, seed=7;
+  var covEl=document.getElementById("f2Cov"),radEl=document.getElementById("f2Rad"),
+      baseEl=document.getElementById("f2Base"),newEl=document.getElementById("f2New");
+
+  function build(){
+    var rng=mulberry32(seed);
+    var nodes=[];
+    for(var c=0;c<COLS;c++)for(var r=0;r<ROWS;r++){
+      nodes.push({c:c,r:r,x:42+c*58+(rng()-0.5)*16,y:44+r*56+(rng()-0.5)*16,out:[]});
+    }
+    return {nodes:nodes,rng:rng};
+  }
+  var G=build();
+
+  function idx(c,r){return c*ROWS+r;}
+  function wire(cov){
+    var rng=mulberry32(seed*991+Math.round(cov*1000));
+    G.nodes.forEach(function(n){n.out=[];});
+    for(var c=0;c<COLS-1;c++)for(var r=0;r<ROWS;r++){
+      for(var d=-1;d<=1;d++){
+        var r2=r+d; if(r2<0||r2>=ROWS)continue;
+        if(rng()<cov)G.nodes[idx(c,r)].out.push(idx(c+1,r2));
+      }
+    }
+  }
+  function dist(a,b){var dx=a.x-b.x,dy=a.y-b.y;return Math.sqrt(dx*dx+dy*dy);}
+
+  function straightest(from,cands,prev){
+    // prefer minimal direction change
+    var hx=1,hy=0;
+    if(prev){hx=from.x-prev.x;hy=from.y-prev.y;var L=Math.hypot(hx,hy)||1;hx/=L;hy/=L;}
+    var best=null,bs=-2;
+    cands.forEach(function(ci){
+      var n=G.nodes[ci],dx=n.x-from.x,dy=n.y-from.y,L=Math.hypot(dx,dy)||1;
+      var s=(dx/L)*hx+(dy/L)*hy;
+      if(s>bs){bs=s;best=ci;}
+    });
+    return best;
+  }
+
+  function walk(useTango,r){
+    var cur=idx(0,2),prev=null,path=[cur],corr=[],trapped=false,avoid=0;
+    for(var step=0;step<COLS-1;step++){
+      var n=G.nodes[cur];
+      if(n.out.length===0){trapped=true;break;}
+      var pick;
+      if(!useTango){
+        pick=straightest(n,n.out,prev);
+      }else{
+        var greedy=straightest(n,n.out,prev);
+        var alive=n.out.filter(function(ci){return G.nodes[ci].out.length>0||G.nodes[ci].c===COLS-1;});
+        if(alive.length){pick=straightest(n,alive,prev); if(pick!==greedy)avoid++;}
+        else{
+          // look-ahead says every direct candidate is a dead end: search within radius r
+          var target=G.nodes[straightest(n,n.out,prev)];
+          var cand=null,cd=1e9;
+          G.nodes.forEach(function(m,mi){
+            if(m.c<=n.c)return;
+            if(m.out.length===0&&m.c!==COLS-1)return;
+            var d=dist(target,m);
+            if(d<=r&&d<cd){cd=d;cand=mi;}
+          });
+          if(cand==null){trapped=true;break;}
+          corr.push([target,G.nodes[cand]]);
+          pick=cand;
+        }
+      }
+      prev=n;cur=pick;path.push(cur);
+    }
+    return {path:path,corr:corr,trapped:trapped,avoid:avoid};
+  }
+
+  function render(){
+    var cov=+covEl.value/100, r=+radEl.value;
+    document.getElementById("f2CovV").textContent=Math.round(cov*100)+"%";
+    document.getElementById("f2RadV").textContent=r;
+    wire(cov);
+    clr(svg);
+    var g=el("g",{});svg.appendChild(g);
+    // edges
+    G.nodes.forEach(function(n){
+      n.out.forEach(function(ci){
+        var m=G.nodes[ci];
+        g.appendChild(el("line",{x1:n.x,y1:n.y,x2:m.x,y2:m.y,stroke:"var(--rule2)","stroke-width":1,opacity:.55}));
+      });
+    });
+    // dead ends
+    var dead=0;
+    G.nodes.forEach(function(n){
+      if(n.c<COLS-1&&n.out.length===0){dead++;g.appendChild(el("circle",{cx:n.x,cy:n.y,r:8,fill:"var(--cr-soft)",stroke:"var(--cr)","stroke-width":1.1}));}
+    });
+    G.nodes.forEach(function(n){
+      g.appendChild(el("circle",{cx:n.x,cy:n.y,r:2.6,fill:(n.c<COLS-1&&n.out.length===0)?"var(--cr)":"var(--ink3)"}));
+    });
+    var A=walk(false,r),B=walk(true,r);
+    function poly(p,cls,w,dash){
+      var d=p.map(function(ci,i){var n=G.nodes[ci];return (i?"L":"M")+n.x.toFixed(1)+" "+n.y.toFixed(1);}).join(" ");
+      var a={d:d,fill:"none",stroke:cls,"stroke-width":w,"stroke-linecap":"round","stroke-linejoin":"round"};
+      if(dash)a["stroke-dasharray"]=dash;
+      g.appendChild(el("path",a));
+    }
+    if(baseEl.checked){
+      poly(A.path,"var(--td)",2.6);
+      var last=G.nodes[A.path[A.path.length-1]];
+      if(A.trapped){
+        g.appendChild(el("path",{d:"M"+last.x+" "+last.y+" L"+(last.x+66)+" "+(last.y+40),fill:"none",stroke:"var(--bad)","stroke-width":2.4,"stroke-dasharray":"5 4","marker-end":"url(#ar-B)"}));
+        g.appendChild(el("text",{x:last.x+10,y:last.y-12,class:"sml f-Bi"},"基线在这里被困住"));
+      }
+    }
+    poly(B.path,"var(--na)",2.6);
+    B.corr.forEach(function(p){
+      g.appendChild(el("path",{d:"M"+p[0].x+" "+p[0].y+" L"+p[1].x+" "+p[1].y,fill:"none",stroke:"var(--ok)","stroke-width":1.8,"stroke-dasharray":"3 3","marker-end":"url(#ar-K)"}));
+      g.appendChild(el("circle",{cx:p[0].x,cy:p[0].y,r:5,fill:"none",stroke:"var(--ok)","stroke-width":1.2}));
+    });
+    var s=G.nodes[idx(0,2)];
+    g.appendChild(el("circle",{cx:s.x,cy:s.y,r:6,fill:"var(--ink)"}));
+    g.appendChild(el("text",{x:s.x-14,y:s.y-13,class:"sml f-ink2"},"起点"));
+    g.appendChild(el("text",{x:14,y:318,class:"xs f-ink3"},"横轴 = 视频时间；节点 = 状态；边 = 训练数据支持的合法后续；橙圈 = 没有出边的终点"));
+    var ro1=document.getElementById("f2A"),ro2=document.getElementById("f2B"),ro3=document.getElementById("f2C"),ro4=document.getElementById("f2D");
+    ro1.textContent=(A.path.length-1)+(A.trapped?" ✗":" ✓");
+    ro2.textContent=(B.path.length-1)+(B.trapped?" ✗":" ✓");
+    ro3.textContent=B.avoid+" / "+B.corr.length;
+    ro4.textContent=dead+" / "+(COLS-1)*ROWS;
+  }
+  [covEl,radEl].forEach(function(x){x.addEventListener("input",render);});
+  baseEl.addEventListener("change",render);
+  newEl.addEventListener("click",function(){seed=(seed*7919+13)%100000;G=build();render();});
+  render();
+})();
+
+/* ===================== FIG 3 sensitivity ===================== */
+(function(){
+  var svg=document.getElementById("f3Svg"); if(!svg)return;
+  var tEl=document.getElementById("f3T"),eEl=document.getElementById("f3E"),roH=document.getElementById("f3Ro");
+  function render(){
+    var t=+tEl.value/100, err=+eEl.value/100;
+    document.getElementById("f3TV").textContent=t.toFixed(2);
+    document.getElementById("f3EV").textContent=err.toFixed(2);
+    clr(svg);
+    var g=el("g",{});svg.appendChild(g);
+    var x0=56,x1=460,y0=40,y1=200;
+    // axes
+    g.appendChild(el("line",{x1:x0,y1:y1,x2:x1,y2:y1,stroke:"var(--axis)","stroke-width":1.2}));
+    g.appendChild(el("line",{x1:x0,y1:y0,x2:x0,y2:y1,stroke:"var(--axis)","stroke-width":1.2}));
+    for(var k=0;k<=4;k++){
+      var yy=y1-(y1-y0)*k/4;
+      g.appendChild(el("line",{x1:x0,y1:yy,x2:x1,y2:yy,stroke:"var(--grid)","stroke-width":1}));
+      g.appendChild(el("text",{x:x0-8,y:yy+4,class:"xs f-ink3","text-anchor":"end"},(k/4).toFixed(2)));
+    }
+    for(var k2=0;k2<=4;k2++){
+      var xx=x0+(x1-x0)*k2/4;
+      g.appendChild(el("text",{x:xx,y:y1+16,class:"xs f-ink3","text-anchor":"middle"},(k2/4).toFixed(2)));
+    }
+    g.appendChild(el("text",{x:(x0+x1)/2,y:y1+34,class:"sml f-ink3","text-anchor":"middle"},"去噪时刻 t（1 = 纯噪声，0 = 干净）"));
+    g.appendChild(el("text",{x:14,y:30,class:"sml f-ink2"},"裁判灵敏度 |ε̂ − ε| / |v_θ − v*|"));
+    // curve flow: 1-t
+    var d="";
+    for(var i=0;i<=100;i++){var tt=i/100;var X=x0+(x1-x0)*tt,Y=y1-(y1-y0)*(1-tt);d+=(i?"L":"M")+X.toFixed(1)+" "+Y.toFixed(1);}
+    g.appendChild(el("path",{d:d,fill:"none",stroke:"var(--dm)","stroke-width":2.4}));
+    g.appendChild(el("line",{x1:x0,y1:y0,x2:x1,y2:y0,stroke:"var(--na)","stroke-width":2,"stroke-dasharray":"6 4"}));
+    g.appendChild(el("text",{x:x1-6,y:y0-8,class:"sml f-Ni","text-anchor":"end"},"ε-参数化（正文推导）：系数恒为 1"));
+    g.appendChild(el("text",{x:x0+96,y:y1-42,class:"sml f-Di"},"flow matching（实际实现）：系数 = 1 − t"));
+    // four denoising steps
+    [1,0.75,0.5,0.25].forEach(function(tt){
+      var X=x0+(x1-x0)*tt;
+      g.appendChild(el("line",{x1:X,y1:y1,x2:X,y2:y1+6,stroke:"var(--ink3)","stroke-width":1.4}));
+    });
+    g.appendChild(el("text",{x:x1,y:y1+52,class:"xs f-ink3","text-anchor":"end"},"竖线 = 4 个去噪时刻（示意）"));
+    // marker
+    var mx=x0+(x1-x0)*t,my=y1-(y1-y0)*(1-t);
+    g.appendChild(el("line",{x1:mx,y1:y1,x2:mx,y2:my,stroke:"var(--cr)","stroke-width":1.3,"stroke-dasharray":"4 3"}));
+    g.appendChild(el("circle",{cx:mx,cy:my,r:5.5,fill:"var(--cr)"}));
+    // right bars
+    var bx=540,bw=280;
+    g.appendChild(el("text",{x:bx,y:36,class:"big f-ink"},"同样的模型误差，两种参数化能看到多少"));
+    var vals=[["ε-参数化（正文）",err,"var(--na)"],["flow（实现）在 t = "+t.toFixed(2),err*(1-t),"var(--dm)"]];
+    vals.forEach(function(v,i){
+      var yy=70+i*54;
+      g.appendChild(el("text",{x:bx,y:yy,class:"sml f-ink2"},v[0]));
+      g.appendChild(el("rect",{x:bx,y:yy+8,width:bw,height:16,rx:5,fill:"var(--surf2)",stroke:"var(--rule)"}));
+      g.appendChild(el("rect",{x:bx,y:yy+8,width:Math.max(2,bw*v[1]),height:16,rx:5,fill:v[2]}));
+      g.appendChild(el("text",{x:bx+bw+8,y:yy+21,class:"mono sml f-ink2"},v[1].toFixed(3)));
+    });
+    var msg = t>0.97 ? "t → 1：梯度恒为零，裁判完全看不见" : (t>0.85? "接近块起点：信号被压到很弱" : "信号可用");
+    g.appendChild(el("text",{x:bx,y:196,class:"sml "+(t>0.85?"f-Bi":"f-Ki")},msg));
+    g.appendChild(el("text",{x:bx,y:216,class:"xs f-ink3"},"论文只说「采用 4 个去噪时刻」，没说裁判站哪一个。"));
+    g.appendChild(el("text",{x:bx,y:232,class:"xs f-ink3"},"这个选择会把信号幅度从 0 连续拉到满值。"));
+    ro(roH,[
+      ["灵敏度系数 (1−t)",(1-t).toFixed(3),t>0.85?"bad":"d"],
+      ["有效偏差 |ε̂ − ε|",(err*(1-t)).toFixed(3),t>0.85?"bad":"n"],
+      ["相对 ε-参数化损失",((1-(1-t))*100).toFixed(0)+"%",t>0.85?"bad":""],
+      ["t = 1 时的梯度","0","bad"]
+    ]);
+  }
+  [tEl,eEl].forEach(function(x){x.addEventListener("input",render);});
+  window.addEventListener("themechange",render);
+  render();
+})();
+
+/* ===================== FIG 4 : residual statistics, live ===================== */
+(function(){
+  var N=64, NP=N*N, NCH=48;
+  var c1=document.getElementById("f4C1"); if(!c1)return;
+  var c2=document.getElementById("f4C2"),c3=document.getElementById("f4C3"),c4=document.getElementById("f4C4");
+  var aEl=document.getElementById("f4A"),avgEl=document.getElementById("f4Avg"),reEl=document.getElementById("f4Re");
+  var roH=document.getElementById("f4Ro"),barH=document.getElementById("f4Bars"),totH=document.getElementById("f4Tot"),capH=document.getElementById("f4Cap");
+  var LAM={mu:.1,sig:.1,gam:.1,kap:.1,s:.1,lmu:.2,lsig:.2};
+  var kind="lf", seed=11;
+
+  /* --- 1D FFT, in-place, radix-2 --- */
+  function fft1(re,im,n,inv){
+    var i,j=0,bit,len,k,tr,ti;
+    for(i=1;i<n;i++){
+      bit=n>>1;
+      for(;j&bit;bit>>=1)j^=bit;
+      j^=bit;
+      if(i<j){tr=re[i];re[i]=re[j];re[j]=tr;ti=im[i];im[i]=im[j];im[j]=ti;}
+    }
+    for(len=2;len<=n;len<<=1){
+      var ang=2*Math.PI/len*(inv?1:-1),wr=Math.cos(ang),wi=Math.sin(ang);
+      for(i=0;i<n;i+=len){
+        var cr=1,ci=0;
+        for(k=0;k<len>>1;k++){
+          var ur=re[i+k],ui=im[i+k];
+          var ar=re[i+k+(len>>1)],ai=im[i+k+(len>>1)];
+          var vr=ar*cr-ai*ci, vi=ar*ci+ai*cr;
+          re[i+k]=ur+vr;im[i+k]=ui+vi;
+          re[i+k+(len>>1)]=ur-vr;im[i+k+(len>>1)]=ui-vi;
+          var ncr=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=ncr;
+        }
+      }
+    }
+    if(inv){for(i=0;i<n;i++){re[i]/=n;im[i]/=n;}}
+  }
+  var _r=new Float64Array(N),_i=new Float64Array(N);
+  function fft2(re,im,inv){
+    var y,x,o;
+    for(y=0;y<N;y++){
+      o=y*N;
+      for(x=0;x<N;x++){_r[x]=re[o+x];_i[x]=im[o+x];}
+      fft1(_r,_i,N,inv);
+      for(x=0;x<N;x++){re[o+x]=_r[x];im[o+x]=_i[x];}
+    }
+    for(x=0;x<N;x++){
+      for(y=0;y<N;y++){_r[y]=re[y*N+x];_i[y]=im[y*N+x];}
+      fft1(_r,_i,N,inv);
+      for(y=0;y<N;y++){re[y*N+x]=_r[y];im[y*N+x]=_i[y];}
+    }
+  }
+
+  /* --- field generators --- */
+  function gauss(rng,n){
+    var a=new Float64Array(n);
+    for(var i=0;i<n;i+=2){
+      var u=rng()||1e-9,v=rng();
+      var rr=Math.sqrt(-2*Math.log(u));
+      a[i]=rr*Math.cos(2*Math.PI*v);
+      if(i+1<n)a[i+1]=rr*Math.sin(2*Math.PI*v);
+    }
+    return a;
+  }
+  function normalize(a){
+    var m=0,i;for(i=0;i<a.length;i++)m+=a[i];m/=a.length;
+    var v=0;for(i=0;i<a.length;i++){a[i]-=m;v+=a[i]*a[i];}
+    v=Math.sqrt(v/a.length)||1;
+    for(i=0;i<a.length;i++)a[i]/=v;
+    return a;
+  }
+  function makeStruct(rng,knd){
+    var out=new Float64Array(NP),x,y,i;
+    if(knd==="lf"){
+      var re=gauss(rng,NP),im=new Float64Array(NP);
+      fft2(re,im,false);
+      for(y=0;y<N;y++)for(x=0;x<N;x++){
+        var fy=(y>N/2?y-N:y)/N, fx=(x>N/2?x-N:x)/N;
+        var f=Math.sqrt(fx*fx+fy*fy);
+        var w=1/Math.pow(1+f*N*0.55,1.9);
+        i=y*N+x;re[i]*=w;im[i]*=w;
+      }
+      fft2(re,im,true);
+      for(i=0;i<NP;i++)out[i]=re[i];
+    }else if(knd==="st"){
+      var ph=rng()*6.283, th=rng()*3.14159, kk=3+Math.floor(rng()*4);
+      for(y=0;y<N;y++)for(x=0;x<N;x++){
+        var u=(x*Math.cos(th)+y*Math.sin(th))/N;
+        out[y*N+x]=Math.sin(2*Math.PI*kk*u+ph)+0.35*Math.sin(2*Math.PI*kk*2.3*u+1.1);
+      }
+    }else{
+      var nb=6;
+      for(var b=0;b<nb;b++){
+        var cx=rng()*N,cy=rng()*N,sg=2+rng()*3,amp=(rng()<.5?-1:1)*(1+rng());
+        for(y=0;y<N;y++)for(x=0;x<N;x++){
+          var dx=x-cx,dy=y-cy;
+          out[y*N+x]+=amp*Math.exp(-(dx*dx+dy*dy)/(2*sg*sg));
+        }
+      }
+    }
+    return normalize(out);
+  }
+
+  /* --- cached ensembles --- */
+  var EPS=[],STR=[];
+  function regen(){
+    var rng=mulberry32(seed);
+    EPS=[];STR=[];
+    for(var j=0;j<NCH;j++){EPS.push(gauss(rng,NP));}
+    var rng2=mulberry32(seed*31+5);
+    for(var j2=0;j2<NCH;j2++){STR.push(makeStruct(rng2,kind));}
+  }
+
+  function moments(a){
+    var i,n=a.length,m=0;
+    for(i=0;i<n;i++)m+=a[i];m/=n;
+    var v=0;for(i=0;i<n;i++){var d=a[i]-m;v+=d*d;}v/=n;
+    var sd=Math.sqrt(v)||1e-12,s3=0,s4=0;
+    for(i=0;i<n;i++){var z=(a[i]-m)/sd;var z2=z*z;s3+=z2*z;s4+=z2*z2;}
+    return {mean:m,varr:v,skew:s3/n,kurt:s4/n};
+  }
+
+  var reBuf=new Float64Array(NP),imBuf=new Float64Array(NP),psdAcc=new Float64Array(NP),lpBuf=new Float64Array(NP);
+
+  function compute(){
+    var a=+aEl.value/100;
+    var field=new Float64Array(NP),struct=new Float64Array(NP),i;
+    for(i=0;i<NP;i++){struct[i]=a*STR[0][i];field[i]=EPS[0][i]+struct[i];}
+    var M=moments(field);
+    // FFT of field 0 (also used for low-pass + spectrum image)
+    for(i=0;i<NP;i++){reBuf[i]=field[i];imBuf[i]=0;}
+    fft2(reBuf,imBuf,false);
+    var spec=new Float64Array(NP);
+    for(i=0;i<NP;i++)spec[i]=reBuf[i]*reBuf[i]+imBuf[i]*imBuf[i];
+    // low-pass
+    var lre=new Float64Array(NP),lim=new Float64Array(NP);
+    for(var y=0;y<N;y++)for(var x=0;x<N;x++){
+      var fy=(y>N/2?y-N:y)/N, fx=(x>N/2?x-N:x)/N;
+      var keep=(fx*fx+fy*fy)<(0.125*0.125);
+      var k=y*N+x;
+      lre[k]=keep?reBuf[k]:0; lim[k]=keep?imBuf[k]:0;
+    }
+    fft2(lre,lim,true);
+    for(i=0;i<NP;i++)lpBuf[i]=lre[i];
+    var ML=moments(lpBuf);
+    // PSD for SFM
+    var useAvg=avgEl.checked;
+    var S;
+    if(!useAvg){S=spec;}
+    else{
+      psdAcc.fill(0);
+      for(var j=0;j<NCH;j++){
+        for(i=0;i<NP;i++){reBuf[i]=EPS[j][i]+a*STR[j][i];imBuf[i]=0;}
+        fft2(reBuf,imBuf,false);
+        for(i=0;i<NP;i++)psdAcc[i]+=reBuf[i]*reBuf[i]+imBuf[i]*imBuf[i];
+      }
+      for(i=0;i<NP;i++)psdAcc[i]/=NCH;
+      S=psdAcc;
+    }
+    var zeta=1e-8,lg=0,am=0,cnt=0;
+    for(i=1;i<NP;i++){var s=S[i]+zeta;lg+=Math.log(s);am+=s;cnt++;}
+    var sfm=Math.exp(lg/cnt)/(am/cnt);
+    var La=LAM.mu*M.mean*M.mean + LAM.sig*Math.pow(M.varr-1,2);
+    var Lb=LAM.gam*M.skew*M.skew + LAM.kap*Math.pow(M.kurt-3,2);
+    var Ls=LAM.s*Math.pow(1-sfm,2);
+    var Ll=LAM.lmu*ML.skew*ML.skew + LAM.lsig*Math.pow(ML.kurt-3,2);
+    return {a:a,M:M,ML:ML,sfm:sfm,La:La,Lb:Lb,Ls:Ls,Ll:Ll,LN:La+Lb+Ls+Ll,field:field,spec:spec,lp:lpBuf,struct:struct,avg:useAvg};
+  }
+
+  function div(v){ // diverging colour, v in [-1,1]
+    var t=Math.max(-1,Math.min(1,v));
+    var c0=[62,124,208],c1=[132,140,150],c2=[236,106,156];
+    var a,b,f;
+    if(t<0){a=c0;b=c1;f=t+1;}else{a=c1;b=c2;f=t;}
+    return [a[0]+(b[0]-a[0])*f|0, a[1]+(b[1]-a[1])*f|0, a[2]+(b[2]-a[2])*f|0];
+  }
+  function paint(cv,arr,scale,mode){
+    var ctx=cv.getContext("2d"),img=ctx.createImageData(N,N),d=img.data;
+    for(var i=0;i<NP;i++){
+      var c;
+      if(mode==="seq"){
+        var t=Math.max(0,Math.min(1,arr[i]));
+        c=[ (20+t*31)|0, (40+t*175)|0, (60+t*160)|0 ];
+      }else c=div(arr[i]/scale);
+      d[i*4]=c[0];d[i*4+1]=c[1];d[i*4+2]=c[2];d[i*4+3]=255;
+    }
+    ctx.putImageData(img,0,0);
+  }
+  function paintSpec(cv,spec){
+    // fftshift + log normalise
+    var arr=new Float64Array(NP),mn=1e30,mx=-1e30;
+    for(var y=0;y<N;y++)for(var x=0;x<N;x++){
+      var sy=(y+N/2)%N, sx=(x+N/2)%N;
+      var v=Math.log10(spec[sy*N+sx]+1e-6);
+      arr[y*N+x]=v; if(v<mn)mn=v; if(v>mx)mx=v;
+    }
+    var rng=(mx-mn)||1;
+    for(var i=0;i<NP;i++)arr[i]=(arr[i]-mn)/rng;
+    paint(cv,arr,1,"seq");
+  }
+
+  function bars(R){
+    clr(barH);
+    var items=[["ℒa 一二阶矩",R.La,"var(--td)"],["ℒb 偏度·峰度",R.Lb,"var(--dv)"],
+               ["ℒs 谱平坦度",R.Ls,"var(--cr)"],["ℒl 低频高阶矩",R.Ll,"var(--na)"]];
+    var lo=-8,hi=0;
+    items.forEach(function(it){
+      var L=it[1];
+      var lv=L<=0?lo:Math.max(lo,Math.min(hi,Math.log10(L)));
+      var w=(lv-lo)/(hi-lo)*100;
+      var d=document.createElement("div");
+      d.className="brow";
+      d.innerHTML='<div class="bl">'+it[0]+'</div><div class="bt"><i></i></div><div class="bv">'+expo(L)+'</div>';
+      var bar=d.querySelector("i");
+      bar.style.width=w.toFixed(1)+"%";
+      bar.style.background=it[2];
+      bar.style.opacity=".95";
+      barH.appendChild(d);
+    });
+    var sc=document.createElement("div");
+    sc.style.cssText="font-family:var(--font-mono);font-size:10px;color:var(--ink3);display:flex;justify-content:space-between;margin:6px 0 0 152px";
+    sc.innerHTML="<span>1e−8</span><span>1e−6</span><span>1e−4</span><span>1e−2</span><span>1</span>";
+    barH.appendChild(sc);
+    totH.textContent="ℒ_N = "+expo(R.LN);
+  }
+
+  var pending=false;
+  function render(){
+    if(pending)return; pending=true;
+    requestAnimationFrame(function(){
+      pending=false;
+      var R=compute();
+      document.getElementById("f4AV").textContent=R.a.toFixed(2);
+      paint(c1,R.field,3.2,"div");
+      paintSpec(c2,R.spec);
+      var lpmax=0;for(var i=0;i<NP;i++)lpmax=Math.max(lpmax,Math.abs(R.lp[i]));
+      paint(c3,R.lp,(lpmax||1)*0.9,"div");
+      paint(c4,R.struct,Math.max(0.35,R.a*2.6),"div");
+      ro(roH,[
+        ["均值 μ (→0)",R.M.mean.toFixed(4),Math.abs(R.M.mean)>0.02?"bad":"ok"],
+        ["方差 σ² (→1)",R.M.varr.toFixed(4),Math.abs(R.M.varr-1)>0.05?"bad":"ok"],
+        ["偏度 (→0)",R.M.skew.toFixed(4),Math.abs(R.M.skew)>0.05?"bad":"ok"],
+        ["超额峰度 (→0)",(R.M.kurt-3).toFixed(4),Math.abs(R.M.kurt-3)>0.1?"bad":"ok"],
+        ["谱平坦度 SFM (→1?)",R.sfm.toFixed(4),R.avg?(R.sfm>0.95?"ok":"bad"):"x"],
+        ["低频超额峰度",(R.ML.kurt-3).toFixed(3),Math.abs(R.ML.kurt-3)>0.5?"bad":"ok"]
+      ]);
+      bars(R);
+      var c;
+      if(R.a<0.02){
+        c=R.avg
+          ? "<b>a = 0，功率谱已在 48 个实现上平均。</b>残差就是完美白噪声，SFM ≈ 0.99，ℒs 落回 10⁻⁵ 量级，和 ℒa / ℒb 配比合理。<b>这才是让论文那组权重（0.1 / 0.2）说得通的设定</b>，但公式 (7) 写的是单个场的 |F(r̂)|²。"
+          : "<b>a = 0，按公式 (7) 字面计算。</b>残差是完美白噪声，可 SFM 只有 ≈ 0.56（理论值 e<sup>−γ</sup> = 0.5615），ℒs ≈ 2×10⁻² —— <b>比 ℒa / ℒb 大 2~3 个数量级</b>。把它往 1.0 推，等于要求一个恒模随机相位信号，那不是高斯噪声。勾上「功率谱先平均」看差别。";
+      }else{
+        var top=[["ℒa",R.La],["ℒb",R.Lb],["ℒs",R.Ls],["ℒl",R.Ll]].sort(function(p,q){return q[1]-p[1];})[0][0];
+        var kn=kind==="lf"?"低频内容状结构（对应 §03 重建里的 Δv：模型把画面内容当噪声减掉了）":
+               kind==="st"?"条纹伪影（功率谱出现尖峰，空间相关性极强）":
+               "稀疏亮斑（典型的重尾：峰度会先于其它指标爆掉）";
+        c="<b>叠入"+kn+"，强度 a = "+R.a.toFixed(2)+"。</b>此时贡献最大的是 <b>"+top+"</b>。注意方差也跟着涨到 "+R.M.varr.toFixed(2)+" —— 因为 r̂ = ε + a·Δv，两者独立时方差是 1 + a²，所以 ℒa 的第二项会自动报警，这是这套检验里最"+"容易触发、也最不特异的一项。";
+      }
+      capH.innerHTML=c+" <span style='color:var(--ink3)'>（64×64，二维 FFT 在你的浏览器里实做；权重取论文值 λ<sub>μ,σ,γ,κ,s</sub>=0.1、λ<sub>lμ,lσ</sub>=0.2；低通截止 = 归一化频率 0.125，论文未给该数值。<b>注意本面板是 64×64，比论文的 3×16×60×104 小得多</b>：低通后只剩约 4% 的自由度，所以 ℒl 在 a=0 时也有一个明显的估计噪声地板——这正是 §10‑D7 提到的第二个问题，在真实尺寸下会小很多。）</span>";
+    });
+  }
+  aEl.addEventListener("input",render);
+  avgEl.addEventListener("change",render);
+  reEl.addEventListener("click",function(){seed=(seed*7919+37)%99991;regen();render();});
+  seg(document.getElementById("f4Kind"),function(b){kind=b.dataset.k;regen();render();});
+  regen();render();
+})();
+
+/* ===================== FIG 5 algorithm stepper ===================== */
+(function(){
+  var host=document.getElementById("f5Algo"),pane=document.getElementById("f5Pane"); if(!host)return;
+  var L=[
+    ["cm","# 输入：KV cache（历史 x⁰_<i，21 潜帧）、文本条件 c、基座权重 θ","",""],
+    ["gT","φ ← θ ⊕ LoRA(rank 8, self-attn 的 Q/K/V)","初始化可训练副本","<b>唯一被训练的东西。</b>rank 8 是消融出来的甜点：rank 2 → FVD 596.2，rank 4 → 496.3，<b>rank 8 → 413.3</b>，rank 16 反而回到 425.6。<br><br><b>论文没说</b>：每个新块开始时 φ 是否重置回 θ。这决定了它是「局部修正算子」还是「持续在线微调」，两者的误差累积性质完全不同（§10‑D8）。"],
+    ["","for 每个自回归块 i = 1, 2, 3, … do","外层：视频时间","一个块 = 3 个潜帧 ≈ 12 个 RGB 帧 ≈ 0.75 s。15 秒视频约 <b>20 块</b>，也就是要做 20 次下面这整套微型训练。"],
+    ["cm","    # ---- ① 正常去噪，拿到候选块 ----","",""],
+    ["gT","    x̂₀ⁱ(θ) ← Denoise(x_T, 4 步, cond = cache ⊕ c)","基座前向","和 Self-Forcing 完全一致的一步。TANGO <b>不改训练、不改架构、不改采样器</b>，只是在这个结果定稿之前插了一段。"],
+    ["cm","    # ---- ④ 就地优化 5 个梯度步 ----","",""],
+    ["","    for k = 1 … 5 do","B=10 噪声向量 / batch 2 / 1 epoch","10 / 2 = <b>5 个梯度步</b>。注意正文说「每个优化步用 B 个噪声向量」，附录 A2 说「总共 B=10、batch 2、1 epoch」——两处对不上，以 A2 为准（§11）。<br><br>B 加到 20 时 FVD 还能降到 <b>399.4</b>，作者为省算力停在 10。这条趋势恰好也是 best-of-N 式收益的形状（§10‑D1）。"],
+    ["gT","        x̂₀ⁱ(φ) ← Denoise_φ(x_T, 4 步, cond = cache ⊕ c)","带 LoRA 的前向","每个梯度步都要重新生成一次候选块——这是 7 倍开销的主要来源之一。"],
+    ["","        𝓛 ← 0",""," "],
+    ["gC","        for ε in batch(2) do","② 前瞻，每个 ε 一次","对 <b>同一个</b>候选块，用不同的初始噪声去试探下一块，近似 (10) 式里的 𝔼<sub>ε</sub>[ℒ_N]。"],
+    ["gC","            x_t^{i+1} ← 由 ε 构造第 i+1 块的带噪状态   # ?","论文未说如何构造","<b>这是最大的实现空白。</b>第 i+1 块还没生成，没有干净信号可加噪。两种自洽读法：(a) 从纯噪声走一个欧拉步；(b) 把 x̂₀ⁱ 当作下一块的干净信号去加噪。两者的梯度含义不同（§03、§10‑D4）。"],
+    ["gD","            v ← v_θ(x_t^{i+1}, t, {x⁰_<i, x̂₀ⁱ(φ)})   # ?","裁判：权重冻结的同一个模型","<b>θ 冻结</b>，只有 φ 被更新。梯度必须穿过这次前向传回 φ，所以需要梯度检查点（显存 23.4 → 37.6 GiB）。<br><br><b>t 取哪一个，论文没说。</b>而灵敏度正比 (1−t)，t=1 时梯度恒为 0（FIG 3）。"],
+    ["gD","            r̂ ← x_t^{i+1} + (1−t)·v","隐含噪声 (A5)","flow matching 不直接预测噪声，要从速度场反解。这个反解在 t→1 处会把模型误差乘以 0 —— 所以附录 A1 说的「drop-in 替换 ε-参数化」并不成立（§10‑D4）。"],
+    ["gC","            𝓛 ← 𝓛 + ℒa(r̂) + ℒb(r̂) + ℒs(r̂) + ℒl(r̂)","③ 四项检验 (5)–(9)","一二阶矩 / 三四阶矩 / 谱平坦度 / 低频高阶矩。见 §04 的现场面板——其中 ℒs 的目标值 1.0 在单场实现下是错的（§10‑D3）。"],
+    ["gT","        𝓛 ← 𝓛/2 + λ_reg · ‖x̂₀ⁱ(φ) − x̂₀ⁱ(θ)‖²   # ?","约束项 (10)；归一化未说","<b>λ_reg = 0.9，比任何噪声权重都大。</b>消融里去掉它 FVD 变成 664.2，比完全不用这方法（576.8）还差 15% —— 它不是保险丝，是主承重（§10‑D10）。<br><br>‖·‖² 是求和还是均值？论文没写，而这决定了 0.9 : 0.1 这个配比是「拴住」还是「冻死」（§05）。"],
+    ["gT","        φ ← AdamW(φ, ∇_φ 𝓛, lr = 2×10⁻⁶)","更新","学习率极小。配合 5 步和强正则，单块的改动幅度很有限。"],
+    ["gT","    x̂₀ⁱ ← x̂₀ⁱ(φ)","定稿","<b>写回 cache 的是优化后的版本</b>，不是 ① 的那一版。"],
+    ["","    cache ← RollingUpdate(cache, x̂₀ⁱ)","滚动 KV cache","只保留最近 21 个潜帧（≈5 s）。超出窗口的历史直接丢掉——这也意味着 TANGO 的「历史」本身是有限的。"],
+    ["cm","# 15 s ≈ 20 块 ⇒ 20 次微型训练 ⇒ 1.2 min → 8.6 min","",""]
+  ];
+  var rows=[];
+  L.forEach(function(l,i){
+    var d=document.createElement("div");
+    d.className="ln "+(l[0]||"");
+    var no=document.createElement("div");no.className="no";no.textContent=String(i+1).padStart(2,"0");
+    var co=document.createElement("div");co.className="co";co.textContent=l[1];
+    d.appendChild(no);d.appendChild(co);
+    d.addEventListener("click",function(){sel(i);});
+    host.appendChild(d);rows.push(d);
+  });
+  function sel(i){
+    rows.forEach(function(r,j){r.classList.toggle("on",j===i);});
+    var l=L[i];
+    if(!l[3]||!l[3].trim()){
+      pane.innerHTML='<h5>选一行</h5><p style="font-size:13px;color:var(--ink3)">点左边任意一行，这里显示它在做什么、以及论文在这一行上留了什么空白。带 <code>#&nbsp;?</code> 的行是没有明确规定的地方。</p>';
+      return;
+    }
+    pane.innerHTML='<h5>'+(l[2]||"说明")+'</h5><p style="font-size:13.5px;line-height:1.75">'+l[3]+'</p>';
+  }
+  sel(10);
+})();
+
+/* ===================== FIG 6 drift ===================== */
+(function(){
+  var svg=document.getElementById("f6Svg"); if(!svg)return;
+  var roH=document.getElementById("f6Ro"),capH=document.getElementById("f6Cap");
+  var LAB=["1–3s","4–6s","7–9s","10–12s","13–15s"];
+  var D=[
+    {n:"TANGO（完整）",v:[365.1,408.8,412.7,441.4,438.8],c:"var(--na)",w:3,key:1},
+    {n:"baseline（w/o ℒ_N）",v:[367.9,554.6,600.7,645.4,715.6],c:"var(--bad)",w:2.6,key:1},
+    {n:"w/o ℒ_reg",v:[420.1,634.4,630.9,823.9,811.7],c:"var(--cr)",w:2,key:0},
+    {n:"w/o ℒ_b",v:[363.7,449.8,561.2,587.1,572.3],c:"var(--dm)",w:1.6,key:0},
+    {n:"w/o ℒ_s",v:[369.3,443.9,507.1,530.6,578.4],c:"var(--td)",w:1.6,key:0},
+    {n:"w/o ℒ_l",v:[380.3,452.8,518.4,534.8,545.2],c:"var(--dv)",w:1.6,key:0},
+    {n:"w/o ℒ_a",v:[364.6,418.1,467.1,469.8,488.2],c:"var(--ink3)",w:1.6,key:0}
+  ];
+  var mode="main";
+  function render(){
+    clr(svg);
+    var g=el("g",{});svg.appendChild(g);
+    var x0=66,x1=650,y0=28,y1=280;
+    var series=D.filter(function(d){return mode==="main"?d.key:true;});
+    var rel=(mode==="rel");
+    var vals=[];series.forEach(function(d){d.v.forEach(function(v,i){vals.push(rel?(v/d.v[0]-1)*100:v);});});
+    var lo=rel?0:330, hi=Math.max.apply(null,vals)*1.06;
+    if(rel)lo=-6;
+    function X(i){return x0+(x1-x0)*i/(LAB.length-1);}
+    function Y(v){return y1-(y1-y0)*(v-lo)/(hi-lo);}
+    for(var k=0;k<=5;k++){
+      var vv=lo+(hi-lo)*k/5,yy=Y(vv);
+      g.appendChild(el("line",{x1:x0,y1:yy,x2:x1,y2:yy,stroke:"var(--grid)","stroke-width":1}));
+      g.appendChild(el("text",{x:x0-9,y:yy+4,class:"xs f-ink3","text-anchor":"end"},rel?vv.toFixed(0)+"%":vv.toFixed(0)));
+    }
+    g.appendChild(el("line",{x1:x0,y1:y0,x2:x0,y2:y1,stroke:"var(--axis)","stroke-width":1.2}));
+    g.appendChild(el("line",{x1:x0,y1:y1,x2:x1,y2:y1,stroke:"var(--axis)","stroke-width":1.2}));
+    LAB.forEach(function(l,i){g.appendChild(el("text",{x:X(i),y:y1+18,class:"sml f-ink3","text-anchor":"middle"},l));});
+    g.appendChild(el("text",{x:14,y:18,class:"sml f-ink2"},rel?"相对首段的 FVD 增幅":"FVD ↓"));
+    series.forEach(function(d,si){
+      var pts=d.v.map(function(v,i){return [X(i),Y(rel?(v/d.v[0]-1)*100:v)];});
+      g.appendChild(el("path",{d:pts.map(function(p,i){return (i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1);}).join(" "),
+        fill:"none",stroke:d.c,"stroke-width":d.w,"stroke-linejoin":"round",opacity:d.key||mode!=="abl"?1:.78}));
+      pts.forEach(function(p){g.appendChild(el("circle",{cx:p[0],cy:p[1],r:d.w>2?4:2.8,fill:d.c}));});
+      var last=pts[pts.length-1];
+      g.appendChild(el("text",{x:x1+10,y:last[1]+4,class:"sml",fill:d.c},d.n));
+    });
+    if(mode==="main"){
+      g.appendChild(el("text",{x:X(0)+16,y:Y(365.1)-16,class:"sml f-ink3"},"起点几乎重合（0.8%）"));
+      g.appendChild(el("path",{d:"M"+(X(0)+13)+" "+(Y(365)-11)+" L"+(X(0)+4)+" "+(Y(367)-3),fill:"none",stroke:"var(--ink3)","stroke-width":1}));
+    }
+    var ro1=[["TANGO 首→末","365.1 → 438.8","n"],["增幅","+20%","ok"],["baseline 首→末","367.9 → 715.6","bad"],["增幅","+94%","bad"],["首段差距","0.8%","x"]];
+    ro(roH,ro1);
+    var caps={
+      main:"<b>只看两条线。</b>首段（1–3 s）几乎重合：365.1 vs 367.9。此后 baseline 近乎线性地劣化到 715.6，而 TANGO 基本走平。<b>这篇论文真正做到的事，是把劣化斜率压下去</b>，不是把整体画质提一档。",
+      abl:"<b>全部消融。</b>注意 w/o ℒ_reg（橙）在<b>每一段</b>都比 baseline（红）更差——放开约束的噪声引导是有害的，不只是无效。四个噪声项去掉任意一个都只是「劣化得快一点」，说明它们之间有相当的冗余。",
+      rel:"<b>换成相对首段的增幅</b>，斜率差异最刺眼：TANGO +20%，baseline +94%，w/o ℒ_reg +93%。所有变体的首段值都挤在 363.7~380.3（除 w/o ℒ_reg 的 420.1），也就是说<b>按这台仪器，噪声引导在前 3 秒几乎什么都没做</b>——这与附录 A3 用 VBench 得出的「任何长度都有效」存在张力。"
+    };
+    capH.innerHTML=caps[mode];
+  }
+  seg(document.getElementById("f6Seg"),function(b){mode=b.dataset.k;render();});
+  window.addEventListener("themechange",render);
+  render();
+})();
+
+/* ===================== tables ===================== */
+(function(){
+  var T1=[
+    ["RollingForcing",0.658,0.205,0.957,0.819,0.403,0.940,0.712,0.986,0.932,0.935],
+    ["Self-Forcing",0.644,0.206,0.942,0.848,0.611,0.950,0.696,0.985,0.896,0.959],
+    ["CausVid",0.665,0.242,0.966,0.824,0.872,0.998,0.702,0.976,0.747,0.937],
+    ["RewardForcing",0.650,0.205,0.954,0.896,0.625,0.980,0.687,0.984,0.845,0.940],
+    ["LongLive",0.660,0.205,0.958,0.885,0.361,0.960,0.695,0.988,0.851,0.969],
+    ["TANGO (ours)",0.690,0.257,0.962,0.850,0.769,0.960,0.727,0.985,0.937,0.972]
+  ];
+  var T2=[
+    ["RollingForcing",0.269,0.563,0.747,0.958,0.991,0.241,0.802,0.814,0.804],
+    ["Self-Forcing",0.271,0.578,0.768,0.928,0.989,0.249,0.832,0.808,0.827],
+    ["CausVid",0.275,0.556,0.667,0.933,0.938,0.252,0.837,0.794,0.828],
+    ["RewardForcing",0.269,0.539,0.830,0.932,0.986,0.244,0.835,0.804,0.829],
+    ["LongLive",0.268,0.591,0.801,0.953,0.992,0.242,0.838,0.812,0.832],
+    ["TANGO (ours)",0.283,0.603,0.859,0.945,0.989,0.275,0.864,0.860,0.863]
+  ];
+  function build(id,data){
+    var tb=document.querySelector("#"+id+" tbody");
+    var ncol=data[0].length;
+    var best=[];
+    for(var c=1;c<ncol;c++){var m=-1;data.forEach(function(r){if(r[c]>m)m=r[c];});best.push(m);}
+    function draw(rows){
+      clr(tb);
+      rows.forEach(function(r){
+        var tr=document.createElement("tr");
+        if(r[0].indexOf("TANGO")===0)tr.className="me";
+        r.forEach(function(v,c){
+          var td=document.createElement("td");
+          if(c===0){td.innerHTML="<b>"+v+"</b>";}
+          else{td.className="num"+(Math.abs(v-best[c-1])<1e-9?" best":"");td.textContent=v.toFixed(3);}
+          tr.appendChild(td);
+        });
+        tb.appendChild(tr);
+      });
+    }
+    draw(data);
+    var ths=[].slice.call(document.querySelectorAll("#"+id+" th.srt"));
+    var dir={};
+    ths.forEach(function(th){
+      th.addEventListener("click",function(){
+        var c=+th.dataset.c;
+        dir[c]=!dir[c];
+        ths.forEach(function(x){x.classList.toggle("act",x===th);});
+        var rows=data.slice().sort(function(a,b){
+          if(c===0)return dir[c]?(a[0]<b[0]?-1:1):(a[0]>b[0]?-1:1);
+          return dir[c]?a[c]-b[c]:b[c]-a[c];
+        });
+        draw(rows);
+      });
+    });
+  }
+  build("tRes",T1);build("tRes2",T2);
+})();
+
+/* ===================== FIG 7 VBench weighting ===================== */
+(function(){
+  var svg=document.getElementById("f7Svg"); if(!svg)return;
+  var qEl=document.getElementById("f7Q"),sEl=document.getElementById("f7S");
+  var M=[["RollingForcing",0.802,0.814,0.804],["Self-Forcing",0.832,0.808,0.827],["CausVid",0.837,0.794,0.828],
+         ["RewardForcing",0.835,0.804,0.829],["LongLive",0.838,0.812,0.832],["TANGO",0.864,0.860,0.863]];
+  function render(){
+    var q=+qEl.value/1000,s=+sEl.value/1000;
+    document.getElementById("f7QV").textContent=q.toFixed(3);
+    document.getElementById("f7SV").textContent=s.toFixed(3);
+    clr(svg);
+    var g=el("g",{});svg.appendChild(g);
+    var x0=70,x1=480,y0=26,y1=160,qlo=.78,qhi=.88,slo=.78,shi=.88;
+    function X(v){return x0+(x1-x0)*(v-qlo)/(qhi-qlo);}
+    function Y(v){return y1-(y1-y0)*(v-slo)/(shi-slo);}
+    // iso-total lines
+    [0.80,0.81,0.82,0.83,0.84,0.85,0.86,0.87].forEach(function(tt){
+      // 4q + s = 5t  -> s = 5t - 4q
+      var qa=qlo,sa=5*tt-4*qa, qb=qhi,sb=5*tt-4*qb;
+      var pts=[[qa,sa],[qb,sb]].filter(function(p){return true;});
+      g.appendChild(el("line",{x1:X(qa),y1:Y(sa),x2:X(qb),y2:Y(sb),stroke:"var(--grid)","stroke-width":1}));
+      if(sa<=shi&&sa>=slo)g.appendChild(el("text",{x:X(qa)+3,y:Y(sa)-3,class:"xs f-ink3"},tt.toFixed(2)));
+    });
+    g.appendChild(el("rect",{x:x0,y:y0,width:x1-x0,height:y1-y0,fill:"none",stroke:"var(--axis)","stroke-width":1.2}));
+    g.appendChild(el("text",{x:(x0+x1)/2,y:y1+22,class:"sml f-ink3","text-anchor":"middle"},"Quality Score →"));
+    g.appendChild(el("text",{x:18,y:y0+10,class:"sml f-ink3"},"Semantic ↑"));
+    M.forEach(function(m){
+      var isT=m[0]==="TANGO";
+      g.appendChild(el("circle",{cx:X(m[1]),cy:Y(m[2]),r:isT?6:4,fill:isT?"var(--na)":"var(--ink3)"}));
+      g.appendChild(el("text",{x:X(m[1])+9,y:Y(m[2])+4,class:"xs",fill:isT?"var(--na-ink)":"var(--ink3)"},m[0]+" "+m[3].toFixed(3)));
+    });
+    var cx=X(Math.max(qlo,Math.min(qhi,q))),cy=Y(Math.max(slo,Math.min(shi,s)));
+    g.appendChild(el("circle",{cx:cx,cy:cy,r:7,fill:"none",stroke:"var(--cr)","stroke-width":2}));
+    // right: decomposition
+    var bx=540,bw=290,tot=(q*4+s)/5;
+    g.appendChild(el("text",{x:bx,y:38,class:"big f-ink"},"Total = ( Quality×4 + Semantic×1 ) / 5"));
+    g.appendChild(el("rect",{x:bx,y:52,width:bw*0.8,height:24,rx:5,fill:"var(--td-soft)",stroke:"var(--td)"}));
+    g.appendChild(el("rect",{x:bx+bw*0.8,y:52,width:bw*0.2,height:24,rx:5,fill:"var(--dm-soft)",stroke:"var(--dm)"}));
+    g.appendChild(el("text",{x:bx+10,y:69,class:"mono sml f-Ti"},"Quality  ×4"));
+    g.appendChild(el("text",{x:bx+bw*0.8+8,y:69,class:"mono xs f-Di"},"Sem ×1"));
+    g.appendChild(el("text",{x:bx,y:106,class:"mono lbl f-ink2"},"( "+q.toFixed(3)+"×4 + "+s.toFixed(3)+" ) / 5"));
+    g.appendChild(el("text",{x:bx,y:140,class:"f-Ni",style:"font-size:30px;font-family:var(--font-display);font-weight:700"},tot.toFixed(4)));
+    var match=M.filter(function(m){return Math.abs((m[1]*4+m[2])/5-tot)<0.0006;});
+    g.appendChild(el("text",{x:bx,y:164,class:"sml f-ink3"},match.length?("↔ 与论文表中 "+match[0][0]+" 的 Total "+match[0][3].toFixed(3)+" 吻合"):"（拖动滑块对准任一方法）"));
+    g.appendChild(el("text",{x:bx,y:182,class:"xs f-ink3"},"六个方法逐一核对全部吻合 ⇒ 两张表内部一致"));
+  }
+  [qEl,sEl].forEach(function(x){x.addEventListener("input",render);});
+  window.addEventListener("themechange",render);
+  render();
+})();
+
+/* ===================== FIG 8 ablation bars ===================== */
+(function(){
+  var host=document.getElementById("f8Bars"); if(!host)return;
+  var D=[["TANGO（完整）",413.3,"hl"],["w/o ℒa",441.6,""],["w/o ℒl",486.3,""],["w/o ℒs",487.9,""],
+         ["w/o ℒb",506.8,""],["baseline（完全不用）",576.8,"ref"],["w/o ℒreg",664.2,"dim"]];
+  var mx=700;
+  D.forEach(function(d){
+    var row=document.createElement("div");
+    row.className="brow "+(d[2]==="hl"?"hl":d[2]==="dim"?"dim":"");
+    var pct=(d[1]/mx*100).toFixed(1);
+    var extra=d[2]==="ref"?' style="background:var(--ink3);opacity:.75"':'';
+    row.innerHTML='<div class="bl">'+d[0]+'</div><div class="bt"><i style="width:'+pct+'%"'+(extra?extra.replace(' style="',' data-x="'):"")+'></i></div><div class="bv">'+d[1].toFixed(1)+'</div>';
+    if(d[2]==="ref"){row.querySelector("i").style.background="var(--ink2)";row.querySelector("i").style.opacity=".8";}
+    host.appendChild(row);
+  });
+  var note=document.createElement("div");
+  note.style.cssText="margin-top:10px;font-size:12px;color:var(--ink3);line-height:1.6";
+  note.innerHTML="灰条 = 完全不用 TANGO（576.8）。<b style='color:var(--bad-ink)'>只有 w/o ℒreg 越过了它</b>：没有约束的噪声引导比不做还差 15%。";
+  host.appendChild(note);
+})();
+
+/* ===================== FIG 8b hyperparameters ===================== */
+(function(){
+  var svg=document.getElementById("f8bSvg"); if(!svg)return;
+  var P=[
+    {n:"LoRA rank",d:8,v:[[2,596.2],[4,496.3],[8,413.3],[16,425.6]]},
+    {n:"B（噪声向量）",d:10,v:[[1,473.7],[5,461.8],[10,413.3],[20,399.4]],note:"↓ 越多越好"},
+    {n:"λ_reg",d:0.9,v:[[0.1,656.5],[0.5,449.3],[0.9,413.3],[10,475.6]]},
+    {n:"λ_μ",d:0.1,v:[[0.01,503.8],[0.1,413.3],[1,449.3]]},
+    {n:"λ_σ",d:0.1,v:[[0.01,482.8],[0.1,413.3],[1,540.7]]},
+    {n:"λ_lμ",d:0.2,v:[[0.02,419.8],[0.2,413.3],[2,464.7]]},
+    {n:"λ_lσ",d:0.2,v:[[0.02,482.8],[0.2,413.3],[2,464.7]]},
+    {n:"λ_γ",d:0.1,v:[[0.01,468.1],[0.1,413.3],[1,442.7]]},
+    {n:"λ_κ",d:0.1,v:[[0.01,479.0],[0.1,413.3],[1,482.6]]},
+    {n:"λ_s",d:0.1,v:[[0.01,477.4],[0.1,413.3],[1,429.1]]}
+  ];
+  var DUP={"482.8":1,"464.7":1,"449.3":1};
+  function render(){
+    clr(svg);
+    var g=el("g",{});svg.appendChild(g);
+    var cw=166,ch=140,ox=24,oy=16;
+    P.forEach(function(p,pi){
+      var col=pi%5,row=(pi/5)|0;
+      var X0=ox+col*cw, Y0=oy+row*ch;
+      var gg=el("g",{transform:"translate("+X0+","+Y0+")"});g.appendChild(gg);
+      gg.appendChild(el("text",{x:0,y:10,class:"mono sml f-ink2"},p.n));
+      var w=132,h=78,top=20;
+      var lo=390,hi=680;
+      function Y(v){return top+h-(v-lo)/(hi-lo)*h;}
+      gg.appendChild(el("rect",{x:0,y:top,width:w,height:h,fill:"var(--surf2)",stroke:"var(--rule)"}));
+      // baseline ref 576.8
+      gg.appendChild(el("line",{x1:0,y1:Y(576.8),x2:w,y2:Y(576.8),stroke:"var(--ink3)","stroke-width":1,"stroke-dasharray":"3 3",opacity:.7}));
+      var pts=p.v.map(function(d,i){return [w*(i+0.5)/p.v.length, Y(d[1])];});
+      gg.appendChild(el("path",{d:pts.map(function(q,i){return (i?"L":"M")+q[0].toFixed(1)+" "+q[1].toFixed(1);}).join(" "),
+        fill:"none",stroke:"var(--rule2)","stroke-width":1.6}));
+      p.v.forEach(function(d,i){
+        var isD=Math.abs(d[0]-p.d)<1e-9;
+        var isDup=DUP[d[1].toFixed(1)]&&!isD;
+        gg.appendChild(el("circle",{cx:pts[i][0],cy:pts[i][1],r:isD?4.6:3.2,
+          fill:isD?"var(--na)":(isDup?"var(--bad)":"var(--ink3)")}));
+        gg.appendChild(el("text",{x:pts[i][0],y:top+h+12,class:"xs f-ink3","text-anchor":"middle"},String(d[0])));
+        if(isD||isDup)gg.appendChild(el("text",{x:pts[i][0],y:pts[i][1]-7,class:"xs","text-anchor":"middle",
+          fill:isD?"var(--na-ink)":"var(--bad-ink)"},d[1].toFixed(1)));
+      });
+      if(p.note)gg.appendChild(el("text",{x:0,y:top+h+26,class:"xs f-Xi"},p.note));
+    });
+    g.appendChild(el("text",{x:24,y:294,class:"xs f-ink3"},"每格纵轴统一为 FVD 390–680；灰虚线 = 完全不用 TANGO 的 576.8。横轴为试过的取值。"));
+  }
+  window.addEventListener("themechange",render);
+  render();
+  document.getElementById("f8bCap").innerHTML="十个超参里有<b>九个</b>的最优点恰好落在论文采用的那一档，形状都是干净的 U。唯一的例外是 <b>B</b>：20 比默认的 10 更好（399.4 vs 413.3），作者明说是为算力止步于 10。<b>红点标的是表里三处完全重复的 FVD 值</b>（482.8 / 464.7 / 449.3），它们分属本应互相独立的跑（§10‑D9）。";
+})();
+
+/* ===================== FIG 9 cost scatter ===================== */
+(function(){
+  var svg=document.getElementById("f9Svg"); if(!svg)return;
+  var roH=document.getElementById("f9Ro"),capH=document.getElementById("f9Cap");
+  var D=[
+    ["Baseline (Self-Forcing)","1.3B",0.827,1.2,23.4,"var(--ink3)"],
+    ["HunyuanVideo","13B",0.832,92.3,62.5,"var(--ink3)"],
+    ["SVI-1.0 (Wan2.1)","14B",0.837,30.6,37.9,"var(--ink3)"],
+    ["SVI-2.0 (Wan2.1)","14B",0.849,39.8,37.9,"var(--ink3)"],
+    ["SVI-2.0-Pro (Wan2.2)","27B",0.869,43.2,68.4,"var(--cr)"],
+    ["TANGO (ours)","1.3B",0.863,8.6,37.6,"var(--na)"]
+  ];
+  var mode="off";
+  function render(){
+    clr(svg);
+    var g=el("g",{});svg.appendChild(g);
+    var x0=80,x1=760,y0=36,y1=270;
+    var lo=Math.log10(1),hi=Math.log10(120);
+    function X(m){return x0+(x1-x0)*(Math.log10(m)-lo)/(hi-lo);}
+    function Y(v){return y1-(y1-y0)*(v-0.818)/(0.880-0.818);}
+    [1,2,5,10,20,50,100].forEach(function(m){
+      g.appendChild(el("line",{x1:X(m),y1:y0,x2:X(m),y2:y1,stroke:"var(--grid)","stroke-width":1}));
+      g.appendChild(el("text",{x:X(m),y:y1+18,class:"xs f-ink3","text-anchor":"middle"},m+"′"));
+    });
+    [0.82,0.83,0.84,0.85,0.86,0.87].forEach(function(v){
+      g.appendChild(el("line",{x1:x0,y1:Y(v),x2:x1,y2:Y(v),stroke:"var(--grid)","stroke-width":1}));
+      g.appendChild(el("text",{x:x0-9,y:Y(v)+4,class:"xs f-ink3","text-anchor":"end"},v.toFixed(2)));
+    });
+    g.appendChild(el("line",{x1:x0,y1:y1,x2:x1,y2:y1,stroke:"var(--axis)","stroke-width":1.2}));
+    g.appendChild(el("line",{x1:x0,y1:y0,x2:x0,y2:y1,stroke:"var(--axis)","stroke-width":1.2}));
+    g.appendChild(el("text",{x:(x0+x1)/2,y:y1+38,class:"sml f-ink3","text-anchor":"middle"},"15 s 视频生成耗时（分钟，对数轴）"));
+    g.appendChild(el("text",{x:16,y:26,class:"sml f-ink2"},"VBench 总分 ↑"));
+    D.forEach(function(d){
+      var r=Math.sqrt(d[4])*1.5;
+      g.appendChild(el("circle",{cx:X(d[3]),cy:Y(d[2]),r:r,fill:d[5],opacity:.22}));
+      g.appendChild(el("circle",{cx:X(d[3]),cy:Y(d[2]),r:4.5,fill:d[5]}));
+      var top=d[0].indexOf("Hunyuan")===0;
+      var anchor=top?"end":(d[3]>40?"end":"start"), dx=top?(r+4):(d[3]>40?-(r+8):(r+8));
+      var dy=top?-(r+16):-2;
+      g.appendChild(el("text",{x:X(d[3])+dx,y:Y(d[2])+dy,class:"sml","text-anchor":anchor,fill:d[5]==="var(--ink3)"?"var(--ink2)":d[5]},d[0]));
+      g.appendChild(el("text",{x:X(d[3])+dx,y:Y(d[2])+dy+15,class:"xs f-ink3","text-anchor":anchor},d[1]+" · "+d[4]+" GiB · "+d[2].toFixed(3)));
+    });
+    if(mode==="on"){
+      g.appendChild(el("line",{x1:X(1.2),y1:Y(0.827),x2:X(8.6),y2:Y(0.827),stroke:"var(--bad)","stroke-width":1.6,"stroke-dasharray":"5 4"}));
+      g.appendChild(el("circle",{cx:X(8.6),cy:Y(0.827),r:9,fill:"none",stroke:"var(--bad)","stroke-width":2,"stroke-dasharray":"3 3"}));
+      g.appendChild(el("text",{x:X(8.6),y:Y(0.827)+6,class:"big f-Bi","text-anchor":"middle"},"?"));
+      g.appendChild(el("text",{x:X(8.6)+16,y:Y(0.827)+4,class:"sml f-Bi"},"Self-Forcing + 同等 7.2× 算力"));
+      g.appendChild(el("text",{x:X(8.6)+16,y:Y(0.827)+19,class:"xs f-ink3"},"（更多去噪步 / best-of-B / 重复采样）—— 论文没有做这个对照"));
+      g.appendChild(el("rect",{x:X(1.2)-4,y:y0+4,width:X(8.6)-X(1.2)+8,height:y1-y0-8,fill:"var(--bad-soft)",opacity:.35}));
+    }
+    ro(roH,[
+      ["TANGO 参数量","1.3B","n"],["达到的分数","0.863","ok"],
+      ["对手 SVI-2.0-Pro","27B / 0.869","x"],["耗时比","8.6 vs 43.2 min","ok"],
+      ["相对自家基线","×7.2 / ×1.6","bad"]
+    ]);
+    capH.innerHTML = mode==="on"
+      ? "<b>红圈是这张图里最该有、却缺席的那个点。</b>把 Self-Forcing 也给 8.6 分钟——多跑去噪步、或者抽 B 条候选挑最好的——它会落在哪里？论文没有做。在这个点被填上之前，「1.3B 打平 27B」证明的是<b>测试时算力有用</b>，而不一定是<b>噪声一致性这个判据有用</b>（§10‑D1）。"
+      : "<b>论文原始数据（Tab. 4）。</b>TANGO 以 1.3B 拿到 0.863，逼近 27B 的 SVI-2.0-Pro（0.869），而耗时只有它的 1/5、显存约一半。气泡面积 = 显存。这张图是这篇论文最有力的卖点——前提是你接受「基线不给额外算力」这个比法。点右边的按钮看我的意见。";
+  }
+  seg(document.getElementById("f9Seg"),function(b){mode=b.dataset.k;render();});
+  window.addEventListener("themechange",render);
+  render();
+})();
+
+/* ===================== FIG 10 lineage ===================== */
+(function(){
+  var svg=document.getElementById("f10Svg"); if(!svg)return;
+  function render(){
+    clr(svg);
+    var g=el("g",{});svg.appendChild(g);
+    var cols=[
+      {t:"训练时干预",s:"改训练循环，代价在训练侧",items:["Self-Forcing — 训练时展开自己的预测","BlockVid / 时序展开","AutoRefiner — 外挂提纯网络"],c:"var(--td)"},
+      {t:"架构 / 注意力",s:"收窄生成流形换稳定",items:["RollingForcing — 注意力 sink","LongLive — 锚定初始帧","StreamingT2V — 长短期记忆块"],c:"var(--dm)"},
+      {t:"免训练采样调度",s:"改噪声或去噪顺序",items:["FreeNoise — 噪声重排","FreeLong — 多频带平衡","Gen-L-Video — 重叠片段共去噪"],c:"var(--cr)"},
+      {t:"测试时优化",s:"推理时真的做梯度下降",items:["TANGO — 噪声一致性（本文）","Self-Refining Video Sampling [24]","Pathwise Test-Time Correction [56]","TTOM [44] / test-time alignment [27]"],c:"var(--na)"}
+    ];
+    var w=196,x0=16;
+    cols.forEach(function(c,ci){
+      var X=x0+ci*(w+14);
+      g.appendChild(el("rect",{x:X,y:18,width:w,height:250,rx:11,fill:"var(--surf2)",stroke:c.c,"stroke-width":1.2,opacity:ci===3?1:.72}));
+      g.appendChild(el("text",{x:X+14,y:42,class:"big",fill:c.c},c.t));
+      g.appendChild(el("text",{x:X+14,y:60,class:"xs f-ink3"},c.s));
+      c.items.forEach(function(it,ii){
+        var Y=82+ii*42, me=it.indexOf("TANGO")===0;
+        var miss=it.indexOf("[24]")>0||it.indexOf("[56]")>0||it.indexOf("[44]")>0;
+        g.appendChild(el("rect",{x:X+12,y:Y-14,width:w-24,height:34,rx:7,
+          fill:me?"var(--na-soft)":"var(--surf)",stroke:me?"var(--na)":"var(--rule)","stroke-width":me?1.6:1,
+          "stroke-dasharray":miss?"4 3":""}));
+        var parts=it.split(" — ");
+        g.appendChild(el("text",{x:X+20,y:Y-1,class:"sml",fill:me?"var(--na-ink)":(miss?"var(--ink3)":"var(--ink2)")},parts[0]));
+        if(parts[1])g.appendChild(el("text",{x:X+20,y:Y+13,class:"xs f-ink3"},parts[1]));
+      });
+      if(ci<3)g.appendChild(el("path",{d:"M"+(X+w)+" 143 L"+(X+w+10)+" 143",stroke:"var(--ink3)","stroke-width":1.3,"marker-end":"url(#ar-n)"}));
+    });
+    g.appendChild(el("text",{x:16,y:288,class:"xs f-ink3"},"虚线框 = 论文在相关工作里提到、但没有放进对比表的同格方法（§10‑D1）。越往右，算力越集中在推理侧、越不需要改训练。"));
+  }
+  window.addEventListener("themechange",render);
+  render();
+})();
+
+/* ===================== doubts filter ===================== */
+(function(){
+  var list=document.getElementById("dvList"); if(!list)return;
+  var items=[].slice.call(list.querySelectorAll(".dt"));
+  seg(document.getElementById("dvFilter"),function(b){
+    var s=b.dataset.s;
+    items.forEach(function(d){d.hidden=(s!=="all"&&d.dataset.s!==s);});
+  });
+  var open=false;
+  document.getElementById("dvAll").addEventListener("click",function(){
+    open=!open;items.forEach(function(d){if(!d.hidden)d.open=open;});
+  });
+})();
+</script>
+</body>
+</html>
