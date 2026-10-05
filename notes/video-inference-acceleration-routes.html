@@ -1,0 +1,1392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视频生成推理加速：一个乘式，八条路线</title>
+<meta name="description" content="把列表里 132 篇加速工作挂回同一个成本乘式：每帧延迟 = 步数 × token 数 × 注意力 × 位宽 ÷ 复用。蒸馏砍第一项，稀疏与线性砍第三项，量化砍第四项，缓存砍最后一项——谁和谁能叠加，谁和谁在互相拆台。">
+<style>
+  :root { color-scheme: light dark; }
+  html[data-theme="light"] { color-scheme: light; }
+  html[data-theme="dark"]  { color-scheme: dark; }
+
+  body {
+    color-scheme: light;
+    --page:      #f9f9f7;
+    --surface:   #fcfcfb;
+    --ink:       #0b0b0b;
+    --ink2:      #52514e;
+    --muted:     #898781;
+    --grid:      #e1e0d9;
+    --axis:      #c3c2b7;
+    --hairline:  rgba(11,11,11,0.10);
+    --r-step:    #2a78d6;  /* 轴一 步数 */
+    --r-adapt:   #7a5cd0;  /* 轴二 自适应 */
+    --r-cache:   #1baf7a;  /* 轴三 缓存 */
+    --r-sparse:  #eb6834;  /* 轴四 稀疏 */
+    --r-linear:  #c2410c;  /* 轴五 线性 */
+    --r-token:   #eda100;  /* 轴六 token */
+    --r-kv:      #e87ba4;  /* 轴七 KV */
+    --r-quant:   #8a8f2b;  /* 轴八 量化 */
+    --r-causal:  #6b7280;  /* 前提 因果化 */
+    --r-sys:     #0e7490;  /* 落地 系统 */
+    --good:      #006300;
+    --bad:       #d03b3b;
+    --code-bg:   #f4f3f0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) body {
+      color-scheme: dark;
+      --page:      #0d0d0d;
+      --surface:   #1a1a19;
+      --ink:       #ffffff;
+      --ink2:      #c3c2b7;
+      --muted:     #898781;
+      --grid:      #2c2c2a;
+      --axis:      #383835;
+      --hairline:  rgba(255,255,255,0.10);
+      --r-step:    #3987e5;
+      --r-adapt:   #9b84e0;
+      --r-cache:   #199e70;
+      --r-sparse:  #f0794a;
+      --r-linear:  #e06236;
+      --r-token:   #c98500;
+      --r-kv:      #d55181;
+      --r-quant:   #b6bc3c;
+      --r-causal:  #9aa1ac;
+      --r-sys:     #22a5c4;
+      --good:      #0ca30c;
+      --bad:       #e66767;
+      --code-bg:   #232322;
+    }
+  }
+  html[data-theme="dark"] body {
+    color-scheme: dark;
+    --page:      #0d0d0d;
+    --surface:   #1a1a19;
+    --ink:       #ffffff;
+    --ink2:      #c3c2b7;
+    --muted:     #898781;
+    --grid:      #2c2c2a;
+    --axis:      #383835;
+    --hairline:  rgba(255,255,255,0.10);
+    --r-step:    #3987e5;
+    --r-adapt:   #9b84e0;
+    --r-cache:   #199e70;
+    --r-sparse:  #f0794a;
+    --r-linear:  #e06236;
+    --r-token:   #c98500;
+    --r-kv:      #d55181;
+    --r-quant:   #b6bc3c;
+    --r-causal:  #9aa1ac;
+    --r-sys:     #22a5c4;
+    --good:      #0ca30c;
+    --bad:       #e66767;
+    --code-bg:   #232322;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 16px 64px;
+    background: var(--page); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-size: 15px; line-height: 1.8;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+
+  /* ---------- header ---------- */
+  header { padding: 44px 4px 10px; position: relative; }
+  .kicker { font-size: 12.5px; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; }
+  h1 { font-size: 27px; line-height: 1.4; margin: 0 0 10px; font-weight: 700; }
+  .sub { color: var(--ink2); max-width: 46em; margin: 0 0 18px; }
+  #themeBtn {
+    position: absolute; top: 44px; right: 4px;
+    border: 1px solid var(--hairline); background: var(--surface); color: var(--ink2);
+    border-radius: 999px; padding: 5px 13px; font-size: 12.5px; cursor: pointer;
+  }
+  #themeBtn:hover { color: var(--ink); }
+  .statrow { display: flex; flex-wrap: wrap; gap: 8px; }
+  .stat {
+    border: 1px solid var(--hairline); background: var(--surface);
+    border-radius: 999px; padding: 5px 14px; font-size: 12.5px; color: var(--ink2);
+  }
+  .stat b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* ---------- sections ---------- */
+  section.card {
+    background: var(--surface); border: 1px solid var(--hairline);
+    border-radius: 14px; padding: 26px 28px 24px; margin: 18px 0;
+  }
+  .sechead { display: flex; align-items: baseline; gap: 12px; margin: 0 0 6px; }
+  .secnum { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .08em; font-variant-numeric: tabular-nums; }
+  h2 { font-size: 19.5px; margin: 0; font-weight: 700; }
+  h3 { font-size: 16px; margin: 26px 0 8px; font-weight: 700; }
+  p  { margin: 8px 0; color: var(--ink2); }
+  p strong, li strong { color: var(--ink); font-weight: 600; }
+  .lead { color: var(--ink2); }
+  ul.pts { margin: 6px 0 4px; padding-left: 1.3em; color: var(--ink2); }
+  ul.pts li { margin: 5px 0; }
+  ul.pts li::marker { color: var(--muted); }
+  a.ref { color: var(--ink2); text-decoration: none; border-bottom: 1px solid var(--hairline); }
+  a.ref:hover { color: var(--ink); border-bottom-color: currentColor; }
+
+  /* ---------- figures ---------- */
+  .fig { margin: 14px 0 6px; }
+  .fig svg { width: 100%; height: auto; display: block; }
+  .figcap { font-size: 12.5px; color: var(--muted); margin: 6px 2px 0; line-height: 1.65; }
+  .svgtxt { font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  .legendrow { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 12px 0 4px; align-items: center; }
+  .lg { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink2); }
+  .lg .sw { width: 13px; height: 13px; border-radius: 4px; border: 1.6px solid; display: inline-block; }
+
+  /* ---------- 评注 ---------- */
+  .insight {
+    border-left: 3px solid var(--r-step); border-radius: 4px;
+    background: color-mix(in srgb, var(--r-step) 5%, var(--surface));
+    padding: 10px 16px; margin: 14px 0; color: var(--ink2); font-size: 14px;
+  }
+  .insight .t { font-weight: 700; color: var(--ink); display: block; margin-bottom: 2px; font-size: 13.5px; }
+  .insight.warn { border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 5%, var(--surface)); }
+
+  /* ---------- 对比表 ---------- */
+  .cmp { width: 100%; border-collapse: collapse; margin: 14px 0 4px; font-size: 13.5px; }
+  .cmp th, .cmp td { text-align: left; vertical-align: top; padding: 10px 12px; border-top: 1px solid var(--grid); line-height: 1.65; }
+  .cmp thead th { border-top: none; font-size: 13px; color: var(--ink); padding-top: 4px; }
+  .cmp thead .en { display: block; font-weight: 400; font-size: 11px; color: var(--muted); }
+  .cmp td { color: var(--ink2); }
+  .cmp td b { color: var(--ink); font-weight: 600; }
+  .cmp .good { color: var(--good); font-weight: 600; }
+  .cmp .bad  { color: var(--bad); }
+
+  /* ---------- 路线索引 ---------- */
+  .filterbar { display: flex; flex-wrap: wrap; gap: 7px; margin: 14px 0 4px; }
+  .fbtn {
+    border: 1px solid var(--hairline); background: color-mix(in srgb, var(--ink) 3%, var(--surface));
+    color: var(--ink2); border-radius: 999px; padding: 4px 13px; font-size: 12.5px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .fbtn .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .fbtn .ct { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+  .fbtn[aria-pressed="true"] { color: var(--ink); border-color: currentColor; }
+  .fbtn:hover { color: var(--ink); }
+  .routeblock { margin: 20px 0 0; }
+  .routeblock h4 { font-size: 14.5px; margin: 0 0 2px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .routeblock h4 .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .routeblock .rdesc { font-size: 12.5px; color: var(--muted); margin: 0 0 8px 18px; }
+  .plist { list-style: none; margin: 0 0 0 18px; padding: 0; }
+  .plist li { display: flex; gap: 10px; align-items: baseline; padding: 3px 0; font-size: 13px; border-top: 1px solid color-mix(in srgb, var(--grid) 55%, transparent); }
+  .plist li:first-child { border-top: none; }
+  .plist .dt { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; min-width: 62px; }
+  .plist .nm { color: var(--ink); font-weight: 600; text-decoration: none; }
+  .plist .nm:hover { text-decoration: underline; }
+  .plist .tt { color: var(--ink2); font-size: 12px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 700px) { .plist .tt { display: none; } }
+
+  #tip {
+    position: fixed; z-index: 50; pointer-events: none; display: none;
+    background: var(--ink); color: var(--page);
+    font-size: 12px; line-height: 1.5; padding: 6px 10px; border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.18); max-width: 280px;
+  }
+  #tip b { font-weight: 600; }
+
+  footer { color: var(--muted); font-size: 12.5px; padding: 22px 6px 0; line-height: 2; }
+  footer a { color: var(--ink2); }
+
+  @media (max-width: 760px) {
+    section.card { padding: 20px 17px 18px; }
+    h1 { font-size: 23px; }
+    #themeBtn { top: 38px; }
+  }
+</style>
+</head>
+<body>
+<div id="tip"></div>
+<div class="wrap">
+
+<header>
+  <div class="kicker">NOTE · 跨 132 篇论文</div>
+  <h1>视频生成推理加速：一个乘式，八条路线</h1>
+  <p class="sub">这份列表里关于"跑得更快"的工作已经有 132 篇，名字五花八门——<span class="mono">Forcing</span> 家族、<span class="mono">Cache</span> 家族、各种 <span class="mono">Sparse</span> 和 <span class="mono">Quant</span>。但它们其实都在动同一个乘式里的某一项。把乘式写出来，路线图就自己长出来了：谁和谁能叠加，谁和谁在互相拆台，哪一项已经被榨干、哪一项还松着。</p>
+  <div class="statrow">
+    <span class="stat">共 <b>132</b> 篇</span>
+    <span class="stat"><b>8</b> 条加速路线 + 前提层 + 系统层</span>
+    <span class="stat">实测吞吐 <b>66</b> 个系统</span>
+    <span class="stat">已精读 <b>11</b> 篇</span>
+  </div>
+  <button id="themeBtn">☾ 深色</button>
+</header>
+
+<section class="card">
+  <div class="sechead"><span class="secnum">00</span><h2>一图看懂：一个乘式，八条路线</h2></div>
+  <p class="lead">一次自回归视频生成，单帧的延迟大致是这么攒出来的——<strong>去噪跑几步</strong>，每步要过<strong>多少 token</strong>，每个 token 在多长的<strong>历史</strong>上算注意力，每次乘法用<strong>几个比特</strong>，以及这里面有多少能<strong>直接抄上一步的答案</strong>。五个因子，乘在一起。</p>
+  <p>所有加速工作都在动其中一项。把论文按"它砍的是哪个因子"排开，132 篇立刻分成八堆，而且互相之间的兼容性也一并清楚了：<strong>动不同因子的方法天然可以叠加，动同一个因子的方法互相替代</strong>。</p>
+
+  <div class="fig">
+  <svg viewBox="0 0 1000 476" role="img" aria-label="推理成本乘式分解为八条加速路线">
+    <defs>
+      <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+        <path d="M0,1 L9,5 L0,9 z" fill="var(--axis)"/>
+      </marker>
+    </defs>
+
+    <!-- 前提层 -->
+    <rect x="24" y="16" width="952" height="40" rx="10" fill="color-mix(in srgb, var(--r-causal) 9%, var(--surface))" stroke="var(--r-causal)" stroke-width="1.2" stroke-dasharray="5 4"/>
+    <text class="svgtxt" x="44" y="41" font-size="13" font-weight="700" fill="var(--r-causal)">前提层</text>
+    <text class="svgtxt" x="104" y="41" font-size="12.5" fill="var(--ink2)">因果化骨干 · 12 篇 —— 把双向去噪改成流式。它一秒都不省，但不做这一步，后面八条路线全部无从谈起</text>
+
+    <!-- 乘式标题 -->
+    <text class="svgtxt" x="500" y="86" font-size="13" fill="var(--muted)" text-anchor="middle">每帧延迟  ≈  以下五项的乘积</text>
+
+    <!-- 因子盒 -->
+    <g class="svgtxt">
+      <rect x="72" y="100" width="140" height="58" rx="9" fill="color-mix(in srgb, var(--ink) 4%, var(--surface))" stroke="var(--hairline)"/>
+      <text x="142" y="124" font-size="14" font-weight="700" fill="var(--ink)" text-anchor="middle">步数 NFE</text>
+      <text x="142" y="143" font-size="11.5" fill="var(--muted)" text-anchor="middle">50 → 4 → 1</text>
+
+      <text x="237" y="136" font-size="17" fill="var(--muted)" text-anchor="middle">×</text>
+
+      <rect x="262" y="100" width="120" height="58" rx="9" fill="color-mix(in srgb, var(--ink) 4%, var(--surface))" stroke="var(--hairline)"/>
+      <text x="322" y="124" font-size="14" font-weight="700" fill="var(--ink)" text-anchor="middle">token 数 N</text>
+      <text x="322" y="143" font-size="11.5" fill="var(--muted)" text-anchor="middle">空间分辨率</text>
+
+      <text x="412" y="136" font-size="17" fill="var(--muted)" text-anchor="middle">×</text>
+
+      <rect x="442" y="100" width="240" height="58" rx="9" fill="color-mix(in srgb, var(--ink) 4%, var(--surface))" stroke="var(--hairline)"/>
+      <text x="562" y="124" font-size="14" font-weight="700" fill="var(--ink)" text-anchor="middle">每 token 成本 · 注意力(历史 L)</text>
+      <text x="562" y="143" font-size="11.5" fill="var(--muted)" text-anchor="middle">复杂度 O(L²) 与历史长度 L 两个变量</text>
+
+      <text x="712" y="136" font-size="17" fill="var(--muted)" text-anchor="middle">×</text>
+
+      <rect x="742" y="100" width="118" height="58" rx="9" fill="color-mix(in srgb, var(--ink) 4%, var(--surface))" stroke="var(--hairline)"/>
+      <text x="801" y="124" font-size="14" font-weight="700" fill="var(--ink)" text-anchor="middle">位宽 b</text>
+      <text x="801" y="143" font-size="11.5" fill="var(--muted)" text-anchor="middle">BF16 → FP4</text>
+
+      <text x="874" y="136" font-size="17" fill="var(--muted)" text-anchor="middle">÷</text>
+
+      <rect x="890" y="100" width="86" height="58" rx="9" fill="color-mix(in srgb, var(--ink) 4%, var(--surface))" stroke="var(--hairline)"/>
+      <text x="933" y="124" font-size="14" font-weight="700" fill="var(--ink)" text-anchor="middle">复用率</text>
+      <text x="933" y="143" font-size="11.5" fill="var(--muted)" text-anchor="middle">抄上一步</text>
+    </g>
+
+    <!-- 连线：因子 → 路线 -->
+    <g fill="none" stroke="var(--axis)" stroke-width="1.3" marker-end="url(#ah)">
+      <path d="M142,158 C142,240 82,232 82,296"/>
+      <path d="M142,158 C142,240 202,232 202,296"/>
+      <path d="M322,158 C322,240 322,232 322,296"/>
+      <path d="M520,158 C520,240 442,232 442,296"/>
+      <path d="M562,158 C562,240 562,232 562,296"/>
+      <path d="M620,158 C620,240 682,232 682,296"/>
+      <path d="M801,158 C801,240 802,232 802,296"/>
+      <path d="M933,158 C933,240 922,232 922,296"/>
+    </g>
+
+    <!-- 路线卡片 -->
+    <g class="svgtxt">
+      <g data-tip="<b>轴一 · 砍步数</b>42 篇。把 50 步教师压进 1–4 步学生：分布匹配、对抗后训练、轨迹蒸馏、on-policy 自蒸馏四大家族，外加一条因果对齐支线。">
+        <rect x="26" y="296" width="112" height="100" rx="10" fill="color-mix(in srgb, var(--r-step) 10%, var(--surface))" stroke="var(--r-step)" stroke-width="1.5"/>
+        <text x="82" y="320" font-size="11.5" font-weight="700" fill="var(--r-step)" text-anchor="middle">轴一</text>
+        <text x="82" y="344" font-size="14.5" font-weight="700" fill="var(--ink)" text-anchor="middle">蒸馏</text>
+        <text x="82" y="364" font-size="11" fill="var(--ink2)" text-anchor="middle">50步 → 1–4步</text>
+        <text x="82" y="384" font-size="12.5" font-weight="700" fill="var(--r-step)" text-anchor="middle">42 篇</text>
+      </g>
+      <g data-tip="<b>轴二 · 自适应计算</b>7 篇。既然不是每个 chunk 都一样难，就别给它们同样的步数预算。">
+        <rect x="146" y="296" width="112" height="100" rx="10" fill="color-mix(in srgb, var(--r-adapt) 10%, var(--surface))" stroke="var(--r-adapt)" stroke-width="1.5"/>
+        <text x="202" y="320" font-size="11.5" font-weight="700" fill="var(--r-adapt)" text-anchor="middle">轴二</text>
+        <text x="202" y="344" font-size="14.5" font-weight="700" fill="var(--ink)" text-anchor="middle">自适应步数</text>
+        <text x="202" y="364" font-size="11" fill="var(--ink2)" text-anchor="middle">难帧多跑</text>
+        <text x="202" y="384" font-size="12.5" font-weight="700" fill="var(--r-adapt)" text-anchor="middle">7 篇</text>
+      </g>
+      <g data-tip="<b>轴六 · 砍 token</b>8 篇。同样的一帧，用更少的 token 表示：裁剪、动态 patch、分辨率分层、更狠的 VAE。">
+        <rect x="266" y="296" width="112" height="100" rx="10" fill="color-mix(in srgb, var(--r-token) 10%, var(--surface))" stroke="var(--r-token)" stroke-width="1.5"/>
+        <text x="322" y="320" font-size="11.5" font-weight="700" fill="color-mix(in srgb, var(--r-token) 75%, var(--ink))" text-anchor="middle">轴六</text>
+        <text x="322" y="344" font-size="14.5" font-weight="700" fill="var(--ink)" text-anchor="middle">token 裁剪</text>
+        <text x="322" y="364" font-size="11" fill="var(--ink2)" text-anchor="middle">空间轴</text>
+        <text x="322" y="384" font-size="12.5" font-weight="700" fill="color-mix(in srgb, var(--r-token) 75%, var(--ink))" text-anchor="middle">8 篇</text>
+      </g>
+      <g data-tip="<b>轴四 · 稀疏注意力</b>13 篇。注意力矩阵里大多数格子贡献接近零，跳过它们——形状不变，只是少算。">
+        <rect x="386" y="296" width="112" height="100" rx="10" fill="color-mix(in srgb, var(--r-sparse) 10%, var(--surface))" stroke="var(--r-sparse)" stroke-width="1.5"/>
+        <text x="442" y="320" font-size="11.5" font-weight="700" fill="var(--r-sparse)" text-anchor="middle">轴四</text>
+        <text x="442" y="344" font-size="14.5" font-weight="700" fill="var(--ink)" text-anchor="middle">稀疏注意力</text>
+        <text x="442" y="364" font-size="11" fill="var(--ink2)" text-anchor="middle">跳格子</text>
+        <text x="442" y="384" font-size="12.5" font-weight="700" fill="var(--r-sparse)" text-anchor="middle">13 篇</text>
+      </g>
+      <g data-tip="<b>轴五 · 线性注意力</b>10 篇。不挑格子，直接换掉算子：把 O(L²) 改写成 O(L) 的状态递推。">
+        <rect x="506" y="296" width="112" height="100" rx="10" fill="color-mix(in srgb, var(--r-linear) 10%, var(--surface))" stroke="var(--r-linear)" stroke-width="1.5"/>
+        <text x="562" y="320" font-size="11.5" font-weight="700" fill="var(--r-linear)" text-anchor="middle">轴五</text>
+        <text x="562" y="344" font-size="14.5" font-weight="700" fill="var(--ink)" text-anchor="middle">线性注意力</text>
+        <text x="562" y="364" font-size="11" fill="var(--ink2)" text-anchor="middle">换算子</text>
+        <text x="562" y="384" font-size="12.5" font-weight="700" fill="var(--r-linear)" text-anchor="middle">10 篇</text>
+      </g>
+      <g data-tip="<b>轴七 · KV 压缩</b>14 篇。长时程专有：历史缓存把显存和带宽吃光，于是挑、压、量化、丢。">
+        <rect x="626" y="296" width="112" height="100" rx="10" fill="color-mix(in srgb, var(--r-kv) 10%, var(--surface))" stroke="var(--r-kv)" stroke-width="1.5"/>
+        <text x="682" y="320" font-size="11.5" font-weight="700" fill="var(--r-kv)" text-anchor="middle">轴七</text>
+        <text x="682" y="344" font-size="14.5" font-weight="700" fill="var(--ink)" text-anchor="middle">KV 压缩</text>
+        <text x="682" y="364" font-size="11" fill="var(--ink2)" text-anchor="middle">时间轴</text>
+        <text x="682" y="384" font-size="12.5" font-weight="700" fill="var(--r-kv)" text-anchor="middle">14 篇</text>
+      </g>
+      <g data-tip="<b>轴八 · 量化</b>9 篇。同样的算子、同样的格子数，用更少的比特跑完。">
+        <rect x="746" y="296" width="112" height="100" rx="10" fill="color-mix(in srgb, var(--r-quant) 12%, var(--surface))" stroke="var(--r-quant)" stroke-width="1.5"/>
+        <text x="802" y="320" font-size="11.5" font-weight="700" fill="color-mix(in srgb, var(--r-quant) 80%, var(--ink))" text-anchor="middle">轴八</text>
+        <text x="802" y="344" font-size="14.5" font-weight="700" fill="var(--ink)" text-anchor="middle">量化</text>
+        <text x="802" y="364" font-size="11" fill="var(--ink2)" text-anchor="middle">INT4 / FP4</text>
+        <text x="802" y="384" font-size="12.5" font-weight="700" fill="color-mix(in srgb, var(--r-quant) 80%, var(--ink))" text-anchor="middle">9 篇</text>
+      </g>
+      <g data-tip="<b>轴三 · 缓存复用</b>17 篇。相邻去噪步、相邻 chunk 的特征高度相似，算过的直接抄。唯一一条做除法的路线。">
+        <rect x="866" y="296" width="112" height="100" rx="10" fill="color-mix(in srgb, var(--r-cache) 10%, var(--surface))" stroke="var(--r-cache)" stroke-width="1.5"/>
+        <text x="922" y="320" font-size="11.5" font-weight="700" fill="var(--r-cache)" text-anchor="middle">轴三</text>
+        <text x="922" y="344" font-size="14.5" font-weight="700" fill="var(--ink)" text-anchor="middle">缓存复用</text>
+        <text x="922" y="364" font-size="11" fill="var(--ink2)" text-anchor="middle">别重算</text>
+        <text x="922" y="384" font-size="12.5" font-weight="700" fill="var(--r-cache)" text-anchor="middle">17 篇</text>
+      </g>
+    </g>
+
+    <!-- 落地层 -->
+    <rect x="24" y="420" width="952" height="40" rx="10" fill="color-mix(in srgb, var(--r-sys) 9%, var(--surface))" stroke="var(--r-sys)" stroke-width="1.2" stroke-dasharray="5 4"/>
+    <text class="svgtxt" x="44" y="445" font-size="13" font-weight="700" fill="var(--r-sys)">落地层</text>
+    <text class="svgtxt" x="104" y="445" font-size="12.5" fill="var(--ink2)">系统与服务 · 7 篇 —— 把上面八条路线装进一个真的能对外开服务的引擎：批处理、并行、VAE 解码、显存调度</text>
+  </svg>
+  </div>
+  <p class="figcap">五个因子对应八条路线。<strong>横向不同因子可叠加</strong>——一个 4 步的蒸馏模型照样能再上稀疏注意力再上 FP4；<strong>同一因子下的路线互相替代</strong>——稀疏和线性都在改注意力，通常二选一。悬停卡片看每条路线在做什么。</p>
+
+  <div class="insight">
+    <span class="t">为什么把"因果化"单列成前提层而不是第九条路线</span>
+    因果化<strong>不减少任何一项计算</strong>：同样的 NFE、同样的 token、同样的注意力。它改的是<em>什么时候能把第一帧交出去</em>——双向模型必须等整个 clip 去噪完，因果模型生成完第一个 chunk 就能出画。对一个离线 benchmark 来说这不叫加速，对一个要接手柄的系统来说这是全部。<a class="ref" href="https://arxiv.org/abs/2407.01392">Diffusion Forcing</a> 把逐帧独立噪声级引进来，<a class="ref" href="https://arxiv.org/abs/2412.07772">CausVid</a> 把双向教师蒸成因果学生，这条线才算铺通。
+  </div>
+</section>
+
+<section class="card">
+  <div class="sechead"><span class="secnum">01</span><h2>轴一 · 砍步数：六个家族，一个共同的难处</h2></div>
+  <p class="lead">42 篇，是八条路线里最拥挤的一条，也是收益最直接的一条——把 NFE 从 50 压到 4，是 <strong>12 倍</strong>，别的路线要叠三四条才够得上。</p>
+  <p>所有 few-step 蒸馏都在回答同一个问题：<strong>学生只走 1–4 步，怎么够得着教师 50 步才到的那个分布。</strong>区别只在拿什么信号来监督。按这个标准分，六个家族：</p>
+
+  <div class="fig">
+  <svg viewBox="0 0 1000 438" role="img" aria-label="少步蒸馏六大家族的时间谱系">
+    <!-- 时间轴 -->
+    <line x1="122" y1="52" x2="960" y2="52" stroke="var(--axis)" stroke-width="1"/>
+    <g class="svgtxt" font-size="11" fill="var(--muted)">
+      <line x1="330" y1="46" x2="330" y2="58" stroke="var(--axis)"/><text x="330" y="38" text-anchor="middle">2025</text>
+      <line x1="672" y1="46" x2="672" y2="58" stroke="var(--axis)"/><text x="672" y="38" text-anchor="middle">2026</text>
+      <text x="122" y="38" text-anchor="start">2024-06</text>
+      <text x="960" y="38" text-anchor="end">2026-09</text>
+    </g>
+
+    <!-- 泳道 -->
+    <g class="svgtxt">
+      <g font-size="11.5" font-weight="700" text-anchor="end">
+        <text x="95" y="100" fill="var(--r-step)">分布匹配</text>
+        <text x="95" y="156" fill="var(--r-step)">对抗后训练</text>
+        <text x="95" y="212" fill="var(--r-step)">轨迹 · 一致性</text>
+        <text x="95" y="268" fill="var(--r-step)">on-policy 自蒸馏</text>
+        <text x="95" y="324" fill="var(--r-step)">因果上下文对齐</text>
+        <text x="95" y="380" fill="var(--r-step)">RL / reward</text>
+      </g>
+      <g font-size="9.5" fill="var(--muted)" text-anchor="end">
+        <text x="95" y="113">反向 KL 分数差</text>
+        <text x="95" y="169">判别器</text>
+        <text x="95" y="225">回归 ODE 轨迹点</text>
+        <text x="95" y="281">学生自己的状态</text>
+        <text x="95" y="337">视频专有</text>
+        <text x="95" y="393">奖励进梯度</text>
+      </g>
+      <g stroke="var(--grid)" stroke-width="1" stroke-dasharray="3 4">
+        <line x1="122" y1="96" x2="960" y2="96"/>
+        <line x1="122" y1="152" x2="960" y2="152"/>
+        <line x1="122" y1="208" x2="960" y2="208"/>
+        <line x1="122" y1="264" x2="960" y2="264"/>
+        <line x1="122" y1="320" x2="960" y2="320"/>
+        <line x1="122" y1="376" x2="960" y2="376"/>
+      </g>
+    </g>
+
+    <!-- 节点 -->
+    <g class="svgtxt" font-size="10.5">
+      <!-- 分布匹配 -->
+      <text x="122" y="92" font-size="10" fill="var(--muted)" text-anchor="start">← DMD / DMD2 / DFD 见另一篇 note</text>
+      <g data-tip="<b>Reward Forcing</b> 2025-12 · 把奖励项挂进分布匹配的梯度，流式生成边蒸边对齐"><circle cx="643" cy="96" r="5" fill="var(--r-step)"/><text x="643" y="83" fill="var(--ink)" text-anchor="middle">Reward Forcing</text></g>
+      <g data-tip="<b>SGMD</b> 2026-05 · Score Gradient Matching，换掉分数差的估计方式"><circle cx="786" cy="96" r="5" fill="var(--r-step)"/><text x="786" y="114" fill="var(--ink)" text-anchor="middle">SGMD</text></g>
+      <g data-tip="<b>DM-Align</b> 2026-09 · 已精读。发现「对齐」和「蒸馏」的梯度长得一模一样，于是两件事一个梯度做完"><circle cx="900" cy="96" r="6" fill="var(--r-step)" stroke="var(--ink)" stroke-width="1.5"/><text x="900" y="83" fill="var(--ink)" font-weight="700" text-anchor="middle">★ DM-Align</text></g>
+
+      <!-- 对抗 -->
+      <g data-tip="<b>APT</b> 2025-01 · Adversarial Post-Training，一步出视频的起点"><circle cx="330" cy="152" r="5" fill="var(--r-sparse)"/><text x="330" y="139" fill="var(--ink)" text-anchor="middle">APT</text></g>
+      <g data-tip="<b>AAPT</b> 2025-06 · 把 APT 搬到自回归，实时交互式生成"><circle cx="472" cy="152" r="5" fill="var(--r-sparse)"/><text x="472" y="170" fill="var(--ink)" text-anchor="middle">AAPT</text></g>
+      <g data-tip="<b>Adversarial Self-Distillation</b> 2025-11 · 判别器换成学生自己的历史"><circle cx="615" cy="152" r="5" fill="var(--r-sparse)"/><text x="615" y="139" fill="var(--ink)" text-anchor="middle">Adv. Self-Distill</text></g>
+      <g data-tip="<b>AAD-1</b> 2026-06 · 非对称对抗蒸馏，一步自回归"><circle cx="814" cy="152" r="5" fill="var(--r-sparse)"/><text x="814" y="170" fill="var(--ink)" text-anchor="middle">AAD-1</text></g>
+
+      <!-- 轨迹 -->
+      <g data-tip="<b>Motion Consistency Model</b> 2024-06 · 把运动和外观拆开再做一致性蒸馏"><circle cx="130" cy="208" r="5" fill="var(--r-adapt)"/><text x="122" y="195" fill="var(--ink)" text-anchor="start">MCM</text></g>
+      <g data-tip="<b>Transition Matching Distillation</b> 2026-01 · 直接匹配状态转移而不是分布"><circle cx="672" cy="208" r="5" fill="var(--r-adapt)"/><text x="672" y="195" fill="var(--ink)" text-anchor="middle">Transition Matching</text></g>
+      <g data-tip="<b>DUET</b> 2026-08 · 两个蒸馏专家分管多样性与质量，两步出视频"><circle cx="871" cy="208" r="5" fill="var(--r-adapt)"/><text x="871" y="226" fill="var(--ink)" text-anchor="middle">DUET</text></g>
+      <g data-tip="<b>CrossDistill</b> 2026-09 · 已精读。把噪声轴切两段：高噪声用轨迹蒸馏保住 seed 分岔，低噪声用分布匹配拉回流形"><circle cx="900" cy="208" r="6" fill="var(--r-adapt)" stroke="var(--ink)" stroke-width="1.5"/><text x="900" y="195" fill="var(--ink)" font-weight="700" text-anchor="middle">★ CrossDistill</text></g>
+
+      <!-- on-policy -->
+      <g data-tip="<b>Self Forcing</b> 2025-06 · 训练时就让学生用自己生成的历史，堵上 train-test gap"><circle cx="472" cy="264" r="5" fill="var(--r-cache)"/><text x="472" y="251" fill="var(--ink)" text-anchor="middle">Self Forcing</text></g>
+      <g data-tip="<b>Self-Forcing++</b> 2025-10 · 推到分钟级"><circle cx="586" cy="264" r="5" fill="var(--r-cache)"/><text x="586" y="282" fill="var(--ink)" text-anchor="middle">Self-Forcing++</text></g>
+      <g data-tip="<b>OPSD-V</b> 2026-07 · 已精读。真实长视频当特权上下文喂教师，学生和教师同状态、异缓存"><circle cx="843" cy="264" r="6" fill="var(--r-cache)" stroke="var(--ink)" stroke-width="1.5"/><text x="843" y="251" fill="var(--ink)" font-weight="700" text-anchor="middle">★ OPSD-V</text></g>
+      <g data-tip="<b>HPSD</b> 2026-08 · 已精读。学生从教师的轨迹出发，用自己的脚走完剩下几步"><circle cx="871" cy="264" r="6" fill="var(--r-cache)" stroke="var(--ink)" stroke-width="1.5"/><text x="871" y="282" fill="var(--ink)" font-weight="700" text-anchor="middle">★ HPSD</text></g>
+
+      <!-- 因果对齐 -->
+      <g data-tip="<b>Causal Forcing</b> 2026-02 · 把自回归蒸馏的上下文错配正面当问题解"><circle cx="700" cy="320" r="5" fill="var(--r-kv)"/><text x="700" y="307" fill="var(--ink)" text-anchor="middle">Causal Forcing</text></g>
+      <g data-tip="<b>Causal Forcing++</b> 2026-05 · 同一思路放大到可扩展配方"><circle cx="786" cy="320" r="5" fill="var(--r-kv)"/><text x="786" y="338" fill="var(--ink)" text-anchor="middle">Causal Forcing++</text></g>
+      <g data-tip="<b>CMD</b> 2026-08 · 已精读。教师先改造成因果的再打分，三层递进：时间边界对齐 → 真实历史对齐 → 早期 rollout 加噪保险"><circle cx="871" cy="320" r="6" fill="var(--r-kv)" stroke="var(--ink)" stroke-width="1.5"/><text x="871" y="307" fill="var(--ink)" font-weight="700" text-anchor="middle">★ CMD</text></g>
+      <g data-tip="<b>Mask Forcing</b> 2026-09 · 已精读。只动「重加噪」那一格：两成 token 偷跑一个欧拉步"><circle cx="900" cy="320" r="6" fill="var(--r-kv)" stroke="var(--ink)" stroke-width="1.5"/><text x="900" y="338" fill="var(--ink)" font-weight="700" text-anchor="middle">★ Mask Forcing</text></g>
+
+      <!-- RL -->
+      <g data-tip="<b>Reward-Forcing</b> 2026-01 · 自回归生成里挂奖励反馈"><circle cx="672" cy="376" r="5" fill="var(--r-quant)"/><text x="672" y="363" fill="var(--ink)" text-anchor="middle">Reward-Forcing</text></g>
+      <g data-tip="<b>Astrolabe</b> 2026-03 · 在前向过程上做 RL，专治蒸馏后的自回归模型"><circle cx="729" cy="376" r="5" fill="var(--r-quant)"/><text x="729" y="394" fill="var(--ink)" text-anchor="middle">Astrolabe</text></g>
+      <g data-tip="<b>Stream-R1</b> 2026-05 · 可靠性-困惑度感知的奖励蒸馏"><circle cx="786" cy="376" r="5" fill="var(--r-quant)"/><text x="786" y="363" fill="var(--ink)" text-anchor="middle">Stream-R1</text></g>
+      <g data-tip="<b>RAVEN</b> 2026-05 · 一致性模型 + GRPO"><circle cx="812" cy="376" r="5" fill="var(--r-quant)"/><text x="812" y="394" fill="var(--ink)" text-anchor="middle">RAVEN</text></g>
+    </g>
+  </svg>
+  </div>
+  <p class="figcap">时间轴为真实日期，每条泳道只标出会在下文讨论的里程碑，<strong>★ 表示本列表里已有精读</strong>；该家族的其余论文见文末索引。ECCV / CVPR 2026 的会议论文无 arXiv 日期，未上图。</p>
+
+  <h3>六条泳道里，前三条是从图像继承的，后三条是视频自己长出来的</h3>
+  <p><strong>分布匹配、对抗、轨迹一致性</strong>三家在图像扩散上就已经打得很熟，搬到视频基本是换个骨干。真正的视频特产是下面三条：</p>
+  <ul class="pts">
+    <li><strong>on-policy 自蒸馏</strong>——视频是自回归的，学生一旦开始用自己生成的历史，误差就会滚雪球。<a class="ref" href="https://arxiv.org/abs/2506.08009">Self Forcing</a> 的做法是训练时就让它滚，把 train-test gap 提前暴露；<a class="ref" href="https://arxiv.org/abs/2607.08766">OPSD-V</a> 更进一步，诊断出长时程退化的根子在「短片教师 + 被污染的缓存」，于是给教师喂真实长视频当特权上下文，学生和教师<em>同状态、异缓存</em>。</li>
+    <li><strong>因果上下文对齐</strong>——这条线解的问题只在视频里存在：<em>教师是双向的，学生是因果的</em>。教师看得到未来帧，它给出的分数对一个只能看过去的学生来说是过期的。<a class="ref" href="https://arxiv.org/abs/2608.13391">CMD</a> 把这件事拆成三层递进——先把时间边界对齐，再把「真实历史」对齐，最后给不可靠的早期 rollout 上一道加噪保险。</li>
+    <li><strong>RL / reward 进蒸馏</strong>——最年轻的一条，全部集中在 2026 年。<a class="ref" href="https://arxiv.org/abs/2609.04283">DM-Align</a> 给了一个漂亮的理由：RLHF 的最优策略本来就有闭式解，也就是说「对齐」本身就是一个分布，于是对齐的梯度和分布匹配蒸馏的梯度<em>形状完全一样</em>，可以直接相加。两阶段（先 RL 再蒸馏太贵、先蒸馏再 RL 会崩）的死结就这么解开了。</li>
+  </ul>
+</section>
+
+<section class="card">
+  <div class="sechead"><span class="secnum">02</span><h2>蒸馏的账单：12 倍加速不是白拿的</h2></div>
+  <p class="lead">把 50 步压成 4 步，丢掉的东西是有规律的。2026 年这条线上过半的新论文不是在"再快一点"，而是在<strong>把前几年蒸馏丢掉的东西捡回来</strong>。</p>
+
+  <div class="fig">
+  <svg viewBox="0 0 1000 286" role="img" aria-label="蒸馏的多样性与流形权衡">
+    <g class="svgtxt">
+      <!-- 面板 1 -->
+      <g>
+        <text x="132" y="34" font-size="13" font-weight="700" fill="var(--ink)" text-anchor="middle">教师 · 50 步</text>
+        <text x="132" y="51" font-size="11" fill="var(--muted)" text-anchor="middle">又散又清晰，但慢</text>
+        <ellipse cx="132" cy="160" rx="78" ry="52" fill="color-mix(in srgb, var(--r-step) 8%, transparent)" stroke="var(--r-step)" stroke-width="1.2" stroke-dasharray="4 3"/>
+        <g fill="var(--r-step)">
+          <circle cx="74" cy="132" r="4"/><circle cx="102" cy="120" r="4"/><circle cx="134" cy="126" r="4"/><circle cx="166" cy="118" r="4"/><circle cx="190" cy="140" r="4"/>
+          <circle cx="68" cy="164" r="4"/><circle cx="106" cy="158" r="4"/><circle cx="140" cy="170" r="4"/><circle cx="172" cy="160" r="4"/><circle cx="196" cy="176" r="4"/>
+          <circle cx="92" cy="192" r="4"/><circle cx="148" cy="196" r="4"/>
+        </g>
+        <text x="132" y="244" font-size="11" fill="var(--good)" text-anchor="middle">✓ 12 个种子 → 12 个结果</text>
+        <text x="132" y="262" font-size="11" fill="var(--good)" text-anchor="middle">✓ 全部落在流形内</text>
+      </g>
+      <!-- 面板 2 -->
+      <g>
+        <text x="377" y="34" font-size="13" font-weight="700" fill="var(--ink)" text-anchor="middle">轨迹蒸馏</text>
+        <text x="377" y="51" font-size="11" fill="var(--muted)" text-anchor="middle">散是散了，糊</text>
+        <ellipse cx="377" cy="160" rx="78" ry="52" fill="color-mix(in srgb, var(--r-adapt) 8%, transparent)" stroke="var(--r-adapt)" stroke-width="1.2" stroke-dasharray="4 3"/>
+        <g fill="var(--r-adapt)">
+          <circle cx="289" cy="120" r="4"/><circle cx="347" cy="120" r="4"/><circle cx="379" cy="126" r="4"/><circle cx="411" cy="98" r="4"/><circle cx="465" cy="140" r="4"/>
+          <circle cx="313" cy="164" r="4"/><circle cx="351" cy="158" r="4"/><circle cx="385" cy="170" r="4"/><circle cx="417" cy="160" r="4"/><circle cx="469" cy="186" r="4"/>
+          <circle cx="325" cy="212" r="4"/><circle cx="393" cy="196" r="4"/>
+        </g>
+        <text x="377" y="244" font-size="11" fill="var(--good)" text-anchor="middle">✓ 多样性保住了</text>
+        <text x="377" y="262" font-size="11" fill="var(--bad)" text-anchor="middle">✗ 5 个掉出流形 → 模糊 / 伪影</text>
+      </g>
+      <!-- 面板 3 -->
+      <g>
+        <text x="622" y="34" font-size="13" font-weight="700" fill="var(--ink)" text-anchor="middle">分布匹配（反向 KL）</text>
+        <text x="622" y="51" font-size="11" fill="var(--muted)" text-anchor="middle">清晰，但挑模式</text>
+        <ellipse cx="622" cy="160" rx="78" ry="52" fill="color-mix(in srgb, var(--r-cache) 8%, transparent)" stroke="var(--r-cache)" stroke-width="1.2" stroke-dasharray="4 3"/>
+        <g fill="var(--r-cache)">
+          <circle cx="578" cy="142" r="4"/><circle cx="586" cy="148" r="4"/><circle cx="582" cy="138" r="4"/><circle cx="588" cy="140" r="4"/>
+          <circle cx="628" cy="182" r="4"/><circle cx="636" cy="178" r="4"/><circle cx="632" cy="186" r="4"/><circle cx="638" cy="184" r="4"/>
+          <circle cx="666" cy="150" r="4"/><circle cx="674" cy="154" r="4"/><circle cx="670" cy="146" r="4"/><circle cx="676" cy="148" r="4"/>
+        </g>
+        <text x="622" y="244" font-size="11" fill="var(--bad)" text-anchor="middle">✗ 12 个种子 → 3 个结果</text>
+        <text x="622" y="262" font-size="11" fill="var(--good)" text-anchor="middle">✓ 全部落在流形内</text>
+      </g>
+      <!-- 面板 4 -->
+      <g>
+        <text x="867" y="34" font-size="13" font-weight="700" fill="var(--ink)" text-anchor="middle">★ 噪声轴分段</text>
+        <text x="867" y="51" font-size="11" fill="var(--muted)" text-anchor="middle">高噪声用左边，低噪声用中间</text>
+        <ellipse cx="867" cy="160" rx="78" ry="52" fill="color-mix(in srgb, var(--r-sparse) 8%, transparent)" stroke="var(--r-sparse)" stroke-width="1.5"/>
+        <g fill="var(--r-sparse)">
+          <circle cx="809" cy="132" r="4"/><circle cx="837" cy="120" r="4"/><circle cx="869" cy="126" r="4"/><circle cx="901" cy="118" r="4"/><circle cx="925" cy="140" r="4"/>
+          <circle cx="803" cy="164" r="4"/><circle cx="841" cy="158" r="4"/><circle cx="875" cy="170" r="4"/><circle cx="907" cy="160" r="4"/><circle cx="931" cy="176" r="4"/>
+          <circle cx="827" cy="192" r="4"/><circle cx="883" cy="196" r="4"/>
+        </g>
+        <text x="867" y="244" font-size="11" fill="var(--good)" text-anchor="middle">✓ 多样性保住了</text>
+        <text x="867" y="262" font-size="11" fill="var(--good)" text-anchor="middle">✓ 全部落在流形内</text>
+      </g>
+    </g>
+  </svg>
+  </div>
+  <p class="figcap">示意图，非实测数据。虚线圈是"清晰可信的输出"所在的流形。<a class="ref" href="https://arxiv.org/abs/2609.14725">CrossDistill</a> 的观察是：<strong>分岔发生在高噪声段，清晰度决定于低噪声段</strong>，所以两段本来就该交给不同的老板。它的交接点写作 τ*=0.94——但论文没说这个数写在哪根轴上，两种读法差 4 倍，精读里核过。</p>
+
+  <h3>三张账单，三条在还债的支线</h3>
+  <table class="cmp">
+    <thead><tr>
+      <th style="width:23%">丢掉了什么<span class="en">the bill</span></th>
+      <th style="width:31%">为什么会丢<span class="en">mechanism</span></th>
+      <th>谁在还<span class="en">who pays it back</span></th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td><b>多样性</b><br><span style="font-size:12px">同一句 prompt 换种子，出来的是同一个画面</span></td>
+        <td>反向 KL 是 mode-seeking 的：学生只要稳稳盖住教师分布的<em>一个</em>峰，损失就很低。种子在高噪声段本该分岔，分布匹配把分岔按掉了。</td>
+        <td><a class="ref" href="https://arxiv.org/abs/2609.14725">CrossDistill</a>（噪声轴分段）、<a class="ref" href="https://arxiv.org/abs/2609.11265">Uncertainty DMD</a>、<a class="ref" href="https://arxiv.org/abs/2608.09637">DUET</a>（两个专家分管质量与多样性）、SALT</td>
+      </tr>
+      <tr>
+        <td><b>运动控制</b><br><span style="font-size:12px">轨迹条件给了，模型不太听</span></td>
+        <td>ECCV 2026 的 <i>When Distillation Breaks Motion Control</i> 正面点了这件事：少步学生为了画面质量，牺牲的恰好是对运动条件的响应——而这正是交互式系统唯一在乎的东西。</td>
+        <td>该文本身（恢复生成式轨迹）、<a class="ref" href="https://arxiv.org/abs/2608.14022">ForgeWM</a>（渐进式因果训练的动作条件世界模型）</td>
+      </tr>
+      <tr>
+        <td><b>动态 / 时序稳定</b><br><span style="font-size:12px">过饱和、过平滑、越跑越僵</span></td>
+        <td>两个来源：中间去噪预测没人管，以及自回归 rollout 的误差在加速度域滚雪球。<a class="ref" href="https://arxiv.org/abs/2607.08020">SAGA</a> 的观察很漂亮——换到<em>加速度域</em>去看，伪影自己就亮起来了。</td>
+        <td><a class="ref" href="https://arxiv.org/abs/2609.09123">Mask Forcing</a>（两成 token 偷跑一个欧拉步）、<a class="ref" href="https://arxiv.org/abs/2607.08020">SAGA</a>（Slepian 基上罚高频加速度）、<a class="ref" href="https://arxiv.org/abs/2608.17707">DynaForcing</a></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="insight warn">
+    <span class="t">读这条线时值得留的一个心眼</span>
+    "少步 + 画质不掉"在论文里几乎总是成立的——因为衡量画质的是 VBench 这类<em>单样本</em>指标，而蒸馏丢的是<em>跨样本</em>的多样性，单样本指标天然测不到。同理，运动控制的退化要专门设计的条件一致性指标才照得出来。<strong>这条路线的真实代价，很大程度上取决于评测有没有看那个方向。</strong>
+  </div>
+</section>
+
+<section class="card">
+  <div class="sechead"><span class="secnum">03</span><h2>轴二 · 自适应计算：不是每个 chunk 都值同样的步数</h2></div>
+  <p class="lead">只有 7 篇，是八条路线里最冷清的一条，但想法最直接：固定 4 步意味着<em>一个静止的空镜头和一个爆炸场面拿到一样的预算</em>。</p>
+  <p><a class="ref" href="https://arxiv.org/abs/2606.04432">DSA</a> 是这条线上被精读过的一篇，做法干净——给自回归扩散装一个置信度头，从 DiT 身上抽三处特征挤出一个标量，让每个 chunk 自己决定跑 1 步还是 4 步。精读里把它的 NFE 记账反推了一遍（论文没算这笔账），也指出了它没验证的那个前提：<strong>"难帧多跑步"这个直觉，需要"置信度低 ⟹ 多跑一步真的能改善"成立，而这一条论文没测。</strong></p>
+  <p>另外两个方向：<a class="ref" href="https://arxiv.org/abs/2607.03509">Flex-Forcing</a> 把"分块"本身变成推理时可调的旋钮——同一个模型，改 chunk 配置就能在双向和自回归之间滑动，于是可以按算力预算搜最优分块；ECCV 的 <i>Surprise Forcing</i> 把问题换了个提法：不是"这一帧跑几步"，而是<em>"这一帧要不要记、能不能跳"</em>。</p>
+  <div class="insight">
+    <span class="t">为什么这条路线这么冷清</span>
+    自适应计算和<strong>批处理是天敌</strong>。一个 batch 里每个样本跑的步数不一样，GPU 就得等最慢的那个，省下的算力变不成吞吐。单用户交互式场景（正是世界模型的场景）里它有意义，对外开服务的批处理场景里它很难落地——这大概也是它只有 7 篇、而缓存有 17 篇的原因。
+  </div>
+</section>
+
+<section class="card">
+  <div class="sechead"><span class="secnum">04</span><h2>轴三 · 缓存：唯一一条做除法的路线</h2></div>
+  <p class="lead">17 篇。前提是一个实证观察：<strong>相邻去噪步之间，DiT 内部的特征变化极小</strong>——尤其是深层。既然算出来跟上一步差不多，那就别算，直接抄。</p>
+  <div class="fig">
+<svg viewBox="0 0 1000 268" role="img" aria-label="三种缓存策略的实算与复用分布">
+<text class="svgtxt" x="24" y="86" font-size="10.5" fill="var(--muted)" text-anchor="start" transform="rotate(-90 24 86)">DiT 层 →</text>
+<text class="svgtxt" x="152.0" y="22" font-size="13" font-weight="700" fill="var(--ink)" text-anchor="middle">固定间隔</text>
+<text class="svgtxt" x="152.0" y="39" font-size="11" fill="var(--muted)" text-anchor="middle">PAB / Ca2-VDM：每隔一步抄一次</text>
+<rect x="60" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="83" y="52" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="106" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="129" y="52" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="152" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="175" y="52" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="198" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="221" y="52" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="60" y="75" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="83" y="75" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="106" y="75" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="129" y="75" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="152" y="75" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="175" y="75" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="198" y="75" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="221" y="75" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="60" y="98" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="83" y="98" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="106" y="98" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="129" y="98" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="152" y="98" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="175" y="98" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="198" y="98" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="221" y="98" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="60" y="121" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="83" y="121" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="106" y="121" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="129" y="121" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="152" y="121" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="175" y="121" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="198" y="121" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="221" y="121" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="60" y="144" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="83" y="144" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="106" y="144" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="129" y="144" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="152" y="144" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="175" y="144" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="198" y="144" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="221" y="144" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="60" y="167" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="83" y="167" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="106" y="167" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="129" y="167" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="152" y="167" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="175" y="167" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="198" y="167" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="221" y="167" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<text class="svgtxt" x="152.0" y="206" font-size="10.5" fill="var(--muted)" text-anchor="middle">去噪步 →</text>
+<text class="svgtxt" x="152.0" y="226" font-size="12" font-weight="700" fill="var(--r-cache)" text-anchor="middle">实算 50%</text>
+<text class="svgtxt" x="462.0" y="22" font-size="13" font-weight="700" fill="var(--ink)" text-anchor="middle">内容自适应</text>
+<text class="svgtxt" x="462.0" y="39" font-size="11" fill="var(--muted)" text-anchor="middle">D2Cache / WorldCache：按变化量决定</text>
+<rect x="370" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="393" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="416" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="439" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="462" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="485" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="508" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="531" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="370" y="75" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="393" y="75" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="416" y="75" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="439" y="75" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="462" y="75" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="485" y="75" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="508" y="75" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="531" y="75" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="370" y="98" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="393" y="98" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="416" y="98" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="439" y="98" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="462" y="98" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="485" y="98" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="508" y="98" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="531" y="98" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="370" y="121" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="393" y="121" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="416" y="121" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="439" y="121" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="462" y="121" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="485" y="121" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="508" y="121" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="531" y="121" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="370" y="144" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="393" y="144" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="416" y="144" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="439" y="144" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="462" y="144" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="485" y="144" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="508" y="144" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="531" y="144" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="370" y="167" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="393" y="167" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="416" y="167" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="439" y="167" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="462" y="167" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="485" y="167" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="508" y="167" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="531" y="167" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<text class="svgtxt" x="462.0" y="206" font-size="10.5" fill="var(--muted)" text-anchor="middle">去噪步 →</text>
+<text class="svgtxt" x="462.0" y="226" font-size="12" font-weight="700" fill="var(--r-cache)" text-anchor="middle">实算 42%</text>
+<text class="svgtxt" x="772.0" y="22" font-size="13" font-weight="700" fill="var(--ink)" text-anchor="middle">跨 chunk</text>
+<text class="svgtxt" x="772.0" y="39" font-size="11" fill="var(--muted)" text-anchor="middle">X-Cache：下一块抄上一块</text>
+<rect x="680" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="703" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="726" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="749" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="772" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="795" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="818" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="841" y="52" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="680" y="75" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="703" y="75" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="726" y="75" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="749" y="75" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="772" y="75" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="795" y="75" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="818" y="75" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="841" y="75" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="680" y="98" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="703" y="98" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="726" y="98" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="749" y="98" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="772" y="98" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="795" y="98" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="818" y="98" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="841" y="98" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="680" y="121" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="703" y="121" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="726" y="121" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="749" y="121" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="772" y="121" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="795" y="121" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="818" y="121" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="841" y="121" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="680" y="144" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="703" y="144" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="726" y="144" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="749" y="144" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="772" y="144" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="795" y="144" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="818" y="144" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="841" y="144" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="680" y="167" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="703" y="167" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="726" y="167" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="749" y="167" width="20" height="20" rx="3" fill="var(--r-cache)" opacity="0.82"/>
+<rect x="772" y="167" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="795" y="167" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="818" y="167" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<rect x="841" y="167" width="20" height="20" rx="3" fill="none" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+<text class="svgtxt" x="725" y="206" font-size="10.5" fill="var(--r-step)" text-anchor="middle">chunk k</text><text class="svgtxt" x="817" y="206" font-size="10.5" fill="var(--r-step)" text-anchor="middle">chunk k+1</text>
+<text class="svgtxt" x="772.0" y="226" font-size="12" font-weight="700" fill="var(--r-cache)" text-anchor="middle">实算 67%</text>
+<line x1="770.5" y1="44" x2="770.5" y2="200" stroke="var(--r-step)" stroke-width="2" stroke-dasharray="5 3"/>
+
+</svg>
+  </div>
+  <p class="figcap">示意图。实心 = 这一格真的跑了前向，虚线 = 抄上一步的结果。三种策略的差别只在<strong>抄哪些格子</strong>：固定间隔最简单也最容易在运动剧烈时露馅；内容自适应按变化量决定，但判断本身要花钱；跨 chunk 是自回归视频专有的，因为相邻 chunk 的内容本来就连续。</p>
+
+  <h3>这条线的三代</h3>
+  <ul class="pts">
+    <li><strong>固定策略（2024）</strong>——<a class="ref" href="https://arxiv.org/abs/2408.12588">Pyramid Attention Broadcast</a> 和 <a class="ref" href="https://arxiv.org/abs/2411.16375">Ca2-VDM</a>。训练无关，接上就能用，代价是运动剧烈的片段会糊。</li>
+    <li><strong>内容感知（2026 上半年）</strong>——<a class="ref" href="https://arxiv.org/abs/2603.06331">WorldCache</a>（异构 token 缓存）、<a class="ref" href="https://arxiv.org/abs/2603.22286">WorldCache</a>（内容感知，同名不同篇）、<a class="ref" href="https://arxiv.org/abs/2608.01845">WorldDynCache</a>（风控式的风险上界）。判断"这一格能不能抄"本身变成一个要设计的问题。</li>
+    <li><strong>可学习的缓存（2026 下半年）</strong>——CVPR 的 <i>DisCa</i> 和 <a class="ref" href="https://arxiv.org/abs/2608.17973">LinCa</a> 干脆把"抄什么"训进网络里：不是抄原值，而是学一个从旧特征到新特征的轻量映射。</li>
+  </ul>
+
+  <div class="insight warn">
+    <span class="t">缓存和蒸馏是这张图里最尖锐的一处冲突</span>
+    缓存的收益来自<strong>步与步之间的冗余</strong>。一个 50 步的模型，相邻步差别微乎其微，抄一半都看不出来。但一个蒸馏到 <strong>4 步</strong>的模型，每一步都在走一大段，步间冗余基本被蒸馏吃干净了——这时候再抄，抄的是实打实的信息。<br>
+    CVPR 2026 的 <i>DisCa</i> 名字里那个 "Distillation-Compatible" 就是冲这个来的，<a class="ref" href="https://arxiv.org/abs/2604.20289">X-Cache</a> 副标题直接写着 "for Few-Step"。换句话说：<strong>这条路线正在被轴一挤压，不得不从"跨步复用"转向"跨 chunk 复用"</strong>——因为后者的冗余是内容带来的，蒸馏拿不走。
+  </div>
+</section>
+
+<section class="card">
+  <div class="sechead"><span class="secnum">05</span><h2>轴四 / 轴五 · 注意力：跳格子，还是换算子</h2></div>
+  <p class="lead">23 篇分在两条路线上，解决的是同一件事（注意力在长上下文下炸开），但走的是两条不可调和的路。</p>
+  <div class="fig">
+<svg viewBox="0 0 1000 330" role="img" aria-label="稠密、稀疏与线性注意力的结构差异">
+<text class="svgtxt" x="209.0" y="38" font-size="13" font-weight="700" fill="var(--ink)" text-anchor="middle">稠密因果注意力</text>
+<text class="svgtxt" x="209.0" y="55" font-size="11" fill="var(--muted)" text-anchor="middle">O(L²)：每个 query 看全部历史</text>
+<rect x="90" y="70" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="90" y="87" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="107" y="87" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="90" y="104" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="107" y="104" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="124" y="104" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="90" y="121" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="107" y="121" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="124" y="121" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="141" y="121" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="90" y="138" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="107" y="138" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="124" y="138" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="141" y="138" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="158" y="138" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="90" y="155" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="107" y="155" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="124" y="155" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="141" y="155" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="158" y="155" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="175" y="155" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="90" y="172" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="107" y="172" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="124" y="172" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="141" y="172" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="158" y="172" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="175" y="172" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="192" y="172" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="90" y="189" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="107" y="189" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="124" y="189" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="141" y="189" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="158" y="189" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="175" y="189" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="192" y="189" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="209" y="189" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="90" y="206" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="107" y="206" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="124" y="206" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="141" y="206" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="158" y="206" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="175" y="206" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="192" y="206" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="209" y="206" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="226" y="206" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="90" y="223" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="107" y="223" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="124" y="223" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="141" y="223" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="158" y="223" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="175" y="223" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="192" y="223" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="209" y="223" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="226" y="223" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="243" y="223" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="90" y="240" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="107" y="240" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="124" y="240" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="141" y="240" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="158" y="240" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="175" y="240" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="192" y="240" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="209" y="240" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="226" y="240" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="243" y="240" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="260" y="240" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="90" y="257" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="107" y="257" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="124" y="257" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="141" y="257" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="158" y="257" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="175" y="257" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="192" y="257" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="209" y="257" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="226" y="257" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="243" y="257" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="260" y="257" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="277" y="257" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="90" y="274" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="107" y="274" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="124" y="274" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="141" y="274" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="158" y="274" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="175" y="274" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="192" y="274" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="209" y="274" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="226" y="274" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="243" y="274" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="260" y="274" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="277" y="274" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="294" y="274" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="90" y="291" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="107" y="291" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="124" y="291" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="141" y="291" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="158" y="291" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="175" y="291" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="192" y="291" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="209" y="291" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="226" y="291" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="243" y="291" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="260" y="291" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="277" y="291" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="294" y="291" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<rect x="311" y="291" width="15" height="15" rx="2" fill="var(--r-step)" opacity="0.85"/>
+<text class="svgtxt" x="209.0" y="326" font-size="12" font-weight="700" fill="var(--r-step)" text-anchor="middle">实算 105/105 格</text>
+<text class="svgtxt" x="519.0" y="38" font-size="13" font-weight="700" fill="var(--ink)" text-anchor="middle">稀疏注意力</text>
+<text class="svgtxt" x="519.0" y="55" font-size="11" fill="var(--muted)" text-anchor="middle">仍是 L×L 的形状，只是跳格子</text>
+<rect x="400" y="70" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="400" y="87" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="417" y="87" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="400" y="104" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="417" y="104" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="434" y="104" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="400" y="121" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="417" y="121" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="434" y="121" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="451" y="121" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="400" y="138" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="417" y="138" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="434" y="138" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="451" y="138" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="468" y="138" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="400" y="155" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="417" y="155" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="434" y="155" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="451" y="155" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="468" y="155" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="485" y="155" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="400" y="172" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="417" y="172" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="434" y="172" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="451" y="172" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="468" y="172" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="485" y="172" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="502" y="172" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="400" y="189" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="417" y="189" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="434" y="189" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="451" y="189" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="468" y="189" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="485" y="189" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="502" y="189" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="519" y="189" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="400" y="206" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="417" y="206" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="434" y="206" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="451" y="206" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="468" y="206" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="485" y="206" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="502" y="206" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="519" y="206" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="536" y="206" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="400" y="223" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="417" y="223" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="434" y="223" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="451" y="223" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="468" y="223" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="485" y="223" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="502" y="223" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="519" y="223" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="536" y="223" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="553" y="223" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="400" y="240" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="417" y="240" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="434" y="240" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="451" y="240" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="468" y="240" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="485" y="240" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="502" y="240" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="519" y="240" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="536" y="240" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="553" y="240" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="570" y="240" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="400" y="257" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="417" y="257" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="434" y="257" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="451" y="257" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="468" y="257" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="485" y="257" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="502" y="257" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="519" y="257" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="536" y="257" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="553" y="257" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="570" y="257" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="587" y="257" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="400" y="274" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="417" y="274" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="434" y="274" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="451" y="274" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="468" y="274" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="485" y="274" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="502" y="274" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="519" y="274" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="536" y="274" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="553" y="274" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="570" y="274" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="587" y="274" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="604" y="274" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="400" y="291" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="417" y="291" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="434" y="291" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="451" y="291" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="468" y="291" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="485" y="291" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="502" y="291" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="519" y="291" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="536" y="291" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="553" y="291" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="570" y="291" width="15" height="15" rx="2" fill="none" stroke="var(--grid)" stroke-width="0.9"/>
+<rect x="587" y="291" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="604" y="291" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<rect x="621" y="291" width="15" height="15" rx="2" fill="var(--r-sparse)" opacity="0.85"/>
+<text class="svgtxt" x="519.0" y="326" font-size="12" font-weight="700" fill="var(--r-sparse)" text-anchor="middle">实算 62/105 格</text>
+<text class="svgtxt" x="850" y="38" font-size="13" font-weight="700" fill="var(--ink)" text-anchor="middle">线性注意力</text>
+<text class="svgtxt" x="850" y="55" font-size="11" fill="var(--muted)" text-anchor="middle">矩阵根本没被建出来</text>
+<rect x="802" y="142" width="96" height="70" rx="10" fill="color-mix(in srgb, var(--r-linear) 14%, var(--surface))" stroke="var(--r-linear)" stroke-width="1.8"/>
+<text class="svgtxt" x="850" y="173" font-size="14" font-weight="700" fill="var(--r-linear)" text-anchor="middle">状态 S</text>
+<text class="svgtxt" x="850" y="193" font-size="10.5" fill="var(--ink2)" text-anchor="middle">固定大小</text>
+<text class="svgtxt" x="748" y="130" font-size="11.5" fill="var(--ink2)" text-anchor="middle">x₁</text>
+<path d="M762,126 L798,174" fill="none" stroke="var(--axis)" stroke-width="1.1" marker-end="url(#ah2)"/>
+<text class="svgtxt" x="748" y="156" font-size="11.5" fill="var(--ink2)" text-anchor="middle">x₂</text>
+<path d="M762,152 L798,174" fill="none" stroke="var(--axis)" stroke-width="1.1" marker-end="url(#ah2)"/>
+<text class="svgtxt" x="748" y="182" font-size="11.5" fill="var(--ink2)" text-anchor="middle">…</text>
+<path d="M762,178 L798,174" fill="none" stroke="var(--axis)" stroke-width="1.1" marker-end="url(#ah2)"/>
+<text class="svgtxt" x="748" y="208" font-size="11.5" fill="var(--ink2)" text-anchor="middle">x_L</text>
+<path d="M762,204 L798,174" fill="none" stroke="var(--axis)" stroke-width="1.1" marker-end="url(#ah2)"/>
+<path d="M850,212 C910,240 770,240 826,214" fill="none" stroke="var(--r-linear)" stroke-width="1.4" marker-end="url(#ah2)"/>
+<text class="svgtxt" x="850" y="256" font-size="10.5" fill="var(--muted)" text-anchor="middle">递推更新，读完就丢</text>
+<text class="svgtxt" x="850" y="326" font-size="12" font-weight="700" fill="var(--r-linear)" text-anchor="middle">显存 O(1)，算力 O(L)</text>
+<defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="var(--axis)"/></marker></defs>
+</svg>
+  </div>
+  <p class="figcap">示意图，L=14 的因果注意力。中间那张图是关键：<strong>稀疏注意力省的是算力，省不掉那个 L×L 的结构</strong>——KV 还是得留着，显存还是 O(L)。右边那张才是换了本体：状态是定长的，历史读完即弃。</p>
+
+  <table class="cmp">
+    <thead><tr>
+      <th style="width:14%"></th>
+      <th style="width:43%">轴四 · 稀疏注意力<span class="en">13 篇 · skip the cells</span></th>
+      <th>轴五 · 线性注意力<span class="en">10 篇 · replace the operator</span></th>
+    </tr></thead>
+    <tbody>
+      <tr><td>做法</td><td>保留 softmax 注意力，只算被选中的块</td><td>换掉 softmax，用可递推的核 / 低秩形式</td></tr>
+      <tr><td>要不要重训</td><td><b class="good">常常不用</b>——LoSA、<i>Partition the Support</i>、SPADE 都是训练无关的</td><td><b class="bad">必须</b>——至少要一轮线性化后训练（LinVideo、Attention Surgery、SQuad）</td></tr>
+      <tr><td>显存</td><td>仍是 <b>O(L)</b>，KV 一个都不能少</td><td><b class="good">O(1)</b>，定长状态</td></tr>
+      <tr><td>质量风险</td><td>挑错块 = 丢掉真正重要的历史，长时程尤其危险</td><td>定长状态装不下的东西，永久丢失</td></tr>
+      <tr><td>怎么缓</td><td>误差补偿：SVG-EAR 的线性补偿、<i>Partition the Support</i> 的残差重建、CalibAtt 的离线校准</td><td><b>混合</b>——几层线性配几层 full attention。SANA 系、Video DeltaNet、<i>Attend Locally, Remember Linearly</i> 都是这个路子</td></tr>
+      <tr><td>代表</td><td>CalibAtt、USV、AdaCluster、<a class="ref" href="https://arxiv.org/abs/2604.21221">Sparse Forcing</a>、<a class="ref" href="https://arxiv.org/abs/2608.12032">LoSA</a>、<a class="ref" href="https://arxiv.org/abs/2608.03335">SPADE</a></td><td><a class="ref" href="https://arxiv.org/abs/2509.24695">SANA-Video</a>、<a class="ref" href="https://arxiv.org/abs/2605.15178">SANA-WM</a>、LinVideo、<a class="ref" href="https://arxiv.org/abs/2609.06712">RoLA</a>、<a class="ref" href="https://arxiv.org/abs/2609.20744">Video DeltaNet</a></td></tr>
+    </tbody>
+  </table>
+
+  <div class="insight">
+    <span class="t">两条路线正在收敛到同一个答案：混合</span>
+    纯线性的模型装不下长时程的细节，纯稀疏的模型省不掉显存。2026 年出现的做法几乎全是<strong>分层混合</strong>——一部分层跑线性（负责"大致记得"），少数层保留 full attention（负责"精确回忆"）。<a class="ref" href="https://arxiv.org/abs/2605.16579">Attend Locally, Remember Linearly</a> 把这件事说得最直白：<em>局部用注意力，跨帧记忆用线性</em>。这也正好解释了为什么轴五的论文几乎都同时带 <span class="mono">memory</span> 标签——在长视频里，"注意力复杂度"和"记忆机制"是同一个问题的两个名字。
+  </div>
+</section>
+
+<section class="card">
+  <div class="sechead"><span class="secnum">06</span><h2>轴六 / 轴七 · 两个方向上的"少装一点"</h2></div>
+  <p class="lead">同样是减 token，<strong>空间轴</strong>（这一帧用多少格子表示）和<strong>时间轴</strong>（历史留多少帧）是两个完全不同的问题——后者只在长时程自回归里才出现，也正因如此，它是这张图里<em>离交互式世界模型最近</em>的一条路线。</p>
+
+  <h3>轴七的物理约束：KV 是线性增长的，显存不是</h3>
+  <div class="fig">
+  <svg viewBox="0 0 1000 300" role="img" aria-label="KV 缓存随生成时长的增长与四种压缩策略">
+    <g class="svgtxt">
+      <line x1="90" y1="230" x2="700" y2="230" stroke="var(--axis)" stroke-width="1"/>
+      <line x1="90" y1="50" x2="90" y2="230" stroke="var(--axis)" stroke-width="1"/>
+      <text x="395" y="256" font-size="11.5" fill="var(--muted)" text-anchor="middle">生成时长 →</text>
+      <text x="74" y="145" font-size="11.5" fill="var(--muted)" text-anchor="middle" transform="rotate(-90 74 145)">KV 显存占用 →</text>
+      <line x1="90" y1="100" x2="700" y2="100" stroke="var(--bad)" stroke-width="1.2" stroke-dasharray="5 4" opacity="0.7"/>
+      <text x="96" y="94" font-size="11" fill="var(--bad)">单卡显存上限</text>
+
+      <path d="M90,230 L700,60" fill="none" stroke="var(--r-kv)" stroke-width="2.4"/>
+      <circle cx="557" cy="100" r="4.5" fill="var(--bad)"/>
+      <text x="553" y="124" font-size="10.5" fill="var(--bad)" text-anchor="end">撞墙 —— 之后要么降分辨率，要么截断历史</text>
+
+      <path d="M90,230 L250,186 L700,186" fill="none" stroke="var(--r-causal)" stroke-width="2" stroke-dasharray="6 4"/>
+      <path d="M90,230 Q320,176 700,152" fill="none" stroke="var(--r-cache)" stroke-width="2"/>
+      <path d="M90,230 L700,209" fill="none" stroke="var(--r-quant)" stroke-width="2"/>
+
+      <g font-size="11.5">
+        <text x="710" y="64" fill="var(--r-kv)" font-weight="700">全量 KV</text>
+        <text x="710" y="80" fill="var(--muted)" font-size="10.5">线性增长，什么都不丢</text>
+        <text x="710" y="148" fill="var(--r-cache)" font-weight="700">选择性保留</text>
+        <text x="710" y="164" fill="var(--muted)" font-size="10.5">Focused / DensityKV / Pyramid Forcing</text>
+        <text x="710" y="182" fill="var(--r-causal)" font-weight="700">定长滑窗</text>
+        <text x="710" y="198" fill="var(--muted)" font-size="10.5">最省，但窗口外的世界直接消失</text>
+        <text x="710" y="215" fill="var(--r-quant)" font-weight="700">低比特 KV</text>
+        <text x="710" y="231" fill="var(--muted)" font-size="10.5">Quant VideoGen 的 2-bit：只改位宽，不挑内容</text>
+      </g>
+    </g>
+  </svg>
+  </div>
+  <p class="figcap">示意图。四条策略的区别不在斜率大小，而在<strong>丢的是什么</strong>：低比特 KV 每一帧都留着、只是变糊；选择性保留每一帧要么精确要么没有；定长滑窗则是干脆地遗忘。对一个"回头看还得是同一个世界"的世界模型来说，这三种损失完全不等价。</p>
+
+  <p>这解释了轴七为什么是<strong>唯一一条和 <span class="mono">memory</span> 标签大面积重叠</strong>的加速路线。<a class="ref" href="https://arxiv.org/abs/2605.22718">WorldKV</a>、<a class="ref" href="https://arxiv.org/abs/2603.21366">Relax Forcing</a>、<a class="ref" href="https://arxiv.org/abs/2602.06028">Context Forcing</a> 这些工作，说它们是"加速"或者说它们是"记忆"都对——在长视频里<em>省显存和记得住是同一件事的两面</em>。一个值得注意的细节：<a class="ref" href="https://arxiv.org/abs/2605.14487">Head Forcing</a> 和 <a class="ref" href="https://arxiv.org/abs/2605.13111">Pyramid Forcing</a> 都发现<strong>不同注意力头对历史的需求差别极大</strong>，于是按头分配预算，而不是全局一刀切。</p>
+
+  <h3>轴六：空间轴上的 token，被 VAE 挡住了上限</h3>
+  <p>8 篇，是八条路线里最少的一条。原因不难猜：每帧的 token 数主要由 VAE 的压缩率定死，而动 VAE 就要重训整个生成器。所以这条线上的工作大多绕着走——<a class="ref" href="https://arxiv.org/abs/2602.00268">TokenTrim</a> 在推理时裁、CVPR 的 <i>Content-Aware Dynamic Patchification</i> 按内容改 patch 大小、<i>HiStream</i> 在高分辨率下消冗余、<a class="ref" href="https://arxiv.org/abs/2607.14898">FlashDecoder</a> 则是换了个地方下手：<strong>把 latent→pixel 那一段单独换成流式 Transformer 解码器</strong>。它报出的 152 fps 是全表最高的数字，但要看清楚——那是解码器这一段的吞吐，不是端到端的生成速度。</p>
+</section>
+
+<section class="card">
+  <div class="sechead"><span class="secnum">07</span><h2>轴八 · 量化，以及它和别的路线打的架</h2></div>
+  <p class="lead">9 篇。想法上最朴素的一条：同样的算子、同样的格子数，用更少的比特跑完。BF16 → INT8 → INT4 → FP4，每一跳都是 2 倍。</p>
+  <p>但视频扩散的量化有个图像模型没有的麻烦：<strong>去噪的不同阶段，激活值的分布差别很大</strong>。高噪声步的特征接近高斯，低噪声步的特征结构性很强，用同一套量化参数必然有一头受委屈。<a class="ref" href="https://arxiv.org/abs/2609.04031">DSAQuant</a> 名字里的 "Denoising-Stage-Aligned" 就是针对这个——按去噪阶段分别做量化感知训练。CVPR 的 <i>DeltaQuant</i> 走的是另一条：既然相邻步的差值比绝对值更平滑，那就量化 delta 而不是量化值本身（顺带和轴三的缓存共用了同一个观察）。</p>
+  <div class="insight warn">
+    <span class="t">两处真实的冲突</span>
+    <strong>量化 × 稀疏：</strong><a class="ref" href="https://arxiv.org/abs/2605.26266">Quantized Keys Steal Attention</a> 报告了一个很具体的失败——KV 被量化之后，量化误差会系统性地<em>抬高某些 key 的注意力得分</em>，于是稀疏注意力的 top-k 选块挑错了对象。两条本来正交的路线，在这里互相污染，需要专门的偏差校正。<br>
+    <strong>量化 × 注意力核：</strong>ECCV 的 <i>RotateAttention</i> 指出 INT4 注意力和 RoPE 的旋转对不上——旋转把值域拉宽，直接量化会溢出，得先做范围矫正。<em>越往低比特走，量化就越不能当成一个和模型结构无关的后处理。</em>
+  </div>
+</section>
+
+<section class="card">
+  <div class="sechead"><span class="secnum">08</span><h2>落地层 · 从"论文里的倍数"到"真能开的服务"</h2></div>
+  <p class="lead">7 篇，人数最少，但这是上面八条路线兑现的地方。</p>
+  <ul class="pts">
+    <li><strong>推理引擎</strong>——<a class="ref" href="https://arxiv.org/abs/2511.20714">Inferix</a> 把 block-diffusion 当成一等公民来调度；<a class="ref" href="https://arxiv.org/abs/2606.19271">TurboServe</a> 关心的是"经济地"服务流式视频生成，也就是批处理、排队和 SLA 这些论文通常不写的东西。</li>
+    <li><strong>并行基础设施</strong>——<a class="ref" href="https://arxiv.org/abs/2605.18739">LongLive-2.0</a> 是 NVFP4 上的并行长视频基建，把轴八和系统层焊在了一起；<a class="ref" href="https://arxiv.org/abs/2603.06664">Sequential-Parallel 3D 位置编码</a> 则是把并行切分的约束反过来写进位置编码里。</li>
+    <li><strong>开源全栈</strong>——<a class="ref" href="https://arxiv.org/abs/2605.30263">minWM</a> 值得单独点一句：它不追求任何单项最快，而是把一条完整的实时交互式世界模型链路开源出来。对想复现这张图上任何一条路线的人，这是成本最低的起点。</li>
+  </ul>
+  <div class="insight">
+    <span class="t">论文的倍数和服务的吞吐，中间隔着一个批处理</span>
+    这一层反复出现的一个矛盾前面已经碰到过两次：<strong>轴二（自适应步数）和轴三（内容自适应缓存）都是"每个样本花的钱不一样"</strong>，而批处理要求整批同构。单用户交互（手柄接在上面）是它们的主场；一旦要对外开服务，它们省下的算力很难变成吞吐。这是为什么一篇论文报的"3.2× 加速"和一个服务实际能多接的并发数，经常对不上。
+  </div>
+</section>
+
+<section class="card">
+  <div class="sechead"><span class="secnum">09</span><h2>这些路线加起来，实际跑到了哪</h2></div>
+  <p class="lead">上面全是方法。这一节是列表里<strong>真实记录过的吞吐</strong>——66 个系统，每个点是论文自报的 fps，按骨干类型着色。唯一一条值得盯的线是 24 fps：过了它，手柄接上去才不难受。</p>
+  <div class="fig"><svg id="fpsChart" viewBox="0 0 1000 384" role="img" aria-label="66 个系统的自报吞吐随时间变化"></svg></div>
+  <div class="legendrow" id="fpsLegend"></div>
+  <p class="figcap">纵轴为对数刻度。数字取自各论文自报，<strong>分辨率、骨干规模、硬件各不相同，不可直接横向比较</strong>——放在一起只为看一件事：过 24 fps 线的点，2025 年中之前基本没有，之后成片出现。悬停看是哪个系统。</p>
+  <div class="insight">
+    <span class="t">图里最容易误读的两个点</span>
+    最高的那个 <b>FlashDecoder 152 fps</b> 是 latent→pixel <em>解码器那一段</em>的吞吐，不是端到端生成速度；<b>COMBAT 85 fps</b> 的骨干规模也远小于同期的通用世界模型。反过来，底下 0.3–1 fps 那一簇（WorldMem、EvoWorld、UCM）几乎都是<strong>把算力花在长时程记忆上</strong>的工作——它们不是慢，是在买别的东西。
+  </div>
+</section>
+
+<section class="card">
+  <div class="sechead"><span class="secnum">10</span><h2>谁能和谁叠：兼容性矩阵</h2></div>
+  <p class="lead">开头那句"动不同因子的方法天然可叠加"是个好用的一阶近似，但有几处例外是被论文实测到的。把 28 对组合逐一过一遍：</p>
+  <div class="fig">
+<svg viewBox="0 0 1000 500" role="img" aria-label="八条路线两两之间的叠加与冲突矩阵">
+<g class="svgtxt">
+<text x="234.0" y="62" font-size="15" font-weight="700" fill="var(--r-step)" text-anchor="middle">①</text>
+<text x="282.0" y="62" font-size="15" font-weight="700" fill="var(--r-adapt)" text-anchor="middle">②</text>
+<text x="330.0" y="62" font-size="15" font-weight="700" fill="var(--r-cache)" text-anchor="middle">③</text>
+<text x="378.0" y="62" font-size="15" font-weight="700" fill="var(--r-sparse)" text-anchor="middle">④</text>
+<text x="426.0" y="62" font-size="15" font-weight="700" fill="var(--r-linear)" text-anchor="middle">⑤</text>
+<text x="474.0" y="62" font-size="15" font-weight="700" fill="var(--r-token)" text-anchor="middle">⑥</text>
+<text x="522.0" y="62" font-size="15" font-weight="700" fill="var(--r-kv)" text-anchor="middle">⑦</text>
+<text x="570.0" y="62" font-size="15" font-weight="700" fill="var(--r-quant)" text-anchor="middle">⑧</text>
+<text x="196" y="105.0" font-size="12.5" fill="var(--ink2)" text-anchor="end">① 蒸馏</text>
+<text x="196" y="153.0" font-size="12.5" fill="var(--ink2)" text-anchor="end">② 自适应步数</text>
+<text x="196" y="201.0" font-size="12.5" fill="var(--ink2)" text-anchor="end">③ 缓存复用</text>
+<text x="196" y="249.0" font-size="12.5" fill="var(--ink2)" text-anchor="end">④ 稀疏注意力</text>
+<text x="196" y="297.0" font-size="12.5" fill="var(--ink2)" text-anchor="end">⑤ 线性注意力</text>
+<text x="196" y="345.0" font-size="12.5" fill="var(--ink2)" text-anchor="end">⑥ token 裁剪</text>
+<text x="196" y="393.0" font-size="12.5" fill="var(--ink2)" text-anchor="end">⑦ KV 压缩</text>
+<text x="196" y="441.0" font-size="12.5" fill="var(--ink2)" text-anchor="end">⑧ 量化</text>
+<rect x="210" y="76" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--r-step) 16%, var(--surface))"/>
+<g data-tip="<b>②自适应步数 × ①蒸馏</b>都在砍 NFE。蒸馏到 4 步之后，自适应步数能再省的余量已经很小——两者更接近互相替代">
+<rect x="210" y="124" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--muted) 13%, var(--surface))" stroke="color-mix(in srgb, var(--muted) 42%, transparent)" stroke-width="1"/>
+<text x="232.5" y="152.5" font-size="15" font-weight="700" fill="var(--muted)" text-anchor="middle">～</text>
+</g>
+<rect x="258" y="124" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--r-adapt) 16%, var(--surface))"/>
+<g data-tip="<b>③缓存复用 × ①蒸馏</b><b>真实冲突</b>：缓存吃的是步间冗余，蒸馏刚好把步间冗余榨干了。DisCa 的「Distillation-Compatible」、X-Cache 的「for Few-Step」都是冲这个来的">
+<rect x="210" y="172" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--bad) 13%, var(--surface))" stroke="color-mix(in srgb, var(--bad) 42%, transparent)" stroke-width="1"/>
+<text x="232.5" y="200.5" font-size="15" font-weight="700" fill="var(--bad)" text-anchor="middle">！</text>
+</g>
+<g data-tip="<b>③缓存复用 × ②自适应步数</b>两者都让每个样本花的钱不一样，叠在一起对批处理更不友好">
+<rect x="258" y="172" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--bad) 13%, var(--surface))" stroke="color-mix(in srgb, var(--bad) 42%, transparent)" stroke-width="1"/>
+<text x="280.5" y="200.5" font-size="15" font-weight="700" fill="var(--bad)" text-anchor="middle">！</text>
+</g>
+<rect x="306" y="172" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--r-cache) 16%, var(--surface))"/>
+<g data-tip="<b>④稀疏注意力 × ①蒸馏</b>正交：一个砍步数，一个砍每步的注意力">
+<rect x="210" y="220" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="232.5" y="248.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>④稀疏注意力 × ②自适应步数</b>正交">
+<rect x="258" y="220" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="280.5" y="248.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>④稀疏注意力 × ③缓存复用</b>正交">
+<rect x="306" y="220" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="328.5" y="248.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<rect x="354" y="220" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--r-sparse) 16%, var(--surface))"/>
+<g data-tip="<b>⑤线性注意力 × ①蒸馏</b>正交">
+<rect x="210" y="268" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="232.5" y="296.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑤线性注意力 × ②自适应步数</b>正交">
+<rect x="258" y="268" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="280.5" y="296.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑤线性注意力 × ③缓存复用</b>正交">
+<rect x="306" y="268" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="328.5" y="296.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑤线性注意力 × ④稀疏注意力</b><b>互相替代</b>：都在改注意力，通常二选一。混合方案里可以分层共存，但同一层上不行">
+<rect x="354" y="268" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--muted) 13%, var(--surface))" stroke="color-mix(in srgb, var(--muted) 42%, transparent)" stroke-width="1"/>
+<text x="376.5" y="296.5" font-size="15" font-weight="700" fill="var(--muted)" text-anchor="middle">～</text>
+</g>
+<rect x="402" y="268" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--r-linear) 16%, var(--surface))"/>
+<g data-tip="<b>⑥token 裁剪 × ①蒸馏</b>正交">
+<rect x="210" y="316" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="232.5" y="344.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑥token 裁剪 × ②自适应步数</b>正交">
+<rect x="258" y="316" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="280.5" y="344.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑥token 裁剪 × ③缓存复用</b>正交">
+<rect x="306" y="316" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="328.5" y="344.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑥token 裁剪 × ④稀疏注意力</b>正交">
+<rect x="354" y="316" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="376.5" y="344.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑥token 裁剪 × ⑤线性注意力</b>正交">
+<rect x="402" y="316" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="424.5" y="344.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<rect x="450" y="316" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--r-token) 16%, var(--surface))"/>
+<g data-tip="<b>⑦KV 压缩 × ①蒸馏</b>正交">
+<rect x="210" y="364" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="232.5" y="392.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑦KV 压缩 × ②自适应步数</b>正交">
+<rect x="258" y="364" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="280.5" y="392.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑦KV 压缩 × ③缓存复用</b>正交">
+<rect x="306" y="364" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="328.5" y="392.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑦KV 压缩 × ④稀疏注意力</b>正交">
+<rect x="354" y="364" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="376.5" y="392.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑦KV 压缩 × ⑤线性注意力</b><b>大体不适用</b>：线性注意力压根没有随长度增长的 KV，也就没有 KV 可压">
+<rect x="402" y="364" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--muted) 13%, var(--surface))" stroke="color-mix(in srgb, var(--muted) 42%, transparent)" stroke-width="1"/>
+<text x="424.5" y="392.5" font-size="15" font-weight="700" fill="var(--muted)" text-anchor="middle">～</text>
+</g>
+<g data-tip="<b>⑦KV 压缩 × ⑥token 裁剪</b>正交：一个砍空间轴 token，一个砍时间轴历史">
+<rect x="450" y="364" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="472.5" y="392.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<rect x="498" y="364" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--r-kv) 16%, var(--surface))"/>
+<g data-tip="<b>⑧量化 × ①蒸馏</b>正交，且常一起用：少步 + 低比特是当前最常见的组合">
+<rect x="210" y="412" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="232.5" y="440.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑧量化 × ②自适应步数</b>正交">
+<rect x="258" y="412" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="280.5" y="440.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑧量化 × ③缓存复用</b>不只正交——DeltaQuant 量化 delta 而非绝对值，和缓存共用「相邻步差值更平滑」这同一个观察">
+<rect x="306" y="412" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="328.5" y="440.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑧量化 × ④稀疏注意力</b><b>真实冲突</b>：KV 量化误差会系统性抬高某些 key 的得分，稀疏注意力的 top-k 于是挑错块（Quantized Keys Steal Attention）。另有 RotateAttention 报告 INT4 与 RoPE 旋转的值域冲突">
+<rect x="354" y="412" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--bad) 13%, var(--surface))" stroke="color-mix(in srgb, var(--bad) 42%, transparent)" stroke-width="1"/>
+<text x="376.5" y="440.5" font-size="15" font-weight="700" fill="var(--bad)" text-anchor="middle">！</text>
+</g>
+<g data-tip="<b>⑧量化 × ⑤线性注意力</b>正交">
+<rect x="402" y="412" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="424.5" y="440.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑧量化 × ⑥token 裁剪</b>正交">
+<rect x="450" y="412" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="472.5" y="440.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<g data-tip="<b>⑧量化 × ⑦KV 压缩</b>正交，Quant VideoGen 的 2-bit KV 就是这两条直接叠起来">
+<rect x="498" y="412" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--good) 13%, var(--surface))" stroke="color-mix(in srgb, var(--good) 42%, transparent)" stroke-width="1"/>
+<text x="520.5" y="440.5" font-size="15" font-weight="700" fill="var(--good)" text-anchor="middle">＋</text>
+</g>
+<rect x="546" y="412" width="45" height="45" rx="6" fill="color-mix(in srgb, var(--r-quant) 16%, var(--surface))"/>
+<g font-size="12.5"><text x="210" y="482" fill="var(--good)" font-weight="700">＋ 可叠加</text>
+<text x="310" y="482" fill="var(--muted)" font-weight="700">～ 互相替代 / 不适用</text>
+<text x="482" y="482" fill="var(--bad)" font-weight="700">！ 有实测到的互相拆台</text>
+<text x="628" y="482" fill="var(--muted)">悬停任一格看依据</text></g>
+</g></svg>
+  </div>
+  <p class="figcap">三处"！"全都来自具体论文报告的失败，不是推测；两处"～"是结构性的互相替代。其余 23 对确实可以叠。</p>
+  <div class="insight">
+    <span class="t">如果只记一句话</span>
+    <strong>先做轴一（蒸馏到 4 步），再做轴四或轴五（改注意力），再做轴八（降位宽）——这三下打完，剩下的路线收益都进入个位数百分比。</strong>轴三（缓存）要放在轴一<em>之前</em>评估，因为蒸馏会把它的收益吃掉；轴七（KV）只在你真的要做分钟级以上的长时程时才成为瓶颈；轴二和轴六是这张表里最容易被高估的两条。
+  </div>
+</section>
+
+<section class="card">
+  <div class="sechead"><span class="secnum">11</span><h2>全部 132 篇，按路线索引</h2></div>
+  <p class="lead">一篇论文可以同时属于几条路线（比如 Quant VideoGen 同时在轴七和轴八），所以下面各段之和大于 132。点标题去原文。</p>
+  <div class="filterbar" id="filterbar"></div>
+  <div id="routeIndex"></div>
+</section>
+
+<footer>
+  跨 132 篇论文的方法梳理，数据取自本列表的 <span class="mono">data/papers.jsonl</span>，统计口径为人工策展而非关键词匹配。<br>
+  相关阅读：<a href="dmd-dmd2-dfd-comparison.html">从 DMD 到 Data-Forcing：三代分布匹配蒸馏方法对比</a> —— 本文轴一"分布匹配"泳道的起点，在那篇里拆到了公式级。<br>
+  文中带 ★ 的论文在 <span class="mono">explainers/</span> 下有单篇精读；示意图均已标注，实测数据仅吞吐图一张。
+</footer>
+
+</div>
+
+<script>
+(function () {
+const ROUTES={"P":{"name":"因果化骨干","desc":"把双向去噪改成因果/流式——不省算力，但没有它就没有'实时'可言","items":[{"id":"2407.01392","n":"Diffusion Forcing: Next-token Prediction Meets Full-Sequence Diffusion","t":"","d":"2024-07","u":"https://arxiv.org/abs/2407.01392"},{"id":"2410.05954","n":"Pyramidal Flow Matching for Efficient Video Generative Modeling","t":"","d":"2024-10","u":"https://arxiv.org/abs/2410.05954"},{"id":"2412.07772","n":"From Slow Bidirectional to Fast Autoregressive Video Diffusion Models","t":"","d":"2024-12","u":"https://arxiv.org/abs/2412.07772"},{"id":"2501.12389","n":"Taming Teacher Forcing for Masked Autoregressive Video Generation","t":"","d":"2025-01","u":"https://arxiv.org/abs/2501.12389"},{"id":"2506.01380","n":"Playing with Transformer at 30+ FPS via Next-Frame Diffusion","t":"","d":"2025-06","u":"https://arxiv.org/abs/2506.01380"},{"id":"2507.03745","n":"StreamDiT","t":"StreamDiT: Real-Time Streaming Text-to-Video Generation","d":"2025-07","u":"https://arxiv.org/abs/2507.03745"},{"id":"2509.25161","n":"Rolling Forcing: Autoregressive Long Video Diffusion in Real Time","t":"","d":"2025-09","u":"https://arxiv.org/abs/2509.25161"},{"id":"2511.20714","n":"Inferix","t":"Inferix: A Block-Diffusion based Next-Generation Inference Engine for World Simulation","d":"2025-11","u":"https://arxiv.org/abs/2511.20714"},{"id":"2606.11187","n":"Next Forcing","t":"Next Forcing: Causal World Modeling with Multi-Chunk Prediction","d":"2026-06","u":"https://arxiv.org/abs/2606.11187"},{"id":"2607.03509","n":"Flex-Forcing","t":"Flex-Forcing: Towards a Unified Autoregressive and Bidirectional Video Diffusion Model","d":"2026-07","u":"https://arxiv.org/abs/2607.03509"},{"id":"2608.10439","n":"Stream Forcing: Constructing Unified Training Trajectory for Robust Streaming Video Generation","t":"","d":"2026-08","u":"https://arxiv.org/abs/2608.10439"},{"id":"proc:cvpr2026-findings-333a056b","n":"Fast Autoregressive Video Generation with Diagonal Decoding","t":"","d":"CVPR 2026F","u":"https://openaccess.thecvf.com/content/CVPR2026F/html/Ye_Fast_Autoregressive_Video_Generation_with_Diagonal_Decoding_CVPRF_2026_paper.html"}]},"1":{"name":"砍步数 · 蒸馏","desc":"把 NFE 从 50 压到 1–4，是收益最大的一刀","items":[{"id":"2406.06890","n":"Motion Consistency Model: Accelerating Video Diffusion with Disentangled Motion-Appearance Distillation","t":"","d":"2024-06","u":"https://arxiv.org/abs/2406.06890"},{"id":"2501.08316","n":"Diffusion Adversarial Post-Training for One-Step Video Generation","t":"","d":"2025-01","u":"https://arxiv.org/abs/2501.08316"},{"id":"2506.09350","n":"Autoregressive Adversarial Post-Training for Real-Time Interactive Video Generation","t":"","d":"2025-06","u":"https://arxiv.org/abs/2506.09350"},{"id":"2506.08009","n":"Self Forcing: Bridging the Train-Test Gap in Autoregressive Video Diffusion","t":"","d":"2025-06","u":"https://arxiv.org/abs/2506.08009"},{"id":"2510.02283","n":"Self-Forcing++","t":"Self-Forcing++: Towards Minute-Scale High-Quality Video Generation","d":"2025-10","u":"https://arxiv.org/abs/2510.02283"},{"id":"2511.01419","n":"Towards One-step Causal Video Generation via Adversarial Self-Distillation","t":"","d":"2025-11","u":"https://arxiv.org/abs/2511.01419"},{"id":"2512.04678","n":"Reward Forcing: Efficient Streaming Video Generation with Rewarded Distribution Matching Distillation","t":"","d":"2025-12","u":"https://arxiv.org/abs/2512.04678"},{"id":"2512.23576","n":"LiveTalk","t":"LiveTalk: Real-Time Multimodal Interactive Video Diffusion via Improved On-Policy Distillation","d":"2025-12","u":"https://arxiv.org/abs/2512.23576"},{"id":"2601.09881","n":"Transition Matching Distillation for Fast Video Generation","t":"","d":"2026-01","u":"https://arxiv.org/abs/2601.09881"},{"id":"2601.16933","n":"Reward-Forcing","t":"Reward-Forcing: Autoregressive Video Generation with Reward Feedback","d":"2026-01","u":"https://arxiv.org/abs/2601.16933"},{"id":"2602.02214","n":"Causal Forcing: Autoregressive Diffusion Distillation Done Right for High-Quality Real-Time Interactive Video Generation","t":"","d":"2026-02","u":"https://arxiv.org/abs/2602.02214"},{"id":"2603.09488","n":"Streaming Autoregressive Video Generation via Diagonal Distillation","t":"","d":"2026-03","u":"https://arxiv.org/abs/2603.09488"},{"id":"2603.17051","n":"Astrolabe","t":"Astrolabe: Steering Forward-Process Reinforcement Learning for Distilled Autoregressive Video Models","d":"2026-03","u":"https://arxiv.org/abs/2603.17051"},{"id":"2604.10103","n":"Long-Horizon Streaming Video Generation via Hybrid Attention with Decoupled Distillation","t":"","d":"2026-04","u":"https://arxiv.org/abs/2604.10103"},{"id":"2605.30116","n":"SGMD","t":"SGMD: Score Gradient Matching Distillation for Few-Step Video Diffusion Distillation","d":"2026-05","u":"https://arxiv.org/abs/2605.30116"},{"id":"2605.26105","n":"On-Policy Adversarial Flow Distillation for Autoregressive Video Generation","t":"","d":"2026-05","u":"https://arxiv.org/abs/2605.26105"},{"id":"2605.15141","n":"Causal Forcing++: Scalable Few-Step Autoregressive Diffusion Distillation for Real-Time Interactive Video Generation","t":"","d":"2026-05","u":"https://arxiv.org/abs/2605.15141"},{"id":"2605.23458","n":"One-Forcing","t":"One-Forcing: Towards Stable One-Step Autoregressive Video Generation","d":"2026-05","u":"https://arxiv.org/abs/2605.23458"},{"id":"2605.03849","n":"Stream-R1","t":"Stream-R1: Reliability-Perplexity Aware Reward Distillation for Streaming Video Generation","d":"2026-05","u":"https://arxiv.org/abs/2605.03849"},{"id":"2605.15190","n":"RAVEN","t":"RAVEN: Real-time Autoregressive Video Extrapolation with Consistency-model GRPO","d":"2026-05","u":"https://arxiv.org/abs/2605.15190"},{"id":"2606.03972","n":"AAD-1","t":"AAD-1: Asymmetric Adversarial Distillation for One-Step Autoregressive Video Generation","d":"2026-06","u":"https://arxiv.org/abs/2606.03972"},{"id":"2606.25473","n":"Causal-rCM","t":"Causal-rCM: A Unified Teacher-Forcing and Self-Forcing Open Recipe for Autoregressive Diffusion Distillation in Streaming Video Generation and Interactive World Models","d":"2026-06","u":"https://arxiv.org/abs/2606.25473"},{"id":"2606.18702","n":"UniTemp","t":"UniTemp: Unlocking Video Generation in Any Temporal Order via Bidirectional Distillation","d":"2026-06","u":"https://arxiv.org/abs/2606.18702"},{"id":"2607.26004","n":"Parallel Decoding Distillation for Fast Image and Video Generation","t":"","d":"2026-07","u":"https://arxiv.org/abs/2607.26004"},{"id":"2607.08766","n":"OPSD-V","t":"OPSD-V: On-Policy Self-Distillation for Post-Training Few-Step Autoregressive Video Generators","d":"2026-07","u":"https://arxiv.org/abs/2607.08766"},{"id":"2607.08020","n":"SAGA","t":"SAGA: Stable Acceleration Guidance for Autoregressive Video Generation","d":"2026-07","u":"https://arxiv.org/abs/2607.08020"},{"id":"2608.09637","n":"DUET","t":"DUET: A Diversity-Quality Duet of Distillation Experts for Two-Step Video Generation","d":"2026-08","u":"https://arxiv.org/abs/2608.09637"},{"id":"2608.13205","n":"HPSD","t":"HPSD: Hybrid-Policy Self-Distillation for Text-Image-to-Video Diffusion Models","d":"2026-08","u":"https://arxiv.org/abs/2608.13205"},{"id":"2608.17707","n":"DynaForcing","t":"DynaForcing: Overcoming Dynamic Collapse in Self-Forcing Distillation for Streaming Avatar Generation","d":"2026-08","u":"https://arxiv.org/abs/2608.17707"},{"id":"2608.13391","n":"Context-Matched Distillation","t":"Context-Matched Distillation: Teacher Causality for Autoregressive Video Distillation","d":"2026-08","u":"https://arxiv.org/abs/2608.13391"},{"id":"2608.14022","n":"ForgeWM","t":"ForgeWM: Progressive Causal Training for Few-Step Action-Conditioned Video World Models","d":"2026-08","u":"https://arxiv.org/abs/2608.14022"},{"id":"2609.11265","n":"Uncertainty DMD","t":"Uncertainty DMD: Restoring Diversity in Few-Step Autoregressive Video Distillation","d":"2026-09","u":"https://arxiv.org/abs/2609.11265"},{"id":"2609.04283","n":"Joint Alignment and Distillation for Video Generation via Sample-Guided Distribution Matching","t":"","d":"2026-09","u":"https://arxiv.org/abs/2609.04283"},{"id":"2609.14725","n":"CrossDistill","t":"CrossDistill: Balancing Quality and Diversity via Trajectory-Level Hybrid Few-Step Distillation","d":"2026-09","u":"https://arxiv.org/abs/2609.14725"},{"id":"2609.09123","n":"Mask Forcing: Improving Autoregressive Video Diffusion Distillation via Dual-Noise Masking Rollout","t":"","d":"2026-09","u":"https://arxiv.org/abs/2609.09123"},{"id":"2609.20051","n":"DART","t":"DART: Distillation-Aware Reparameterization for Training-Free LoRA Reuse in Few-Step Video Diffusion Models","d":"2026-09","u":"https://arxiv.org/abs/2609.20051"},{"id":"proc:eccv2026-1998c295","n":"SALT","t":"SALT: Self-Consistent Distribution Matching with Cache-Aware Training for Few-Step Video Generation","d":"ECCV 2026","u":"https://eccv.ecva.net/virtual/2026/poster/3473"},{"id":"proc:eccv2026-c2c94c48","n":"MoGAN","t":"MoGAN: Improving Motion Quality in Video Diffusion via Few-Step Motion Adversarial Post-Training","d":"ECCV 2026","u":"https://eccv.ecva.net/virtual/2026/poster/3966"},{"id":"proc:eccv2026-9f9ee195","n":"AnyFlow","t":"AnyFlow: Any-Step Video Diffusion Model with On-Policy Flow Map Distillation","d":"ECCV 2026","u":"https://eccv.ecva.net/virtual/2026/poster/5144"},{"id":"proc:eccv2026-da47d65e","n":"EFlow","t":"EFlow: Fast Few-Step Video Generator Training from Scratch via Efficient Solution Flow","d":"ECCV 2026","u":"https://eccv.ecva.net/virtual/2026/poster/5488"},{"id":"proc:eccv2026-37b24bc7","n":"Reward Lightning: Fast Video Generation via Homologous Preference Distillation","t":"","d":"ECCV 2026","u":"https://eccv.ecva.net/virtual/2026/poster/4259"},{"id":"proc:eccv2026-b9adfc44","n":"When Distillation Breaks Motion Control: Restoring Generative Trajectories for Fast Video Generators","t":"","d":"ECCV 2026","u":"https://eccv.ecva.net/virtual/2026/poster/3640"}]},"2":{"name":"自适应计算","desc":"不是每个 chunk 都值同样的步数","items":[{"id":"2512.11203","n":"AutoRefiner","t":"AutoRefiner: Improving Autoregressive Video Diffusion Models via Reflective Refinement Over the Stochastic Sampling Path","d":"2025-12","u":"https://arxiv.org/abs/2512.11203"},{"id":"2606.04432","n":"DSA","t":"DSA: Dynamic Step Allocation for Fast Autoregressive Video Generation","d":"2026-06","u":"https://arxiv.org/abs/2606.04432"},{"id":"2607.03509","n":"Flex-Forcing","t":"Flex-Forcing: Towards a Unified Autoregressive and Bidirectional Video Diffusion Model","d":"2026-07","u":"https://arxiv.org/abs/2607.03509"},{"id":"2608.17695","n":"Magnitude-Direction Decoupling for Fast Video Generation with Flow Matching Models","t":"","d":"2026-08","u":"https://arxiv.org/abs/2608.17695"},{"id":"2608.01845","n":"WorldDynCache","t":"WorldDynCache: Risk-Controlled Latent Dynamics Approximation for Diffusion World Model","d":"2026-08","u":"https://arxiv.org/abs/2608.01845"},{"id":"proc:eccv2026-9f9ee195","n":"AnyFlow","t":"AnyFlow: Any-Step Video Diffusion Model with On-Policy Flow Map Distillation","d":"ECCV 2026","u":"https://eccv.ecva.net/virtual/2026/poster/5144"},{"id":"proc:eccv2026-d849696a","n":"Surprise Forcing: What to Remember, When to Skip in Long Video Generation","t":"","d":"ECCV 2026","u":"https://eccv.ecva.net/virtual/2026/poster/3534"}]},"3":{"name":"跨步复用 · 缓存","desc":"相邻去噪步的特征高度冗余，算过的别再算","items":[{"id":"2408.12588","n":"Real-Time Video Generation with Pyramid Attention Broadcast","t":"","d":"2024-08","u":"https://arxiv.org/abs/2408.12588"},{"id":"2411.16375","n":"Ca2-VDM","t":"Ca2-VDM: Efficient Autoregressive Video Diffusion Model with Causal Generation and Cache Sharing","d":"2024-11","u":"https://arxiv.org/abs/2411.16375"},{"id":"2508.17588","n":"HERO","t":"HERO: Hierarchical Extrapolation and Refresh for Efficient World Models","d":"2025-08","u":"https://arxiv.org/abs/2508.17588"},{"id":"2510.19755","n":"A Survey on Cache Methods in Diffusion Models: Toward Efficient Multi-Modal Generation","t":"","d":"2025-10","u":"https://arxiv.org/abs/2510.19755"},{"id":"2511.20426","n":"Block Cascading: Training Free Acceleration of Block-Causal Video Models","t":"","d":"2025-11","u":"https://arxiv.org/abs/2511.20426"},{"id":"2602.01801","n":"Fast Autoregressive Video Diffusion and World Models with Temporal Cache Compression and Sparse Attention","t":"","d":"2026-02","u":"https://arxiv.org/abs/2602.01801"},{"id":"2603.06331","n":"WorldCache","t":"WorldCache: Accelerating World Models for Free via Heterogeneous Token Caching","d":"2026-03","u":"https://arxiv.org/abs/2603.06331"},{"id":"2603.22286","n":"WorldCache","t":"WorldCache: Content-Aware Caching for Accelerated Video World Models","d":"2026-03","u":"https://arxiv.org/abs/2603.22286"},{"id":"2604.20289","n":"X-Cache","t":"X-Cache: Cross-Chunk Block Caching for Few-Step Autoregressive World Models Inference","d":"2026-04","u":"https://arxiv.org/abs/2604.20289"},{"id":"2605.31158","n":"Light Interaction: Training-Free Inference Acceleration for Interactive Video World Models","t":"","d":"2026-05","u":"https://arxiv.org/abs/2605.31158"},{"id":"2606.13035","n":"TetherCache","t":"TetherCache: Stabilizing Autoregressive Long-Form Video Generation with Gated Recall and Trusted Alignment","d":"2026-06","u":"https://arxiv.org/abs/2606.13035"},{"id":"2608.17973","n":"LinCa","t":"LinCa: Accelerating Diffusion Models via Learnable Decomposed Feature Caching","d":"2026-08","u":"https://arxiv.org/abs/2608.17973"},{"id":"2608.13043","n":"From Local Mismatch to Global Impact: Optimizing Cache Reuse Policy for Efficient Diffusion","t":"","d":"2026-08","u":"https://arxiv.org/abs/2608.13043"},{"id":"proc:cvpr2026-31a9344c","n":"D2Cache","t":"D2Cache: Second-Order Delta Caching for Higher Video Diffusion Acceleration","d":"CVPR 2026","u":"https://openaccess.thecvf.com/content/CVPR2026/html/Liu_D2Cache_Second-Order_Delta_Caching_for_Higher_Video_Diffusion_Acceleration_CVPR_2026_paper.html"},{"id":"proc:cvpr2026-ff130b9f","n":"DisCa","t":"DisCa: Accelerating Video Diffusion Transformers with Distillation-Compatible Learnable Feature Caching","d":"CVPR 2026","u":"https://openaccess.thecvf.com/content/CVPR2026/html/Zou_DisCa_Accelerating_Video_Diffusion_Transformers_with_Distillation-Compatible_Learnable_Feature_Caching_CVPR_2026_paper.html"},{"id":"proc:cvpr2026-ffc94528","n":"RAPID","t":"RAPID: Reusing Attention Sparsity with Inter-step Adaptation for Efficient Video Diffusion","d":"CVPR 2026","u":"https://openaccess.thecvf.com/content/CVPR2026/html/Lin_RAPID_Reusing_Attention_Sparsity_with_Inter-step_Adaptation_for_Efficient_Video_CVPR_2026_paper.html"},{"id":"proc:cvpr2026-b131e985","n":"Accelerating Autoregressive Video Diffusion via History-Guided Cache and Residual Correction","t":"","d":"CVPR 2026","u":"https://openaccess.thecvf.com/content/CVPR2026/html/Nan_Accelerating_Autoregressive_Video_Diffusion_via_History-Guided_Cache_and_Residual_Correction_CVPR_2026_paper.html"}]},"4":{"name":"稀疏注意力","desc":"注意力矩阵里绝大多数格子对结果没贡献","items":[{"id":"2602.12271","n":"MonarchRT","t":"MonarchRT: Efficient Attention for Real-Time Video Generation","d":"2026-02","u":"https://arxiv.org/abs/2602.12271"},{"id":"2602.04789","n":"Light Forcing: Accelerating Autoregressive Video Diffusion via Sparse Attention","t":"","d":"2026-02","u":"https://arxiv.org/abs/2602.04789"},{"id":"2604.21221","n":"Sparse Forcing: Native Trainable Sparse Attention for Real-time Autoregressive Diffusion Video Generation","t":"","d":"2026-04","u":"https://arxiv.org/abs/2604.21221"},{"id":"2608.12032","n":"LoSA","t":"LoSA: Near-Lossless Sparse Attention for Training-Free Video Diffusion Acceleration","d":"2026-08","u":"https://arxiv.org/abs/2608.12032"},{"id":"2608.03335","n":"SPADE","t":"SPADE: An Input-Adaptive Sparse Attention Engine for Fast Video Diffusion Models Inference","d":"2026-08","u":"https://arxiv.org/abs/2608.03335"},{"id":"2608.10519","n":"SparSTAR","t":"SparSTAR: Sparse Attention for SpaceTime AutoRegressive Video Synthesis","d":"2026-08","u":"https://arxiv.org/abs/2608.10519"},{"id":"2608.02504","n":"Token Radius Attention for Efficient Video Generation","t":"","d":"2026-08","u":"https://arxiv.org/abs/2608.02504"},{"id":"2608.18484","n":"Partition the Support, Reconstruct the Residual: Training-Free Sparse Attention for Video Generation and World Models","t":"","d":"2026-08","u":"https://arxiv.org/abs/2608.18484"},{"id":"proc:cvpr2026-1e70e0f1","n":"AdaCluster","t":"AdaCluster: Adaptive Query-Key Clustering for Sparse Attention in Video Generation","d":"CVPR 2026","u":"https://openaccess.thecvf.com/content/CVPR2026/html/Tan_AdaCluster_Adaptive_Query-Key_Clustering_for_Sparse_Attention_in_Video_Generation_CVPR_2026_paper.html"},{"id":"proc:cvpr2026-8c5d2e00","n":"VMonarch","t":"VMonarch: Efficient Video Diffusion Transformers with Structured Attention","d":"CVPR 2026","u":"https://openaccess.thecvf.com/content/CVPR2026/html/Liang_VMonarch_Efficient_Video_Diffusion_Transformers_with_Structured_Attention_CVPR_2026_paper.html"},{"id":"proc:cvpr2026-findings-bb5fb12a","n":"USV","t":"USV: Unified Sparsification for Accelerating Video Diffusion Models","d":"CVPR 2026F","u":"https://openaccess.thecvf.com/content/CVPR2026F/html/Wu_USV_Unified_Sparsification_for_Accelerating_Video_Diffusion_Models_CVPRF_2026_paper.html"},{"id":"proc:eccv2026-0100aff6","n":"Accelerating Text-to-Video Generation with Calibrated Sparse Attention","t":"","d":"ECCV 2026","u":"https://eccv.ecva.net/virtual/2026/poster/3436"},{"id":"proc:eccv2026-9f49c61f","n":"SVG-EAR","t":"SVG-EAR: Parameter-Free Linear Compensation for Sparse Video Generation via Error-aware Routing","d":"ECCV 2026","u":"https://eccv.ecva.net/virtual/2026/poster/3530"}]},"5":{"name":"线性注意力","desc":"不挑格子，直接把 O(n²) 换成 O(n)","items":[{"id":"2509.24695","n":"SANA-Video","t":"SANA-Video: Efficient Video Generation with Block Linear Diffusion Transformer","d":"2025-09","u":"https://arxiv.org/abs/2509.24695"},{"id":"2601.20499","n":"Efficient Autoregressive Video Diffusion with Dummy Head","t":"","d":"2026-01","u":"https://arxiv.org/abs/2601.20499"},{"id":"2605.15178","n":"SANA-WM","t":"SANA-WM: Efficient Minute-Scale World Modeling with Hybrid Linear Diffusion Transformer","d":"2026-05","u":"https://arxiv.org/abs/2605.15178"},{"id":"2605.30409","n":"SANA-Streaming","t":"SANA-Streaming: Real-time Streaming Video Editing with Hybrid Diffusion Transformer","d":"2026-05","u":"https://arxiv.org/abs/2605.30409"},{"id":"2605.16579","n":"Attend Locally, Remember Linearly: Linear Attention as Cross-Frame Memory for Autoregressive Video Diffusion","t":"","d":"2026-05","u":"https://arxiv.org/abs/2605.16579"},{"id":"2608.16585","n":"SQuad","t":"SQuad: Sub-Quadratic Attention Distillation for Efficient Video Generation","d":"2026-08","u":"https://arxiv.org/abs/2608.16585"},{"id":"2609.06712","n":"RoLA","t":"RoLA: Rotary-Positioned Low-Rank Linear Attention for Efficient Diffusion Transformers","d":"2026-09","u":"https://arxiv.org/abs/2609.06712"},{"id":"2609.20744","n":"Video DeltaNet: A Video-Native Hybrid Attention for Livestream Video Generation","t":"","d":"2026-09","u":"https://arxiv.org/abs/2609.20744"},{"id":"proc:cvpr2026-518b5f91","n":"LinVideo","t":"LinVideo: A Post-Training Framework towards O(n) Attention in Efficient Video Generation","d":"CVPR 2026","u":"https://openaccess.thecvf.com/content/CVPR2026/html/Huang_LinVideo_A_Post-Training_Framework_towards_On_Attention_in_Efficient_Video_CVPR_2026_paper.html"},{"id":"proc:cvpr2026-059985e4","n":"Attention Surgery: An Efficient Recipe to Linearize Your Video Diffusion Transformer","t":"","d":"CVPR 2026","u":"https://openaccess.thecvf.com/content/CVPR2026/html/Ghafoorian_Attention_Surgery_An_Efficient_Recipe_to_Linearize_Your_Video_Diffusion_CVPR_2026_paper.html"}]},"6":{"name":"砍 token · 空间轴","desc":"每步喂进去的 token 少一点","items":[{"id":"2310.05737","n":"Language Model Beats Diffusion -- Tokenizer is Key to Visual Generation","t":"","d":"2023-10","u":"https://arxiv.org/abs/2310.05737"},{"id":"2512.05081","n":"Deep Forcing: Training-Free Long Video Generation with Deep Sink and Participative Compression","t":"","d":"2025-12","u":"https://arxiv.org/abs/2512.05081"},{"id":"2602.00268","n":"TokenTrim","t":"TokenTrim: Inference-Time Token Pruning for Autoregressive Long Video Generation","d":"2026-01","u":"https://arxiv.org/abs/2602.00268"},{"id":"2607.00712","n":"Towards Memory-Efficient Autoregressive Video Generation via Instance-Specific Parametric Absorption","t":"","d":"2026-07","u":"https://arxiv.org/abs/2607.00712"},{"id":"2607.14898","n":"FlashDecoder","t":"FlashDecoder: Real-Time Latent-to-Pixel Streaming Decoder with Transformers","d":"2026-07","u":"https://arxiv.org/abs/2607.14898"},{"id":"proc:cvpr2026-52c34ab7","n":"Content-Aware Dynamic Patchification for Efficient Video Diffusion","t":"","d":"CVPR 2026","u":"https://openaccess.thecvf.com/content/CVPR2026/html/Li_Content-Aware_Dynamic_Patchification_for_Efficient_Video_Diffusion_CVPR_2026_paper.html"},{"id":"proc:cvpr2026-findings-8e85ce50","n":"HiStream","t":"HiStream: Efficient High-Resolution Video Generation via Redundancy Eliminated Streaming","d":"CVPR 2026F","u":"https://openaccess.thecvf.com/content/CVPR2026F/html/Qiu_HiStream_Efficient_High-Resolution_Video_Generation_via_Redundancy_Eliminated_Streaming_CVPRF_2026_paper.html"},{"id":"proc:eccv2026-a139df52","n":"FastSTAR","t":"FastSTAR: Spatiotemporal Token Pruning for Efficient Autoregressive Video Synthesis","d":"ECCV 2026","u":"https://eccv.ecva.net/virtual/2026/poster/5679"}]},"7":{"name":"砍 KV · 时间轴","desc":"长时程专有：历史缓存的显存与带宽","items":[{"id":"2601.21896","n":"Past- and Future-Informed KV Cache Policy with Salience Estimation in Autoregressive Video Diffusion","t":"","d":"2026-01","u":"https://arxiv.org/abs/2601.21896"},{"id":"2602.02958","n":"Quant VideoGen","t":"Quant VideoGen: Auto-Regressive Long Video Generation via 2-Bit KV-Cache Quantization","d":"2026-02","u":"https://arxiv.org/abs/2602.02958"},{"id":"2602.06028","n":"Context Forcing: Consistent Autoregressive Video Generation with Long Context","t":"","d":"2026-02","u":"https://arxiv.org/abs/2602.06028"},{"id":"2603.21366","n":"Relax Forcing: Relaxed KV-Memory for Consistent Long Video Generation","t":"","d":"2026-03","u":"https://arxiv.org/abs/2603.21366"},{"id":"2603.25730","n":"PackForcing","t":"PackForcing: Short Video Training Suffices for Long Video Sampling and Long Context Inference","d":"2026-03","u":"https://arxiv.org/abs/2603.25730"},{"id":"2605.09681","n":"Forcing-KV","t":"Forcing-KV: Hybrid KV Cache Compression for Efficient Autoregressive Video Diffusion Models","d":"2026-05","u":"https://arxiv.org/abs/2605.09681"},{"id":"2605.13111","n":"Pyramid Forcing: Head-Aware Pyramid KV Cache Policy for High-Quality Long Video Generation","t":"","d":"2026-05","u":"https://arxiv.org/abs/2605.13111"},{"id":"2605.18346","n":"Focused Forcing: Content-Aware Per-Frame KV Selection for Efficient Autoregressive Video Diffusion","t":"","d":"2026-05","u":"https://arxiv.org/abs/2605.18346"},{"id":"2605.30351","n":"VideoMLA","t":"VideoMLA: Low-Rank Latent KV Cache for Minute-Scale Autoregressive Video Diffusion","d":"2026-05","u":"https://arxiv.org/abs/2605.30351"},{"id":"2605.22718","n":"WorldKV","t":"WorldKV: Efficient World Memory with World Retrieval and Compression","d":"2026-05","u":"https://arxiv.org/abs/2605.22718"},{"id":"2605.14487","n":"Head Forcing: Long Autoregressive Video Generation via Head Heterogeneity","t":"","d":"2026-05","u":"https://arxiv.org/abs/2605.14487"},{"id":"2605.26266","n":"Quantized Keys Steal Attention: Bias Correction for KV-Cache Compression in Video Diffusion","t":"","d":"2026-05","u":"https://arxiv.org/abs/2605.26266"},{"id":"2608.27922","n":"DensityKV","t":"DensityKV: Density-Guided KV Cache Compression for Long Video Generation","d":"2026-08","u":"https://arxiv.org/abs/2608.27922"},{"id":"proc:cvpr2026-e1cdab5b","n":"Dual-Granularity Memory for Efficient Video Generation","t":"","d":"CVPR 2026","u":"https://openaccess.thecvf.com/content/CVPR2026/html/Wang_Dual-Granularity_Memory_for_Efficient_Video_Generation_CVPR_2026_paper.html"}]},"8":{"name":"砍位宽 · 量化","desc":"同样的算子，用更少的比特跑","items":[{"id":"2602.02958","n":"Quant VideoGen","t":"Quant VideoGen: Auto-Regressive Long Video Generation via 2-Bit KV-Cache Quantization","d":"2026-02","u":"https://arxiv.org/abs/2602.02958"},{"id":"2605.21072","n":"Q-ARVD","t":"Q-ARVD: Quantizing Autoregressive Video Diffusion Models","d":"2026-05","u":"https://arxiv.org/abs/2605.21072"},{"id":"2605.18739","n":"LongLive-2.0","t":"LongLive-2.0: An NVFP4 Parallel Infrastructure for Long Video Generation","d":"2026-05","u":"https://arxiv.org/abs/2605.18739"},{"id":"2605.26266","n":"Quantized Keys Steal Attention: Bias Correction for KV-Cache Compression in Video Diffusion","t":"","d":"2026-05","u":"https://arxiv.org/abs/2605.26266"},{"id":"2609.04031","n":"DSAQuant","t":"DSAQuant: Denoising-Stage-Aligned Quantization-Aware Training for Video Generation","d":"2026-09","u":"https://arxiv.org/abs/2609.04031"},{"id":"proc:cvpr2026-76b504b8","n":"FastLightGen","t":"FastLightGen: Fast and Light Video Generation with Fewer Steps and Parameters","d":"CVPR 2026","u":"https://openaccess.thecvf.com/content/CVPR2026/html/Shao_FastLightGen_Fast_and_Light_Video_Generation_with_Fewer_Steps_and_CVPR_2026_paper.html"},{"id":"proc:cvpr2026-ed95b015","n":"DeltaQuant","t":"DeltaQuant: 4-bit Video Diffusion Models with Spatiotemporal Delta Smoothing","d":"CVPR 2026","u":"https://openaccess.thecvf.com/content/CVPR2026/html/Li_DeltaQuant_4-bit_Video_Diffusion_Models_with_Spatiotemporal_Delta_Smoothing_CVPR_2026_paper.html"},{"id":"proc:eccv2026-512c1cc7","n":"RotateAttention","t":"RotateAttention : RoPE-Aware Rotation and Range Rectification for INT4 Quantized Attention in Video Generation","d":"ECCV 2026","u":"https://eccv.ecva.net/virtual/2026/poster/5842"},{"id":"proc:eccv2026-ed2c409c","n":"SSBP","t":"SSBP: Stage-Specialized Block Pruning for Video Diffusion Models","d":"ECCV 2026","u":"https://eccv.ecva.net/virtual/2026/poster/3369"}]},"S":{"name":"系统与服务","desc":"把上面所有东西装进一个能跑的引擎","items":[{"id":"2511.20714","n":"Inferix","t":"Inferix: A Block-Diffusion based Next-Generation Inference Engine for World Simulation","d":"2025-11","u":"https://arxiv.org/abs/2511.20714"},{"id":"2603.06664","n":"Accelerating Video Generation Inference with Sequential-Parallel 3D Positional Encoding Using a Global Time Index","t":"","d":"2026-03","u":"https://arxiv.org/abs/2603.06664"},{"id":"2605.18739","n":"LongLive-2.0","t":"LongLive-2.0: An NVFP4 Parallel Infrastructure for Long Video Generation","d":"2026-05","u":"https://arxiv.org/abs/2605.18739"},{"id":"2605.30263","n":"minWM","t":"minWM: A Full-Stack Open-Source Framework for Real-Time Interactive Video World Models","d":"2026-05","u":"https://arxiv.org/abs/2605.30263"},{"id":"2606.19271","n":"TurboServe","t":"TurboServe: Serving Streaming Video Generation Efficiently and Economically","d":"2026-06","u":"https://arxiv.org/abs/2606.19271"},{"id":"2607.14898","n":"FlashDecoder","t":"FlashDecoder: Real-Time Latent-to-Pixel Streaming Decoder with Transformers","d":"2026-07","u":"https://arxiv.org/abs/2607.14898"},{"id":"2608.12107","n":"Avatar-Forever","t":"Avatar-Forever: Decoupled Parallel Training for High-Quality Real-Time Infinite Avatars","d":"2026-08","u":"https://arxiv.org/abs/2608.12107"}]}};
+const FPS=[{"n":"Genie","d":"2024-02-23","v":1.0,"g":"artok","u":"https://arxiv.org/abs/2402.15391"},{"n":"Diffusion Models Are Real-Time Game Engines","d":"2024-08-27","v":20.0,"g":"causal","u":"https://arxiv.org/abs/2408.14837"},{"n":"GameGen-X","d":"2024-11-01","v":20.0,"g":"hybrid","u":"https://arxiv.org/abs/2411.00769"},{"n":"Playable Game Generation","d":"2024-12-01","v":20.0,"g":"hybrid","u":"https://arxiv.org/abs/2412.00887"},{"n":"The Matrix","d":"2024-12-04","v":16.0,"g":"causal","u":"https://arxiv.org/abs/2412.03568"},{"n":"From Slow Bidirectional to Fast Autoregressi","d":"2024-12-10","v":9.4,"g":"causal","u":"https://arxiv.org/abs/2412.07772"},{"n":"Model as a Game","d":"2025-03-27","v":10.0,"g":"causal","u":"https://arxiv.org/abs/2503.21172"},{"n":"MineWorld","d":"2025-04-11","v":5.91,"g":"artok","u":"https://arxiv.org/abs/2504.08388"},{"n":"WorldMem","d":"2025-04-16","v":0.89,"g":"causal","u":"https://arxiv.org/abs/2504.12369"},{"n":"Context as Memory","d":"2025-06-03","v":0.97,"g":"causal","u":"https://arxiv.org/abs/2506.03141"},{"n":"Self Forcing","d":"2025-06-09","v":17.0,"g":"causal","u":"https://arxiv.org/abs/2506.08009"},{"n":"PlayerOne","d":"2025-06-11","v":8.0,"g":"bidir","u":"https://arxiv.org/abs/2506.09995"},{"n":"Autoregressive Adversarial Post-Training for","d":"2025-06-11","v":24.8,"g":"hybrid","u":"https://arxiv.org/abs/2506.09350"},{"n":"Hunyuan-GameCraft","d":"2025-06-20","v":6.6,"g":"hybrid","u":"https://arxiv.org/abs/2506.17201"},{"n":"Matrix-Game 2.0","d":"2025-08-18","v":25.0,"g":"causal","u":"https://arxiv.org/abs/2508.13009"},{"n":"LongLive","d":"2025-09-26","v":20.7,"g":"causal","u":"https://arxiv.org/abs/2509.22622"},{"n":"Dreamer4","d":"2025-09-29","v":21.0,"g":"causal","u":"https://arxiv.org/abs/2509.24527"},{"n":"EvoWorld","d":"2025-10-01","v":0.32,"g":"bidir","u":"https://arxiv.org/abs/2510.01183"},{"n":"MagicWorld","d":"2025-11-24","v":16.0,"g":"causal","u":"https://arxiv.org/abs/2511.18886"},{"n":"Hunyuan-GameCraft-2","d":"2025-11-28","v":16.0,"g":"causal","u":"https://arxiv.org/abs/2511.23429"},{"n":"SpriteHand","d":"2025-12-01","v":18.0,"g":"causal","u":"https://arxiv.org/abs/2512.01960"},{"n":"RELIC","d":"2025-12-03","v":16.0,"g":"causal","u":"https://arxiv.org/abs/2512.04040"},{"n":"Astra","d":"2025-12-09","v":20.0,"g":"causal","u":"https://arxiv.org/abs/2512.08931"},{"n":"WorldPlay","d":"2025-12-16","v":24.0,"g":"causal","u":"https://arxiv.org/abs/2512.14614"},{"n":"Yume-1.5","d":"2025-12-26","v":12.0,"g":"causal","u":"https://arxiv.org/abs/2512.22096"},{"n":"TeleWorld","d":"2025-12-31","v":8.0,"g":"causal","u":"https://arxiv.org/abs/2601.00051"},{"n":"lingbot-world","d":"2026-01-28","v":16.0,"g":"hybrid","u":"https://arxiv.org/abs/2601.20540"},{"n":"Scalable Generative Game Engine","d":"2026-01-31","v":26.4,"g":"causal","u":"https://arxiv.org/abs/2602.00608"},{"n":"Hand2World","d":"2026-02-10","v":8.9,"g":"causal","u":"https://arxiv.org/abs/2602.09600"},{"n":"Generated Reality","d":"2026-02-20","v":11.0,"g":"bidir","u":"https://arxiv.org/abs/2602.18422"},{"n":"UCM","d":"2026-02-26","v":0.42,"g":"bidir","u":"https://arxiv.org/abs/2602.22960"},{"n":"COMBAT","d":"2026-02-28","v":85.0,"g":"causal","u":"https://arxiv.org/abs/2603.00825"},{"n":"MultiGen","d":"2026-03-03","v":20.0,"g":"causal","u":"https://arxiv.org/abs/2603.06679"},{"n":"Beyond Pixel Histories","d":"2026-03-03","v":1.13,"g":"hybrid","u":"https://arxiv.org/abs/2603.03482"},{"n":"RealWonder","d":"2026-03-05","v":13.2,"g":"causal","u":"https://arxiv.org/abs/2603.05449"},{"n":"InSpatio-WorldFM","d":"2026-03-12","v":25.0,"g":"other","u":"https://arxiv.org/abs/2603.11911"},{"n":"ShotStream","d":"2026-03-26","v":16.0,"g":"causal","u":"https://arxiv.org/abs/2603.25746"},{"n":"INSPATIO-WORLD","d":"2026-04-08","v":24.0,"g":"causal","u":"https://arxiv.org/abs/2604.07209"},{"n":"Matrix-Game 3.0","d":"2026-04-10","v":40.0,"g":"bidir","u":"https://arxiv.org/abs/2604.08995"},{"n":"PROWL","d":"2026-05-11","v":20.0,"g":"causal","u":"https://arxiv.org/abs/2605.18803"},{"n":"CausalCine","d":"2026-05-12","v":16.0,"g":"causal","u":"https://arxiv.org/abs/2605.12496"},{"n":"SANA-WM","d":"2026-05-14","v":16.0,"g":"hybrid","u":"https://arxiv.org/abs/2605.15178"},{"n":"Incantation","d":"2026-05-18","v":19.7,"g":"causal","u":"https://arxiv.org/abs/2605.18601"},{"n":"Gamma-World","d":"2026-05-27","v":24.0,"g":"causal","u":"https://arxiv.org/abs/2605.28816"},{"n":"Streaming Video Generation with Streaming Fo","d":"2026-06-05","v":16.6,"g":"causal","u":"https://arxiv.org/abs/2606.07508"},{"n":"SwiftVR","d":"2026-06-08","v":31.32,"g":"other","u":"https://arxiv.org/abs/2606.09516"},{"n":"Ultra Flash","d":"2026-06-08","v":30.0,"g":"causal","u":"https://arxiv.org/abs/2606.09150"},{"n":"MoVerse","d":"2026-06-11","v":8.0,"g":"bidir","u":"https://arxiv.org/abs/2606.13376"},{"n":"TetherCache","d":"2026-06-11","v":3.22,"g":"causal","u":"https://arxiv.org/abs/2606.13035"},{"n":"GeoStream","d":"2026-06-13","v":4.05,"g":"causal","u":"https://arxiv.org/abs/2606.15162"},{"n":"DreamX-World 1.0","d":"2026-06-15","v":16.0,"g":"bidir","u":"https://arxiv.org/abs/2606.16993"},{"n":"MaineCoon","d":"2026-06-16","v":47.5,"g":"causal","u":"https://arxiv.org/abs/2606.17800"},{"n":"ActWorld","d":"2026-06-16","v":3.5,"g":"bidir","u":"https://arxiv.org/abs/2606.17730"},{"n":"UniTemp","d":"2026-06-17","v":14.8,"g":"causal","u":"https://arxiv.org/abs/2606.18702"},{"n":"Causal-rCM","d":"2026-06-24","v":17.4,"g":"causal","u":"https://arxiv.org/abs/2606.25473"},{"n":"LiveEdit","d":"2026-06-25","v":12.66,"g":"causal","u":"https://arxiv.org/abs/2606.26740"},{"n":"DreamForge-World 0.1","d":"2026-06-29","v":14.5,"g":"causal","u":"https://arxiv.org/abs/2606.30292"},{"n":"Flex-Forcing","d":"2026-07-03","v":25.8,"g":"hybrid","u":"https://arxiv.org/abs/2607.03509"},{"n":"Multiplayer Interactive World Models with Re","d":"2026-07-06","v":20.0,"g":"causal","u":"https://arxiv.org/abs/2607.05352"},{"n":"AlayaWorld","d":"2026-07-07","v":24.0,"g":"bidir","u":"https://arxiv.org/abs/2607.06291"},{"n":"MoWorld","d":"2026-07-07","v":50.0,"g":"bidir","u":"https://arxiv.org/abs/2607.06216"},{"n":"Infinite Worlds with Versatile Interactions","d":"2026-07-08","v":60.0,"g":"hybrid","u":"https://arxiv.org/abs/2607.07534"},{"n":"WanToFight","d":"2026-07-14","v":30.0,"g":"causal","u":"https://arxiv.org/abs/2607.12592"},{"n":"FlashDecoder","d":"2026-07-16","v":152.0,"g":"causal","u":"https://arxiv.org/abs/2607.14898"},{"n":"Wonder","d":"2026-07-28","v":16.0,"g":"causal","u":"https://arxiv.org/abs/2607.26037"},{"n":"HelloWorld","d":"2026-08-05","v":24.0,"g":"bidir","u":"https://arxiv.org/abs/2608.05070"}];
+
+  /* ---------- 主题切换 ---------- */
+  var btn = document.getElementById('themeBtn');
+  function effective() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t) return t;
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  function label() { btn.textContent = effective() === 'dark' ? '☀ 浅色' : '☾ 深色'; }
+  btn.addEventListener('click', function () {
+    document.documentElement.setAttribute('data-theme', effective() === 'dark' ? 'light' : 'dark');
+    label();
+  });
+  label();
+
+  /* ---------- 悬停提示 ---------- */
+  var tip = document.getElementById('tip');
+  function bindTips(root) {
+    (root || document).querySelectorAll('[data-tip]').forEach(function (el) {
+      if (el.__tb) return; el.__tb = 1;
+      el.addEventListener('mousemove', function (e) {
+        tip.innerHTML = el.getAttribute('data-tip');
+        tip.style.display = 'block';
+        var x = Math.min(e.clientX + 14, innerWidth - 300), y = Math.min(e.clientY + 16, innerHeight - 90);
+        tip.style.left = Math.max(6, x) + 'px'; tip.style.top = y + 'px';
+      });
+      el.addEventListener('mouseleave', function () { tip.style.display = 'none'; });
+    });
+  }
+  bindTips();
+
+  /* ---------- 吞吐散点图 ---------- */
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(n, a) { var e = document.createElementNS(NS, n); for (var k in a) e.setAttribute(k, a[k]); return e; }
+  var GRP = {
+    causal:{c:'var(--r-step)',   n:'因果扩散'},
+    hybrid:{c:'var(--r-sparse)', n:'AR–扩散混合'},
+    bidir: {c:'var(--r-kv)',     n:'双向扩散'},
+    artok: {c:'var(--r-quant)',  n:'AR token'},
+    other: {c:'var(--r-sys)',    n:'其他'}
+  };
+  (function drawFps() {
+    var svg = document.getElementById('fpsChart');
+    var X0 = 84, X1 = 938, Y0 = 46, Y1 = 300;
+    var t0 = Date.parse('2024-02-01'), t1 = Date.parse('2026-10-01');
+    var lo = Math.log10(0.28), hi = Math.log10(180);
+    function px(d) { return X0 + (Date.parse(d) - t0) / (t1 - t0) * (X1 - X0); }
+    function py(v) { return Y1 - (Math.log10(v) - lo) / (hi - lo) * (Y1 - Y0); }
+
+    [1, 10, 100].forEach(function (v) {
+      svg.appendChild(el('line', {x1:X0, y1:py(v), x2:X1, y2:py(v), stroke:'var(--grid)', 'stroke-width':1}));
+      var t = el('text', {x:X0-10, y:py(v)+4, 'font-size':11, fill:'var(--muted)', 'text-anchor':'end', class:'svgtxt'});
+      t.textContent = v + ' fps'; svg.appendChild(t);
+    });
+    svg.appendChild(el('line', {x1:X0, y1:py(24), x2:X1, y2:py(24), stroke:'var(--good)', 'stroke-width':1.4, 'stroke-dasharray':'6 4'}));
+    var th = el('text', {x:X0+8, y:py(24)-8, 'font-size':11.5, fill:'var(--good)', 'text-anchor':'start', 'font-weight':700, class:'svgtxt'});
+    th.textContent = '24 fps · 接手柄不难受的门槛'; svg.appendChild(th);
+
+    ['2024-07-01','2025-01-01','2025-07-01','2026-01-01','2026-07-01'].forEach(function (d) {
+      var x = px(d);
+      svg.appendChild(el('line', {x1:x, y1:Y0, x2:x, y2:Y1, stroke:'var(--grid)', 'stroke-width':1, 'stroke-dasharray':'2 5'}));
+      var t = el('text', {x:x, y:Y1+18, 'font-size':11, fill:'var(--muted)', 'text-anchor':'middle', class:'svgtxt'});
+      t.textContent = d.slice(0,7); svg.appendChild(t);
+    });
+    svg.appendChild(el('line', {x1:X0, y1:Y1, x2:X1, y2:Y1, stroke:'var(--axis)', 'stroke-width':1}));
+
+    FPS.forEach(function (p) {
+      var g = el('g', {'data-tip':'<b>'+p.n+'</b>'+p.d+' · '+p.v+' fps · '+GRP[p.g].n});
+      var c = el('circle', {cx:px(p.d), cy:py(p.v), r:5, fill:GRP[p.g].c, 'fill-opacity':0.72, stroke:GRP[p.g].c, 'stroke-width':1.2});
+      c.style.cursor = 'pointer';
+      g.appendChild(c);
+      g.addEventListener('click', function () { if (p.u) open(p.u, '_blank'); });
+      svg.appendChild(g);
+    });
+    // 标注几个极值
+    [['FlashDecoder',152.0,'2026-07-16',-12],['Genie',1,'2024-02-23',16],['MaineCoon',47.5,'2026-06-16',-12],['WorldMem',0.89,'2025-04-16',16]].forEach(function (a) {
+      var t = el('text', {x:px(a[2]), y:py(a[1])+a[3], 'font-size':10.5, fill:'var(--ink2)', 'text-anchor':'middle', class:'svgtxt'});
+      t.textContent = a[0]; svg.appendChild(t);
+    });
+    bindTips(svg);
+
+    var lg = document.getElementById('fpsLegend');
+    Object.keys(GRP).forEach(function (k) {
+      var s = document.createElement('span'); s.className = 'lg';
+      s.innerHTML = '<span class="sw" style="background:color-mix(in srgb,' + GRP[k].c + ' 24%, transparent);border-color:' + GRP[k].c + '"></span>' + GRP[k].n;
+      lg.appendChild(s);
+    });
+  })();
+
+  /* ---------- 路线索引 ---------- */
+  var COL = {P:'--r-causal','1':'--r-step','2':'--r-adapt','3':'--r-cache','4':'--r-sparse',
+             '5':'--r-linear','6':'--r-token','7':'--r-kv','8':'--r-quant',S:'--r-sys'};
+  var ORDER = ['P','1','2','3','4','5','6','7','8','S'];
+  var LBL = {P:'前提',S:'落地'};
+  var idx = document.getElementById('routeIndex'), fb = document.getElementById('filterbar');
+  var active = null;
+
+  ORDER.forEach(function (k) {
+    var r = ROUTES[k], c = 'var(' + COL[k] + ')';
+    var b = document.createElement('button');
+    b.className = 'fbtn'; b.type = 'button'; b.setAttribute('aria-pressed', 'false'); b.dataset.k = k;
+    b.innerHTML = '<span class="dot" style="background:' + c + '"></span>' + (LBL[k] || '轴' + k) + ' ' + r.name + ' <span class="ct">' + r.items.length + '</span>';
+    b.addEventListener('click', function () { setFilter(active === k ? null : k); });
+    fb.appendChild(b);
+
+    var blk = document.createElement('div');
+    blk.className = 'routeblock'; blk.dataset.k = k;
+    var h = document.createElement('h4');
+    h.innerHTML = '<span class="dot" style="background:' + c + '"></span>' + (LBL[k] || '轴' + k) + ' · ' + r.name + ' <span style="color:var(--muted);font-weight:400;font-size:12px">' + r.items.length + ' 篇</span>';
+    blk.appendChild(h);
+    var d = document.createElement('p'); d.className = 'rdesc'; d.textContent = r.desc; blk.appendChild(d);
+    var ul = document.createElement('ul'); ul.className = 'plist';
+    r.items.forEach(function (p) {
+      var li = document.createElement('li');
+      var nm = p.u ? '<a class="nm" href="' + p.u + '" target="_blank" rel="noopener">' + p.n + '</a>' : '<span class="nm">' + p.n + '</span>';
+      li.innerHTML = '<span class="dt">' + p.d + '</span>' + nm + '<span class="tt">' + p.t + '</span>';
+      ul.appendChild(li);
+    });
+    blk.appendChild(ul); idx.appendChild(blk);
+  });
+
+  function setFilter(k) {
+    active = k;
+    fb.querySelectorAll('.fbtn').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.k === k)); });
+    idx.querySelectorAll('.routeblock').forEach(function (b) { b.style.display = (!k || b.dataset.k === k) ? '' : 'none'; });
+  }
+})();
+</script>
+</body>
+</html>
