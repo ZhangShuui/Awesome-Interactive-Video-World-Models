@@ -105,6 +105,7 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * **`ViTeX-Bench`**, Benchmarking High-Fidelity Video Scene Text Editing. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.40356)] · 📊`benchmarks`
 * **`LOCI`**, Spatial Linear Memory for Streaming World Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.40222)] · ⚡`realtime` 🧠`memory`
 * Enhancing Autoregressive Video Generation via Representation Adversarial Distillation. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.40037)] · ⚡`realtime`
+* Why Do Conventional World Models Fail to Learn Cellular Automata?. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.39604)] · ⚡`realtime`
 * **`PartiCam`**, Camera Controlled Video Generation with Reward Guidance. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.39504)] · 🕹️`control`
 * **`CAST`**, Causal Advantage-Structured Training with Spatially Grounded Compositional Rewards for Diffusion Models. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.39441)] · ⚡`realtime`
 * The Golden Path Hypothesis: Reusable Schedules in Diffusion Caching. **`arXiv 2026.09`** [[Paper](https://arxiv.org/abs/2609.39343)] · ⚡`realtime`
