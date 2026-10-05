@@ -1,0 +1,1885 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HetA-DiT 精读</title>
+<meta name="description" content="HetA-DiT（arXiv 2609.31050，Qualcomm AI Research）精读：不确定度分支怎么训、token 怎么路由、FLOPs 账怎么复算，逐表核对与存疑清单。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=Noto+Serif+SC:wght@600;700&family=STIX+Two+Text:ital@0;1&display=swap">
+<style>
+/* ============================================================
+   HetA-DiT 精读 — tokens
+   角色色：dense = 稠密/全局注意力（难 token，热）
+           local = 局部注意力（易 token，冷）
+           unc   = 不确定度 u
+           heta  = HetA-DiT（图表里的"本方法"）
+           dmd   = 稠密 DMD 基线   wan = 50 步 Wan 原模型   oth = 其他方法
+           risk / med / low = 存疑严重度
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0d1014; --surf:#141920; --surf2:#1a2028; --surf3:#232b34;
+  --rule:#252e38; --rule2:#394552;
+  --ink:#e8edf2; --ink2:#a9b3be; --ink3:#7c8793;
+  --dense:#f2804f; --dense-ink:#f7a67f; --dense-soft:rgba(242,128,79,.17);
+  --local:#2fb5a4; --local-ink:#6fd8ca; --local-soft:rgba(47,181,164,.16);
+  --unc:#b48cf6; --unc-ink:#cdb2fb; --unc-soft:rgba(180,140,246,.15);
+  --heta:#f2804f; --dmd:#6c9fe6; --dmd-ink:#9fc2f3; --dmd2:#a7c7f2; --wan:#b48cf6; --oth:#8a95a2;
+  --risk:#ff5f6f; --risk-ink:#ff9aa4; --risk-soft:rgba(255,95,111,.14);
+  --med:#dcaa45; --med-ink:#ecc977; --med-soft:rgba(220,170,69,.14);
+  --low:#8a95a2; --low-soft:rgba(138,149,162,.14);
+  --good:#58c47e; --good-soft:rgba(88,196,126,.13);
+  --grid:#1f2730; --axis:#3d4856;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 32px rgba(0,0,0,.30);
+  --f-head:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --f-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --f-math:"STIX Two Text","Times New Roman",Georgia,serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f1f3f6; --surf:#ffffff; --surf2:#edf0f3; --surf3:#e1e6eb;
+    --rule:#d7dde4; --rule2:#b7c1cb;
+    --ink:#121820; --ink2:#3f4955; --ink3:#65707c;
+    --dense:#d9602c; --dense-ink:#a8481d; --dense-soft:rgba(217,96,44,.11);
+    --local:#128576; --local-ink:#0c665b; --local-soft:rgba(18,133,118,.10);
+    --unc:#7c4fe0; --unc-ink:#5f37bd; --unc-soft:rgba(124,79,224,.10);
+    --heta:#d9602c; --dmd:#2f6ed0; --dmd-ink:#1f55a8; --dmd2:#8fb4ec; --wan:#7c4fe0; --oth:#7b8591;
+    --risk:#d3334a; --risk-ink:#a8253a; --risk-soft:rgba(211,51,74,.09);
+    --med:#a47510; --med-ink:#7f5a08; --med-soft:rgba(164,117,16,.11);
+    --low:#6f7a86; --low-soft:rgba(111,122,134,.11);
+    --good:#1d8a4a; --good-soft:rgba(29,138,74,.10);
+    --grid:#e4e9ee; --axis:#b7c1cb;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f1f3f6; --surf:#ffffff; --surf2:#edf0f3; --surf3:#e1e6eb;
+  --rule:#d7dde4; --rule2:#b7c1cb;
+  --ink:#121820; --ink2:#3f4955; --ink3:#65707c;
+  --dense:#d9602c; --dense-ink:#a8481d; --dense-soft:rgba(217,96,44,.11);
+  --local:#128576; --local-ink:#0c665b; --local-soft:rgba(18,133,118,.10);
+  --unc:#7c4fe0; --unc-ink:#5f37bd; --unc-soft:rgba(124,79,224,.10);
+  --heta:#d9602c; --dmd:#2f6ed0; --dmd-ink:#1f55a8; --dmd2:#8fb4ec; --wan:#7c4fe0; --oth:#7b8591;
+  --risk:#d3334a; --risk-ink:#a8253a; --risk-soft:rgba(211,51,74,.09);
+  --med:#a47510; --med-ink:#7f5a08; --med-soft:rgba(164,117,16,.11);
+  --low:#6f7a86; --low-soft:rgba(111,122,134,.11);
+  --good:#1d8a4a; --good-soft:rgba(29,138,74,.10);
+  --grid:#e4e9ee; --axis:#b7c1cb;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.75;overflow-x:hidden}
+a{color:var(--dmd-ink);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:2px solid var(--dmd);outline-offset:2px;border-radius:4px}
+b,strong{font-weight:600;color:var(--ink)}
+sub,sup{font-size:.72em;line-height:0}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--surf3);padding:1px 5px;border-radius:4px}
+.tnum{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono);font-size:.92em}
+.mv{font-family:var(--f-math);font-style:italic;font-size:1.07em;white-space:nowrap}
+.dim{color:var(--ink3)}
+.c-dense{color:var(--dense-ink)} .c-local{color:var(--local-ink)} .c-unc{color:var(--unc-ink)} .c-dmd{color:var(--dmd-ink)}
+.wrap{max-width:1100px;margin:0 auto;padding-inline:20px;padding-block:22px 110px}
+@media (max-width:520px){ .wrap{padding-inline:16px} }
+
+/* theme toggle */
+.themebtn{position:fixed;bottom:14px;right:14px;z-index:40;font:500 12px/1 var(--f-mono);color:var(--ink2);background:var(--surf);border:1px solid var(--rule2);border-radius:999px;padding:7px 11px;cursor:pointer;box-shadow:var(--shadow)}
+.themebtn:hover{color:var(--ink)}
+
+/* ---------- hero ---------- */
+.hero{padding-block:18px 30px;border-bottom:1px solid var(--rule);display:grid;gap:18px}
+.kicker{font:500 12px/1.4 var(--f-mono);letter-spacing:.12em;color:var(--ink3);text-transform:uppercase}
+h1{font-family:var(--f-head);font-weight:700;font-size:clamp(34px,5.6vw,56px);line-height:1.1;margin:2px 0 0;letter-spacing:.01em;text-wrap:balance}
+h1 .soft{display:block;font-size:.46em;color:var(--ink2);font-weight:600;margin-top:10px;line-height:1.35}
+.sub{font-size:17.5px;line-height:1.75;color:var(--ink2);max-width:60em;margin:0}
+.meta{border:1px solid var(--rule2);border-radius:12px;overflow:hidden;background:var(--surf);box-shadow:var(--shadow)}
+.meta .band{height:10px;background:linear-gradient(90deg,var(--local) 0 34%,color-mix(in srgb,var(--local) 50%,var(--dense)) 34% 58%,var(--dense) 58% 80%,var(--local) 80%)}
+.meta dl{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr))}
+.meta dl div{padding:10px 14px;border-right:1px solid var(--rule);border-top:1px solid var(--rule);min-width:0}
+.meta dt{font:500 11px/1.4 var(--f-mono);letter-spacing:.1em;color:var(--ink3);text-transform:uppercase}
+.meta dd{margin:3px 0 0;font-size:13.5px;line-height:1.55;overflow-wrap:anywhere}
+.meta dd .no{color:var(--risk-ink);font-weight:600}
+.thesis{max-width:62em;margin:0;padding:14px 18px;border-left:3px solid var(--dense);background:var(--dense-soft);border-radius:0 10px 10px 0;font-size:15.5px}
+.statstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:12px;overflow:hidden}
+.statstrip div{background:var(--surf);padding:12px 14px;display:grid;gap:3px;align-content:start}
+.statstrip b{font-family:var(--f-mono);font-weight:500;font-size:19px;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.statstrip span{font-size:12.5px;line-height:1.5;color:var(--ink3)}
+.srcleg{display:flex;flex-wrap:wrap;gap:8px 14px;font-size:12.5px;color:var(--ink3);align-items:center}
+
+/* source tags */
+.src{display:inline-block;font:600 10.5px/1.5 var(--f-mono);padding:0 5px;border-radius:4px;vertical-align:1px;letter-spacing:.02em;white-space:nowrap}
+.src.p{background:var(--surf3);color:var(--ink2)}
+.src.c{background:var(--good-soft);color:var(--good)}
+.src.d{background:var(--unc-soft);color:var(--unc-ink)}
+.src.e{background:var(--med-soft);color:var(--med-ink)}
+
+/* ---------- TOC ---------- */
+nav.toc{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--rule);margin-inline:-20px;padding:8px 20px;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{flex:none;font-size:13px;color:var(--ink2);text-decoration:none;padding:5px 10px;border-radius:999px;white-space:nowrap}
+nav.toc a .n{font-family:var(--f-mono);font-size:11px;color:var(--ink3);margin-right:4px}
+nav.toc a:hover,nav.toc a.on{background:var(--surf3);color:var(--ink)}
+@media (max-width:520px){ nav.toc{margin-inline:-16px;padding-inline:16px} }
+
+/* ---------- sections ---------- */
+section{padding-block:46px 6px;scroll-margin-top:56px}
+h2{font-family:var(--f-head);font-weight:700;font-size:clamp(24px,3.3vw,32px);line-height:1.3;margin:0 0 8px;text-wrap:balance;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+h2 .no{font-family:var(--f-mono);font-weight:500;font-size:.5em;color:var(--ink3);letter-spacing:.04em}
+h3{font-family:var(--f-head);font-weight:600;font-size:20.5px;line-height:1.45;margin:34px 0 10px;text-wrap:balance}
+h4{font-size:14px;font-weight:600;margin:0 0 6px;letter-spacing:.02em}
+p{margin:0 0 14px}
+.lede{color:var(--ink2);font-size:16.5px;max-width:60em}
+.prose{max-width:48em}
+ul.tight,ol.tight{margin:0 0 14px;padding-left:1.3em}
+ul.tight li,ol.tight li{margin:5px 0}
+
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin:18px 0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:14px;margin:18px 0}
+.card{background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:16px 18px;min-width:0}
+.card p:last-child,.card ul:last-child{margin-bottom:0}
+.card h4{font:600 11.5px/1.5 var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink3)}
+.card.hot{border-color:color-mix(in srgb,var(--dense) 45%,var(--rule))}
+.card.cool{border-color:color-mix(in srgb,var(--local) 45%,var(--rule))}
+
+.verdict{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin:20px 0}
+.verdict>div{background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:16px 18px}
+.verdict h4{display:flex;align-items:center;gap:8px;font-size:15px}
+.verdict .dot{width:10px;height:10px;border-radius:50%;background:var(--good);flex:none}
+.verdict .dot.r{background:var(--risk)}
+.verdict ul{margin:6px 0 0;padding-left:1.15em}
+.verdict li{margin:7px 0;font-size:14.5px;line-height:1.65}
+
+.eq{font-family:var(--f-math);font-size:18px;line-height:1.7;background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:12px 16px;margin:14px 0;overflow-x:auto;white-space:nowrap}
+.eq .lab{font-family:var(--f-mono);font-size:12px;color:var(--ink3);float:right;margin-left:18px}
+.eq .say{display:block;font-family:var(--f-body);font-size:14px;color:var(--ink2);white-space:normal;margin-top:6px;line-height:1.6}
+.frac{display:inline-flex;flex-direction:column;vertical-align:middle;text-align:center;margin:0 3px;line-height:1.25}
+.frac>span:first-child{border-bottom:1px solid currentColor;padding:0 3px}
+.frac>span:last-child{padding:0 3px}
+
+.note{border-left:3px solid var(--rule2);background:var(--surf2);padding:11px 15px;border-radius:0 10px 10px 0;margin:16px 0;font-size:14.5px;line-height:1.7;color:var(--ink2)}
+.note b{color:var(--ink)}
+.note.hot{border-left-color:var(--dense);background:var(--dense-soft)}
+.note.cool{border-left-color:var(--local);background:var(--local-soft)}
+.note.warn{border-left-color:var(--med);background:var(--med-soft)}
+.note.bad{border-left-color:var(--risk);background:var(--risk-soft)}
+
+/* ---------- figures & widgets ---------- */
+figure.fig{margin:22px 0;background:var(--surf);border:1px solid var(--rule);border-radius:14px;padding:16px 18px 14px;box-shadow:var(--shadow);min-width:0}
+figure.fig figcaption{font-size:13.5px;line-height:1.65;color:var(--ink3);margin-top:12px}
+figure.fig figcaption b{color:var(--ink2)}
+.figtitle{font:600 12px/1.5 var(--f-mono);letter-spacing:.1em;color:var(--ink3);text-transform:uppercase;margin:0 0 10px}
+.ctrls{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin:0 0 12px}
+.ctrl{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink2);flex-wrap:wrap}
+.ctrl label{font:500 11.5px/1.3 var(--f-mono);letter-spacing:.06em;color:var(--ink3);text-transform:uppercase}
+.seg{display:inline-flex;flex-wrap:wrap;gap:2px;background:var(--surf2);border:1px solid var(--rule);border-radius:9px;padding:2px}
+.seg button{font:500 12.5px/1.2 var(--f-body);color:var(--ink2);background:none;border:0;border-radius:7px;padding:6px 10px;cursor:pointer;white-space:nowrap}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--surf3);color:var(--ink);box-shadow:inset 0 0 0 1px var(--rule2)}
+.seg button:disabled{opacity:.4;cursor:not-allowed}
+input[type=range]{accent-color:var(--dense);width:min(240px,52vw);cursor:pointer}
+.rv{font:500 13px/1 var(--f-mono);color:var(--ink);min-width:3.2em;display:inline-block;font-variant-numeric:tabular-nums}
+.readout{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:10px;overflow:hidden;margin-top:12px}
+.readout div{background:var(--surf2);padding:9px 12px;display:grid;gap:1px;min-width:0}
+.readout b{font:500 16.5px/1.35 var(--f-mono);font-variant-numeric:tabular-nums;color:var(--ink)}
+.readout span{font-size:12px;line-height:1.45;color:var(--ink3)}
+.readout .hot b{color:var(--dense-ink)} .readout .cool b{color:var(--local-ink)} .readout .bad b{color:var(--risk-ink)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--ink2);margin:8px 0 0}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:12px;height:12px;border-radius:3px;display:inline-block;flex:none}
+.legend i.ln{height:3px;border-radius:2px}
+.legend i.ring{background:none!important;border:2px solid;border-radius:50%}
+svg{display:block;max-width:100%;height:auto;overflow:visible}
+svg.cap{max-width:820px;margin-inline:auto}
+svg.cap-s{max-width:720px;margin-inline:auto}
+svg text{font-family:var(--f-body);fill:var(--ink2)}
+svg .ax{font:11px var(--f-mono);fill:var(--ink3)}
+svg .lab{font-size:12px;fill:var(--ink2)}
+svg .labb{font-size:12.5px;font-weight:600;fill:var(--ink)}
+svg .grid{stroke:var(--grid);stroke-width:1}
+.scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.scrollx>svg{min-width:560px}
+canvas{display:block;max-width:100%;touch-action:manipulation}
+
+/* router playground */
+.router{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:start}
+@media (max-width:860px){ .router{grid-template-columns:1fr} }
+.router .side{display:grid;gap:12px;min-width:0}
+.cvbox{position:relative;border-radius:10px;overflow:hidden;border:1px solid var(--rule);background:var(--surf2)}
+.cvcap{font:500 11.5px/1.4 var(--f-mono);color:var(--ink3);display:flex;justify-content:space-between;gap:10px;margin-top:6px;flex-wrap:wrap}
+
+/* tables */
+.tbl{overflow-x:auto;margin:16px 0;border:1px solid var(--rule);border-radius:12px;background:var(--surf)}
+table.t{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55;min-width:560px}
+table.t th,table.t td{padding:8px 12px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+table.t th{font:600 11.5px/1.4 var(--f-mono);letter-spacing:.06em;color:var(--ink3);text-transform:uppercase;background:var(--surf2)}
+table.t tr:last-child td{border-bottom:0}
+table.t td.n{font-family:var(--f-mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+table.t tr.hl td{background:var(--dense-soft)}
+table.t tr.ref td{background:var(--surf2)}
+.up{color:var(--good)} .dn{color:var(--risk-ink)}
+
+/* bars (html) */
+.hb{display:grid;grid-template-columns:minmax(110px,190px) minmax(0,1fr) 70px;gap:4px 10px;align-items:center;font-size:13px}
+.hb .nm{color:var(--ink2);line-height:1.3}
+.hb .nm small{display:block;color:var(--ink3);font-size:11px}
+.hb .tr{position:relative;height:18px;background:var(--surf2);border-radius:4px;overflow:hidden}
+.hb .bar{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
+.hb .v{font:500 12.5px/1 var(--f-mono);text-align:right;font-variant-numeric:tabular-nums}
+@media (max-width:520px){ .hb{grid-template-columns:minmax(90px,120px) minmax(0,1fr) 50px;gap:4px 8px} }
+.stack{display:flex;height:22px;border-radius:5px;overflow:hidden;font:500 11.5px/22px var(--f-mono);color:#fff}
+.stack span{display:block;text-align:center;white-space:nowrap;overflow:hidden}
+
+/* doubts */
+.doubts{display:grid;gap:10px;margin-top:14px}
+details.doubt{background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:0}
+details.doubt>summary{list-style:none;cursor:pointer;padding:13px 16px;display:grid;grid-template-columns:auto auto 1fr;gap:10px;align-items:baseline}
+details.doubt>summary::-webkit-details-marker{display:none}
+details.doubt>summary .id{font:500 12px/1 var(--f-mono);color:var(--ink3)}
+details.doubt>summary .t{font-weight:600;line-height:1.55}
+details.doubt[open]>summary{border-bottom:1px solid var(--rule)}
+details.doubt .body{padding:12px 16px 14px;font-size:14.5px;line-height:1.72;color:var(--ink2)}
+details.doubt .body p:last-child{margin-bottom:0}
+details.doubt .body b{color:var(--ink)}
+.sev{font:600 11px/1.6 var(--f-mono);padding:0 7px;border-radius:5px;white-space:nowrap}
+.sev.h{background:var(--risk-soft);color:var(--risk-ink)}
+.sev.m{background:var(--med-soft);color:var(--med-ink)}
+.sev.l{background:var(--low-soft);color:var(--ink2)}
+details.doubt.h{border-left:3px solid var(--risk)}
+details.doubt.m{border-left:3px solid var(--med)}
+details.doubt.l{border-left:3px solid var(--low)}
+.fix{display:block;margin-top:8px;font-size:13.5px;color:var(--ink3)}
+.fix::before{content:"建议补的实验 → ";color:var(--good);font-weight:600}
+
+footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--rule);font-size:13px;color:var(--ink3);line-height:1.7}
+</style>
+</head>
+<body>
+<button class="themebtn" id="themebtn" type="button" aria-label="切换明暗主题">◐ 主题：自动</button>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">arXiv 2609.31050 · 精读 · 2026-09-28</div>
+  <h1>HetA-DiT 精读<span class="soft">把全局注意力只留给"难"的 token：不确定度路由的异构注意力</span></h1>
+  <p class="sub">论文原题 <i>Where Compute Matters: Heterogeneous Attention for Efficient Video Diffusion</i>。在已经蒸馏成 3 步的 Wan 视频模型上，加一个轻量分支给每个 token 估"不确定度"。约 20% 最不确定的 token 做全局注意力，其余只看 11×11×11 的邻域。掩码直接用上一步的不确定度，推理时不多跑一次网络。</p>
+
+  <div class="meta">
+    <div class="band" aria-hidden="true"></div>
+    <dl>
+      <div><dt>作者</dt><dd>Olga Zatsarynna, Denis Korzhenkov, Juergen Gall, Amir Habibian, Mohsen Ghafoorian</dd></div>
+      <div><dt>机构</dt><dd>Qualcomm AI Research · 波恩大学</dd></div>
+      <div><dt>版本</dt><dd>v1 · 2026-09-25 · cs.CV</dd></div>
+      <div><dt>基座</dt><dd>DMD 蒸馏的 Wan2.2-TI2V-5B（121×704×1280）与 Wan2.1-T2V-1.3B（81×480×832），推理 3 步</dd></div>
+      <div><dt>训练</dt><dd>阶段一 15k + 阶段二 6k 次迭代，4×H100；论文称约 12 GPU·天</dd></div>
+      <div><dt>代码 / 权重</dt><dd><span class="no">未公开</span>。论文没给代码链接，也没有项目页</dd></div>
+    </dl>
+  </div>
+
+  <p class="thesis"><b>我的判断：</b>问题抓得准，工程也干净。和算力相近的 DMD 2 步比，它在 VBench 和人评上都明显更好。但论文最想证明的是"按不确定度路由"本身有用，这一点证据撑不住：
+    <br>① 纯不确定度路由（83.00）<b>不如</b>固定均匀路由（83.13）；
+    <br>② 全部 token 只用局部注意力（82.85）已经基本追平稠密 DMD 3 步（82.94）；
+    <br>③ HetA 比它的稠密对照多训了 21k 步，而且阶段一改了训练目标。
+    <br>另外，在 VBench-2.0 上它的 5 个大类<b>全部</b>低于稠密 DMD 3 步，这点正文没有提。</p>
+
+  <div class="statstrip">
+    <div><b class="c-dense">≈20%</b><span>走全局注意力的 query token（c = 0.9）</span></div>
+    <div><b>4.85× <span class="dim" style="font-size:.7em">/ 4.18×</span></b><span>注意力 FLOPs 缩减：论文报告 / 我按式 (14) 复算（5B）</span></div>
+    <div><b>1.84× · 1.63×</b><span>5B 上注意力 / 整个 Transformer 块的实测延迟加速</span></div>
+    <div><b>83.28 <span class="dim" style="font-size:.7em">vs</span> 82.94</b><span>VBench 总分：HetA vs 稠密 DMD 3 步（Wan2.2-5B）</span></div>
+    <div><b class="c-dense">58.9 <span class="dim" style="font-size:.7em">vs</span> 60.8</b><span>VBench-2.0 总分：HetA vs 稠密 DMD 3 步</span></div>
+    <div><b>32 / 32 / 36%</b><span>人评：HetA 胜 / 平 / DMD 3 步胜</span></div>
+  </div>
+  <div class="srcleg">本页数字来源标注：<span><span class="src p">论文</span> 原文</span><span><span class="src c">复算</span> 我用论文信息重算</span><span><span class="src d">解码</span> 从论文 SVG 图的坐标里读出</span><span><span class="src e">估算</span> 我基于假设推的，假设写在旁边</span></div>
+</header>
+
+<nav class="toc" id="toc" aria-label="目录">
+  <a href="#s1"><span class="n">1</span>一页读懂</a>
+  <a href="#s2"><span class="n">2</span>钱花在哪</a>
+  <a href="#s3"><span class="n">3</span>不确定度</a>
+  <a href="#s4"><span class="n">4</span>路由</a>
+  <a href="#s5"><span class="n">5</span>时间线</a>
+  <a href="#s6"><span class="n">6</span>算力账本</a>
+  <a href="#s7"><span class="n">7</span>实验逐项读</a>
+  <a href="#s8"><span class="n">8</span>存疑</a>
+  <a href="#s9"><span class="n">9</span>前人工作</a>
+  <a href="#s10"><span class="n">10</span>收尾</a>
+</nav>
+
+<!-- =============================== §1 =============================== -->
+<section id="s1">
+  <h2><span class="no">§1</span>一页读懂</h2>
+  <p class="lede">先按论文自己的逻辑讲一遍，再给判断。后面每一节都会回到这里的某一条。</p>
+
+  <div class="grid3">
+    <div class="card">
+      <h4>Problem · 钱花在哪</h4>
+      <p>视频 DiT 一次要处理上万个 token，自注意力是 O(<span class="mv">N</span>²)。我按 Wan 的公开结构复算：Wan2.2-5B 在 704p、121 帧时（<span class="mv">N</span> = 27,280），单个块 53% 的 FLOPs 花在注意力核心（Q·Kᵀ 与 A·V）上。已有的提速办法都<b>一视同仁</b>：</p>
+      <ul class="tight">
+        <li>稀疏或线性注意力：让每个 token 都便宜一点；</li>
+        <li>特征缓存：依赖多步之间的冗余，蒸馏到 3 步后冗余基本没了；</li>
+        <li>MoE：只动 FFN。</li>
+      </ul>
+    </div>
+    <div class="card hot">
+      <h4>Idea · 按难度分配</h4>
+      <p>天空、雾、静止背景看邻居就够了；运动物体、细长结构、遮挡需要全局信息。于是分两阶段：</p>
+      <ul class="tight">
+        <li><b>阶段一</b>：给 DMD 学生加一个分支，逐 token 输出 <span class="mv">u<sub>i</sub></span>。把 DMD 的 MSE 形式换成"带方差的高斯负对数似然"来训练它。</li>
+        <li><b>阶段二</b>：冻结分支。<span class="mv">u</span> 超过 <span class="mv">μ + cσ</span> 的 token 走全局注意力，其余走局部注意力；另外随机交换 7% 的 token 以扩大覆盖。然后用标准 DMD 再微调。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>Results · 论文报告</h4>
+      <p><b>Wan2.2-5B，3 步：</b></p>
+      <ul class="tight">
+        <li>质量：VBench 83.28（稠密 DMD 3 步 82.94），VBench-2.0 58.9（60.8）。人评 32 / 32 / 36，与稠密版分不出高下。</li>
+        <li>效率：注意力 FLOPs 4.85×，块级 1.73×；FlexAttention 实测块延迟 1.63×。</li>
+      </ul>
+      <p><b>Wan2.1-1.3B：</b>VBench 83.10（稠密 DMD 83.61）。</p>
+    </div>
+  </div>
+
+  <div class="verdict">
+    <div>
+      <h4><span class="dot"></span>站得住的</h4>
+      <ul>
+        <li><b>成本分析对。</b>我用 Wan 的配置数 FLOPs，得到 A14B@720p 自注意力占 81.5%、FFN 占 13.1%，和论文写的 82% / 13% 吻合。块级 FLOPs 2.25× 与 1.73× 也能从注意力缩减比精确推出来。<span class="src c">复算</span></li>
+        <li><b>方法干净。</b>每个 token 每一步都会更新，只是看的范围不同，所以不依赖多步冗余。3 步下缓存确实吃亏：ToCa 的 dynamic degree 掉到 18.1。<span class="src d">解码</span></li>
+        <li><b>推理零额外前向。</b>用上一步的 <span class="mv">u</span> 构造这一步的掩码。</li>
+        <li><b>和算力相近的 DMD 2 步比，确实更好。</b>VBench +0.80；人评 50% vs 24%，按每组约 416 对估算 p≈10⁻⁹。论文没这样表述，但我认为这是全文最有说服力的比较。<span class="src e">估算</span></li>
+        <li><b>表格基本自洽。</b>VBench 总分都等于 (4·Quality+Semantic)/5；雷达图解码值与表格一致。</li>
+      </ul>
+    </div>
+    <div>
+      <h4><span class="dot r"></span>最该存疑的</h4>
+      <ul>
+        <li><b>增益来源混淆。</b>稀疏版反超稠密版（83.28 vs 82.94），连 90% 局部的版本也反超（82.98）。但 HetA 多训了 21k 步，阶段一还改了生成器的损失。缺"同样训练、不稀疏"的对照。→ <a href="#d1">D1</a></li>
+        <li><b>路由信号本身几乎没被证明。</b>纯不确定度路由 83.00 &lt; 固定均匀 83.13。所有路由方式加上全局部版本，挤在 0.5 分的范围里，而且没有报告种子方差。→ <a href="#d2">D2</a></li>
+        <li><b>VBench-2.0 全线低于稠密 DMD 3 步。</b>掉得最多的维度是 Dynamic Attribute −10.2、Motion Rationality −9.2、Multi-View Consistency −7.4，恰好是最该依赖长程信息的维度。→ <a href="#d3">D3</a></li>
+        <li><b>第 1 步怎么算没写。</b>如果第 1 步走稠密，整条 3 步管线只快 1.35×，比 DMD 2 步还慢。→ <a href="#d4">D4</a></li>
+        <li><b>FLOPs 按式 (14) 复现不出来。</b>核大小扫描里局部注意力的成本似乎只按约 15% 计入。→ <a href="#d5">D5</a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- =============================== §2 =============================== -->
+<section id="s2">
+  <h2><span class="no">§2</span>钱花在哪：一个 Transformer 块的 FLOPs 账</h2>
+  <p class="lede">"只给 20% 的 token 全局注意力"值多少，取决于注意力在整块里占多大比例。下面按 Wan 的公开结构，逐项数一个块里每个 token 的 FLOPs。结构参数包括隐藏维度、FFN 宽度、VAE 压缩率 4×8×8（2.2-5B 为 4×16×16）、1×2×2 分块、512 个文本 token。</p>
+
+  <figure class="fig" id="flopw">
+    <div class="figtitle">单块 FLOPs 构成 · 可切换模型与分辨率</div>
+    <div class="ctrls">
+      <div class="ctrl"><label>设置</label>
+        <div class="seg" id="flop-seg" role="group" aria-label="模型设置">
+          <button type="button" data-v="13" aria-pressed="false">1.3B · 480p · 81 帧</button>
+          <button type="button" data-v="5" aria-pressed="true">2.2-5B · 704p · 121 帧</button>
+          <button type="button" data-v="14a" aria-pressed="false">14B · 480p · 81 帧</button>
+          <button type="button" data-v="14c" aria-pressed="false">14B · 720p · 81 帧</button>
+        </div>
+      </div>
+    </div>
+    <div id="flop-bar"></div>
+    <div class="legend">
+      <span><i style="background:var(--dense)"></i>自注意力核心 Q·Kᵀ、A·V（HetA 只压缩这一块）</span>
+      <span><i style="background:var(--unc)"></i>Q/K/V/O 投影</span>
+      <span><i style="background:var(--dmd)"></i>交叉注意力（文本）</span>
+      <span><i style="background:var(--oth)"></i>FFN</span>
+    </div>
+    <div class="readout" id="flop-read"></div>
+    <figcaption><b>怎么数：</b>每个 token 每块：投影 8<span class="mv">d</span>²，注意力核心 4<span class="mv">Nd</span>，交叉注意力 4<span class="mv">d</span>² + 4·512·<span class="mv">d</span>（外加摊到每个 token 的文本 K/V 投影），FFN 4<span class="mv">d·d</span><sub>ff</sub>（均按 1 次乘加 = 2 FLOPs）。忽略归一化、调制、不确定度分支。<b>校验：</b>按 14B@720p 算出自注意力（核心 + 投影）81.5%、FFN 13.1%，论文 §2 写的是 82% / 13%。<span class="src c">复算</span></figcaption>
+  </figure>
+
+  <p class="prose">关键一行是"上限"：就算注意力核心完全免费，5B 的块级加速也最多 <b>2.13×</b>，因为投影、交叉注意力、FFN 一点都没省。HetA 在 5B 上报告块级 1.73×，已经吃掉了这个上限的大半。所以<b>在注意力内部继续压，边际收益会越来越小</b>，后面的延迟分析也印证了这一点。</p>
+
+  <h3>已有方法分别省在哪</h3>
+  <div class="tbl">
+    <table class="t">
+      <thead><tr><th>路线</th><th>省在哪</th><th>每个 token 同等对待？</th><th>3 步蒸馏下</th><th>论文里对比的例子</th></tr></thead>
+      <tbody>
+        <tr><td>固定稀疏 / 滑动窗口</td><td>注意力</td><td>是</td><td>可用</td><td>STA（HunyuanVideo 基座）、Jenga（免训练，80% 稀疏）</td></tr>
+        <tr><td>可训练稀疏</td><td>注意力</td><td>是（块级 top-k）</td><td>可用</td><td>VSA（80% 稀疏，4×4×4 块）</td></tr>
+        <tr><td>线性 / 混合注意力</td><td>注意力</td><td>是</td><td>可用</td><td>Attention Surgery（30 块中换 20 块）、ReHyAt（30 块全换）。二者与本文同组</td></tr>
+        <tr><td>特征缓存</td><td>跨步复用</td><td>否，硬性二选一：算或复用</td><td>冗余少，吃亏</td><td>ToCa（只在 3 步中的第 2 步缓存）</td></tr>
+        <tr><td>MoE</td><td>FFN</td><td>否</td><td>可用</td><td>论文引 DiT-MoE 与 Wan（见 <a href="#d19">D19</a>：Wan2.2 的 MoE 按时间步切换整模型，不是 token 级 FFN 路由）</td></tr>
+        <tr class="hl"><td><b>HetA</b></td><td>注意力（只在 query 侧）</td><td><b>否</b>：每个 token 二选一，稠密或局部</td><td>专为此设计</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="prose dim" style="font-size:14.5px">论文把自己的定位写成"soft, attention-level, DMD-compatible token routing"。其中"soft"容易误读：路由本身是硬阈值，每个 token 要么稠密要么局部。所谓"soft"是和缓存比较：缓存会让一部分 token 这一步完全不更新，HetA 则让每个 token 都更新。</p>
+</section>
+
+<!-- =============================== §3 =============================== -->
+<section id="s3">
+  <h2><span class="no">§3</span>阶段一：不确定度分支到底在学什么</h2>
+  <p class="lede">这是全文最巧的一步，也最容易被一句"预测去噪难度"带过去。结论先说：<span class="mv">u<sub>i</sub></span> 学的是 <b>DMD 在第 <span class="mv">i</span> 个 token 上"拉"学生的典型力度</b>，也就是学生和老师在这里还有多大分歧。它不是"离真实视频还差多少"。训练全程只用 prompt，根本没有真实视频可比。</p>
+
+  <h3>3.1 DMD 在做什么（三句话）</h3>
+  <ol class="tight prose">
+    <li>学生 <span class="mv">G<sub>θ</sub></span> 从噪声一步出一个干净 latent <span class="mv">x̃</span><sub>0</sub>，再把它加噪到随机时刻 <span class="mv">τ</span>，得到 <span class="mv">x̃<sub>τ</sub></span>。</li>
+    <li>两个打分网络看这个 <span class="mv">x̃<sub>τ</sub></span>：<b>老师</b> <span class="mv">s</span><sub>T</sub> 是冻结的原版 Wan，代表"真实分布"；<b>假分网络</b> <span class="mv">s</span><sub>S</sub> 一边训练一边拟合"学生当前的分布"。</li>
+    <li>两者之差 <span class="mv">s</span><sub>S</sub> − <span class="mv">s</span><sub>T</sub> 就是"让学生分布往老师分布挪"的方向。</li>
+  </ol>
+  <p class="prose">论文式 (8) 用了一个常见的改写：把这一步挪动写成一个临时靶子（伪目标），让学生去贴靶子。</p>
+  <div class="eq"><span class="lab">式 (8)</span>
+    <span class="mv">x̂</span><sub>0</sub> = sg[ <span class="mv">x̃</span><sub>0</sub> − <span class="mv">w</span>(<span class="mv">τ</span>)·( <span class="mv">s</span><sub>S</sub>(<span class="mv">x̃<sub>τ</sub></span>) − <span class="mv">s</span><sub>T</sub>(<span class="mv">x̃<sub>τ</sub></span>) ) ],&nbsp;&nbsp;&nbsp;
+    ∇<sub><span class="mv">θ</span></sub>ℒ<sub>DMD</sub> = 𝔼 ∇<sub><span class="mv">θ</span></sub>‖ <span class="mv">x̃</span><sub>0</sub> − <span class="mv">x̂</span><sub>0</sub> ‖²
+    <span class="say">sg 是停止梯度。靶子与当前输出之差 <span class="mv">g</span> = <span class="mv">x̃</span><sub>0</sub> − <span class="mv">x̂</span><sub>0</sub> = <span class="mv">w</span>·(<span class="mv">s</span><sub>S</sub> − <span class="mv">s</span><sub>T</sub>)，就是 DMD 的"拉力"。下文记作 <span class="mv">g<sub>i</sub></span>，逐 token 一份。</span>
+  </div>
+
+  <h3>3.2 把 MSE 换成"带方差的高斯"</h3>
+  <p class="prose">MSE 等价于方差固定为 1 的高斯负对数似然。论文把每个 token 的方差放开，由新分支预测 <span class="mv">u<sub>i</sub></span>：</p>
+  <div class="eq"><span class="lab">式 (9)(10)</span>
+    ℒ<sup>unc</sup><sub>DMD</sub> = 𝔼 Σ<sub><span class="mv">i</span></sub> [ <span class="mv">λ</span><sub>rec</sub>·<span class="frac"><span>‖ <span class="mv">x̃</span><sub>0,<span class="mv">i</span></sub> − <span class="mv">x̂</span><sub>0,<span class="mv">i</span></sub> ‖²</span><span><span class="mv">u<sub>i</sub></span>²</span></span> + <span class="mv">λ</span><sub>log</sub>·log <span class="mv">u<sub>i</sub></span> ]
+    <span class="say">第一项：拉力大的 token，<span class="mv">u</span> 被推大。第二项：不让 <span class="mv">u</span> 无限变大。<b>λ<sub>rec</sub>、λ<sub>log</sub> 的取值、<span class="mv">u</span> ≥ 0 用什么函数保证、分支是什么结构、接在哪一层，论文都没写。</b></span>
+  </div>
+  <p class="prose">对 <span class="mv">u<sub>i</sub></span> 求导并令其为零，得到最优解（我的推导）：</p>
+  <div class="eq"><span class="lab">推导</span>
+    <span class="mv">u<sub>i</sub></span>*² = <span class="frac"><span>2<span class="mv">λ</span><sub>rec</sub></span><span><span class="mv">λ</span><sub>log</sub></span></span> · 𝔼[ ‖ <span class="mv">g<sub>i</sub></span> ‖² | 输入 ]
+    <span class="say">所以 <span class="mv">u<sub>i</sub></span> 预测的是 <b>DMD 拉力的均方根</b>，条件是学生看到的输入（噪声 latent、时刻、prompt）。拉力大，说明老师认为学生在这里"还不像"。它和"去噪难度"相关，但不是一回事。</span>
+  </div>
+
+  <figure class="fig">
+    <div class="figtitle">阶段一的数据流</div>
+    <div class="scrollx">
+    <svg viewBox="0 0 900 262" role="img" aria-label="阶段一数据流：学生输出 x0 和 u，x0 加噪后送老师与假分网络，二者之差构成伪目标，与 u 一起进入高斯负对数似然">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--ink3)"/></marker>
+        <marker id="arU" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--unc)"/></marker>
+      </defs>
+      <g font-size="13">
+        <rect x="8" y="26" width="128" height="62" rx="9" fill="var(--surf2)" stroke="var(--rule2)"/>
+        <text x="72" y="52" text-anchor="middle" class="labb">噪声 z</text><text x="72" y="72" text-anchor="middle" class="lab">提示 y</text>
+
+        <rect x="166" y="14" width="214" height="86" rx="10" fill="var(--surf2)" stroke="var(--rule2)"/>
+        <text x="273" y="40" text-anchor="middle" class="labb">学生 G_θ（Wan DiT）</text>
+        <rect x="184" y="54" width="178" height="32" rx="7" fill="var(--unc-soft)" stroke="var(--unc)"/>
+        <text x="273" y="75" text-anchor="middle" style="fill:var(--unc-ink);font-size:12.5px">＋不确定度分支（阶段二冻结）</text>
+
+        <rect x="412" y="30" width="100" height="54" rx="9" fill="var(--surf2)" stroke="var(--rule2)"/>
+        <text x="462" y="54" text-anchor="middle" class="labb">x̃₀</text><text x="462" y="73" text-anchor="middle" class="ax">干净 latent</text>
+
+        <rect x="544" y="26" width="150" height="62" rx="9" fill="var(--surf2)" stroke="var(--rule2)"/>
+        <text x="619" y="51" text-anchor="middle" class="labb">加噪到时刻 τ</text><text x="619" y="72" text-anchor="middle" class="ax">x̃τ = α x̃₀ + σ ε</text>
+
+        <rect x="726" y="8" width="166" height="40" rx="8" fill="var(--dmd)" fill-opacity=".14" stroke="var(--dmd)"/>
+        <text x="809" y="33" text-anchor="middle" style="fill:var(--dmd-ink);font-size:12.5px;font-weight:600">老师 s_T（冻结 Wan）</text>
+        <rect x="726" y="58" width="166" height="40" rx="8" fill="var(--surf3)" stroke="var(--rule2)"/>
+        <text x="809" y="83" text-anchor="middle" class="lab">假分 s_S（学学生分布）</text>
+
+        <rect x="712" y="160" width="180" height="62" rx="9" fill="var(--dense-soft)" stroke="var(--dense)"/>
+        <text x="802" y="185" text-anchor="middle" style="fill:var(--dense-ink);font-weight:600">拉力 g = w(τ)(s_S − s_T)</text>
+        <text x="802" y="206" text-anchor="middle" class="ax">逐 token 的"还差多少"</text>
+
+        <rect x="460" y="160" width="220" height="62" rx="9" fill="var(--surf2)" stroke="var(--rule2)"/>
+        <text x="570" y="185" text-anchor="middle" class="labb">伪目标 x̂₀ = sg[x̃₀ − g]</text>
+        <text x="570" y="206" text-anchor="middle" class="ax">停止梯度的临时靶子</text>
+
+        <rect x="166" y="152" width="262" height="78" rx="10" fill="var(--unc-soft)" stroke="var(--unc)"/>
+        <text x="297" y="178" text-anchor="middle" style="fill:var(--unc-ink);font-weight:600">逐 token 高斯 NLL</text>
+        <text x="297" y="200" text-anchor="middle" class="lab">λ_rec‖x̃₀ − x̂₀‖² / u² + λ_log log u</text>
+        <text x="297" y="219" text-anchor="middle" class="ax">→ u² ≈ (2λ_rec/λ_log)·𝔼‖g‖²</text>
+      </g>
+      <g fill="none" stroke="var(--ink3)" stroke-width="1.5">
+        <path d="M136 57H162" marker-end="url(#ar)"/>
+        <path d="M380 57H408" marker-end="url(#ar)"/>
+        <path d="M512 57H540" marker-end="url(#ar)"/>
+        <path d="M694 50L722 32" marker-end="url(#ar)"/>
+        <path d="M694 64L722 76" marker-end="url(#ar)"/>
+        <path d="M809 98V156" marker-end="url(#ar)"/>
+        <path d="M712 191H684" marker-end="url(#ar)"/>
+        <path d="M460 191H432" marker-end="url(#ar)"/>
+        <path d="M462 84V156" stroke-dasharray="4 4" marker-end="url(#ar)"/>
+      </g>
+      <path d="M273 100V148" fill="none" stroke="var(--unc)" stroke-width="2" marker-end="url(#arU)"/>
+      <text x="282" y="130" style="fill:var(--unc-ink);font-size:12px">u（每个 token 一个标量）</text>
+      <text x="470" y="128" class="ax">x̃₀（sg）</text>
+      <text x="8" y="252" class="ax">训练只用 prompt（Qwen3 给 VIPE1M 子集写的描述），视觉监督全部来自老师；没有真实视频。</text>
+    </svg>
+    </div>
+    <figcaption>根据论文 §3.1–3.2 与式 (6)(8)–(10) 重画。<b>注意：</b>NLL 对生成器本身也有梯度，不只训练分支，见 3.3。</figcaption>
+  </figure>
+
+  <h3>3.3 玩一下：这个损失对"难 token"做了什么</h3>
+  <p class="prose">下面固定 <span class="mv">λ</span><sub>rec</sub> = ½（这时 NLL 就是标准高斯形式）。拖动拉力大小 <span class="mv">e</span> = ‖<span class="mv">g<sub>i</sub></span>‖，以及 <span class="mv">κ</span> = <span class="mv">λ</span><sub>log</sub>/<span class="mv">λ</span><sub>rec</sub>，看损失曲线和最优 <span class="mv">u</span>。</p>
+  <figure class="fig" id="nll">
+    <div class="figtitle">逐 token NLL：ℓ(u) = λ_rec·e²/u² + λ_log·ln u</div>
+    <div class="ctrls">
+      <div class="ctrl"><label for="nll-e">拉力 e</label><input type="range" id="nll-e" min="0.1" max="3" step="0.05" value="1"><span class="rv" id="nll-ev">1.00</span></div>
+      <div class="ctrl"><label for="nll-k">κ = λ_log/λ_rec</label><input type="range" id="nll-k" min="0.5" max="4" step="0.1" value="2"><span class="rv" id="nll-kv">2.0</span></div>
+    </div>
+    <svg id="nll-svg" class="cap-s" viewBox="0 0 640 230" role="img" aria-label="NLL 随 u 变化的曲线"></svg>
+    <div class="readout" id="nll-read"></div>
+    <h4 style="margin-top:16px">三个 token 对生成器的更新力度（以中等 token 为 1）</h4>
+    <div id="nll-bars" class="hb" style="margin-top:8px"></div>
+    <div class="legend"><span><i style="background:var(--dmd)"></i>普通 DMD（MSE）：更新 ∝ e</span><span><i style="background:var(--unc)"></i>阶段一 NLL，u 取最优：更新 = 2λ_rec·e/u*² = λ_log/e</span></div>
+    <figcaption><b>人话：</b>NLL 对 <span class="mv">x̃</span><sub>0</sub> 的梯度是 2<span class="mv">λ</span><sub>rec</sub>·<span class="mv">g</span>/<span class="mv">u</span>²。<span class="mv">u</span> 大的"难 token"，拉力被除以 <span class="mv">u</span>²，<b>更新反而被压小</b>；"易 token"的更新被放大。这就是 Kendall &amp; Gal（2017）说的"学习型损失衰减"，论文没有引用。论文还说用了它之后"不再需要 DMD 常用的逐样本归一化"，等于把逐样本归一化换成了逐 token 归一化。<b>所以阶段一不只是加了个头，它用 15k 次迭代改变了生成器自己的训练信号。</b>这在 §7 解读"稀疏版反超稠密版"时很关键。<span class="src c">推导</span></figcaption>
+  </figure>
+
+  <h3>3.4 附录 D 的直觉：不确定 = "更吵的时刻"</h3>
+  <p class="prose">附录 D 把 <span class="mv">u</span> 当成 <span class="mv">x</span><sub>0</sub> 预测的标准差：<span class="mv">x</span><sub>0</sub> ≈ <span class="mv">x̂</span><sub>0</sub> + <span class="mv">uη</span>。把这个预测重新加噪到 <span class="mv">τ</span>，等效噪声方差变成 <span class="mv">σ<sub>τ</sub></span>² + <span class="mv">α<sub>τ</sub></span>²<span class="mv">u</span>²。也就是说，这个 token 的有效信噪比，相当于处在一个更吵的时刻 <span class="mv">τ′</span> ≥ <span class="mv">τ</span>。论文据此认为，越吵的 token 越应该拿到全局计算，这和"高噪声阶段注意力更偏全局、负责布局"的经验一致。</p>
+  <figure class="fig" id="snr">
+    <div class="figtitle">把不确定度折算成"等效时刻"（按 Wan 的 flow matching：α = 1 − t，σ = t）</div>
+    <div class="ctrls">
+      <div class="ctrl"><label for="snr-t">当前时刻 t</label><input type="range" id="snr-t" min="0.05" max="0.95" step="0.01" value="0.6"><span class="rv" id="snr-tv">0.60</span></div>
+      <div class="ctrl"><label for="snr-u">不确定度 u</label><input type="range" id="snr-u" min="0" max="2" step="0.02" value="0.5"><span class="rv" id="snr-uv">0.50</span></div>
+    </div>
+    <svg id="snr-svg" class="cap-s" viewBox="0 0 640 96" role="img" aria-label="等效时刻示意"></svg>
+    <div class="readout" id="snr-read"></div>
+    <figcaption>SNR<sub>eff</sub> = α²/(σ² + α²u²)，再解 ((1 − t′)/t′)² = SNR<sub>eff</sub>。<b>可以看到：</b>同样的 <span class="mv">u</span>，在低噪声阶段（<span class="mv">t</span> 小）造成的"时刻倒退"大得多。这只是论文给的直觉，要注意 <span class="mv">u</span> 实际拟合的是 DMD 拉力，不是 <span class="mv">x</span><sub>0</sub> 的真实误差（§3.2）。论文的不确定度图都取在 σ = 0.6。</figcaption>
+  </figure>
+
+  <h3>3.5 <span class="mv">u</span> 实际长什么样：附录 Fig.12–16 逐张看</h3>
+  <p class="prose">论文只给了 5 个例子，都在 σ = 0.6 这一个时刻，没有任何定量检验，比如 <span class="mv">u</span> 与"改成局部注意力后该 token 误差增加多少"的相关性。下面是我逐张看图的记录。</p>
+  <div class="tbl">
+    <table class="t">
+      <thead><tr><th>场景</th><th><span class="mv">u</span> 最高</th><th><span class="mv">u</span> 最低</th><th>我的读法</th></tr></thead>
+      <tbody>
+        <tr><td>山路航拍（Fig.12）</td><td>整条弯曲柏油路（通红）</td><td>两侧密林、草地</td><td><b>和 Fig.1 的叙述相反。</b>Fig.1 说"细结构要全局，平滑区域局部就够"。这里路面平整、纹理少，却最"难"；密林纹理极细，却最"易"。更像是在标"细长、需要长程连贯的结构"，或者"显著前景"。</td></tr>
+        <tr><td>切番茄（Fig.13）</td><td>番茄切面（最红）、刀、手</td><td>墙面、台面</td><td>符合"前景 + 运动"。</td></tr>
+        <tr><td>两棵发光的树（Fig.14）</td><td>树枝、树干</td><td>黑色背景</td><td>高对比细结构。</td></tr>
+        <tr><td>山路上迎面开来的车（Fig.15）</td><td>车；第 2 帧车占满画面时整块发红</td><td>天空、山坡</td><td>跟着运动物体走，这是 <span class="mv">u</span> 最有说服力的一例。</td></tr>
+        <tr><td>海边情侣喝咖啡（Fig.16）</td><td>杯子与点心</td><td>海面</td><td>脸和手只是中等。引言说脸和手属于难区域，图里并不突出。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="prose dim" style="font-size:14.5px">另外，这些图在帧与帧之间很稳定，形状像物体掩码，热图上还看得到明显的 2×2 分块格子。它更接近"显著物体检测器"，而不是逐像素的难度图。这未必是坏事，但论文把它讲成"去噪难度"，缺少验证。→ <a href="#d8">D8</a></p>
+</section>
+
+<!-- =============================== §4 =============================== -->
+<section id="s4">
+  <h2><span class="no">§4</span>阶段二：token 怎么被分到稠密或局部</h2>
+  <p class="lede">分支冻结之后，每一步都用它的输出决定下一步谁看全局。规则一共 6 条：</p>
+  <ol class="tight prose">
+    <li>对每个样本、每个时刻，算全部 <span class="mv">N</span> 个 <span class="mv">u<sub>i</sub></span> 的均值 <span class="mv">μ</span> 与标准差 <span class="mv">σ</span>，阈值 <span class="mv">T</span>(<span class="mv">τ</span>) = <span class="mv">μ</span> + <span class="mv">c</span>·<span class="mv">σ</span>。默认 <span class="mv">c</span> = 0.9，论文说约对应 80% 局部。</li>
+    <li><span class="mv">m<sub>i</sub></span> = 𝟙[<span class="mv">u<sub>i</sub></span> &lt; <span class="mv">T</span>]。<span class="c-local"><span class="mv">m</span> = 1 → 局部</span>，<span class="c-dense"><span class="mv">m</span> = 0 → 稠密</span>。</li>
+    <li>在<b>每个 Transformer 块</b>里，再随机挑一部分不确定 token，和随机挑的确定 token 对调，默认 7%。目的是让更多 token 有机会看全局。</li>
+    <li>这个掩码用于<b>下一步</b> <span class="mv">τ</span> − Δ，所以推理时不用多跑一次网络。</li>
+    <li>输出 <span class="mv">z′<sub>i</sub></span> = <span class="mv">m<sub>i</sub></span>·Attn<sub>local</sub>(<span class="mv">i</span>) + (1 − <span class="mv">m<sub>i</sub></span>)·Attn<sub>dense</sub>(<span class="mv">i</span>)，局部邻域是 11×11×11 的三维窗口。</li>
+    <li>冻结分支，用标准 DMD 目标把其余参数微调 6k 次。</li>
+  </ol>
+
+  <figure class="fig">
+    <div class="figtitle">HetA-DiT 的一个去噪步</div>
+    <div class="scrollx">
+    <svg viewBox="0 0 900 330" role="img" aria-label="HetA-DiT 结构：上一步的不确定度经阈值得到掩码，掩码决定每个自注意力层里各 query 看全局还是局部">
+      <defs>
+        <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--ink3)"/></marker>
+      </defs>
+      <!-- previous step -->
+      <rect x="10" y="20" width="150" height="54" rx="9" fill="var(--unc-soft)" stroke="var(--unc)"/>
+      <text x="85" y="43" text-anchor="middle" style="fill:var(--unc-ink);font-weight:600;font-size:13px">上一步的 u(τ)</text>
+      <text x="85" y="62" text-anchor="middle" class="ax">N 个标量</text>
+      <rect x="10" y="100" width="150" height="54" rx="9" fill="var(--surf2)" stroke="var(--rule2)"/>
+      <text x="85" y="123" text-anchor="middle" class="labb">阈值 μ + cσ</text>
+      <text x="85" y="142" text-anchor="middle" class="ax">逐样本、逐时刻</text>
+      <rect x="10" y="180" width="150" height="54" rx="9" fill="var(--surf2)" stroke="var(--rule2)"/>
+      <text x="85" y="203" text-anchor="middle" class="labb">掩码 m(τ)</text>
+      <text x="85" y="222" text-anchor="middle" class="ax">≈20% 为 0（稠密）</text>
+      <path d="M85 74V96M85 154V176" stroke="var(--ink3)" stroke-width="1.5" marker-end="url(#ar2)" fill="none"/>
+      <path d="M160 207H200" stroke="var(--ink3)" stroke-width="1.5" marker-end="url(#ar2)" fill="none"/>
+      <text x="166" y="198" class="ax">用于 τ−Δ</text>
+
+      <!-- block stack -->
+      <rect x="206" y="14" width="200" height="262" rx="12" fill="none" stroke="var(--rule2)" stroke-dasharray="5 4"/>
+      <text x="394" y="34" text-anchor="end" class="ax">× B = 30 块（5B / 1.3B）</text>
+      <rect x="222" y="48" width="168" height="62" rx="9" fill="var(--dense-soft)" stroke="var(--dense)"/>
+      <text x="306" y="74" text-anchor="middle" style="fill:var(--dense-ink);font-weight:600;font-size:13px">异构自注意力 SA</text>
+      <text x="306" y="94" text-anchor="middle" class="ax">每块另随机交换 7%</text>
+      <rect x="222" y="126" width="168" height="54" rx="9" fill="var(--surf2)" stroke="var(--rule2)"/>
+      <text x="306" y="158" text-anchor="middle" class="lab">交叉注意力 CA（不变）</text>
+      <rect x="222" y="196" width="168" height="54" rx="9" fill="var(--surf2)" stroke="var(--rule2)"/>
+      <text x="306" y="228" text-anchor="middle" class="lab">FFN（不变）</text>
+      <path d="M306 110V122M306 180V192" stroke="var(--ink3)" stroke-width="1.5" marker-end="url(#ar2)" fill="none"/>
+
+      <!-- SA detail -->
+      <path d="M390 79L452 40M390 79L452 250" stroke="var(--rule2)" stroke-dasharray="3 4" fill="none"/>
+      <rect x="452" y="14" width="438" height="262" rx="12" fill="var(--surf2)" stroke="var(--rule2)"/>
+      <text x="470" y="38" class="labb">SA 内部（只在 query 侧分叉）</text>
+      <g id="sa-tokens"></g>
+      <text x="470" y="66" class="ax">一行 token（示意）：</text>
+      <!-- dense path -->
+      <rect x="470" y="112" width="200" height="66" rx="9" fill="var(--dense-soft)" stroke="var(--dense)"/>
+      <text x="570" y="136" text-anchor="middle" style="fill:var(--dense-ink);font-weight:600;font-size:13px">m = 0：稠密</text>
+      <text x="570" y="156" text-anchor="middle" class="lab">Q 与全部 N 个 K/V</text>
+      <text x="570" y="171" text-anchor="middle" class="ax">成本 ρ·N²·d</text>
+      <!-- local path -->
+      <rect x="680" y="112" width="200" height="66" rx="9" fill="var(--local-soft)" stroke="var(--local)"/>
+      <text x="780" y="136" text-anchor="middle" style="fill:var(--local-ink);font-weight:600;font-size:13px">m = 1：局部</text>
+      <text x="780" y="156" text-anchor="middle" class="lab">Q 只与 11³ 邻域的 K/V</text>
+      <text x="780" y="171" text-anchor="middle" class="ax">成本 (1−ρ)·N·M·d</text>
+      <rect x="470" y="198" width="410" height="60" rx="9" fill="var(--surf)" stroke="var(--rule2)"/>
+      <text x="675" y="222" text-anchor="middle" class="labb">z′ᵢ = mᵢ·Attn_local(i) + (1 − mᵢ)·Attn_dense(i)</text>
+      <text x="675" y="243" text-anchor="middle" class="ax">K/V 永远来自全部 token；每个 token 都被更新（区别于缓存）</text>
+      <path d="M570 178V194M780 178V194" stroke="var(--ink3)" stroke-width="1.5" marker-end="url(#ar2)" fill="none"/>
+
+      <!-- outputs -->
+      <rect x="206" y="290" width="200" height="34" rx="8" fill="var(--surf2)" stroke="var(--rule2)"/>
+      <text x="306" y="312" text-anchor="middle" class="lab">x̃₀(τ−Δ) 与 u(τ−Δ)</text>
+      <path d="M306 276V286" stroke="var(--ink3)" stroke-width="1.5" marker-end="url(#ar2)" fill="none"/>
+      <path d="M206 307H40V240" stroke="var(--unc)" stroke-width="1.5" stroke-dasharray="5 4" fill="none" marker-end="url(#ar2)"/>
+      <text x="48" y="300" style="fill:var(--unc-ink);font-size:11.5px">下一步的掩码来源</text>
+    </svg>
+    </div>
+    <figcaption>根据论文 Fig.2、式 (11)–(13) 重画。<b>论文没交代：</b>第 1 步没有"上一步"，掩码从哪来（§5）；FlexAttention 里稠密 query 怎么排布才能真正省时（§6.3）。</figcaption>
+  </figure>
+
+  <h3>4.1 路由沙盒</h3>
+  <p class="prose">下面用 Wan2.2-5B 在 704p、121 帧时的真实 token 网格：31 个 latent 帧 × 22 × 40。每帧 880 个 token，总共 27,280 个。<span class="mv">u</span> 是我造的合成场，模仿附录图里的几种形态。统计量 <span class="mv">μ</span>、<span class="mv">σ</span> 和随机交换都在整段视频上计算，与论文一致。点击任一 token，可以看它在当前帧能看到的范围。</p>
+  <figure class="fig" id="router-fig">
+    <div class="figtitle">路由沙盒 · 合成不确定度场</div>
+    <div class="ctrls">
+      <div class="ctrl"><label>场景</label>
+        <div class="seg" id="rt-scene" role="group" aria-label="场景">
+          <button type="button" data-v="road" aria-pressed="true">山路航拍</button>
+          <button type="button" data-v="car" aria-pressed="false">迎面来车</button>
+          <button type="button" data-v="tomato" aria-pressed="false">切番茄</button>
+          <button type="button" data-v="hard" aria-pressed="false">处处都难</button>
+        </div>
+      </div>
+      <div class="ctrl"><label>视图</label>
+        <div class="seg" id="rt-view" role="group" aria-label="视图">
+          <button type="button" data-v="route" aria-pressed="true">路由</button>
+          <button type="button" data-v="heat" aria-pressed="false">不确定度</button>
+        </div>
+      </div>
+    </div>
+    <div class="ctrls">
+      <div class="ctrl"><label for="rt-c">阈值系数 c</label><input type="range" id="rt-c" min="0" max="2" step="0.05" value="0.9"><span class="rv" id="rt-cval">0.90</span></div>
+      <div class="ctrl"><label>随机交换</label>
+        <div class="seg" id="rt-r" role="group" aria-label="随机交换比例">
+          <button type="button" data-v="0" aria-pressed="false">0%</button>
+          <button type="button" data-v="0.03" aria-pressed="false">3%</button>
+          <button type="button" data-v="0.07" aria-pressed="true">7%（默认）</button>
+          <button type="button" data-v="all" aria-pressed="false">全随机</button>
+        </div>
+      </div>
+    </div>
+    <div class="ctrls">
+      <div class="ctrl"><label for="rt-b">Transformer 块</label><input type="range" id="rt-b" min="1" max="30" step="1" value="1"><span class="rv" id="rt-bv">1</span></div>
+      <div class="ctrl"><label for="rt-t">latent 帧</label><input type="range" id="rt-t" min="0" max="30" step="1" value="10"><span class="rv" id="rt-tv">10</span></div>
+    </div>
+    <div class="router">
+      <div>
+        <div class="cvbox"><canvas id="rt-cv" width="800" height="440" aria-label="当前 latent 帧的 22×40 token 网格"></canvas></div>
+        <div class="cvcap"><span id="rt-cap">点击任一 token 查看它的注意力范围</span><span>22 × 40 token / 帧</span></div>
+      </div>
+      <div class="side">
+        <svg id="rt-hist" viewBox="0 0 300 150" role="img" aria-label="整段视频 u 的直方图与阈值"></svg>
+        <div class="readout" id="rt-read" style="margin-top:0"></div>
+        <p class="note" id="rt-note" style="margin:0"></p>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--dense)"></i>稠密（按 u 选中）</span>
+      <span><i style="background:var(--dense);outline:2px dashed var(--ink);outline-offset:-3px"></i>随机换入的稠密</span>
+      <span><i style="background:var(--local-soft);outline:2px solid var(--dense);outline-offset:-2px"></i>被随机换出的高 u token</span>
+      <span><i style="background:var(--local-soft)"></i>局部</span>
+    </div>
+    <figcaption><b>可以试：</b>①"处处都难"场景下，稠密比例并不会升高，因为阈值是相对的。② 拖动"Transformer 块"，随机换入的 token 每层都不同，而高 <span class="mv">u</span> 的主体大部分时间都保持稠密。③ 把随机交换调成"全随机"，就是论文消融里 82.78 分的"随机路由"。<span class="src e">合成数据</span></figcaption>
+  </figure>
+
+  <h3>4.2 三个容易误解的地方</h3>
+  <div class="grid3">
+    <div class="card hot">
+      <h4>稠密只发生在 query 侧</h4>
+      <p>K/V 始终来自全部 token。局部 token 的 query 只看 11×11×11 = 1,331 个 key，是 5B 全部 27,280 个的 4.9%、1.3B 全部 32,760 个的 4.1%。在 5B 的 31×22×40 网格上，11 帧的时间窗约覆盖全片 1/3，11 行覆盖画面高度的一半。这个"局部"并不小。</p>
+    </div>
+    <div class="card cool">
+      <h4>局部不等于看不到远处</h4>
+      <p>每层局部窗的半径是 5 个 token，30 层叠起来，理论感受野半径达 150。5B 网格最长的一边是 40，第 8 层就已经覆盖整帧。局部注意力损失的是<b>一层之内直达的长程交互</b>，不是信息<b>能不能传到</b>。这能解释为什么"全局部"版本已有 82.85 分（§7.5）。</p>
+    </div>
+    <div class="card">
+      <h4>"自适应"只管在哪算，不管算多少</h4>
+      <p>阈值 <span class="mv">μ</span> + <span class="mv">cσ</span> 是相对的，稠密比例主要取决于 <span class="mv">c</span> 和 <span class="mv">u</span> 的<b>分布形状</b>：近似高斯时 <span class="mv">c</span> = 0.9 对应 18.4%；指数或对数正态这类右偏分布约 10–15%。一段处处都难的视频不会因此多拿算力。好处是延迟可预测。论文没报告 ρ 在样本和时刻之间的分布。<span class="src c">复算</span></p>
+    </div>
+  </div>
+  <div class="tbl" style="max-width:640px">
+    <table class="t" style="min-width:0">
+      <thead><tr><th>目标局部比例</th><th>高斯下需要的 c</th><th>论文用的 c</th></tr></thead>
+      <tbody>
+        <tr><td>70%（Fig.4 的 70% 变体）</td><td class="n">0.52</td><td class="n">未给</td></tr>
+        <tr><td>80%（默认）</td><td class="n">0.84</td><td class="n">0.9</td></tr>
+        <tr><td>90%（Fig.4 的 90% 变体）</td><td class="n">1.28</td><td class="n">未给</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- =============================== §5 =============================== -->
+<section id="s5">
+  <h2><span class="no">§5</span>训练与推理的时间线</h2>
+  <p class="lede">两个训练阶段加一次推理。容易出问题的地方有三处：掩码的来源在训练和推理时不同；分支冻结了，但它读取的主干特征还在变；第 1 步没有掩码来源。</p>
+
+  <figure class="fig">
+    <div class="figtitle">从 DMD 检查点到 3 步推理</div>
+    <div class="scrollx">
+    <svg viewBox="0 0 900 250" role="img" aria-label="训练与推理时间线">
+      <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--ink3)"/></marker></defs>
+      <rect x="8" y="30" width="120" height="70" rx="9" fill="var(--surf2)" stroke="var(--rule2)"/>
+      <text x="68" y="58" text-anchor="middle" class="labb">DMD 检查点</text><text x="68" y="78" text-anchor="middle" class="ax">稠密，3 步</text><text x="68" y="93" text-anchor="middle" class="ax">（来历未说明）</text>
+      <rect x="150" y="18" width="220" height="94" rx="10" fill="var(--unc-soft)" stroke="var(--unc)"/>
+      <text x="260" y="42" text-anchor="middle" style="fill:var(--unc-ink);font-weight:600;font-size:13px">阶段一 · 15k 次</text>
+      <text x="260" y="62" text-anchor="middle" class="lab">NLL 形式的 DMD，全稠密</text>
+      <text x="260" y="80" text-anchor="middle" class="ax">batch 2×4，t 采样偏高噪声（shift 5）</text>
+      <text x="260" y="97" text-anchor="middle" class="ax">训练：主干 + 分支 + 假分网络</text>
+      <rect x="392" y="18" width="232" height="94" rx="10" fill="var(--dense-soft)" stroke="var(--dense)"/>
+      <text x="508" y="42" text-anchor="middle" style="fill:var(--dense-ink);font-weight:600;font-size:13px">阶段二 · 6k 次</text>
+      <text x="508" y="62" text-anchor="middle" class="lab">标准 DMD，异构注意力</text>
+      <text x="508" y="80" text-anchor="middle" class="ax">batch 1×4，shift 1；分支冻结</text>
+      <text x="508" y="97" text-anchor="middle" class="ax">掩码：额外一次无梯度全稠密前向</text>
+      <path d="M128 65H146M370 65H388" stroke="var(--ink3)" stroke-width="1.5" marker-end="url(#ar3)" fill="none"/>
+
+      <text x="646" y="30" class="labb">推理 · 3 步</text>
+      <g>
+        <rect x="646" y="42" width="72" height="56" rx="8" fill="var(--surf3)" stroke="var(--risk)" stroke-dasharray="5 3"/>
+        <text x="682" y="66" text-anchor="middle" class="labb">第 1 步</text><text x="682" y="86" text-anchor="middle" style="fill:var(--risk-ink);font-size:12px">掩码？</text>
+        <rect x="734" y="42" width="72" height="56" rx="8" fill="var(--dense-soft)" stroke="var(--dense)"/>
+        <text x="770" y="66" text-anchor="middle" class="labb">第 2 步</text><text x="770" y="86" text-anchor="middle" class="ax">用 u₁</text>
+        <rect x="822" y="42" width="72" height="56" rx="8" fill="var(--dense-soft)" stroke="var(--dense)"/>
+        <text x="858" y="66" text-anchor="middle" class="labb">第 3 步</text><text x="858" y="86" text-anchor="middle" class="ax">用 u₂</text>
+        <path d="M718 70H730M806 70H818" stroke="var(--ink3)" stroke-width="1.5" marker-end="url(#ar3)" fill="none"/>
+      </g>
+      <path d="M624 65H640" stroke="var(--ink3)" stroke-width="1.5" marker-end="url(#ar3)" fill="none"/>
+
+      <g font-size="12.5">
+        <rect x="150" y="140" width="742" height="100" rx="10" fill="var(--surf2)" stroke="var(--rule)"/>
+        <text x="168" y="164" class="labb">三处不一致</text>
+        <text x="168" y="187" class="lab">① 阶段二训练时，u 来自一次<tspan style="font-weight:600;fill:var(--ink)">全稠密</tspan>的学生前向；推理时，u 来自上一步<tspan style="font-weight:600;fill:var(--ink)">异构注意力</tspan>的前向。两种来源没有做消融。</text>
+        <text x="168" y="208" class="lab">② 分支冻结了，但阶段二在改主干。分支的输入特征会漂移。相对阈值 μ+cσ 能吸收整体缩放，吸收不了形状变化。</text>
+        <text x="168" y="229" class="lab">③ 第 1 步没有上一步的 u，论文没写这一步用什么：全稠密、全局部，还是别的掩码。</text>
+      </g>
+    </svg>
+    </div>
+    <figcaption>超参数来自论文附录 A.1：学生学习率 1e-5，假分网络 5e-6，AdamW（权重衰减 0.01，β = 0.9 / 0.999），bf16，常数学习率加 10 步预热，老师 CFG = 5。分支的结构、λ<sub>rec</sub>、λ<sub>log</sub>，以及训练时"更早的时刻"具体早多少（Δ），论文没给。</figcaption>
+  </figure>
+
+  <div class="note warn"><b>第 1 步是一个关键空白。</b>3 步里如果第 1 步走全稠密，5B 的块级延迟加速就从 1.63× 降到整条管线的 <b>1.35×</b>。这时 HetA 的 3 步约等于 2.23 个稠密步，比 DMD 2 步（2.0 个稠密步）<b>还慢 11%</b>。如果 3 步都能稀疏（需要另找第 1 步的掩码），约 1.84 个稠密步，比 DMD 2 步快 8%。§6 的计算器里可以切换这两种情况。<span class="src c">复算</span></div>
+</section>
+
+<!-- =============================== §6 =============================== -->
+<section id="s6">
+  <h2><span class="no">§6</span>算力账本：用论文自己的公式复算</h2>
+  <p class="lede">论文式 (14) 给出的注意力成本是 O(<span class="mv">ρN</span>²<span class="mv">d</span> + (1 − <span class="mv">ρ</span>)<span class="mv">NMd</span>)，其中 <span class="mv">ρ</span> 是稠密 query 的比例，<span class="mv">M</span> = |𝔑(<span class="mv">i</span>)| 是局部窗口里的 key 数。把 Wan 的真实 token 数代进去，块级数字对得上，注意力这一层对不上。</p>
+
+  <figure class="fig" id="calc">
+    <div class="figtitle">式 (14) 计算器 · 与论文 Table 5 / Table 7 对照</div>
+    <div class="ctrls">
+      <div class="ctrl"><label>模型</label>
+        <div class="seg" id="calc-m" role="group" aria-label="模型">
+          <button type="button" data-v="13" aria-pressed="false">1.3B · 480p · 81f</button>
+          <button type="button" data-v="5" aria-pressed="true">2.2-5B · 704p · 121f</button>
+          <button type="button" data-v="14a" aria-pressed="false">14B · 480p · 81f</button>
+          <button type="button" data-v="14b" aria-pressed="false">14B · 480p · 121f</button>
+        </div>
+      </div>
+    </div>
+    <div class="ctrls">
+      <div class="ctrl"><label for="calc-rho">稠密比例 ρ</label><input type="range" id="calc-rho" min="0" max="0.5" step="0.005" value="0.2"><span class="rv" id="calc-rhov">0.200</span></div>
+      <div class="ctrl"><label>窗口 k</label>
+        <div class="seg" id="calc-k" role="group" aria-label="局部窗口边长">
+          <button type="button" data-v="7" aria-pressed="false">7</button>
+          <button type="button" data-v="9" aria-pressed="false">9</button>
+          <button type="button" data-v="11" aria-pressed="true">11</button>
+          <button type="button" data-v="13" aria-pressed="false">13</button>
+          <button type="button" data-v="15" aria-pressed="false">15</button>
+        </div>
+      </div>
+    </div>
+    <div class="ctrls">
+      <div class="ctrl"><label>局部成本计法</label>
+        <div class="seg" id="calc-acc" role="group" aria-label="局部注意力成本计法">
+          <button type="button" data-v="k3" aria-pressed="true">M = k³（式 14）</button>
+          <button type="button" data-v="clip" aria-pressed="false">边界截断</button>
+          <button type="button" data-v="paper" aria-pressed="false">论文隐含 ≈0.148·k³</button>
+        </div>
+      </div>
+      <div class="ctrl"><label>第 1 步</label>
+        <div class="seg" id="calc-first" role="group" aria-label="第一步">
+          <button type="button" data-v="dense" aria-pressed="true">全稠密</button>
+          <button type="button" data-v="sparse" aria-pressed="false">也稀疏</button>
+        </div>
+      </div>
+    </div>
+    <div class="readout" id="calc-read"></div>
+    <h4 style="margin-top:18px">整条 3 步管线的 DiT 时间（以"一个稠密步"为 1，用论文实测的块级延迟加速）</h4>
+    <div id="calc-pipe" class="hb" style="margin-top:8px"></div>
+    <figcaption><b>块级换算：</b>块级缩减 = 1 / (1 − <span class="mv">a</span> + <span class="mv">a</span>·<span class="mv">r</span>)，其中 <span class="mv">a</span> 是注意力核心占整块 FLOPs 的比例（§2），<span class="mv">r</span> 是注意力保留下来的比例。把论文报告的注意力缩减比代进去：1.3B 得 2.250×（论文 2.25×），5B 得 1.728×（论文 1.73×）。14B 行按 81 帧只得 1.716×，按 121 帧得 1.973×（论文 1.97×）。所以 14B 那行很可能是 121 帧，但表里只写了 480×832。<b>"边界截断"</b>指窗口在视频边缘被裁掉、不平移，平均 key 数会小于 k³。<span class="src c">复算</span></figcaption>
+  </figure>
+
+  <h3>6.1 注意力这一层为什么对不上</h3>
+  <p class="prose">取 <span class="mv">ρ</span> = 0.2、<span class="mv">M</span> = 11³、<span class="mv">N</span> = 27,280，式 (14) 给出 5B 的注意力缩减是 <b>4.18×</b>，论文报告 <b>4.85×</b>。核大小扫描（Table 7）的差距更明显：</p>
+  <figure class="fig">
+    <div class="figtitle">Table 7：局部窗口 k 与注意力缩减（2.2-5B）</div>
+    <svg id="t7-svg" class="cap-s" viewBox="0 0 640 250" role="img" aria-label="不同核大小下注意力缩减：式14预测与论文报告"></svg>
+    <div class="legend">
+      <span><i class="ln" style="background:var(--local)"></i>式 (14)，M = k³，ρ = 0.2</span>
+      <span><i class="ln" style="background:var(--local);opacity:.5"></i>边界截断</span>
+      <span><i class="ln" style="background:var(--unc)"></i>M ≈ 0.148·k³（拟合论文）</span>
+      <span><i class="ring" style="border-color:var(--dense)"></i>论文 Table 7</span>
+    </div>
+    <figcaption>k³ 从 729 增到 2,197，扩大 3 倍。按式 (14)，注意力缩减应该从 4.52× 掉到 3.78×；论文只从 4.91× 掉到 4.76×。三点的斜率相当于每个局部 query 只看约 <b>0.15·k³ 个 key</b>，k = 11 时约 200 个。同样的"折扣"还能<b>精确</b>复现 Fig.4 里 HetA-70/80/90% 的横坐标 1.58/1.73/1.90×；按 k³ 计应该是 1.55/1.68/1.83×。<span class="src c">复算</span> <span class="src d">解码</span></figcaption>
+  </figure>
+  <p class="prose">可能的解释有三种，论文都没有交代：</p>
+  <ol class="tight prose">
+    <li>实际 <span class="mv">ρ</span> 小于 0.2。按 4.85× 反推，<span class="mv">ρ</span> ≈ 0.165；但这解释不了 Table 7 的斜率。</li>
+    <li>"11×11×11"不是以 token 为单位，比如以分块前的 latent 为单位。</li>
+    <li>FLOPs 计数器没把 FlexAttention 的局部部分算全。论文只说用 DeepSpeed 数 FLOPs。</li>
+  </ol>
+  <p class="prose">不管是哪一种，<b>Fig.4 的横轴（全文的帕累托论据）用的就是这个口径。</b>→ <a href="#d5">D5</a></p>
+
+  <h3>6.2 实测延迟：注意力 1.84× 如何换来块级 1.63×</h3>
+  <div class="tbl">
+    <table class="t">
+      <thead><tr><th>模型</th><th>分辨率</th><th>注意力延迟</th><th>块延迟</th><th>注意力 FLOPs</th><th>块 FLOPs</th><th>反推：注意力占稠密块耗时</th><th>FLOPs 占比（核心 / 含投影）</th></tr></thead>
+      <tbody>
+        <tr><td>Wan2.1-1.3B</td><td>480×832</td><td class="n">1.52×</td><td class="n">1.34×</td><td class="n">4.87×</td><td class="n">2.25×</td><td class="n">74%</td><td class="n">70% / 77%</td></tr>
+        <tr class="hl"><td>Wan2.2-5B</td><td>704×1280</td><td class="n">1.84×</td><td class="n">1.63×</td><td class="n">4.85×</td><td class="n">1.73×</td><td class="n"><b>85%</b></td><td class="n">53% / 65%</td></tr>
+        <tr><td>Wan2.2-14B</td><td>480×832</td><td class="n">1.57×</td><td class="n">1.30×</td><td class="n">4.91×</td><td class="n">1.97×</td><td class="n">64%</td><td class="n">52–62% / 69–75%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="prose">反推方法：块加速 = 1 / ((1 − <span class="mv">a<sub>t</sub></span>) + <span class="mv">a<sub>t</sub></span>/注意力加速)，解出注意力在稠密块里的耗时占比 <span class="mv">a<sub>t</sub></span>。1.3B 和 14B 的 <span class="mv">a<sub>t</sub></span> 与 FLOPs 占比接近，<b>5B 却要求注意力占稠密块耗时的 85%</b>，而它的 FLOPs 只占 53%，含投影也只有 65%。最可能的原因是稠密基线用了偏慢的注意力 kernel，比如不带掩码的 FlexAttention，而不是 FlashAttention-3。这样基线的注意力被拉长，块级加速就显得大。论文没写稠密基线用什么 kernel，也没写硬件和 batch。<span class="src c">复算</span> → <a href="#d9">D9</a></p>
+  <div class="note"><b>另一个没交代的实现细节。</b>FlexAttention 按 128×128 的块来跳过计算。如果 20% 的稠密 query 在序列里是散开的，几乎每个 128 个 query 的块里都会有稠密 token：随机分布时，一个块里一个都没有的概率是 0.8¹²⁸ ≈ 4×10⁻¹³。这样整行 KV 块都得算，稀疏就失效了。要拿到 1.84×，必须先按路由把 query 重排或 gather。另外，每个 Transformer 块都有不同的随机交换，所以每层每步都要重建一次 BlockMask。论文说延迟"已含摊销的 BlockMask 构建"，但没说怎么排布。→ <a href="#d10">D10</a></div>
+</section>
+
+<!-- =============================== §7 =============================== -->
+<section id="s7">
+  <h2><span class="no">§7</span>实验逐项读</h2>
+  <p class="lede">所有质量实验都是 3 步推理，VBench 用官方扩写后的全部 prompt。下面的逐维数值是从论文附录雷达图的 SVG 坐标里解码出来的。解码值与 Table 1/2 的汇总完全吻合，映射关系没有错。</p>
+
+  <h3>7.1 VBench（Table 2 / Table 3）</h3>
+  <figure class="fig" id="vb">
+    <div class="figtitle">Wan2.2-5B 基座 · 704×1280 · VBench</div>
+    <div class="ctrls">
+      <div class="ctrl"><label>指标</label>
+        <div class="seg" id="vb-m" role="group" aria-label="指标">
+          <button type="button" data-v="0" aria-pressed="true">Total</button>
+          <button type="button" data-v="1" aria-pressed="false">Quality</button>
+          <button type="button" data-v="2" aria-pressed="false">Semantic</button>
+        </div>
+      </div>
+    </div>
+    <div id="vb-bars" class="hb"></div>
+    <figcaption>黄色背景的是免训练方法（Jenga、ToCa）。STA 基于 HunyuanVideo，不是同一基座，这里不画。Total 全部满足 (4·Q + S)/5，误差在 ±0.01 内；HetA 由 Q/S 算得 83.272，Table 2 写 83.28，Table 8 与 Fig.4 写 83.27。<span class="src c">复算</span></figcaption>
+  </figure>
+  <div class="grid2">
+    <div class="card">
+      <h4>"追平 50 步 Wan2.2"是 DMD 的功劳</h4>
+      <p>HetA 83.28 = Wan2.2 83.28，但构成完全不同：质量 83.71 vs 85.03（<span class="dn">−1.32</span>），语义 81.52 vs 76.28（<span class="up">+5.24</span>）。语义分高是所有 DMD 变体的共性，DMD2s 80.22、DMD3s 80.43，因为老师的 CFG = 5 被蒸进了学生。<b>该比的是 DMD3s</b>：总分 +0.34，质量 +0.15，语义 +1.09。</p>
+    </div>
+    <div class="card">
+      <h4>语义提升来自哪几维 <span class="src d">解码</span></h4>
+      <p>对 DMD3s：multiple objects +3.0，spatial relationship +4.2，scene +2.2，imaging quality +0.7。这几维都是"组合与布局"类，可能受益于难 token 的全局注意力，也可能来自阶段一额外 15k 次训练。现有实验分不开这两者。</p>
+    </div>
+  </div>
+  <div class="tbl" style="max-width:760px">
+    <table class="t" style="min-width:0">
+      <thead><tr><th>Table 3 · Wan2.1-1.3B · 480×832</th><th>Total</th><th>Quality</th><th>Semantic</th></tr></thead>
+      <tbody>
+        <tr class="ref"><td>Wan2.1 1.3B（50 步，论文复现）</td><td class="n">83.10</td><td class="n">85.10</td><td class="n">75.12</td></tr>
+        <tr><td>VSA</td><td class="n">82.77</td><td class="n">83.60</td><td class="n">79.47</td></tr>
+        <tr><td>DMD3s（稠密）</td><td class="n">83.61</td><td class="n">84.82</td><td class="n">78.78</td></tr>
+        <tr class="hl"><td>DMD3s-HetA</td><td class="n">83.10 <span class="dn">−0.51</span></td><td class="n">84.23 <span class="dn">−0.59</span></td><td class="n">78.55 <span class="dn">−0.23</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="prose">在 1.3B 上，HetA 的三项<b>全部</b>低于稠密 DMD 3 步，正文写的是"on par"。1.3B 只有 VSA 一个效率对照；人评、VBench-2.0、消融都只在 5B 上做。</p>
+
+  <h3>7.2 质量–效率权衡（Fig.4 重画）</h3>
+  <figure class="fig" id="pareto">
+    <div class="figtitle">VBench Total vs 块级效率 · 坐标从论文 SVG 解码</div>
+    <div class="ctrls">
+      <div class="ctrl"><label>HetA 的横轴口径</label>
+        <div class="seg" id="par-x" role="group" aria-label="横轴口径">
+          <button type="button" data-v="step" aria-pressed="true">论文：单步</button>
+          <button type="button" data-v="pipe" aria-pressed="false">若第 1 步全稠密：整条 3 步</button>
+        </div>
+      </div>
+      <div class="ctrl"><label>补充点</label>
+        <div class="seg" id="par-extra" role="group" aria-label="补充点">
+          <button type="button" data-v="off" aria-pressed="false">不显示</button>
+          <button type="button" data-v="on" aria-pressed="true">显示同成本对照与 DMD2s</button>
+        </div>
+      </div>
+    </div>
+    <div class="scrollx"><svg id="par-svg" class="cap" viewBox="0 0 720 360" role="img" aria-label="质量效率散点图"></svg></div>
+    <div class="legend">
+      <span><i style="background:var(--heta);border-radius:50%"></i>HetA（70 / 80 / 90% 局部）</span>
+      <span><i style="background:var(--dmd);border-radius:50%"></i>稠密 DMD</span>
+      <span><i style="background:var(--oth);border-radius:50%"></i>其他效率方法</span>
+      <span><i class="ring" style="border-color:var(--local)"></i>论文消融里的同成本对照，横坐标取 1.73×</span>
+      <span><i class="ring" style="border-color:var(--med)"></i>我的估算点</span>
+    </div>
+    <figcaption>实心点全部解码自 Fig.4：DMD3s (1.00×, 82.94)、Attn Surgery (1.25×, 82.62)、ReHyAt (1.44×, 82.54)、ToCa (1.52×, 80.52)、VSA (1.88×, 82.24)、HetA-70% (1.58×, 83.24)、HetA-80% (1.73×, 83.27)、HetA-90% (1.90×, 82.98)。<span class="src d">解码</span>
+      <br><b>空心点：</b>固定均匀 83.13、纯不确定度（0% 随机）83.00、随机 82.78 来自 Table 6/8，与 HetA-80% 同成本。全局部 82.85 来自 Table 6，横坐标是我按 §2 的 FLOPs 模型估的 2.02–2.11×。DMD2s 82.48 画在 1.5×，即 2 步对 3 步。<span class="src e">估算</span>
+      <br><b>要点：</b>全局部版本如果画进图里，会压过 VSA、ToCa、ReHyAt 和 Attn Surgery。说明<b>同一套训练配方加最朴素的局部注意力就已经赢了这些基线</b>，HetA 的路由只在这之上多拿约 0.4 分。</figcaption>
+  </figure>
+  <div class="note">论文的叙述是"90% 局部时分数下降"（82.98）。但 82.98 仍<b>高于</b>稠密 DMD3s 的 82.94。一个 90% token 只看局部的模型反超稠密原模型，最自然的解释是后续训练本身带来了增益，而不是稀疏化。→ <a href="#d1">D1</a></div>
+  <p class="prose dim" style="font-size:14.5px">横轴口径的另一个疑点：VSA 与 HetA-80% 同为 80% 稀疏，VSA 却画在 1.88×，高于 HetA 的 1.73×。按我的 FLOPs 模型，80% 稀疏的注意力最多缩减 5×，块级上限约 1.74×。ToCa 按附录配置，只在第 2 步缓存，有效 FFN 缓存率 10.3%，理论块级节省不到 15%，图上却是 1.52×。→ <a href="#d13">D13</a></p>
+
+  <h3>7.3 VBench-2.0 与逐维拆解</h3>
+  <p class="prose">Table 1：HetA 58.9，稠密 DMD3s 60.8，DMD2s 57.9，Wan2.2（50 步）58.1。正文只说 HetA "胜过 50 步 Wan2.2 和 2 步 DMD"，没提它比自己的稠密对照低 1.9 分，而且 <b>5 个大类全部更低</b>：人体保真 79.8 vs 80.7、创造性 55.0 vs 58.7、可控性 35.9 vs 36.2、常识 62.5 vs 64.5、物理 61.4 vs 63.9。</p>
+  <figure class="fig" id="dim">
+    <div class="figtitle">逐维差值：HetA − 对照（正 = HetA 更好）</div>
+    <div class="ctrls">
+      <div class="ctrl"><label>基准</label>
+        <div class="seg" id="dim-b" role="group" aria-label="基准">
+          <button type="button" data-v="v2" aria-pressed="true">VBench-2.0（18 维）</button>
+          <button type="button" data-v="v1" aria-pressed="false">VBench（16 维）</button>
+        </div>
+      </div>
+      <div class="ctrl"><label>对照</label><div class="seg" id="dim-c" role="group" aria-label="对照"></div></div>
+    </div>
+    <div class="scrollx"><svg id="dim-svg" class="cap" viewBox="0 0 720 520" role="img" aria-label="逐维差值条形图"></svg></div>
+    <figcaption>数值解码自附录 Fig.5/6 雷达图的多边形顶点，精度约 ±0.1。VBench-2.0 各大类等于所属维度的均值，我用解码值复算 HetA / DMD3s / DMD2s 全部吻合。Wan2.2 的"常识"在 Table 1 写的是 64.1，按雷达图和总分应为 65.1。<span class="src d">解码</span></figcaption>
+  </figure>
+  <div class="grid2">
+    <div class="card hot">
+      <h4>对稠密 DMD3s，掉得最多的四维</h4>
+      <p>Dynamic Attribute <span class="dn">−10.2</span>，Motion Rationality <span class="dn">−9.2</span>，Multi-View Consistency <span class="dn">−7.4</span>，Diversity <span class="dn">−6.9</span>。前三维都要求跨帧、长程一致，正是局部注意力最可能伤到的地方。Diversity 下降则可能与阶段一改了 DMD 的逐 token 权重有关（§3.3）。涨的维度有 Instance Preservation +5.3、Motion Order +5.0、Complex Landscape +4.0。VBench-2.0 每维 prompt 少，单维噪声大，但下降集中在同一类维度，值得认真对待。</p>
+    </div>
+    <div class="card">
+      <h4>"胜过 50 步 Wan2.2"靠一维</h4>
+      <p>Wan2.2 的 Multi-View Consistency 只有 <b>6.0</b>，HetA 是 31.7，这一维把 Wan2.2 的物理分拉到 51.3。去掉这一维重算五大类均值，Wan2.2 约 61.1，HetA 约 60.9，基本持平。<span class="src c">复算</span></p>
+    </div>
+  </div>
+
+  <h3>7.4 人评（Table 4）</h3>
+  <figure class="fig">
+    <div class="figtitle">1,248 对 · 19 位评估者 · 667 个 GPT 扩写 prompt · 左右位置随机</div>
+    <div id="hp" style="display:grid;gap:12px"></div>
+    <div class="legend"><span><i style="background:var(--heta)"></i>偏好 HetA</span><span><i style="background:var(--oth)"></i>无偏好</span><span><i style="background:var(--dmd)"></i>偏好对照</span></div>
+    <figcaption>论文没给每组多少对，也没做显著性检验、没报告评估者一致性。右侧 p 值是我在"三组平分，每组约 416 对"的假设下，对非平局票做双侧符号检验得到的。结论与论文的定性说法一致：对 DMD3s 分不出高下；对 DMD2s 和 Attn Surgery 显著更好。缺的是对"全局部"和"固定均匀路由"的人评，它们才能检验路由本身。<span class="src e">估算</span></figcaption>
+  </figure>
+
+  <h3>7.5 消融：所有变体挤在 0.5 分以内</h3>
+  <figure class="fig" id="abl">
+    <div class="figtitle">Table 6 / 7 / 8 与 Fig.4 放在同一把尺子上</div>
+    <div class="ctrls">
+      <div class="ctrl"><label>指标</label>
+        <div class="seg" id="abl-m" role="group" aria-label="指标">
+          <button type="button" data-v="0" aria-pressed="true">Total</button>
+          <button type="button" data-v="1" aria-pressed="false">Quality</button>
+          <button type="button" data-v="2" aria-pressed="false">Semantic</button>
+        </div>
+      </div>
+    </div>
+    <div class="scrollx"><svg id="abl-svg" class="cap" viewBox="0 0 720 420" role="img" aria-label="消融点图"></svg></div>
+    <figcaption>竖虚线：稠密 DMD3s（蓝）与 DMD2s（浅蓝）。Table 6 的"随机路由"与 Table 8 的"20%（全随机）"数字完全相同，是同一个实验。Fig.4 只有 Total。论文没有报告种子方差；VBench 上 0.1–0.3 分的差异在不同论文里常被当作噪声。</figcaption>
+  </figure>
+  <div class="grid2">
+    <div class="card">
+      <h4>论文怎么说</h4>
+      <p>"基于不确定度的路由取得了最好的总分与语义分……朴素策略虽然合理，但始终不如我们。"随机交换 7% 最好，理由是"增加稠密注意力的覆盖面"。</p>
+    </div>
+    <div class="card hot">
+      <h4>数字其实在说</h4>
+      <p><b>纯不确定度路由</b>（0% 随机）83.00，<b>低于固定均匀路由</b> 83.13。加入 3% 和 7% 随机后才升到 83.18 和 83.27。也就是说，能打败均匀覆盖的，是"不确定度 + 覆盖面"的组合，其中覆盖面这部分恰恰是均匀路由本来就有的。全局部 82.85 与稠密 DMD3s 82.94 只差 0.09。Table 7 里语义分随 k 不单调（80.54 → 81.52 → 80.82）；正文说 11³"保持最高加速"，而表中最快的是 9³（4.91×）。</p>
+    </div>
+  </div>
+
+  <h3>7.6 我核对过的</h3>
+  <ul class="tight prose">
+    <li>VBench Total = (4·Quality + Semantic)/5：Table 2、Table 3 所有行在 ±0.01 内吻合。<span class="src c">复算</span></li>
+    <li>VBench-2.0 各大类 = 所属维度的均值：人体保真 3 维、创造性 2 维、可控性 7 维、常识 2 维、物理 4 维。HetA / DMD3s / DMD2s 全部吻合。Table 1 里 Wan2.1-1.3B 总分 56.0（五项均值 56.12）、CogVideoX-1.5 总分 53.4（五项均值 51.36）对不上，后者疑为 Hum.Fid 72.1 应作 82.1。<span class="src c">复算</span></li>
+    <li>论文"A14B@720p 自注意力 82%、FFN 13%"：我的 FLOPs 模型给 81.5% / 13.1%。<span class="src c">复算</span></li>
+    <li>块级 FLOPs 缩减可由注意力缩减比精确推出：2.250×（报 2.25×）、1.728×（报 1.73×）；14B 需按 121 帧才得 1.973×（报 1.97×）。<span class="src c">复算</span></li>
+    <li>注意力缩减 4.85×、Table 7 的 4.76/4.85/4.91×、Fig.4 的 1.58/1.73/1.90×，全部等价于"局部成本 ≈ 0.148·k³"。按式 (14) 分别应为 4.18×；3.78/4.18/4.52×；1.55/1.68/1.83×。<span class="src c">复算</span></li>
+    <li>附录 B 的覆盖率 1 − (1 − <span class="mv">r</span>)<sup><span class="mv">B</span></sup> = 0.89：如果 <span class="mv">r</span> 是占全部 token 的比例，每个确定 token 每层被抽中的概率应是 <span class="mv">r</span>/(1 − <span class="mv">ρ</span>) = 0.0875，覆盖率 0.94；两个稀疏步合计 0.996。<span class="src c">复算</span></li>
+    <li>Table 6 的"随机路由"= Table 8 的"20%（全随机）"= 82.78 / 83.37 / 80.45。</li>
+  </ul>
+</section>
+
+<!-- =============================== §8 =============================== -->
+<section id="s8">
+  <h2><span class="no">§8</span>存疑清单（22 条）</h2>
+  <p class="lede">分三档：<span class="sev h">高</span> 影响核心结论；<span class="sev m">中</span> 影响某个数字或可复现性；<span class="sev l">低</span> 表述或笔误。每条都写了依据，能量化的给了数字，最后附上建议补的实验。</p>
+  <div class="ctrls">
+    <div class="ctrl"><label>筛选</label>
+      <div class="seg" id="dq-f" role="group" aria-label="按严重度筛选">
+        <button type="button" data-v="all" aria-pressed="true">全部 22</button>
+        <button type="button" data-v="h" aria-pressed="false">高 4</button>
+        <button type="button" data-v="m" aria-pressed="false">中 11</button>
+        <button type="button" data-v="l" aria-pressed="false">低 7</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="doubts" id="doubts">
+    <details class="doubt h" id="d1" open>
+      <summary><span class="id">D1</span><span class="sev h">高</span><span class="t">质量增益来源混淆：稀疏版反超稠密版，但它多训了 21k 步，阶段一还改了目标</span></summary>
+      <div class="body">
+        <p>Wan2.2-5B 上，HetA 83.28 &gt; 稠密 DMD3s 82.94，语义 +1.09；90% 局部的变体 82.98，也 &gt; 82.94；全局部 82.85 ≈ 82.94。一个只做近似的稀疏模型反超被近似的稠密模型，最自然的解释是<b>后续训练本身带来了增益</b>：阶段一 15k 次，用的是改过的、逐 token 归一化的 DMD 目标（§3.3）；阶段二再 6k 次。</p>
+        <p>Fig.3 里同一 prompt 下 HetA 与 DMD3s 的内容明显不同：DMD3s 前几帧是一只花篮，HetA 从头到尾是花瓶。这说明 HetA 已经是一个不同的模型，而不是 DMD3s 的稀疏近似。不过论文没说两边是否用了同一个种子。</p>
+        <span class="fix">① 阶段一结束时的模型直接用全稠密注意力评测；② 稠密 DMD3s 用同样的数据和 21k 次迭代续训；③ 在这两个基础上再比稀疏化带来的变化。</span>
+      </div>
+    </details>
+
+    <details class="doubt h" id="d2">
+      <summary><span class="id">D2</span><span class="sev h">高</span><span class="t">"按不确定度路由"本身的价值几乎没被证明</span></summary>
+      <div class="body">
+        <p>同成本（80% 局部）下：随机 82.78，纯不确定度（0% 随机）<b>83.00</b>，固定均匀 <b>83.13</b>，不确定度 + 3% 随机 83.18，+ 7% 随机 83.27。不确定度单独使用时<b>输给了</b>均匀覆盖；要靠混入随机覆盖才反超 0.14 分。全局部 82.85 离最好的变体只差 0.43。</p>
+        <p>全部差异都在 0.5 分以内，而论文没有给种子方差、置信区间，也没有在这些变体之间做人评。论文说"uncertainty-based routing is consistently superior"，在这组数字下站不住。</p>
+        <span class="fix">多种子重复 Table 6/8；在全局部、固定均匀、纯不确定度、+7% 之间做人评；补"均匀 + 7% 随机"一格，用来隔离不确定度的贡献。</span>
+      </div>
+    </details>
+
+    <details class="doubt h" id="d3">
+      <summary><span class="id">D3</span><span class="sev h">高</span><span class="t">VBench-2.0 五大类全部低于稠密 DMD3s，Wan2.1-1.3B 上三项也全低；正文只挑有利的比较</span></summary>
+      <div class="body">
+        <p>VBench-2.0：58.9 vs 60.8，五大类全低。逐维看（从雷达图解码），掉得最多的是 Dynamic Attribute −10.2、Motion Rationality −9.2、Multi-View Consistency −7.4、Diversity −6.9。前三维都依赖跨帧长程一致，正是局部注意力最可能损失的能力。正文只写"胜过 50 步 Wan2.2 和 2 步 DMD"。</p>
+        <p>Wan2.1-1.3B：83.10 vs 83.61（−0.51），质量、语义都更低，正文写"on par"。1.3B 上没有人评，也没有 VBench-2.0。</p>
+        <span class="fix">在正文并列报告对稠密 DMD3s 的差值；针对长程一致性补专项评测（多视角一致、身份保持、长时运动）；1.3B 补人评。</span>
+      </div>
+    </details>
+
+    <details class="doubt h" id="d4">
+      <summary><span class="id">D4</span><span class="sev h">高</span><span class="t">第 1 步的掩码从哪来没写；真正算力相当的对照是 DMD 2 步，而这个比较没有被正面讨论</span></summary>
+      <div class="body">
+        <p>掩码来自"上一步"的 <span class="mv">u</span>，而第 1 步没有上一步。如果第 1 步走全稠密，5B 块级延迟加速就从 1.63× 变成整条 3 步的 <b>1.35×</b>。此时 HetA 的 3 步约等于 2.23 个稠密步，比 DMD 2 步（2.0）还慢 11%。如果 3 步都能稀疏，是 1.84 个稠密步。</p>
+        <p>无论哪种，HetA 和 DMD2s 的算力都在同一量级。好消息是 HetA 在这个对比里<b>确实更好</b>：VBench +0.80，人评 50% vs 24%。这其实是全文最有力的证据，但论文把 DMD2s 当作普通基线，没把它当成"算力对照"来讨论。</p>
+        <span class="fix">写清第 1 步的处理；报告整条管线（含文本编码与 VAE 解码）的端到端时延，并与 DMD2s 并列；试一下 2 步的 HetA。</span>
+      </div>
+    </details>
+
+    <details class="doubt m" id="d5">
+      <summary><span class="id">D5</span><span class="sev m">中</span><span class="t">注意力 FLOPs 按论文式 (14) 复现不出来：局部部分像只按 ≈15% 的 k³ 计入</span></summary>
+      <div class="body">
+        <p>5B：<span class="mv">N</span> = 31×22×40 = 27,280，<span class="mv">M</span> = 11³，<span class="mv">ρ</span> = 0.2，式 (14) 给出 4.18×，论文报告 4.85×。Table 7 的 k = 9/11/13 按式 (14) 应为 4.52/4.18/3.78×，论文是 4.91/4.85/4.76×。三点的斜率等价于 <span class="mv">M</span><sub>eff</sub> ≈ 0.148·k³。同一个折扣还能精确复现 Fig.4 的 1.58/1.73/1.90×。</p>
+        <p>块级数字由注意力数字推出来是对的，所以问题出在注意力这一层怎么数。Fig.4 的横轴，也就是帕累托论据，用的正是这个口径。</p>
+        <span class="fix">公开 FLOPs 计数脚本；说明局部窗口的单位与边界处理；按实测 ρ 报告，而不是按 0.2。</span>
+      </div>
+    </details>
+
+    <details class="doubt m" id="d6">
+      <summary><span class="id">D6</span><span class="sev m">中</span><span class="t">掩码来源训练与推理不一致；冻结的分支读的是一直在变的主干特征</span></summary>
+      <div class="body">
+        <p>阶段二训练时，<span class="mv">u</span> 来自额外一次<b>全稠密</b>、无梯度的学生前向，在"更早的时刻"上计算；推理时，<span class="mv">u</span> 来自上一步<b>异构注意力</b>的前向。分支虽然冻结，但它的输入是阶段二正在微调的主干特征（论文没给分支结构，这是我的推断）。所以推理时的 <span class="mv">u</span> 分布可能漂移。相对阈值 <span class="mv">μ</span> + <span class="mv">cσ</span> 能吸收整体缩放，这一点设计得不错，但吸收不了形状变化。</p>
+        <span class="fix">对比两种掩码来源；报告推理时 <span class="mv">u</span> 的分布与阶段一结束时的差异；说明"更早的时刻"是固定 Δ 还是模拟推理步。</span>
+      </div>
+    </details>
+
+    <details class="doubt m" id="d7">
+      <summary><span class="id">D7</span><span class="sev m">中</span><span class="t">阶段一改变了生成器的训练信号，且关键超参全缺</span></summary>
+      <div class="body">
+        <p>NLL 对 <span class="mv">x̃</span><sub>0</sub> 的梯度是 2λ<sub>rec</sub>·<span class="mv">g</span>/<span class="mv">u</span>²：难 token 的 DMD 更新被压小，易 token 的被放大；同时去掉了 DMD 的逐样本归一化。这会改变质量和多样性。VBench-2.0 的 Diversity −6.9 是一个信号，但分不清是阶段一还是稀疏化造成的。λ<sub>rec</sub>、λ<sub>log</sub>、<span class="mv">u</span> 的参数化（softplus 还是 exp）、分支结构、分支接在哪一层，全部没给。</p>
+        <span class="fix">消融"梯度 stop 在 <span class="mv">u</span> 分支、不回传到生成器"的版本；报告 λ 与分支结构。</span>
+      </div>
+    </details>
+
+    <details class="doubt m" id="d8">
+      <summary><span class="id">D8</span><span class="sev m">中</span><span class="t">"不确定度 = 去噪难度 = 需要全局注意力"这条链没被验证，附录图还与 Fig.1 的叙述相反</span></summary>
+      <div class="body">
+        <p><span class="mv">u</span> 学的是 DMD 拉力的均方根（§3.2），不是 <span class="mv">x</span><sub>0</sub> 误差，也不是"需要全局信息"的直接度量。论文没有 <span class="mv">u</span> 与"换成局部注意力后该 token 输出变化"的相关性分析，只有 5 张 σ = 0.6 的定性图。山路航拍那张里，平整路面 <span class="mv">u</span> 最高，纹理极细的密林最低，和 Fig.1"细结构要全局、平滑区域局部即可"正好相反。整体看更像显著物体掩码。</p>
+        <span class="fix">逐 token 测量 ‖Attn<sub>dense</sub> − Attn<sub>local</sub>‖，与 <span class="mv">u</span> 求秩相关；给出不同时刻的 <span class="mv">u</span> 图；与"显著性 / 光流幅度"这类廉价信号做路由对照。</span>
+      </div>
+    </details>
+
+    <details class="doubt m" id="d9">
+      <summary><span class="id">D9</span><span class="sev m">中</span><span class="t">5B 的延迟数字内部有张力；稠密基线的 kernel、硬件、batch 都没写</span></summary>
+      <div class="body">
+        <p>注意力 1.84× 要换来块级 1.63×，注意力必须占稠密块耗时的 85%。而按 FLOPs 它只占 53%，含 QKV/O 投影也只有 65%。1.3B（74%）和 14B（64%）没有这个问题。最可能的情况是稠密基线用了偏慢的注意力实现，比如不带掩码的 FlexAttention 而不是 FlashAttention-3，块级加速因此被放大。</p>
+        <span class="fix">以 FlashAttention-3 作为稠密基线重测，写明 GPU、batch、序列长度与是否 torch.compile。</span>
+      </div>
+    </details>
+
+    <details class="doubt m" id="d10">
+      <summary><span class="id">D10</span><span class="sev m">中</span><span class="t">FlexAttention 的关键实现细节缺失：query 重排与逐层 BlockMask</span></summary>
+      <div class="body">
+        <p>FlexAttention 按 128×128 的块跳过计算。20% 的稠密 query 如果散落在序列里，几乎每个 query 块都含稠密 token，稀疏就失效了。要拿到 1.84×，必须先按路由把 query 重排或 gather，再散回原位。另外随机交换是逐块进行的，所以 30 个块 × 每步都要不同的 BlockMask。这些都没写，复现者很可能拿不到论文的延迟。</p>
+        <span class="fix">公开 kernel 实现，或至少给出伪代码与各部分耗时拆分（掩码构建、gather/scatter、稠密、局部）。</span>
+      </div>
+    </details>
+
+    <details class="doubt m" id="d11">
+      <summary><span class="id">D11</span><span class="sev m">中</span><span class="t">"内容自适应"只管在哪算，不管算多少；ρ 的分布没报告</span></summary>
+      <div class="body">
+        <p>阈值 <span class="mv">μ</span> + <span class="mv">cσ</span> 是相对的，稠密比例由 <span class="mv">c</span> 与 <span class="mv">u</span> 的分布形状决定：高斯时 18.4%，右偏分布时 10–15%。一段处处都难的视频拿到的稠密比例和一段简单视频差不多。摘要说"content- and timestep-adaptive"，严格说只是<b>位置</b>自适应。ρ 在样本和时刻之间的分布、它和延迟的关系，都没报告。</p>
+        <span class="fix">报告 ρ 的分布；试一个绝对阈值或预算控制器，看"按难度增减总量"是否有额外收益。</span>
+      </div>
+    </details>
+
+    <details class="doubt m" id="d12">
+      <summary><span class="id">D12</span><span class="sev m">中</span><span class="t">基线公平性：训练预算不透明，ToCa 被限制，部分基线同组，STA 不同基座</span></summary>
+      <div class="body">
+        <p>HetA 训练 21k 次；VSA"大体遵循 FastVideo 配方"，Attention Surgery 和 ReHyAt 各三阶段，但迭代数都没列。ToCa 只允许在 3 步中的第 2 步缓存，有效 FFN 缓存率 10.3%，却让 VBench 掉了 2.4 分（80.52），dynamic degree 掉到 18.1。这个配置本身就不太像 ToCa 的正常用法。Attention Surgery、ReHyAt 与本文同组。STA 是 HunyuanVideo 基座，不该和 Wan 基座的方法并列比较。</p>
+        <span class="fix">列出每个基线的训练迭代与 GPU 时；给 ToCa 至少一个"与 HetA 同等 FLOPs 预算"的配置。</span>
+      </div>
+    </details>
+
+    <details class="doubt m" id="d13">
+      <summary><span class="id">D13</span><span class="sev m">中</span><span class="t">Fig.4 横轴口径不透明，全局部版本没有画进去</span></summary>
+      <div class="body">
+        <p>VSA 与 HetA-80% 都是 80% 稀疏，VSA 却在 1.88×，HetA 在 1.73×。按我的 FLOPs 模型，80% 稀疏的块级上限约 1.74×。ToCa 按附录配置，理论块级节省不到 15%，图上是 1.52×。而全局部版本（82.85 分，我估约 2.0–2.1×）如果画进图，会压过 VSA、ToCa、ReHyAt、Attn Surgery 全部四个基线，这会削弱"HetA 的帕累托优势来自路由"的叙述。</p>
+        <span class="fix">给出每个方法横坐标的计算方式；把全局部、固定均匀加进 Fig.4。</span>
+      </div>
+    </details>
+
+    <details class="doubt m" id="d14">
+      <summary><span class="id">D14</span><span class="sev m">中</span><span class="t">人评信息不全，也没覆盖真正该比的对照</span></summary>
+      <div class="body">
+        <p>1,248 对、19 人、667 个 prompt，但没给每组多少对、显著性检验和评估者一致性。人评用的是 GPT 扩写的长 prompt，与 VBench 自动评测的设置不同。对照组只有 DMD2s、DMD3s、Attn Surgery，没有全局部和固定均匀路由，而这两者才是检验 D2 的关键。</p>
+        <span class="fix">报告每组对数与二项检验；加入全局部与固定均匀路由的人评。</span>
+      </div>
+    </details>
+
+    <details class="doubt m" id="d15">
+      <summary><span class="id">D15</span><span class="sev m">中</span><span class="t">不可复现</span></summary>
+      <div class="body">
+        <p>没有代码和权重。缺失的信息包括：分支结构、λ<sub>rec</sub>、λ<sub>log</sub>、<span class="mv">u</span> 的参数化、第 1 步处理、训练时"更早时刻"的 Δ、随机交换的具体抽样方式、FLOPs 计数方式、FlexAttention 的排布、起点 DMD 检查点怎么训的（迭代、数据），以及 3 步推理的时间步。论文说"further training details in the supp. material"，但附录 A 只给了优化器超参。</p>
+      </div>
+    </details>
+
+    <details class="doubt l" id="d16">
+      <summary><span class="id">D16</span><span class="sev l">低</span><span class="t">"soft routing"的说法容易误读</span></summary>
+      <div class="body"><p>路由是硬阈值 0/1，不可微。论文说的"soft dense-vs-local budget"是和缓存相比：每个 token 仍会被更新，而不是被跳过。</p></div>
+    </details>
+
+    <details class="doubt l" id="d17">
+      <summary><span class="id">D17</span><span class="sev l">低</span><span class="t">表格与文字的若干笔误</span></summary>
+      <div class="body">
+        <ul class="tight">
+          <li>Table 1 表头写"Res. 480×832"，但 Wan2.2 的几行是 704×1280。</li>
+          <li>Table 1 中 Wan2.2 的"常识"64.1，按雷达图和总分应为 65.1。CogVideoX-1.5 总分 53.4 与五项均值 51.36 不符，疑为 Hum.Fid 72.1 应作 82.1。Wan2.1 1.3B 总分 56.0，五项均值 56.12。</li>
+          <li>HetA 的 VBench 总分：Table 2 写 83.28，Table 8 和 Fig.4 写 83.27；由 Q/S 算得 83.272。</li>
+          <li>Table 7 正文说 11³"maintaining the highest speedup"，实际 9³ 最快（4.91×）；又说"larger kernels improve performance"，但语义分不单调。</li>
+          <li>Table 5 的 14B 行只写 480×832，按块级 1.97× 反推应为 121 帧，而同分辨率的 1.3B 用 81 帧；14B 没有任何质量结果。</li>
+        </ul>
+      </div>
+    </details>
+
+    <details class="doubt l" id="d18">
+      <summary><span class="id">D18</span><span class="sev l">低</span><span class="t">两处"胜过或追平 50 步 Wan"都另有原因</span></summary>
+      <div class="body"><p>VBench：83.28 = 83.28，靠的是 DMD 带来的语义分（+5.24），质量分其实低 1.32。VBench-2.0：58.9 &gt; 58.1，主要靠 Wan2.2 的 Multi-View Consistency 只有 6.0；去掉这一维重算，两者约 61.1 vs 60.9。正文还说"achieving a substantial end-to-end sampling speedup"，相对 50 步 Wan 的加速几乎全部来自 DMD。</p></div>
+    </details>
+
+    <details class="doubt l" id="d19">
+      <summary><span class="id">D19</span><span class="sev l">低</span><span class="t">相关工作：对 Wan MoE 的描述不准，漏引几条最近的先例</span></summary>
+      <div class="body">
+        <p>论文说 MoE-DiT"[8, 1] 把专家放在 FFN 子层"。[8] DiT-MoE 确实如此，[1] Wan 却不是：Wan2.2-A14B 的 MoE 是按时间步（信噪比）切换两个完整的 14B 专家，不是 token 级的 FFN 路由。</p>
+        <p>漏引的先例见 §9：CoLT5（轻量局部分支 + 按 token 升级到重分支，结构同构）、Mixture-of-Depths、DyDiT、RAS、HSA（2605.06892），以及式 (10) 的出处 Kendall &amp; Gal（2017）和局部 3D 注意力的标准实现 NATTEN。另外，VSA 被引了两次（[31] 和 [49]）；arXiv HTML 版页面的 &lt;title&gt; 是"MobileWan: Closing the Quality Gap for Mobile Video Diffusion"，属于模板残留。</p>
+      </div>
+    </details>
+
+    <details class="doubt l" id="d20">
+      <summary><span class="id">D20</span><span class="sev l">低</span><span class="t">高通的论文，却没有端侧结果</span></summary>
+      <div class="body"><p>同组的 Neodragon、MobileWan 都面向手机 NPU。HetA 的掩码逐样本、逐步、逐层变化，这在静态图的 NPU 上很难高效实现。论文只有 H100 + FlexAttention 的数据，没有讨论可部署性。</p></div>
+    </details>
+
+    <details class="doubt l" id="d21">
+      <summary><span class="id">D21</span><span class="sev l">低</span><span class="t">"约 12 GPU·天，比预训练低 4–5 个数量级"无法核实</span></summary>
+      <div class="body"><p>21k 次迭代、4 张卡、约 3 天，平均每步约 12 秒，数量级说得通。但 Wan 的预训练算力没有公开，"4–5 个数量级"无从验证。这 12 GPU·天也不含得到起点 DMD 检查点的成本。</p></div>
+    </details>
+
+    <details class="doubt l" id="d22">
+      <summary><span class="id">D22</span><span class="sev l">低</span><span class="t">附录 B 的覆盖率公式有个小瑕疵</span></summary>
+      <div class="body"><p>1 − (1 − <span class="mv">r</span>)<sup><span class="mv">B</span></sup> 把 <span class="mv">r</span> 当成"每个确定 token 每层被抽中的概率"。如果 <span class="mv">r</span> 是占全部 token 的比例（从"20%（all）"看应是如此），概率应为 <span class="mv">r</span>/(1 − <span class="mv">ρ</span>)，覆盖率从 0.89 变为 0.94。不影响结论。</p></div>
+    </details>
+  </div>
+</section>
+
+<!-- =============================== §9 =============================== -->
+<section id="s9">
+  <h2><span class="no">§9</span>与前人工作的关系</h2>
+  <p class="lede">"按 token 分配计算"这个想法并不新，HetA 的新意在于三点组合：放在<b>注意力</b>层、适配<b>3 步 DMD</b>、用<b>不确定度</b>做路由信号。</p>
+  <div class="tbl">
+    <table class="t">
+      <thead><tr><th>工作</th><th>做了什么</th><th>和 HetA 的关系</th><th>论文引了吗</th></tr></thead>
+      <tbody>
+        <tr><td>CoLT5（Ainslie 等，2023）</td><td>长文本条件计算：所有 token 走轻量分支（局部注意力 + 小 FFN），路由器挑出的重要 token 再走重分支</td><td><b>结构几乎同构</b>：以局部为底，按 token 升级到全局。区别在于它的路由器是端到端学的 top-k</td><td>否</td></tr>
+        <tr><td>Mixture-of-Depths（Raposo 等，2024）</td><td>每层 top-k token 参与计算，其余走残差</td><td>token 级计算分配的通用形式</td><td>否</td></tr>
+        <tr><td>DyDiT（Zhao 等，ICLR 2025）</td><td>扩散 Transformer 的时间步动态宽度，加空间 token 动态跳过 MLP</td><td>同在扩散模型里做"按 token 省"，但省在 MLP</td><td>否</td></tr>
+        <tr><td>RAS（Liu 等，2025）</td><td>按模型自身输出挑"关注区域"，每步只更新这些 token</td><td>用模型自己的信号决定哪里多算，多步设定</td><td>否</td></tr>
+        <tr><td>HSA（Chu &amp; Patel，2605.06892，2026-05）</td><td>免训练，按速度变化给 token 分配不同步数；活跃 token 仍做全局注意力</td><td>异构发生在<b>步数</b>维度，HetA 在<b>注意力范围</b>维度，可以叠加</td><td>否</td></tr>
+        <tr><td>Adaptor / Astraea / SpargeAttn [9–11]</td><td>免训练的自适应 token 精简或稀疏注意力</td><td>论文用它们说明"免训练会掉质量"</td><td>是</td></tr>
+        <tr><td>ToCa / LiteAttention [6,7]</td><td>token 级特征缓存</td><td>论文的主要反例：3 步下冗余不够</td><td>是</td></tr>
+        <tr><td>Kendall &amp; Gal（2017）</td><td>异方差回归：预测方差并用它衰减损失</td><td>式 (10) 就是这个损失，§3.3 的"难 token 被压权"即来自它</td><td>否</td></tr>
+        <tr><td>NATTEN / Neighborhood Attention（Hassani 等）</td><td>局部邻域注意力的标准实现，包括边界平移窗口</td><td>决定 <span class="mv">M</span> 在边界处是否等于 k³（D5）</td><td>否</td></tr>
+        <tr class="ref"><td>Uncertainty-DMD（2609.11265，本项目已读）</td><td>DMD 的多样性塌缩及修补</td><td>名字相近但说的是另一件事。HetA 在 VBench-2.0 上 Diversity −6.9，正好可以放进那篇的框架里看</td><td>—</td></tr>
+        <tr class="ref"><td>TRACK（2609.30096，本项目已读）</td><td>哪些去噪步交给小模型</td><td>"步"维度的异构；和 HetA 的"token"维度互补</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- =============================== §10 =============================== -->
+<section id="s10">
+  <h2><span class="no">§10</span>收尾：公道话、对世界模型的启示、最值钱的后续实验</h2>
+  <div class="grid3">
+    <div class="card cool">
+      <h4>做对的地方</h4>
+      <ul class="tight">
+        <li>把问题放在 3 步蒸馏这个真实部署点上。缓存方法在这里确实失效，HetA 不依赖多步冗余。</li>
+        <li>推理零额外前向：用上一步的 <span class="mv">u</span> 做下一步的掩码。</li>
+        <li>用 NLL 改写 DMD 的伪目标，让"不确定度"在只有 prompt、没有真实视频的条件下也能训练。这一步很漂亮。</li>
+        <li>相对阈值让延迟基本可预测，也能吸收冻结分支的尺度漂移。</li>
+        <li>块级 FLOPs、VBench 汇总、雷达图与表格彼此一致，数字不是随手写的。</li>
+      </ul>
+    </div>
+    <div class="card hot">
+      <h4>对交互式视频世界模型的启示</h4>
+      <ul class="tight">
+        <li>世界模型每一步真正在变的，往往只是动作影响的区域和运动物体，大片背景是静止的。这正是 token 级异构计算的甜区，而且那里同样是少步蒸馏加流式生成。</li>
+        <li>"上一步的 <span class="mv">u</span> 决定下一步谁看全局"，可以自然推广成<b>"上一个 chunk 的 <span class="mv">u</span> 决定下一个 chunk 谁读长程 KV 记忆"</b>：稠密 query 读全部缓存，局部 query 只读近邻帧。这既省算力，也是一种记忆检索门控。</li>
+        <li>先跑"全局部 + 同样训练"的基线。这篇论文显示它已经很强；在世界模型里加路由之前，先确认局部注意力加足够的深度是否就已经够用。</li>
+        <li>不确定度头还可以当"模型哪里没把握"的信号，用于触发记忆检索、局部重生成或多次采样。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>最值钱的后续实验</h4>
+      <ol class="tight">
+        <li>拆开 D1：阶段一模型直接用稠密注意力评测，加上同迭代数的稠密 DMD 续训。</li>
+        <li>同成本、同训练的路由对照（均匀、全局部、纯不确定度、+7%），多种子，并做人评。</li>
+        <li>写明第 1 步怎么处理；报告含 VAE 的端到端时延，与 DMD2s 并列。</li>
+        <li><span class="mv">u</span> 与"局部化带来的误差"做逐 token 相关，并给出不同时刻的 <span class="mv">u</span> 图。</li>
+        <li>公开 FLOPs 计数与 FlexAttention 的排布方式。</li>
+        <li>1.3B 补人评，并解释为什么那里全面低于稠密版。</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<footer>
+  本页基于 arXiv 2609.31050v1 的正文与附录 A–D。Fig.4 与 Fig.5/6 的数值来自 arXiv HTML 版随附 SVG 的坐标解码；附录不确定度图（Fig.12–16）和 Fig.1–3 是我逐张看图后的文字描述，没有转载图片。标 <span class="src c">复算</span> <span class="src e">估算</span> 的数字是我的计算，前提写在旁边。本页是读者笔记，不代表作者观点；与论文不一致的地方以论文为准。
+</footer>
+</div>
+
+<script>
+(function(){
+"use strict";
+/* ---------------- helpers ---------------- */
+var $ = function(s){ return document.querySelector(s); };
+var $$ = function(s){ return Array.prototype.slice.call(document.querySelectorAll(s)); };
+var NS = "http://www.w3.org/2000/svg";
+function S(tag, attrs, parent, text){
+  var e = document.createElementNS(NS, tag);
+  if (attrs) for (var k in attrs) if (attrs[k] != null) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function clear(el){ while (el.firstChild) el.removeChild(el.firstChild); }
+function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+function f(x, d){ return (x == null || isNaN(x)) ? "—" : Number(x).toFixed(d); }
+function pct(x, d){ return f(100 * x, d == null ? 1 : d) + "%"; }
+function segBind(id, cb){
+  var el = document.getElementById(id); if (!el) return;
+  el.addEventListener("click", function(e){
+    var b = e.target.closest("button"); if (!b || b.disabled || !el.contains(b)) return;
+    el.querySelectorAll("button").forEach(function(x){ x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+    cb(b.getAttribute("data-v"));
+  });
+}
+function segVal(id){ var b = document.querySelector("#" + id + ' button[aria-pressed="true"]'); return b ? b.getAttribute("data-v") : null; }
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+var rerenders = [];
+
+/* ---------------- theme ---------------- */
+(function(){
+  var root = document.documentElement, btn = $("#themebtn"), modes = ["auto", "light", "dark"], mode = "auto";
+  try { mode = localStorage.getItem("heta-theme") || "auto"; } catch (e) {}
+  if (modes.indexOf(mode) < 0) mode = "auto";
+  function apply(){
+    if (mode === "auto") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", mode);
+    btn.textContent = "◐ 主题：" + ({auto:"自动", light:"浅色", dark:"深色"})[mode];
+    rerenders.forEach(function(fn){ try { fn(); } catch (e) {} });
+  }
+  btn.addEventListener("click", function(){ mode = modes[(modes.indexOf(mode) + 1) % 3]; try { localStorage.setItem("heta-theme", mode); } catch (e) {} apply(); });
+  try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function(){ if (mode === "auto") apply(); }); } catch (e) {}
+  window.__applyTheme = apply;
+  if (mode !== "auto") root.setAttribute("data-theme", mode);
+  btn.textContent = "◐ 主题：" + ({auto:"自动", light:"浅色", dark:"深色"})[mode];
+})();
+
+/* ---------------- model configs & FLOPs ---------------- */
+var TXT = 512;
+var MODELS = {
+  "13":  {name:"Wan2.1-1.3B · 480×832 · 81 帧",  d:1536, ff:8960,  grid:[21,30,52], rep:{attn:4.87, block:2.25, lat:1.52, blat:1.34}},
+  "5":   {name:"Wan2.2-5B · 704×1280 · 121 帧",  d:3072, ff:14336, grid:[31,22,40], rep:{attn:4.85, block:1.73, lat:1.84, blat:1.63}},
+  "14a": {name:"Wan2.2-14B · 480×832 · 81 帧",   d:5120, ff:13824, grid:[21,30,52], rep:{attn:4.91, block:1.97, lat:1.57, blat:1.30}},
+  "14b": {name:"Wan2.2-14B · 480×832 · 121 帧",  d:5120, ff:13824, grid:[31,30,52], rep:{attn:4.91, block:1.97, lat:1.57, blat:1.30}},
+  "14c": {name:"Wan2.2-14B · 720×1280 · 81 帧",  d:5120, ff:13824, grid:[21,45,80], rep:null}
+};
+function flops(m){
+  var g = m.grid, N = g[0]*g[1]*g[2], d = m.d;
+  var proj = 8*d*d, core = 4*N*d, cross = 4*d*d + 4*TXT*d + 4*TXT*d*d/N, ffn = 4*d*m.ff;
+  return {N:N, proj:proj, core:core, cross:cross, ffn:ffn, tot:proj+core+cross+ffn};
+}
+function avgClip(L, k){ var r = (k-1)/2, s = 0; for (var i = 0; i < L; i++) s += Math.min(i+r, L-1) - Math.max(i-r, 0) + 1; return s / L; }
+
+/* ---------------- §2 FLOP bar ---------------- */
+(function(){
+  var bar = $("#flop-bar"), rd = $("#flop-read"); if (!bar) return;
+  function draw(key){
+    var m = MODELS[key], F = flops(m);
+    var parts = [["core","var(--dense)","注意力核心"],["proj","var(--unc)","投影"],["cross","var(--dmd)","交叉"],["ffn","var(--oth)","FFN"]];
+    bar.innerHTML = '<div class="stack" role="img" aria-label="FLOPs 构成">' + parts.map(function(p){
+      var s = F[p[0]]/F.tot; return '<span style="width:' + (100*s).toFixed(2) + '%;background:' + p[1] + '" title="' + p[2] + " " + pct(s) + '">' + (s > 0.07 ? pct(s,0) : "") + "</span>";
+    }).join("") + "</div>";
+    var a = F.core/F.tot;
+    rd.innerHTML =
+      '<div><b>' + F.N.toLocaleString() + '</b><span>token 数 N（' + m.grid.join("×") + '）</span></div>' +
+      '<div class="hot"><b>' + pct(a) + '</b><span>注意力核心占整块 FLOPs</span></div>' +
+      '<div><b>' + pct((F.core+F.proj)/F.tot) + '</b><span>自注意力（核心 + 投影）</span></div>' +
+      '<div class="bad"><b>' + f(1/(1-a),2) + '×</b><span>块级上限：注意力核心完全免费时</span></div>' +
+      '<div><b>' + f(4*F.N*m.d/1e6,0) + ' M</b><span>每 token 每块的注意力核心 FLOPs</span></div>';
+  }
+  segBind("flop-seg", draw); draw("5");
+})();
+
+/* ---------------- §3.3 NLL toy ---------------- */
+(function(){
+  var svg = $("#nll-svg"); if (!svg) return;
+  var eI = $("#nll-e"), kI = $("#nll-k");
+  function draw(){
+    var e = +eI.value, k = +kI.value, lr = 0.5, ll = 0.5*k;
+    $("#nll-ev").textContent = f(e,2); $("#nll-kv").textContent = f(k,1);
+    var ustar = e*Math.sqrt(2*lr/ll);
+    function L(u){ return lr*e*e/(u*u) + ll*Math.log(u); }
+    clear(svg);
+    var W = 640, H = 230, ml = 48, mr = 16, mt = 14, mb = 36, pw = W-ml-mr, ph = H-mt-mb;
+    var umin = 0.05, umax = 4.2, lmin = L(ustar), ylo = lmin - 0.4, yhi = lmin + 3.2;
+    var X = function(u){ return ml + (u-umin)/(umax-umin)*pw; }, Y = function(v){ return mt + ph - (Math.min(Math.max(v,ylo),yhi)-ylo)/(yhi-ylo)*ph; };
+    for (var t = 0.5; t <= 4; t += 0.5){ S("line",{x1:X(t),x2:X(t),y1:mt,y2:mt+ph,"class":"grid"},svg); S("text",{x:X(t),y:H-16,"text-anchor":"middle","class":"ax"},svg,f(t,1)); }
+    S("line",{x1:ml,x2:W-mr,y1:mt+ph,y2:mt+ph,stroke:"var(--axis)"},svg);
+    S("text",{x:ml+pw/2,y:H-2,"text-anchor":"middle","class":"ax"},svg,"预测的不确定度 u");
+    S("text",{x:ml-8,y:mt+8,"text-anchor":"end","class":"ax"},svg,"ℓ(u)");
+    var pts = []; for (var i = 0; i <= 240; i++){ var u = umin + (umax-umin)*i/240; pts.push(X(u).toFixed(1)+","+Y(L(u)).toFixed(1)); }
+    S("polyline",{points:pts.join(" "),fill:"none",stroke:"var(--unc)","stroke-width":2.4},svg);
+    // e reference
+    if (e <= umax){ S("line",{x1:X(e),x2:X(e),y1:mt,y2:mt+ph,stroke:"var(--dmd)","stroke-dasharray":"4 4"},svg); S("text",{x:X(e)+4,y:mt+12,"class":"ax",style:"fill:var(--dmd-ink)"},svg,"u = e"); }
+    S("line",{x1:X(ustar),x2:X(ustar),y1:Y(lmin),y2:mt+ph,stroke:"var(--unc)","stroke-dasharray":"2 3"},svg);
+    S("circle",{cx:X(ustar),cy:Y(lmin),r:6,fill:"var(--unc)",stroke:"var(--surf)","stroke-width":2},svg);
+    S("text",{x:X(ustar)+(ustar > 3 ? -10 : 10),y:Y(lmin)-10,"text-anchor":ustar > 3 ? "end" : "start","class":"labb"},svg,"u* = e·√(2/κ) = " + f(ustar,2));
+    $("#nll-read").innerHTML =
+      '<div><b>' + f(ustar,3) + '</b><span>最优 u*</span></div>' +
+      '<div><b>' + f(1/(ustar*ustar),3) + '</b><span>生成器梯度权重 2λ_rec/u*²（MSE 时为 1）</span></div>' +
+      '<div class="hot"><b>' + f(e/(ustar*ustar),3) + '</b><span>该 token 的实际更新力度 = e·权重 = κ/(2e)</span></div>';
+    var toks = [["易 token", 0.3], ["中等 token", 1.0], ["难 token", 2.5]];
+    var html = "";
+    toks.forEach(function(t){
+      var mse = t[1]/1.0, nll = 1.0/t[1];
+      html += '<div class="nm">' + t[0] + '<small>e = ' + f(t[1],1) + '</small></div><div style="display:grid;gap:3px">' +
+        '<div class="tr"><span class="bar" style="width:' + Math.min(100, mse/3.4*100).toFixed(1) + '%;background:var(--dmd)"></span></div>' +
+        '<div class="tr"><span class="bar" style="width:' + Math.min(100, nll/3.4*100).toFixed(1) + '%;background:var(--unc)"></span></div></div>' +
+        '<div class="v">' + f(mse,2) + '<br>' + f(nll,2) + '</div>';
+    });
+    $("#nll-bars").innerHTML = html;
+  }
+  eI.addEventListener("input", draw); kI.addEventListener("input", draw); draw();
+})();
+
+/* ---------------- §3.4 SNR ---------------- */
+(function(){
+  var svg = $("#snr-svg"); if (!svg) return;
+  var tI = $("#snr-t"), uI = $("#snr-u");
+  function draw(){
+    var t = +tI.value, u = +uI.value, a = 1-t, s = t;
+    $("#snr-tv").textContent = f(t,2); $("#snr-uv").textContent = f(u,2);
+    var snr = a*a/(s*s), se = a*a/(s*s + a*a*u*u), tp = 1/(1+Math.sqrt(se));
+    clear(svg);
+    var W = 640, ml = 20, mr = 20, pw = W-ml-mr, y = 52, X = function(v){ return ml + v*pw; };
+    S("line",{x1:X(0),x2:X(1),y1:y,y2:y,stroke:"var(--axis)","stroke-width":2},svg);
+    for (var i = 0; i <= 10; i++){ S("line",{x1:X(i/10),x2:X(i/10),y1:y-4,y2:y+4,stroke:"var(--axis)"},svg); S("text",{x:X(i/10),y:y+20,"text-anchor":"middle","class":"ax"},svg,f(i/10,1)); }
+    S("text",{x:X(0),y:y+36,"class":"ax"},svg,"t = 0 干净");
+    S("text",{x:X(1),y:y+36,"text-anchor":"end","class":"ax"},svg,"t = 1 纯噪声");
+    S("rect",{x:X(t),y:y-7,width:Math.max(0,X(tp)-X(t)),height:14,fill:"var(--unc-soft)"},svg);
+    S("circle",{cx:X(t),cy:y,r:7,fill:"var(--dmd)",stroke:"var(--surf)","stroke-width":2},svg);
+    S("circle",{cx:X(tp),cy:y,r:7,fill:"var(--unc)",stroke:"var(--surf)","stroke-width":2},svg);
+    var near = Math.abs(X(tp)-X(t)) < 70;
+    S("text",{x:X(t),y:y-14,"text-anchor":near ? "end" : "middle","class":"labb"},svg,"实际 t=" + f(t,2));
+    S("text",{x:X(tp),y:y-14,"text-anchor":near ? "start" : "middle","class":"labb",style:"fill:var(--unc-ink)"},svg,(near ? "  " : "") + "等效 t′=" + f(tp,3));
+    $("#snr-read").innerHTML =
+      '<div><b>' + f(snr,3) + '</b><span>该时刻的 SNR = α²/σ²</span></div>' +
+      '<div><b>' + f(se,3) + '</b><span>考虑 u 后的 SNR_eff</span></div>' +
+      '<div class="hot"><b>+' + f(tp-t,3) + '</b><span>等效时刻后退 Δt = t′ − t</span></div>';
+  }
+  tI.addEventListener("input", draw); uI.addEventListener("input", draw); draw();
+})();
+
+/* ---------------- §4 SA token strip (decorative) ---------------- */
+(function(){
+  var g = document.getElementById("sa-tokens"); if (!g) return;
+  var pat = [0,0,1,0,0,0,1,1,0,0,0,1,0,0,0,0,1,0,0,0];
+  pat.forEach(function(p, i){ S("rect",{x:590+i*14,y:54,width:11,height:11,rx:2,fill:p ? "var(--dense)" : "var(--local)","fill-opacity":p ? 1 : .55},g); });
+  S("text",{x:590,y:92,"class":"ax"},g,"橙 = 稠密 query（约 20%），青 = 局部 query");
+})();
+
+/* ---------------- §4.1 Router playground ---------------- */
+(function(){
+  var cv = document.getElementById("rt-cv"); if (!cv) return;
+  var T = 31, H = 22, W = 40, FR = H*W, N = T*FR;
+  function hash(i){ i = (i ^ 61) ^ (i >>> 16); i = (i + (i << 3)) | 0; i = i ^ (i >>> 4); i = Math.imul(i, 0x27d4eb2d); i = i ^ (i >>> 15); return (i >>> 0) / 4294967296; }
+  function mulberry(a){ return function(){ a |= 0; a = (a + 0x6D2B79F5) | 0; var t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  function smooth(x, y, t, s){ return 0.5*Math.sin(0.41*x + 0.9*s + 0.07*t) * Math.cos(0.53*y + 1.7*s) + 0.3*Math.sin(0.23*x - 0.31*y + 2.3*s + 0.05*t) + 0.2*Math.cos(0.77*x + 0.61*y + 4.1*s); }
+  function gauss(d, w){ return Math.exp(-(d*d)/(w*w)); }
+  var SCENES = {
+    road: function(x, y, t, i){
+      var xc = 20 + 7*Math.sin(0.2*y + 0.5 + 0.02*t) + 3*Math.sin(0.47*y + 1.3) - 0.08*t;
+      var d = x - xc, road = gauss(d, 1.35);
+      var base = d < 0 ? 0.10 : 0.22;
+      var stream = 0.30*gauss(x - (33 + 2*Math.sin(0.3*y + 0.04*t)), 0.7);
+      return base + 0.85*road + stream + 0.05*smooth(x, y, t, 1) + 0.03*hash(i + 11);
+    },
+    car: function(x, y, t, i){
+      var cx = 12 + 0.55*t, cy = 10 + 0.22*t, sx = 2.2 + 0.22*t, sy = 1.5 + 0.13*t;
+      var car = Math.exp(-(Math.pow((x-cx)/sx, 2) + Math.pow((y-cy)/sy, 2)));
+      var road = gauss(y - (8 + 0.35*x), 2.4) * (y > 6 ? 1 : 0.3);
+      var base = y < 5 ? 0.07 : 0.13;
+      return base + 0.25*road + 0.95*car + 0.04*smooth(x, y, t, 2) + 0.03*hash(i + 29);
+    },
+    tomato: function(x, y, t, i){
+      var tom = 0, cs = [[12,15],[18,16],[24,14.5]];
+      cs.forEach(function(c){ tom = Math.max(tom, gauss(Math.hypot(x-c[0], y-c[1]), 2.3)); });
+      var ky = 5 + 0.12*t, knife = gauss((y - (ky + 0.18*(x-10))), 1.0) * (x > 9 && x < 33 ? 1 : 0);
+      var hand = gauss(Math.hypot(x - 33, y - (6 + 0.1*t)), 3.0);
+      var base = y > 12 ? 0.18 : 0.10;
+      return base + 0.85*tom + 0.5*knife + 0.42*hand + 0.04*smooth(x, y, t, 3) + 0.03*hash(i + 47);
+    },
+    hard: function(x, y, t, i){
+      return 0.55 + 0.16*smooth(x, y, t, 4) + 0.08*smooth(y, x, t, 5) + 0.06*hash(i + 83);
+    }
+  };
+  var U = new Float32Array(N), stats = {}, scene = "road", view = "route", sel = null;
+  function build(){
+    var fn = SCENES[scene], mn = 1e9, mx = -1e9, s = 0, s2 = 0;
+    for (var t = 0; t < T; t++) for (var y = 0; y < H; y++) for (var x = 0; x < W; x++){
+      var i = t*FR + y*W + x, v = Math.max(0.005, fn(x, y, t, i)); U[i] = v; s += v; s2 += v*v; if (v < mn) mn = v; if (v > mx) mx = v;
+    }
+    var mu = s/N; stats = {mu:mu, sd:Math.sqrt(Math.max(0, s2/N - mu*mu)), mn:mn, mx:mx};
+  }
+  var cI = $("#rt-c"), bI = $("#rt-b"), tI = $("#rt-t");
+  var ROUTE = null;
+  function route(){
+    var c = +cI.value, b = +bI.value, r = segVal("rt-r");
+    var thr = stats.mu + c*stats.sd;
+    var base = new Uint8Array(N), D = [], L = [];
+    for (var i = 0; i < N; i++){ if (U[i] >= thr){ base[i] = 1; D.push(i); } else L.push(i); }
+    var dense = new Uint8Array(base), promo = new Uint8Array(N), demo = new Uint8Array(N);
+    var rng = mulberry(9973*b + ({road:1,car:2,tomato:3,hard:4})[scene]);
+    function pick(arr, n){ var a = arr.slice(), out = []; n = Math.min(n, a.length); for (var k = 0; k < n; k++){ var j = k + Math.floor(rng()*(a.length-k)); var tmp = a[k]; a[k] = a[j]; a[j] = tmp; out.push(a[k]); } return out; }
+    var nSwap = 0;
+    if (r === "all"){
+      var all = []; for (var q = 0; q < N; q++) all.push(q);
+      dense = new Uint8Array(N);
+      pick(all, D.length).forEach(function(i){ dense[i] = 1; if (!base[i]) promo[i] = 1; });
+      for (var z = 0; z < N; z++) if (base[z] && !dense[z]) demo[z] = 1;
+      nSwap = D.length;
+    } else {
+      var rr = +r; nSwap = Math.min(Math.round(rr*N), D.length, L.length);
+      pick(D, nSwap).forEach(function(i){ dense[i] = 0; demo[i] = 1; });
+      pick(L, nSwap).forEach(function(i){ dense[i] = 1; promo[i] = 1; });
+    }
+    ROUTE = {thr:thr, base:base, dense:dense, promo:promo, demo:demo, nD:D.length, nL:L.length, nSwap:nSwap, r:r};
+  }
+  var STOPS = [[0,[0,0,4]],[.13,[27,12,65]],[.25,[74,12,107]],[.38,[120,28,109]],[.5,[165,44,96]],[.63,[207,68,70]],[.75,[237,105,37]],[.88,[251,155,6]],[1,[252,255,164]]];
+  function cmap(v){
+    v = Math.max(0, Math.min(1, v));
+    for (var k = 1; k < STOPS.length; k++) if (v <= STOPS[k][0]){
+      var a = STOPS[k-1], b = STOPS[k], w = (v - a[0])/(b[0] - a[0]);
+      return "rgb(" + [0,1,2].map(function(j){ return Math.round(a[1][j] + (b[1][j]-a[1][j])*w); }).join(",") + ")";
+    }
+    return "rgb(252,255,164)";
+  }
+  var cs = 20;
+  function draw(){
+    var box = cv.parentNode, wpx = Math.max(240, box.clientWidth), dpr = window.devicePixelRatio || 1;
+    cs = Math.max(5, Math.floor(wpx / W));
+    var cw = cs*W, ch = cs*H;
+    cv.style.width = cw + "px"; cv.style.height = ch + "px";
+    cv.width = Math.round(cw*dpr); cv.height = Math.round(ch*dpr);
+    var ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var cSurf = css("--surf2"), cDense = css("--dense"), cLocal = css("--local"), cInk = css("--ink"), cBg = css("--surf");
+    ctx.fillStyle = cSurf; ctx.fillRect(0, 0, cw, ch);
+    var t = +tI.value, R = ROUTE, gap = cs >= 10 ? 1 : 0.5;
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++){
+      var i = t*FR + y*W + x, px = x*cs, py = y*cs;
+      if (view === "heat"){
+        ctx.fillStyle = cmap((U[i] - stats.mn)/(stats.mx - stats.mn)); ctx.fillRect(px, py, cs, cs);
+      } else {
+        if (R.dense[i]){ ctx.fillStyle = cDense; ctx.globalAlpha = 1; }
+        else { ctx.fillStyle = cLocal; ctx.globalAlpha = R.demo[i] ? 0.22 : 0.26; }
+        ctx.fillRect(px + gap, py + gap, cs - 2*gap, cs - 2*gap); ctx.globalAlpha = 1;
+        if (R.promo[i] && R.dense[i]){ ctx.strokeStyle = cInk; ctx.lineWidth = Math.max(1, cs/10); ctx.setLineDash([Math.max(2, cs/5), Math.max(2, cs/6)]); ctx.strokeRect(px + cs*0.22, py + cs*0.22, cs*0.56, cs*0.56); ctx.setLineDash([]); }
+        if (R.demo[i]){ ctx.strokeStyle = cDense; ctx.lineWidth = Math.max(1.2, cs/9); ctx.strokeRect(px + gap + 1, py + gap + 1, cs - 2*gap - 2, cs - 2*gap - 2); }
+      }
+    }
+    if (view === "heat"){
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(1, cs/12);
+      for (var y2 = 0; y2 < H; y2++) for (var x2 = 0; x2 < W; x2++){
+        var j = t*FR + y2*W + x2; if (!R.base[j]) continue;
+        var px2 = x2*cs, py2 = y2*cs; ctx.beginPath();
+        if (y2 === 0 || !R.base[j - W]) { ctx.moveTo(px2, py2); ctx.lineTo(px2 + cs, py2); }
+        if (y2 === H-1 || !R.base[j + W]) { ctx.moveTo(px2, py2 + cs); ctx.lineTo(px2 + cs, py2 + cs); }
+        if (x2 === 0 || !R.base[j - 1]) { ctx.moveTo(px2, py2); ctx.lineTo(px2, py2 + cs); }
+        if (x2 === W-1 || !R.base[j + 1]) { ctx.moveTo(px2 + cs, py2); ctx.lineTo(px2 + cs, py2 + cs); }
+        ctx.stroke();
+      }
+    }
+    var cap = $("#rt-cap");
+    if (sel){
+      var si = t*FR + sel[1]*W + sel[0], isD = R.dense[si];
+      ctx.lineWidth = 3; ctx.strokeStyle = cInk;
+      if (isD){
+        ctx.setLineDash([8, 5]); ctx.strokeRect(1.5, 1.5, cw - 3, ch - 3); ctx.setLineDash([]);
+        cap.innerHTML = "token (" + sel[0] + "," + sel[1] + ") 在块 " + bI.value + " 里是<b class='c-dense'>稠密</b>：query 看全部 27,280 个 key（虚线框只画了当前帧）";
+      } else {
+        var x0 = Math.max(0, sel[0]-5), x1 = Math.min(W-1, sel[0]+5), y0 = Math.max(0, sel[1]-5), y1 = Math.min(H-1, sel[1]+5), t0 = Math.max(0, t-5), t1 = Math.min(T-1, t+5);
+        ctx.strokeRect(x0*cs + 1.5, y0*cs + 1.5, (x1-x0+1)*cs - 3, (y1-y0+1)*cs - 3);
+        var nk = (x1-x0+1)*(y1-y0+1)*(t1-t0+1);
+        cap.innerHTML = "token (" + sel[0] + "," + sel[1] + ") 在块 " + bI.value + " 里是<b class='c-local'>局部</b>：本帧 " + (x1-x0+1)*(y1-y0+1) + " 个 × " + (t1-t0+1) + " 帧 = " + nk.toLocaleString() + " 个 key（边界截断后；满窗 1,331）";
+      }
+      ctx.strokeStyle = cInk; ctx.lineWidth = 2; ctx.strokeRect(sel[0]*cs + 1, sel[1]*cs + 1, cs - 2, cs - 2);
+    } else cap.textContent = "点击任一 token 查看它的注意力范围";
+  }
+  function hist(){
+    var svg = $("#rt-hist"); clear(svg);
+    var Wd = 300, Hd = 150, ml = 8, mr = 8, mt = 18, mb = 26, pw = Wd-ml-mr, ph = Hd-mt-mb, nb = 36;
+    var lo = stats.mn, hi = stats.mx, bins = new Array(nb).fill(0);
+    for (var i = 0; i < N; i++){ var k = Math.min(nb-1, Math.floor((U[i]-lo)/(hi-lo)*nb)); bins[k]++; }
+    var mxc = Math.max.apply(null, bins), bw = pw/nb, X = function(v){ return ml + (v-lo)/(hi-lo)*pw; };
+    bins.forEach(function(c, k){
+      var v0 = lo + (hi-lo)*k/nb, h = c/mxc*ph;
+      S("rect",{x:ml + k*bw + 0.5, y:mt + ph - h, width:bw - 1, height:h, fill:(v0 + (hi-lo)/nb/2) >= ROUTE.thr ? "var(--dense)" : "var(--local)", "fill-opacity":(v0 >= ROUTE.thr) ? 1 : 0.6}, svg);
+    });
+    S("line",{x1:ml,x2:Wd-mr,y1:mt+ph,y2:mt+ph,stroke:"var(--axis)"},svg);
+    var xm = X(stats.mu), xt = X(Math.min(hi, ROUTE.thr));
+    S("line",{x1:xm,x2:xm,y1:mt-2,y2:mt+ph,stroke:"var(--ink3)","stroke-dasharray":"3 3"},svg);
+    S("text",{x:xm,y:Hd-8,"text-anchor":"middle","class":"ax"},svg,"μ");
+    S("line",{x1:xt,x2:xt,y1:mt-6,y2:mt+ph,stroke:"var(--ink)","stroke-width":2},svg);
+    S("text",{x:Math.min(xt, Wd-40),y:12,"text-anchor":"middle","class":"labb"},svg,"μ+cσ");
+    S("text",{x:Wd-mr,y:Hd-8,"text-anchor":"end","class":"ax"},svg,"u →");
+    S("text",{x:ml,y:Hd-8,"class":"ax"},svg,"全片 27,280 个 token");
+  }
+  function readout(){
+    var R = ROUTE, t = +tI.value, nd = 0, nf = 0;
+    for (var i = 0; i < N; i++) if (R.dense[i]) nd++;
+    for (var j = t*FR; j < (t+1)*FR; j++) if (R.dense[j]) nf++;
+    var keep = R.r === "all" ? null : (R.nD ? 1 - R.nSwap/R.nD : 0);
+    var pIn = R.r === "all" ? null : (R.nL ? 1 - Math.pow(1 - R.nSwap/R.nL, 30) : 0);
+    $("#rt-read").innerHTML =
+      '<div class="hot"><b>' + pct(R.nD/N) + '</b><span>按阈值选出的稠密比例 ρ（全片）</span></div>' +
+      '<div><b>' + pct(nf/FR) + '</b><span>当前帧实际稠密（含随机交换）</span></div>' +
+      '<div><b>' + f(stats.mu,3) + ' / ' + f(stats.sd,3) + '</b><span>μ / σ</span></div>' +
+      '<div><b>' + (R.r === "all" ? "全随机" : R.nSwap.toLocaleString()) + '</b><span>本块换入 = 换出的 token 数</span></div>' +
+      '<div><b>' + (keep == null ? "≈" + pct(R.nD/N,0) : pct(keep,0)) + '</b><span>高 u token 在某一块里保持稠密的概率</span></div>' +
+      '<div class="cool"><b>' + (pIn == null ? "—" : pct(pIn,0)) + '</b><span>低 u token 在 30 块里至少被换入一次</span></div>';
+    var notes = {
+      road: "路面这条细长带是 u 最高的区域。这个场景的 u 分布强烈右偏（大片低值加一条高值带），所以 c = 0.9 只选出 " + pct(R.nD/N,1) + "，明显少于论文说的约 20%。可见 ρ 取决于分布形状；论文的 u 要达到约 20%，分布应更接近高斯。",
+      car: "来车随帧变大，稠密区域跟着车移动。拖动 latent 帧可以看到路由随内容变化，这正是论文说的\"内容自适应\"。",
+      tomato: "番茄、刀和手分成三个层级。c 调大时，最先掉出稠密集合的是刀和手。",
+      hard: "这里 u 没有明显的\"难区\"，但相对阈值 μ+cσ 仍然只选出约 " + pct(R.nD/N,0) + " 的 token，而且选中的位置基本由噪声决定。总量不会因为视频更难而增加。"
+    };
+    $("#rt-note").textContent = notes[scene];
+  }
+  function all(){ route(); draw(); hist(); readout(); }
+  segBind("rt-scene", function(v){ scene = v; build(); all(); });
+  segBind("rt-view", function(v){ view = v; draw(); });
+  segBind("rt-r", function(){ all(); });
+  cI.addEventListener("input", function(){ $("#rt-cval").textContent = f(+cI.value, 2); all(); });
+  bI.addEventListener("input", function(){ $("#rt-bv").textContent = bI.value; all(); });
+  tI.addEventListener("input", function(){ $("#rt-tv").textContent = tI.value; draw(); readout(); });
+  cv.addEventListener("click", function(e){
+    var r = cv.getBoundingClientRect(), x = Math.floor((e.clientX - r.left)/cs), y = Math.floor((e.clientY - r.top)/cs);
+    if (x < 0 || y < 0 || x >= W || y >= H) return;
+    sel = (sel && sel[0] === x && sel[1] === y) ? null : [x, y]; draw();
+  });
+  var rt; window.addEventListener("resize", function(){ clearTimeout(rt); rt = setTimeout(draw, 120); });
+  rerenders.push(function(){ draw(); });
+  build(); all();
+})();
+
+/* ---------------- §6 calculator ---------------- */
+(function(){
+  var rd = $("#calc-read"); if (!rd) return;
+  var rhoI = $("#calc-rho");
+  function draw(){
+    var key = segVal("calc-m"), k = +segVal("calc-k"), acc = segVal("calc-acc"), first = segVal("calc-first"), rho = +rhoI.value;
+    $("#calc-rhov").textContent = f(rho, 3);
+    var m = MODELS[key], F = flops(m), N = F.N, g = m.grid;
+    var M = acc === "k3" ? k*k*k : acc === "clip" ? avgClip(g[0],k)*avgClip(g[1],k)*avgClip(g[2],k) : 0.148*k*k*k;
+    var r = rho + (1-rho)*M/N, a = F.core/F.tot, attn = 1/r, block = 1/(1-a+a*r);
+    var rep = m.rep, rhoImp = (1/rep.attn - M/N)/(1 - M/N);
+    var dA = Math.abs(attn/rep.attn - 1) > 0.03, dB = Math.abs(block/rep.block - 1) > 0.03;
+    rd.innerHTML =
+      '<div><b>' + N.toLocaleString() + '</b><span>N（' + g.join("×") + '）</span></div>' +
+      '<div><b>' + f(M,0) + '</b><span>局部 key 数 M（占 N 的 ' + pct(M/N,1) + '）</span></div>' +
+      '<div class="' + (dA ? "bad" : "cool") + '"><b>' + f(attn,2) + '×</b><span>注意力 FLOPs 缩减（本页计算）· 论文 ' + f(rep.attn,2) + '×</span></div>' +
+      '<div class="' + (dB ? "bad" : "cool") + '"><b>' + f(block,3) + '×</b><span>块级 FLOPs 缩减（本页计算）· 论文 ' + f(rep.block,2) + '×</span></div>' +
+      '<div><b>' + f(1/(1-a+a/rep.attn),3) + '×</b><span>用论文的注意力缩减推块级（检验上层换算）</span></div>' +
+      '<div><b>' + f(rhoImp,3) + '</b><span>要得到论文的 ' + f(rep.attn,2) + '×，在这个 M 下 ρ 应为</span></div>';
+    var s = rep.blat, heta = first === "dense" ? 1 + 2/s : 3/s;
+    var rows = [["DMD3s（稠密 3 步）", 3, "var(--dmd)"], ["DMD2s（稠密 2 步）", 2, "var(--dmd2)"], ["HetA 3 步（第 1 步" + (first === "dense" ? "全稠密" : "也稀疏") + "）", heta, "var(--heta)"]];
+    $("#calc-pipe").innerHTML = rows.map(function(rw){
+      return '<div class="nm">' + rw[0] + '<small>相对 DMD3s ' + f(3/rw[1],2) + '×</small></div><div class="tr"><span class="bar" style="width:' + (rw[1]/3*100).toFixed(1) + '%;background:' + rw[2] + '"></span></div><div class="v">' + f(rw[1],2) + '</div>';
+    }).join("") + '<div class="nm dim" style="grid-column:1/-1;font-size:12px">块级延迟加速用论文 Table 5 的 ' + f(s,2) + '×（' + m.name.split(" · ")[0] + '）；只算 DiT，不含文本编码与 VAE 解码。</div>';
+  }
+  ["calc-m","calc-k","calc-acc","calc-first"].forEach(function(id){ segBind(id, draw); });
+  rhoI.addEventListener("input", draw); draw();
+})();
+
+/* ---------------- §6.1 Table 7 chart ---------------- */
+(function(){
+  var svg = $("#t7-svg"); if (!svg) return;
+  var W = 640, H = 250, ml = 52, mr = 150, mt = 16, mb = 38, pw = W-ml-mr, ph = H-mt-mb;
+  var N = 27280, g = [31,22,40], ks = [9,11,13];
+  var X = function(k){ return ml + (k-8.4)/(13.6-8.4)*pw; }, Y = function(v){ return mt + ph - (v-3.5)/(5.2-3.5)*ph; };
+  for (var v = 3.5; v <= 5.21; v += 0.25){ S("line",{x1:ml,x2:ml+pw,y1:Y(v),y2:Y(v),"class":"grid"},svg); S("text",{x:ml-6,y:Y(v)+4,"text-anchor":"end","class":"ax"},svg,f(v,2)+"×"); }
+  ks.forEach(function(k){ S("text",{x:X(k),y:H-18,"text-anchor":"middle","class":"ax"},svg,k+"×"+k+"×"+k); });
+  S("text",{x:ml+pw/2,y:H-2,"text-anchor":"middle","class":"ax"},svg,"局部窗口");
+  function red(M){ return 1/(0.2 + 0.8*M/N); }
+  var series = [
+    {lab:"式 (14)：M = k³", col:"var(--local)", op:1, fn:function(k){ return red(k*k*k); }},
+    {lab:"边界截断", col:"var(--local)", op:.5, fn:function(k){ return red(avgClip(g[0],k)*avgClip(g[1],k)*avgClip(g[2],k)); }},
+    {lab:"M ≈ 0.148·k³", col:"var(--unc)", op:1, fn:function(k){ return red(0.148*k*k*k); }}
+  ];
+  series.forEach(function(sr){
+    var pts = ks.map(function(k){ return [X(k), Y(sr.fn(k))]; });
+    S("polyline",{points:pts.map(function(p){ return p[0].toFixed(1)+","+p[1].toFixed(1); }).join(" "),fill:"none",stroke:sr.col,"stroke-width":2.2,"stroke-opacity":sr.op},svg);
+    pts.forEach(function(p){ S("circle",{cx:p[0],cy:p[1],r:3.5,fill:sr.col,"fill-opacity":sr.op},svg); });
+    var last = pts[pts.length-1]; S("text",{x:last[0]+14,y:last[1]+(sr.op < 1 ? -4 : (sr.col === "var(--unc)" ? 18 : 8)),"class":"lab",style:"fill:"+sr.col},svg,sr.lab + " " + f(sr.fn(13),2) + "×");
+  });
+  var rep = [4.91,4.85,4.76];
+  ks.forEach(function(k, i){ S("circle",{cx:X(k),cy:Y(rep[i]),r:7,fill:"none",stroke:"var(--dense)","stroke-width":2.4},svg); S("text",{x:X(k),y:Y(rep[i])-12,"text-anchor":"middle","class":"labb",style:"fill:var(--dense-ink)"},svg,(i === 0 ? "论文 " : "") + f(rep[i],2)+"×"); });
+})();
+
+/* ---------------- §7.1 VBench dot plot ---------------- */
+(function(){
+  var host = $("#vb-bars"); if (!host) return;
+  var D = [
+    ["Wan2.2-5B（50 步）", [83.28,85.03,76.28], "wan"],
+    ["DMD2s（稠密 2 步）", [82.48,83.05,80.22], "dmd2"],
+    ["DMD3s（稠密 3 步）", [82.94,83.56,80.43], "dmd"],
+    ["Attn Surgery", [82.62,83.60,78.71], "oth"],
+    ["ReHyAt", [82.55,82.78,81.61], "oth"],
+    ["VSA", [82.24,82.71,80.38], "oth"],
+    ["Jenga（免训练）", [82.72,83.58,79.22], "oth", 1],
+    ["ToCa（免训练）", [80.52,81.40,76.98], "oth", 1],
+    ["DMD3s-HetA", [83.28,83.71,81.52], "heta"]
+  ];
+  var DOM = [[80,84],[81,85.5],[76,82]];
+  function draw(mi){
+    mi = +mi; var dom = DOM[mi];
+    var rows = D.slice().sort(function(a,b){ return b[1][mi] - a[1][mi]; });
+    var W = 760, rh = 30, ml = 180, mr = 118, mt = 26, H = mt + rows.length*rh + 10, pw = W-ml-mr;
+    var X = function(v){ return ml + (v-dom[0])/(dom[1]-dom[0])*pw; };
+    var svg = S("svg",{viewBox:"0 0 "+W+" "+H,role:"img","aria-label":"VBench 点图","class":"cap"});
+    for (var t = Math.ceil(dom[0]); t <= dom[1]; t += (dom[1]-dom[0] > 5 ? 1 : 0.5)){ S("line",{x1:X(t),x2:X(t),y1:mt-6,y2:H-8,"class":"grid"},svg); S("text",{x:X(t),y:mt-10,"text-anchor":"middle","class":"ax"},svg,f(t,t%1?1:0)); }
+    var ref = D[2][1][mi];
+    S("line",{x1:X(ref),x2:X(ref),y1:mt-6,y2:H-8,stroke:"var(--dmd)","stroke-dasharray":"4 4","stroke-width":1.5},svg);
+    rows.forEach(function(r, i){
+      var y = mt + i*rh + rh/2, col = "var(--" + r[2] + ")", v = r[1][mi];
+      if (r[3]) S("rect",{x:0,y:y-rh/2+2,width:W,height:rh-4,rx:6,fill:"var(--med-soft)"},svg);
+      S("text",{x:ml-12,y:y+4,"text-anchor":"end","class":r[2]==="heta" ? "labb" : "lab"},svg,r[0]);
+      S("line",{x1:X(dom[0]),x2:X(v),y1:y,y2:y,stroke:col,"stroke-width":r[2]==="heta" ? 3 : 2,"stroke-opacity":.55},svg);
+      S("circle",{cx:X(v),cy:y,r:r[2]==="heta" ? 7 : 5.5,fill:col,stroke:"var(--surf)","stroke-width":1.5},svg);
+      var dv = v - ref;
+      S("text",{x:W-mr+8,y:y+4,"class":"ax",style:r[2]==="heta" ? "fill:var(--ink);font-weight:600" : ""},svg,f(v,2) + (r[2] !== "dmd" ? " (" + (dv >= 0 ? "+" : "") + f(dv,2) + ")" : ""));
+    });
+    host.innerHTML = ""; host.style.display = "block"; host.appendChild(svg);
+  }
+  segBind("vb-m", draw); draw("0");
+})();
+
+/* ---------------- §7.2 Pareto ---------------- */
+(function(){
+  var svg = $("#par-svg"); if (!svg) return;
+  var BASE = [
+    {n:"DMD3s（稠密）", x:1.00, y:82.94, c:"dmd", dx:10, dy:-10, a:"start"},
+    {n:"Attn Surgery", x:1.25, y:82.62, c:"oth", dx:0, dy:-12, a:"middle"},
+    {n:"ReHyAt", x:1.44, y:82.54, c:"oth", dx:-10, dy:16, a:"end"},
+    {n:"VSA", x:1.88, y:82.24, c:"oth", dx:10, dy:4, a:"start"},
+    {n:"HetA-70%", x:1.58, y:83.24, c:"heta", u:1, dx:-10, dy:-8, a:"end"},
+    {n:"HetA-80%", x:1.73, y:83.27, c:"heta", u:1, dx:8, dy:-10, a:"start"},
+    {n:"HetA-90%", x:1.90, y:82.98, c:"heta", u:1, dx:10, dy:4, a:"start"}
+  ];
+  var EXTRA = [
+    {n:"DMD2s（2 步，x = 3/2）", x:1.50, y:82.48, c:"dmd2", dx:10, dy:14, a:"start"},
+    {n:"固定均匀", x:1.73, y:83.13, ring:"local", dx:10, dy:4, a:"start"},
+    {n:"纯不确定度", x:1.73, y:83.00, ring:"local", u:1, dx:-10, dy:4, a:"end"},
+    {n:"随机路由", x:1.73, y:82.78, ring:"local", dx:-10, dy:4, a:"end"},
+    {n:"全局部（x 为估算）", x:2.065, y:82.85, ring:"med", err:[2.02,2.11], dx:0, dy:20, a:"middle"}
+  ];
+  function draw(){
+    clear(svg);
+    var mode = segVal("par-x"), extra = segVal("par-extra") === "on";
+    var W = 720, H = 360, ml = 56, mr = 24, mt = 18, mb = 46, pw = W-ml-mr, ph = H-mt-mb;
+    var x0 = 0.9, x1 = 2.2, y0 = 82.1, y1 = 83.45;
+    var X = function(v){ return ml + (v-x0)/(x1-x0)*pw; }, Y = function(v){ return mt + ph - (v-y0)/(y1-y0)*ph; };
+    for (var t = 1.0; t <= 2.21; t += 0.2){ S("line",{x1:X(t),x2:X(t),y1:mt,y2:mt+ph,"class":"grid"},svg); S("text",{x:X(t),y:mt+ph+18,"text-anchor":"middle","class":"ax"},svg,f(t,1)+"×"); }
+    for (var v = 82.2; v <= 83.41; v += 0.2){ S("line",{x1:ml,x2:ml+pw,y1:Y(v),y2:Y(v),"class":"grid"},svg); S("text",{x:ml-8,y:Y(v)+4,"text-anchor":"end","class":"ax"},svg,f(v,1)); }
+    S("text",{x:ml+pw/2,y:H-6,"text-anchor":"middle","class":"ax"},svg,mode === "pipe" ? "块级效率（HetA 的点按整条 3 步、第 1 步全稠密折算）" : "块级效率（论文口径：单步 FLOPs）");
+    S("text",{x:ml,y:10,"class":"ax"},svg,"VBench Total");
+    S("line",{x1:ml,x2:ml+pw,y1:Y(82.94),y2:Y(82.94),stroke:"var(--dmd)","stroke-dasharray":"5 4","stroke-opacity":.6},svg);
+    // ToCa off-chart
+    var tx = X(1.52);
+    S("path",{d:"M"+tx+" "+(mt+ph-22)+"V"+(mt+ph-4)+"M"+(tx-5)+" "+(mt+ph-10)+"L"+tx+" "+(mt+ph-3)+"L"+(tx+5)+" "+(mt+ph-10),stroke:"var(--oth)","stroke-width":2,fill:"none"},svg);
+    S("text",{x:tx+8,y:mt+ph-10,"class":"lab"},svg,"ToCa 1.52×, 80.52（图外）");
+    var pts = BASE.concat(extra ? EXTRA : []);
+    pts.forEach(function(p){
+      var xv = (mode === "pipe" && p.u) ? 3/(1 + 2/p.x) : p.x, cx = X(xv), cy = Y(p.y);
+      if (mode === "pipe" && p.u){ S("line",{x1:X(p.x),x2:cx,y1:cy,y2:cy,stroke:"var(--heta)","stroke-dasharray":"2 3","stroke-opacity":.6},svg); }
+      if (p.err){ S("line",{x1:X(p.err[0]),x2:X(p.err[1]),y1:cy,y2:cy,stroke:"var(--med)","stroke-width":2},svg); }
+      if (p.ring) S("circle",{cx:cx,cy:cy,r:6,fill:"var(--surf)",stroke:"var(--"+p.ring+")","stroke-width":2.2},svg);
+      else S("circle",{cx:cx,cy:cy,r:p.c === "heta" ? 7 : 6,fill:"var(--"+p.c+")",stroke:"var(--surf)","stroke-width":1.5},svg);
+      var lbl = p.n + (mode === "pipe" && p.u ? " · " + f(xv,2) + "×" : "");
+      S("text",{x:cx+p.dx,y:cy+p.dy,"text-anchor":p.a,"class":p.c === "heta" ? "labb" : "lab"},svg,lbl);
+    });
+  }
+  segBind("par-x", draw); segBind("par-extra", draw); draw();
+})();
+
+/* ---------------- §7.3 per-dimension diffs ---------------- */
+(function(){
+  var svg = $("#dim-svg"); if (!svg) return;
+  var V2 = {
+    dims:[["镜头运动","可控"],["复杂景观","可控"],["复杂情节","可控"],["构图组合","创造"],["多样性","创造"],["动态属性","可控"],["动态空间关系","可控"],["人体结构","人体"],["人物服饰","人体"],["人物身份","人体"],["人物交互","可控"],["实例保持","常识"],["材质","物理"],["力学","物理"],["动作顺序","可控"],["运动合理性","常识"],["多视角一致","物理"],["热学","物理"]],
+    vals:{Ours:[37.65,21.33,12.63,54.8,55.3,28.94,32.37,80.16,98.48,60.62,80.0,88.89,74.55,70.15,38.05,36.21,31.73,69.23],
+          DMD3:[37.65,17.33,12.69,55.22,62.19,39.19,31.88,80.3,98.87,62.8,81.67,83.63,72.32,74.29,33.0,45.4,39.11,70.0],
+          DMD2:[43.21,18.44,16.06,58.26,50.13,41.76,32.85,75.19,98.91,56.59,78.67,83.04,73.68,75.91,34.01,36.78,25.38,68.57],
+          "Wan2.2":[47.84,17.56,12.59,54.8,60.61,35.9,34.3,81.4,99.03,57.73,76.0,87.72,71.56,66.14,33.67,42.53,6.03,61.27]},
+    comps:[["DMD3","稠密 DMD3s","dmd"],["DMD2","DMD2s","dmd2"],["Wan2.2","Wan2.2（50 步）","wan"]]
+  };
+  var V1 = {
+    dims:[["主体一致","质量"],["背景一致","质量"],["时间闪烁","质量"],["运动平滑","质量"],["动态程度","质量"],["美学质量","质量"],["成像质量","质量"],["物体类别","语义"],["多物体","语义"],["人体动作","语义"],["颜色","语义"],["空间关系","语义"],["场景","语义"],["外观风格","语义"],["时间风格","语义"],["整体一致","语义"]],
+    vals:{Ours:[94.89,95.77,98.77,98.32,50.56,67.46,71.33,95.08,83.17,99.0,83.35,85.84,55.77,21.21,25.48,27.38],
+          DMD2:[95.12,95.65,99.06,98.8,40.56,66.49,70.44,94.03,79.12,99.4,83.83,82.52,52.85,21.21,25.26,27.37],
+          DMD3:[95.1,95.31,98.86,98.64,48.89,67.02,70.64,94.7,80.2,99.4,83.8,81.61,53.58,21.3,25.28,27.32],
+          AttnSurg:[94.16,95.18,98.6,98.09,56.94,68.06,69.76,92.01,74.66,98.2,83.1,78.69,51.8,21.53,25.14,27.05],
+          ReHyAt:[96.54,96.16,98.25,98.56,36.11,69.06,69.01,95.71,83.06,96.8,86.62,86.35,55.33,21.37,25.14,27.24],
+          VSA:[94.63,95.05,97.64,97.85,53.61,67.14,69.56,95.66,77.85,99.6,84.34,82.21,53.53,21.08,25.45,27.3],
+          Jenga:[92.89,94.53,97.78,97.99,66.67,67.43,69.9,92.48,72.82,99.4,83.97,80.54,54.07,21.97,25.41,27.43],
+          ToCa:[94.33,95.68,99.27,99.15,18.06,66.01,70.63,87.53,68.87,98.8,80.44,74.28,54.83,20.78,25.15,27.08]},
+    comps:[["DMD3","稠密 DMD3s","dmd"],["DMD2","DMD2s","dmd2"],["AttnSurg","Attn Surgery","oth"],["ReHyAt","ReHyAt","oth"],["VSA","VSA","oth"],["Jenga","Jenga","oth"],["ToCa","ToCa","oth"]]
+  };
+  var bench = "v2", comp = "DMD3";
+  var cseg = document.getElementById("dim-c");
+  function buildSeg(){
+    var B = bench === "v2" ? V2 : V1;
+    cseg.innerHTML = B.comps.map(function(c){ return '<button type="button" data-v="' + c[0] + '" aria-pressed="' + (c[0] === comp ? "true" : "false") + '">' + c[1] + "</button>"; }).join("");
+  }
+  function draw(){
+    var B = bench === "v2" ? V2 : V1, cc = B.comps.filter(function(c){ return c[0] === comp; })[0];
+    var rows = B.dims.map(function(d, i){ return {n:d[0], cat:d[1], a:B.vals.Ours[i], b:B.vals[comp][i], dv:B.vals.Ours[i] - B.vals[comp][i]}; });
+    rows.sort(function(p, q){ return q.dv - p.dv; });
+    var mx = Math.max(5, Math.ceil(Math.max.apply(null, rows.map(function(r){ return Math.abs(r.dv); }))/5)*5);
+    var W = 720, rh = 26, ml = 170, mr = 120, mt = 44, H = mt + rows.length*rh + 12, pw = W-ml-mr, cx0 = ml + pw/2;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H); clear(svg);
+    var X = function(v){ return cx0 + v/mx*(pw/2); };
+    for (var t = -mx; t <= mx; t += (mx > 20 ? 10 : 5)){ S("line",{x1:X(t),x2:X(t),y1:mt-6,y2:H-8,"class":"grid"},svg); S("text",{x:X(t),y:mt-12,"text-anchor":"middle","class":"ax"},svg,(t > 0 ? "+" : "") + t); }
+    S("line",{x1:cx0,x2:cx0,y1:mt-6,y2:H-8,stroke:"var(--axis)","stroke-width":1.5},svg);
+    S("text",{x:W-mr+10,y:14,"class":"ax"},svg,"HetA / " + cc[1]);
+    rows.forEach(function(r, i){
+      var y = mt + i*rh + rh/2, col = r.dv >= 0 ? "var(--heta)" : "var(--" + cc[2] + ")";
+      S("text",{x:ml-10,y:y+4,"text-anchor":"end","class":"lab"},svg,r.n);
+      S("text",{x:ml-10-(r.n.length*12.5)-6,y:y+4,"text-anchor":"end","class":"ax"},svg,r.cat);
+      var xa = X(Math.min(0, r.dv)), w = Math.abs(X(r.dv) - cx0);
+      S("rect",{x:xa,y:y-8,width:Math.max(1, w),height:16,rx:3,fill:col,"fill-opacity":Math.abs(r.dv) < 1 ? .45 : .9},svg);
+      S("text",{x:r.dv >= 0 ? X(r.dv)+5 : X(r.dv)-5,y:y+4,"text-anchor":r.dv >= 0 ? "start" : "end","class":"ax",style:Math.abs(r.dv) >= 5 ? "fill:var(--ink);font-weight:600" : ""},svg,(r.dv >= 0 ? "+" : "") + f(r.dv,1));
+      S("text",{x:W-mr+10,y:y+4,"class":"ax"},svg,f(r.a,1) + " / " + f(r.b,1));
+    });
+  }
+  segBind("dim-b", function(v){ bench = v; comp = "DMD3"; buildSeg(); draw(); });
+  cseg.addEventListener("click", function(e){ var b = e.target.closest("button"); if (!b) return; comp = b.getAttribute("data-v"); cseg.querySelectorAll("button").forEach(function(x){ x.setAttribute("aria-pressed", x === b ? "true" : "false"); }); draw(); });
+  buildSeg(); draw();
+})();
+
+/* ---------------- §7.4 human preference ---------------- */
+(function(){
+  var host = $("#hp"); if (!host) return;
+  var D = [["DMD2s（稠密 2 步）",50,26,24,"7×10⁻¹⁰","显著更好"],["DMD3s（稠密 3 步）",32,32,36,"0.34","分不出"],["DMD3s-Attn Surgery",68,13,19,"&lt;10⁻²⁰","显著更好"]];
+  host.innerHTML = D.map(function(r){
+    return '<div style="display:grid;grid-template-columns:minmax(120px,180px) minmax(0,1fr) 116px;gap:10px;align-items:center;font-size:13px">' +
+      '<div style="color:var(--ink2)">vs ' + r[0] + '</div>' +
+      '<div class="stack"><span style="width:' + r[1] + '%;background:var(--heta)">' + r[1] + '%</span><span style="width:' + r[2] + '%;background:var(--oth)">' + r[2] + '%</span><span style="width:' + r[3] + '%;background:var(--dmd)">' + r[3] + '%</span></div>' +
+      '<div class="mono" style="font-size:12px;color:var(--ink3)">p ≈ ' + r[4] + '<br><span style="color:var(--ink2)">' + r[5] + '</span></div></div>';
+  }).join("");
+})();
+
+/* ---------------- §7.5 ablation dot plot ---------------- */
+(function(){
+  var svg = $("#abl-svg"); if (!svg) return;
+  var G = [
+    ["路由策略（80% 局部 · Table 6/8）", [
+      ["随机路由（= 20% 全随机）", [82.78,83.37,80.45]],
+      ["全局部（0% 稠密）", [82.85,83.56,79.99]],
+      ["纯不确定度（0% 随机）", [83.00,83.48,81.25]],
+      ["固定均匀", [83.13,83.76,80.58]],
+      ["不确定度 + 3% 随机", [83.18,83.63,81.39]],
+      ["不确定度 + 7% 随机（默认）", [83.27,83.71,81.52], 1]]],
+    ["局部窗口（Table 7）", [
+      ["9×9×9", [83.22,83.89,80.54]],
+      ["11×11×11（默认）", [83.28,83.71,81.52], 1],
+      ["13×13×13", [83.36,83.99,80.82]]]],
+    ["局部比例（Fig.4，仅 Total）", [
+      ["70% 局部", [83.24,null,null]],
+      ["80% 局部（默认）", [83.27,null,null], 1],
+      ["90% 局部", [82.98,null,null]]]]
+  ];
+  var REF = {dmd3:[82.94,83.56,80.43], dmd2:[82.48,83.05,80.22]};
+  var DOM = [[82.3,83.5],[82.9,84.1],[79.8,81.8]];
+  function draw(mi){
+    mi = +mi; clear(svg);
+    var dom = DOM[mi], W = 720, rh = 24, gh = 34, ml = 230, mr = 60, mt = 34;
+    var nrows = G.reduce(function(s, g){ return s + g[1].length; }, 0), H = mt + nrows*rh + G.length*gh + 30, pw = W-ml-mr;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    var X = function(v){ return ml + (v-dom[0])/(dom[1]-dom[0])*pw; };
+    for (var t = dom[0]; t <= dom[1]+1e-9; t += 0.2){ S("line",{x1:X(t),x2:X(t),y1:mt-4,y2:H-6,"class":"grid"},svg); S("text",{x:X(t),y:mt-10,"text-anchor":"middle","class":"ax"},svg,f(t,1)); }
+    [["dmd3","var(--dmd)","DMD3s"],["dmd2","var(--dmd2)","DMD2s"]].forEach(function(r){
+      var v = REF[r[0]][mi]; if (v < dom[0] || v > dom[1]) return;
+      S("line",{x1:X(v),x2:X(v),y1:mt-4,y2:H-6,stroke:r[1],"stroke-dasharray":"5 4","stroke-width":1.6},svg);
+      S("text",{x:X(v)+4,y:H-8,"class":"ax",style:"fill:"+r[1]},svg,r[2] + " " + f(v,2));
+    });
+    var y = mt;
+    G.forEach(function(g){
+      y += gh; S("text",{x:8,y:y-6,"class":"labb"},svg,g[0]);
+      g[1].forEach(function(r){
+        var cy = y + rh/2 + 2, v = r[1][mi];
+        S("text",{x:ml-12,y:cy+4,"text-anchor":"end","class":r[2] ? "labb" : "lab"},svg,r[0]);
+        if (v == null){ S("text",{x:ml+6,y:cy+4,"class":"ax"},svg,"—（只报告了 Total）"); }
+        else {
+          S("circle",{cx:X(v),cy:cy,r:r[2] ? 7 : 5.5,fill:r[2] ? "var(--heta)" : "var(--surf)",stroke:r[2] ? "var(--surf)" : "var(--local)","stroke-width":r[2] ? 1.5 : 2.2},svg);
+          S("text",{x:W-mr+8,y:cy+4,"class":"ax",style:r[2] ? "fill:var(--ink);font-weight:600" : ""},svg,f(v,2));
+        }
+        y += rh;
+      });
+    });
+  }
+  segBind("abl-m", draw); draw("0");
+})();
+
+/* ---------------- §8 doubts filter ---------------- */
+segBind("dq-f", function(v){
+  $$("#doubts details.doubt").forEach(function(d){ d.hidden = !(v === "all" || d.classList.contains(v)); });
+});
+/* open doubt when navigated to via hash */
+function openHash(){ var h = location.hash; if (!h || h.length < 2) return; var el = document.getElementById(h.slice(1)); if (el && el.tagName === "DETAILS"){ el.hidden = false; el.open = true; } }
+window.addEventListener("hashchange", openHash); openHash();
+$$('a[href^="#d"]').forEach(function(a){ a.addEventListener("click", function(){ var el = document.getElementById(a.getAttribute("href").slice(1)); if (el && el.tagName === "DETAILS"){ el.hidden = false; el.open = true; } }); });
+
+/* ---------------- TOC highlight ---------------- */
+(function(){
+  var links = {}; $$("#toc a").forEach(function(a){ links[a.getAttribute("href").slice(1)] = a; });
+  if (!("IntersectionObserver" in window)) return;
+  var io = new IntersectionObserver(function(es){
+    es.forEach(function(e){ if (e.isIntersecting){ Object.keys(links).forEach(function(k){ links[k].classList.toggle("on", k === e.target.id); }); var a = links[e.target.id]; if (a && a.parentNode.scrollWidth > a.parentNode.clientWidth){ a.parentNode.scrollLeft = a.offsetLeft - 40; } } });
+  }, {rootMargin:"-45% 0px -50% 0px"});
+  $$("section[id]").forEach(function(s){ io.observe(s); });
+})();
+
+})();
+</script>
+</body>
+</html>

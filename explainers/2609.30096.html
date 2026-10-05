@@ -1,0 +1,1284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TRACK 精读</title>
+<meta name="description" content="TRACK（arXiv 2609.30096，NVIDIA）精读：离线测大小模型分歧、按分歧取前 K 步交给小模型；逐图读数、加速账本复算，以及 18 条存疑。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+/* ============================================================
+   TRACK 精读 — design tokens (dark-first, 与本系列其它精读页同一套字体)
+   角色色：lg = 大模型（14B / Super）   sm = 小模型（1.3B / Nano / Edge）
+           me = 本页复算或推断（不是论文原文）
+           risk = 存疑    lo/mi/hi = 低/中/高频带
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0d1012; --surf:#14191c; --surf2:#1a2024; --surf3:#232b30;
+  --rule:#242d32; --rule2:#374249;
+  --ink:#e5ebed; --ink2:#a0abb1; --ink3:#737f87;
+  --lg:#9a8cf2; --lg-ink:#b9afff; --lg-soft:rgba(154,140,242,.17);
+  --sm:#2fb5a3; --sm-ink:#62d4c3; --sm-soft:rgba(47,181,163,.16);
+  --me:#e3a13f; --me-ink:#f2bd69; --me-soft:rgba(227,161,63,.14);
+  --risk:#ec6a86; --risk-ink:#ff93aa; --risk-soft:rgba(236,106,134,.15);
+  --ok:#5cbf80; --ok-ink:#82d9a0; --ok-soft:rgba(92,191,128,.14);
+  --mid:#c9b458; --mid-ink:#e0cd72; --mid-soft:rgba(201,180,88,.14);
+  --lo:#5a9be8; --mi:#d8b84a; --hi:#e2704a;
+  --tie:#4a555c;
+  --grid:#1f272c; --axis:#3a464e;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 30px rgba(0,0,0,.34);
+  --font-display:"Familjen Grotesk","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"Source Serif 4",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f3f5f5; --surf:#ffffff; --surf2:#ecf0f1; --surf3:#e0e6e8;
+    --rule:#d8dfe2; --rule2:#b8c2c7;
+    --ink:#101517; --ink2:#404b51; --ink3:#68747b;
+    --lg:#5b49c8; --lg-ink:#4636a8; --lg-soft:rgba(91,73,200,.11);
+    --sm:#0d8a7a; --sm-ink:#096c60; --sm-soft:rgba(13,138,122,.11);
+    --me:#b0700e; --me-ink:#8a5608; --me-soft:rgba(176,112,14,.12);
+    --risk:#c43a5e; --risk-ink:#a22c4c; --risk-soft:rgba(196,58,94,.10);
+    --ok:#1b8a4c; --ok-ink:#136b3a; --ok-soft:rgba(27,138,76,.10);
+    --mid:#95790a; --mid-ink:#735d05; --mid-soft:rgba(149,121,10,.12);
+    --lo:#2f6fc0; --mi:#b08c0c; --hi:#c9522a;
+    --tie:#c3cbcf;
+    --grid:#e5eaec; --axis:#b8c2c7;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f3f5f5; --surf:#ffffff; --surf2:#ecf0f1; --surf3:#e0e6e8;
+  --rule:#d8dfe2; --rule2:#b8c2c7;
+  --ink:#101517; --ink2:#404b51; --ink3:#68747b;
+  --lg:#5b49c8; --lg-ink:#4636a8; --lg-soft:rgba(91,73,200,.11);
+  --sm:#0d8a7a; --sm-ink:#096c60; --sm-soft:rgba(13,138,122,.11);
+  --me:#b0700e; --me-ink:#8a5608; --me-soft:rgba(176,112,14,.12);
+  --risk:#c43a5e; --risk-ink:#a22c4c; --risk-soft:rgba(196,58,94,.10);
+  --ok:#1b8a4c; --ok-ink:#136b3a; --ok-soft:rgba(27,138,76,.10);
+  --mid:#95790a; --mid-ink:#735d05; --mid-soft:rgba(149,121,10,.12);
+  --lo:#2f6fc0; --mi:#b08c0c; --hi:#c9522a;
+  --tie:#c3cbcf;
+  --grid:#e5eaec; --axis:#b8c2c7;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#0d1012; --surf:#14191c; --surf2:#1a2024; --surf3:#232b30;
+  --rule:#242d32; --rule2:#374249;
+  --ink:#e5ebed; --ink2:#a0abb1; --ink3:#737f87;
+  --lg:#9a8cf2; --lg-ink:#b9afff; --lg-soft:rgba(154,140,242,.17);
+  --sm:#2fb5a3; --sm-ink:#62d4c3; --sm-soft:rgba(47,181,163,.16);
+  --me:#e3a13f; --me-ink:#f2bd69; --me-soft:rgba(227,161,63,.14);
+  --risk:#ec6a86; --risk-ink:#ff93aa; --risk-soft:rgba(236,106,134,.15);
+  --ok:#5cbf80; --ok-ink:#82d9a0; --ok-soft:rgba(92,191,128,.14);
+  --mid:#c9b458; --mid-ink:#e0cd72; --mid-soft:rgba(201,180,88,.14);
+  --lo:#5a9be8; --mi:#d8b84a; --hi:#e2704a;
+  --tie:#4a555c;
+  --grid:#1f272c; --axis:#3a464e;
+}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth; -webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important; animation:none!important} }
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16.5px; line-height:1.74;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1000px; margin:0 auto; padding-inline:20px; padding-block:0 140px}
+@media(max-width:640px){ .wrap{padding-inline:16px; padding-block:0 120px} body{font-size:16px} }
+a{color:var(--sm-ink)}
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--sm); outline-offset:2px; border-radius:4px}
+
+/* ---------- header ---------- */
+header.hero{padding-block:56px 30px; border-bottom:1px solid var(--rule)}
+.kicker{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink3); margin-bottom:16px; display:flex; flex-wrap:wrap; gap:6px 14px}
+.kicker a{color:var(--sm-ink); text-decoration:none; border-bottom:1px solid transparent}
+.kicker a:hover{border-bottom-color:currentColor}
+h1{font-family:var(--font-display); font-weight:700; font-size:clamp(34px,6vw,56px); line-height:1.06; letter-spacing:-.022em; margin:0 0 10px; text-wrap:balance}
+h1 .l{color:var(--lg-ink)} h1 .s{color:var(--sm-ink)}
+.sub{font-family:var(--font-display); font-weight:500; font-size:clamp(16px,2.5vw,20px); color:var(--ink2); line-height:1.5; margin:0 0 24px; max-width:62ch; text-wrap:balance}
+.thesis{font-family:var(--font-math); font-size:clamp(16.5px,2.3vw,19px); line-height:1.66; color:var(--ink); border-left:3px solid var(--sm); padding:2px 0 2px 18px; margin:0 0 26px; max-width:66ch}
+.thesis b{color:var(--sm-ink); font-weight:600}
+.statstrip{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:10px; overflow:hidden; margin-top:22px}
+.statstrip div{background:var(--surf); padding:12px 14px}
+.statstrip b{display:block; font-family:var(--font-display); font-size:21px; font-weight:700; letter-spacing:-.01em; line-height:1.2; font-variant-numeric:tabular-nums}
+@media(max-width:640px){ .statstrip div:last-child:nth-child(odd){grid-column:1 / -1} }
+.statstrip span{display:block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.05em; color:var(--ink3); margin-top:4px; line-height:1.45}
+
+/* ---------- schedule barcode (本页的招牌元素) ---------- */
+.codes{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:16px 18px 12px; box-shadow:var(--shadow)}
+.code-row{display:grid; grid-template-columns:minmax(118px,178px) 1fr minmax(64px,auto); gap:4px 14px; align-items:center; padding-block:7px; border-bottom:1px dashed var(--rule)}
+.code-row:last-of-type{border-bottom:0}
+.code-name{font-family:var(--font-display); font-weight:600; font-size:14.5px; line-height:1.25}
+.code-name small{display:block; font-family:var(--font-mono); font-weight:400; font-size:10.5px; color:var(--ink3); letter-spacing:.03em; margin-top:2px}
+.bar{display:flex; height:26px; border-radius:5px; overflow:hidden; gap:1px; background:var(--bg)}
+.bar i{flex:1 1 0; min-width:0; background:var(--lg); display:block; position:relative}
+.bar i.s{background:var(--sm)}
+.bar i.dim{opacity:.35}
+.code-speed{font-family:var(--font-mono); font-size:14px; font-weight:700; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
+.code-speed small{display:block; font-weight:400; font-size:10.5px; color:var(--ink3)}
+.code-note{grid-column:2 / 4; font-family:var(--font-mono); font-size:11px; color:var(--ink3); line-height:1.4}
+.code-note .me{color:var(--me-ink)}
+@media(max-width:640px){
+  .code-row{grid-template-columns:1fr auto}
+  .code-row .bar{grid-column:1 / 3; grid-row:2}
+  .code-note{grid-column:1 / 3}
+}
+.legend{display:flex; flex-wrap:wrap; gap:6px 18px; font-family:var(--font-mono); font-size:11.5px; color:var(--ink2); margin-top:10px}
+.legend span{display:inline-flex; align-items:center; gap:7px}
+.sw{display:inline-block; width:14px; height:10px; border-radius:2px; background:var(--lg)}
+.sw.s{background:var(--sm)} .sw.me{background:var(--me)} .sw.tie{background:var(--tie)}
+
+/* ---------- nav ---------- */
+nav.toc{position:sticky; top:env(safe-area-inset-top,0px); z-index:40; background:color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border-bottom:1px solid var(--rule); margin-inline:-20px; margin-block:0 40px; padding:9px 20px; overflow-x:auto; white-space:nowrap; scrollbar-width:none}
+@media(max-width:640px){ nav.toc{margin-inline:-16px; padding-inline:16px} }
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{display:inline-block; font-family:var(--font-mono); font-size:12px; color:var(--ink2); text-decoration:none; padding:5px 10px; border-radius:6px; margin-right:2px}
+nav.toc a:hover{background:var(--surf2); color:var(--ink)}
+nav.toc a.on{background:var(--sm-soft); color:var(--sm-ink)}
+
+/* ---------- sections ---------- */
+section{margin:0 0 78px; scroll-margin-top:64px}
+h2{font-family:var(--font-display); font-weight:700; font-size:clamp(24px,3.6vw,32px); letter-spacing:-.015em; line-height:1.2; margin:0 0 6px; text-wrap:balance}
+h2 .no{font-family:var(--font-mono); font-size:.5em; font-weight:500; color:var(--ink3); vertical-align:.45em; margin-right:10px; letter-spacing:.04em}
+.lede{color:var(--ink2); font-size:17px; margin:0 0 26px; max-width:66ch}
+h3{font-family:var(--font-display); font-weight:600; font-size:20px; letter-spacing:-.005em; margin:38px 0 10px; text-wrap:balance}
+h4{font-family:var(--font-display); font-weight:600; font-size:16.5px; margin:22px 0 6px}
+p{margin:0 0 14px; max-width:70ch}
+ul,ol{margin:0 0 16px; padding-left:1.25em; max-width:70ch}
+li{margin:0 0 6px}
+b,strong{font-weight:600}
+code,.mono{font-family:var(--font-mono); font-size:.88em; background:var(--surf2); padding:1px 5px; border-radius:4px}
+.L{color:var(--lg-ink); font-weight:600} .S{color:var(--sm-ink); font-weight:600}
+.meT{color:var(--me-ink)} .rk{color:var(--risk-ink)} .okT{color:var(--ok-ink)}
+.chip{display:inline-block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; padding:1px 7px; border-radius:99px; vertical-align:2px; white-space:nowrap}
+.chip.me{background:var(--me-soft); color:var(--me-ink)}
+.chip.paper{background:var(--surf3); color:var(--ink2)}
+.chip.hi{background:var(--risk-soft); color:var(--risk-ink)}
+.chip.md{background:var(--mid-soft); color:var(--mid-ink)}
+.chip.lo{background:var(--surf3); color:var(--ink2)}
+.chip.ok{background:var(--ok-soft); color:var(--ok-ink)}
+
+/* ---------- math ---------- */
+.eq{font-family:var(--font-math); font-size:18px; background:var(--surf); border:1px solid var(--rule); border-radius:10px; padding:14px 18px; margin:10px 0 16px; overflow-x:auto; line-height:1.9}
+.eq .tag{float:right; font-family:var(--font-mono); font-size:11.5px; color:var(--ink3); margin-left:14px}
+.eq i{font-style:italic}
+.eq .l{color:var(--lg-ink)} .eq .s{color:var(--sm-ink)}
+.eq small{display:block; font-family:var(--font-body); font-size:14px; color:var(--ink2); line-height:1.6; margin-top:4px}
+.frac{display:inline-flex; flex-direction:column; vertical-align:middle; text-align:center; line-height:1.25; margin:0 3px}
+.frac > span:first-child{border-bottom:1px solid currentColor; padding:0 4px 2px}
+.frac > span:last-child{padding:2px 4px 0}
+
+/* ---------- panels, notes ---------- */
+.panel{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:18px; margin:18px 0 22px}
+.panel-h{display:flex; flex-wrap:wrap; justify-content:space-between; align-items:baseline; gap:6px 16px; margin-bottom:12px}
+.panel-h h4{margin:0}
+.panel-h .src{font-family:var(--font-mono); font-size:11px; color:var(--ink3)}
+.note{border-left:3px solid var(--me); background:var(--me-soft); padding:10px 14px; border-radius:0 8px 8px 0; margin:14px 0 18px; max-width:72ch; font-size:15.5px}
+.note b{color:var(--me-ink)}
+.note.risk{border-left-color:var(--risk); background:var(--risk-soft)}
+.note.risk b{color:var(--risk-ink)}
+.note.ok{border-left-color:var(--ok); background:var(--ok-soft)}
+.note.ok b{color:var(--ok-ink)}
+figure{margin:18px 0 24px}
+figure svg{display:block; width:100%; height:auto; max-width:100%}
+figcaption{font-size:14px; color:var(--ink2); margin-top:8px; line-height:1.6; max-width:72ch}
+.scroll-x{overflow-x:auto; -webkit-overflow-scrolling:touch}
+
+/* ---------- controls ---------- */
+.seg{display:inline-flex; flex-wrap:wrap; gap:2px; background:var(--surf2); border:1px solid var(--rule); border-radius:8px; padding:2px}
+.seg button{font:500 12.5px/1 var(--font-mono); color:var(--ink2); background:transparent; border:0; border-radius:6px; padding:7px 11px; cursor:pointer}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--surf); color:var(--ink); box-shadow:0 0 0 1px var(--rule2)}
+.ctrls{display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; margin-bottom:12px}
+.slider{display:flex; align-items:center; gap:10px; flex:1 1 260px; font-family:var(--font-mono); font-size:12.5px; color:var(--ink2)}
+.slider input[type=range]{flex:1; accent-color:var(--sm)}
+.slider output{min-width:5.5ch; color:var(--ink); font-weight:700; font-variant-numeric:tabular-nums}
+.btn{font:500 12px/1 var(--font-mono); color:var(--sm-ink); background:var(--sm-soft); border:1px solid transparent; border-radius:6px; padding:7px 10px; cursor:pointer}
+.btn:hover{border-color:var(--sm)}
+.readout{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:8px; overflow:hidden; margin-top:12px}
+.readout div{background:var(--surf2); padding:9px 12px}
+.readout span{display:block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.05em; color:var(--ink3)}
+.readout b{display:block; font-family:var(--font-mono); font-size:15px; font-weight:700; font-variant-numeric:tabular-nums; margin-top:2px; line-height:1.35}
+.readout b.good{color:var(--ok-ink)} .readout b.bad{color:var(--risk-ink)} .readout b.me{color:var(--me-ink)}
+
+/* svg chart text */
+.ax text, text.ax{fill:var(--ink3); font-family:var(--font-mono); font-size:11px}
+.ax line, line.ax{stroke:var(--axis)}
+line.grid{stroke:var(--grid)}
+text.lab{fill:var(--ink2); font-family:var(--font-mono); font-size:11px}
+text.labb{fill:var(--ink); font-family:var(--font-mono); font-size:11.5px; font-weight:700}
+text.dia{fill:var(--ink); font-family:var(--font-body); font-size:13px}
+text.dia2{fill:var(--ink2); font-family:var(--font-mono); font-size:11px}
+text.diaL{fill:var(--lg-ink); font-family:var(--font-display); font-size:14px; font-weight:600}
+text.diaS{fill:var(--sm-ink); font-family:var(--font-display); font-size:14px; font-weight:600}
+
+/* ---------- tables ---------- */
+table{border-collapse:collapse; width:100%; font-size:14px; font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px; border-bottom:1px solid var(--rule); text-align:right; white-space:nowrap}
+th{font-family:var(--font-mono); font-weight:500; font-size:11.5px; letter-spacing:.04em; color:var(--ink3); text-align:right; border-bottom-color:var(--rule2)}
+th:first-child, td:first-child{text-align:left}
+td.name{font-weight:600}
+tr.hl td{background:var(--sm-soft)}
+tr.base td{color:var(--ink2)}
+td.me{color:var(--me-ink)}
+td.bad{color:var(--risk-ink)} td.good{color:var(--ok-ink)}
+.tnote{font-size:13px; color:var(--ink3); margin-top:8px; max-width:none}
+
+/* ---------- verdict grid ---------- */
+.verdict{display:grid; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); gap:14px; margin:18px 0 8px}
+.verdict > div{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:16px 18px}
+.verdict h4{margin:0 0 8px; display:flex; align-items:center; gap:8px}
+.verdict ul{margin:0; padding-left:1.1em; font-size:15px}
+.verdict .dot{width:9px; height:9px; border-radius:50%; background:var(--ok); display:inline-block}
+.verdict .dot.r{background:var(--risk)} .verdict .dot.m{background:var(--me)}
+
+/* ---------- human eval ---------- */
+.he{display:grid; grid-template-columns:minmax(96px,120px) 1fr 70px; gap:6px 12px; align-items:center; font-size:13.5px}
+.he .nm{font-family:var(--font-display); font-weight:600}
+.he .hb{display:flex; height:22px; border-radius:4px; overflow:hidden; font-family:var(--font-mono); font-size:10.5px}
+.he .hb span{display:flex; align-items:center; justify-content:center; color:#fff; white-space:nowrap; overflow:hidden}
+.he .hb .b{background:var(--lg)} .he .hb .t{background:var(--tie); color:var(--ink)} .he .hb .w{background:var(--sm)}
+.he .pv{font-family:var(--font-mono); font-size:12px; color:var(--ink2); text-align:right}
+.he h5{grid-column:1 / 4; margin:12px 0 2px; font-family:var(--font-mono); font-size:11.5px; letter-spacing:.06em; color:var(--ink3); font-weight:500}
+
+/* ---------- timeline ---------- */
+.tl{display:grid; gap:0}
+.tl-row{display:grid; grid-template-columns:92px minmax(0,1fr) minmax(150px,230px); gap:6px 16px; padding:13px 0; border-bottom:1px solid var(--rule); align-items:start}
+.tl-date{font-family:var(--font-mono); font-size:12px; color:var(--ink3); padding-top:3px}
+.tl-body h4{margin:0 0 3px; font-size:16px}
+.tl-body p{font-size:14.5px; color:var(--ink2); margin:0}
+.tl-code .bar{height:18px}
+.tl-code small{display:block; font-family:var(--font-mono); font-size:10.5px; color:var(--ink3); margin-top:5px; line-height:1.4}
+.tl-row.me-row{background:linear-gradient(90deg, var(--sm-soft), transparent 70%)}
+@media(max-width:640px){ .tl-row{grid-template-columns:1fr} .tl-date{padding-top:0} }
+
+/* ---------- doubts ---------- */
+.doubts{display:grid; gap:10px; margin-top:14px}
+.doubt{background:var(--surf); border:1px solid var(--rule); border-radius:10px; padding:14px 16px 12px; border-left:4px solid var(--rule2)}
+.doubt.hi{border-left-color:var(--risk)} .doubt.md{border-left-color:var(--mid)} .doubt.lo{border-left-color:var(--rule2)}
+.doubt h4{margin:0 0 6px; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; font-size:16px; line-height:1.4}
+.doubt h4 .n{font-family:var(--font-mono); font-size:12px; color:var(--ink3); font-weight:500}
+.doubt p{font-size:15px; margin:0 0 6px; max-width:none}
+.doubt p:last-child{margin-bottom:0}
+.doubt .fix{font-size:14px; color:var(--ink2)}
+.doubt .fix b{color:var(--ink)}
+
+.src-list{font-size:14px; color:var(--ink2)}
+.src-list li{margin-bottom:4px}
+footer{border-top:1px solid var(--rule); padding-top:18px; font-size:13px; color:var(--ink3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">
+    <span>arXiv 2609.30096 · v1</span><span>NVIDIA</span><span>2026-09-24</span><span>免训练推理加速</span><span>未放代码</span>
+    <a href="https://arxiv.org/abs/2609.30096" target="_blank" rel="noopener">论文 ↗</a>
+  </div>
+  <h1>TRACK：让 <span class="l">14B</span> 和 <span class="s">1.3B</span> 在同一条去噪轨迹上接力</h1>
+  <p class="sub">TRajectory-Aware Capacity routing via top-K · Mustafa Munir, Huy Vu, … , Ali Taghibakhshi, Nima Tajbakhsh（NVIDIA）</p>
+  <p class="thesis">同一家族的大、小视频扩散模型共用一个 latent 空间，所以采样时每一步都可以换人。TRACK 先离线跑一遍<b>纯大模型</b>的轨迹，在每一步把同一个带噪 latent 同时喂给大、小两个模型，记下它们的预测差了多少；再把<b>差得最少的 K 步</b>固定交给小模型。推理时每步只跑一个模型，不训练，不改调度器。</p>
+
+  <div class="codes" id="hero-codes" aria-label="四条管线上 TRACK 的实际调度"></div>
+  <div class="legend">
+    <span><i class="sw"></i>大模型步</span><span><i class="sw s"></i>小模型步</span>
+    <span class="meT">Wan 行由 Fig. 4A 的绿线确认；其余三行是按论文的 top-K 规则，用 Fig. 7 的分歧曲线推出来的（论文没有列出具体步号）</span>
+  </div>
+
+  <div class="statstrip">
+    <div><b>1.95×</b><span>Wan 2.1 · 50 步里 30 步给 1.3B</span></div>
+    <div><b>2.04–2.73×</b><span>Cosmos 3 · Super 配 Nano / Edge · 35 步里 24 步</span></div>
+    <div><b>2.69× / 2.17×</b><span>TurboDiffusion 4 步里 3 步 / FastVideo 3 步里 2 步</span></div>
+    <div><b>45–60%</b><span>单卡 A100 去噪能耗下降（附录 Table 3）</span></div>
+    <div><b>0</b><span>训练 · 改权重 · 改调度器 · 在线双模型评估</span></div>
+  </div>
+</header>
+
+<nav class="toc" id="toc" aria-label="目录">
+  <a href="#s1">1 结论先行</a><a href="#s2">2 接力的前提</a><a href="#s3">3 分歧分数</a><a href="#s4">4 优化=排序</a><a href="#s5">5 步≠噪声</a><a href="#s6">6 加速账本</a><a href="#s7">7 频率分解</a><a href="#s8">8 实验逐项读</a><a href="#s9">9 前人工作</a><a href="#s10">10 存疑</a><a href="#s11">11 收尾</a>
+</nav>
+
+<!-- =============================== 1 =============================== -->
+<section id="s1">
+  <h2><span class="no">§1</span>结论先行</h2>
+  <p class="lede">方法本身很短：一张离线测出来的"每步分歧表"，排个序，取前 K 个。值得花时间的是它在四条管线上最后选出了什么，以及实验能不能撑住"比单向交接更好"这个主张。</p>
+
+  <p><b>一句话：</b>对每条标定 prompt，只用大模型 <span class="L">L</span> 走完整条去噪轨迹；每一步在调度器更新之前，把同一个 <i>x</i><sub>t</sub>、同一个时间步、同一组条件和 CFG 系数分别喂给 <span class="L">L</span> 和小模型 <span class="S">S</span>，算 ‖p<sub>S</sub>−p<sub>L</sub>‖ / ‖p<sub>L</sub>‖；对 prompt 取平均得到每步分数 q<sub>k</sub>，最小的 K 步永久分给 <span class="S">S</span>。</p>
+
+  <div class="verdict">
+    <div>
+      <h4><span class="dot"></span>站得住的</h4>
+      <ul>
+        <li>数字内部自洽：由加速比反推的"小/大单步耗时比"在 0.16–0.26 之间，Wan 那一对是 0.188，和 SRDiffusion 在 A800 上实测的 158 s / 841 s = 0.188 一致；能耗表的加减和百分比逐项都对。</li>
+        <li>Wan 2.1 上，同样 30 步给小模型，"最后 2 步换回大模型"比"一交接到底"(Last-K) 在 4 项一致性指标上平均高 0.35 分，多样性也略高。</li>
+        <li>蒸馏的 3 步 FastVideo：只让 14B 跑第 1 步，后 2 步给 1.3B，4 项均值不降反升（97.34 vs 97.27）。</li>
+      </ul>
+    </div>
+    <div>
+      <h4><span class="dot r"></span>最该存疑的</h4>
+      <ul>
+        <li>和 FlowBlending（2512.24724，2025-12）几乎同一件事：同一对 Wan 2.1 模型、同样的"大-小-大"结构、同样用大小模型速度预测的差异定边界。TRACK 没有引用它。</li>
+        <li>"能切回大模型"是相对 SRDiffusion 的主要卖点，但按论文自己的曲线，Cosmos 3、TurboDiffusion、FastVideo 三条管线选出来的就是 Last-K，也就是固定切换点的单向交接。</li>
+        <li>和 SRDiffusion 的比较没有对齐预算：SRDiffusion 原文在同一设置下是 2.84–3.21×，TRACK 是 1.95×。</li>
+        <li>只报 4 项 VBench 时间一致性指标，这几项几乎分不出 14B 和 1.3B。</li>
+      </ul>
+    </div>
+    <div>
+      <h4><span class="dot m"></span>我的定位</h4>
+      <ul>
+        <li>把"大小模型分段接力"自动化成离线选步的工程版本。在 Wan 上的结论与 FlowBlending 的 LSL 一致；新增的是更多管线（含 3/4 步蒸馏模型）、能耗和多样性测量。</li>
+        <li>对交互式世界模型的启发主要来自少步结果：每个 chunk 的第 1 个去噪步用大模型、其余用小模型，可能是便宜的提速手段。代价是两个模型要同时驻留显存。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- =============================== 2 =============================== -->
+<section id="s2">
+  <h2><span class="no">§2</span>接力的前提：只换"谁来给预测"</h2>
+  <p class="lede">论文 §3.1。大、小模型要能在同一条轨迹里互换，靠的是同一家族共享的四样东西：VAE 的 latent 空间、文本编码器和条件接口、预测目标、调度器的语义。</p>
+
+  <p>采样时，第 <i>i</i> 步的带噪 latent 是 <i>x</i><sub>t<sub>i</sub></sub> ∈ ℝ<sup>C×F×H×W</sup>，时间步从 t<sub>0</sub> 递减到 t<sub>N−1</sub>。任一模型 m ∈ {<span class="L">L</span>, <span class="S">S</span>} 给出带 CFG 的预测：</p>
+  <div class="eq"><span class="tag">Eq. 1</span>
+    p<sub>m</sub>(<i>x</i><sub>t<sub>i</sub></sub>, t<sub>i</sub>) = f<sub>m</sub>(<i>x</i>, t, ∅) + <i>w</i> · ( f<sub>m</sub>(<i>x</i>, t, τ) − f<sub>m</sub>(<i>x</i>, t, ∅) )
+    <small>τ 是 prompt 条件，∅ 是负向（空）条件，<i>w</i> 是 guidance 系数。两个模型用同一个 <i>w</i>。</small>
+  </div>
+  <div class="eq"><span class="tag">Eq. 2–3</span>
+    <i>x</i><sub>t<sub>i+1</sub></sub> = 𝒮( <i>x</i><sub>t<sub>i</sub></sub>, p<sub>π(i)</sub>(<i>x</i><sub>t<sub>i</sub></sub>, t<sub>i</sub>), t<sub>i</sub>, h<sub>i</sub> )，&nbsp; π : {0,…,N−1} → {<span class="l">L</span>, <span class="s">S</span>}
+    <small>𝒮 是调度器（Wan 默认 UniPC），h<sub>i</sub> 是多步求解器需要的历史。TRACK 不动时间步序列、预测目标、调度器和它的状态演化，只改 p 由谁提供。总去噪成本约为 Σ<sub>i</sub> C<sub>π(i)</sub>。</small>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 760 236" role="img" aria-label="单步接力：同一个 latent 进来，由策略 π(i) 决定走大模型还是小模型，产出的预测交给同一个调度器，得到下一步的 latent">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        <marker id="arL" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--lg)"/></marker>
+        <marker id="arS" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--sm)"/></marker>
+      </defs>
+      <g style="color:var(--ink2)">
+        <rect x="16" y="88" width="98" height="48" rx="8" fill="var(--surf2)" stroke="var(--rule2)"/>
+        <text x="65" y="117" text-anchor="middle" class="dia">x_t(i)</text>
+        <line x1="114" y1="112" x2="134" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+        <circle cx="160" cy="112" r="24" fill="var(--surf2)" stroke="var(--me)" stroke-width="1.5"/>
+        <text x="160" y="116" text-anchor="middle" class="dia">π(i)</text>
+        <text x="160" y="160" text-anchor="middle" class="dia2">离线查表</text>
+        <path d="M178 96 L222 52" fill="none" stroke="var(--lg)" stroke-width="1.8" marker-end="url(#arL)"/>
+        <path d="M178 128 L222 172" fill="none" stroke="var(--sm)" stroke-width="1.8" marker-end="url(#arS)"/>
+        <text x="206" y="80" class="dia2" text-anchor="end">L</text>
+        <text x="206" y="152" class="dia2" text-anchor="end">S</text>
+        <rect x="226" y="26" width="178" height="52" rx="8" fill="var(--lg-soft)" stroke="var(--lg)"/>
+        <text x="315" y="49" text-anchor="middle" class="diaL">大模型 L · 14B</text>
+        <text x="315" y="67" text-anchor="middle" class="dia2">单步耗时 1.00</text>
+        <rect x="226" y="146" width="178" height="52" rx="8" fill="var(--sm-soft)" stroke="var(--sm)"/>
+        <text x="315" y="169" text-anchor="middle" class="diaS">小模型 S · 1.3B</text>
+        <text x="315" y="187" text-anchor="middle" class="dia2">单步耗时 ≈ 0.19</text>
+        <path d="M404 52 L452 100" fill="none" stroke="var(--lg)" stroke-width="1.8" marker-end="url(#arL)"/>
+        <path d="M404 172 L452 124" fill="none" stroke="var(--sm)" stroke-width="1.8" marker-end="url(#arS)"/>
+        <rect x="456" y="88" width="122" height="48" rx="8" fill="var(--surf2)" stroke="var(--rule2)"/>
+        <text x="517" y="109" text-anchor="middle" class="dia">p(x, t)</text>
+        <text x="517" y="126" text-anchor="middle" class="dia2">CFG 后的预测</text>
+        <line x1="578" y1="112" x2="606" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+        <rect x="610" y="88" width="134" height="48" rx="8" fill="var(--surf2)" stroke="var(--rule2)"/>
+        <text x="677" y="109" text-anchor="middle" class="dia">调度器 𝒮</text>
+        <text x="677" y="126" text-anchor="middle" class="dia2">UniPC · 历史 h</text>
+        <path d="M677 136 L677 220 L65 220 L65 140" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#ar)"/>
+        <text x="371" y="214" text-anchor="middle" class="dia2">x_t(i+1)，进入下一步</text>
+      </g>
+    </svg>
+    <figcaption>每一步只有一条彩色路径真正执行。π(i) 在推理前就定好了，所以推理时没有任何额外判断，也不需要同时跑两个模型。1.00 和 0.19 是我由 Wan 的 1.95× 反推的相对单步耗时（见 §6）。</figcaption>
+  </figure>
+
+  <p>这一节有两点要记住。第一，替换发生在"模型输出"这一层，调度器照常把预测变成下一步 latent，所以任何共享 latent 空间的模型对都能用，内部结构和参数量可以完全不同。第二，多步求解器（UniPC）会用前几步的预测做外推；在切换边界上，历史里混着另一个模型的输出。论文只说"保留调度器状态"，没有讨论这一点的影响。</p>
+</section>
+
+<!-- =============================== 3 =============================== -->
+<section id="s3">
+  <h2><span class="no">§3</span>标定：怎么找出"可以换人"的步</h2>
+  <p class="lede">论文 §3.2。整个方法唯一需要"测"的东西就是一张 N 格的分歧表，下面的交互图可以在四条管线上直接拖 K。</p>
+
+  <figure>
+    <svg viewBox="0 0 760 250" role="img" aria-label="标定流程：沿纯大模型轨迹前进，在第 k 步用同一个 latent 同时探测大、小模型，算相对 L2 差，再对 M 条 prompt 平均得到 q_k，排序取最小的 K 步">
+      <g style="color:var(--ink2)">
+        <text x="744" y="22" class="dia2" text-anchor="end">参考轨迹：只用 L 前进（每条标定 prompt 各一条）</text>
+        <line x1="40" y1="52" x2="720" y2="52" stroke="var(--lg)" stroke-width="2"/>
+        <g>
+          <circle cx="40" cy="52" r="9" fill="var(--surf2)" stroke="var(--lg)" stroke-width="1.5"/>
+          <circle cx="150" cy="52" r="9" fill="var(--surf2)" stroke="var(--lg)" stroke-width="1.5"/>
+          <circle cx="300" cy="52" r="12" fill="var(--me-soft)" stroke="var(--me)" stroke-width="2"/>
+          <circle cx="450" cy="52" r="9" fill="var(--surf2)" stroke="var(--lg)" stroke-width="1.5"/>
+          <circle cx="600" cy="52" r="9" fill="var(--surf2)" stroke="var(--lg)" stroke-width="1.5"/>
+          <circle cx="720" cy="52" r="9" fill="var(--surf2)" stroke="var(--lg)" stroke-width="1.5"/>
+        </g>
+        <text x="40" y="80" text-anchor="middle" class="dia2">x_t0</text>
+        <text x="150" y="80" text-anchor="middle" class="dia2">…</text>
+        <text x="300" y="36" text-anchor="middle" class="dia" style="fill:var(--me-ink)">x_tk（第 k 步）</text>
+        <text x="450" y="80" text-anchor="middle" class="dia2">x_tk+1</text>
+        <text x="600" y="80" text-anchor="middle" class="dia2">…</text>
+        <text x="720" y="80" text-anchor="middle" class="dia2">x_tN</text>
+        <path d="M292 62 L252 104" fill="none" stroke="var(--lg)" stroke-width="1.6" marker-end="url(#arL)"/>
+        <path d="M308 62 L348 104" fill="none" stroke="var(--sm)" stroke-width="1.6" marker-end="url(#arS)"/>
+        <text x="240" y="88" text-anchor="end" class="dia2">同一个 x、t、条件、w</text>
+        <rect x="186" y="108" width="100" height="36" rx="7" fill="var(--lg-soft)" stroke="var(--lg)"/>
+        <text x="236" y="131" text-anchor="middle" class="diaL">p_L</text>
+        <rect x="314" y="108" width="100" height="36" rx="7" fill="var(--sm-soft)" stroke="var(--sm)"/>
+        <text x="364" y="131" text-anchor="middle" class="diaS">p_S</text>
+        <path d="M286 118 C 380 118, 420 76, 444 60" fill="none" stroke="var(--lg)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arL)"/>
+        <text x="452" y="104" class="dia2">只有 p_L 推进轨迹</text>
+        <path d="M236 144 L280 180" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+        <path d="M364 144 L320 180" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+        <rect x="222" y="184" width="156" height="48" rx="8" fill="var(--surf2)" stroke="var(--rule2)"/>
+        <text x="300" y="204" text-anchor="middle" class="dia">r_jk = ‖p_S−p_L‖/‖p_L‖</text>
+        <text x="300" y="222" text-anchor="middle" class="dia2">Eq. 4 · 相对 L2</text>
+        <line x1="378" y1="208" x2="426" y2="208" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+        <rect x="430" y="184" width="138" height="48" rx="8" fill="var(--surf2)" stroke="var(--rule2)"/>
+        <text x="499" y="204" text-anchor="middle" class="dia">q_k = mean_j r_jk</text>
+        <text x="499" y="222" text-anchor="middle" class="dia2">Eq. 5 · M 条 prompt</text>
+        <line x1="568" y1="208" x2="604" y2="208" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+        <rect x="608" y="184" width="136" height="48" rx="8" fill="var(--sm-soft)" stroke="var(--sm)"/>
+        <text x="676" y="204" text-anchor="middle" class="dia">最小的 K 个 q_k</text>
+        <text x="676" y="222" text-anchor="middle" class="dia2">→ 交给 S，得 π</text>
+      </g>
+    </svg>
+    <figcaption>标定时每一步多跑一次小模型；小模型的预测只用来打分，从不推进轨迹。所以每个 q<sub>k</sub> 都是在"纯大模型会走到的地方"测的。</figcaption>
+  </figure>
+
+  <div class="eq"><span class="tag">Eq. 4–5</span>
+    r<sub>j,k</sub> = <span class="frac"><span>‖ p<sub><span class="s">S</span></sub>(<i>x</i><sup>(j)</sup><sub>t<sub>k</sub></sub>, t<sub>k</sub>) − p<sub><span class="l">L</span></sub>(<i>x</i><sup>(j)</sup><sub>t<sub>k</sub></sub>, t<sub>k</sub>) ‖<sub>2</sub></span><span>max( ‖ p<sub><span class="l">L</span></sub>(<i>x</i><sup>(j)</sup><sub>t<sub>k</sub></sub>, t<sub>k</sub>) ‖<sub>2</sub> , ε )</span></span>，&nbsp;&nbsp; q<sub>k</sub> = <span class="frac"><span>1</span><span>M</span></span> Σ<sub>j=1..M</sub> r<sub>j,k</sub>
+    <small>j 是标定 prompt，k 是去噪步。分母用大模型预测的范数做归一化，ε 防止除零。q<sub>k</sub> 越小，这一步越"可以换人"。</small>
+  </div>
+
+  <p>用人话说：在每一步问一次"如果这里让小模型来，它给出的方向和大模型差多少（按大模型自己的幅度算百分比）"。Wan 2.1 上，这个百分比在开头约 31%，到第 38 步附近降到 12.8% 的最低点，最后两步又冲回 20% 以上。即使在最好的那几步，1.3B 的预测也和 14B 差十几个百分点，所以这个分数的绝对值没有"安全线"的含义，它只用来排序。</p>
+
+  <div class="panel" id="explorer">
+    <div class="panel-h"><h4>分歧曲线 × top-K 实验台</h4><span class="src">曲线：Fig. 4A / Fig. 7 像素级读数（±0.003）· 质量点：Fig. 6 / Table 1</span></div>
+    <div class="ctrls">
+      <div class="seg" id="ex-pipe" role="group" aria-label="选择管线">
+        <button type="button" data-p="wan" aria-pressed="true">Wan 2.1 · 50 步</button>
+        <button type="button" data-p="cos" aria-pressed="false">Cosmos 3 · 35 步</button>
+        <button type="button" data-p="turbo" aria-pressed="false">TurboDiffusion · 4 步</button>
+        <button type="button" data-p="fv" aria-pressed="false">FastVideo · 3 步</button>
+      </div>
+      <div class="seg" id="ex-view" role="group" aria-label="视图">
+        <button type="button" data-v="step" aria-pressed="true">按步序</button>
+        <button type="button" data-v="sort" aria-pressed="false">按分数排序（Eq. 7 视角）</button>
+      </div>
+    </div>
+    <div class="ctrls">
+      <label class="slider" for="ex-k">给小模型的步数 K <input type="range" id="ex-k" min="0" max="50" step="1" value="30"><output id="ex-kout">30</output></label>
+      <button type="button" class="btn" id="ex-paperk">跳到论文的 K</button>
+    </div>
+    <div class="scroll-x"><svg id="ex-svg" viewBox="0 0 720 260" role="img" aria-label="每步分歧分数与被选中交给小模型的步"></svg></div>
+    <div class="bar" id="ex-bar" style="margin-top:6px"></div>
+    <div class="readout" id="ex-read"></div>
+    <p class="tnote" id="ex-note"></p>
+  </div>
+
+  <p>拖一拖就能看到本页最重要的观察：<b>top-K 在四条管线上选出的小模型步，永远是一个连续区间。</b>Wan 的曲线是 U 形，最后两步分歧高，所以 K=30 时得到"大 18 · 小 30 · 大 2"。Cosmos 3 的曲线也是 U 形，但末端只回升到 0.29，远低于开头的 0.43–0.57，所以 K=24 选中的是最后 24 步，和 Last-K 完全一样。TurboDiffusion 和 FastVideo 的分歧从第 1 步起单调下降，任何 K 都等于 Last-K。论文说 TRACK 能产生"连续和非连续"的调度，并把"能切回大模型"作为相对 SRDiffusion 的优势；在它自己的四个实验里，非连续从未出现，切回也只在 Wan 上出现。</p>
+</section>
+
+<!-- =============================== 4 =============================== -->
+<section id="s4">
+  <h2><span class="no">§4</span>"约束轨迹偏离最小化"其实就是排序</h2>
+  <p class="lede">论文把选步写成了一个带盒约束的优化问题。它的解一眼就能看出来，这一节把它翻译成人话。</p>
+
+  <div class="eq"><span class="tag">Eq. 6</span>
+    arg min<sub>β<sub>0</sub>,…,β<sub>N−1</sub> ∈ [0,1]</sub> &nbsp;Σ<sub>k</sub> ( W<sub>k</sub> − C<sub>0</sub> ) β<sub>k</sub>，&nbsp;&nbsp; W<sub>k</sub> = q<sub>k</sub><sup>2</sup>
+    <small>β<sub>k</sub>=1 表示第 k 步用小模型。W<sub>k</sub> 是"用小模型的代价"，C<sub>0</sub> 是每用一次小模型换来的收益（论文举例：某硬件上的延迟）。</small>
+  </div>
+  <div class="eq"><span class="tag">Eq. 7</span>
+    β<sub>k</sub><sup>⋆</sup> = 1 &nbsp;若 W<sub>k</sub> &lt; C<sub>0</sub>；&nbsp; β<sub>k</sub><sup>⋆</sup> = 0 &nbsp;若 W<sub>k</sub> &gt; C<sub>0</sub>
+    <small>目标对每个 β<sub>k</sub> 是线性的、互不相干，所以每一步单独决定：代价低于门槛就换。把 C<sub>0</sub> 放在第 K 小和第 K+1 小的 W 之间，恰好选中 K 步。</small>
+  </div>
+
+  <p>三点说明，都可以在上面实验台的"按分数排序"视图里看到：</p>
+  <ol>
+    <li><b>平方不影响结果。</b>q ≥ 0 时，按 q<sup>2</sup> 排序和按 q 排序是同一个顺序。</li>
+    <li><b>C<sub>0</sub> 其实由 K 反推。</b>W 的单位是"相对误差的平方"，C<sub>0</sub> 的单位是延迟，两者没有换算关系，所以实际操作是先定 K 再说 C<sub>0</sub> 在哪。论文自己也写了"指定 C<sub>0</sub> 等价于指定 K"。</li>
+    <li><b>可加性是假设。</b>把总代价写成 Σ W<sub>k</sub>β<sub>k</sub>，等于假定各步误差独立、直接相加，不考虑前面换人会不会放大或抵消后面的偏差。§8.3 的 Table 2 恰好给了反例：先小后大的 First-K 在 flicker 和 motion 上比全程用小模型还差。</li>
+  </ol>
+  <p>所以这一节的数学本身没有错，只是名字（Constrained Trajectory Divergence Minimization）比内容大。它不产生排序以外的任何信息。</p>
+</section>
+
+<!-- =============================== 5 =============================== -->
+<section id="s5">
+  <h2><span class="no">§5</span>"中间 30 步"不等于"中间的噪声段"<span class="chip me" style="margin-left:10px">本页补充分析</span></h2>
+  <p class="lede">论文全程按"步序号"讨论。Wan 用的是带 shift 的 flow-matching 时间表，步序号和噪声水平之间是非线性的，这会改变我们对"谁干了多少活"的理解。</p>
+
+  <p>Wan 2.1 文生视频的官方默认是 50 步、UniPC、<code>sample_shift=5</code>（官方 <code>generate.py</code>；论文没写它用的 shift）。噪声水平 σ 从 1 走到 0，shift 把均匀的步重新分配：σ′ = sσ / (1 + (s−1)σ)。s=5 时，开头的步很碎，末尾的步很大，末步走的 Δσ′ 约是首步的 25 倍。下图把同一个调度分别按"步数"和按"走过的噪声路程"画出来。</p>
+
+  <div class="panel" id="shiftw">
+    <div class="panel-h"><h4>同一条调度，两种量法</h4><span class="src">σ′ 按 σ 均匀 50 等分再 shift 计算，近似 UniPC 的时间表</span></div>
+    <div class="ctrls">
+      <div class="seg" id="sh-s" role="group" aria-label="shift 值">
+        <button type="button" data-s="1" aria-pressed="false">shift 1</button>
+        <button type="button" data-s="3" aria-pressed="false">shift 3</button>
+        <button type="button" data-s="5" aria-pressed="true">shift 5（默认）</button>
+        <button type="button" data-s="8" aria-pressed="false">shift 8</button>
+      </div>
+      <div class="seg" id="sh-p" role="group" aria-label="调度">
+        <button type="button" data-q="track" aria-pressed="true">TRACK（K=30）</button>
+        <button type="button" data-q="last" aria-pressed="false">Last-K</button>
+        <button type="button" data-q="first" aria-pressed="false">First-K</button>
+        <button type="button" data-q="dw" aria-pressed="false">按 Δσ′ 加权后再取 top-30</button>
+      </div>
+    </div>
+    <div class="scroll-x"><svg id="sh-svg" viewBox="0 0 720 164" role="img" aria-label="按步序和按噪声路程两种刻度下的大小模型分工"></svg></div>
+    <div class="readout" id="sh-read"></div>
+  </div>
+
+  <p>在默认的 shift 5 下，TRACK 的"大 18 · 小 30 · 大 2"换成噪声路程是：前 18 个大模型步只把 σ′ 从 1.00 降到 0.90（10% 的路程），小模型走完 0.90 → 0.17（73%），最后 2 个大模型步走完剩下的 17%。所以"大模型开头收尾"的真实含义是：大模型只负责最高噪声的那一小段和最后的大步收尾，中间的大部分去噪是 1.3B 做的。</p>
+
+  <div class="note"><b>一个反事实：把步长算进分数会怎样？</b> 论文的分数是预测层面的相对误差，不含步长。每步实际挪动 latent 的量，一阶近似是 Δσ′<sub>k</sub> × ‖p<sub>S</sub>−p<sub>L</sub>‖。把 q<sub>k</sub> 乘上 Δσ′<sub>k</sub> 再取最小的 30 步（上图最后一个按钮），shift ≥ 3 时选出来的就是第 0–29 步，也就是 First-K，而 First-K 在论文 Table 2 里最差。这说明"这一步的局部偏差有多大"并不能直接代表"这一步换人对最终视频伤害多大"：开头的小偏差会被放大成布局差异，末尾的大步偏差反而容易被看成细节差异。TRACK 的分数恰好选出了好调度，但论文没有论证为什么该用这个归一化，也没有做"只替换第 k 步、测最终视频变化"这类直接验证。</div>
+</section>
+
+<!-- =============================== 6 =============================== -->
+<section id="s6">
+  <h2><span class="no">§6</span>加速账本：用论文自己的数字反推单步耗时</h2>
+  <p class="lede">论文没有给出每个模型的单步耗时，但只要有 N、K 和加速比，就能解出小/大单步耗时比 r。反推出来的 r 能和外部数据对上，是这篇论文数字可信的主要依据。</p>
+
+  <div class="eq"><span class="tag">成本模型</span>
+    加速比 = <span class="frac"><span>N</span><span>(N − K) + K · r</span></span>，&nbsp;&nbsp; r = C<sub><span class="s">S</span></sub> / C<sub><span class="l">L</span></sub>，&nbsp;&nbsp; 上限（全用小模型）= 1 / r
+    <small>忽略文本编码、VAE 解码和调度器本身的开销，这与论文 §3.1 的口径一致。</small>
+  </div>
+
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>管线</th><th>N</th><th>K</th><th>报告加速</th><th>反推 r</th><th>全小模型上限</th><th>参数量比</th><th>外部核对</th></tr></thead>
+      <tbody>
+        <tr><td class="name">Wan 2.1 14B / 1.3B</td><td>50</td><td>30</td><td>1.95×</td><td class="me">0.188</td><td class="me">5.32×</td><td>0.093</td><td style="text-align:left">SRDiffusion 在 A800 上实测 158 s / 841 s = <b>0.188</b></td></tr>
+        <tr><td class="name">Cosmos 3 Super / Nano</td><td>35</td><td>24</td><td>2.04×</td><td class="me">0.257</td><td class="me">3.90×</td><td>16B / 64B = 0.25</td><td style="text-align:left">与参数比吻合</td></tr>
+        <tr><td class="name">Cosmos 3 Super / Edge</td><td>35</td><td>24</td><td>2.73×</td><td class="me">0.076</td><td class="me">13.2×</td><td>4B / 64B = 0.063</td><td style="text-align:left">与参数比吻合</td></tr>
+        <tr><td class="name">TurboDiffusion 14B / 1.3B</td><td>4</td><td>3</td><td>2.69×</td><td class="me">0.162</td><td class="me">6.16×</td><td>0.093</td><td style="text-align:left" class="bad">能耗表用的是 K=2，见下</td></tr>
+        <tr><td class="name">FastVideo 14B / 1.3B</td><td>3</td><td>2</td><td>2.17×</td><td class="me">0.191</td><td class="me">5.23×</td><td>0.093</td><td style="text-align:left">与 Wan 一致</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tnote">Cosmos 3 参数量取自 NVIDIA 模型卡：Super 64B（32B reasoner + 32B generator），Nano 16B，Edge 4B。1.3B 相对 14B 的时间比（0.19）高于参数比（0.09），因为小模型的 GPU 利用率更低、注意力开销占比更大，这是正常的。</p>
+
+  <h3>能耗表（附录 Table 3）逐行核对</h3>
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>管线</th><th>表中 K/N</th><th>基线 kJ</th><th>TRACK kJ</th><th>节省</th><th>每千条 kWh</th><th>能耗比折算的"加速"</th><th>按 r 预测的节省</th></tr></thead>
+      <tbody>
+        <tr><td class="name">TurboDiffusion</td><td class="bad">2/4</td><td>8.31</td><td>4.52</td><td>45.6%</td><td>1.05</td><td class="me">1.84×</td><td class="me">K=2: 42% · K=3: 63%</td></tr>
+        <tr><td class="name">FastVideo</td><td>2/3</td><td>9.44</td><td>4.30</td><td>54.4%</td><td>1.43</td><td class="me">2.20×</td><td class="me">54%</td></tr>
+        <tr><td class="name">Cosmos 3 S/N</td><td>24/35</td><td>204.22</td><td>97.07</td><td>52.5%</td><td>29.77</td><td class="me">2.10×</td><td class="me">51%</td></tr>
+        <tr><td class="name">Cosmos 3 S/E</td><td>24/35</td><td>213.40</td><td>85.93</td><td>59.7%</td><td>35.41</td><td class="me">2.48×</td><td class="me">63%</td></tr>
+        <tr><td class="name">Wan 2.1</td><td>30/50</td><td>394.43</td><td>199.86</td><td>49.3%</td><td>54.05</td><td class="me">1.97×</td><td class="me">49%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tnote">"节省"和"每千条 kWh"是论文的数，我逐项复算都对（例如 194.57 kJ × 1000 / 3600 = 54.05 kWh）。</p>
+  <p>两处要注意。<b>一是 TurboDiffusion 的 K 前后不一</b>：主表 Table 1 是 3/4 步给小模型、2.69×；能耗表写的是 2/4，45.6% 的节省也只和 K=2 对得上（K=3 应省约 63%）。§8.3 会看到，按 Fig. 6，K=2 才是 TurboDiffusion 质量最高的点。<b>二是 Cosmos 3 的测量条件</b>：附录说所有能耗都在单张 A100 上测，而 Cosmos3-Super 的官方模型卡是 64B、只测过 BF16、推荐多卡张量并行，权重本身就超过 80 GB，还要和 Nano 或 Edge 同时驻留。论文没说是否用了 CPU offload 或量化，这会直接改变时间和能耗的数值。同一个全 Super 基线在两行里分别测出 204.22 和 213.40 kJ，相差 4.5%，也说明测量噪声不小。</p>
+
+  <div class="note"><b>标定成本，论文没报。</b>每条标定 prompt 相当于跑一次全大模型再加每步一次小模型，约 (1 + r) ≈ 1.19 次全 14B 生成。Fig. 4 的曲线用了 150 条 prompt，约等于 178 次全 14B 生成；按 SRDiffusion 报告的 A800 上 841 s/条，量级是 40 GPU·小时。它只需做一次，但换了分辨率、步数、shift、CFG 系数之后都应重做。</div>
+</section>
+
+<!-- =============================== 7 =============================== -->
+<section id="s7">
+  <h2><span class="no">§7</span>频率分解：分歧从低频移到高频</h2>
+  <p class="lede">论文 §4.4 和附录 B。把 p<sub>S</sub>−p<sub>L</sub> 用正交傅里叶变换拆成空间（H、W）和 latent 时间轴（F）上的低、中、高三段，各自算分数。</p>
+
+  <div class="panel">
+    <div class="panel-h"><h4>Wan 2.1 · 各频带分歧（Fig. 4B / 4C 像素读数，±0.01）</h4><span class="src">阴影 = TRACK K=30 交给小模型的第 18–47 步</span></div>
+    <div class="scroll-x"><svg id="fq-svg" viewBox="0 0 720 250" role="img" aria-label="空间与时间频带的分歧曲线：开头低频主导，末尾中高频上升"></svg></div>
+    <div class="legend"><span><i class="sw" style="background:var(--lo)"></i>低频（时间轴含静态分量）</span><span><i class="sw" style="background:var(--mi)"></i>中频</span><span><i class="sw" style="background:var(--hi)"></i>高频</span></div>
+  </div>
+
+  <p>人话版：开头两个模型对"画面里有什么、放在哪、镜头往哪走"意见不同，差异集中在低频；收尾时它们对纹理、边缘这类细节意见不同，差异移到中高频；中段大结构已经定了，细节还没开始画，两个模型都差不多。这和扩散模型"先粗后细"的常识一致。附录里 Cosmos 3 是同样的 U 形；TurboDiffusion 和 FastVideo 的分歧从第 1 步单调下降，每一步都是低频主导。</p>
+  <p>我的三点补充：</p>
+  <ul>
+    <li><b>开头高频一致几乎是必然的。</b>σ≈1 时速度 v = ε − x<sub>0</sub> 的高频部分主要来自噪声 ε，而 x<sub>t</sub>≈ε，两个模型都"看得见"它，差异自然小。</li>
+    <li><b>每个频带是各自归一化的</b>，数值不能跨频带比大小：TurboDiffusion 第 0 步低频带分数约 1.1，比标量总分 0.58 还大。频带的切分阈值也没有给。</li>
+    <li><b>这套分析只用来解释曲线形状</b>，没有进入选步策略。</li>
+  </ul>
+</section>
+
+<!-- =============================== 8 =============================== -->
+<section id="s8">
+  <h2><span class="no">§8</span>实验逐项读</h2>
+  <p class="lede">设置：四条管线都生成 81 帧、480×832；质量看 250 条 prompt（来自 VBench、EvalCrafter、T2V-CompBench 和手写），但只报 4 项 VBench 指标：temporal flicker、motion smoothness、subject consistency（DINO ViT-B/16）、background consistency。多样性用 DreamSim 两两距离（10 条 prompt × 8 个 seed）。人评每条管线 30 条 prompt × 5 人。</p>
+
+  <h3>8.1 主表（Table 1）加上均值</h3>
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>管线 · 配置</th><th>小模型步</th><th>加速</th><th>Flicker</th><th>Motion</th><th>Subject</th><th>Background</th><th>4 项均值</th><th>Δ 均值</th></tr></thead>
+      <tbody>
+        <tr class="base"><td>Wan 2.1 全大（14B）</td><td>0/50</td><td>1.00×</td><td>96.71</td><td>98.31</td><td>94.62</td><td>94.79</td><td class="me">96.11</td><td></td></tr>
+        <tr class="hl"><td class="name">Wan 2.1 TRACK</td><td>30/50</td><td>1.95×</td><td>96.86</td><td>98.39</td><td>94.81</td><td>94.99</td><td class="me">96.26</td><td class="good">+0.15</td></tr>
+        <tr class="base"><td>Cosmos 3 全大（Super）</td><td>0/35</td><td>1.00×</td><td>98.96</td><td>99.41</td><td>96.77</td><td>95.39</td><td class="me">97.63</td><td></td></tr>
+        <tr class="hl"><td class="name">Cosmos 3 TRACK · Nano</td><td>24/35</td><td>2.04×</td><td>99.06</td><td>99.46</td><td>96.93</td><td>95.55</td><td class="me">97.75</td><td class="good">+0.12</td></tr>
+        <tr class="hl"><td class="name">Cosmos 3 TRACK · Edge</td><td>24/35</td><td>2.73×</td><td>98.33</td><td>98.98</td><td>97.24</td><td>95.04</td><td class="me">97.40</td><td class="bad">−0.23</td></tr>
+        <tr class="base"><td>TurboDiffusion 全大（14B）</td><td>0/4</td><td>1.00×</td><td>97.26</td><td>98.64</td><td>94.10</td><td>93.32</td><td class="me">95.83</td><td></td></tr>
+        <tr class="hl"><td class="name">TurboDiffusion TRACK</td><td>3/4</td><td>2.69×</td><td>96.94</td><td>98.42</td><td>94.10</td><td>93.48</td><td class="me">95.74</td><td class="bad">−0.09</td></tr>
+        <tr class="base"><td>FastVideo 全大（14B）</td><td>0/3</td><td>1.00×</td><td>98.19</td><td>99.15</td><td>95.81</td><td>95.91</td><td class="me">97.27</td><td></td></tr>
+        <tr class="hl"><td class="name">FastVideo TRACK</td><td>2/3</td><td>2.17×</td><td>97.99</td><td>99.12</td><td>96.07</td><td>96.16</td><td class="me">97.34</td><td class="good">+0.07</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tnote">均值和 Δ 是我算的。Fig. 2 只画了 Cosmos 的 Nano 配置（2.04×），没有画均值下降最多的 Edge 配置（2.73×）。</p>
+
+  <h3>8.2 这 4 项指标能分出 14B 和 1.3B 吗？</h3>
+  <p>这是读懂整张表的前提。SRDiffusion 附录转录的 VBench 官方榜单里，Wan 14B 与 1.3B 在这 4 项上几乎一样，temporal flickering 甚至是 1.3B 更高（97.63 vs 96.84）；subject 93.91 vs 93.44，background 97.06 vs 96.55。两者真正拉开差距的是 multiple objects（81.16 vs 77.26）、object class（93.09 vs 90.87）、aesthetic quality（66.9 vs 64.35）这类语义和美学维度，TRACK 一项都没报。论文自己的数据也显示同样的问题：全程用小模型时，4 项均值只比全大模型低 0.41–0.96 分（Fig. 6 和 Table 2）。在这样窄的量程里，"±0.2 分以内"很难说明质量"相当"。</p>
+
+  <h3>8.3 K 扫描（Fig. 6）：挑工作点的依据</h3>
+  <div class="panel">
+    <div class="panel-h"><h4>质量 vs 加速（横轴按 §6 的 r 换算）</h4><span class="src">点 = Fig. 6 读数（±0.01），基线与论文工作点取 Table 1 精确值</span></div>
+    <div class="ctrls">
+      <div class="seg" id="kp-pipe" role="group" aria-label="选择管线">
+        <button type="button" data-p="wan" aria-pressed="true">Wan 2.1</button>
+        <button type="button" data-p="cos" aria-pressed="false">Cosmos 3 (Super/Nano)</button>
+        <button type="button" data-p="turbo" aria-pressed="false">TurboDiffusion</button>
+        <button type="button" data-p="fv" aria-pressed="false">FastVideo</button>
+      </div>
+    </div>
+    <div class="scroll-x"><svg id="kp-svg" viewBox="0 0 720 280" role="img" aria-label="不同 K 下 4 项均值与加速比的关系"></svg></div>
+    <p class="tnote" id="kp-note"></p>
+  </div>
+  <p>三个读数：</p>
+  <ul>
+    <li><b>K 是在评测集上挑的。</b>Table 1 的每个数都和 Fig. 6 上对应的点一致，说明扫描和最终汇报用的是同一批 250 条 prompt。只挑一个整数问题不大，但"标定泛化到整个 benchmark"的说法因此没有独立的留出集支撑。</li>
+    <li><b>"质量相当"的门槛前后不一。</b>附录说 Cosmos 的 K=28 "severely penalizes consistency"，那一点的均值只比基线低 0.12；而 TurboDiffusion 的 K=3（−0.09）和 Cosmos Super/Edge 的 K=24（−0.23）都作为"质量相当"的主结果写进了摘要（2.69× 和 2.73×）。</li>
+    <li><b>如果统一按"不低于基线"来选</b>，TurboDiffusion 应选 K=2，按 r 换算约 1.72×，这也正是能耗表里用的 K。</li>
+  </ul>
+
+  <h3>8.4 同预算策略对比（Table 2 + 附录 Table 4，Wan 2.1，150 条 prompt）</h3>
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>策略</th><th>小模型步</th><th>估算加速</th><th>Flicker</th><th>Motion</th><th>Subject</th><th>Background</th><th>4 项均值</th><th>DreamSim 保持</th></tr></thead>
+      <tbody>
+        <tr class="base"><td>全大模型</td><td>0</td><td>1.00×</td><td>96.30</td><td>98.08</td><td>94.28</td><td>94.95</td><td class="me">95.90</td><td>100.0%</td></tr>
+        <tr><td>全小模型</td><td>50</td><td class="me">5.32×</td><td>96.35</td><td>97.63</td><td>93.83</td><td>94.17</td><td class="me">95.50</td><td>79.4%</td></tr>
+        <tr><td>First-K（≈T-Stitch）</td><td>30</td><td class="me">1.95×</td><td>95.39</td><td>96.90</td><td>93.77</td><td>94.14</td><td class="me">95.05</td><td>84.6%</td></tr>
+        <tr><td>Last-K（≈SRDiffusion 固定切换点）</td><td>30</td><td class="me">1.95×</td><td>96.04</td><td>97.89</td><td>94.05</td><td>94.51</td><td class="me">95.62</td><td>97.8%</td></tr>
+        <tr><td>Random-K</td><td>30</td><td class="me">1.95×</td><td>95.95</td><td>97.55</td><td>93.91</td><td>94.49</td><td class="me">95.48</td><td>85.7%</td></tr>
+        <tr class="hl"><td class="name">TRACK Top-K</td><td>30</td><td class="me">1.95×</td><td>96.47</td><td>98.14</td><td>94.41</td><td>94.88</td><td class="me">95.98</td><td>98.3%</td></tr>
+        <tr><td>SRDiffusion δ=0.03</td><td class="rk">未报告</td><td class="me">≈3.2×</td><td>95.84</td><td>97.57</td><td>93.76</td><td>94.35</td><td class="me">95.38</td><td>87.1%</td></tr>
+        <tr><td>SRDiffusion δ=0.01</td><td class="rk">未报告</td><td class="me">≈2.85×</td><td>95.98</td><td>97.73</td><td>93.94</td><td>94.63</td><td class="me">95.57</td><td>92.6%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tnote">估算加速：K=30 各策略用 r=0.188 换算；SRDiffusion 的两个值取自它原文同一设置（Wan 14B/1.3B、832×480、50 步）下的实测 2.84× 和 3.21×，原文说 δ=0.01 时平均约在第 10 步切换，即约 40 步交给小模型。TRACK 的 Table 4 没有报告 SRDiffusion 的切换步数和速度。</p>
+
+  <div class="panel">
+    <div class="panel-h"><h4>把速度也画上去</h4><span class="src">空心点 = 速度取自 SRDiffusion 原文</span></div>
+    <div class="ctrls">
+      <div class="seg" id="pol-y" role="group" aria-label="纵轴指标">
+        <button type="button" data-y="q" aria-pressed="true">4 项均值</button>
+        <button type="button" data-y="d" aria-pressed="false">DreamSim 多样性保持</button>
+      </div>
+    </div>
+    <div class="scroll-x"><svg id="pol-svg" viewBox="0 0 720 290" role="img" aria-label="各策略的质量或多样性与估算加速比"></svg></div>
+  </div>
+  <p>这张表能读出四件事：</p>
+  <ol>
+    <li><b>谁跑前几步，谁决定多样性。</b>凡是大模型跑开头的（Last-K、TRACK、SRDiffusion）多样性都在 87% 以上；First-K 和全小模型分别只剩 84.6% 和 79.4%。这和论文引用的 [10] 的发现一致。</li>
+    <li><b>TRACK 和 Last-K 只差 4 个步位。</b>同是 30 步给小模型，Last-K 是"大 20 · 小 30"，TRACK 是"大 18 · 小 30 · 大 2"：第 18、19 步 TRACK 给小模型，第 48、49 步 TRACK 给大模型。均值差 0.35、多样性差 0.5 个百分点，全部来自这 4 步。这是论文里"切回大模型有用"唯一的直接证据，而且只在 Wan 上。</li>
+    <li><b>混用本身有代价。</b>First-K、Random-K 的 flicker 和 motion 都比全小模型还低，Last-K 和两档 SRDiffusion 的 flicker 也低于全小模型。在 4 项均值上，全小模型（约 5.3×）高于 First-K、Random-K、SRDiffusion δ=0.03。如果这 4 项能作为"质量相当"的判据，结论应该是"直接用 1.3B"。</li>
+    <li><b>和 SRDiffusion 的比较没对齐预算。</b>拿 1.95× 的 TRACK 去比约 2.85–3.2× 的 SRDiffusion，然后说前者质量更好，并不能说明选步方法更好。可作参考的是 TRACK 自己的 K=40（约 2.85×）：Fig. 6 上 4 项均值比基线低约 0.34，而 SRDiffusion δ=0.01 在 Table 4 里低 0.33。两组 prompt 不同，只能看量级，但至少看不出 TRACK 在同速度下有优势。</li>
+  </ol>
+
+  <h3>8.5 人评（Fig. 3）</h3>
+  <div class="panel">
+    <div class="panel-h"><h4>每条管线 150 次判断（30 prompt × 5 人）</h4><span class="src">百分比读自 Fig. 3；p 为我算的双侧符号检验（剔除平局）</span></div>
+    <div class="he" id="he"></div>
+    <div class="legend"><span><i class="sw"></i>全大模型胜</span><span><i class="sw tie"></i>平局</span><span><i class="sw s"></i>TRACK 胜</span></div>
+  </div>
+  <p>所有差异都不显著（最小 p = 0.18），这支持"看不出差别"，但证据力有限：150 次判断来自 30 条 prompt，同一 prompt 下 5 个人的判断彼此相关，有效样本更接近 30；而且没有"全小模型 vs 全大模型"的对照组，无法知道这套人评能否分辨 14B 和 1.3B。正文还有两处与图不符：把 Wan 视觉质量（全大模型胜 38.0%，TRACK 胜 33.3%）列进"TRACK 持平或略胜"；TurboDiffusion 的 TRACK 胜率正文写 37.7%，图中是 37.3%（56/150）。Cosmos 用的是 Nano 还是 Edge，人评部分没说。</p>
+
+  <h3>8.6 多样性（附录 Table 5）</h3>
+  <div class="scroll-x">
+    <table style="max-width:560px">
+      <thead><tr><th>管线</th><th>基线 DreamSim</th><th>TRACK</th><th>保持率</th></tr></thead>
+      <tbody>
+        <tr><td>FastVideo</td><td>0.271</td><td>0.284</td><td>104.8%</td></tr>
+        <tr><td>TurboDiffusion</td><td>0.607</td><td>0.581</td><td>95.7%</td></tr>
+        <tr><td>Wan 2.1</td><td>0.505</td><td>0.502</td><td>99.4%</td></tr>
+        <tr><td>Cosmos 3</td><td>0.550</td><td>0.548</td><td>99.5%</td></tr>
+        <tr class="base"><td>SDXL（引自 [10]）</td><td>0.337</td><td>0.350</td><td>103.9%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>多样性基本保住，这在预期之内：四条管线的调度都让大模型跑第 1 步。SDXL 那一行来自另一篇论文里"蒸馏模型 + 基模型"的混合，设定不同，只能当背景参考。Table 5 用的 K 没有写明。</p>
+</section>
+
+<!-- =============================== 9 =============================== -->
+<section id="s9">
+  <h2><span class="no">§9</span>与前人工作的关系</h2>
+  <p class="lede">"不同去噪阶段交给不同大小的模型"不是新想法。按时间排开，每一行右侧是该方法的典型调度形状（示意，50 格）。</p>
+
+  <div class="tl">
+    <div class="tl-row">
+      <div class="tl-date">2023-06</div>
+      <div class="tl-body"><h4>OMS-DPM <span class="chip lo">ICML 2023 · TRACK 未引用</span></h4><p>给定一组预训练模型和时间预算，用性能预测器加搜索，为每一步从"模型动物园"里挑一个模型。图像扩散。逐步分配这件事本身它已经做过，而且不限于两个模型。</p></div>
+      <div class="tl-code"><div class="bar" data-code="L4 S6 L3 S12 L2 S15 L3 S5"></div><small>任意逐步组合 · 搜索得到</small></div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-date">2024-02</div>
+      <div class="tl-body"><h4>T-Stitch <span class="chip paper">ICLR 2025 · TRACK 引用</span></h4><p>先小后大，一次交接：小模型跑前段，大模型跑后段。图像 DiT。TRACK 的 First-K 基线对应它。</p></div>
+      <div class="tl-code"><div class="bar" data-code="S30 L20"></div><small>First-K</small></div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-date">2024-08</div>
+      <div class="tl-body"><h4>Hybrid SD <span class="chip lo">TRACK 未引用</span></h4><p>边云协同：云端大模型做前段的语义规划，端侧小模型做后段细化。图像扩散。</p></div>
+      <div class="tl-code"><div class="bar" data-code="L15 S35"></div><small>先大后小</small></div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-date">2025-05</div>
+      <div class="tl-body"><h4>SRDiffusion <span class="chip paper">TRACK 引用</span></h4><p>大模型在高噪声段"打草稿"，小模型在低噪声段"上色"，用 latent 变化率的二阶差分按 prompt 自适应决定切换点（至少 5 步）。Wan 14B/1.3B 上 2.84–3.21×，报了 VBench 16 维和与 14B 输出的 LPIPS/PSNR/SSIM。它自己的消融显示固定切换点和自适应几乎一样。</p></div>
+      <div class="tl-code"><div class="bar" data-code="L10 S40"></div><small>δ=0.01 时平均约第 10 步切换</small></div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-date">2025-12</div>
+      <div class="tl-body"><h4>FlowBlending <span class="chip hi">TRACK 未引用</span></h4><p>大-小-大三段（LSL）：前段大模型定结构和运动，中段小模型，后段大模型修细节。用 DINO 相似度定前边界、FID 定后边界，并计算大小模型速度预测的 cosine / ℓ2 距离随时间步的变化，中段最低。Wan 2.1 14B/1.3B 与 LTX-Video 13B/2B，1.65×，FLOPs 少 57%。</p></div>
+      <div class="tl-code"><div class="bar" data-code="L12 S30 L8"></div><small>LSL · 边界步号为示意</small></div>
+    </div>
+    <div class="tl-row me-row">
+      <div class="tl-date">2026-09</div>
+      <div class="tl-body"><h4>TRACK <span class="chip ok">本文</span></h4><p>离线在纯大模型轨迹上测相对分歧，取最小的 K 步给小模型。Wan 2.1、Cosmos 3、TurboDiffusion、FastVideo，1.95–2.73×；新增能耗与多样性测量。</p></div>
+      <div class="tl-code"><div class="bar" data-code="L18 S30 L2"></div><small>Wan 2.1 · K=30</small></div>
+    </div>
+  </div>
+
+  <p style="margin-top:18px">同一思路在训练侧的版本是 Wan 2.2 的 MoE：高噪声专家和低噪声专家按信噪比切换，两个专家都是 14B，靠分工而不是靠变小来省算力。DDSM（ICLR 2024）则训练一个可伸缩网络，为不同步选不同宽度。和它们相比，TRACK 的定位是"不训练、只用现成的大小两个检查点"，这一点和 SRDiffusion、FlowBlending 相同。</p>
+</section>
+
+<!-- =============================== 10 =============================== -->
+<section id="s10">
+  <h2><span class="no">§10</span>存疑清单</h2>
+  <p class="lede">按严重程度排序。"高"指会改变论文主结论的问题，"中"指缺实验或缺细节，"低"指表述或次要口径问题。每条都给出能核验它的实验。</p>
+  <div class="ctrls">
+    <div class="seg" id="dq-f" role="group" aria-label="按严重程度筛选">
+      <button type="button" data-f="all" aria-pressed="true">全部 18</button>
+      <button type="button" data-f="hi" aria-pressed="false">高 5</button>
+      <button type="button" data-f="md" aria-pressed="false">中 7</button>
+      <button type="button" data-f="lo" aria-pressed="false">低 6</button>
+    </div>
+  </div>
+
+  <div class="doubts" id="doubts">
+    <article class="doubt hi" data-sev="hi">
+      <h4><span class="n">H1</span><span class="chip hi">高</span>与 FlowBlending 几乎是同一件事，且没有引用</h4>
+      <p>FlowBlending（Song 等，Yonsei，arXiv 2512.24724，2025-12-31）在同一对 Wan 2.1 14B/1.3B 上提出大-小-大三段采样，也计算了大小模型速度预测的 cosine 与 ℓ2 距离随时间步的变化，结论同样是中段最低。TRACK 在 Wan 上选出的"大 18 · 小 30 · 大 2"正是这个结构。更早的 OMS-DPM（逐步从多个模型里选）和 Hybrid SD（先大后小）也未被引用。论文把自己定位为"把单次交接推广到逐步分配"，这个定位在文献上不成立。TRACK 实际的增量是：用 top-K 自动定边界，扩展到 Cosmos 3 和两条少步蒸馏管线，测了能耗和多样性。</p>
+      <p class="fix"><b>核验：</b>同一评测协议下，与 FlowBlending 的边界选择直接比较。</p>
+    </article>
+    <article class="doubt hi" data-sev="hi">
+      <h4><span class="n">H2</span><span class="chip hi">高</span>"切回大模型""非连续调度"只在 Wan 上出现</h4>
+      <p>按 Fig. 7 的曲线，Cosmos 3 在 K=24 时 top-K 是第 11–34 步，即最后 24 步（第 10 步分数约 0.43，第 34 步约 0.29，差距远大于读数误差）；TurboDiffusion K=3 是第 1–3 步，FastVideo K=2 是第 1–2 步。这三条都等于 Last-K，也就是切换点固定的单向交接。在四条管线上，小模型步都是一个连续区间。论文对 SRDiffusion 的两条批评（不能切回大模型、只看大模型信号）在 3/4 的管线上不能区分二者。</p>
+      <p class="fix"><b>核验：</b>公布每条管线的具体 π；注明 Fig. 7 的 Cosmos 曲线来自 Nano 还是 Edge。</p>
+    </article>
+    <article class="doubt hi" data-sev="hi">
+      <h4><span class="n">H3</span><span class="chip hi">高</span>与 SRDiffusion 的比较没有对齐预算</h4>
+      <p>附录 Table 4 没有报告 SRDiffusion 的切换步数和速度。SRDiffusion 原文在同一设置（Wan 14B/1.3B、832×480、50 步）下，δ=0.01 平均约第 10 步切换，约 40 步给小模型，2.84×；δ=0.03 为 3.21×。拿 1.95× 的 TRACK 去比，得出"TRACK 更好"不成立。TRACK 自己在 K=40（约 2.85×）时 4 项均值降约 0.34，与 SRDiffusion δ=0.01 的 0.33 相当。</p>
+      <p class="fix"><b>核验：</b>固定 K 或固定实测延迟，比较 TRACK、Last-K、SRDiffusion。</p>
+    </article>
+    <article class="doubt hi" data-sev="hi">
+      <h4><span class="n">H4</span><span class="chip hi">高</span>质量指标几乎分不出 14B 和 1.3B</h4>
+      <p>全文只报 4 项时间一致性指标。VBench 榜单上 Wan 1.3B 的 temporal flickering 反而高于 14B（97.63 vs 96.84），subject、background 只差约 0.5；两者的差距在 multiple objects、object class、aesthetic 等未报告维度。论文 Table 2 里全小模型（约 5.3×）的 4 项均值高于 First-K、Random-K 和 SRDiffusion δ=0.03。没有 dynamic degree，无法排除"画面动得少所以更一致"；也没有与全大模型输出的 LPIPS/PSNR/SSIM，而 SRDiffusion 报了。</p>
+      <p class="fix"><b>核验：</b>完整 VBench 16 维，加与全大模型输出的相似度和动态程度。</p>
+    </article>
+    <article class="doubt hi" data-sev="hi">
+      <h4><span class="n">H5</span><span class="chip hi">高</span>工作点在评测集上挑，门槛前后不一</h4>
+      <p>Table 1 的每个数都与 Fig. 6 上的点一致，扫描和汇报用的是同一批 250 条 prompt。附录称 Cosmos 的 K=28（均值 −0.12）"severely penalizes"，而 TurboDiffusion 的 K=3（−0.09）和 Cosmos Super/Edge 的 K=24（−0.23）写进了摘要。能耗表里 TurboDiffusion 又用了 K=2。按"不低于基线"统一选，TurboDiffusion 应为 K=2，约 1.72×，不是 2.69×。</p>
+      <p class="fix"><b>核验：</b>在留出 prompt 上选 K，并给出数值化的"质量相当"阈值。</p>
+    </article>
+
+    <article class="doubt md" data-sev="md">
+      <h4><span class="n">M1</span><span class="chip md">中</span>分数只看单步，只在纯大模型轨迹上测</h4>
+      <p>推理时进入第 k 步的 latent 取决于前面由谁在跑，30 个连续小模型步的累积偏移没有被度量。Table 2 里 First-K、Random-K 的 flicker（95.39、95.95）都低于全小模型（96.35），说明混用会带来单步分数看不到的代价。论文没有验证 q<sub>k</sub> 和"只替换第 k 步后最终视频的变化"是否相关。</p>
+      <p class="fix"><b>核验：</b>逐步单点替换，算最终输出变化与 q<sub>k</sub> 的秩相关。</p>
+    </article>
+    <article class="doubt md" data-sev="md">
+      <h4><span class="n">M2</span><span class="chip md">中</span>分数的归一化方式没有论证，也没有消融</h4>
+      <p>分数按大模型预测的幅度归一化，不含步长。§5 的反事实显示，把步长算进去，选择会整体翻成 First-K。换成 cosine 距离、x<sub>0</sub> 空间误差或最终输出敏感度，排序会不会变，论文都没有试。现在的好结果更像是经验上的，不是从分数的定义推出来的。</p>
+      <p class="fix"><b>核验：</b>同一 K 下比较几种分数定义选出的 π 和最终质量。</p>
+    </article>
+    <article class="doubt md" data-sev="md">
+      <h4><span class="n">M3</span><span class="chip md">中</span>缺同耗时的基线</h4>
+      <p>Wan 和 Cosmos 是 50 / 35 步采样，最直接的对手是"大模型少走几步"（例如 Wan 14B 走约 26 步，耗时和 TRACK 相当）以及 TeaCache 这类缓存方法。论文说自己与减步互补，但没在同一耗时下比较过。</p>
+      <p class="fix"><b>核验：</b>把 TRACK、减步、缓存、SRDiffusion、FlowBlending 画在同一条耗时轴上。</p>
+    </article>
+    <article class="doubt md" data-sev="md">
+      <h4><span class="n">M4</span><span class="chip md">中</span>标定集的规模、来源和成本都没报</h4>
+      <p>标定集大小 M、是否与 150 条评测集重叠（Fig. 4 的曲线恰好也是 150 条 prompt 的平均）、标定成本（我估算约 40 GPU·小时量级）都没给。"标定泛化到整个 benchmark、无需手工调步"没有实验支撑，没有缩小 M、换 prompt 分布或留出集的实验。</p>
+      <p class="fix"><b>核验：</b>M ∈ {5, 20, 50, 150} 时曲线和 π 是否稳定。</p>
+    </article>
+    <article class="doubt md" data-sev="md">
+      <h4><span class="n">M5</span><span class="chip md">中</span>人评证据力弱，正文与图有出入</h4>
+      <p>所有胜负差都不显著（最小 p = 0.18）；30 条 prompt × 5 人，判断彼此相关；没有全小模型对照组。正文把 Wan 视觉质量（全大胜 38.0% &gt; TRACK 胜 33.3%）列进"持平或略胜"，TurboDiffusion 的胜率正文 37.7%、图中 37.3%。</p>
+      <p class="fix"><b>核验：</b>加"全小 vs 全大"一组作灵敏度对照，报按 prompt 聚类的置信区间。</p>
+    </article>
+    <article class="doubt md" data-sev="md">
+      <h4><span class="n">M6</span><span class="chip md">中</span>Cosmos 3 的测量条件不清</h4>
+      <p>附录说能耗全部在单张 A100 上测。Cosmos3-Super 官方为 64B、只测过 BF16、推荐多卡张量并行，权重超过 80 GB，还要和 Nano（16B）或 Edge（4B）同时驻留。是否 offload、量化或多卡都没写。同一全 Super 基线两次测得 204.22 和 213.40 kJ，相差 4.5%。</p>
+      <p class="fix"><b>核验：</b>写明硬件、精度、并行方式和是否 offload。</p>
+    </article>
+    <article class="doubt md" data-sev="md">
+      <h4><span class="n">M7</span><span class="chip md">中</span>速度测量协议缺失</h4>
+      <p>Table 1 的加速比用的什么硬件、两个模型是否都常驻显存、是否含切换开销、重复几次取均值，都没写。r 的外部核对只对 Wan 那一对成立（0.188）。</p>
+      <p class="fix"><b>核验：</b>报告每个模型的单步延迟及方差。</p>
+    </article>
+
+    <article class="doubt lo" data-sev="lo">
+      <h4><span class="n">L1</span><span class="chip lo">低</span>"优化"的包装大于内容</h4>
+      <p>Eq. 6 的解就是排序；W = q<sup>2</sup> 不改变顺序；C<sub>0</sub> 与 W 量纲不同，只能由 K 反推。数学没错，但名字高估了这一步的贡献。</p>
+    </article>
+    <article class="doubt lo" data-sev="lo">
+      <h4><span class="n">L2</span><span class="chip lo">低</span>多步求解器在切换边界混用两个模型的历史</h4>
+      <p>UniPC 用前几步的预测做外推，切换处的历史来自另一个模型。论文只说"保留调度器状态"。可以对比"切换时把求解器降回一阶"的变体。</p>
+    </article>
+    <article class="doubt lo" data-sev="lo">
+      <h4><span class="n">L3</span><span class="chip lo">低</span>频率分析的口径</h4>
+      <p>频带阈值没给；每个频带单独归一化（TurboDiffusion 第 0 步低频带分数约 1.1，比总分 0.58 还大）；结论是已知的先粗后细，而且不进入策略。</p>
+    </article>
+    <article class="doubt lo" data-sev="lo">
+      <h4><span class="n">L4</span><span class="chip lo">低</span>两个模型共用同一个 CFG 系数</h4>
+      <p>小模型的最佳 guidance 系数未必和大模型相同。共用一个 <i>w</i> 可能抬高某些步的分歧，也可能影响混合后的质量。论文没有讨论。</p>
+    </article>
+    <article class="doubt lo" data-sev="lo">
+      <h4><span class="n">L5</span><span class="chip lo">低</span>若干次要口径</h4>
+      <p>Fig. 2 只画了 Cosmos 的 Nano 配置，没画均值下降最多的 Edge 配置；Table 5 的 TRACK 用了哪个 K 没写；Table 5 的 SDXL 行是另一篇论文里"蒸馏模型 + 基模型"的混合，设定不同；人评里 Cosmos 用的是 Nano 还是 Edge 没说。</p>
+    </article>
+    <article class="doubt lo" data-sev="lo">
+      <h4><span class="n">L6</span><span class="chip lo">低</span>没有代码和原始曲线</h4>
+      <p>论文没有代码链接，也没给分歧曲线的原始数值。本页的曲线是从 arXiv HTML 版的图片像素里读出来的。</p>
+    </article>
+  </div>
+</section>
+
+<!-- =============================== 11 =============================== -->
+<section id="s11">
+  <h2><span class="no">§11</span>收尾：做对的地方、最值钱的后续实验、定位</h2>
+
+  <h3>做对的地方</h3>
+  <ul>
+    <li>数字干净：加速比、能耗、百分比都能从表里的其它数复算出来，r 还能和第三方实测对上。</li>
+    <li>First-K / Last-K / Random-K 的同预算对照设计得对，能把"换多少"和"换在哪"分开看。</li>
+    <li>把少步蒸馏管线也纳进来，并得到一个有用的结论：FastVideo 只让 14B 跑第 1 步就够了。</li>
+    <li>测了多样性。"谁跑开头谁决定多样性"这个结论清楚，对所有分段方案都适用。</li>
+    <li>方法简单，几乎零工程成本；局限性（两个模型同时占显存）写得诚实。</li>
+  </ul>
+
+  <h3>最值钱的后续实验</h3>
+  <ol>
+    <li>在 Wan 上扫"大 a · 小 30 · 大 b"（a + b = 20）的全部 21 种组合，看 top-K 选出的 (18, 2) 是否最优，顺带与 FlowBlending 的边界比较。</li>
+    <li>同耗时对比：Wan 14B 约 26 步、TeaCache、SRDiffusion δ=0.01、TRACK K=40 放在一张图上。</li>
+    <li>完整 VBench 16 维，加与全大模型输出的 LPIPS / PSNR / SSIM 和 dynamic degree。</li>
+    <li>单步替换敏感度：只把第 k 步换成小模型，测最终视频变化，和 q<sub>k</sub> 做秩相关；再试几种分数定义。</li>
+    <li>标定集规模 M 与留出集泛化，并报告标定成本。</li>
+    <li>人评加入"全小 vs 全大"作为灵敏度对照。</li>
+  </ol>
+
+  <h3>对本仓库（交互式视频世界模型）的意义</h3>
+  <p>TRACK 的实验对象都是双向、整段生成的文生视频，不是因果流式的世界模型。能迁移过来的是少步部分的结论：像 Self-Forcing 这类每个 chunk 只去噪 3–4 步的自回归模型，如果同一家族有大小两个版本，"每个 chunk 第 1 步用大模型、其余用小模型"是一个便宜的提速方向。要注意两点：两个模型要同时驻留显存；KV cache 是由哪个模型写的，会影响下一个 chunk，这是 TRACK 的整段生成里没有的新问题。</p>
+
+  <h3>来源</h3>
+  <ul class="src-list">
+    <li><a href="https://arxiv.org/abs/2609.30096" target="_blank" rel="noopener">TRACK · arXiv 2609.30096</a>（正文全文；图表数值读自 <a href="https://arxiv.org/html/2609.30096v1" target="_blank" rel="noopener">HTML 版</a>的原图）</li>
+    <li><a href="https://arxiv.org/abs/2512.24724" target="_blank" rel="noopener">FlowBlending · arXiv 2512.24724</a></li>
+    <li><a href="https://arxiv.org/abs/2505.19151" target="_blank" rel="noopener">SRDiffusion · arXiv 2505.19151</a>（Wan 14B/1.3B 的 841 s / 158 s 与 VBench 分维度数值）</li>
+    <li><a href="https://arxiv.org/abs/2402.14167" target="_blank" rel="noopener">T-Stitch · arXiv 2402.14167</a> · <a href="https://arxiv.org/abs/2306.08860" target="_blank" rel="noopener">OMS-DPM · arXiv 2306.08860</a> · <a href="https://arxiv.org/abs/2408.06646" target="_blank" rel="noopener">Hybrid SD · arXiv 2408.06646</a> · <a href="https://arxiv.org/abs/2310.03337" target="_blank" rel="noopener">DDSM · arXiv 2310.03337</a></li>
+    <li><a href="https://huggingface.co/nvidia/Cosmos3-Super" target="_blank" rel="noopener">Cosmos3-Super 模型卡</a> · <a href="https://huggingface.co/nvidia/Cosmos3-Edge" target="_blank" rel="noopener">Cosmos3-Edge 模型卡</a> · <a href="https://huggingface.co/blog/nvidia/cosmos-3-for-physical-ai" target="_blank" rel="noopener">Cosmos 3 发布博客</a></li>
+    <li><a href="https://github.com/Wan-Video/Wan2.1/blob/main/generate.py" target="_blank" rel="noopener">Wan2.1 generate.py</a>（T2V 默认 50 步、UniPC、shift 5、CFG 5）</li>
+  </ul>
+</section>
+
+<footer>本页是读者笔记，不是作者的说明。标"复算""推断"或琥珀色的数字是我根据论文数据算出或读图得到的；与论文原文冲突时以论文为准。2026-09-26。</footer>
+</div>
+
+<script>
+(function(){
+"use strict";
+var NS = "http://www.w3.org/2000/svg";
+function S(tag, attrs, parent, text){
+  var e = document.createElementNS(NS, tag);
+  if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function clear(el){ while (el.firstChild) el.removeChild(el.firstChild); }
+function fmt(x, d){ return (Math.round(x * Math.pow(10, d)) / Math.pow(10, d)).toFixed(d); }
+function sign(x, d){ return (x >= 0 ? "+" : "−") + fmt(Math.abs(x), d); }
+function segPick(id, attr, cb){
+  var g = document.getElementById(id);
+  g.addEventListener("click", function(ev){
+    var b = ev.target.closest("button"); if (!b || !g.contains(b)) return;
+    g.querySelectorAll("button").forEach(function(x){ x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+    cb(b.getAttribute(attr));
+  });
+}
+
+/* ---------------- 数据：论文图表读数 ---------------- */
+var P = {
+  wan: { name:"Wan 2.1", N:50, r:0.188, Kp:30, base:96.1075,
+    q:[0.31,0.283,0.281,0.290,0.280,0.273,0.266,0.259,0.249,0.240,0.232,0.225,0.216,0.208,0.202,0.196,0.190,0.1845,0.1797,0.1747,0.1707,0.1665,0.1622,0.1577,0.154,0.1508,0.1478,0.145,0.1426,0.1406,0.1381,0.1366,0.1348,0.133,0.1314,0.1301,0.1293,0.1284,0.1282,0.1284,0.1286,0.1299,0.1316,0.1343,0.1385,0.145,0.1556,0.1729,0.207,0.27],
+    qual:{0:96.1075,10:96.08,20:96.19,30:96.2625,40:95.77,50:95.23},
+    note:"论文工作点 K=30。Fig. 4A 里两条绿色虚线落在第 17.5 和 47.5 步，选中的正是第 18–47 步，与这里按读数重算的结果一致。" },
+  cos: { name:"Cosmos 3", N:35, r:0.257, Kp:24, base:97.6325,
+    q:[0.47,0.457,0.45,0.477,0.538,0.569,0.56,0.552,0.512,0.471,0.428,0.398,0.361,0.33,0.297,0.27,0.249,0.223,0.202,0.185,0.174,0.165,0.158,0.154,0.152,0.152,0.154,0.158,0.165,0.175,0.187,0.206,0.231,0.261,0.292],
+    qual:{0:97.6325,7:97.63,14:97.68,24:97.75,28:97.51,35:96.97},
+    note:"曲线来自 Fig. 7A，论文没说是 Super/Nano 还是 Super/Edge；质量点是 Super/Nano（Fig. 6）。K=24 时第 10 步（0.43）和第 34 步（0.29）差得很远，“等于 Last-K”这个结论不受读数误差影响。K ≥ 20 时最后一步都会被选给小模型。" },
+  turbo: { name:"TurboDiffusion", N:4, r:0.162, Kp:3, base:95.83,
+    q:[0.58,0.37,0.283,0.203],
+    qual:{0:95.83,1:95.84,2:95.94,3:95.735,4:95.19},
+    note:"分歧从第 0 步起单调下降，任何 K 都等于 Last-K。主表用 K=3（2.69×，均值 −0.09），能耗表用 K=2；Fig. 6 上质量最高的是 K=2。" },
+  fv: { name:"FastVideo", N:3, r:0.191, Kp:2, base:97.265,
+    q:[0.86,0.38,0.31],
+    qual:{0:97.265,1:97.28,2:97.335,3:96.31},
+    note:"分歧单调下降，K=2 即“14B 只跑第 1 步”。这是全文最干净的一个结果：均值不降反升（+0.07），全换成 1.3B 则掉 0.96。" }
+};
+function speed(p, K){ return p.N / ((p.N - K) + K * p.r); }
+function topK(q, K){
+  var idx = q.map(function(v,i){ return i; });
+  idx.sort(function(a,b){ return q[a] - q[b] || a - b; });
+  var sel = new Array(q.length).fill(false);
+  for (var i = 0; i < K; i++) sel[idx[i]] = true;
+  return sel;
+}
+function rle(sel){
+  var out = [], cur = null, n = 0;
+  sel.forEach(function(s){ var c = s ? "S" : "L"; if (c === cur) n++; else { if (cur) out.push([cur,n]); cur = c; n = 1; } });
+  if (cur) out.push([cur,n]);
+  return out;
+}
+function parseCode(code){
+  var cells = [];
+  code.trim().split(/\s+/).forEach(function(t){ var c = t[0], n = +t.slice(1); for (var i=0;i<n;i++) cells.push(c === "S"); });
+  return cells;
+}
+function fillBar(el, sel, showNum){
+  clear(el);
+  sel.forEach(function(s, i){
+    var c = document.createElement("i");
+    if (s) c.className = "s";
+    c.title = "第 " + i + " 步 · " + (s ? "小模型" : "大模型");
+    if (showNum){ c.textContent = i; c.style.cssText = "font:500 10.5px/26px var(--font-mono);color:#fff;text-align:center;font-style:normal"; }
+    el.appendChild(c);
+  });
+}
+
+/* ---------------- hero barcodes ---------------- */
+(function(){
+  var rows = [
+    {n:"Wan 2.1", s:"14B ⇄ 1.3B · 50 步", code:"L18 S30 L2", sp:"1.95×", k:"K = 30", note:"Fig. 4A 绿线：第 18–47 步给小模型，最后 2 步换回大模型", me:false},
+    {n:"Cosmos 3", s:"Super ⇄ Nano / Edge · 35 步", code:"L11 S24", sp:"2.04–2.73×", k:"K = 24", note:"按 Fig. 7 推出：第 11–34 步，等于 Last-K", me:true},
+    {n:"TurboDiffusion", s:"14B ⇄ 1.3B · 4 步", code:"L1 S3", sp:"2.69×", k:"K = 3", note:"分歧单调下降：第 1–3 步，等于 Last-K", me:true},
+    {n:"FastVideo", s:"14B ⇄ 1.3B · 3 步", code:"L1 S2", sp:"2.17×", k:"K = 2", note:"分歧单调下降：第 1–2 步，等于 Last-K", me:true}
+  ];
+  var host = document.getElementById("hero-codes");
+  rows.forEach(function(r){
+    var row = document.createElement("div"); row.className = "code-row";
+    var nm = document.createElement("div"); nm.className = "code-name"; nm.innerHTML = r.n + "<small>" + r.s + "</small>";
+    var bar = document.createElement("div"); bar.className = "bar";
+    var cells = parseCode(r.code); fillBar(bar, cells, cells.length <= 6);
+    var sp = document.createElement("div"); sp.className = "code-speed"; sp.innerHTML = r.sp + "<small>" + r.k + "</small>";
+    var nt = document.createElement("div"); nt.className = "code-note"; nt.innerHTML = r.me ? '<span class="me">' + r.note + "</span>" : r.note;
+    row.appendChild(nm); row.appendChild(bar); row.appendChild(sp); row.appendChild(nt);
+    host.appendChild(row);
+  });
+})();
+
+/* timeline barcodes */
+document.querySelectorAll(".tl-code .bar").forEach(function(b){ fillBar(b, parseCode(b.getAttribute("data-code")), false); });
+
+/* ---------------- explorer ---------------- */
+(function(){
+  var st = { p:"wan", view:"step", K:30 };
+  var svg = document.getElementById("ex-svg"), bar = document.getElementById("ex-bar");
+  var slider = document.getElementById("ex-k"), kout = document.getElementById("ex-kout");
+  var read = document.getElementById("ex-read"), note = document.getElementById("ex-note");
+  var W = 720, H = 260, ml = 50, mr = 14, mt = 16, mb = 36, pw = W - ml - mr, ph = H - mt - mb;
+
+  function draw(){
+    var p = P[st.p], N = p.N, K = st.K, sel = topK(p.q, K);
+    clear(svg);
+    var sorted = st.view === "sort";
+    var vals = sorted ? p.q.map(function(v){ return v * v; }) : p.q.slice();
+    var order = p.q.map(function(v,i){ return i; });
+    if (sorted) order.sort(function(a,b){ return p.q[a] - p.q[b] || a - b; });
+    var vmax = Math.max.apply(null, vals) * 1.12;
+    var nice = sorted ? (vmax > 0.5 ? 0.2 : vmax > 0.2 ? 0.05 : 0.02) : (vmax > 0.5 ? 0.2 : 0.05);
+    vmax = Math.ceil(vmax / nice) * nice;
+    var y = function(v){ return mt + ph - v / vmax * ph; };
+    var g = S("g", {"class":"ax"}, svg);
+    for (var t = 0; t <= vmax + 1e-9; t += nice){
+      S("line", {x1:ml, x2:W - mr, y1:y(t), y2:y(t), "class":"grid"}, svg);
+      S("text", {x:ml - 7, y:y(t) + 4, "text-anchor":"end"}, g, fmt(t, nice < 0.05 ? 2 : 2));
+    }
+    S("text", {x:ml, y:10, "class":"ax"}, svg, sorted ? "W = q²（从小到大）" : "分歧分数 q");
+    var bw = pw / N, gap = Math.min(3, bw * 0.18);
+    order.forEach(function(k, pos){
+      var v = vals[k], x = ml + pos * bw + gap / 2;
+      var r = S("rect", {x:x, y:y(v), width:Math.max(1, bw - gap), height:Math.max(0.5, y(0) - y(v)), rx: bw > 12 ? 3 : 1, fill: sel[k] ? "var(--sm)" : "var(--lg)", "fill-opacity": sel[k] ? 1 : 0.78}, svg);
+      S("title", null, r, "第 " + k + " 步 · q = " + fmt(p.q[k], 3) + (sel[k] ? " · 小模型" : " · 大模型"));
+      if (N <= 6) S("text", {x:x + (bw - gap) / 2, y:y(v) - 6, "text-anchor":"middle", "class":"labb"}, svg, fmt(v, 3));
+    });
+    // x labels
+    var every = N >= 40 ? 10 : N >= 20 ? 5 : 1;
+    order.forEach(function(k, pos){
+      var lab = sorted ? k : pos;
+      if (N <= 6 || (sorted ? false : pos % every === 0)) S("text", {x:ml + pos * bw + bw / 2, y:H - mb + 16, "text-anchor":"middle", "class":"ax"}, svg, sorted ? "第" + k + "步" : String(lab));
+    });
+    S("text", {x:ml + pw / 2, y:H - 4, "text-anchor":"middle", "class":"ax"}, svg, sorted ? (N <= 6 ? "按分数从小到大排（柱下为原始步号）" : "按分数从小到大排（悬停看原始步号）") : "去噪步序号 k（0 = 噪声最大）");
+    S("line", {x1:ml, x2:W - mr, y1:y(0), y2:y(0), stroke:"var(--axis)"}, svg);
+    if (sorted){
+      var sv = order.map(function(k){ return vals[k]; });
+      var c0 = K === 0 ? sv[0] * 0.6 : K === N ? sv[N - 1] * 1.05 : (sv[K - 1] + sv[K]) / 2;
+      S("line", {x1:ml, x2:W - mr, y1:y(c0), y2:y(c0), stroke:"var(--me)", "stroke-width":1.6, "stroke-dasharray":"6 4"}, svg);
+      var tx = Math.min(W - mr - 6, ml + Math.max(K, 1) * bw + 8);
+      S("text", {x:tx, y:y(c0) - 7, "text-anchor": K > N * 0.7 ? "end" : "start", fill:"var(--me-ink)", "font-family":"var(--font-mono)", "font-size":"11.5"}, svg, "C₀ = " + fmt(c0, 4) + "：低于此线的 " + K + " 步换成小模型");
+    } else if (K > 0 && K < N){
+      // mark the switch boundaries
+      for (var i = 1; i < N; i++) if (sel[i] !== sel[i - 1]){
+        var bx = ml + i * bw;
+        S("line", {x1:bx, x2:bx, y1:mt, y2:y(0), stroke:"var(--me)", "stroke-width":1.2, "stroke-dasharray":"3 3"}, svg);
+      }
+    }
+    fillBar(bar, sel, N <= 6);
+    // readouts
+    var runs = rle(sel), sched = runs.map(function(r){ return r[0] + "×" + r[1]; }).join(" · ");
+    var switches = runs.length - 1;
+    var last = sel.every(function(s, i){ return s === (i >= N - K); });
+    var first = sel.every(function(s, i){ return s === (i < K); });
+    var shape = K === 0 ? "全大模型" : K === N ? "全小模型" : last ? "= Last-K（单向交接）" : first ? "= First-K" : (runs.length === 3 && runs[0][0] === "L" ? "大-小-大（切回大模型）" : "其它");
+    var qv = p.qual[K], dq = qv == null ? 0 : (Math.round(qv * 100) - Math.round(p.base * 100)) / 100;
+    var qtxt = qv == null ? "论文未测此 K" : fmt(qv, 2) + "（" + sign(dq, 2) + "）";
+    var qcls = qv == null ? "" : (dq >= 0 ? "good" : "bad");
+    read.innerHTML =
+      '<div><span>调度（按步序）</span><b>' + sched + '</b></div>' +
+      '<div><span>形状</span><b class="' + (last && K > 0 && K < N ? "bad" : "") + '">' + shape + '</b></div>' +
+      '<div><span>切换次数</span><b>' + switches + '</b></div>' +
+      '<div><span>估算加速（r = ' + p.r + '）</span><b class="me">' + fmt(speed(p, K), 2) + '×</b></div>' +
+      '<div><span>Fig. 6 四项均值</span><b class="' + qcls + '">' + qtxt + '</b></div>';
+    note.textContent = p.note;
+  }
+  segPick("ex-pipe", "data-p", function(v){
+    st.p = v; var p = P[v];
+    slider.max = p.N; st.K = p.Kp; slider.value = st.K; kout.textContent = st.K; draw();
+  });
+  segPick("ex-view", "data-v", function(v){ st.view = v; draw(); });
+  slider.addEventListener("input", function(){ st.K = +slider.value; kout.textContent = st.K; draw(); });
+  document.getElementById("ex-paperk").addEventListener("click", function(){ st.K = P[st.p].Kp; slider.value = st.K; kout.textContent = st.K; draw(); });
+  draw();
+})();
+
+/* ---------------- shift widget ---------------- */
+(function(){
+  var st = { s:5, pol:"track" };
+  var svg = document.getElementById("sh-svg"), read = document.getElementById("sh-read");
+  var N = 50, W = 720, ml = 8, mr = 8, pw = W - ml - mr;
+  function sig(s){ var a = []; for (var k = 0; k <= N; k++){ var x = 1 - k / N; a.push(s * x / (1 + (s - 1) * x)); } return a; }
+  function draw(){
+    var sp = sig(st.s), d = []; for (var k = 0; k < N; k++) d.push(sp[k] - sp[k + 1]);
+    var q = P.wan.q, sel;
+    if (st.pol === "track") sel = topK(q, 30);
+    else if (st.pol === "last") sel = q.map(function(v,i){ return i >= 20; });
+    else if (st.pol === "first") sel = q.map(function(v,i){ return i < 30; });
+    else sel = topK(q.map(function(v,i){ return v * d[i]; }), 30);
+    clear(svg);
+    S("text", {x:ml, y:14, "class":"lab"}, svg, "上行：按步序，50 步等宽");
+    S("text", {x:ml, y:160, "class":"lab"}, svg, "下行：按噪声路程，σ′ 从 1 走到 0（shift " + st.s + "）；虚线连接同一个切换点");
+    var y1 = 22, y2 = 96, h = 28, x = ml, xs = ml;
+    for (var k = 0; k < N; k++){
+      var w1 = pw / N, w2 = pw * d[k];
+      var col = sel[k] ? "var(--sm)" : "var(--lg)";
+      S("rect", {x:x + 0.5, y:y1, width:Math.max(0.5, w1 - 1), height:h, fill:col}, svg);
+      S("rect", {x:xs, y:y2, width:Math.max(0.3, w2 - (w2 > 2 ? 0.6 : 0)), height:h, fill:col}, svg);
+      if (k === 0 || sel[k] !== sel[k - 1]){
+        S("line", {x1:x, y1:y1 + h, x2:xs, y2:y2, stroke:"var(--me)", "stroke-width":1.2, "stroke-dasharray":"3 3"}, svg);
+      }
+      x += w1; xs += w2;
+    }
+    S("line", {x1:x, y1:y1 + h, x2:xs, y2:y2, stroke:"var(--me)", "stroke-width":1.2, "stroke-dasharray":"3 3"}, svg);
+    [1, 0.75, 0.5, 0.25, 0].forEach(function(v){
+      var px = ml + pw * (1 - v);
+      S("line", {x1:px, x2:px, y1:y2 + h, y2:y2 + h + 5, stroke:"var(--axis)"}, svg);
+      S("text", {x:px, y:y2 + h + 17, "text-anchor": v === 1 ? "start" : v === 0 ? "end" : "middle", "class":"ax"}, svg, "σ′=" + v);
+    });
+    var runs = rle(sel), pos = 0, cov = [];
+    runs.forEach(function(r){ var c = 0; for (var i = 0; i < r[1]; i++) c += d[pos + i]; cov.push([r[0], r[1], c, sp[pos], sp[pos + r[1]]]); pos += r[1]; });
+    var sCov = 0; for (var k2 = 0; k2 < N; k2++) if (sel[k2]) sCov += d[k2];
+    read.innerHTML = cov.map(function(c){
+      return '<div><span>' + (c[0] === "L" ? "大模型" : "小模型") + " × " + c[1] + ' 步</span><b class="' + (c[0] === "S" ? "" : "") + '">σ′ ' + fmt(c[3], 2) + " → " + fmt(c[4], 2) + "（" + fmt(c[2] * 100, 0) + "%）</b></div>";
+    }).join("") + '<div><span>小模型承担的噪声路程</span><b class="me">' + fmt(sCov * 100, 0) + "%</b></div>";
+  }
+  segPick("sh-s", "data-s", function(v){ st.s = +v; draw(); });
+  segPick("sh-p", "data-q", function(v){ st.pol = v; draw(); });
+  draw();
+})();
+
+/* ---------------- frequency chart ---------------- */
+(function(){
+  var B = {
+    lo:[0.403,0.381,0.387,0.403,0.393,0.382,0.369,0.356,0.338,0.324,0.309,0.295,0.28,0.268,0.256,0.245,0.234,0.224,0.215,0.207,0.199,0.192,0.185,0.177,0.171,0.166,0.161,0.156,0.151,0.147,0.143,0.139,0.136,0.132,0.129,0.126,0.124,0.122,0.12,0.118,0.116,0.116,0.115,0.115,0.116,0.119,0.123,0.131,0.149,0.18],
+    mi:[0.095,0.086,0.084,0.089,0.095,0.106,0.116,0.126,0.134,0.140,0.145,0.149,0.152,0.154,0.156,0.157,0.157,0.157,0.157,0.156,0.155,0.155,0.154,0.152,0.150,0.149,0.148,0.147,0.146,0.145,0.144,0.144,0.143,0.143,0.142,0.142,0.142,0.142,0.143,0.144,0.146,0.148,0.152,0.156,0.160,0.167,0.179,0.203,0.251,0.345],
+    hi:[0.095,0.082,0.079,0.079,0.081,0.085,0.089,0.093,0.096,0.098,0.101,0.102,0.104,0.105,0.106,0.107,0.108,0.109,0.111,0.111,0.112,0.112,0.112,0.112,0.113,0.113,0.113,0.113,0.114,0.115,0.115,0.116,0.116,0.117,0.117,0.118,0.119,0.12,0.122,0.124,0.126,0.129,0.133,0.138,0.145,0.155,0.171,0.195,0.245,0.33]
+  };
+  var C = {
+    lo:[0.371,0.352,0.358,0.371,0.358,0.346,0.334,0.321,0.308,0.295,0.282,0.269,0.256,0.245,0.235,0.226,0.217,0.209,0.203,0.196,0.19,0.184,0.178,0.172,0.167,0.162,0.157,0.153,0.15,0.147,0.143,0.141,0.138,0.136,0.133,0.131,0.129,0.127,0.126,0.124,0.123,0.123,0.124,0.125,0.127,0.131,0.138,0.15,0.172,0.215],
+    mi:[0.107,0.097,0.1,0.111,0.119,0.129,0.137,0.145,0.15,0.153,0.155,0.157,0.157,0.157,0.155,0.153,0.151,0.149,0.147,0.145,0.144,0.143,0.142,0.141,0.139,0.138,0.137,0.136,0.135,0.135,0.134,0.134,0.134,0.134,0.133,0.133,0.134,0.134,0.135,0.135,0.137,0.14,0.141,0.145,0.152,0.164,0.175,0.197,0.242,0.315],
+    hi:[0.105,0.095,0.093,0.101,0.106,0.116,0.123,0.13,0.131,0.133,0.135,0.137,0.138,0.137,0.138,0.137,0.136,0.136,0.135,0.134,0.134,0.133,0.132,0.131,0.13,0.129,0.128,0.127,0.127,0.127,0.127,0.127,0.127,0.127,0.127,0.127,0.128,0.129,0.13,0.131,0.133,0.136,0.139,0.144,0.15,0.16,0.173,0.197,0.242,0.335]
+  };
+  var svg = document.getElementById("fq-svg");
+  var panels = [[B, "空间频带（Fig. 4B）", 44], [C, "latent 时间轴频带（Fig. 4C）", 404]];
+  var pw = 300, top = 26, ph = 180, ymin = 0.05, ymax = 0.42;
+  panels.forEach(function(pp){
+    var D = pp[0], x0 = pp[2];
+    var X = function(k){ return x0 + k / 49 * pw; }, Y = function(v){ return top + ph - (v - ymin) / (ymax - ymin) * ph; };
+    S("text", {x:x0, y:14, "class":"lab"}, svg, pp[1]);
+    S("rect", {x:X(17.5), y:top, width:X(47.5) - X(17.5), height:ph, fill:"var(--sm-soft)"}, svg);
+    [0.1, 0.2, 0.3, 0.4].forEach(function(t){
+      S("line", {x1:x0, x2:x0 + pw, y1:Y(t), y2:Y(t), "class":"grid"}, svg);
+      S("text", {x:x0 - 6, y:Y(t) + 4, "text-anchor":"end", "class":"ax"}, svg, fmt(t, 1));
+    });
+    [0, 10, 20, 30, 40].forEach(function(k){ S("text", {x:X(k), y:top + ph + 16, "text-anchor":"middle", "class":"ax"}, svg, String(k)); });
+    S("line", {x1:x0, x2:x0 + pw, y1:top + ph, y2:top + ph, stroke:"var(--axis)"}, svg);
+    S("text", {x:x0 + pw / 2, y:top + ph + 34, "text-anchor":"middle", "class":"ax"}, svg, "去噪步序号");
+    [["lo","var(--lo)"],["mi","var(--mi)"],["hi","var(--hi)"]].forEach(function(b){
+      var pts = D[b[0]].map(function(v, k){ return X(k).toFixed(1) + "," + Y(v).toFixed(1); }).join(" ");
+      S("polyline", {points:pts, fill:"none", stroke:b[1], "stroke-width":2.2, "stroke-linejoin":"round"}, svg);
+    });
+  });
+})();
+
+/* ---------------- K sweep pareto ---------------- */
+(function(){
+  var svg = document.getElementById("kp-svg"), note = document.getElementById("kp-note");
+  var W = 720, H = 280, ml = 58, mr = 20, mt = 18, mb = 42, pw = W - ml - mr, ph = H - mt - mb;
+  var notes = {
+    wan:"K ≤ 30 时均值在基线 ±0.16 内；K=40（约 2.85×）掉 0.34，全换 1.3B（5.32×）掉 0.88。论文选 K=30。",
+    cos:"K=24 最高（+0.12）；K=28（约 2.47×）只掉 0.12，附录却称其 “severely penalizes consistency”。Edge 配置（2.73×，−0.23）没有扫描图。",
+    turbo:"K=2 最高（+0.11，约 1.72×）；论文主表选了已经低于基线的 K=3（−0.09，2.69×），能耗表却用 K=2。",
+    fv:"K=2 最高（+0.07）；全换 1.3B 掉 0.96。第 1 步是 14B 的全部价值所在。"
+  };
+  function draw(pk){
+    var p = P[pk]; clear(svg);
+    var Ks = Object.keys(p.qual).map(Number).sort(function(a,b){ return a - b; });
+    var pts = Ks.map(function(K){ return {K:K, x:speed(p, K), y:p.qual[K]}; });
+    var xmax = Math.ceil(speed(p, p.N) + 0.3), ys = pts.map(function(d){ return d.y; });
+    var ylo = Math.floor((Math.min.apply(null, ys) - 0.12) * 10) / 10, yhi = Math.ceil((Math.max.apply(null, ys) + 0.12) * 10) / 10;
+    var X = function(v){ return ml + (v - 1) / (xmax - 1) * pw; }, Y = function(v){ return mt + ph - (v - ylo) / (yhi - ylo) * ph; };
+    var step = (yhi - ylo) > 1 ? 0.25 : 0.2;
+    for (var t = Math.ceil(ylo / step) * step; t <= yhi + 1e-9; t += step){
+      S("line", {x1:ml, x2:W - mr, y1:Y(t), y2:Y(t), "class":"grid"}, svg);
+      S("text", {x:ml - 7, y:Y(t) + 4, "text-anchor":"end", "class":"ax"}, svg, fmt(t, 2));
+    }
+    for (var xv = 1; xv <= xmax; xv++){
+      S("line", {x1:X(xv), x2:X(xv), y1:mt + ph, y2:mt + ph + 5, stroke:"var(--axis)"}, svg);
+      S("text", {x:X(xv), y:mt + ph + 18, "text-anchor":"middle", "class":"ax"}, svg, xv + "×");
+    }
+    S("line", {x1:ml, x2:W - mr, y1:mt + ph, y2:mt + ph, stroke:"var(--axis)"}, svg);
+    S("text", {x:ml + pw / 2, y:H - 6, "text-anchor":"middle", "class":"ax"}, svg, "估算加速比（按 §6 反推的 r = " + p.r + "）");
+    S("text", {x:ml, y:12, "class":"ax"}, svg, "VBench 4 项均值");
+    S("line", {x1:ml, x2:W - mr, y1:Y(p.base), y2:Y(p.base), stroke:"var(--risk)", "stroke-width":1.4, "stroke-dasharray":"6 4"}, svg);
+    S("text", {x:W - mr, y:Y(p.base) - 6, "text-anchor":"end", fill:"var(--risk-ink)", "font-family":"var(--font-mono)", "font-size":"11"}, svg, "全大模型基线 " + fmt(p.base, 2));
+    S("polyline", {points:pts.map(function(d){ return X(d.x).toFixed(1) + "," + Y(d.y).toFixed(1); }).join(" "), fill:"none", stroke:"var(--sm)", "stroke-width":2}, svg);
+    pts.forEach(function(d){
+      var isP = d.K === p.Kp;
+      if (isP) S("circle", {cx:X(d.x), cy:Y(d.y), r:11, fill:"none", stroke:"var(--me)", "stroke-width":2}, svg);
+      var c = S("circle", {cx:X(d.x), cy:Y(d.y), r:5.5, fill: d.y >= p.base - 0.005 ? "var(--sm)" : "var(--risk)", stroke:"var(--surf)", "stroke-width":1.5}, svg);
+      S("title", null, c, "K=" + d.K + " · " + fmt(d.x, 2) + "× · " + fmt(d.y, 2));
+      var up = (Ks.indexOf(d.K) % 2 === 0);
+      S("text", {x:X(d.x) + (d.K === p.N ? -6 : 6), y:Y(d.y) + (up ? -12 : 21), "text-anchor": d.K === p.N ? "end" : "start", "class": isP ? "labb" : "lab"}, svg, "K=" + d.K + (isP ? " · 论文工作点 " + fmt(d.x, 2) + "×" : ""));
+    });
+    note.textContent = notes[pk];
+  }
+  segPick("kp-pipe", "data-p", draw);
+  draw("wan");
+})();
+
+/* ---------------- policy scatter ---------------- */
+(function(){
+  var svg = document.getElementById("pol-svg");
+  var W = 720, H = 290, ml = 58, mr = 20, mt = 18, mb = 42, pw = W - ml - mr, ph = H - mt - mb;
+  var pts = [
+    {n:"全大模型", x:1, q:95.9025, d:100, sq:"u", sd:"u"},
+    {n:"全小模型", x:5.32, q:95.495, d:79.4, sq:"l", sd:"l"},
+    {n:"First-K", x:1.95, q:95.05, d:84.6, sq:"r", sd:"l"},
+    {n:"Last-K", x:1.95, q:95.6225, d:97.8, sq:"r", sd:"l"},
+    {n:"Random-K", x:1.95, q:95.475, d:85.7, sq:"r", sd:"r"},
+    {n:"TRACK", x:1.95, q:95.975, d:98.3, sq:"r", sd:"r", hl:true},
+    {n:"SRDiffusion δ=0.01", x:2.84, q:95.57, d:92.6, sq:"r", sd:"r", hollow:true},
+    {n:"SRDiffusion δ=0.03", x:3.21, q:95.38, d:87.1, sq:"r", sd:"r", hollow:true}
+  ];
+  function draw(mode){
+    clear(svg);
+    var key = mode === "q" ? "q" : "d", side = mode === "q" ? "sq" : "sd";
+    var ylo = mode === "q" ? 94.9 : 76, yhi = mode === "q" ? 96.1 : 102, step = mode === "q" ? 0.2 : 5;
+    var xmax = 5.6;
+    var X = function(v){ return ml + (v - 1) / (xmax - 1) * pw; }, Y = function(v){ return mt + ph - (v - ylo) / (yhi - ylo) * ph; };
+    for (var t = Math.ceil(ylo / step) * step; t <= yhi + 1e-9; t += step){
+      S("line", {x1:ml, x2:W - mr, y1:Y(t), y2:Y(t), "class":"grid"}, svg);
+      S("text", {x:ml - 7, y:Y(t) + 4, "text-anchor":"end", "class":"ax"}, svg, mode === "q" ? fmt(t, 1) : fmt(t, 0) + "%");
+    }
+    [1,2,3,4,5].forEach(function(v){
+      S("line", {x1:X(v), x2:X(v), y1:mt + ph, y2:mt + ph + 5, stroke:"var(--axis)"}, svg);
+      S("text", {x:X(v), y:mt + ph + 18, "text-anchor":"middle", "class":"ax"}, svg, v + "×");
+    });
+    S("line", {x1:ml, x2:W - mr, y1:mt + ph, y2:mt + ph, stroke:"var(--axis)"}, svg);
+    S("text", {x:ml + pw / 2, y:H - 6, "text-anchor":"middle", "class":"ax"}, svg, "估算加速比");
+    S("text", {x:ml, y:12, "class":"ax"}, svg, mode === "q" ? "4 项均值（150 条 prompt）" : "DreamSim 多样性保持率");
+    S("line", {x1:ml, x2:W - mr, y1:Y(pts[0][key]), y2:Y(pts[0][key]), stroke:"var(--risk)", "stroke-width":1.2, "stroke-dasharray":"6 4"}, svg);
+    S("line", {x1:X(1.95), x2:X(1.95), y1:mt, y2:mt + ph, stroke:"var(--axis)", "stroke-dasharray":"2 4"}, svg);
+    S("text", {x:X(1.95), y:mt + 10, "text-anchor":"middle", "class":"ax"}, svg, "K=30 · 1.95×");
+    pts.forEach(function(d){
+      var cx = X(d.x), cy = Y(d[key]);
+      var fill = d.hollow ? "var(--surf)" : d.hl ? "var(--sm)" : d.n === "全大模型" ? "var(--lg)" : "var(--ink3)";
+      var c = S("circle", {cx:cx, cy:cy, r: d.hl ? 7 : 5.5, fill:fill, stroke: d.hollow ? "var(--me)" : "var(--surf)", "stroke-width": d.hollow ? 2 : 1.5}, svg);
+      S("title", null, c, d.n + " · " + d.x + "× · " + (mode === "q" ? fmt(d.q, 2) : d.d + "%"));
+      var L = d[side] === "l", U = d[side] === "u";
+      S("text", {x: U ? cx + 4 : cx + (L ? -10 : 10), y: U ? cy - 11 : cy + 4, "text-anchor": L ? "end" : "start", "class": d.hl ? "labb" : "lab"}, svg, d.n + " " + (mode === "q" ? fmt(d.q, 2) : d.d + "%"));
+    });
+  }
+  segPick("pol-y", "data-y", draw);
+  draw("q");
+})();
+
+/* ---------------- human eval ---------------- */
+(function(){
+  var host = document.getElementById("he");
+  var groups = [
+    ["视觉质量", [["Wan 2.1",38.0,28.7,33.3,"0.56"],["Cosmos 3",26.0,42.0,32.0,"0.39"],["TurboDiffusion",34.7,28.0,37.3,"0.77"],["FastVideo",35.3,26.7,38.0,"0.78"]]],
+    ["提示遵循", [["Wan 2.1",10.7,78.0,11.3,"1.00"],["Cosmos 3",17.3,67.3,15.3,"0.78"],["TurboDiffusion",12.0,69.3,18.7,"0.18"],["FastVideo",10.0,78.7,11.3,"0.86"]]]
+  ];
+  var html = "";
+  groups.forEach(function(g){
+    html += "<h5>" + g[0] + "</h5>";
+    g[1].forEach(function(r){
+      html += '<div class="nm">' + r[0] + '</div><div class="hb"><span class="b" style="width:' + r[1] + '%">' + r[1] + '%</span><span class="t" style="width:' + r[2] + '%">' + (r[2] > 12 ? r[2] + "%" : "") + '</span><span class="w" style="width:' + r[3] + '%">' + r[3] + '%</span></div><div class="pv">p = ' + r[4] + "</div>";
+    });
+  });
+  host.innerHTML = html;
+})();
+
+/* ---------------- doubts filter ---------------- */
+segPick("dq-f", "data-f", function(f){
+  document.querySelectorAll("#doubts .doubt").forEach(function(d){ d.hidden = !(f === "all" || d.getAttribute("data-sev") === f); });
+});
+
+/* ---------------- toc highlight ---------------- */
+(function(){
+  var links = {}; document.querySelectorAll("#toc a").forEach(function(a){ links[a.getAttribute("href").slice(1)] = a; });
+  if (!("IntersectionObserver" in window)) return;
+  var io = new IntersectionObserver(function(es){
+    es.forEach(function(e){ if (e.isIntersecting){ Object.keys(links).forEach(function(k){ links[k].classList.toggle("on", k === e.target.id); }); var a = links[e.target.id]; if (a && a.scrollIntoView && a.parentNode.scrollWidth > a.parentNode.clientWidth){ a.parentNode.scrollLeft = a.offsetLeft - 40; } } });
+  }, {rootMargin:"-45% 0px -50% 0px"});
+  document.querySelectorAll("section[id]").forEach(function(s){ io.observe(s); });
+})();
+})();
+</script>
+</body>
+</html>

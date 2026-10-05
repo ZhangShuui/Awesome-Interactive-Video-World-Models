@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SVEET 精读</title>
+<meta name="description" content="SVEET（arXiv 2609.24788）精读：在双向 Wan2.1-VACE 上训练编辑控制分支，再零样本插到 Causal Forcing 流式骨干上。逐帧注意力、正交解耦训练（ODT）、理论核查（含反例）、论文与发布代码逐项对照、结果重读与存疑清单。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=Noto+Serif+SC:wght@600;700&family=STIX+Two+Text:ital@0;1&display=swap">
+<style>
+/* ============================================================
+   SVEET 精读 — tokens（深色优先）
+   角色色（全页一致，三色经 dataviz 校验脚本全配对通过）：
+     bi  = 双向骨干 Wan2.1-VACE / 训练侧（橙）
+     ca  = 因果流式骨干 Causal Forcing / 推理侧（蓝）
+     ctl = VACE 控制分支 / LoRA / SVEET（青）
+     dis = 差异子空间 V_k（中性色 + 虚线 + 文字标签，不占色相）
+   存疑等级 risk/med/low 总带文字标签，不单靠颜色。
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#101315; --surf:#161b1e; --surf2:#1c2226; --surf3:#252c31;
+  --rule:#273137; --rule2:#38444b;
+  --ink:#e9eef1; --ink2:#aab5bb; --ink3:#808c93;
+  --bi:#d95926; --bi-ink:#f0915f; --bi-soft:rgba(217,89,38,.17);
+  --ca:#3987e5; --ca-ink:#86b7f2; --ca-soft:rgba(57,135,229,.17);
+  --ctl:#199e70; --ctl-ink:#5fd3a6; --ctl-soft:rgba(25,158,112,.18);
+  --dis:#c9d2d7; --dis-soft:rgba(201,210,215,.10);
+  --risk:#e5544c; --risk-ink:#f68a83; --risk-soft:rgba(229,84,76,.14);
+  --med:#d4b144; --med-ink:#ecd07a; --med-soft:rgba(212,177,68,.14);
+  --low:#7f8b92; --low-ink:#b3bec4; --low-soft:rgba(127,139,146,.16);
+  --grid:#20282d; --axis:#3b474e;
+  --heat:233,238,241;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 32px rgba(0,0,0,.30);
+  --f-head:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --f-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --f-math:"STIX Two Text","Times New Roman",Georgia,serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#eef1f2; --surf:#ffffff; --surf2:#e9edef; --surf3:#dde3e6;
+    --rule:#d4dbdf; --rule2:#b5c0c6;
+    --ink:#111719; --ink2:#3c474d; --ink3:#5f6c73;
+    --bi:#eb6834; --bi-ink:#a8431a; --bi-soft:rgba(235,104,52,.11);
+    --ca:#2a78d6; --ca-ink:#1b5aa6; --ca-soft:rgba(42,120,214,.10);
+    --ctl:#1baf7a; --ctl-ink:#0c6e4b; --ctl-soft:rgba(27,175,122,.12);
+    --dis:#4b565c; --dis-soft:rgba(75,86,92,.08);
+    --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.09);
+    --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.11);
+    --low:#6e7a80; --low-ink:#4d585e; --low-soft:rgba(110,122,128,.12);
+    --grid:#e4e9ec; --axis:#b5c0c6;
+    --heat:17,23,25;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#eef1f2; --surf:#ffffff; --surf2:#e9edef; --surf3:#dde3e6;
+  --rule:#d4dbdf; --rule2:#b5c0c6;
+  --ink:#111719; --ink2:#3c474d; --ink3:#5f6c73;
+  --bi:#eb6834; --bi-ink:#a8431a; --bi-soft:rgba(235,104,52,.11);
+  --ca:#2a78d6; --ca-ink:#1b5aa6; --ca-soft:rgba(42,120,214,.10);
+  --ctl:#1baf7a; --ctl-ink:#0c6e4b; --ctl-soft:rgba(27,175,122,.12);
+  --dis:#4b565c; --dis-soft:rgba(75,86,92,.08);
+  --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.09);
+  --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.11);
+  --low:#6e7a80; --low-ink:#4d585e; --low-soft:rgba(110,122,128,.12);
+  --grid:#e4e9ec; --axis:#b5c0c6;
+  --heat:17,23,25;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.75;overflow-x:hidden}
+a{color:var(--ca-ink);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:2px solid var(--ca);outline-offset:2px;border-radius:4px}
+b,strong{font-weight:600;color:var(--ink)}
+sub,sup{font-size:.72em;line-height:0}
+code,.mono{font-family:var(--f-mono);font-size:.88em}
+code{background:var(--surf2);border:1px solid var(--rule);border-radius:4px;padding:0 4px;overflow-wrap:anywhere}
+.tnum{font-variant-numeric:tabular-nums}
+.mv{font-family:var(--f-math);font-style:italic;font-size:1.06em;white-space:nowrap}
+.dim{color:var(--ink3)}
+.c-bi{color:var(--bi-ink)} .c-ca{color:var(--ca-ink)} .c-ctl{color:var(--ctl-ink)} .c-risk{color:var(--risk-ink)}
+.wrap{max-width:1180px;margin:0 auto;padding:0 20px 96px}
+@media (max-width:640px){ .wrap{padding:0 16px 96px} body{font-size:15.5px} }
+
+/* ---------- header ---------- */
+.themebtn{position:fixed;top:12px;right:12px;z-index:40;background:var(--surf);color:var(--ink2);border:1px solid var(--rule2);border-radius:999px;padding:5px 12px;font:500 13px var(--f-body);cursor:pointer;box-shadow:var(--shadow)}
+.themebtn:hover{color:var(--ink)}
+.hero{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:36px;align-items:center;padding:64px 0 28px}
+@media (max-width:900px){ .hero{grid-template-columns:minmax(0,1fr);gap:22px;padding-top:56px} }
+.kicker{font:500 12.5px/1.4 var(--f-mono);letter-spacing:.06em;color:var(--ink3);text-transform:uppercase;margin:0 0 10px}
+h1{font-family:var(--f-head);font-weight:700;font-size:clamp(34px,5vw,52px);line-height:1.12;margin:0 0 14px;letter-spacing:.01em}
+h1 .soft{display:block;font-size:.44em;line-height:1.45;font-weight:600;color:var(--ink2);margin-top:10px}
+.sub{color:var(--ink2);margin:0 0 16px}
+.thesis{border-left:3px solid var(--ctl);background:var(--surf);padding:12px 16px;border-radius:0 10px 10px 0;box-shadow:var(--shadow)}
+.thesis p{margin:.3em 0}
+.heroviz{background:var(--surf);border:1px solid var(--rule);border-radius:14px;padding:12px;box-shadow:var(--shadow)}
+.heroviz .bar{display:flex;justify-content:space-between;font:500 11.5px var(--f-mono);color:var(--ink3);letter-spacing:.05em;margin:0 2px 6px}
+.heroviz svg{display:block;width:100%;height:auto}
+.heroviz .cap{font-size:12.5px;color:var(--ink3);margin:6px 2px 0;line-height:1.5}
+
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:12px;overflow:hidden;margin:18px 0}
+.meta div{background:var(--surf);padding:10px 14px}
+.meta dt{font:500 11.5px var(--f-mono);letter-spacing:.05em;color:var(--ink3);text-transform:uppercase}
+.meta dd{margin:2px 0 0;font-size:14px;line-height:1.6;color:var(--ink2)}
+.meta dd b{color:var(--ink)}
+.statstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:18px 0 8px}
+.statstrip>div{background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:12px 14px}
+.statstrip b{display:block;font:600 22px/1.25 var(--f-mono);font-variant-numeric:tabular-nums;color:var(--ink)}
+.statstrip span{display:block;font-size:13px;line-height:1.55;color:var(--ink2);margin-top:4px}
+.toc{position:sticky;top:0;z-index:30;display:flex;gap:4px;overflow-x:auto;scrollbar-width:thin;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--rule);padding:8px 0;margin:18px 0 0}
+.toc a{flex:0 0 auto;text-decoration:none;color:var(--ink2);font-size:13.5px;padding:4px 10px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+.toc a:hover{border-color:var(--rule2);color:var(--ink)}
+.toc a.on{background:var(--surf);border-color:var(--rule2);color:var(--ink)}
+.toc .n{font-family:var(--f-mono);font-size:11.5px;color:var(--ink3);margin-right:5px}
+
+/* ---------- sections ---------- */
+section{padding:44px 0 8px;scroll-margin-top:52px}
+h2{font-family:var(--f-head);font-size:clamp(24px,3.2vw,31px);line-height:1.3;margin:0 0 14px;font-weight:700}
+h2 .no{font:600 .56em var(--f-mono);color:var(--ink3);margin-right:12px;vertical-align:.18em}
+h3{font-size:17.5px;margin:30px 0 8px;font-weight:600;line-height:1.45}
+h3 .hn{font:600 12.5px var(--f-mono);color:var(--ink3);margin-right:8px}
+.lede{font-size:17px;color:var(--ink2);max-width:880px}
+.prose{max-width:880px}
+.prose p,.prose li{color:var(--ink2)}
+.prose ul,.prose ol{padding-left:1.3em}
+.prose li{margin:.25em 0}
+.cols2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.cols3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+@media (max-width:860px){ .cols2,.cols3{grid-template-columns:minmax(0,1fr)} }
+.card{background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:14px 16px}
+.card h4{margin:0 0 6px;font-size:15px;font-weight:600;line-height:1.45}
+.card p{margin:.35em 0;font-size:14.5px;color:var(--ink2);line-height:1.68}
+.card ul{margin:.3em 0;padding-left:1.15em;font-size:14.5px;color:var(--ink2)}
+.card.bi{border-top:3px solid var(--bi)} .card.ca{border-top:3px solid var(--ca)} .card.ctl{border-top:3px solid var(--ctl)} .card.risk{border-top:3px solid var(--risk)}
+.callout{border:1px solid var(--rule2);border-left:4px solid var(--risk);background:var(--risk-soft);border-radius:0 10px 10px 0;padding:10px 14px;margin:14px 0;max-width:900px}
+.callout.note{border-left-color:var(--ca);background:var(--ca-soft)}
+.callout.ok{border-left-color:var(--ctl);background:var(--ctl-soft)}
+.callout p{margin:.3em 0;color:var(--ink2)}
+.callout b{color:var(--ink)}
+
+/* source tags */
+.src{display:inline-block;font:500 10.5px/1 var(--f-mono);padding:3px 5px 2px;border-radius:4px;border:1px solid var(--rule2);color:var(--ink3);vertical-align:.12em;margin:0 2px;letter-spacing:.02em;white-space:nowrap}
+.src.p{border-style:solid}
+.src.c{border-style:solid;border-color:var(--ink3);color:var(--ink2);background:var(--surf2)}
+.src.i{border-style:dashed}
+.src.x{border-style:dotted}
+.tag{display:inline-block;font:600 11px/1 var(--f-body);padding:4px 7px 3px;border-radius:5px;margin-right:6px;vertical-align:.1em;white-space:nowrap}
+.tag.risk{background:var(--risk-soft);color:var(--risk-ink);border:1px solid var(--risk)}
+.tag.med{background:var(--med-soft);color:var(--med-ink);border:1px solid var(--med)}
+.tag.low{background:var(--low-soft);color:var(--low-ink);border:1px solid var(--low)}
+
+/* figures & widgets */
+figure{margin:18px 0;background:var(--surf);border:1px solid var(--rule);border-radius:14px;padding:14px 16px 12px;box-shadow:var(--shadow)}
+figure svg{display:block;width:100%;height:auto;overflow:visible}
+figcaption{font-size:13.5px;color:var(--ink3);margin-top:8px;line-height:1.6}
+figcaption b{color:var(--ink2)}
+.figtitle{font:600 12px var(--f-mono);letter-spacing:.05em;color:var(--ink3);text-transform:uppercase;margin:0 0 10px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.ctrls{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin:4px 0 12px}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--rule2);border-radius:9px;overflow:hidden;background:var(--surf2)}
+.seg button{border:0;background:transparent;color:var(--ink2);font:500 13px var(--f-body);padding:6px 11px;cursor:pointer;border-right:1px solid var(--rule2)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--surf);color:var(--ink);box-shadow:inset 0 -2px 0 var(--ink2)}
+.btn{border:1px solid var(--rule2);background:var(--surf2);color:var(--ink);font:500 13px var(--f-body);padding:6px 12px;border-radius:8px;cursor:pointer}
+.btn:hover{background:var(--surf3)}
+.lbl{font-size:13px;color:var(--ink2);display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lbl input[type=range]{width:150px;accent-color:var(--ink2)}
+.lbl output,.ro b{font:600 13px var(--f-mono);font-variant-numeric:tabular-nums;color:var(--ink)}
+.ro{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:10px}
+.ro div{background:var(--surf2);border:1px solid var(--rule);border-radius:9px;padding:7px 10px;font-size:12.5px;color:var(--ink3);line-height:1.45}
+.ro b{display:block;font-size:16px;margin-top:2px}
+.ro .good b{color:var(--ctl-ink)} .ro .bad b{color:var(--risk-ink)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--ink2);margin:6px 0 2px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.legend i.line{height:0;border-top:2px dashed var(--dis);border-radius:0;width:16px;vertical-align:3px}
+.twogrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media (max-width:760px){ .twogrid{grid-template-columns:minmax(0,1fr)} }
+.scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+/* svg text roles */
+svg text{font-family:var(--f-body);fill:var(--ink2)}
+svg .t-ink{fill:var(--ink)} svg .t-2{fill:var(--ink2)} svg .t-3{fill:var(--ink3)}
+svg .mono,svg .mf{font-family:var(--f-mono)}
+svg text.mono{font-size:inherit}
+.maskbox svg,.pjbox svg{max-width:430px;margin:0 auto}
+svg .t-bi{fill:var(--bi-ink)} svg .t-ca{fill:var(--ca-ink)} svg .t-ctl{fill:var(--ctl-ink)} svg .t-risk{fill:var(--risk-ink)}
+
+/* tables */
+table.dt{border-collapse:separate;border-spacing:0;width:100%;font-size:13.5px;min-width:640px}
+table.dt th,table.dt td{padding:7px 9px;border-bottom:1px solid var(--rule);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.dt th{font:600 11.5px/1.35 var(--f-body);color:var(--ink3);text-align:right;vertical-align:bottom;white-space:normal}
+table.dt th:first-child,table.dt td:first-child{text-align:left;position:sticky;left:0;background:var(--surf);z-index:1}
+table.dt td{font-family:var(--f-mono);font-size:12.5px;color:var(--ink2)}
+table.dt td:first-child{font-family:var(--f-body);font-size:13px;color:var(--ink)}
+table.dt tr.ours td{box-shadow:inset 0 1px 0 var(--ctl),inset 0 -1px 0 var(--ctl)}
+table.dt tr.ours td:first-child{color:var(--ctl-ink);font-weight:600}
+table.dt td.best{font-weight:700;color:var(--ink)}
+table.dt td.dup{outline:2px dashed var(--risk);outline-offset:-3px}
+table.cmp{border-collapse:collapse;width:100%;font-size:14px}
+table.cmp th,table.cmp td{border-bottom:1px solid var(--rule);padding:9px 10px;text-align:left;vertical-align:top;line-height:1.6}
+table.cmp th{font:600 12px var(--f-body);color:var(--ink3);text-transform:none}
+table.cmp td{color:var(--ink2)}
+table.cmp td:first-child{color:var(--ink);font-weight:600;min-width:120px}
+table.cmp .v{display:inline-block;font:600 11px/1 var(--f-body);padding:4px 6px 3px;border-radius:5px;white-space:nowrap}
+table.cmp .v.same{background:var(--ctl-soft);color:var(--ctl-ink);border:1px solid var(--ctl)}
+table.cmp .v.diff{background:var(--risk-soft);color:var(--risk-ink);border:1px solid var(--risk)}
+table.cmp .v.unk{background:var(--med-soft);color:var(--med-ink);border:1px solid var(--med)}
+@media (max-width:760px){ table.cmp,table.cmp tbody,table.cmp tr,table.cmp td{display:block;width:100%} table.cmp thead{display:none} table.cmp tr{border:1px solid var(--rule);border-radius:10px;margin:0 0 10px;padding:4px 0;background:var(--surf)} table.cmp td{border-bottom:0;padding:5px 12px} table.cmp td[data-h]::before{content:attr(data-h);display:block;font:600 11px var(--f-mono);color:var(--ink3);letter-spacing:.04em} }
+
+/* doubts */
+.dfilter{margin:10px 0 14px}
+.doubts{display:flex;flex-direction:column;gap:8px;max-width:960px}
+details.d{background:var(--surf);border:1px solid var(--rule);border-radius:11px;overflow:hidden}
+details.d[data-lv="risk"]{border-left:4px solid var(--risk)}
+details.d[data-lv="med"]{border-left:4px solid var(--med)}
+details.d[data-lv="low"]{border-left:4px solid var(--low)}
+details.d summary{cursor:pointer;list-style:none;display:flex;gap:10px;align-items:flex-start;padding:11px 14px}
+details.d summary::-webkit-details-marker{display:none}
+details.d summary::before{content:"▸";color:var(--ink3);font-size:13px;margin-top:3px;transition:transform .15s}
+details.d[open] summary::before{transform:rotate(90deg)}
+details.d .id{font:600 12.5px var(--f-mono);color:var(--ink3);min-width:26px;margin-top:2px}
+details.d .t{font-weight:600;line-height:1.55}
+details.d .body{padding:0 16px 12px 50px;color:var(--ink2);font-size:14.8px}
+details.d .body p{margin:.45em 0}
+@media (max-width:640px){ details.d .body{padding-left:16px} }
+
+/* matrices (theory widget) */
+.mx{display:inline-grid;grid-template-columns:repeat(2,58px);gap:4px;padding:4px 8px;border-left:2px solid var(--ink3);border-right:2px solid var(--ink3);border-radius:6px;vertical-align:middle}
+.mx input{width:58px;background:var(--surf2);border:1px solid var(--rule2);color:var(--ink);font:500 13px var(--f-mono);padding:4px 5px;border-radius:5px;text-align:right}
+.mxrow{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center;margin:8px 0}
+.mxrow .nm{font-family:var(--f-math);font-style:italic;font-size:17px;color:var(--ink)}
+.hmask{display:inline-grid;grid-template-columns:repeat(2,auto);gap:4px 10px;font:500 12.5px var(--f-mono);color:var(--ink2)}
+.calcout{font:500 13px/1.75 var(--f-mono);background:var(--surf2);border:1px solid var(--rule);border-radius:9px;padding:10px 12px;color:var(--ink2);overflow-x:auto;white-space:pre}
+.calcout .ok{color:var(--ctl-ink)} .calcout .no{color:var(--risk-ink);font-weight:600}
+
+/* tooltip */
+#tip{position:fixed;z-index:60;pointer-events:none;background:var(--surf);color:var(--ink);border:1px solid var(--rule2);border-radius:8px;padding:7px 10px;font-size:12.5px;line-height:1.5;box-shadow:var(--shadow);max-width:300px}
+#tip b{color:var(--ink)}
+footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--rule);font-size:13px;color:var(--ink3)}
+</style>
+</head>
+<body>
+<button class="themebtn" id="themeBtn" type="button" aria-label="切换明暗主题">◐ 主题</button>
+<div id="tip" hidden></div>
+<div class="wrap">
+
+<header class="hero">
+  <div>
+    <p class="kicker">arXiv 2609.24788v1 · cs.CV · 2026-09-21 · 精读</p>
+    <h1>SVEET<span class="soft">在双向视频模型上学会编辑，再原封不动地插到流式因果模型上用</span></h1>
+    <p class="sub">原题：<i>Streaming Video Editing with Easy Adaptation</i>。流程分三步：先在离线的双向模型 <b class="c-bi">Wan2.1-VACE-1.3B</b> 上，用 LoRA 微调 VACE 控制分支（风格化 / 补洞 / 深度转视频）；再把这个分支直接接到实时的因果模型 <b class="c-ca">Causal Forcing</b> 上，逐块（chunk）生成，因果骨干一个参数都不改。为了让分支换了骨干还能用，论文做了两处改动：控制分支改成<b>逐帧注意力</b>；训练时把 LoRA 的更新限制在“两个骨干特征差异最大的方向”的<b>正交补</b>里（ODT）。</p>
+    <div class="thesis">
+      <p><b>一句话判断：</b>工程上的思路是对的：控制分支在双向老师上训练、到蒸馏出来的学生上用。条件编码逐帧独立，训练和推理的计算就一模一样，也不用额外的缓存。这两点对做实时世界模型的人有直接参考价值。</p>
+      <p>但论文的两根“理论支柱”都有问题。第一，ODT 在代码里的校准只在 <b>t=0 的干净潜变量</b>上、两个模型都用<b>双向注意力</b>跑，测到的并不是“因果性”造成的差异。第二，附录两个定理的关键不等式<b>有反例</b>。此外，发布版推理代码用的不是论文写的逐帧注意力，训练端最关键的模型代码被 <code>.gitignore</code> 漏掉了。表 1 还有一行疑似复制粘贴错误。详见 <a href="#s10">§10</a>。</p>
+    </div>
+  </div>
+  <div class="heroviz" aria-label="动画：VACE 控制分支从双向骨干拔下，插到因果骨干上逐块生成">
+    <div class="bar"><span>TRAIN ON BIDIRECTIONAL → PLUG INTO CAUSAL</span><span id="heroPhase">① 训练</span></div>
+    <svg id="heroSvg" viewBox="0 0 420 300" role="img" aria-label="示意动画"></svg>
+    <p class="cap" id="heroCap">① 在双向骨干上训练 VACE 分支：整段 21 个潜帧一起去噪，骨干冻结，只训 LoRA。</p>
+  </div>
+</header>
+
+<dl class="meta">
+  <div><dt>作者 / 单位</dt><dd>Yujia Hu, Jiajun Li, Zihao He, Songhua Liu（通讯）· 上海交通大学</dd></div>
+  <div><dt>双向骨干（训练）</dt><dd><b>Wan2.1-VACE-1.3B</b>：30 层 DiT，宽 1536；VACE 的 15 个控制块挂在第 0,2,…,28 层 <span class="src c">代码</span></dd></div>
+  <div><dt>因果骨干（推理）</dt><dd><b>Causal Forcing</b> 分块版：同为 Wan2.1-T2V-1.3B 蒸馏，每块 3 个潜帧、4 步去噪 + KV cache</dd></div>
+  <div><dt>训练</dt><dd>LoRA rank 128，挂在 VACE 块的 q/k/v/o/ffn.0/ffn.2；AdamW，lr 1e-4（附录写 5e-5）；单卡 A100，batch 1，10 epoch；81 帧 480×832</dd></div>
+  <div><dt>任务与数据</dt><dd>风格化：Ditto，26 种风格 × 500 ≈ 13K；补洞：VPData &gt;6K；深度转视频：VPData ≈7K（Video-Depth-Anything 提深度）。每个任务单独训一个分支</dd></div>
+  <div><dt>速度</dt><dd>论文称单卡 H100 15 FPS。参考：CF 骨干本身 17.0 FPS、首帧 0.69 s（CF 论文表 1）</dd></div>
+  <div><dt>评测</dt><dd>GPT-4o 1–10 分、CLIP-T、VBench 6 项；测试集风格化 120 条（Ditto）、补洞 / 深度各 80 条（VPData）；用户研究 10 人 × 15 条视频</dd></div>
+  <div><dt>代码 / 权重</dt><dd><a href="https://github.com/YujiaHu1109/SVEET">YujiaHu1109/SVEET</a>（本文核对的是 commit <code>1c48254</code>，2026-09-25）；README 只给了 HF <code>Cicici1109/SVEET</code> 上 style 权重的下载命令。训练端模型代码缺失，见 <a href="#s9">§9</a></dd></div>
+</dl>
+
+<div class="statstrip">
+  <div><b>7.43 / 7.07 / 5.87</b><span>风格任务 GPT-4o 分（1–10）：本文 / 同管线 3D 注意力无 ODT / 最强外部基线 LiveEdit（表 1a）</span></div>
+  <div><b>+0.24 ~ +0.27</b><span>ODT 在 VLM 分上的增益；逐帧 2D 注意力只有 +0.10 ~ +0.12（表 2，仅风格任务，没报方差）</span></div>
+  <div><b>4% – 21%</b><span>每层抓住 80% 差异能量所需的方向占比，约 61–323 / 1536 维（附录 A，图 8）</span></div>
+  <div><b>16 / 24</b><span>本文在表 1 的“3 任务 × 8 指标”里拿第一的格数；深度任务的运动平滑度排 7 家中第 6</span></div>
+  <div><b>15 FPS</b><span>单卡 H100，没说计时口径、没报首帧延迟；CF 骨干自身 17 FPS</span></div>
+</div>
+
+<nav class="toc" aria-label="目录" id="toc">
+  <a href="#s1"><span class="n">§1</span>一页读懂</a>
+  <a href="#s2"><span class="n">§2</span>要解决什么</a>
+  <a href="#s3"><span class="n">§3</span>架构</a>
+  <a href="#s4"><span class="n">§4</span>逐帧注意力</a>
+  <a href="#s5"><span class="n">§5</span>ODT</a>
+  <a href="#s6"><span class="n">§6</span>理论核查</a>
+  <a href="#s7"><span class="n">§7</span>流式推理</a>
+  <a href="#s8"><span class="n">§8</span>结果重读</a>
+  <a href="#s9"><span class="n">§9</span>论文 vs 代码</a>
+  <a href="#s10"><span class="n">§10</span>存疑</a>
+  <a href="#s11"><span class="n">§11</span>公道话与启示</a>
+</nav>
+
+<!-- ============================ §1 ============================ -->
+<section id="s1">
+  <h2><span class="no">§1</span>一页读懂</h2>
+  <p class="lede">整篇论文就是三个阶段。前两个在离线时各做一次，第三个是实时运行的部分。</p>
+  <div class="cols3" style="margin-top:14px">
+    <div class="card bi">
+      <h4>① 校准：找“两个骨干哪里不一样” <span class="src c">代码</span></h4>
+      <p>取 500 条视频，分别喂给双向 Wan 和因果 CF，记录第 0,2,…,28 层的输出特征。每层用岭回归拟合一个 1536×1536 的线性映射 <span class="mv">W</span>，让双向特征 × <span class="mv">W</span> ≈ 因果特征。对 <span class="mv">A = W − I</span> 做 SVD，取能量占前 80% 的奇异方向 <span class="mv">V<sub>k</sub></span>，得到投影 <span class="mv">Π<sub>⊥</sub> = I − V<sub>k</sub>V<sub>k</sub><sup>⊤</sup></span>。</p>
+      <p class="dim" style="font-size:13px">注意：代码里这一步用 t=0 的干净潜变量，两个模型都开全双向注意力（§5）。</p>
+    </div>
+    <div class="card ctl">
+      <h4>② 训练：在双向骨干上教会 VACE 编辑</h4>
+      <p>骨干冻结，只训 VACE 控制分支的 LoRA。两处改动：</p>
+      <ul>
+        <li><b>逐帧注意力</b>：控制分支里每个 token 只看同一帧的 token（式 3）。</li>
+        <li><b>ODT</b>：LoRA 的更新限制在 <span class="mv">Π<sub>⊥</sub></span> 的子空间里，不去碰“双向和因果特征差异最大的方向”。</li>
+      </ul>
+      <p>用的是普通的 flow matching 损失，单卡 A100，每个任务训一个分支。</p>
+    </div>
+    <div class="card ca">
+      <h4>③ 部署：原样插到因果骨干上，逐块生成</h4>
+      <p>骨干权重换成 Causal Forcing，VACE 分支（LoRA 已合并）照旧挂上，不再训练。每个 chunk 是 3 个潜帧，第一块覆盖 9 个视频帧，之后每块 12 帧。流程是：4 步去噪 → 用 t=0 再跑一遍写入 KV cache → 下一块。控制分支每次只处理当前块的源视频。</p>
+      <p class="dim" style="font-size:13px">81 帧 = 7 块，每块 5 次前向。</p>
+    </div>
+  </div>
+  <div class="prose" style="margin-top:14px">
+    <p><b>三个要点</b>：</p>
+    <ol>
+      <li>这篇的“迁移”能成立，前提是两个骨干<b>同源同构</b>：CF 是从 Wan2.1-T2V-1.3B 蒸馏出来的，层数、宽度、hint 注入点都一样。所谓“跨异构骨干”其实没有被测过。</li>
+      <li>头条数字里，最大的一块增益在<b>同管线的 3D 版</b>（VACE 分支 + 任务 LoRA 微调 + 接到 CF，不加两项新设计）上就已经拿到了：风格任务上它比最强外部基线 LiveEdit 高 1.20 分，而 LiveEdit 也是在 Ditto 上训练的。两个新设计合起来再加 0.37（风格）/ 0.41（补洞）。</li>
+      <li>ODT 的直觉是“别往两个骨干不一致的方向写控制信号”，这个直觉说得通。但校准的方式、投影作用在哪一侧、理论证明，这三处都站不稳（§5、§6）。</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============================ §2 ============================ -->
+<section id="s2">
+  <h2><span class="no">§2</span>它要解决什么</h2>
+  <p class="lede prose">实时视频生成已经做到了：Self Forcing / Causal Forcing 把 Wan2.1-1.3B 蒸馏成 4 步、块因果、带 KV cache 的生成器，H100 上 17 FPS。但好用的编辑模型（VACE 这类）都是双向、整段处理的，要看到未来帧，没法边收边出。怎么让实时模型也能“按源视频改画面”？眼下有三条路：</p>
+  <div class="cols3" style="margin-top:12px">
+    <div class="card">
+      <h4>路子 A · 重新训 / 蒸馏一个流式编辑器</h4>
+      <p><b>LiveEdit</b>（2606.26740）分三阶段：先在双向模型上微调编辑能力（通道拼接）→ 用 teacher forcing 改成因果 → 用 DMD 蒸馏成 4 步。训练数据是 20K 条 Ditto 编辑对，12.66 FPS。<span class="src x">外部</span></p>
+      <p>代价：整个骨干都要重训一遍。</p>
+    </div>
+    <div class="card">
+      <h4>路子 B · 什么都不训，直接插</h4>
+      <p><b>Daydream / Fosdick</b>（2602.14381）把现成的 VACE 权重直接接到 LongLive、StreamDiffusionV2、MemFlow、Krea-14B、Reward Forcing 这 5 条 Wan 系自回归管线上。深度控制多 20–30% 延迟；参考图生视频严重退化。<span class="src x">外部</span></p>
+      <p>SVEET 表 1 里的 “DayDream+CF” 就是这条路。论文没写它的具体配置，按 Fosdick 的做法应该是零训练。</p>
+    </div>
+    <div class="card ctl">
+      <h4>路子 C · SVEET：在双向上训，零样本迁移</h4>
+      <p>只在双向骨干上训练控制分支（LoRA，很便宜），但为“迁移”做了两处针对性设计，然后零样本插到 CF 上。因果骨干不动。</p>
+      <p>相对路子 B 的增量：<b>①</b> 用任务数据微调 VACE；<b>②</b> 控制分支逐帧注意力；<b>③</b> ODT。</p>
+    </div>
+  </div>
+  <div class="callout note">
+    <p><b>为什么“在老师上训、在学生上用”有吸引力</b> <span class="src i">推断</span></p>
+    <p>论文给的动机是“流式蒸馏很贵（128 H100 GPU·天）”。更根本的原因可能在别处：蒸馏出来的 4 步因果生成器是用 DMD 训的，它不再是一个“在任意噪声水平都能去噪”的模型，想给它加一个新的控制条件，没有现成的、简单的训练目标。双向老师则是标准的扩散模型，加控制分支用普通 flow matching 训练就行，便宜又稳。图像领域早有类似经验：在 SD1.5 上训的 ControlNet，拿到它的微调版、蒸馏版上照样能用。SVEET 是在视频的“双向老师 → 因果学生”上验证了同一件事，并尝试缩小其中的落差。</p>
+  </div>
+</section>
+
+<!-- ============================ §3 ============================ -->
+<section id="s3">
+  <h2><span class="no">§3</span>架构：VACE 是怎么挂在骨干上的</h2>
+  <p class="lede prose">VACE 是一条“旁路”：15 个和骨干同构的 Transformer 块读条件视频，各输出一个 hint，加到骨干第 0,2,4,…,28 层的输出上。骨干本身冻结。SVEET 的训练和推理用的是同一张图，区别只在骨干的权重和注意力方式。切换下面的开关对比两种状态。</p>
+  <figure id="archFig" data-mode="train">
+    <div class="figtitle"><span>图 1 · VACE 旁路 + 骨干（示意，数字核对自代码）</span>
+      <span class="seg" id="archSeg"><button type="button" aria-pressed="true" data-m="train">训练时</button><button type="button" aria-pressed="false" data-m="infer">推理时</button></span></div>
+    <div class="scrollx"><svg id="archSvg" viewBox="0 0 780 540" style="min-width:640px" role="img" aria-label="架构图：左侧条件编码，中间 VACE 15 个控制块，右侧 30 层骨干，hint 加到偶数层输出后"></svg></div>
+    <div class="legend"><span><i style="background:var(--ctl)"></i>VACE 控制分支（LoRA 所在）</span><span><i id="archLegBack" style="background:var(--bi)"></i><span id="archLegBackT">骨干：双向 Wan2.1-VACE-1.3B（冻结）</span></span><span><i style="background:var(--rule2)"></i>来自骨干权重的共享输入</span></div>
+    <figcaption id="archCap"></figcaption>
+  </figure>
+  <div class="cols2">
+    <div class="card">
+      <h4>论文没强调、但很关键的一点 <span class="src c">代码</span></h4>
+      <p>控制分支并不是自给自足的。它第 0 块的输入是 <code>before_proj(条件) + x</code>，这里的 <code>x</code> 是骨干 patch embedding 之后的<b>噪声潜变量</b>；每个块的时间调制 <code>e</code>（AdaLN）和交叉注意力用的文本嵌入，也都来自骨干自己的 time / text embedding。</p>
+      <p>部署时这些模块整体换成了 CF 的权重（<code>infer_single.py</code> 先按合并后的 VACE 建模型，再 <code>load_state_dict(CF generator, strict=False)</code>）。所以“换骨干”不只是换了 hint 的接收方，控制分支自己的输入分布也跟着变了。</p>
+    </div>
+    <div class="card">
+      <h4>为什么能插得上</h4>
+      <p>hint 是直接加到骨干残差流上的一个 1536 维向量，这就要求两个骨干<b>逐层同宽、同层数、注入点一一对应</b>。CF（以及附录里的 Self Forcing）都是从 Wan2.1-T2V-1.3B 蒸馏出来的，这个条件天然满足 <span class="src x">外部</span>。</p>
+      <p>摘要里说的“跨异构骨干架构的零样本迁移”，实际测的只是<b>同一架构、不同权重和注意力方式</b>之间的迁移。换一个宽度或层数不同的骨干，这个方法本身就用不了。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ §4 ============================ -->
+<section id="s4">
+  <h2><span class="no">§4</span>逐帧注意力：让控制分支训练和推理算的是同一件事</h2>
+  <div class="prose">
+    <p>原版 VACE 的控制块用全时空（3D）注意力：训练时一次喂 21 个潜帧，每个 token 能看到全部 21 帧。流式推理时一次只来一个 chunk（3 个潜帧），要么只让它看这 3 帧（和训练对不上），要么也给控制分支配一个 KV cache（多一份显存和复杂度）。SVEET 的办法是把注意力掩码改成<b>只看同一帧</b>（式 3）：</p>
+    <p style="text-align:center"><span class="mv">M<sub>(t,s),(t′,s′)</sub> = 1 若 t = t′，否则 0</span></p>
+    <p>这样第 t 帧的控制特征只取决于第 t 帧的源画面。下面的交互图把几种掩码放在一起比较：<b>训练时</b>（一次看到全部帧）和<b>流式推理时</b>（处理第 2 个 chunk、前面的帧已经过去）各是什么样。</p>
+  </div>
+  <figure>
+    <div class="figtitle"><span>交互 1 · 注意力掩码：训练 vs 流式推理（6 个潜帧 × 每帧 3 个 token，chunk = 3 帧）</span></div>
+    <div class="ctrls"><span class="seg" id="maskSeg">
+      <button type="button" aria-pressed="false" data-k="full">原版 VACE：3D</button>
+      <button type="button" aria-pressed="true" data-k="frame">论文：逐帧 2D（式 3）</button>
+      <button type="button" aria-pressed="false" data-k="code">发布推理代码：块内稠密</button>
+      <button type="button" aria-pressed="false" data-k="causal">块因果 + cache（论文未试）</button>
+      <button type="button" aria-pressed="false" data-k="bb">对照：CF 骨干</button>
+    </span></div>
+    <div class="twogrid maskbox">
+      <div><div class="figtitle" style="margin-bottom:4px"><span>训练时（整段一次喂入）</span></div><svg id="maskTrain" viewBox="0 0 300 316" role="img" aria-label="训练时注意力掩码"></svg></div>
+      <div><div class="figtitle" style="margin-bottom:4px"><span>流式推理，正在处理 chunk 2</span></div><svg id="maskInfer" viewBox="0 0 300 316" role="img" aria-label="推理时注意力掩码"></svg></div>
+    </div>
+    <div class="legend"><span><i style="background:var(--ctl)"></i>可见（本次前向实际计算）</span><span><i style="background:var(--ca);opacity:.55"></i>可见（从 KV cache 读取）</span><span><i style="background:var(--surf3)"></i>不可见 / 不在本次前向里</span></div>
+    <div class="ro" id="maskRo"></div>
+    <figcaption id="maskCap"></figcaption>
+  </figure>
+  <div class="cols2">
+    <div class="card ctl">
+      <h4>逐帧的好处</h4>
+      <ul>
+        <li><b>训练和推理完全一致</b>：训练时虽然一次喂 21 帧，每帧只看自己；推理时一个 chunk 3 帧，每帧还是只看自己。</li>
+        <li><b>控制分支不需要 KV cache</b>，不随视频变长增加开销。</li>
+        <li><b>与绝对时间位置无关</b> <span class="src i">推断</span>：同一帧内的 token 时间下标相同，RoPE 的时间分量在 q·k 里相互抵消，控制特征只取决于画面本身，不取决于“这是第几帧”。论文没提这一点，但它正是逐帧设计能无限往后推的原因（前提是骨干撑得住）。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>代价与没试的替代方案</h4>
+      <ul>
+        <li>控制分支<b>看不到运动</b>，时间一致性全靠骨干的 KV cache。风格化这类逐帧任务影响不大；需要跨帧推理的编辑（例如跟踪一个被遮挡的物体）就可能吃亏。</li>
+        <li>论文把 P2 表述成“条件编码必须逐帧独立”。其实逐帧只是<b>充分条件</b>。最自然的替代是：训练时控制分支也用块因果掩码，推理时给它配 KV cache，同样满足“训练 = 推理”，还保留了运动信息。论文没有做这个对照。</li>
+        <li>按表 2，2D 注意力的增益（+0.10~0.12）<b>小于</b> ODT 的增益（+0.24~0.27）。“3D + ODT”（7.33）甚至高于“2D 不加 ODT”（7.19）。</li>
+      </ul>
+    </div>
+  </div>
+  <div class="callout">
+    <p><b>发布代码和论文对不上</b> <span class="src c">代码</span></p>
+    <p>在 <code>Self-Forcing/wan/modules/causal_model.py</code> 里，VACE 块推理时拿到的是 <code>kv_cache=None</code>、<code>block_mask=None</code>（<code>pipeline/causal_inference.py</code> 里 <code>_initialize_vace_kv_cache</code> 的调用被注释掉了；<code>block_mask</code> 只在训练前向里才创建）。这样走到的是 <code>flex_attention(..., block_mask=None)</code>，也就是对<b>当前 chunk 全部 3 个潜帧、4,680 个 token 做稠密注意力</b>，不是式 3 的逐帧掩码。训练端的 VACE 模型定义（<code>diffsynth/models/wan_video_vace_causal.py</code>）不在仓库里（原因见 §9），所以没法确认训练时用的是哪种掩码。如果训练确实是逐帧的，发布版推理就引入了论文本来要消除的训练 / 推理不一致。</p>
+  </div>
+</section>
+
+<!-- ============================ §5 ============================ -->
+<section id="s5">
+  <h2><span class="no">§5</span>ODT：别往“两个骨干意见不一致”的方向写控制信号</h2>
+  <div class="prose">
+    <p><b>直觉</b>：同一段视频喂给双向 Wan 和因果 CF，每层算出来的特征不完全一样，而且差异集中在少数几个方向上。控制分支学编辑时如果恰好把信号写进这些方向，换到 CF 上就会被“扭曲”。所以 ODT 把控制分支的更新限制在这些方向的正交补里，只在两个骨干“意见一致”的子空间里做编辑。</p>
+    <p>论文的写法（§3.2，式 4–8）：用岭回归求每层的线性映射 <span class="mv">W<sub>1</sub></span> 使 <span class="mv">W<sub>1</sub>X<sub>b</sub> ≈ X<sub>c</sub></span>，令 <span class="mv">A<sub>1</sub> = W<sub>1</sub> − I</span>，SVD 后取前 k 个右奇异向量 <span class="mv">V<sub>k</sub></span>，令 <span class="mv">Π<sub>⊥</sub> = I − V<sub>k</sub>V<sub>k</sub><sup>⊤</sup></span>，然后把控制更新约束成 <span class="mv">A<sub>2</sub> = C Π<sub>⊥</sub></span>，其中 C 由 LoRA 参数化。下面按<b>代码</b>把每一步实际做了什么摊开。</p>
+  </div>
+
+  <h3><span class="hn">5.1</span>校准流水线：代码里到底怎么算的</h3>
+  <figure>
+    <div class="figtitle"><span>图 2 · tools/feature_map.py + tools/feature_or.py（逐行核对）</span></div>
+    <div class="cols3" id="odtPipe">
+      <div class="card"><h4>① 取数据 <span class="src c">代码</span></h4><p>读训练 CSV 的 <code>vace_video</code> 列（源视频），固定种子 42 打乱后取前 <b>500</b> 条（另留 20 条 holdout，但对应的评估代码整段被注释掉了）。每条重采样到 81 帧、480×832。</p></div>
+      <div class="card"><h4>② 编码 <span class="src c">代码</span></h4><p>Wan VAE 编码成<b>干净</b>潜变量 z₀（21 × 60 × 104）。所有视频都用同一个文本：<code>"a high quality video"</code>，而不是各自的描述。</p></div>
+      <div class="card"><h4>③ 两个骨干各跑一遍 <span class="src c">代码</span></h4><p>用同一个 <code>feature_extraction_fn</code>：<b>t = 0</b>，标准 WanModel 块，<b>全双向注意力</b>，一次喂整段 21 帧。双向侧是 Wan2.1-VACE-1.3B 的骨干（不带 hint）；因果侧是把 CF generator 的权重装进同一个 WanModel。</p><p class="dim" style="font-size:13px">调用处没传任何 mask；WanModel 的源码也在缺失的 <code>models/</code> 目录里，“全注意力”是按上游 DiffSynth 的实现推断的。</p></div>
+      <div class="card"><h4>④ 取特征 <span class="src c">代码</span></h4><p>在第 0,2,…,28 块（即 hint 注入点）的输出上挂 hook。每层 ≈ 500 × 32,760 ≈ <b>1,640 万</b>个 token，每个 1536 维。</p></div>
+      <div class="card"><h4>⑤ 岭回归 <span class="src c">代码</span></h4><p>行向量约定：<span class="mv">W = (X<sub>b</sub><sup>⊤</sup>X<sub>b</sub> + λI)<sup>−1</sup>X<sub>b</sub><sup>⊤</sup>X<sub>c</sub></span>，使 <span class="mv">X<sub>c</sub> ≈ X<sub>b</sub>W</span>；<b>λ = 1e-3</b>，fp64 累加。论文式 4 写的是列向量约定 <span class="mv">WX<sub>b</sub></span>，两者互为转置。</p></div>
+      <div class="card"><h4>⑥ SVD → Π<sub>⊥</sub> <span class="src c">代码</span></h4><p><span class="mv">A = W − I = UΣV<sup>⊤</sup></span>；按 <b>σ² 的累计占比</b>取 k（第一个使累计能量 ≥ 80% 的位置）；<span class="mv">Π<sub>⊥</sub> = I − V<sub>k</sub>V<sub>k</sub><sup>⊤</sup></span>，每层一个 1536×1536 矩阵。</p><p class="dim" style="font-size:13px">⑦ 训练时调用 <code>vace.load_orthogonal_constraints(Π⊥)</code>，这个函数的定义不在仓库里。</p></div>
+    </div>
+    <figcaption><b>读法</b>：在行向量约定下，<span class="mv">X<sub>c</sub> − X<sub>b</sub> = X<sub>b</sub>A = (X<sub>b</sub>U)ΣV<sup>⊤</sup></span>，所以代码取的 <span class="mv">V<sub>k</sub></span> 是“因果特征偏离双向特征时，偏离落在哪些方向”（输出侧）。按论文式 4 的列向量写法，“右奇异向量”则是输入侧的方向。论文的公式和代码说的不是同一组向量；代码这组的含义更直观。</figcaption>
+  </figure>
+
+  <div class="callout">
+    <p><b>这一步测到的不是“因果性”</b> <span class="src c">代码</span> <span class="src i">推断</span></p>
+    <p>因果骨干和双向骨干至少有三处不同：<b>① 权重</b>（蒸馏改过）；<b>② 注意力方式</b>（块因果 + KV cache，看不到未来帧）；<b>③ 工作的噪声水平</b>（4 个大步，有效噪声 σ ≈ 1 → 0.9375 → 0.833 → 0.625）。代码的校准只保留了 ①，而且只在 t = 0 上测：两个模型都用全双向注意力、看整段干净视频。</p>
+    <p>公平地说，推理时 t = 0 那一遍（写 KV cache）也会注入 hint，所以 hint 会通过缓存影响后面所有块，t = 0 并非完全无关。但那一遍用的是块因果 + 缓存注意力，不是校准时的双向注意力；而决定当前块画面的 4 个去噪步（σ ≈ 1 → 0.625）完全没有测。附录 B 自己说“功能 1 负责扩散时间步调制”，却只在一个时间步上估计它。所以 <span class="mv">V<sub>k</sub></span> 充其量是“t = 0、双向注意力下，蒸馏导致的权重漂移方向”，拿它代表论文说的“因果性方向”，中间差了好几步。</p>
+  </div>
+
+  <h3><span class="hn">5.2</span>“80% 能量”意味着砍掉多少维</h3>
+  <div class="prose"><p>附录 A 说每层只要 4%–21% 的方向就能解释 80% 的差异能量。按 1536 维算，k ≈ 61–323。下面用一条<b>合成谱</b>演示阈值、固定 k 和能量定义（σ 还是 σ²）怎么影响 k。论文图 8 的真实数值没能读到（arXiv 页面被限流），所以这里只示意机制，不代表论文数据。</p></div>
+  <figure>
+    <div class="figtitle"><span>交互 2 · 累计能量曲线与 k 的选择（合成谱，n = 1536）</span></div>
+    <div class="ctrls">
+      <label class="lbl">谱的集中程度 <input type="range" id="spConc" min="0" max="100" value="55"><output id="spConcO"></output></label>
+      <span class="lbl">阈值 r <span class="seg" id="spThr"><button type="button" aria-pressed="false" data-v="0.6">60%</button><button type="button" aria-pressed="true" data-v="0.8">80%</button><button type="button" aria-pressed="false" data-v="0.9">90%</button></span></span>
+      <span class="lbl">能量按 <span class="seg" id="spDef"><button type="button" aria-pressed="true" data-v="2">σ²（代码）</button><button type="button" aria-pressed="false" data-v="1">σ</button></span></span>
+    </div>
+    <div class="scrollx"><svg id="spSvg" viewBox="0 0 720 280" style="min-width:560px" role="img" aria-label="累计能量曲线"></svg></div>
+    <div class="ro" id="spRo"></div>
+    <figcaption>竖虚线是固定 k = 32 / 64 / 128（论文图 7 的对照组），阴影带是论文报告的 4%–21% 区间。论文说固定小 k“只比直接迁移略好”，按能量自适应选 k 更好，r = 80% 在多数指标上最好。图 7 没有数值表，只能看图。</figcaption>
+  </figure>
+
+  <h3><span class="hn">5.3</span>投影在二维里长什么样，估偏了会怎样</h3>
+  <div class="prose"><p>把 1536 维压成 2 维来看：虚线是估计出的差异方向 <span class="mv">v</span>，青色箭头是控制分支想做的更新 <span class="mv">Δ</span>，投影后的更新是 <span class="mv">Π<sub>⊥</sub>Δ</span>。附录的式 24（勾股分解）说，被砍掉的能量 = <span class="mv">‖ΔP<sub>k</sub>‖²</span>，也就是“控制更新本来就想用差异方向的那部分”。再加一个滑块“估计偏差 δ”：如果真正起作用的差异方向（比如去噪时间步上的方向）和 t = 0 时估出的方向差了 δ，投影后的更新和真实方向之间还剩多少重叠。</p></div>
+  <figure>
+    <div class="figtitle"><span>交互 3 · 正交投影玩具（2 维示意）</span></div>
+    <div class="ctrls">
+      <label class="lbl">更新方向 ∠Δ <input type="range" id="pjU" min="0" max="180" value="62"><output id="pjUO"></output></label>
+      <label class="lbl">估计偏差 δ <input type="range" id="pjD" min="0" max="45" value="0"><output id="pjDO"></output></label>
+    </div>
+    <div class="twogrid pjbox" style="align-items:center">
+      <svg id="pjSvg" viewBox="0 0 320 300" role="img" aria-label="二维投影示意"></svg>
+      <div>
+        <div class="ro" id="pjRo" style="grid-template-columns:repeat(2,minmax(0,1fr))"></div>
+        <p style="font-size:13.5px;color:var(--ink2);margin:10px 2px 0">δ = 0 时，投影后与差异方向的重叠恰好为 0，这是论文想要的效果。δ 一旦不为 0，残余重叠 ≈ ‖Π<sub>⊥</sub>Δ‖·sin δ。在 1536 维里，“估偏”意味着真实差异子空间和 <span class="mv">V<sub>k</sub></span> 之间有非零的主角度。论文没有测过去噪时间步上的差异子空间，也就无从知道 δ 有多大。</p>
+      </div>
+    </div>
+    <div class="legend"><span><i class="line"></i>估计的差异方向 v（t = 0 校准）</span><span><i class="line" style="border-top-style:dotted"></i>真实差异方向（示意）</span><span><i style="background:var(--ctl)"></i>投影后更新 Π⊥Δ</span><span><i style="background:var(--ctl);opacity:.35"></i>原始更新 Δ</span></div>
+  </figure>
+
+  <h3><span class="hn">5.4</span>投影到底乘在哪一侧：六个 LoRA 目标层逐个看</h3>
+  <div class="cols2">
+    <div class="card">
+      <h4>形状对不上 <span class="src c">代码</span> <span class="src i">推断</span></h4>
+      <div class="scrollx"><table class="cmp" style="min-width:360px;font-size:13.5px">
+        <thead><tr><th>LoRA 目标</th><th>输入 → 输出</th><th>Π（1536²）乘输入侧</th><th>乘输出侧</th></tr></thead>
+        <tbody>
+          <tr><td data-h="目标">q / k / v / o（自注意力 + 交叉注意力）</td><td data-h="维度" class="mono">1536 → 1536</td><td data-h="输入侧">可以</td><td data-h="输出侧">可以</td></tr>
+          <tr><td data-h="目标">ffn.0</td><td data-h="维度" class="mono">1536 → 8960</td><td data-h="输入侧">可以</td><td data-h="输出侧"><b class="c-risk">不行</b></td></tr>
+          <tr><td data-h="目标">ffn.2</td><td data-h="维度" class="mono">8960 → 1536</td><td data-h="输入侧"><b class="c-risk">不行</b></td><td data-h="输出侧">可以</td></tr>
+        </tbody></table></div>
+      <p>peft 按模块名后缀匹配，所以 “q/k/v/o” 同时命中自注意力和交叉注意力，每个 VACE 块其实挂了 10 个 LoRA <span class="src c">代码</span>。其中交叉注意力的 k / v 输入是<b>文本嵌入</b>，不在残差流里。没有哪一侧能同时覆盖所有层。式 8 的 <span class="mv">A<sub>2</sub> = CΠ<sub>⊥</sub></span> 在论文的列向量约定下是乘在<b>输入侧</b>；代码里 <span class="mv">V<sub>k</sub></span> 按行向量约定求出，更像输出侧的量。实现函数缺失，作者怎么处理的无从得知。</p>
+    </div>
+    <div class="card">
+      <h4>坐标系也对不上 <span class="src i">推断</span></h4>
+      <p><span class="mv">V<sub>k</sub></span> 是在<b>骨干第 ℓ 块的输出空间</b>里估计的。LoRA 却作用在 <b>VACE 分支自己的内部流</b> c 上：q/k 的输出甚至在注意力头空间里。hint 等于 <code>after_proj(c)</code>，而 <code>after_proj</code> 是一个冻结的、不在 LoRA 目标里的 1536×1536 全连接层，会把各个方向重新混合。</p>
+      <p>所以就算把 c 空间里的 LoRA 更新投影掉了 <span class="mv">V<sub>k</sub></span>，也不能保证最终加进骨干的 hint 避开了 <span class="mv">V<sub>k</sub></span>。要做到这一点，更直接的办法是投影 hint 本身。推理代码里其实有两个相关开关，默认都关着：<code>use_W</code>（<code>hint @ W</code>）和 <code>use_pi_perp_path</code>（<code>hint @ Π⊥</code>）。表 2 的“推理期投影”被描述为“用估计的映射矩阵做事后投影”，对应的应该是前者（6.43 分，比不投影还差）。至于直接把 hint 投影到 Π⊥ 的效果，论文没有报告。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ §6 ============================ -->
+<section id="s6">
+  <h2><span class="no">§6</span>理论核查：两条关键不等式都有反例</h2>
+  <div class="prose">
+    <p><b>定理想说什么（人话）</b>：设有两个“功能”，分别对应同一个权重矩阵 W 上的两个参数更新：<span class="mv">ΔW<sub>1</sub></span>（双向 → 因果）和 <span class="mv">ΔW<sub>2</sub></span>（控制）。把 <span class="mv">ΔW<sub>2</sub></span> 投影到 <span class="mv">ΔW<sub>1</sub></span> 主奇异方向的正交补上，得到 <span class="mv">ΔW̃<sub>2</sub> = ΔW<sub>2</sub>(I − P<sub>k</sub>)</span>。定理 1 说控制对功能 1 的干扰不超过 <span class="mv">ΔW<sub>1</sub></span> 的“尾部”；定理 2 说两个更新叠加时的非线性交叉项也受尾部奇异值控制。于是 <span class="mv">f(W+ΔW<sub>1</sub>+ΔW̃<sub>2</sub>) ≈ f(W+ΔW<sub>1</sub>) + f(W+ΔW̃<sub>2</sub>) − f(W)</span>，即“因果模型加控制 ≈ 因果模型的输出 + 控制在双向模型上学到的效果”。</p>
+    <p>逐式核对附录 B 的结果如下。</p>
+  </div>
+  <div class="scrollx"><table class="cmp" style="max-width:1000px">
+    <thead><tr><th style="width:130px">位置</th><th>论文写的</th><th style="width:88px">核对</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td data-h="位置">式 23、24 / 35</td><td data-h="论文">被砍掉的能量 = ‖ΔW₂P<sub>k</sub>‖²（勾股分解）；‖E₂‖ ≤ ‖X‖₂‖ΔW₂P<sub>k</sub>‖<sub>F</sub></td><td data-h="核对"><span class="v same">成立</span></td><td data-h="说明">正交投影的标准性质和次乘性。</td></tr>
+      <tr><td data-h="位置">式 52</td><td data-h="论文">组合误差的领头项 = ⟨ΔW₁, H ΔW̃₂⟩</td><td data-h="核对"><span class="v same">成立</span></td><td data-h="说明">二阶泰勒展开的交叉项，推导没问题（余项写法不严谨，f 是向量值，H 应理解为逐输出的 Hessian）。</td></tr>
+      <tr><td data-h="位置">定理 1 · 式 22，证明 26–27</td><td data-h="论文">‖XPΔW̃₂‖₂ ≤ σ<sub>k+1</sub>(XP)·‖ΔW₂‖₂</td><td data-h="核对"><span class="v diff">不成立</span></td><td data-h="说明">(26) 用 Eckart–Young 说 ‖XP(I−P<sub>k</sub>)‖₂ = σ<sub>k+1</sub>(XP)，但 P<sub>k</sub> 是 <b>ΔW₁</b> 的主奇异投影，不是 XP 的，Eckart–Young 只对矩阵自己的奇异向量成立。(27) 把 XPΔW₂(I−P<sub>k</sub>) 改写成 XP(I−P<sub>k</sub>)ΔW₂(I−P<sub>k</sub>)，中间凭空多了一个 (I−P<sub>k</sub>)。维度记号也自相矛盾：论文把 V<sub>k</sub> 写成 d×k，那 ΔW₂(I−P<sub>k</sub>) 就要求 m = d；按“d×m 矩阵的右奇异向量”来理解，则 XP(I−P<sub>k</sub>) 要求 d = m。哪种读法都隐含 d = m。另外，非正式表述说干扰由“ΔW₁ 的尾部”控制，正式的式 22 用的却是 σ<sub>k+1</sub>(XP)，两处本身就不一致。<b>反例</b>见下面计算器的预设 ③。</td></tr>
+      <tr><td data-h="位置">定理 2 · 式 43 / 54</td><td data-h="论文">‖ΔW₁<sup>⊤</sup>ΔW̃₂‖<sub>F</sub> ≤ σ<sub>k+1</sub>(ΔW₁)·‖ΔW₂‖<sub>F</sub></td><td data-h="核对"><span class="v diff">不成立</span></td><td data-h="说明"><b>乘积顺序写反了</b>。反例：ΔW₁ = diag(1, 0)，ΔW₂ = E₁₂，左边 = 1，右边 = 0。交换顺序后的 ‖ΔW̃₂ΔW₁<sup>⊤</sup>‖<sub>F</sub> ≤ σ<sub>k+1</sub>‖ΔW₂‖<sub>F</sub> 才成立（ΔW̃₂ΔW₁<sup>⊤</sup> = ΔW₂V<sub>尾</sub>Σ<sub>尾</sub>U<sub>尾</sub><sup>⊤</sup>）。随机 2×2 高斯矩阵（k = 1）：原式约 69% 的情况下被违反（numpy 2 万次），交换顺序后 0 次。违反率取决于 k 与维度的比例：8×8、k = 1 约 0.1%，8×8、k = 4 约 53%。</td></tr>
+      <tr><td data-h="位置">定理 2 · “H 对角”</td><td data-h="论文">若 Hessian 对角，则 ‖E<sub>comp</sub>‖ ≤ ‖H‖₂σ<sub>k+1</sub>‖ΔW₂‖<sub>F</sub></td><td data-h="核对"><span class="v diff">条件不够</span></td><td data-h="说明">对角但非标量的 H 是逐元素加权，会破坏子空间正交性。反例：ΔW₁ = ½·𝟙（秩 1，σ₂ = 0），ΔW₂ = I，H 只保留对角两格，得 ⟨ΔW₁, H⊙ΔW̃₂⟩ = 0.5 ≠ 0。至少要 H = h·I（各向同性），这时界是 |h|·‖ΔW₁ − [ΔW₁]<sub>k</sub>‖<sub>F</sub>·‖ΔW₂‖<sub>F</sub>（尾部 Frobenius 能量，不是 σ<sub>k+1</sub>）。</td></tr>
+      <tr><td data-h="位置">定理 ↔ 方法</td><td data-h="论文">“We theoretically validate that such disentanglement … enables effective zero-shot transfer”</td><td data-h="核对"><span class="v diff">对象不同</span></td><td data-h="说明">定理里两个更新作用在<b>同一个权重矩阵</b>上。SVEET 里，A₁ 是两个模型块输出之间的<b>特征映射</b>，没有对应的参数更新；控制更新则在 VACE 分支的<b>另一组参数</b>上。在参数空间里两者不共享坐标，⟨ΔW₁, ΔW₂⟩ 恒为 0；交叉项由“骨干参数 × 控制参数”的交叉 Hessian 决定，和对 A₁ 做 SVD 没有直接关系。</td></tr>
+    </tbody>
+  </table></div>
+
+  <figure>
+    <div class="figtitle"><span>交互 4 · 2×2 反例计算器（k = 1，数值实时计算）</span></div>
+    <div class="ctrls"><span class="seg" id="thPre">
+      <button type="button" aria-pressed="true" data-p="t2">① 式 54 反例</button>
+      <button type="button" aria-pressed="false" data-p="h">② 对角 H 反例</button>
+      <button type="button" aria-pressed="false" data-p="t1">③ 定理 1 反例</button>
+      <button type="button" aria-pressed="false" data-p="rnd">随机一组</button>
+    </span> <button class="btn" type="button" id="thMany">随机试 2,000 次</button></div>
+    <div class="mxrow">
+      <span class="nm">ΔW₁ =</span><span class="mx" id="mA"><input aria-label="ΔW1 11"><input aria-label="ΔW1 12"><input aria-label="ΔW1 21"><input aria-label="ΔW1 22"></span>
+      <span class="nm">ΔW₂ =</span><span class="mx" id="mB"><input aria-label="ΔW2 11"><input aria-label="ΔW2 12"><input aria-label="ΔW2 21"><input aria-label="ΔW2 22"></span>
+      <span class="nm">P（定理 1）= diag(</span><span class="hmask"><label><input type="checkbox" id="pP1" checked> p₁</label><label><input type="checkbox" id="pP2"> p₂</label></span><span class="nm">)，X = I</span>
+      <span class="nm">H 掩码</span><span class="hmask" id="hM"><label><input type="checkbox" checked> h₁₁</label><label><input type="checkbox"> h₁₂</label><label><input type="checkbox"> h₂₁</label><label><input type="checkbox" checked> h₂₂</label></span>
+    </div>
+    <div class="calcout" id="thOut" aria-live="polite"></div>
+    <figcaption>计算内容：对 ΔW₁ 做 SVD，取 P₁ = v₁v₁<sup>⊤</sup>，ΔW̃₂ = ΔW₂(I − P₁)；然后逐条检查式 54（论文顺序和交换顺序）、标量 / 对角 H 下的交叉项，以及定理 1 的式 22（同时检查假设 X(I−P)ΔW₁ = 0 是否满足）。矩阵可以直接改。</figcaption>
+  </figure>
+  <div class="callout ok">
+    <p><b>公道地说</b>：理论有错，不等于方法没用。ODT 在表 2 上确实带来 +0.24~0.27 的 VLM 分，这个经验结果要单独看，它的可信度取决于实验本身（见 §8、§10）。问题在于论文说“理论上验证了”，这个说法不成立。另外，“把第二个更新投影到第一个更新主子空间的正交补”这个思路本身来自模型合并文献（论文引用的 Cheng et al. 2025）。</p>
+  </div>
+</section>
+
+<!-- ============================ §7 ============================ -->
+<section id="s7">
+  <h2><span class="no">§7</span>流式推理：81 帧是怎么一块一块出来的</h2>
+  <div class="prose"><p>推理时，骨干是 Causal Forcing 的分块版，配置文件是 <code>causal_forcing_dmd_chunkwise.yaml</code>：每块 3 个潜帧，去噪步 [1000, 750, 500, 250]，经 shift = 5 变换后有效噪声 σ ≈ 1, 0.9375, 0.833, 0.625。每块的最后一步出结果后，再用 t = 0 跑一遍，把干净特征写进 KV cache。VACE 分支在每次前向里都要重新跑一遍，读的是当前块的源视频潜变量。点“下一步”或“播放”逐步看。</p></div>
+  <figure>
+    <div class="figtitle"><span>交互 5 · 分块时间线（按发布代码 causal_inference.py）</span><span class="seg" id="tlSeg"><button type="button" aria-pressed="true" data-v="code">控制分支：代码（块内稠密）</button><button type="button" aria-pressed="false" data-v="paper">控制分支：论文（逐帧）</button></span></div>
+    <div class="ctrls"><button class="btn" type="button" id="tlPrev">◀ 上一步</button><button class="btn" type="button" id="tlNext">下一步 ▶</button><button class="btn" type="button" id="tlPlay">▶ 播放</button><label class="lbl">第 <output id="tlStepO"></output> / 35 次前向</label></div>
+    <div class="scrollx"><svg id="tlSvg" viewBox="0 0 760 250" style="min-width:600px" role="img" aria-label="分块时间线"></svg></div>
+    <div class="ro" id="tlRo"></div>
+    <figcaption><b>发布代码的两处“非流式”</b> <span class="src c">代码</span>：① 开始生成前，整段源视频先一次性 VAE 编码成条件潜变量；② 最后整段一次性解码（<code>use_cache=False</code>）。计时变量 <code>pure_inference_elapsed</code> 只覆盖中间的去噪循环。VAE 本身是因果 3D 卷积，做成真正的边收边出并不难，但论文报告的 15 FPS 包不包括编解码，没有说明。</figcaption>
+  </figure>
+  <div class="cols2">
+    <div class="card">
+      <h4>15 FPS 从哪来</h4>
+      <p>CF 论文表 1 报的是 17.0 FPS、首帧 0.69 s（单卡 H100，和 Self Forcing 分块版完全相同）<span class="src x">外部</span>。SVEET 在它上面多挂了 15 个控制块，每次前向都要跑。<b>如果</b>两个数字口径相同，15 FPS 意味着控制分支带来约 13% 的开销；但 SVEET 没说计时包括什么，这个比较只能算粗估 <span class="src i">推断</span>。作为参照，Fosdick 测到：LongLive-1.3B 加 VACE 深度控制，每块延迟从 539 ms 升到 698 ms（约 +30%，RTX 5090，368×640）；Krea-14B 上约 +20%（H100）<span class="src x">外部</span>。</p>
+      <p>结论：“实时”基本是骨干给的，SVEET 本身不加速。论文也没有报首帧延迟，而 Self Forcing 和 CF 都报了。</p>
+    </div>
+    <div class="card">
+      <h4>“流式”只测了 5 秒</h4>
+      <p>所有评测都是 81 帧，和训练长度一样。CF 论文自己承认：它在 5 s 视频上训练、注意力窗口最多 5 s，直接往后推会有训练 / 推理不一致，质量会下降，需要 LongLive、Rolling Forcing 之类的长视频方案 <span class="src x">外部</span>。</p>
+      <p>“直播风格化”这类应用真正关心的是：1 分钟以后画面是否漂移、控制是否还跟得上。论文没有这方面的数据。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ §8 ============================ -->
+<section id="s8">
+  <h2><span class="no">§8</span>结果重读</h2>
+  <div class="prose">
+    <p><b>评测设置</b> <span class="src p">论文</span>：三个任务各有一个留出测试集（风格化：Ditto 120 条；补洞、深度转视频：VPData 各 80 条）。指标分三类：GPT-4o 按 1–10 分打“遵循指令 + 画面连贯”的分；CLIP-T（ViT-L/14）；VBench 的 6 项。另有一个用户研究：10 人，15 条视频。外部基线 4 个：SDEdit+CF、StreamDiffusionV2、DayDream+CF、LiveEdit。自建对照 2 个：同管线的 3D 注意力版（Full-Attn）、通道拼接版（Channel-Concat）。</p>
+  </div>
+
+  <h3><span class="hn">8.1</span>表 1 逐格看</h3>
+  <figure>
+    <div class="figtitle"><span>交互 6 · 表 1（格子深浅 = 该列排名，粗体 = 该列第一）</span></div>
+    <div class="ctrls">
+      <span class="seg" id="t1Seg"><button type="button" aria-pressed="true" data-t="style">(a) 风格化</button><button type="button" aria-pressed="false" data-t="inpaint">(b) 补洞</button><button type="button" aria-pressed="false" data-t="depth">(c) 深度转视频</button></span>
+      <label class="lbl"><input type="checkbox" id="t1Dup" checked> 标出逐位相同的格子</label>
+      <label class="lbl"><input type="checkbox" id="t1Rank"> 显示名次</label>
+    </div>
+    <div class="scrollx"><table class="dt" id="t1Tab"></table></div>
+    <p id="t1Sum" style="font-size:14px;color:var(--ink2);margin:10px 2px 0"></p>
+    <figcaption>数字抄自论文表 1，排名由本页计算。VLM = GPT-4o 1–10 分；其余是 CLIP-T 和 VBench 六项，均为越高越好。“3D VACE”即正文说的 Full-Attn 对照，它的风格数字和表 2 的“3D w/o ODT”完全一致，所以它是<b>做了 LoRA 微调、不加 ODT</b> 的版本。</figcaption>
+  </figure>
+
+  <h3><span class="hn">8.2</span>增益从哪来：把 VLM 分拆开</h3>
+  <figure>
+    <div class="figtitle"><span>图 3 · 各任务 VLM 分（GPT-4o，1–10）：外部基线 → 同管线 3D（LoRA，无 ODT）→ SVEET</span></div>
+    <div class="scrollx"><svg id="gainSvg" viewBox="0 0 720 300" style="min-width:560px" role="img" aria-label="三个任务四类方法的 VLM 分柱状图"></svg></div>
+    <div class="legend" id="gainLeg"></div>
+    <figcaption><b>读法</b>：风格化里，3D 版比最强外部基线 LiveEdit 高 1.20 分（两者都用 Ditto 训练过，所以这个差距不是“同源数据”造成的，而是来自“VACE 分支 + CF 骨干”这套管线），逐帧注意力 + ODT 再加 0.37。补洞是 +0.28 和 +0.41。深度转视频是个反常点：微调过的 3D 版（5.75）<b>比完全没训练的 DayDream+CF（7.15）还低 1.40</b>，SVEET 却一下子跳到 8.41（比 3D 版高 2.66）。消融表只做了风格任务，这个反常没人解释。</figcaption>
+  </figure>
+
+  <h3><span class="hn">8.3</span>消融（表 2，仅风格化任务）</h3>
+  <div class="cols2">
+    <figure style="margin-top:0">
+      <div class="figtitle"><span>图 4 · 2 × 2：注意力方式 × 是否 ODT（VLM 分）</span></div>
+      <svg id="ablSvg" viewBox="0 0 360 250" role="img" aria-label="消融二乘二网格"></svg>
+      <figcaption>两个因素几乎是可加的：交互项只有 −0.02。ODT 的作用约为逐帧注意力的 2 倍多。</figcaption>
+    </figure>
+    <div class="card" style="align-self:start">
+      <h4>表 2 其余两行</h4>
+      <table class="cmp" style="font-size:13.5px"><thead><tr><th>设置</th><th>VLM</th><th>运动平滑</th></tr></thead><tbody>
+        <tr><td data-h="设置">推理期投影（Infer-stage Proj）</td><td data-h="VLM" class="mono">6.4250</td><td data-h="运动平滑" class="mono">0.9848</td></tr>
+        <tr><td data-h="设置">两阶段 teacher forcing（Two-stage TF）</td><td data-h="VLM" class="mono">7.0927</td><td data-h="运动平滑" class="mono">0.9879</td></tr>
+        <tr><td data-h="设置">SVEET（2D + ODT）</td><td data-h="VLM" class="mono">7.4322</td><td data-h="运动平滑" class="mono">0.9898</td></tr>
+      </tbody></table>
+      <p>“推理期投影”是训练时不约束，推理时直接用估出来的映射去变换 hint。它比什么都不做（3D 无 ODT 7.07、2D 无 ODT 7.19）还差，说明 t = 0 估出的线性映射<b>不能当作特征对齐器直接用</b>，这和 §5 的疑虑一致。“两阶段 TF”要额外改动流式骨干，论文只有一句话描述。</p>
+      <p class="dim" style="font-size:13px">表 2 只报了 VLM 和运动平滑两个数，没有任何“源结构保持”指标。可正文却说“2D 注意力改善了源结构保持”。</p>
+    </div>
+  </div>
+
+  <h3><span class="hn">8.4</span>用户研究（表 3）</h3>
+  <div class="cols2">
+    <div class="card">
+      <table class="cmp" style="font-size:13.5px"><thead><tr><th>方法</th><th>编辑正确</th><th>结构保持</th><th>整体平滑</th></tr></thead><tbody>
+        <tr><td data-h="方法">SDEdit+CF</td><td data-h="编辑正确" class="mono">5.39</td><td data-h="结构保持" class="mono">2.81</td><td data-h="整体平滑" class="mono">4.85</td></tr>
+        <tr><td data-h="方法">SDV2</td><td data-h="编辑正确" class="mono">5.33</td><td data-h="结构保持" class="mono">2.91</td><td data-h="整体平滑" class="mono">6.58</td></tr>
+        <tr><td data-h="方法">DayDream+CF</td><td data-h="编辑正确" class="mono">7.85</td><td data-h="结构保持" class="mono">8.62</td><td data-h="整体平滑" class="mono">7.95</td></tr>
+        <tr><td data-h="方法"><b class="c-ctl">SVEET</b></td><td data-h="编辑正确" class="mono">9.08</td><td data-h="结构保持" class="mono">9.21</td><td data-h="整体平滑" class="mono">8.11</td></tr>
+      </tbody></table>
+    </div>
+    <div class="card">
+      <p>10 位参与者，15 条视频，量表没说明（看数值像 1–10）。<b>LiveEdit 不在里面</b>，而它是表 1 里最强的外部基线；同管线的 3D 版、通道拼接版也不在。</p>
+      <p>SDEdit+CF 和 SDV2 的“结构保持”只有 2.8–2.9 分，这是 SDEdit 类方法重新加噪的固有特点，拿它们来衬托意义不大。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ §9 ============================ -->
+<section id="s9">
+  <h2><span class="no">§9</span>论文说的 vs 发布代码做的</h2>
+  <p class="lede prose">核对的是 <a href="https://github.com/YujiaHu1109/SVEET">GitHub 仓库</a> commit <code>1c48254</code>（2026-09-25）。仓库里 <code>.gitignore</code> 的第 11 行 <code>models/</code> 本意是排除权重目录，但它把 <code>DiffSynth-Studio/diffsynth/models/</code> 这个<b>源码目录</b>也一起排除了（<code>git check-ignore</code> 可验证）。结果是 <code>wan_video_dit.py</code>、<code>wan_video_vace_causal.py</code>、VAE、文本编码器等模型定义全部缺失：训练脚本和校准脚本都 import 不到，ODT 的核心实现 <code>load_orthogonal_constraints</code> 也看不到。</p>
+  <div class="scrollx"><table class="cmp">
+    <thead><tr><th style="width:150px">环节</th><th>论文</th><th>发布代码</th><th style="width:90px">结论</th></tr></thead>
+    <tbody>
+      <tr><td data-h="环节">控制分支注意力（推理）</td><td data-h="论文">逐帧 2D，式 3；不需要 KV cache</td><td data-h="代码"><code>kv_cache=None</code>、<code>block_mask=None</code> → 对当前 chunk 3 个潜帧（4,680 token）做稠密注意力；确实没有 cache（flex_attention 在补齐到 4,736 的长度上计算，56 个零填充 key 没被屏蔽，是沿用 Self Forcing 代码的小瑕疵）</td><td data-h="结论"><span class="v diff">不一致</span></td></tr>
+      <tr><td data-h="环节">控制分支注意力（训练）</td><td data-h="论文">逐帧 2D</td><td data-h="代码"><code>VaceWanModel_causal</code> 定义缺失</td><td data-h="结论"><span class="v unk">无法核实</span></td></tr>
+      <tr><td data-h="环节">校准输入</td><td data-h="论文">“identical video–prompt pairs”；N 是 “cached tokens”</td><td data-h="代码">干净潜变量、<b>t = 0</b>、固定 prompt “a high quality video”；两个模型都用全双向注意力跑整段 21 帧</td><td data-h="结论"><span class="v diff">含义不同</span></td></tr>
+      <tr><td data-h="环节">校准规模与 λ</td><td data-h="论文">“over 500 samples”；λ 未给</td><td data-h="代码"><code>num_train=500</code>；<code>ridge=1e-3</code>；holdout 评估代码被注释掉</td><td data-h="结论"><span class="v same">一致（补全）</span></td></tr>
+      <tr><td data-h="环节">线性映射约定</td><td data-h="论文">式 4：W X<sub>b</sub>（列向量）；取“右奇异向量”</td><td data-h="代码">解 X<sub>c</sub> ≈ X<sub>b</sub>W（行向量）；<code>Vt[:k].T</code> 是输出侧的偏离方向</td><td data-h="结论"><span class="v diff">互为转置</span></td></tr>
+      <tr><td data-h="环节">k 的选择</td><td data-h="论文">累计谱能量 80%</td><td data-h="代码">按 σ² 累计，<code>k = #{cum/total &lt; 0.8} + 1</code></td><td data-h="结论"><span class="v same">一致（补全）</span></td></tr>
+      <tr><td data-h="环节">Π⊥ 怎么约束 LoRA</td><td data-h="论文">式 8：A₂ = CΠ⊥</td><td data-h="代码"><code>train.py</code> 调 <code>self.pipe.vace.load_orthogonal_constraints(...)</code>，定义缺失</td><td data-h="结论"><span class="v unk">无法核实</span></td></tr>
+      <tr><td data-h="环节">推理期投影</td><td data-h="论文">表 2 “Infer-stage Proj”：“用估计的映射矩阵做事后投影”</td><td data-h="代码"><code>use_W</code>（hint @ W）对应这一行；另有 <code>use_pi_perp_path</code>（hint @ Π⊥），论文没报它的结果；两者默认都是 False</td><td data-h="结论"><span class="v same">消融开关</span></td></tr>
+      <tr><td data-h="环节">hint 注入</td><td data-h="论文">图 2 的 ⊕</td><td data-h="代码">在骨干第 0,2,…,28 块输出后 <code>x = x + hint × vace_scale</code>（1.0）</td><td data-h="结论"><span class="v same">一致</span></td></tr>
+      <tr><td data-h="环节">换骨干</td><td data-h="论文">“directly attached … without any fine-tuning”</td><td data-h="代码">先按合并 LoRA 后的 VACE 目录建模，再 <code>load_state_dict(CF generator, strict=False)</code>：骨干（含 patch / time / text embedding）换成 CF，VACE 块保留</td><td data-h="结论"><span class="v same">一致</span></td></tr>
+      <tr><td data-h="环节">学习率</td><td data-h="论文">正文 1e-4；附录 C.1 为 5e-5</td><td data-h="代码">README 训练命令 1e-4</td><td data-h="结论"><span class="v diff">论文自相矛盾</span></td></tr>
+      <tr><td data-h="环节">流式 I/O 与计时</td><td data-h="论文">15 FPS，口径未说明</td><td data-h="代码">整段源视频先 VAE 编码，最后整段解码；计时只包去噪循环</td><td data-h="结论"><span class="v unk">口径不明</span></td></tr>
+      <tr><td data-h="环节">发布权重</td><td data-h="论文">三个任务</td><td data-h="代码">README 只给了 <code>style.safetensors</code> 的下载命令</td><td data-h="结论"><span class="v unk">部分</span></td></tr>
+      <tr><td data-h="环节">README 命令</td><td data-h="论文">—</td><td data-h="代码">路径写的是 <code>DiffSynth-Studio-vaceori/</code>（仓库里叫 <code>DiffSynth-Studio/</code>）；<code>feature_map.py</code> 的命令传了脚本里没定义的 <code>--bidirectional_model_id</code> / <code>--causal_model_id</code>，argparse 会直接报错</td><td data-h="结论"><span class="v diff">跑不通</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============================ §10 ============================ -->
+<section id="s10">
+  <h2><span class="no">§10</span>存疑清单（21 条）</h2>
+  <p class="lede prose">按对核心结论的影响分三级：<span class="tag risk">高</span> 会动摇主要结论，<span class="tag med">中</span> 会让某个数字或说法打折扣，<span class="tag low">低</span> 是口径或表述问题。<span class="src i">推断</span> 表示是我的推断，论文或代码里没有直接证据。</p>
+  <div class="dfilter"><span class="seg" id="dSeg"><button type="button" aria-pressed="true" data-f="all">全部 21</button><button type="button" aria-pressed="false" data-f="risk">高 5</button><button type="button" aria-pressed="false" data-f="med">中 9</button><button type="button" aria-pressed="false" data-f="low">低 7</button></span></div>
+  <div class="doubts" id="doubts">
+
+<details class="d" data-lv="risk" open><summary><span class="id">H1</span><span class="t"><span class="tag risk">高</span>“首个”和“跨异构骨干”两个说法都站不住</span></summary><div class="body">
+<p>贡献第一条写“据我们所知，首个研究不重训、不蒸馏流式骨干的双向→流式编辑迁移”。可是 Fosdick（Daydream，2602.14381，2026-02）已经把在双向 Wan 上训练的 VACE 权重，零训练地接到 LongLive、StreamDiffusionV2、MemFlow、Krea-14B、Reward Forcing 五条自回归管线上，还报了深度 RMSE 和掩码 SSIM 这类客观控制指标 <span class="src x">外部</span>。SVEET 把它当作基线（DayDream+CF），却没在相关工作里讨论它。真正的增量应该表述为：用任务数据微调 + 逐帧注意力 + ODT。</p>
+<p>摘要说“跨异构骨干架构的零样本知识迁移”，但 CF 和 Self Forcing 都是 Wan2.1-T2V-1.3B 蒸馏出来的<b>同一个架构</b>（30 层、1536 维），只是权重和注意力方式不同。hint 是逐层加到残差流上的，维度必须对得上，所以这个方法天生只能在同源同构的骨干之间迁移。</p></div></details>
+
+<details class="d" data-lv="risk"><summary><span class="id">H2</span><span class="t"><span class="tag risk">高</span>ODT 校准测的是“t = 0 的权重漂移”，不是“因果性”</span></summary><div class="body">
+<p>代码 <span class="src c">代码</span>：两个模型都在<b>干净潜变量、t = 0、全双向注意力、整段 21 帧</b>上跑，CF 的权重被装进标准 WanModel，prompt 统一是 “a high quality video”。这样估出的 A₁ 只反映蒸馏导致的权重差，既不含块因果注意力 / KV cache 带来的差异，也不含 hint 实际起作用的那几个噪声水平（σ ≈ 1 → 0.625）上的差异。</p>
+<p>推理时 t = 0 写缓存那一遍也会注入 hint，所以 t = 0 并非完全无关。但那一遍用的是块因果 + 缓存注意力，而决定当前块画面的 4 个去噪步没有测。附录 B 明确说功能 1 “负责扩散时间步调制”，却只在一个时间步上估计它。表 2 里“推理期投影”（直接用估出的映射变换 hint）比不做还差，这也说明估出来的映射和实际部署时的差异对不上 <span class="src i">推断</span>。至少应该在 4 个去噪时间步上、用真正的块因果推理方式采特征，并报告各时间步子空间之间的主角度。</p></div></details>
+
+<details class="d" data-lv="risk"><summary><span class="id">H3</span><span class="t"><span class="tag risk">高</span>理论与方法对不上，两个定理的关键不等式都有反例</span></summary><div class="body">
+<p>① <b>对象不同</b>：定理讨论同一个权重矩阵上的两个参数更新。SVEET 里 A₁ 是两个模型块输出之间的特征映射；控制更新在 VACE 分支的另一组参数上，hint 还要经过冻结的 <code>after_proj</code>。在参数空间里两者不共享坐标。</p>
+<p>② <b>定理 2 式 43 / 54 乘积顺序写反</b>：ΔW₁ = diag(1, 0)、ΔW₂ = E₁₂ 时，左边 = 1，右边 = 0；交换顺序后才成立。“Hessian 对角”也不够，至少要各向同性；对角加权的反例见 §6。</p>
+<p>③ <b>定理 1 式 22</b> 误用 Eckart–Young：P<sub>k</sub> 来自 ΔW₁，不是 XP 的奇异向量；证明中式 27 凭空插入了 (I − P<sub>k</sub>)；维度记号自相矛盾，隐含 d = m。反例：X = I、P = diag(1, 0)、ΔW₁ = E₁₂、ΔW₂ = E₁₁，左边 = 1，右边 = 0。</p>
+<p>引言说 “We theoretically validate …”，这个说法不成立。ODT 有没有用只能看实验，而实验本身也有 H4、H5、M4 的问题。</p></div></details>
+
+<details class="d" data-lv="risk"><summary><span class="id">H4</span><span class="t"><span class="tag risk">高</span>发布代码：推理不是逐帧注意力，训练端核心代码缺失</span></summary><div class="body">
+<p>推理时 VACE 块是对当前 chunk 的 3 个潜帧做<b>块内稠密注意力</b>，不是式 3 的逐帧掩码（§4、§9）<span class="src c">代码</span>。训练端的模型定义目录被 <code>.gitignore</code> 的 <code>models/</code> 规则整个排除，所以 2D 掩码在训练中怎么实现、Π⊥ 怎么作用于 LoRA，都没法核实，训练也跑不起来。</p>
+<p>两条原则之一（P2）和 ODT 的具体实现都无法从发布版复现。如果论文数字就是用这份推理代码跑出来的，那表里的 “2D” 在推理时其实是 “chunk-3D”，训练时是否是 2D 也不确定。</p></div></details>
+
+<details class="d" data-lv="risk"><summary><span class="id">H5</span><span class="t"><span class="tag risk">高</span>表 1 的完整性和可比性</span></summary><div class="body">
+<p>① 表 1(c) 深度任务里，<b>Channel concat 和 DayDream+CF 两行的 8 个数有 7 个逐位相同</b>（CLIP 0.2892、主体一致 0.9332、背景一致 0.9239、闪烁 0.9818、平滑 0.9884、美学 0.5096、整体一致 0.0811），只有 VLM 分不同（6.0830 vs 7.1502）。两个不同方法不可能在 7 个指标上四位小数全部相同，至少有一行是复制粘贴错误。</p>
+<p>② SDEdit+CF、StreamDiffusionV2、LiveEdit 都是文本引导的视频到视频编辑器，拿它们做补洞和深度转视频时，掩码和深度图怎么喂进去，论文没说。LiveEdit 原本做的是局部属性编辑。</p>
+<p>③ 补洞和深度两个任务里，只有 SVEET 和它的两个同管线对照用 VPData（与测试集同源）训练过；DayDream+CF 按 Fosdick 的做法应是零训练。风格任务里 LiveEdit 也在 Ditto 上训练过，这一项相对公平。</p>
+<p>④ 头条指标是 GPT-4o 的 1–10 分，没给 prompt、抽帧方式和方差。补洞和深度转视频都有真值视频，却没报任何有参考指标，比如非掩码区 PSNR / SSIM、输出视频重新估深度后的误差。Fosdick 就报了深度 RMSE 和掩码 SSIM。</p></div></details>
+
+<details class="d" data-lv="med"><summary><span class="id">M1</span><span class="t"><span class="tag med">中</span>Π⊥ 作用在哪一侧、哪个坐标系，论文都没定义清楚</span></summary><div class="body">
+<p>式 8 的 A₂ = CΠ⊥ 在论文的列向量约定下是乘在输入侧；代码里 V<sub>k</sub> 按行向量约定求出，更像输出侧的量。六个 LoRA 目标里，ffn.0（1536→8960）只能在输入侧乘 1536² 的 Π，ffn.2（8960→1536）只能在输出侧乘，没有一个统一的“侧”。更根本的是，V<sub>k</sub> 在骨干残差流里估计，LoRA 却作用在 VACE 分支内部流和注意力头空间里，hint 还要经过冻结的 <code>after_proj</code> 重新混合，所以训练期的约束不能保证 hint 避开 V<sub>k</sub> <span class="src i">推断</span>。</p></div></details>
+
+<details class="d" data-lv="med"><summary><span class="id">M2</span><span class="t"><span class="tag med">中</span>大头增益在“同管线 3D 版”上就已拿到，不是来自两项新设计；深度任务的结果反常</span></summary><div class="body">
+<p>风格化：同管线 3D 版（VACE + LoRA，无 ODT，接 CF）已经比最强外部基线 LiveEdit（同样用 Ditto 训练）高 1.20 分，逐帧 + ODT 再加 0.37。补洞：+0.28 和 +0.41。深度转视频：3D 版 5.75，<b>比完全没训练的 DayDream+CF（7.15）还低 1.40</b>，SVEET 却是 8.41（+2.66）。为什么在深度任务上 LoRA 微调反而把 3D 版训差了，而 2D + ODT 能把它拉回来还超出一大截？消融只做了风格任务，这个问题没有解释。</p></div></details>
+
+<details class="d" data-lv="med"><summary><span class="id">M3</span><span class="t"><span class="tag med">中</span>正文的结论和自己的数字对不上</span></summary><div class="body">
+<p>§5.2 说在补洞和深度任务上“时间稳定性明显更好”。可深度任务里，本文的运动平滑度在 7 个方法中排<b>第 6</b>（0.9882），时间闪烁排第 4；补洞任务的平滑度排第 2，美学排第 4。§5.3 说“2D 注意力改善源结构保持”，但表 2 只有 VLM 分和运动平滑。全文唯一的“结构保持”数字是用户研究（表 3）里的主观打分，而且表 3 不含 3D / 2D 对照。</p></div></details>
+
+<details class="d" data-lv="med"><summary><span class="id">M4</span><span class="t"><span class="tag med">中</span>统计力度不够</span></summary><div class="body">
+<p>表 2 的差距在 0.10–0.27 之间：1–10 分制、120 条视频、单一裁判（GPT-4o），没报种子数，也没有误差棒。用户研究 10 人 × 15 条视频，没有包括表 1 中最强的外部基线 LiveEdit，也没有包括同管线的 3D 版，量表也没说明。</p></div></details>
+
+<details class="d" data-lv="med"><summary><span class="id">M5</span><span class="t"><span class="tag med">中</span>“流式 / 实时”只在 5 秒、同长度上验证</span></summary><div class="body">
+<p>所有评测都是 81 帧，和训练长度相同。CF 自己承认超过 5 s 会退化 <span class="src x">外部</span>。论文没有报首帧延迟，也没说 FPS 的计时口径。发布代码先把整段源视频做 VAE 编码，最后整段解码，计时只包去噪循环 <span class="src c">代码</span>。“实时”基本是 CF 骨干（17 FPS）给的，SVEET 本身不加速，只会多出控制分支的开销。</p></div></details>
+
+<details class="d" data-lv="med"><summary><span class="id">M6</span><span class="t"><span class="tag med">中</span>“条件编码必须逐帧独立”说成了必要条件</span></summary><div class="body">
+<p>证据只有图 3 的一组定性图，加上表 2 里 +0.10~0.12 的差距。最自然的替代方案没有测：训练时控制分支也用块因果掩码，推理时给它配 KV cache。这样同样满足“训练 = 推理”，还能保留运动信息。另外 ODT 的作用比 2D 大，“3D + ODT”（7.33）高于“2D 无 ODT”（7.19）。P1（控制与骨干解耦）的证据是 Wan-Fun 迁移失败，这几乎是定义上的结果：控制能力如果写进了骨干权重，换掉骨干自然就没了。Wan-Fun 具体怎么“迁移”的，论文也没说。</p></div></details>
+
+<details class="d" data-lv="med"><summary><span class="id">M7</span><span class="t"><span class="tag med">中</span>“只在双向上训练”有前提；迁移到 Self Forcing 只有定性图</span></summary><div class="body">
+<p>ODT 需要先在<b>目标流式骨干</b>上跑 500 条校准视频，所以严格说是“每一对（双向，因果）骨干各训一次”。附录 D.1 换到 Self Forcing 时，沿用的是基于 CF 算出的 Π⊥ 训练出来的分支，只给了图 10 的定性结果，没有数字。</p></div></details>
+
+<details class="d" data-lv="med"><summary><span class="id">M8</span><span class="t"><span class="tag med">中</span>缺上界和强基线</span></summary><div class="body">
+<p>缺三类对照：① 离线双向 VACE 加同一 LoRA 的结果（质量上界，能看出迁移损失了多少）；② 直接在冻结的 CF 上训练控制分支（用 teacher forcing，或者把“双向 VACE”用 DMD 蒸馏到“因果 VACE”）；③ 用同样的任务数据微调 DayDream 方案。“两阶段 TF”只有一句话，训练细节不详。</p></div></details>
+
+<details class="d" data-lv="med"><summary><span class="id">M9</span><span class="t"><span class="tag med">中</span>“训练成本高得难以承受”的动机被放大了</span></summary><div class="body">
+<p>“128 H100 GPU·天”没有注明具体出处（引了三篇）。Self Forcing 自己报告 DMD 阶段约 64 × H100 × 1.5 h ≈ 4 GPU·天（外加 ODE 初始化）<span class="src x">外部</span>；128 这个数可能来自 CausVid <span class="src i">推断</span>。SVEET 自己的训练开销也没报：单卡 A100、13K 样本 × 10 epoch、batch 1，约 13 万步，墙钟时间不详。</p></div></details>
+
+<details class="d" data-lv="low"><summary><span class="id">L1</span><span class="t"><span class="tag low">低</span>学习率前后矛盾</span></summary><div class="body"><p>正文 §5.1 和 README 写 1e-4，附录 C.1 写 5e-5。</p></div></details>
+
+<details class="d" data-lv="low"><summary><span class="id">L2</span><span class="t"><span class="tag low">低</span>关键超参只在代码里</span></summary><div class="body"><p>λ = 1e-3、校准 prompt、t = 0、能量按 σ² 计算、只取注入层，这些论文都没写。</p></div></details>
+
+<details class="d" data-lv="low"><summary><span class="id">L3</span><span class="t"><span class="tag low">低</span>图 1 展示的任务多于实验覆盖的任务</span></summary><div class="body"><p>图 1 标了 5 类任务（风格化、增强、深度转视频、上色、补洞），实际只训练和评测了 3 类。“增强”和“上色”没有任何说明和数字。</p></div></details>
+
+<details class="d" data-lv="low"><summary><span class="id">L4</span><span class="t"><span class="tag low">低</span>没测未见过的风格</span></summary><div class="body"><p>风格训练集是 26 种风格 × 500 条，测试集是 Ditto 里随机抽的 120 条，没说测试风格是否都在这 26 种之内（大概率在）。泛化到没见过的风格没有测。</p></div></details>
+
+<details class="d" data-lv="low"><summary><span class="id">L5</span><span class="t"><span class="tag low">低</span>名称、交叉引用、记号不一致</span></summary><div class="body"><p>“VACE-Fun” 和 “Wan-Fun” 混用；“Theorem B”；附录 C.1 说岭回归“在 Sec. 4”（实际在 §3.2）；正文说其他骨干的结果在 “Appendix D.2”（实际是 D.1）；附录里 V<sub>k</sub> ∈ ℝ<sup>d×k</sup> 和 ΔW₁ ∈ ℝ<sup>d×m</sup> 的右奇异向量维度不符；n 在正文是特征维，在附录是 token 数；§5.2 定性比较那段把 “Fosdick (2026)” 的引用挂在了 LiveEdit 后面；参考文献里 CausVid 列了两次（Yin 2025a / 2025b）。</p></div></details>
+
+<details class="d" data-lv="low"><summary><span class="id">L6</span><span class="t"><span class="tag low">低</span>仓库说明跑不通</span></summary><div class="body"><p>README 里的路径 <code>DiffSynth-Studio-vaceori/</code> 在仓库里不存在；校准命令传了两个脚本没定义的参数；只发布了 style 权重（见 §9）。</p></div></details>
+
+<details class="d" data-lv="low"><summary><span class="id">L7</span><span class="t"><span class="tag low">低</span>岭回归正则项把 W 往 0 拉，而不是往 I 拉</span></summary><div class="body"><p>式 4 用 λ‖W‖²。在方差很小的特征方向上，W 会被压向 0，A₁ = W − I 就趋于 −I，这些方向可能被误当成“差异方向”。更合理的写法是 λ‖W − I‖²。代码里 λ = 1e-3，每层 token 数约 1,640 万，实际影响大概率很小 <span class="src i">推断</span>。</p></div></details>
+
+  </div>
+</section>
+
+<!-- ============================ §11 ============================ -->
+<section id="s11">
+  <h2><span class="no">§11</span>公道话与启示</h2>
+  <div class="cols2">
+    <div class="card ctl">
+      <h4>做对了的地方</h4>
+      <ul>
+        <li><b>问题选得实在</b>：已经有很多好用的控制分支和编辑器，都长在双向模型上，把它们搬到实时模型上是真实需求。</li>
+        <li><b>成本低</b>：只训 LoRA，单卡 A100，因果骨干一个参数不动。</li>
+        <li><b>逐帧条件编码</b>这个设计干净：训练和推理的计算完全一致，不需要额外缓存，而且与绝对时间位置无关。</li>
+        <li>做了<b>受控的 2 × 2 消融</b>，也有“推理期投影”这样的负对照，说明事后对齐映射行不通。</li>
+        <li>代码和风格权重公开了（虽然不完整）。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>对交互式世界模型方向的启示</h4>
+      <ul>
+        <li><b>控制分支可以在老师上训、在学生上用</b>：动作、相机、深度、姿态这类控制，如果在双向 Wan 上训好，只要学生是同源同构的蒸馏模型，就有机会零样本迁移，省掉“给 DMD 学生加控制”的麻烦。</li>
+        <li><b>逐帧条件编码器</b>很适合动作条件：世界模型的动作本来就是逐步的，按帧独立编码，天然和块因果推理对齐。</li>
+        <li>SVEET 的“子空间避让”是一个便宜的旋钮，但要做对：<b>在实际去噪时间步上、用真正的因果推理方式</b>采特征，最好直接约束 hint 本身。</li>
+        <li><b>评测教训</b>：控制遵循要用客观指标（深度误差、掩码区 SSIM、位姿误差），要测长时域和首帧延迟，不能只看 GPT 分。</li>
+      </ul>
+    </div>
+  </div>
+  <div class="cols2" style="margin-top:16px">
+    <div class="card">
+      <h4>按本项目的严格标准定位</h4>
+      <p><b>① 逐步动作条件</b>：部分满足。条件是逐块流入的源视频，不是用户动作；提示词整段固定，没有演示中途切换。<b>② 闭环</b>：不满足，输出不会反馈到任何环境或决策。<b>③ 跨步持久状态</b>：弱，只有骨干在 5 秒窗口内的 KV cache。</p>
+      <p>所以它不是交互式世界模型，而是一个“流式条件生成器”。它对本方向的价值在于<b>把控制能力迁移到因果骨干</b>这套基础设施。</p>
+    </div>
+    <div class="card">
+      <h4>最值钱的后续实验</h4>
+      <ol style="padding-left:1.2em;margin:.3em 0;font-size:14.5px;color:var(--ink2)">
+        <li>在 4 个去噪时间步上、用块因果推理方式重新估 A₁，报告各时间步子空间之间的主角度，看 t = 0 的 V<sub>k</sub> 能代表多少。</li>
+        <li>直接投影 hint 与投影 LoRA 做对比；以及“块因果控制分支 + cache”与“逐帧”的对照。</li>
+        <li>加上离线双向 VACE 上界和直接在 CF 上训练的对照，量化迁移到底损失了多少。</li>
+        <li>用客观指标（深度 RMSE、非掩码区 SSIM）评测，多种子，报误差棒；修正表 1(c) 的重复行。</li>
+        <li>1 分钟以上的长视频、首帧延迟、端到端（含编解码）的 FPS。</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>本页是个人精读笔记，不是论文本身，也不是作者的说法。与论文不一致的地方以论文为准。来源标记：<span class="src p">论文</span> 论文正文 / 附录；<span class="src c">代码</span> GitHub 仓库 commit 1c48254；<span class="src x">外部</span> 其他论文（Causal Forcing 2602.02214、Self Forcing 2506.08009、Fosdick 2602.14381、LiveEdit 2606.26740）；<span class="src i">推断</span> 本页的推断。</p>
+  <p>核对说明：arXiv HTML 页被抓取代理限流，未能读取图 7 / 图 8 上的具体数值，涉及这两张图的地方只依据正文文字，并已在对应位置注明。§6 的反例在 numpy 中验证过，页面计算器会实时重算。</p>
+</footer>
+</div>
+
+<script>
+(function(){
+"use strict";
+var NS="http://www.w3.org/2000/svg";
+function S(tag,attrs,parent){var e=document.createElementNS(NS,tag);if(attrs){for(var k in attrs){if(attrs[k]!==undefined&&attrs[k]!==null)e.setAttribute(k,attrs[k]);}}if(parent)parent.appendChild(e);return e;}
+function T(parent,x,y,str,attrs){var a=attrs||{};a.x=x;a.y=y;var t=S("text",a,parent);t.textContent=str;return t;}
+function $(id){return document.getElementById(id);}
+function clear(el){while(el.firstChild)el.removeChild(el.firstChild);}
+function f(v,d){d=(d===undefined)?3:d;var r=Math.round(v*Math.pow(10,d))/Math.pow(10,d);if(Object.is(r,-0))r=0;return r.toFixed(d);}
+var reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ---------- theme ---------- */
+var root=document.documentElement;
+try{var sv=localStorage.getItem("sveet-theme");if(sv==="light"||sv==="dark")root.setAttribute("data-theme",sv);}catch(e){}
+$("themeBtn").addEventListener("click",function(){
+  var cur=root.getAttribute("data-theme");
+  if(!cur){cur=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches)?"light":"dark";}
+  var nx=cur==="light"?"dark":"light";root.setAttribute("data-theme",nx);
+  try{localStorage.setItem("sveet-theme",nx);}catch(e){}
+});
+
+/* ---------- tooltip ---------- */
+var tip=$("tip");
+function showTip(ev,html){tip.innerHTML=html;tip.hidden=false;moveTip(ev);}
+function moveTip(ev){var x=ev.clientX+14,y=ev.clientY+14;var w=tip.offsetWidth,h=tip.offsetHeight;if(x+w>window.innerWidth-8)x=ev.clientX-w-14;if(y+h>window.innerHeight-8)y=ev.clientY-h-14;tip.style.left=Math.max(6,x)+"px";tip.style.top=Math.max(6,y)+"px";}
+function hideTip(){tip.hidden=true;}
+function bindTip(el,html){el.addEventListener("mouseenter",function(ev){showTip(ev,typeof html==="function"?html():html);});el.addEventListener("mousemove",moveTip);el.addEventListener("mouseleave",hideTip);}
+
+/* ---------- seg helper ---------- */
+function seg(id,cb){var box=$(id);if(!box)return;var bs=box.querySelectorAll("button");bs.forEach(function(b){b.addEventListener("click",function(){bs.forEach(function(o){o.setAttribute("aria-pressed",o===b?"true":"false");});cb(b);});});}
+
+/* ---------- TOC active ---------- */
+(function(){
+  var links=[].slice.call(document.querySelectorAll("#toc a"));
+  if(!("IntersectionObserver" in window))return;
+  var map={};links.forEach(function(a){map[a.getAttribute("href").slice(1)]=a;});
+  var io=new IntersectionObserver(function(ents){ents.forEach(function(en){if(en.isIntersecting){links.forEach(function(a){a.classList.remove("on");});var a=map[en.target.id];if(a){a.classList.add("on");}}});},{rootMargin:"-40% 0px -55% 0px"});
+  document.querySelectorAll("section[id]").forEach(function(s){io.observe(s);});
+})();
+
+/* ================= HERO ================= */
+(function(){
+  var svg=$("heroSvg");if(!svg)return;
+  function box(x,y,w,h,col,title,sub){
+    var g=S("g",{},svg);
+    S("rect",{x:x,y:y,width:w,height:h,rx:10,style:"fill:var(--surf2);stroke:"+col+";stroke-width:2"},g);
+    for(var i=0;i<10;i++){S("line",{x1:x+14,x2:x+w-14,y1:y+34+i*7.2,y2:y+34+i*7.2,style:"stroke:"+col+";stroke-opacity:.45;stroke-width:3;stroke-linecap:round"},g);}
+    T(g,x+w/2,y+20,title,{"text-anchor":"middle","font-size":12.5,"font-weight":600,"class":"t-ink"});
+    T(g,x+w/2,y+h+16,sub,{"text-anchor":"middle","font-size":10.5,"class":"t-3"});
+    return g;
+  }
+  box(18,24,164,106,"var(--bi)","双向 Wan2.1-VACE","整段 21 帧 · 全注意力");
+  box(238,24,164,106,"var(--ca)","Causal Forcing","块因果 · 4 步 · KV cache");
+  var arrow=S("path",{d:"M100 232 C 170 242, 250 242, 320 232",style:"fill:none;stroke:var(--ink3);stroke-width:1.5;stroke-dasharray:4 4"},svg);
+  var vg=S("g",{},svg);
+  S("rect",{x:-58,y:-17,width:116,height:34,rx:9,style:"fill:var(--ctl-soft);stroke:var(--ctl);stroke-width:2"},vg);
+  T(vg,0,4,"VACE 分支",{"text-anchor":"middle","font-size":12.5,"font-weight":600,"class":"t-ctl"});
+  var up=S("g",{},vg);
+  for(var j=-1;j<=1;j++){S("path",{d:"M"+(j*30)+" -19 L"+(j*30)+" -30 M"+(j*30-4)+" -25 L"+(j*30)+" -31 L"+(j*30+4)+" -25",style:"fill:none;stroke:var(--ctl);stroke-width:1.6"},up);}
+  var lora=T(vg,0,31,"LoRA 训练中 · 逐帧注意力 · ODT",{"text-anchor":"middle","font-size":9.5,"class":"t-3"});
+  var tiles=[];var tg=S("g",{},svg);
+  T(tg,20,258,"chunk：",{"font-size":10.5,"class":"t-3"});
+  for(var c=0;c<7;c++){var r=S("rect",{x:66+c*48,y:246,width:42,height:18,rx:4,style:"fill:var(--surf3);stroke:var(--rule2)"},tg);tiles.push(r);
+    T(tg,66+c*48+21,278,c===0?"帧0–8":(12*c-3)+"–"+(12*c+8),{"text-anchor":"middle","font-size":8.5,"class":"t-3 mf"});}
+  var cap=$("heroCap"),ph=$("heroPhase");
+  var caps=["① 在双向骨干上训练 VACE 分支：整段 21 个潜帧一起去噪，骨干冻结，只训 LoRA（逐帧注意力 + ODT）。",
+            "② 拔下来：LoRA 合并进 VACE 权重，之后不再训练。",
+            "③ 插到 Causal Forcing 上逐块生成：每块 3 个潜帧（首块 9 帧，之后 12 帧），4 步去噪 + 1 次写缓存。"];
+  var phs=["① 训练","② 迁移","③ 流式推理"];
+  function setPhase(i){if(cap.textContent!==caps[i])cap.textContent=caps[i];ph.textContent=phs[i];}
+  function place(t){ // t: 0..1 along arc
+    var x0=100,x1=320,y0=190;
+    var x=x0+(x1-x0)*t, y=y0-Math.sin(Math.PI*t)*12;
+    vg.setAttribute("transform","translate("+x+","+y+")");
+  }
+  function draw(ms){
+    var T0=2600,T1=1500,T2=3400,T3=1400,L=T0+T1+T2+T3;var m=ms%L;
+    if(m<T0){setPhase(0);place(0);up.style.opacity=1;lora.textContent="LoRA 训练中 · 逐帧注意力 · ODT";tiles.forEach(function(r){r.style.fill="var(--surf3)";});arrow.style.opacity=.35;}
+    else if(m<T0+T1){var t=(m-T0)/T1;t=t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;setPhase(1);place(t);up.style.opacity=0;lora.textContent="LoRA 已合并 · 冻结";arrow.style.opacity=1;}
+    else{setPhase(2);place(1);up.style.opacity=1;arrow.style.opacity=.35;var k=Math.min(7,Math.floor((m-T0-T1)/(T2/7))+1);
+      tiles.forEach(function(r,i){r.style.fill=i<k?(i===k-1&&m<T0+T1+T2?"var(--ctl)":"var(--ca)"):"var(--surf3)";});}
+  }
+  if(reduce){setPhase(2);place(1);lora.textContent="LoRA 已合并 · 冻结";tiles.forEach(function(r){r.style.fill="var(--ca)";});cap.textContent="训练：在双向 Wan 上训 VACE 分支（LoRA）→ 部署：原样插到 Causal Forcing 上，逐块生成（7 块 × 3 潜帧 = 81 帧）。";ph.textContent="静态";return;}
+  var start=null;function loop(ts){if(start===null)start=ts;draw(ts-start);requestAnimationFrame(loop);}requestAnimationFrame(loop);
+})();
+
+/* ================= ARCH ================= */
+(function(){
+  var svg=$("archSvg");if(!svg)return;var fig=$("archFig");
+  var mode="train";
+  function render(){
+    clear(svg);
+    var back=mode==="train"?"var(--bi)":"var(--ca)";var backInk=mode==="train"?"t-bi":"t-ca";
+    var defs=S("defs",{},svg);
+    ["ctl","ink3","back"].forEach(function(k){var m=S("marker",{id:"ah-"+k,viewBox:"0 0 10 10",refX:9,refY:5,markerWidth:7,markerHeight:7,orient:"auto-start-reverse"},defs);S("path",{d:"M0 0 L10 5 L0 10 z",style:"fill:"+(k==="ctl"?"var(--ctl)":k==="back"?back:"var(--ink3)")},m);});
+    // column titles
+    T(svg,110,14,"条件编码",{"text-anchor":"middle","font-size":12,"font-weight":600,"class":"t-3"});
+    T(svg,362,14,"VACE 控制分支（15 块）",{"text-anchor":"middle","font-size":12,"font-weight":600,"class":"t-ctl"});
+    T(svg,660,14,mode==="train"?"双向骨干（30 块，冻结）":"因果骨干 CF（30 块，冻结）",{"text-anchor":"middle","font-size":12,"font-weight":600,"class":backInk});
+    // condition column
+    function nb(x,y,w,h,l1,l2,st){var g=S("g",{},svg);S("rect",{x:x,y:y,width:w,height:h,rx:8,style:st||"fill:var(--surf2);stroke:var(--rule2)"},g);T(g,x+w/2,y+(l2?h/2-3:h/2+4),l1,{"text-anchor":"middle","font-size":11.5,"class":"t-ink"});if(l2)T(g,x+w/2,y+h/2+13,l2,{"text-anchor":"middle","font-size":10,"class":"t-3"});return g;}
+    nb(20,26,180,42,"条件视频","源视频 / 掩码 / 深度图");
+    S("line",{x1:110,y1:68,x2:110,y2:84,style:"stroke:var(--ink3);stroke-width:1.4","marker-end":"url(#ah-ink3)"},svg);
+    nb(20,86,180,50,"VAE → VCU（96 通道）","inactive 16 + reactive 16 + 掩码 64");
+    S("path",{d:"M200 111 L250 116",style:"fill:none;stroke:var(--ctl);stroke-width:1.6","marker-end":"url(#ah-ctl)"},svg);
+    T(svg,22,154,"→ vace_patch_embedding + before_proj",{"font-size":9.5,"class":"t-3 mf"});
+    // shared inputs
+    var shSt=mode==="train"?"fill:var(--surf2);stroke:var(--rule2);stroke-dasharray:4 3":"fill:var(--risk-soft);stroke:var(--risk);stroke-dasharray:4 3";
+    var sg=nb(20,300,180,92,"","",shSt);
+    T(sg,110,322,"来自骨干权重的共享输入",{"text-anchor":"middle","font-size":11,"font-weight":600,"class":mode==="train"?"t-2":"t-risk"});
+    T(sg,110,342,"时间嵌入 e → AdaLN 调制",{"text-anchor":"middle","font-size":10.5,"class":"t-2"});
+    T(sg,110,358,"文本嵌入 → 交叉注意力",{"text-anchor":"middle","font-size":10.5,"class":"t-2"});
+    T(sg,110,378,mode==="train"?"（Wan 的 time / text embedding）":"推理时换成 CF 的权重！",{"text-anchor":"middle","font-size":10,"class":mode==="train"?"t-3":"t-risk"});
+    S("path",{d:"M200 346 L250 346",style:"fill:none;stroke:var(--ink3);stroke-width:1.2;stroke-dasharray:3 3","marker-end":"url(#ah-ink3)"},svg);
+    T(svg,110,412,"同样喂给骨干每一层",{"text-anchor":"middle","font-size":9.5,"class":"t-3"});
+    // backbone column
+    var bx=580,bw=160,cx=660;
+    nb(bx,26,bw,40,"噪声潜变量 → patch_emb","得到 x",("fill:var(--surf2);stroke:"+back));
+    var slots=[["块 0",80],["块 1",140],["块 2",180],["块 3",240],["块 4",280],["⋮",352],["块 28",380],["块 29",440]];
+    S("line",{x1:cx,y1:66,x2:cx,y2:480,style:"stroke:"+back+";stroke-width:1.6;stroke-opacity:.8"},svg);
+    slots.forEach(function(s){if(s[0]==="⋮"){T(svg,cx,s[1]+4,"⋮",{"text-anchor":"middle","font-size":18,"class":backInk});return;}
+      S("rect",{x:bx+20,y:s[1],width:bw-40,height:26,rx:6,style:"fill:var(--surf);stroke:"+back+";stroke-width:1.6"},svg);
+      T(svg,cx,s[1]+17,s[0],{"text-anchor":"middle","font-size":11,"class":"t-ink"});});
+    nb(bx,482,bw,34,"head → 输出","",("fill:var(--surf2);stroke:"+back));
+    // VACE blocks
+    var vb=[["VACE 0",120,"第 0 层后"],["VACE 1",220,"第 2 层后"],["VACE 2",320,"第 4 层后"],["VACE 14",420,"第 28 层后"]];
+    var vx=252,vw=220;
+    S("line",{x1:362,y1:144,x2:362,y2:396,style:"stroke:var(--ctl);stroke-width:1.6;stroke-dasharray:0"},svg);
+    T(svg,370,372,"⋮ （c 流逐块传递）",{"font-size":11,"class":"t-ctl"});
+    vb.forEach(function(v){
+      var y=v[1]-26;
+      S("rect",{x:vx,y:y,width:vw,height:52,rx:8,style:"fill:var(--surf)"},svg);
+      S("rect",{x:vx,y:y,width:vw,height:52,rx:8,style:"fill:var(--ctl-soft);stroke:var(--ctl);stroke-width:1.8"},svg);
+      T(svg,vx+10,y+17,v[0],{"font-size":11.5,"font-weight":600,"class":"t-ctl"});
+      T(svg,vx+10,y+33,"自注意力【逐帧】· 交叉注意力 · FFN",{"font-size":10,"class":"t-2"});
+      T(svg,vx+10,y+46,mode==="train"?"LoRA r=128（训练中，受 Π⊥ 约束）":"LoRA 已合并（冻结）",{"font-size":9.5,"class":mode==="train"?"t-ctl":"t-3"});
+      S("path",{d:"M"+(vx+vw)+" "+v[1]+" L"+(cx-11)+" "+v[1],style:"fill:none;stroke:var(--ctl);stroke-width:1.6","marker-end":"url(#ah-ctl)"},svg);
+      T(svg,vx+vw+8,v[1]-6,"after_proj → hint",{"font-size":9.5,"class":"t-3 mf"});
+      S("circle",{cx:cx,cy:v[1],r:10,style:"fill:var(--surf);stroke:var(--ctl);stroke-width:1.8"},svg);
+      T(svg,cx,v[1]+4.5,"+",{"text-anchor":"middle","font-size":14,"font-weight":600,"class":"t-ctl"});
+      T(svg,cx+16,v[1]+4,v[2],{"font-size":9.5,"class":"t-3"});
+    });
+    // x feed to VACE0
+    S("path",{d:"M"+bx+" 52 C 520 60, 470 70, 420 94",style:"fill:none;stroke:"+back+";stroke-width:1.3;stroke-dasharray:4 3","marker-end":"url(#ah-back)"},svg);
+    T(svg,430,44,mode==="train"?"骨干的 x 也喂进 VACE 0":"骨干的 x（CF 的 patch_emb）",{"font-size":9.5,"class":backInk});
+    // bottom strip
+    var info=mode==="train"
+      ? "注意力：全序列 21 个潜帧（32,760 token）· 时间步：随机采样（flow matching 训练）· 只更新 VACE 块的 LoRA"
+      : "注意力：块因果 + KV cache，每块 3 潜帧 · 时间步 ≈ 1000 / 937.5 / 833.3 / 625，再以 t = 0 写缓存 · 全部冻结";
+    T(svg,390,534,info,{"text-anchor":"middle","font-size":10.5,"class":"t-2"});
+    $("archLegBack").style.background=back;
+    $("archLegBackT").textContent=mode==="train"?"骨干：双向 Wan2.1-VACE-1.3B（冻结）":"骨干：Causal Forcing generator（冻结）";
+    $("archCap").innerHTML=mode==="train"
+      ? "<b>训练时</b>：骨干是 Wan2.1-VACE-1.3B 自带的双向 DiT，冻结；VACE 的 15 个块是唯一有梯度的部分（LoRA）。每个 VACE 块的输出经 <code>after_proj</code> 变成 hint，加到骨干第 2i 层的输出上。"
+      : "<b>推理时</b>：骨干（包括 patch / time / text embedding）整体换成 CF 权重，VACE 块原样保留。<b>控制分支的输入 x、时间调制 e 和文本嵌入也随之变了</b>，所以控制分支自己的计算也会漂移，而这正是 ODT 没有直接处理的部分。";
+  }
+  seg("archSeg",function(b){mode=b.getAttribute("data-m");fig.setAttribute("data-mode",mode);render();});
+  render();
+})();
+
+/* ================= MASK EXPLORER ================= */
+(function(){
+  var sT=$("maskTrain"),sI=$("maskInfer");if(!sT)return;
+  var NF=6,TP=3,N=NF*TP,cell=14,ox=42,oy=34;
+  var mode="frame";
+  var info={
+    full:{name:"原版 VACE：3D 全注意力",
+      train:function(q,k){return 1;},
+      infer:function(q,k){var cq=Math.floor(q.f/3),ck=Math.floor(k.f/3);if(cq!==1)return -1;return ck===1?1:0;},
+      same:false,cache:"不需要（但也就看不到前一块）",keys:["32,760","4,680"],
+      cap:"训练时每个 token 能看全部 21 帧；流式推理时只能看当前块 3 帧，这是训练 / 推理的<b>分布差</b>。如果给控制分支加 KV cache 让它也能看到前面的帧，就多一份缓存，而且仍然看不到未来帧，和训练时的“双向”也对不上。"},
+    frame:{name:"论文：逐帧 2D（式 3）",
+      train:function(q,k){return q.f===k.f?1:0;},
+      infer:function(q,k){if(Math.floor(q.f/3)!==1)return -1;return q.f===k.f?1:0;},
+      same:true,cache:"不需要",keys:["1,560","1,560"],
+      cap:"每个 token 只看同一帧，训练和推理的计算<b>完全一样</b>，与块怎么切、视频多长都无关。代价是控制分支本身看不到运动。"},
+    code:{name:"发布推理代码：块内稠密",
+      train:function(q,k){return q.f===k.f?1:0;},
+      infer:function(q,k){var cq=Math.floor(q.f/3),ck=Math.floor(k.f/3);if(cq!==1)return -1;return ck===1?1:0;},
+      same:false,cache:"不需要",keys:["1,560（按论文；训练代码缺失）","4,680"],
+      cap:"左图按论文画成逐帧，因为训练端代码缺失，无法确认。右图是 <code>causal_model.py</code> 实际走的路径：<code>kv_cache=None</code>、<code>block_mask=None</code>，对当前块 3 帧 4,680 个 token 做稠密注意力。如果训练确实是逐帧的，那就是<b>训练 / 推理不一致</b>。"},
+    causal:{name:"块因果 + 缓存（论文没试）",
+      train:function(q,k){return Math.floor(k.f/3)<=Math.floor(q.f/3)?1:0;},
+      infer:function(q,k){var cq=Math.floor(q.f/3),ck=Math.floor(k.f/3);if(cq!==1)return -1;if(ck===1)return 1;if(ck<1)return 2;return 0;},
+      same:true,cache:"需要（和骨干一样随长度增长）",keys:["4,680 × 块序号","4,680 × 块序号"],
+      cap:"训练时用块因果掩码，推理时给控制分支配 KV cache，训练和推理同样一致，而且控制分支能看到过去的运动。代价是多一份缓存。这是 P2 最自然的对照，论文没有做。"},
+    bb:{name:"对照：CF 骨干自身",
+      train:function(q,k){return Math.floor(k.f/3)<=Math.floor(q.f/3)?1:0;},
+      infer:function(q,k){var cq=Math.floor(q.f/3),ck=Math.floor(k.f/3);if(cq!==1)return -1;if(ck===1)return 1;if(ck<1)return 2;return 0;},
+      same:true,cache:"骨干自带（每块写一次，t = 0）",keys:["4,680 × 块序号","4,680 × 块序号"],
+      cap:"CF 骨干本身就是块因果 + KV cache（teacher forcing / self forcing 训练，推理逐块）。控制分支逐帧独立，时间一致性就完全交给它。"}
+  };
+  function tok(i){return {f:Math.floor(i/TP),t:i%TP};}
+  function draw(svg,fn,title){
+    clear(svg);
+    for(var fr=0;fr<NF;fr++){
+      T(svg,ox+fr*TP*cell+TP*cell/2,oy-8,"F"+(fr+1),{"text-anchor":"middle","font-size":10,"class":"t-3 mf"});
+      T(svg,ox-8,oy+fr*TP*cell+TP*cell/2+3,"F"+(fr+1),{"text-anchor":"end","font-size":10,"class":"t-3 mf"});
+    }
+    T(svg,ox+N*cell/2,oy+N*cell+22,"key（被看的 token）→",{"text-anchor":"middle","font-size":10.5,"class":"t-3"});
+    var yl=T(svg,12,oy+N*cell/2,"query ↓",{"text-anchor":"middle","font-size":10.5,"class":"t-3",transform:"rotate(-90 12 "+(oy+N*cell/2)+")"});
+    for(var i=0;i<N;i++){for(var j=0;j<N;j++){
+      var q=tok(i),k=tok(j),v=fn(q,k);
+      var st=v===1?"fill:var(--ctl)":v===2?"fill:var(--ca);fill-opacity:.55":v===-1?"fill:var(--surf2)":"fill:var(--surf3)";
+      var r=S("rect",{x:ox+j*cell+.6,y:oy+i*cell+.6,width:cell-1.2,height:cell-1.2,rx:2,style:st},svg);
+      (function(q,k,v){bindTip(r,function(){var s=v===1?"可见（本次前向计算）":v===2?"可见（从 KV cache 读）":v===-1?"这一行不在本次前向里（已过去的块）":"不可见";return "query：第 "+(q.f+1)+" 帧 token "+(q.t+1)+"<br>key：第 "+(k.f+1)+" 帧 token "+(k.t+1)+"<br><b>"+s+"</b>";});})(q,k,v);
+    }}
+    // chunk boundary
+    var bpos=ox+3*TP*cell;
+    S("line",{x1:bpos,x2:bpos,y1:oy-2,y2:oy+N*cell+2,style:"stroke:var(--ink2);stroke-width:1.5;stroke-dasharray:3 2"},svg);
+    S("line",{x1:ox-2,x2:ox+N*cell+2,y1:oy+3*TP*cell,y2:oy+3*TP*cell,style:"stroke:var(--ink2);stroke-width:1.5;stroke-dasharray:3 2"},svg);
+    T(svg,ox+1.5*TP*cell,oy+N*cell+8+2,"chunk 1",{"text-anchor":"middle","font-size":9,"class":"t-3"});
+    T(svg,ox+4.5*TP*cell,oy+N*cell+8+2,"chunk 2",{"text-anchor":"middle","font-size":9,"class":"t-3"});
+  }
+  function render(){
+    var m=info[mode];
+    draw(sT,m.train);draw(sI,m.infer);
+    var ro=$("maskRo");
+    ro.innerHTML='<div class="'+(m.same?"good":"bad")+'">训练 = 推理？<b>'+(m.same?"一致":"不一致")+'</b></div>'+
+      '<div>控制分支 KV cache<b style="font-size:14px">'+m.cache+'</b></div>'+
+      '<div>真实尺度下每个 query 可见 key 数（训练）<b style="font-size:14px">'+m.keys[0]+'</b></div>'+
+      '<div>真实尺度下每个 query 可见 key 数（推理）<b style="font-size:14px">'+m.keys[1]+'</b></div>';
+    $("maskCap").innerHTML="<b>"+m.name+"</b>："+m.cap+" <span class='dim'>（真实尺度：每潜帧 1,560 token，整段 21 帧 = 32,760，每块 3 帧 = 4,680）</span>";
+  }
+  seg("maskSeg",function(b){mode=b.getAttribute("data-k");render();});
+  render();
+})();
+
+/* ================= SPECTRUM ================= */
+(function(){
+  var svg=$("spSvg");if(!svg)return;
+  var n=1536,conc=40,thr=0.8,def=2;
+  var W=720,H=280,ml=52,mr=18,mt=16,mb=40,pw=W-ml-mr,ph=H-mt-mb;
+  function spec(){var tau=500*Math.pow(15/500,conc/100);var s=new Float64Array(n);for(var i=0;i<n;i++){var ii=i+1;s[i]=Math.exp(-ii/tau)+0.04*Math.exp(-ii/900);}return {s:s,tau:tau};}
+  function cum(s,p){var c=new Float64Array(n),t=0;for(var i=0;i<n;i++){t+=Math.pow(s[i],p);c[i]=t;}for(i=0;i<n;i++)c[i]/=t;return c;}
+  function kAt(c,r){var k=0;while(k<n&&c[k]<r)k++;return Math.min(k+1,n-1);}
+  function X(i){return ml+pw*Math.log(i)/Math.log(n);}
+  function Y(v){return mt+ph*(1-v);}
+  var hover=null;
+  function render(){
+    clear(svg);var sp=spec(),c=cum(sp.s,def),c2=cum(sp.s,def===2?1:2);
+    // band 4%-21%
+    S("rect",{x:X(61),y:mt,width:X(323)-X(61),height:ph,style:"fill:var(--ctl-soft)"},svg);
+    T(svg,X(323)-4,Y(0.45),"论文：4%–21%（k≈61–323）",{"text-anchor":"end","font-size":10,"class":"t-ctl"});
+    // grid
+    [0,0.2,0.4,0.6,0.8,1].forEach(function(v){S("line",{x1:ml,x2:ml+pw,y1:Y(v),y2:Y(v),style:"stroke:var(--grid);stroke-width:1"},svg);T(svg,ml-6,Y(v)+3.5,Math.round(v*100)+"%",{"text-anchor":"end","font-size":10,"class":"t-3 mf"});});
+    [1,10,100,1536].forEach(function(i){T(svg,X(i),mt+ph+16,String(i),{"text-anchor":"middle","font-size":10,"class":"t-3 mf"});S("line",{x1:X(i),x2:X(i),y1:mt+ph,y2:mt+ph+4,style:"stroke:var(--axis)"},svg);});
+    T(svg,ml+pw/2,H-4,"奇异方向序号 i（对数轴）",{"text-anchor":"middle","font-size":10.5,"class":"t-3"});
+    S("line",{x1:ml,x2:ml+pw,y1:mt+ph,y2:mt+ph,style:"stroke:var(--axis)"},svg);
+    // fixed k
+    [32,64,128].forEach(function(k){S("line",{x1:X(k),x2:X(k),y1:mt,y2:mt+ph,style:"stroke:var(--ink3);stroke-width:1;stroke-dasharray:3 3"},svg);T(svg,X(k)+3,mt+ph-6,"k="+k,{"font-size":9.5,"class":"t-3 mf"});});
+    // threshold
+    S("line",{x1:ml,x2:ml+pw,y1:Y(thr),y2:Y(thr),style:"stroke:var(--ink2);stroke-width:1;stroke-dasharray:6 3"},svg);
+    // curves
+    function path(cc){var d="";for(var i=0;i<n;i++){d+=(i?"L":"M")+X(i+1).toFixed(1)+" "+Y(cc[i]).toFixed(1);}return d;}
+    S("path",{d:path(c2),style:"fill:none;stroke:var(--ink3);stroke-width:1.5;stroke-dasharray:2 3"},svg);
+    S("path",{d:path(c),style:"fill:none;stroke:var(--ca);stroke-width:2"},svg);
+    var k=kAt(c,thr),k2=kAt(c2,thr);
+    S("line",{x1:X(k),x2:X(k),y1:Y(thr),y2:mt+ph,style:"stroke:var(--ca);stroke-width:2"},svg);
+    S("circle",{cx:X(k),cy:Y(thr),r:4.5,style:"fill:var(--ca);stroke:var(--surf);stroke-width:2"},svg);
+    T(svg,X(k)+6,Y(thr)-7,"k = "+k,{"font-size":11,"font-weight":600,"class":"t-ca mf"});
+    // labels for curves
+    T(svg,ml+8,mt+ph-22,(def===2?"实线：按 σ²（代码）":"实线：按 σ")+"　虚线：按 "+(def===2?"σ":"σ²"),{"font-size":10,"class":"t-2"});
+    // hover layer
+    var hl=S("line",{x1:0,x2:0,y1:mt,y2:mt+ph,style:"stroke:var(--ink3);stroke-width:1;opacity:0"},svg);
+    var hit=S("rect",{x:ml,y:mt,width:pw,height:ph,style:"fill:transparent"},svg);
+    hit.addEventListener("mousemove",function(ev){var pt=svg.createSVGPoint();pt.x=ev.clientX;pt.y=ev.clientY;var p=pt.matrixTransform(svg.getScreenCTM().inverse());var i=Math.round(Math.exp((p.x-ml)/pw*Math.log(n)));i=Math.max(1,Math.min(n,i));hl.setAttribute("x1",X(i));hl.setAttribute("x2",X(i));hl.style.opacity=1;showTip(ev,"前 <b>"+i+"</b> 个方向（"+(i/n*100).toFixed(1)+"%）<br>累计能量："+(c[i-1]*100).toFixed(1)+"%（"+(def===2?"σ²":"σ")+"）<br>另一定义："+(c2[i-1]*100).toFixed(1)+"%");});
+    hit.addEventListener("mouseleave",function(){hl.style.opacity=0;hideTip();});
+    $("spConcO").textContent="τ = "+sp.tau.toFixed(0);
+    var e32=c[31],e64=c[63],e128=c[127];
+    $("spRo").innerHTML='<div>按当前定义选出的 k<b>'+k+'</b></div><div>k / n<b>'+(k/n*100).toFixed(1)+'%</b></div><div>留给控制更新的维数 n − k<b>'+(n-k)+'</b></div><div>另一种定义下的 k<b>'+k2+'</b></div><div>固定 k = 32 / 64 / 128 抓到的能量<b style="font-size:13.5px">'+(e32*100).toFixed(0)+'% / '+(e64*100).toFixed(0)+'% / '+(e128*100).toFixed(0)+'%</b></div>';
+  }
+  var sl=$("spConc");sl.addEventListener("input",function(){conc=+sl.value;render();});
+  seg("spThr",function(b){thr=+b.getAttribute("data-v");render();});
+  seg("spDef",function(b){def=+b.getAttribute("data-v");render();});
+  conc=+sl.value;render();
+})();
+
+/* ================= PROJECTION TOY ================= */
+(function(){
+  var svg=$("pjSvg");if(!svg)return;
+  var th=62,dl=0,vang=20,cx=160,cy=160,R=112;
+  function P(a,r){var t=a*Math.PI/180;return [cx+r*Math.cos(t),cy-r*Math.sin(t)];}
+  function arrow(x1,y1,x2,y2,st,w){var g=S("g",{},svg);S("line",{x1:x1,y1:y1,x2:x2,y2:y2,style:st+";stroke-width:"+(w||2.2)},g);var a=Math.atan2(y2-y1,x2-x1),h=9;S("path",{d:"M"+x2+" "+y2+" L"+(x2-h*Math.cos(a-0.4))+" "+(y2-h*Math.sin(a-0.4))+" L"+(x2-h*Math.cos(a+0.4))+" "+(y2-h*Math.sin(a+0.4))+" z",style:st.replace("stroke:","fill:")},g);return g;}
+  function render(){
+    clear(svg);
+    S("circle",{cx:cx,cy:cy,r:R,style:"fill:none;stroke:var(--grid);stroke-width:1"},svg);
+    var a1=P(vang,140),a2=P(vang+180,140);
+    S("line",{x1:a2[0],y1:a2[1],x2:a1[0],y2:a1[1],style:"stroke:var(--dis);stroke-width:1.8;stroke-dasharray:6 4"},svg);
+    T(svg,a1[0]-6,a1[1]-8,"v（t=0 估计）",{"text-anchor":"end","font-size":10.5,"class":"t-2"});
+    if(dl>0){var b1=P(vang+dl,140),b2=P(vang+dl+180,140);S("line",{x1:b2[0],y1:b2[1],x2:b1[0],y2:b1[1],style:"stroke:var(--dis);stroke-width:1.5;stroke-dasharray:1.5 3.5"},svg);T(svg,b1[0]+2,b1[1]-6,"真实差异方向",{"font-size":10,"class":"t-3"});}
+    var u=[Math.cos(th*Math.PI/180),Math.sin(th*Math.PI/180)],v=[Math.cos(vang*Math.PI/180),Math.sin(vang*Math.PI/180)];
+    var dot=u[0]*v[0]+u[1]*v[1];var pr=[u[0]-dot*v[0],u[1]-dot*v[1]];
+    var tip0=P(th,R);var ptip=[cx+R*pr[0],cy-R*pr[1]];var foot=[cx+R*dot*v[0],cy-R*dot*v[1]];
+    S("line",{x1:tip0[0],y1:tip0[1],x2:ptip[0],y2:ptip[1],style:"stroke:var(--ink3);stroke-width:1;stroke-dasharray:3 3"},svg);
+    S("line",{x1:cx,y1:cy,x2:foot[0],y2:foot[1],style:"stroke:var(--dis);stroke-width:5;stroke-opacity:.35;stroke-linecap:round"},svg);
+    arrow(cx,cy,tip0[0],tip0[1],"stroke:var(--ctl);opacity:.4",2.2);
+    arrow(cx,cy,ptip[0],ptip[1],"stroke:var(--ctl)",2.6);
+    T(svg,tip0[0]+(tip0[0]>=cx?6:-6),tip0[1]-6,"Δ",{"font-size":13,"class":"t-ctl","text-anchor":tip0[0]>=cx?"start":"end","font-style":"italic"});
+    T(svg,ptip[0]+(ptip[0]>=cx?6:-6),ptip[1]+(ptip[1]>cy?14:-4),"Π⊥Δ",{"font-size":12.5,"class":"t-ctl","text-anchor":ptip[0]>=cx?"start":"end","font-weight":600});
+    S("circle",{cx:cx,cy:cy,r:3,style:"fill:var(--ink2)"},svg);
+    var keep=1-dot*dot,cut=dot*dot;var tr=[Math.cos((vang+dl)*Math.PI/180),Math.sin((vang+dl)*Math.PI/180)];
+    var ovEst=Math.abs(pr[0]*v[0]+pr[1]*v[1]),ovTrue=Math.abs(pr[0]*tr[0]+pr[1]*tr[1]),ovRaw=Math.abs(u[0]*tr[0]+u[1]*tr[1]);
+    $("pjRo").innerHTML='<div>保留能量 ‖Π⊥Δ‖²<b>'+f(keep,3)+'</b></div><div>被砍掉 ‖ΔP‖²（式 24）<b>'+f(cut,3)+'</b></div><div class="good">与估计方向 v 的重叠<b>'+f(ovEst,3)+'</b></div><div class="'+(ovTrue>0.02?"bad":"good")+'">与真实方向的重叠（投影后）<b>'+f(ovTrue,3)+'</b></div><div>对照：不投影时与真实方向的重叠<b>'+f(ovRaw,3)+'</b></div><div>估计偏差 δ<b>'+dl+'°</b></div>';
+    $("pjUO").textContent=th+"°";$("pjDO").textContent=dl+"°";
+  }
+  $("pjU").addEventListener("input",function(e){th=+e.target.value;render();});
+  $("pjD").addEventListener("input",function(e){dl=+e.target.value;render();});
+  render();
+})();
+
+/* ================= THEORY CALC ================= */
+(function(){
+  var out=$("thOut");if(!out)return;
+  var aIn=[].slice.call($("mA").querySelectorAll("input")),bIn=[].slice.call($("mB").querySelectorAll("input")),hIn=[].slice.call($("hM").querySelectorAll("input"));
+  function get(ins){return [[+ins[0].value||0,+ins[1].value||0],[+ins[2].value||0,+ins[3].value||0]];}
+  function set(ins,M){ins[0].value=M[0][0];ins[1].value=M[0][1];ins[2].value=M[1][0];ins[3].value=M[1][1];}
+  function mul(A,B){return [[A[0][0]*B[0][0]+A[0][1]*B[1][0],A[0][0]*B[0][1]+A[0][1]*B[1][1]],[A[1][0]*B[0][0]+A[1][1]*B[1][0],A[1][0]*B[0][1]+A[1][1]*B[1][1]]];}
+  function tr(A){return [[A[0][0],A[1][0]],[A[0][1],A[1][1]]];}
+  function sub(A,B){return [[A[0][0]-B[0][0],A[0][1]-B[0][1]],[A[1][0]-B[1][0],A[1][1]-B[1][1]]];}
+  var I=[[1,0],[0,1]];
+  function fro(A){return Math.sqrt(A[0][0]*A[0][0]+A[0][1]*A[0][1]+A[1][0]*A[1][0]+A[1][1]*A[1][1]);}
+  function svd2(M){var S=mul(tr(M),M);var a=S[0][0],b=S[0][1],c=S[1][1];var m=(a+c)/2,d=Math.sqrt(((a-c)/2)*((a-c)/2)+b*b);var l1=m+d,l2=Math.max(0,m-d);var v;
+    if(Math.abs(b)>1e-12){var v1=[l1-c,b],v2=[b,l1-a];v=(Math.hypot(v1[0],v1[1])>=Math.hypot(v2[0],v2[1]))?v1:v2;}else{v=(a>=c)?[1,0]:[0,1];}
+    var nv=Math.hypot(v[0],v[1])||1;v=[v[0]/nv,v[1]/nv];return {s:[Math.sqrt(Math.max(l1,0)),Math.sqrt(l2)],v:v};}
+  function spec(A){return svd2(A).s[0];}
+  function mstr(A){return "[["+f(A[0][0],3)+", "+f(A[0][1],3)+"], ["+f(A[1][0],3)+", "+f(A[1][1],3)+"]]";}
+  function ok(b){return b?'<span class="ok">✓ 成立</span>':'<span class="no">✗ 不成立</span>';}
+  function core(A,B,p,hm){
+    var sv=svd2(A),v=sv.v,P=[[v[0]*v[0],v[0]*v[1]],[v[1]*v[0],v[1]*v[1]]];var Bt=mul(B,sub(I,P));
+    var lhs=fro(mul(tr(A),Bt)),rhs=sv.s[1]*fro(B),flip=fro(mul(Bt,tr(A)));
+    var inS=A[0][0]*Bt[0][0]+A[0][1]*Bt[0][1]+A[1][0]*Bt[1][0]+A[1][1]*Bt[1][1];
+    var inH=hm[0]*A[0][0]*Bt[0][0]+hm[1]*A[0][1]*Bt[0][1]+hm[2]*A[1][0]*Bt[1][0]+hm[3]*A[1][1]*Bt[1][1];
+    var XP=[[p[0],0],[0,p[1]]];var assume=fro(mul(sub(I,XP),A))<1e-9;var E1=mul(XP,Bt);var e1=spec(E1),sXP=svd2(XP).s[1],r1=sXP*spec(B);
+    return {sv:sv,P:P,Bt:Bt,lhs:lhs,rhs:rhs,flip:flip,inS:inS,inH:inH,assume:assume,e1:e1,r1:r1,tail:Math.sqrt(sv.s[1]*sv.s[1])*fro(B)};
+  }
+  function run(){
+    var A=get(aIn),B=get(bIn),p=[$("pP1").checked?1:0,$("pP2").checked?1:0],hm=hIn.map(function(x){return x.checked?1:0;});
+    var r=core(A,B,p,hm);var eps=1e-9;
+    var s="σ(ΔW₁) = ["+f(r.sv.s[0])+", "+f(r.sv.s[1])+"]    v₁ = ["+f(r.sv.v[0])+", "+f(r.sv.v[1])+"]    P₁ = v₁v₁ᵀ = "+mstr(r.P)+"\n"+
+      "ΔW̃₂ = ΔW₂(I − P₁) = "+mstr(r.Bt)+"\n\n"+
+      "── 定理 2 · 式 54 ──\n"+
+      "论文顺序  ‖ΔW₁ᵀ ΔW̃₂‖_F = "+f(r.lhs)+"   ≤  σ₂·‖ΔW₂‖_F = "+f(r.rhs)+" ?   "+ok(r.lhs<=r.rhs+eps)+"\n"+
+      "交换顺序  ‖ΔW̃₂ ΔW₁ᵀ‖_F = "+f(r.flip)+"   ≤  σ₂·‖ΔW₂‖_F = "+f(r.rhs)+" ?   "+ok(r.flip<=r.rhs+eps)+"\n\n"+
+      "── 交叉项 ⟨ΔW₁, H⊙ΔW̃₂⟩（论文期望：σ₂ 小时 ≈ 0）──\n"+
+      "H = 标量（各向同性）：  "+f(r.inS)+"   界 ‖ΔW₁−[ΔW₁]₁‖_F·‖ΔW₂‖_F = "+f(r.tail)+"   "+ok(Math.abs(r.inS)<=r.tail+eps)+"\n"+
+      "H = 对角掩码 ["+hm.join(",")+"]：  "+f(r.inH)+"   同一个界 "+f(r.tail)+"   "+ok(Math.abs(r.inH)<=r.tail+eps)+"\n\n"+
+      "── 定理 1 · 式 22（X = I，P = diag("+p.join(", ")+")）──\n"+
+      "假设 X(I−P)ΔW₁ = 0：  "+(r.assume?'<span class="ok">满足</span>':'<span class="no">不满足（此时定理不适用）</span>')+"\n"+
+      "‖XP ΔW̃₂‖₂ = "+f(r.e1)+"   ≤  σ₂(XP)·‖ΔW₂‖₂ = "+f(r.r1)+" ?   "+(r.assume?ok(r.e1<=r.r1+eps):"—");
+    out.innerHTML=s;
+  }
+  var pres={
+    t2:{A:[[1,0],[0,0]],B:[[0,1],[0,0]],p:[1,0],h:[1,0,0,1]},
+    h:{A:[[0.5,0.5],[0.5,0.5]],B:[[1,0],[0,1]],p:[1,0],h:[1,0,0,1]},
+    t1:{A:[[0,1],[0,0]],B:[[1,0],[0,0]],p:[1,0],h:[1,0,0,1]}
+  };
+  function gauss(){var u=1-Math.random(),v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+  function load(k){
+    var pr=pres[k];
+    if(k==="rnd"){pr={A:[[+gauss().toFixed(2),+gauss().toFixed(2)],[+gauss().toFixed(2),+gauss().toFixed(2)]],B:[[+gauss().toFixed(2),+gauss().toFixed(2)],[+gauss().toFixed(2),+gauss().toFixed(2)]],p:[1,0],h:[1,0,0,1]};}
+    set(aIn,pr.A);set(bIn,pr.B);$("pP1").checked=!!pr.p[0];$("pP2").checked=!!pr.p[1];hIn.forEach(function(x,i){x.checked=!!pr.h[i];});run();
+  }
+  seg("thPre",function(b){load(b.getAttribute("data-p"));});
+  aIn.concat(bIn).forEach(function(x){x.addEventListener("input",run);});
+  hIn.concat([$("pP1"),$("pP2")]).forEach(function(x){x.addEventListener("change",run);});
+  $("thMany").addEventListener("click",function(){
+    var N=2000,v54=0,vf=0,vt1=0,vh=0,n1=0;
+    for(var t=0;t<N;t++){
+      var A=[[gauss(),gauss()],[gauss(),gauss()]],B=[[gauss(),gauss()],[gauss(),gauss()]];
+      var r=core(A,B,[1,0],[1,0,0,1]);if(r.lhs>r.rhs+1e-9)v54++;if(r.flip>r.rhs+1e-9)vf++;if(Math.abs(r.inH)>r.tail+1e-9)vh++;
+      var A1=[[gauss(),gauss()],[0,0]];var r1=core(A1,B,[1,0],[1,0,0,1]);n1++;if(r1.e1>r1.r1+1e-9)vt1++;
+    }
+    out.innerHTML=out.innerHTML+"\n\n── 随机 "+N+" 次（2×2 标准高斯）──\n式 54 论文顺序违反："+v54+" 次（"+(v54/N*100).toFixed(1)+"%）   交换顺序违反："+vf+" 次\n对角掩码 H 下交叉项超界："+vh+" 次（"+(vh/N*100).toFixed(1)+"%）\n定理 1（满足假设的 ΔW₁，P = diag(1,0)）违反："+vt1+" / "+n1+"（"+(vt1/n1*100).toFixed(1)+"%）";
+  });
+  load("t2");
+})();
+
+/* ================= TIMELINE ================= */
+(function(){
+  var svg=$("tlSvg");if(!svg)return;
+  var step=0,ctlMode="code",timer=null;
+  var tlab=["1000","937.5","833.3","625"],sig=["1.000","0.9375","0.8333","0.625"];
+  function frames(c){return c===0?"0–8":(12*c-3)+"–"+(12*c+8);}
+  function render(){
+    clear(svg);
+    var c=Math.floor(step/5),p=step%5;
+    var x0=24,tw=31,gap=3,y0=34;
+    T(svg,x0,20,"21 个潜帧（每格 1 个，1,560 token）",{"font-size":10.5,"class":"t-3"});
+    for(var i=0;i<21;i++){
+      var ch=Math.floor(i/3),st;
+      if(ch<c)st="fill:var(--ca)";else if(ch===c)st=(p===4?"fill:var(--ca);fill-opacity:.75":"fill:var(--ctl);fill-opacity:"+(0.25+0.18*p));else st="fill:var(--surf3)";
+      S("rect",{x:x0+i*(tw+gap),y:y0,width:tw,height:30,rx:4,style:st+";stroke:"+(ch===c?"var(--ctl)":"var(--rule2)")+";stroke-width:"+(ch===c?1.8:1)},svg);
+      if(i%3===1)T(svg,x0+i*(tw+gap)+tw/2,y0+50,"帧 "+frames(ch),{"text-anchor":"middle","font-size":9.5,"class":ch===c?"t-ink mf":"t-3 mf"});
+    }
+    for(var b=1;b<7;b++){var xx=x0+b*3*(tw+gap)-gap/2;S("line",{x1:xx,x2:xx,y1:y0-4,y2:y0+34,style:"stroke:var(--ink3);stroke-width:1"},svg);}
+    // backbone attention span
+    var yb=112;T(svg,x0,yb-6,"骨干本次前向的注意力范围",{"font-size":10.5,"class":"t-ca"});
+    if(c>0)S("rect",{x:x0,y:yb,width:c*3*(tw+gap)-gap,height:14,rx:3,style:"fill:var(--ca);fill-opacity:.45"},svg);
+    S("rect",{x:x0+c*3*(tw+gap),y:yb,width:3*(tw+gap)-gap,height:14,rx:3,style:"fill:var(--ca)"},svg);
+    var lx=x0+(c+1)*3*(tw+gap)+6,la="start";if(lx>520){lx=x0+c*3*(tw+gap)-6;la="end";}
+    T(svg,lx,yb+11,(c>0?"KV cache "+(4680*c).toLocaleString()+" + ":"")+"当前 4,680 token",{"font-size":10,"class":"t-2 mf","text-anchor":la});
+    // ctl span
+    var yc=160;T(svg,x0,yc-6,"控制分支本次前向（只读当前块的源视频潜变量，无缓存）",{"font-size":10.5,"class":"t-ctl"});
+    if(ctlMode==="code"){S("rect",{x:x0+c*3*(tw+gap),y:yc,width:3*(tw+gap)-gap,height:14,rx:3,style:"fill:var(--ctl)"},svg);T(svg,lx,yc+11,"块内稠密：每个 query 看 4,680",{"font-size":10,"class":"t-2 mf","text-anchor":la});}
+    else{for(var q=0;q<3;q++){S("rect",{x:x0+(c*3+q)*(tw+gap),y:yc,width:tw,height:14,rx:3,style:"fill:var(--ctl)"},svg);}T(svg,lx,yc+11,"逐帧：每个 query 看 1,560",{"font-size":10,"class":"t-2 mf","text-anchor":la});}
+    // passes
+    var yp=210;T(svg,x0,yp-12,"本块的 5 次前向",{"font-size":10.5,"class":"t-3"});
+    for(var k=0;k<5;k++){var px=x0+30+k*118;var on=k===p,done=k<p;
+      S("rect",{x:px-28,y:yp-2,width:108,height:30,rx:7,style:"fill:"+(on?"var(--ctl-soft)":"var(--surf2)")+";stroke:"+(on?"var(--ctl)":"var(--rule2)")+";stroke-width:"+(on?2:1)},svg);
+      T(svg,px+26,yp+11,k<4?"去噪 "+(k+1)+"：t = "+tlab[k]:"写缓存：t = 0",{"text-anchor":"middle","font-size":10,"class":on?"t-ink":(done?"t-2":"t-3")});
+      T(svg,px+26,yp+23,k<4?"σ = "+sig[k]:"干净特征 → KV",{"text-anchor":"middle","font-size":9,"class":"t-3 mf"});}
+    $("tlStepO").textContent=String(step+1);
+    var kvTok=4680*c;
+    $("tlRo").innerHTML='<div>chunk<b>'+(c+1)+' / 7</b></div><div>潜帧 / 视频帧<b style="font-size:14px">'+(3*c)+'–'+(3*c+2)+' / '+frames(c)+'</b></div><div>本次前向<b style="font-size:14px">'+(p<4?"去噪第 "+(p+1)+" 步（t="+tlab[p]+"）":"t = 0 写入 KV cache")+'</b></div><div>骨干每个 query 可见 key<b>'+(kvTok+4680).toLocaleString()+'</b></div><div>控制分支每个 query 可见 key<b>'+(ctlMode==="code"?"4,680":"1,560")+'</b></div><div>已完成前向（每次都含 15 个 VACE 块）<b>'+(step+1)+' / 35</b></div>';
+  }
+  function next(){step=(step+1)%35;render();}
+  $("tlNext").addEventListener("click",function(){stop();next();});
+  $("tlPrev").addEventListener("click",function(){stop();step=(step+34)%35;render();});
+  function stop(){if(timer){clearInterval(timer);timer=null;$("tlPlay").textContent="▶ 播放";}}
+  $("tlPlay").addEventListener("click",function(){if(timer){stop();return;}timer=setInterval(next,reduce?1200:520);$("tlPlay").textContent="❚❚ 暂停";});
+  seg("tlSeg",function(b){ctlMode=b.getAttribute("data-v");render();});
+  render();
+})();
+
+/* ================= TABLE 1 ================= */
+var M=["VLM","CLIP-T","主体一致","背景一致","时间闪烁","运动平滑","美学","整体一致"];
+var NAMES=["SDEdit+CF","StreamDiffusionV2","DayDream+CF","LiveEdit","3D VACE（Full-Attn）","Channel concat","SVEET（本文）"];
+var T1={
+style:[[3.1328,0.1412,0.8674,0.8949,0.9734,0.9840,0.5134,0.0916],[4.2297,0.1833,0.9011,0.9238,0.9857,0.9798,0.4650,0.1055],[5.2321,0.2276,0.9147,0.9203,0.9775,0.9882,0.5049,0.0872],[5.8672,0.2279,0.9276,0.9219,0.9832,0.9892,0.5289,0.1098],[7.0653,0.2105,0.9313,0.9175,0.9592,0.9809,0.5335,0.1046],[1.8902,0.1414,0.7259,0.8848,0.9703,0.9763,0.3655,0.1229],[7.4322,0.2287,0.9447,0.9298,0.9819,0.9898,0.5550,0.1123]],
+inpaint:[[6.7137,0.2816,0.9422,0.9363,0.9863,0.9909,0.5496,0.0928],[6.8580,0.2654,0.9609,0.9551,0.9836,0.9945,0.4867,0.0964],[7.0115,0.2807,0.9579,0.9420,0.9880,0.9935,0.5434,0.0955],[7.7833,0.2803,0.9632,0.9476,0.9873,0.9933,0.5498,0.0962],[8.0583,0.2882,0.9554,0.9426,0.9866,0.9933,0.5252,0.0947],[6.8913,0.2690,0.9475,0.9369,0.9840,0.9933,0.4935,0.0926],[8.4667,0.2895,0.9653,0.9478,0.9886,0.9936,0.5297,0.1014]],
+depth:[[4.3673,0.2658,0.9239,0.9208,0.9920,0.9943,0.4854,0.0929],[5.0505,0.2275,0.9411,0.9513,0.9961,0.9961,0.4606,0.1030],[7.1502,0.2892,0.9332,0.9239,0.9818,0.9884,0.5096,0.0811],[5.1892,0.2896,0.9613,0.9507,0.9958,0.9842,0.5273,0.0809],[5.7484,0.2907,0.9720,0.9517,0.9855,0.9919,0.5466,0.0793],[6.0830,0.2892,0.9332,0.9239,0.9818,0.9884,0.5096,0.0811],[8.4083,0.2928,0.9727,0.9521,0.9892,0.9882,0.5511,0.0813]]};
+(function(){
+  var tab=$("t1Tab");if(!tab)return;var task="style";
+  function ranks(rows,j){var vals=rows.map(function(r,i){return {v:r[j],i:i};});var out=new Array(rows.length);rows.forEach(function(r,i){var better=0;rows.forEach(function(o){if(o[j]>r[j])better++;});out[i]=better+1;});return out;}
+  function render(){
+    var rows=T1[task],showDup=$("t1Dup").checked,showRank=$("t1Rank").checked;
+    var R=M.map(function(_,j){return ranks(rows,j);});
+    var h="<thead><tr><th>方法</th>"+M.map(function(m){return "<th>"+m+"</th>";}).join("")+"</tr></thead><tbody>";
+    rows.forEach(function(r,i){
+      h+="<tr"+(i===6?' class="ours"':"")+"><td>"+NAMES[i]+"</td>";
+      r.forEach(function(v,j){var rk=R[j][i];var a=((8-rk)/7)*0.24;var dup=showDup&&task==="depth"&&(i===2||i===5)&&rows[2][j]===rows[5][j];
+        h+='<td class="'+(rk===1?"best ":"")+(dup?"dup":"")+'" style="background:rgba(var(--heat),'+a.toFixed(3)+')" data-r="'+rk+'" data-i="'+i+'" data-j="'+j+'">'+v.toFixed(4)+(showRank?'<sup style="color:var(--ink3);margin-left:2px">'+rk+"</sup>":"")+"</td>";});
+      h+="</tr>";});
+    tab.innerHTML=h+"</tbody>";
+    tab.querySelectorAll("td[data-r]").forEach(function(td){bindTip(td,function(){var i=+td.getAttribute("data-i"),j=+td.getAttribute("data-j");return "<b>"+NAMES[i]+"</b> · "+M[j]+"<br>"+rows[i][j].toFixed(4)+"　第 "+td.getAttribute("data-r")+" / 7 名"+(td.classList.contains("dup")?"<br><span style='color:var(--risk-ink)'>与另一行逐位相同</span>":"");});});
+    var ours=6,firsts=0,miss=[];M.forEach(function(m,j){var rk=R[j][ours];if(rk===1)firsts++;else{var bi=0;rows.forEach(function(r,i){if(R[j][i]===1)bi=i;});miss.push(m+" 第 "+rk+"（第一："+NAMES[bi]+" "+rows[bi][j].toFixed(4)+"）");}});
+    var s="本文在这一任务的 8 项里拿第一 <b>"+firsts+"</b> 项。"+(miss.length?"没拿第一的："+miss.join("；")+"。":"");
+    if(task==="depth")s+=' <span style="color:var(--risk-ink)">Channel concat 与 DayDream+CF 两行 8 项中 7 项逐位相同（红虚线框），只有 VLM 分不同，疑似复制粘贴错误。</span>';
+    $("t1Sum").innerHTML=s;
+  }
+  seg("t1Seg",function(b){task=b.getAttribute("data-t");render();});
+  $("t1Dup").addEventListener("change",render);$("t1Rank").addEventListener("change",render);
+  render();
+})();
+
+/* ================= GAIN CHART ================= */
+(function(){
+  var svg=$("gainSvg");if(!svg)return;
+  var tasks=["风格化","补洞","深度转视频"],keys=["style","inpaint","depth"];
+  var series=[{n:"其他外部基线最好者（SDEdit / SDV2 / LiveEdit）",st:"fill:var(--ink3);fill-opacity:.35",sw:"background:var(--ink3);opacity:.35"},
+              {n:"DayDream+CF（现成 VACE 直接插，推断未微调）",st:"fill:var(--ink3);fill-opacity:.8",sw:"background:var(--ink3);opacity:.8"},
+              {n:"3D VACE（LoRA 微调，无 ODT）",st:"fill:url(#hatchCtl);stroke:var(--ctl);stroke-width:1.2",sw:"background:repeating-linear-gradient(135deg,var(--ctl) 0 2px,transparent 2px 5px);border:1px solid var(--ctl)"},
+              {n:"SVEET（逐帧 + ODT）",st:"fill:var(--ctl)",sw:"background:var(--ctl)"}];
+  function vals(k){var r=T1[k];var ext=[0,1,3].map(function(i){return {v:r[i][0],n:NAMES[i]};}).sort(function(a,b){return b.v-a.v;})[0];return [ext,{v:r[2][0],n:"DayDream+CF"},{v:r[4][0],n:"3D VACE"},{v:r[6][0],n:"SVEET"}];}
+  var W=720,H=300,ml=40,mr=10,mt=20,mb=46,pw=W-ml-mr,ph=H-mt-mb;
+  var defs=S("defs",{},svg);var pat=S("pattern",{id:"hatchCtl",patternUnits:"userSpaceOnUse",width:6,height:6,patternTransform:"rotate(45)"},defs);S("rect",{width:6,height:6,style:"fill:var(--ctl-soft)"},pat);S("line",{x1:0,y1:0,x2:0,y2:6,style:"stroke:var(--ctl);stroke-width:2.2"},pat);
+  function Y(v){return mt+ph*(1-v/10);}
+  [0,2,4,6,8,10].forEach(function(v){S("line",{x1:ml,x2:ml+pw,y1:Y(v),y2:Y(v),style:"stroke:var(--grid)"},svg);T(svg,ml-6,Y(v)+3.5,String(v),{"text-anchor":"end","font-size":10,"class":"t-3 mf"});});
+  var gw=pw/3,bw=34,g2=2;
+  tasks.forEach(function(tn,ti){
+    var vs=vals(keys[ti]);var gx=ml+gw*ti+gw/2-(4*bw+3*g2)/2;
+    vs.forEach(function(o,si){var x=gx+si*(bw+g2),y=Y(o.v),h=Y(0)-y;
+      var d="M"+x+" "+Y(0)+" L"+x+" "+(y+4)+" Q"+x+" "+y+" "+(x+4)+" "+y+" L"+(x+bw-4)+" "+y+" Q"+(x+bw)+" "+y+" "+(x+bw)+" "+(y+4)+" L"+(x+bw)+" "+Y(0)+" z";
+      var p=S("path",{d:d,style:series[si].st},svg);
+      var hit=S("rect",{x:x-1,y:mt,width:bw+2,height:ph,style:"fill:transparent"},svg);
+      bindTip(hit,"<b>"+tn+"</b> · "+series[si].n+"<br>"+(si===0?o.n+"：":"")+"VLM "+o.v.toFixed(4));
+      if(si>=2)T(svg,x+bw/2,y-6,o.v.toFixed(2),{"text-anchor":"middle","font-size":10,"class":"t-2 mf"});
+    });
+    var d3=vs[3].v-vs[2].v,dx=vs[2].v-Math.max(vs[0].v,vs[1].v);
+    T(svg,ml+gw*ti+gw/2,Y(0)+17,tn,{"text-anchor":"middle","font-size":12,"font-weight":600,"class":"t-ink"});
+    T(svg,ml+gw*ti+gw/2,Y(0)+33,"3D 比外部最好 "+(dx>=0?"+":"−")+Math.abs(dx).toFixed(2)+" · SVEET 比 3D +"+d3.toFixed(2),{"text-anchor":"middle","font-size":10,"class":"t-3"});
+  });
+  S("line",{x1:ml,x2:ml+pw,y1:Y(0),y2:Y(0),style:"stroke:var(--axis)"},svg);
+  $("gainLeg").innerHTML=series.map(function(s){return '<span><i style="'+s.sw+'"></i>'+s.n+"</span>";}).join("");
+})();
+
+/* ================= ABLATION ================= */
+(function(){
+  var svg=$("ablSvg");if(!svg)return;
+  var d={"3D0":[7.0653,0.9809],"3D1":[7.3315,0.9856],"2D0":[7.1898,0.9830],"2D1":[7.4322,0.9898]};
+  var x0=96,y0=40,cw=110,chh=74,gx=40,gy=34;
+  T(svg,x0+cw/2,24,"不加 ODT",{"text-anchor":"middle","font-size":11,"class":"t-3"});T(svg,x0+cw+gx+cw/2,24,"加 ODT",{"text-anchor":"middle","font-size":11,"class":"t-3"});
+  T(svg,x0-12,y0+chh/2+4,"3D 注意力",{"text-anchor":"end","font-size":11,"class":"t-3"});T(svg,x0-12,y0+chh+gy+chh/2+4,"逐帧 2D",{"text-anchor":"end","font-size":11,"class":"t-3"});
+  function cell(k,cx,cy,ours){var v=d[k];var a=((v[0]-7.0)/0.45)*0.28+0.04;S("rect",{x:cx,y:cy,width:cw,height:chh,rx:9,style:"fill:rgba(var(--heat),"+a.toFixed(3)+");stroke:"+(ours?"var(--ctl)":"var(--rule2)")+";stroke-width:"+(ours?2.2:1)},svg);
+    T(svg,cx+cw/2,cy+32,v[0].toFixed(4),{"text-anchor":"middle","font-size":17,"font-weight":600,"class":"t-ink mf"});T(svg,cx+cw/2,cy+52,"运动平滑 "+v[1].toFixed(4),{"text-anchor":"middle","font-size":9.5,"class":"t-3 mf"});if(ours)T(svg,cx+cw/2,cy+66,"SVEET",{"text-anchor":"middle","font-size":9.5,"font-weight":600,"class":"t-ctl"});}
+  cell("3D0",x0,y0);cell("3D1",x0+cw+gx,y0);cell("2D0",x0,y0+chh+gy);cell("2D1",x0+cw+gx,y0+chh+gy,true);
+  function arr(x1,y1,x2,y2,lab,lx,ly,anc){S("line",{x1:x1,y1:y1,x2:x2,y2:y2,style:"stroke:var(--ink3);stroke-width:1.4"},svg);var a=Math.atan2(y2-y1,x2-x1);S("path",{d:"M"+x2+" "+y2+" L"+(x2-7*Math.cos(a-0.45))+" "+(y2-7*Math.sin(a-0.45))+" L"+(x2-7*Math.cos(a+0.45))+" "+(y2-7*Math.sin(a+0.45))+" z",style:"fill:var(--ink3)"},svg);T(svg,lx,ly,lab,{"text-anchor":anc||"middle","font-size":10.5,"font-weight":600,"class":"t-2 mf"});}
+  arr(x0+cw+3,y0+chh/2,x0+cw+gx-3,y0+chh/2,"+0.266",x0+cw+gx/2,y0+chh/2-6);
+  arr(x0+cw+3,y0+chh+gy+chh/2,x0+cw+gx-3,y0+chh+gy+chh/2,"+0.242",x0+cw+gx/2,y0+chh+gy+chh/2-6);
+  arr(x0+cw/2,y0+chh+3,x0+cw/2,y0+chh+gy-3,"+0.125",x0+cw/2+8,y0+chh+gy/2+4,"start");
+  arr(x0+cw+gx+cw/2,y0+chh+3,x0+cw+gx+cw/2,y0+chh+gy-3,"+0.101",x0+cw+gx+cw/2+8,y0+chh+gy/2+4,"start");
+  T(svg,180,y0+2*chh+gy+26,"横向 = ODT 的作用，纵向 = 逐帧 2D 的作用；交互项 −0.024",{"text-anchor":"middle","font-size":10,"class":"t-3"});
+})();
+
+/* ================= DOUBTS FILTER ================= */
+seg("dSeg",function(b){var f0=b.getAttribute("data-f");document.querySelectorAll("#doubts details.d").forEach(function(d){d.hidden=!(f0==="all"||d.getAttribute("data-lv")===f0);});});
+
+})();
+</script>
+</body>
+</html>

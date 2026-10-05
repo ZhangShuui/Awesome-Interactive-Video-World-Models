@@ -1,0 +1,1779 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SolarWM 精读</title>
+<meta name="description" content="SolarWM：143 万条视频的数据引擎 + 相机注入注意力的统一接口 + 三阶段训练（双向 → TF-AnyFlow → DMD/SGF）。方法精读、发布配置核对，以及「5 秒训练跑 1 小时」背后那个论文没写的 4.5 秒注意力窗口。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+/* ============================================================
+   SolarWM 精读 — design tokens
+   角色色：dat = 数据引擎（真正的主角）
+           cam = 相机条件 / fused-PRoPE
+           bid = Stage0.5 双向
+           ar  = Stage1 因果 / teacher forcing
+           dmd = Stage2 DMD / self-gradient forcing
+           risk= 存疑 / 缺证
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0b0e12; --surf:#111519; --surf2:#171c22; --surf3:#1f262f;
+  --rule:#222932; --rule2:#36414f;
+  --ink:#e9eef4; --ink2:#a3adba; --ink3:#74808d;
+
+  --dat:#2aa87c;  --dat-ink:#4fd3a2;  --dat-soft:rgba(42,168,124,.15);
+  --cam:#8b7cf0;  --cam-ink:#ab9dff;  --cam-soft:rgba(139,124,240,.16);
+  --bid:#2f9ed4;  --bid-ink:#5cc2f0;  --bid-soft:rgba(47,158,212,.15);
+  --ar:#dfa93a;   --ar-ink:#f2c562;   --ar-soft:rgba(223,169,58,.16);
+  --dmd:#ec7550;  --dmd-ink:#ff9a75;  --dmd-soft:rgba(236,117,80,.16);
+  --risk:#ea6791; --risk-ink:#ff8cb0; --risk-soft:rgba(234,103,145,.16);
+
+  --ok:#3fb27a; --ok-ink:#62cf95; --ok-soft:rgba(63,178,122,.14);
+  --bad:#e0605a; --bad-ink:#f0857f; --bad-soft:rgba(224,96,90,.14);
+  --warn:#e3b341; --warn-ink:#f0c766; --warn-soft:rgba(227,179,65,.14);
+
+  --grid:#1c222a; --axis:#36414f; --tint:rgba(255,255,255,.03);
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 30px rgba(0,0,0,.34);
+  --font-display:"Familjen Grotesk","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"Source Serif 4",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f1f3f5; --surf:#ffffff; --surf2:#e9edf1; --surf3:#dde2e8;
+    --rule:#dadee4; --rule2:#bcc3cc;
+    --ink:#0f141a; --ink2:#434c56; --ink3:#6b7682;
+    --dat:#0f8a63;  --dat-ink:#0b6d4e;  --dat-soft:rgba(15,138,99,.13);
+    --cam:#6350d6;  --cam-ink:#4f3dbd;  --cam-soft:rgba(99,80,214,.12);
+    --bid:#0e7ba8;  --bid-ink:#0a6289;  --bid-soft:rgba(14,123,168,.12);
+    --ar:#a67d09;   --ar-ink:#856306;   --ar-soft:rgba(166,125,9,.14);
+    --dmd:#d05528;  --dmd-ink:#ad4319;  --dmd-soft:rgba(208,85,40,.12);
+    --risk:#c73a6f;  --risk-ink:#a42c5b;  --risk-soft:rgba(199,58,111,.12);
+    --ok:#138752; --ok-ink:#0d6c41; --ok-soft:rgba(19,135,82,.12);
+    --bad:#c5352e; --bad-ink:#a62923; --bad-soft:rgba(197,53,46,.11);
+    --warn:#b58312; --warn-ink:#8c6408; --warn-soft:rgba(181,131,18,.14);
+    --grid:#e0e4e9; --axis:#bcc3cc; --tint:rgba(15,20,28,.028);
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; -webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16.5px; line-height:1.72;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1000px; margin:0 auto; padding:0 20px 140px}
+@media(max-width:640px){ .wrap{padding:0 16px 120px} body{font-size:16px} }
+
+/* ---------- header ---------- */
+header.hero{
+  padding:62px 0 26px; border-bottom:1px solid var(--rule); margin-bottom:34px;
+}
+.kicker{
+  font-family:var(--font-mono); font-size:11.5px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--ink3); margin-bottom:16px;
+}
+.kicker a{color:var(--dat-ink); text-decoration:none; border-bottom:1px solid transparent}
+.kicker a:hover{border-bottom-color:currentColor}
+h1{
+  font-family:var(--font-display); font-weight:700; font-size:clamp(30px,5.4vw,50px);
+  line-height:1.1; letter-spacing:-.022em; margin:0 0 6px;
+}
+.sub{
+  font-family:var(--font-display); font-weight:500; font-size:clamp(16px,2.5vw,21px);
+  color:var(--ink2); line-height:1.45; margin:0 0 22px; max-width:56ch;
+}
+.thesis{
+  font-family:var(--font-math); font-size:clamp(17px,2.4vw,20px); line-height:1.62;
+  color:var(--ink); border-left:3px solid var(--dat); padding:2px 0 2px 18px;
+  margin:0 0 26px; max-width:62ch;
+}
+.thesis em{color:var(--dat-ink); font-style:normal; font-weight:600}
+
+.statstrip{display:flex; flex-wrap:wrap; gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:10px; overflow:hidden}
+.statstrip div{flex:1 1 130px; background:var(--surf); padding:12px 14px}
+.statstrip b{display:block; font-family:var(--font-display); font-size:21px; font-weight:700; letter-spacing:-.01em; line-height:1.2}
+.statstrip span{display:block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--ink3); margin-top:3px}
+
+/* ---------- nav ---------- */
+nav.toc{
+  position:sticky; top:0; z-index:40; background:color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter:blur(10px); border-bottom:1px solid var(--rule);
+  margin:0 -20px 40px; padding:9px 20px; overflow-x:auto; white-space:nowrap;
+  scrollbar-width:none;
+}
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{
+  display:inline-block; font-family:var(--font-mono); font-size:11.5px; letter-spacing:.04em;
+  color:var(--ink3); text-decoration:none; padding:3px 9px; border-radius:6px; margin-right:2px;
+}
+nav.toc a:hover{color:var(--ink); background:var(--surf2)}
+@media(max-width:640px){ nav.toc{margin:0 -16px 34px; padding:9px 16px} }
+
+/* ---------- typography ---------- */
+h2{
+  font-family:var(--font-display); font-weight:700; font-size:clamp(23px,3.6vw,31px);
+  letter-spacing:-.018em; line-height:1.2; margin:72px 0 6px; scroll-margin-top:60px;
+}
+h2 .num{color:var(--ink3); font-family:var(--font-mono); font-size:.52em; font-weight:500; letter-spacing:.06em; display:block; margin-bottom:9px}
+h3{
+  font-family:var(--font-display); font-weight:600; font-size:clamp(17.5px,2.5vw,21px);
+  letter-spacing:-.01em; margin:40px 0 4px; scroll-margin-top:60px;
+}
+h4{font-family:var(--font-display); font-weight:600; font-size:16px; margin:26px 0 2px; color:var(--ink)}
+p{margin:14px 0; max-width:74ch}
+a{color:var(--dat-ink)}
+strong{font-weight:600; color:var(--ink)}
+code, .m{font-family:var(--font-mono); font-size:.87em; background:var(--surf2); border:1px solid var(--rule); border-radius:4px; padding:1px 5px; color:var(--ink)}
+.eq{font-family:var(--font-math); font-size:1.02em; font-style:italic}
+.lede{font-size:1.06em; color:var(--ink2); max-width:72ch}
+ul,ol{max-width:74ch; padding-left:22px}
+li{margin:7px 0}
+li::marker{color:var(--ink3)}
+hr{border:0; border-top:1px solid var(--rule); margin:44px 0}
+
+/* ---------- cards / callouts ---------- */
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:18px 20px; margin:22px 0; box-shadow:var(--shadow)}
+.card > :first-child{margin-top:0} .card > :last-child{margin-bottom:0}
+.note{border-left:3px solid var(--rule2); background:var(--surf); border-radius:0 10px 10px 0; padding:14px 18px; margin:22px 0}
+.note.dat{border-left-color:var(--dat)} .note.cam{border-left-color:var(--cam)}
+.note.bid{border-left-color:var(--bid)} .note.ar{border-left-color:var(--ar)}
+.note.dmd{border-left-color:var(--dmd)} .note.risk{border-left-color:var(--risk)}
+.note.ok{border-left-color:var(--ok)} .note.warn{border-left-color:var(--warn)}
+.note > :first-child{margin-top:0} .note > :last-child{margin-bottom:0}
+.note .tag{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; display:block; margin-bottom:5px; color:var(--ink3)}
+.note.dat .tag{color:var(--dat-ink)} .note.cam .tag{color:var(--cam-ink)}
+.note.bid .tag{color:var(--bid-ink)} .note.ar .tag{color:var(--ar-ink)}
+.note.dmd .tag{color:var(--dmd-ink)} .note.risk .tag{color:var(--risk-ink)}
+.note.ok .tag{color:var(--ok-ink)} .note.warn .tag{color:var(--warn-ink)}
+
+.pill{display:inline-block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.07em; text-transform:uppercase; padding:2px 8px; border-radius:20px; border:1px solid currentColor; line-height:1.7; vertical-align:2px}
+.pill.dat{color:var(--dat-ink)} .pill.cam{color:var(--cam-ink)} .pill.bid{color:var(--bid-ink)}
+.pill.ar{color:var(--ar-ink)} .pill.dmd{color:var(--dmd-ink)} .pill.risk{color:var(--risk-ink)}
+.pill.ok{color:var(--ok-ink)} .pill.bad{color:var(--bad-ink)} .pill.warn{color:var(--warn-ink)}
+.pill.ghost{color:var(--ink3)}
+
+/* ---------- figures ---------- */
+figure{margin:28px 0; background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:18px 18px 4px; box-shadow:var(--shadow)}
+figure svg{display:block; width:100%; max-width:100%; height:auto}
+figcaption{font-size:13.5px; line-height:1.6; color:var(--ink2); border-top:1px solid var(--rule); margin-top:14px; padding:12px 2px 14px}
+figcaption b{color:var(--ink)}
+.fig-h{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3); margin-bottom:12px}
+
+/* ---------- controls ---------- */
+.ctl{display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; margin:0 0 14px; padding:11px 13px; background:var(--surf2); border:1px solid var(--rule); border-radius:9px}
+.ctl label{font-family:var(--font-mono); font-size:11px; letter-spacing:.05em; color:var(--ink3); text-transform:uppercase}
+.ctl output{font-family:var(--font-mono); font-size:12.5px; color:var(--ink); min-width:6ch; display:inline-block}
+input[type=range]{-webkit-appearance:none; appearance:none; height:4px; background:var(--rule2); border-radius:3px; outline:none; flex:1 1 170px; min-width:130px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:15px; height:15px; border-radius:50%; background:var(--ink); border:2px solid var(--bg); cursor:pointer}
+input[type=range]::-moz-range-thumb{width:15px; height:15px; border-radius:50%; background:var(--ink); border:2px solid var(--bg); cursor:pointer}
+.seg{display:inline-flex; background:var(--surf3); border:1px solid var(--rule); border-radius:7px; overflow:hidden}
+.seg button{
+  font-family:var(--font-mono); font-size:11px; letter-spacing:.04em; padding:5px 11px;
+  background:transparent; border:0; border-right:1px solid var(--rule); color:var(--ink3); cursor:pointer;
+}
+.seg button:last-child{border-right:0}
+.seg button:hover{color:var(--ink)}
+.seg button.on{background:var(--ink); color:var(--bg); font-weight:700}
+.btn{font-family:var(--font-mono); font-size:11px; letter-spacing:.05em; padding:5px 12px; background:var(--surf3); border:1px solid var(--rule2); border-radius:7px; color:var(--ink2); cursor:pointer}
+.btn:hover{color:var(--ink); border-color:var(--ink3)}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto; margin:24px 0; border:1px solid var(--rule); border-radius:11px; background:var(--surf); box-shadow:var(--shadow)}
+table{border-collapse:collapse; width:100%; font-size:13.5px; min-width:560px}
+th,td{padding:8px 12px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:top}
+thead th{
+  font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--ink3); font-weight:500; background:var(--surf2); position:sticky; top:0;
+  border-bottom:1px solid var(--rule2);
+}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--tint)}
+td.n, th.n{text-align:right; font-family:var(--font-mono); font-size:12.5px; font-variant-numeric:tabular-nums}
+td.k{font-family:var(--font-mono); font-size:12px; color:var(--ink2)}
+tr.tot td{font-weight:700; background:var(--surf2); border-top:1px solid var(--rule2)}
+.small{font-size:12px; color:var(--ink3)}
+
+/* ---------- risk list ---------- */
+.risk{border:1px solid var(--rule); border-radius:11px; background:var(--surf); margin:14px 0; overflow:hidden}
+.risk > summary{
+  cursor:pointer; padding:13px 16px; display:flex; gap:12px; align-items:flex-start;
+  list-style:none; font-weight:600; line-height:1.5;
+}
+.risk > summary::-webkit-details-marker{display:none}
+.risk > summary:hover{background:var(--tint)}
+.risk .sev{
+  font-family:var(--font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+  padding:2px 7px; border-radius:4px; flex:0 0 auto; margin-top:3px; font-weight:700;
+}
+.sev.hi{background:var(--bad-soft); color:var(--bad-ink); border:1px solid var(--bad)}
+.sev.md{background:var(--warn-soft); color:var(--warn-ink); border:1px solid var(--warn)}
+.sev.lo{background:var(--surf3); color:var(--ink3); border:1px solid var(--rule2)}
+.risk .idx{font-family:var(--font-mono); font-size:12px; color:var(--ink3); flex:0 0 auto; margin-top:2px}
+.risk .body{padding:0 16px 14px 16px; border-top:1px solid var(--rule); margin-top:2px; padding-top:13px}
+.risk .body > :first-child{margin-top:0} .risk .body > :last-child{margin-bottom:0}
+.risk .body p, .risk .body ul{max-width:none}
+
+/* ---------- misc ---------- */
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:22px 0}
+@media(max-width:720px){ .grid2{grid-template-columns:1fr} }
+.kv{font-family:var(--font-mono); font-size:12.5px; line-height:1.85}
+.kv b{color:var(--ink3); font-weight:400}
+footer{border-top:1px solid var(--rule); margin-top:76px; padding-top:22px; color:var(--ink3); font-size:13px}
+footer a{color:var(--ink2)}
+.srcs{font-size:13px; line-height:1.9}
+
+/* ---------- v2 additions ---------- */
+.src{font-family:var(--font-mono); font-size:10px; letter-spacing:.03em; padding:0 6px; border-radius:4px; vertical-align:1.5px; margin:0 2px; white-space:nowrap; border:1px solid; line-height:1.7; font-style:normal; font-weight:500}
+.src.p{color:var(--ink2); border-color:var(--rule2); background:var(--surf3)}
+.src.c{color:var(--ok-ink); border-color:var(--ok); background:var(--ok-soft)}
+.src.i{color:var(--risk-ink); border-color:var(--risk); background:var(--risk-soft)}
+.src.x{color:var(--cam-ink); border-color:var(--cam); background:var(--cam-soft)}
+
+.gloss{display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:12px; margin:22px 0}
+.gloss > div{background:var(--surf); border:1px solid var(--rule); border-radius:10px; padding:12px 15px}
+.gloss dt{font-family:var(--font-display); font-weight:700; font-size:15px; margin:0 0 5px; color:var(--ink)}
+.gloss dt small{font-family:var(--font-mono); font-size:10.5px; font-weight:400; color:var(--ink3); margin-left:6px}
+.gloss dd{margin:0; font-size:14px; color:var(--ink2); line-height:1.66}
+
+.stages{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:20px 0}
+@media(max-width:760px){ .stages{grid-template-columns:1fr} }
+.stages > div{background:var(--surf); border:1px solid var(--rule); border-top:3px solid var(--rule2); border-radius:10px; padding:12px 15px}
+.stages > div.bid{border-top-color:var(--bid)} .stages > div.ar{border-top-color:var(--ar)} .stages > div.dmd{border-top-color:var(--dmd)}
+.stages h4{margin:0 0 2px; font-size:15px}
+.stages .nm{font-family:var(--font-mono); font-size:10.5px; color:var(--ink3); display:block; margin-bottom:6px}
+.stages p{margin:0; font-size:14px; color:var(--ink2); line-height:1.62}
+
+.take{font-family:var(--font-display); font-weight:600; font-size:15.5px; line-height:1.55; border-top:1px dashed var(--rule2); padding-top:12px; margin:30px 0 0; color:var(--ink); max-width:74ch}
+.take::before{content:"带走一句话　"; color:var(--ink3); font-weight:500; font-family:var(--font-mono); font-size:11px; letter-spacing:.06em}
+
+table.ov td a{color:var(--ink); text-decoration:none; border-bottom:1px dotted var(--ink3)}
+table.ov td a:hover{border-bottom-style:solid}
+
+/* pipeline figure fills (CSS vars work on inline SVG via class) */
+.f-dat{fill:var(--dat)} .f-bid{fill:var(--bid)} .f-ar{fill:var(--ar)} .f-dmd{fill:var(--dmd)} .f-cam{fill:var(--cam)}
+.fs-dat{fill:var(--dat-soft)} .fs-bid{fill:var(--bid-soft)} .fs-ar{fill:var(--ar-soft)} .fs-dmd{fill:var(--dmd-soft)} .fs-cam{fill:var(--cam-soft)}
+.s-dat{stroke:var(--dat)} .s-bid{stroke:var(--bid)} .s-ar{stroke:var(--ar)} .s-dmd{stroke:var(--dmd)} .s-cam{stroke:var(--cam)}
+.t-dat{fill:var(--dat-ink)} .t-bid{fill:var(--bid-ink)} .t-ar{fill:var(--ar-ink)} .t-dmd{fill:var(--dmd-ink)} .t-cam{fill:var(--cam-ink)}
+.f-gt{fill:var(--ink3); fill-opacity:.55}
+.t-mut{fill:var(--ink3)}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">arXiv:2609.02886 · 2026-09-02 · CUHK-SZ / SLAI / NUS / HKUST / NVIDIA / MSRA · <a href="https://arxiv.org/abs/2609.02886">paper</a> · <a href="https://github.com/Junchao-cs/SolarWM">code</a> · <a href="https://junchao-cs.github.io/SolarWM-Web/">project</a></div>
+  <h1>SolarWM</h1>
+  <p class="sub">Open Data and Scalable Training for Long-Horizon Video World Models</p>
+  <p class="thesis">SolarWM 把「给一张图、一条相机轨迹，就能边走边生成后面的画面」的世界模型，做成了一套<em>从数据到权重全部公开</em>的工程栈。真正新的是它的<em>数据引擎</em>：143 万条视频先全部处理完，再按需挑选；训练配方的零件大多来自已有工作。全文没有给出任何性能数字；而最抓眼球的「5 秒训练、1 小时生成」，靠的是一个论文没写出来的设计——<em>模型每一刻只看最近约 4.5 秒</em>。</p>
+  <div class="statstrip">
+    <div><b>1,425,694</b><span>视频片段</span></div>
+    <div><b>25.85 TB</b><span>10 个数据集 · 14 个分区</span></div>
+    <div><b>0</b><span>论文给出的性能数字</span></div>
+    <div><b>256 卡</b><span>配置里的训练规模</span></div>
+    <div><b>≈ 4.5 s</b><span>模型每刻能看到的历史</span></div>
+  </div>
+</header>
+
+<div class="note">
+  <span class="tag">怎么读这页</span>
+  <p>正文里的小标签标明信息来源：<span class="src p">论文</span> 是 SolarWM 论文原文写的；<span class="src c">仓库</span> 是作者发布的代码仓库（配置文件、文档）里写的，论文里没有；<span class="src x">SGF 论文</span> 是它所引用的 Self Gradient Forcing 原文；<span class="src i">推断</span> 是我根据公开数字推算的，可能有误。</p>
+  <p>§1–§8 先把方法讲清楚，§9 集中列存疑点。只想看结论：读完 §1，直接跳到 §9 的一览表。</p>
+</div>
+
+<nav class="toc">
+  <a href="#s1">1 一遍讲清</a>
+  <a href="#s2">2 术语小抄</a>
+  <a href="#s3">3 哪些是新的</a>
+  <a href="#s4">4 数据引擎</a>
+  <a href="#s5">5 相机怎么进模型</a>
+  <a href="#s6">6 三阶段训练</a>
+  <a href="#s7">7 四个底座</a>
+  <a href="#s8">8 5 秒怎么跑 1 小时</a>
+  <a href="#s9">9 存疑 18 条</a>
+  <a href="#s10">10 复现速查</a>
+  <a href="#s11">11 定位</a>
+</nav>
+
+<h2 id="s1"><span class="num">§ 1</span>先用人话讲一遍</h2>
+
+<p class="lede"><strong>要解决的问题。</strong>现在最强的视频生成模型（Wan、LTX、MiniMax 这类）都是「一次生成一整段」：给它一句话，它把 5 秒视频的每一帧同时算出来。交互式世界模型要的是另一种东西——<strong>你给它一张起始画面，再告诉它相机往哪走，它就一段一段地把接下来的画面接着生成出来</strong>，而且要快到能实时跟上、长到能一直走下去。</p>
+
+<p>论文里的设定很具体 <span class="src p">论文</span>：输入是<strong>一张首帧图片 + 一段固定不变的场景描述 + 一条逐帧的相机轨迹</strong>（位置、朝向、焦距），输出 16 fps 的视频。<strong>相机轨迹是唯一随时间变化的控制信号</strong>，没有键盘动作，也没有角色操控。实验里所有轨迹都是事先写好的，论文没有展示真人实时操控。</p>
+
+<p>把「一次生成一整段」的模型改造成这样，有两个麻烦：</p>
+<ul>
+<li><strong>数据杂。</strong>能用的公开数据集有十来个：真实街景、游戏录屏、合成场景都有；相机坐标约定不同，有没有真实尺度不同，画质和文字描述的风格也不同。直接混在一起训，信号互相打架。</li>
+<li><strong>模型杂。</strong>Wan、LTX、MiniMax-H3 的内部结构差别很大：压缩方式、注意力布局、首帧图片的接入方式都不一样。给每个模型各写一套改造代码，结果就没法互相比较，也没法复用。</li>
+</ul>
+
+<p>SolarWM 的回答是三件事：一台统一处理所有数据的<strong>数据引擎</strong>；一套把相机信息接进注意力、四种模型通用的<strong>相机接口</strong>；一个三阶段<strong>训练配方</strong>。下面这张图从左到右就是整条流水线。</p>
+
+<figure>
+  <div class="fig-h">Figure A · 整条流水线：每一阶段，模型能看到哪些时间段</div>
+  <svg viewBox="0 0 900 420" role="img" aria-label="流水线总览：数据引擎处理 10 个数据集共 143 万条片段；Stage 0.5 双向训练，整段互看，学会听相机；Stage 1 TF-AnyFlow，只看过去且看的是真实视频，学会 4 步生成；Stage 2 DMD 加 SGF，只看过去且看的是自己生成的画面；推理时一块接一块生成，只看最近 6 块。">
+    <defs>
+      <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    </defs>
+    <g font-family="JetBrains Mono, monospace" fill="currentColor">
+      <!-- headers -->
+      <g font-size="12.5" font-weight="700">
+        <rect x="10"  y="14" width="160" height="58" rx="8" class="fs-dat s-dat" stroke-width="1.4"/>
+        <rect x="190" y="14" width="160" height="58" rx="8" class="fs-bid s-bid" stroke-width="1.4"/>
+        <rect x="370" y="14" width="160" height="58" rx="8" class="fs-ar s-ar" stroke-width="1.4"/>
+        <rect x="550" y="14" width="160" height="58" rx="8" class="fs-dmd s-dmd" stroke-width="1.4"/>
+        <rect x="730" y="14" width="160" height="58" rx="8" class="fs-cam s-cam" stroke-width="1.4"/>
+        <text x="90"  y="38" text-anchor="middle" class="t-dat">数据引擎</text>
+        <text x="270" y="38" text-anchor="middle" class="t-bid">Stage 0.5 · 双向</text>
+        <text x="450" y="38" text-anchor="middle" class="t-ar">Stage 1 · TF-AnyFlow</text>
+        <text x="630" y="38" text-anchor="middle" class="t-dmd">Stage 2 · DMD+SGF</text>
+        <text x="810" y="38" text-anchor="middle" class="t-cam">推理</text>
+      </g>
+      <g font-size="10.5" opacity=".8">
+        <text x="90"  y="58" text-anchor="middle">10 源 → 143 万片</text>
+        <text x="270" y="58" text-anchor="middle">学会听相机</text>
+        <text x="450" y="58" text-anchor="middle">只看过去 + 4 步</text>
+        <text x="630" y="58" text-anchor="middle">在自己的历史上练</text>
+        <text x="810" y="58" text-anchor="middle">一块接一块往下滚</text>
+      </g>
+      <g stroke="currentColor" stroke-opacity=".5" marker-end="url(#arA)">
+        <line x1="172" y1="43" x2="187" y2="43"/><line x1="352" y1="43" x2="367" y2="43"/>
+        <line x1="532" y1="43" x2="547" y2="43"/><line x1="712" y1="43" x2="727" y2="43"/>
+      </g>
+
+      <!-- row 2: visibility -->
+      <text x="10" y="102" font-size="10.5" class="t-mut" letter-spacing=".5">生成高亮那一块时，模型能看到哪些块（实心 = 看得到，虚框 = 看不到，斜线 = 已被挤出）</text>
+      <g font-size="9" text-anchor="middle">
+        <text x="90" y="138" font-size="10.5">不涉及注意力</text>
+        <text x="90" y="156" font-size="10.5">先全处理、再挑选</text>
+      </g>
+      <!-- stage 0.5: all visible incl. future -->
+      <g>
+        <rect x="200" y="118" width="16" height="30" rx="2" class="fs-bid s-bid"/><rect x="220" y="118" width="16" height="30" rx="2" class="fs-bid s-bid"/>
+        <rect x="240" y="118" width="16" height="30" rx="2" class="fs-bid s-bid"/><rect x="260" y="118" width="16" height="30" rx="2" class="f-bid"/>
+        <rect x="280" y="118" width="16" height="30" rx="2" class="fs-bid s-bid"/><rect x="300" y="118" width="16" height="30" rx="2" class="fs-bid s-bid"/>
+        <rect x="320" y="118" width="16" height="30" rx="2" class="fs-bid s-bid"/>
+      </g>
+      <!-- stage 1: past = ground truth -->
+      <g>
+        <rect x="380" y="118" width="16" height="30" rx="2" class="f-gt"/><rect x="400" y="118" width="16" height="30" rx="2" class="f-gt"/>
+        <rect x="420" y="118" width="16" height="30" rx="2" class="f-gt"/><rect x="440" y="118" width="16" height="30" rx="2" class="f-ar"/>
+        <rect x="460" y="118" width="16" height="30" rx="2" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-dasharray="3 2"/>
+        <rect x="480" y="118" width="16" height="30" rx="2" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-dasharray="3 2"/>
+        <rect x="500" y="118" width="16" height="30" rx="2" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-dasharray="3 2"/>
+      </g>
+      <!-- stage 2: past = self generated -->
+      <g>
+        <rect x="560" y="118" width="16" height="30" rx="2" class="fs-dmd s-dmd"/><rect x="580" y="118" width="16" height="30" rx="2" class="fs-dmd s-dmd"/>
+        <rect x="600" y="118" width="16" height="30" rx="2" class="fs-dmd s-dmd"/><rect x="620" y="118" width="16" height="30" rx="2" class="f-dmd"/>
+        <rect x="640" y="118" width="16" height="30" rx="2" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-dasharray="3 2"/>
+        <rect x="660" y="118" width="16" height="30" rx="2" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-dasharray="3 2"/>
+        <rect x="680" y="118" width="16" height="30" rx="2" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-dasharray="3 2"/>
+      </g>
+      <!-- inference: sliding window, block 1 evicted, generating block 8 -->
+      <g>
+        <rect x="738" y="118" width="16" height="30" rx="2" fill="none" stroke="currentColor" stroke-opacity=".3"/>
+        <line x1="738" y1="118" x2="754" y2="148" stroke="currentColor" stroke-opacity=".35"/>
+        <rect x="758" y="118" width="16" height="30" rx="2" class="fs-cam s-cam"/><rect x="778" y="118" width="16" height="30" rx="2" class="fs-cam s-cam"/>
+        <rect x="798" y="118" width="16" height="30" rx="2" class="fs-cam s-cam"/><rect x="818" y="118" width="16" height="30" rx="2" class="fs-cam s-cam"/>
+        <rect x="838" y="118" width="16" height="30" rx="2" class="fs-cam s-cam"/><rect x="858" y="118" width="16" height="30" rx="2" class="f-cam"/>
+      </g>
+      <g font-size="10.5" text-anchor="middle">
+        <text x="270" y="170">整段互看</text><text x="270" y="186" opacity=".7">连「未来」也能看</text>
+        <text x="450" y="170">只看过去</text><text x="450" y="186" opacity=".7">看的是真实视频</text>
+        <text x="630" y="170">只看过去</text><text x="630" y="186" opacity=".7">看的是自己生成的</text>
+        <text x="810" y="170">只看最近 6 块</text><text x="810" y="186" opacity=".7">更早的被挤出去</text>
+      </g>
+
+      <!-- row 3: what is learned -->
+      <line x1="10" y1="206" x2="890" y2="206" stroke="currentColor" stroke-opacity=".12"/>
+      <text x="10" y="226" font-size="10.5" class="t-mut" letter-spacing=".5">这一步做什么</text>
+      <g font-size="11" text-anchor="middle">
+        <text x="90" y="250">统一格式 · 公制相机</text><text x="90" y="267">打分 · 记下拒绝理由</text><text x="90" y="284">配方只是一份索引</text>
+        <text x="270" y="250">标准去噪训练</text><text x="270" y="267">相机经 PRoPE</text><text x="270" y="284">进入注意力</text>
+        <text x="450" y="250">学「任意区间跳跃」</text><text x="450" y="267">训完即可 4 步生成</text><text x="450" y="284">省掉一个初始化阶段</text>
+        <text x="630" y="250">冻结老师 + 评论员</text><text x="630" y="267">拉回老师的分布</text><text x="630" y="284">SGF 训练写缓存</text>
+        <text x="810" y="250">每块去噪 4 步</text><text x="810" y="267">缓存满了丢最旧</text><text x="810" y="284">不留 sink、不重启</text>
+      </g>
+
+      <!-- row 4: numbers from config -->
+      <line x1="10" y1="304" x2="890" y2="304" stroke="currentColor" stroke-opacity=".12"/>
+      <text x="10" y="324" font-size="10.5" class="t-mut" letter-spacing=".5">配置里的数字（论文里没有；Wan2.2-5B 路线）</text>
+      <g font-size="11" text-anchor="middle">
+        <text x="90" y="348">25.85 TB · 14 分区</text><text x="90" y="365">默认配方 60 万行</text>
+        <text x="270" y="348">81 帧，再 153 帧</text><text x="270" y="365">各 3 万步</text>
+        <text x="450" y="348">81 帧</text><text x="450" y="365">约 3 千步（推断）</text>
+        <text x="630" y="348">81 帧 · 4 千步</text><text x="630" y="365">评论员:学生 = 5:1</text>
+        <text x="810" y="348">480×864 · 16 fps</text><text x="810" y="365">最长展示 60 分钟</text>
+      </g>
+      <text x="450" y="404" font-size="10" text-anchor="middle" class="t-mut">1 块 = 3 个 latent ≈ 12 帧 ≈ 0.75 秒　·　全程 256 卡、global batch 256</text>
+    </g>
+  </svg>
+  <figcaption><b>怎么看这张图：</b>第二行最关键，它画的是生成某一块时模型「能看到哪些块」。Stage 0.5 还是普通视频模型，整段互看，连未来都看得到；Stage 1 起只能看过去，但看到的是真实视频；Stage 2 看到的是自己刚生成的画面，和实际使用时一致；推理时只保留最近 6 块。第四行的帧数与步数来自发布仓库的配置，论文里没有写。</figcaption>
+</figure>
+
+<div class="card">
+<p><strong>一、数据引擎是真正的贡献。</strong>核心原则：<em>在任何挑选之前，先把每一条视频都处理完、打完分</em>。不合格的 549,101 条照样发布，并附上机器可读的拒绝理由。以后想换阈值、换配比，不用重跑昂贵的相机估计和大模型打标。</p>
+<p><strong>二、训练配方分三步。</strong>先让视频模型学会听相机（双向），再改成只看过去、4 步出图（TF-AnyFlow），最后让它在自己生成的历史上练（DMD + SGF）。实在的卖点是省掉了同类方法（Causal Forcing / Causal Forcing++）需要的一个额外初始化阶段。三步的核心零件分别来自已有工作，本文做的是编排，并把它接到四种模型上。</p>
+<p><strong>三、全文没有一个性能数字。</strong>五张表全是数据、发布情况和配置，六张实验图全是示例截图。引言里两次写 "state-of-the-art performance" <span class="src p">论文</span>，但相对谁、用什么指标，论文、项目页、代码仓库三处都查不到。</p>
+</div>
+
+<h2 id="s2"><span class="num">§ 2</span>术语小抄</h2>
+
+<p class="lede">这篇论文横跨数据处理、视频生成、蒸馏加速三块。下面这些词后文反复出现，先用一两句话说清它们在这里指什么。</p>
+
+<dl class="gloss">
+<div><dt>latent<small>潜变量帧</small></dt><dd>视频先被压缩器（VAE）压小再交给模型。Wan2.2-5B 在时间上每 4 帧压成 1 个 latent，首帧单独占 1 个，所以 81 帧 → 21 个 latent。后文说的「18 个 latent」约等于 72 帧、4.5 秒。</dd></div>
+<div><dt>块<small>block / chunk</small></dt><dd>边走边生成时的最小单位。这里 1 块 = 3 个 latent ≈ 12 帧 ≈ 0.75 秒。模型每次生成一块，再接着生成下一块。</dd></div>
+<div><dt>双向 vs 因果注意力</dt><dd>双向：视频里每一帧都能看到前后所有帧，适合一次生成整段，但做不到「边走边生」。因果：只能看过去，才能一块接一块往下生成、随时响应新的相机指令。</dd></div>
+<div><dt>KV cache<small>历史缓存</small></dt><dd>模型把已生成的画面「记成笔记」存起来，后面的块读这份笔记来保持连贯。笔记本页数固定，写满了就撕掉最旧的一页。</dd></div>
+<div><dt>Teacher forcing<small>喂标准答案</small></dt><dd>训练时给模型看的「过去」是真实视频，而不是它自己生成的。好处是稳定，坏处见下一条。</dd></div>
+<div><dt>暴露偏差 / self-rollout</dt><dd>实际使用时，模型看的是自己刚生成、带小错误的画面；只看过真实视频的模型从没见过自己的错误，于是越滚越歪。Self-rollout 就是训练时让它看自己生成的历史，专治这个。</dd></div>
+<div><dt>少步蒸馏</dt><dd>原始视频模型去噪一次要约 50 步，太慢，实时需要 4 步左右。蒸馏就是训练一个少步的「学生」去模仿多步的「老师」。</dd></div>
+<div><dt>AnyFlow<small>区间流映射</small></dt><dd>普通蒸馏学的是「从当前噪声一步跳到成品」；AnyFlow 学的是「从任意噪声水平跳到任意更低的噪声水平」。4 步采样恰好就是 4 次这样的区间跳跃，所以它训出来的模型天生能少步生成。</dd></div>
+<div><dt>DMD<small>分布匹配蒸馏</small></dt><dd>学生先自己生成样本；冻结的老师指出「真实视频往哪个方向」，一个跟着学生一起训练的评论员（critic）指出「学生自己的分布往哪个方向」；两者之差，就是把学生推向老师的力。</dd></div>
+<div><dt>SGF<small>Self Gradient Forcing</small></dt><dd>普通 self-rollout 训练里，后面块的损失只能教模型「怎么读历史笔记」，教不到「当初怎么写笔记」。SGF 先无梯度地跑一遍，再并行重算一遍，把「写笔记」这一步也纳入训练。</dd></div>
+<div><dt>PRoPE<small>投影旋转位置编码</small></dt><dd>把两帧之间「相机怎么移动、怎么转、焦距多少」写成一种作用在注意力上的数学变换。这样注意力比较两帧时，天然知道它们的相对视角。</dd></div>
+<div><dt>Clean Plate<small>清场</small></dt><dd>用一个视频编辑模型把画面里的行人、车辆抹掉，只保留静态场景和原来的相机运动。</dd></div>
+<div><dt>owner / tier<small>分区 / 质量档</small></dt><dd>owner 是可以单独筛选、单独加权的数据分区，共 14 个（如 DL3DV-10s、SpatialVID-Clean）；tier 是每条视频的质量档：xhigh、high、rejected（拒绝）。</dd></div>
+</dl>
+
+<h2 id="s3"><span class="num">§ 3</span>哪些零件是新的</h2>
+
+<p class="lede">系统类论文最容易被误读的一点，是分不清哪些是「本文提出」、哪些是「本文集成」。SolarWM 在正文里每个零件都规规矩矩引了出处 <span class="src p">论文</span>；但它的 Figure 2 流程概览把 "Camera Control via PRoPE"、"AnyFlow Loss"、"DMD Loss" 并列写成自家流水线的特性，图上没有引用标记，读者容易把整条链都算到它头上。</p>
+
+<figure>
+  <div class="fig-h">Figure B · 零件来源</div>
+  <svg viewBox="0 0 900 400" role="img" aria-label="零件来源图：相机注入来自 MosaicMem，Stage 1 损失来自 AnyFlow，Stage 2 的写缓存梯度来自 Self Gradient Forcing，分布匹配来自 DMD 与 Self Forcing，相机标注流水线沿用 SANA-WM，底座来自三个模型家族；SolarWM 自己做的是数据引擎、统一接口与三阶段编排。">
+    <defs>
+      <marker id="arB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    </defs>
+    <g font-family="JetBrains Mono, monospace" font-size="11.5" fill="currentColor">
+      <text x="30" y="26" font-size="11" opacity=".55" letter-spacing="1.4">已有工作（他人提出）</text>
+      <g>
+        <rect x="30" y="40"  width="238" height="44" rx="7" fill="none" stroke="currentColor" stroke-opacity=".3"/>
+        <text x="42" y="59"  font-size="12" font-weight="700">MosaicMem</text>
+        <text x="42" y="75"  font-size="10.5" opacity=".62">fused-PRoPE 相机注入 · 2603.17117</text>
+        <rect x="30" y="96"  width="238" height="44" rx="7" fill="none" stroke="currentColor" stroke-opacity=".3"/>
+        <text x="42" y="115" font-size="12" font-weight="700">AnyFlow</text>
+        <text x="42" y="131" font-size="10.5" opacity=".62">区间流映射损失 · 2605.13724</text>
+        <rect x="30" y="152" width="238" height="44" rx="7" fill="none" stroke="currentColor" stroke-opacity=".3"/>
+        <text x="42" y="171" font-size="12" font-weight="700">Self Gradient Forcing</text>
+        <text x="42" y="187" font-size="10.5" opacity=".62">「写缓存」也带梯度 · 2607.20368</text>
+        <rect x="30" y="208" width="238" height="44" rx="7" fill="none" stroke="currentColor" stroke-opacity=".3"/>
+        <text x="42" y="227" font-size="12" font-weight="700">DMD / Self Forcing</text>
+        <text x="42" y="243" font-size="10.5" opacity=".62">分布匹配 · 自 rollout · CVPR / NeurIPS</text>
+        <rect x="30" y="264" width="238" height="44" rx="7" fill="none" stroke="currentColor" stroke-opacity=".3"/>
+        <text x="42" y="283" font-size="12" font-weight="700">SANA-WM</text>
+        <text x="42" y="299" font-size="10.5" opacity=".62">相机标注流水线设计 · 2605.15178</text>
+        <rect x="30" y="320" width="238" height="44" rx="7" fill="none" stroke="currentColor" stroke-opacity=".3"/>
+        <text x="42" y="339" font-size="12" font-weight="700">Wan2.2 / LTX-2.5 / H3</text>
+        <text x="42" y="355" font-size="10.5" opacity=".62">三个模型家族 · 四个底座</text>
+      </g>
+      <g stroke="currentColor" stroke-opacity=".45" marker-end="url(#arB)" fill="none">
+        <line x1="272" y1="62"  x2="352" y2="120"/><line x1="272" y1="118" x2="352" y2="152"/>
+        <line x1="272" y1="174" x2="352" y2="184"/><line x1="272" y1="230" x2="352" y2="200"/>
+        <line x1="272" y1="286" x2="352" y2="248"/><line x1="272" y1="342" x2="352" y2="280"/>
+      </g>
+      <rect x="358" y="86" width="196" height="212" rx="10" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <text x="456" y="115" text-anchor="middle" font-size="14" font-weight="700" font-family="Familjen Grotesk, sans-serif">SolarWM</text>
+      <text x="456" y="136" text-anchor="middle" font-size="10.5" opacity=".6">本文自己做的</text>
+      <line x1="378" y1="150" x2="534" y2="150" stroke="currentColor" stroke-opacity=".25"/>
+      <text x="378" y="172" font-size="11">· 数据引擎（全部自有）</text>
+      <text x="378" y="192" font-size="11">· 统一的相机接口</text>
+      <text x="378" y="212" font-size="11">· 三阶段的编排</text>
+      <text x="378" y="232" font-size="11">· 四个底座的适配</text>
+      <text x="378" y="252" font-size="11">· 完整的发布</text>
+      <g stroke="currentColor" stroke-opacity=".45" marker-end="url(#arB)" fill="none">
+        <line x1="558" y1="140" x2="626" y2="104"/><line x1="558" y1="192" x2="626" y2="192"/><line x1="558" y1="244" x2="626" y2="280"/>
+      </g>
+      <rect x="632" y="78"  width="238" height="52" rx="7" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="1.4"/>
+      <text x="644" y="99"  font-size="12" font-weight="700">Solar 数据集</text>
+      <text x="644" y="117" font-size="10.5" opacity=".62">143 万片 · 25.85 TB · 14 分区</text>
+      <rect x="632" y="166" width="238" height="52" rx="7" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="1.4"/>
+      <text x="644" y="187" font-size="12" font-weight="700">四个相机可控模型</text>
+      <text x="644" y="205" font-size="10.5" opacity=".62">名义 5B / 14B / 22B / 33B</text>
+      <rect x="632" y="254" width="238" height="52" rx="7" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="1.4"/>
+      <text x="644" y="275" font-size="12" font-weight="700">可复现的代码与配置</text>
+      <text x="644" y="293" font-size="10.5" opacity=".62">配方 · 权重 · 索引 · 拒绝记录</text>
+    </g>
+  </svg>
+  <figcaption><b>怎么看这张图：</b>左边六个是已有工作，中间是 SolarWM 自己做的，右边是它交付的东西。三阶段配方里真正被本文「换掉」的只有一环：用 TF-AnyFlow 取代 Causal Forcing 的 Causal-ODE 初始化与 Causal Forcing++ 的 Causal-CD 初始化。这是一处明确、可检验的简化。</figcaption>
+</figure>
+
+<div class="note cam">
+<span class="tag">一个容易被忽略的出处</span>
+<p>「只在 5 秒片段上训练，却能一直往后生成」这件事并不是 SolarWM 首创。它 Stage 2 用的 Self Gradient Forcing，原文摘要里就写着：只用 5 秒训练窗口，就能外推到数分钟长的视频 <span class="src x">SGF 论文</span>。SolarWM 的贡献是把这条路线和相机控制接在一起，并展示了长到 1 小时的样例。</p>
+</div>
+
+<p class="take">数据引擎是新的；模型侧的新意在编排和跨底座复用，不在任何单个算法。</p>
+
+<h2 id="s4"><span class="num">§ 4</span>数据引擎：全文最值得带走的设计</h2>
+
+<p class="lede">这是全文唯一连零件都是自己的部分。一句话：<strong>把「处理数据」和「挑选数据」彻底分开。</strong></p>
+
+<p>大多数数据集发布的是「筛完之后剩下的」。你想换一个质量阈值，就得从头重跑相机估计和大模型打标，这是很贵的活。SolarWM 反过来：每一条视频先完整处理、打完所有分数，挑选只是在这之上加的一层「索引」。不合格的也不删，放进 rejected 分区，写明为什么不合格 <span class="src p">论文</span>。</p>
+
+<h3>4.1 每条样本长什么样</h3>
+<p>每个来源都被转成同一种、逐帧对齐的格式：</p>
+<p style="text-align:center" class="eq">S<sub>i</sub> = ( V<sub>i</sub>, P<sub>i</sub>, K<sub>i</sub>, C<sub>i</sub>, m<sub>i</sub>, q<sub>i</sub>, π<sub>i</sub> )</p>
+<ul>
+<li><span class="m">V</span> 视频本身</li>
+<li><span class="m">P</span> 每一帧相机在世界里的位置和朝向（4×4 矩阵），<strong>单位是米</strong>，不做全库统一缩放</li>
+<li><span class="m">K</span> 每一帧的焦距和光心 (f<sub>x</sub>, f<sub>y</sub>, c<sub>x</sub>, c<sub>y</sub>)。<strong>是逐帧的</strong>，因为有的视频会变焦，整段用一个焦距就错了</li>
+<li><span class="m">C</span> 一段文字描述 · <span class="m">m</span> 来源和媒体信息</li>
+<li><span class="m">q</span> 所有质量分数，<strong>包括默认配方用不到的</strong></li>
+<li><span class="m">π</span> 溯源：来自哪个数据集的哪一段、经过哪些处理、每一步的结果</li>
+</ul>
+
+<div class="note dat">
+<span class="tag">最值得抄走的一条：三层分开</span>
+<ul style="margin:0">
+<li><strong>物理语料</strong>：视频和标注本身，只存一份</li>
+<li><strong>逻辑配方</strong>：哪些进训练集、每个分区的权重、重复几次——只是一份索引</li>
+<li><strong>模型视图</strong>：为某个模型切好的时间窗、预先压好的 latent</li>
+</ul>
+<p>结果是：改配方不需要复制视频；换一个压缩器，也不会改变选了哪些数据 <span class="src p">论文</span>。</p>
+</div>
+
+<h3>4.2 数据构成：14 个分区，被拒的也公开</h3>
+<p>10 个源数据集被组织成 14 个分区：DL3DV 按时长拆成 10 秒版和 60 秒版；MiraData、Sekai-Walking、SpatialVID 各多出一个「清场」版本（见 4.5）<span class="src p">论文</span>。</p>
+
+<figure>
+  <div class="fig-h">Figure C · 交互：每个分区的三档分布（数据来自论文 Table 4）</div>
+  <div class="ctl">
+    <span class="seg" id="f3sort">
+      <button data-k="all" class="on">按总量</button>
+      <button data-k="keep">按保留量</button>
+      <button data-k="rate">按保留率</button>
+      <button data-k="name">按名称</button>
+    </span>
+    <span class="seg" id="f3mode">
+      <button data-k="abs" class="on">绝对数量</button>
+      <button data-k="pct">占比</button>
+    </span>
+  </div>
+  <svg id="f3" viewBox="0 0 900 470" role="img" aria-label="14 个数据分区的分层柱状图：xhigh 404,795 条、high 471,798 条、rejected 549,101 条，合计 1,425,694 条。MiraData 与 MiraData-Clean 被拒超过八成，ABOT 几乎全部进入 xhigh。"></svg>
+  <figcaption><b>怎么看这张图：</b>每一行是一个分区，绿 / 蓝 / 粉分别是 xhigh / high / 被拒。切到「占比」更清楚：MiraData 被拒 84.7%、MiraData-Clean 被拒 86.2%，而 ABOT 只被拒 0.4%。同一套阈值不可能同时适合这两种数据，所以论文 Table 3 给<b>每个分区单独冻结了一套规则</b>，而不是一张全局门限表。</figcaption>
+</figure>
+
+<div class="note ok">
+<span class="tag">算术核对</span>
+<p>我逐行逐列核了 Table 4：14 行每一行 <span class="m">high + xhigh + rejected = 总数</span> 都成立；三列合计 471,798 / 404,795 / 549,101，总计 1,425,694，与正文「保留 876k」「拒绝 549k」一致。<strong>论文里给出的数字是干净的</strong>，这一点值得单独说——它和「一个性能数字都没有」形成的反差，才是这篇论文真正奇怪的地方。</p>
+</div>
+
+<figure>
+  <div class="fig-h">Figure D · 交互：按原始长度分档（论文 Figure 5）</div>
+  <div class="ctl">
+    <span class="seg" id="f4mode">
+      <button data-k="abs" class="on">绝对数量</button>
+      <button data-k="pct">档内占比</button>
+    </span>
+  </div>
+  <svg id="f4" viewBox="0 0 900 330" role="img" aria-label="按片段原始帧数分四档的柱状图：短于 81 帧的 78.8k 条全部被拒；81 到 152 帧 299.8k 条保留八成；153 到 956 帧 858.3k 条是主体；957 帧以上 188.8k 条只保留约四成。"></svg>
+  <figcaption><b>怎么看这张图：</b>按原始帧数分四档。短于 81 帧的 7.88 万条全部被拒，这和多数分区保留规则里的 <span class="m">N ≥ 81</span> 一致（81 帧在 16 fps 下约 5 秒，正好一个训练片段）。越长的片段被拒比例越高：81–152 帧保留 80%，≥957 帧只保留 44%。两个数和正文对得上：153–956 档保留 55.4 万（正文写 553k），≥957 档保留 8.2 万（正文写 82k）。<span class="small">原始帧率因数据集而异，这里不折算成秒；≥957 档的 high 值 13.9k 在论文图里没有标出，由列合计反推。</span></figcaption>
+</figure>
+
+<h3>4.3 相机标注：按手里已有的信息分三条路</h3>
+<p>相机标注沿用 SANA-WM 的设计 <span class="src p">论文</span>，关键在于<strong>按每个数据集已有的几何信息分流</strong>，而不是所有数据都走同一条 SLAM 流水线。</p>
+
+<figure>
+  <div class="fig-h">Figure E · 相机标注的三条路径</div>
+  <svg viewBox="0 0 900 320" role="img" aria-label="相机标注三条路径：只有视频时，Pi3X 估结构、MoGe-2 估真实深度，融合后送入改造版 VIPE SLAM 估计轨迹和逐帧内参；有真实深度但没有轨迹时，深度直接作为尺度锚点交给 VIPE；已有真值或 COLMAP 位姿时保留原轨迹，只用 Umeyama Sim(3) 把 Pi3X 结构对齐过去，不经过 SLAM。">
+    <defs>
+      <marker id="arE" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    </defs>
+    <g font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor">
+      <!-- lane A -->
+      <text x="20" y="28" font-size="10.5" opacity=".55" letter-spacing="1.2">路径 A · 只有视频</text>
+      <rect x="20" y="38" width="128" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+      <text x="84" y="56" text-anchor="middle" font-size="11.5" font-weight="700">Pi3X</text>
+      <text x="84" y="70" text-anchor="middle" font-size="9.5" opacity=".6">前后一致的结构</text>
+      <rect x="20" y="88" width="128" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+      <text x="84" y="106" text-anchor="middle" font-size="11.5" font-weight="700">MoGe-2</text>
+      <text x="84" y="120" text-anchor="middle" font-size="9.5" opacity=".6">逐帧真实深度</text>
+      <path d="M152,58 L186,74" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arE)"/>
+      <path d="M152,108 L186,92" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arE)"/>
+      <rect x="192" y="63" width="108" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".5" stroke-width="1.3"/>
+      <text x="246" y="81" text-anchor="middle" font-size="11" font-weight="700">对齐融合</text>
+      <text x="246" y="95" text-anchor="middle" font-size="9.5" opacity=".6">得到尺度锚点</text>
+      <path d="M304,83 L352,92" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arE)"/>
+
+      <!-- lane C -->
+      <text x="20" y="160" font-size="10.5" opacity=".55" letter-spacing="1.2">路径 C · 有真实深度、无轨迹</text>
+      <rect x="20" y="170" width="128" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+      <text x="84" y="194" text-anchor="middle" font-size="11" font-weight="700">深度即尺度锚点</text>
+      <path d="M152,190 L336,190 L336,134 L352,134" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arE)"/>
+
+      <!-- VIPE -->
+      <rect x="356" y="66" width="176" height="86" rx="8" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <text x="444" y="90" text-anchor="middle" font-size="13" font-weight="700" font-family="Familjen Grotesk, sans-serif">VIPE（改造版 SLAM）</text>
+      <text x="444" y="108" text-anchor="middle" font-size="10" opacity=".65">估 6 自由度轨迹 + 整体优化</text>
+      <text x="444" y="124" text-anchor="middle" font-size="10" opacity=".65">逐帧内参各自可调</text>
+      <text x="444" y="141" text-anchor="middle" font-size="9.5" opacity=".5">内参由 GeoCalib 初始化</text>
+      <path d="M536,108 L641,108 L641,150" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arE)"/>
+
+      <!-- lane B -->
+      <text x="20" y="246" font-size="10.5" opacity=".55" letter-spacing="1.2">路径 B · 已有真值 / COLMAP 位姿（不经过 SLAM）</text>
+      <rect x="20" y="256" width="128" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+      <text x="84" y="273" text-anchor="middle" font-size="11" font-weight="700">原轨迹 + Pi3X</text>
+      <text x="84" y="288" text-anchor="middle" font-size="9.5" opacity=".6">轨迹保留，不重估</text>
+      <path d="M152,276 L186,276" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arE)"/>
+      <rect x="192" y="256" width="108" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".5" stroke-width="1.3"/>
+      <text x="246" y="271" text-anchor="middle" font-size="10.5" font-weight="700">Umeyama Sim(3)</text>
+      <text x="246" y="286" text-anchor="middle" font-size="9.5" opacity=".6">只用残差最低 80%</text>
+      <path d="M304,276 L641,276 L641,210" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arE)"/>
+
+      <!-- output -->
+      <rect x="566" y="156" width="150" height="48" rx="7" fill="none" stroke="currentColor" stroke-opacity=".6" stroke-width="1.4"/>
+      <text x="641" y="176" text-anchor="middle" font-size="11" font-weight="700">逐帧对齐的 P、K</text>
+      <text x="641" y="193" text-anchor="middle" font-size="9.5" opacity=".6">平移单位是米</text>
+      <path d="M720,180 L756,180" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arE)"/>
+
+      <!-- checks -->
+      <rect x="762" y="50" width="122" height="250" rx="7" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-dasharray="4 3"/>
+      <text x="823" y="72" text-anchor="middle" font-size="10.5" font-weight="700" opacity=".8">完整性检查</text>
+      <text x="774" y="98" font-size="10">· 数值有限</text>
+      <text x="774" y="118" font-size="10">· 焦距为正</text>
+      <text x="774" y="138" font-size="10">· 视场角合理</text>
+      <text x="774" y="158" font-size="10">· fx、fy 接近</text>
+      <text x="774" y="180" font-size="10">· 尺度前后稳定</text>
+      <text x="774" y="194" font-size="9" opacity=".6">std(s)/mean(s)</text>
+      <text x="774" y="228" font-size="10" opacity=".75">证据缺失 →</text>
+      <text x="774" y="244" font-size="10" opacity=".75">直接判不可用</text>
+      <text x="774" y="270" font-size="9" opacity=".5">（配方启用相机</text>
+      <text x="774" y="284" font-size="9" opacity=".5">　检查时）</text>
+    </g>
+  </svg>
+  <figcaption><b>怎么看这张图：</b>三条路的区别在于「手里已经有什么」。核心约束是<b>不覆盖已有证据</b>：已有真实位姿的数据集不会被 SLAM 估计替换，Pi3X 只负责把预测的结构对齐到那条轨迹的尺度上，而且对齐只用残差最低的 80% 帧，防止几帧坏数据把整段尺度拽偏 <span class="src p">论文</span>。<b>论文没讲清的一点：</b>COLMAP 位姿本身没有真实尺度（单位任意），而路径 A 又说 Pi3X 的结构是「尺度不确定」的——那么走路径 B 的 COLMAP 数据（如 DL3DV），最终的「米」从哪里来，论文没有交代。</figcaption>
+</figure>
+
+<h3>4.4 文字描述：刻意不写镜头运动</h3>
+<p>143 万条视频全部用同一条 Kimi-K2.6 流水线写描述：每秒抽 1 帧、最多 64 帧、最大边 768 像素、温度 0、固定随机种子，要求严格输出 6 个字段的 JSON <span class="src p">论文</span>。真正有意思的是 prompt 里的<strong>禁止清单</strong>：不许写人和动物、不许写动作、<strong>不许写镜头运动和景别术语</strong>、不许写媒体术语和推测。</p>
+<div class="note cam">
+<span class="tag">为什么要这样</span>
+<p>论文自己点明了目的：降低文字条件「泄露」相机控制信息的风险 <span class="src p">论文</span>。道理是：如果描述里写着「镜头缓缓右摇」，模型就可以偷懒，从文字里读运动而不是从相机参数里读；训练损失照样下降，可你给它一条新轨迹它就不跟了。把镜头语言从文字里清掉，等于逼着相机控制只能走几何这一条路。</p>
+</div>
+<p>描述之外，每条视频还保留一整排分数：相机完整性、DOVER 画质分、两种运动幅度（VMAF Motion、UniMatch 光流）、镜头切换数（PySceneDetect）、Kimi 给的质量分 / 人车密度 / 场景类型 / 八种拒绝标记。<strong>默认配方用不上的分数也照样发布</strong>，因为不同来源的分数分布本来就不一样。</p>
+
+<h3>4.5 Clean Plate：把行人车辆抹掉</h3>
+<p>行人和车辆的运动既不是相机造成的，也控制不了，对「按相机轨迹生成」的模型来说是纯粹的干扰。所以论文用 LTX-2.3 的 Clean Plate IC-LoRA 把它们抹掉，生成了三个「清场」分区：SpatialVID-Clean 298k、MiraData-Clean 135k、Sekai-Walking-Clean 109k，共 543k 条（8 步去噪，输入 1248×704，输出 1280×720 @16fps）<span class="src p">论文</span>。</p>
+<p>论文在这里做得严谨：清场结果<strong>不继承</strong>原视频的分数，描述、画质、语义、相机诊断全部重算；尺度恢复不明确就直接判不可用。但它没有回答一个显然的问题。</p>
+<div class="note risk">
+<span class="tag">未被检验：清场数据的比重和影响</span>
+<p>三个清场分区中进入保留档的有 305,695 条，占全部保留数据的 <strong>34.9%</strong> <span class="src i">推断</span>（Table 4 相加）。在默认训练配方里比重更高：按 4.6 节的反推，约 <strong>47.8%</strong> 的训练行来自清场分区，而原版 SpatialVID 和 Sekai-Walking 根本不在默认配方里。</p>
+<p>也就是说，模型有近一半的训练数据是「生成模型编辑过、没有人和车」的画面。<strong>它遇到真实有人的场景会怎样？</strong>论文 Figure 7 专门展示第三人称主体的一致性，恰好是这种场景，却只有 3 个例子；没有清场比例的消融，也没有「有人 / 无人」的分组评测。</p>
+</div>
+
+<h3>4.6 配方只是一份索引——而且能算到唯一解</h3>
+<p>论文给了一个可以当场验算的例子 <span class="src p">论文</span>：默认的 81 帧配方覆盖<strong>十个</strong>分区、共 600,320 条训练行；ABOT、MiraData、Sekai-Game 三个分区被重复 6 次，于是每个 epoch 实际出现 870,210 次；另留 1,000 条作测试。</p>
+<div class="note ok">
+<span class="tag">我把它算了一遍</span>
+<ol style="margin:4px 0">
+<li>重复 6 次等于多出 5 份。设这三个分区的训练行数为 <span class="m">x</span>：<span class="m">600,320 + 5x = 870,210 → x = 53,978</span>。</li>
+<li>这三个分区在 Table 4 里的保留数合计 30,842 + 21,489 + 1,947 = <strong>54,278</strong>。</li>
+<li>相差正好 <strong>300 = 3 个分区 × 每个分区留出 100 条测试</strong>（测试集 1,000 条 = 10 个分区 × 100）。完全对上。</li>
+<li>论文没说「十个分区」是哪十个。用「各分区保留数 − 100」去凑 600,320，330 种可能的组合里<strong>只有一种精确命中</strong> <span class="src i">推断</span>：去掉 DL3DV-60s、MiraData-Clean、Sekai-Walking、SpatialVID。换句话说，默认配方用 SpatialVID 和 Sekai-Walking 的清场版替换了原版，保留原版 MiraData 并重复 6 次，不用 60 秒长视图。</li>
+</ol>
+<p style="margin-bottom:0">按这个组合，清场数据占训练行的 47.8%（286,890 / 600,320），占实际出现次数的 33.0%。</p>
+</div>
+
+<p class="take">数据引擎的价值不在「数据多」，而在于每一个取舍都写成了可以改、可以查、甚至可以反推的索引。</p>
+
+<h2 id="s5"><span class="num">§ 5</span>相机怎么进模型：fused-PRoPE</h2>
+
+<p class="lede">模型要「听相机的话」，就得在计算时知道每一帧是从哪个位置、哪个角度拍的。常见做法是加一条「相机编码器」支路，把相机信息当作额外输入塞进去。SolarWM（沿用 MosaicMem 的做法）换了思路：<strong>不加新输入，直接改注意力的计算方式</strong>，让注意力比较两帧时自动考虑它们的相对视角。</p>
+
+<p>打个比方。注意力做的事是：「当前这一小块画面，去其他帧里找和自己相关的内容」。如果两帧之间相机向右转了 30°，同一棵树在两帧里的位置就完全不同。PRoPE 做的，是在比较之前先按两帧之间的相机变换把坐标系「对齐」——相当于告诉注意力：「那一帧是从右边 30° 看过来的，按这个角度去理解它」。</p>
+
+<figure>
+  <div class="fig-h">Figure F · 两种相机注入方式</div>
+  <svg viewBox="0 0 900 430" role="img" aria-label="对比图：左侧为控制支路方案，相机编码器产生额外 token，并多跑一次交叉注意力；右侧为 fused-PRoPE，相机位姿与内参决定的变换直接作用在 Q、K、V 上，自注意力只跑一次，结束后做一次逆变换。">
+    <defs>
+      <marker id="arF" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    </defs>
+    <g font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor">
+      <line x1="450" y1="20" x2="450" y2="410" stroke="currentColor" stroke-opacity=".18" stroke-dasharray="5 5"/>
+      <text x="26" y="32" font-size="11.5" opacity=".6" letter-spacing="1.2">常见替代做法（示意）· 外挂支路</text>
+      <rect x="26" y="48" width="118" height="36" rx="6" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+      <text x="85" y="71" text-anchor="middle">视频 token</text>
+      <rect x="26" y="96" width="118" height="36" rx="6" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+      <text x="85" y="113" text-anchor="middle">相机编码器</text>
+      <text x="85" y="126" text-anchor="middle" font-size="9" opacity=".55">新增参数</text>
+      <path d="M148,66 L196,96" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arF)"/>
+      <path d="M148,114 L196,120" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arF)"/>
+      <rect x="202" y="92" width="110" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+      <text x="257" y="110" text-anchor="middle">相机 token</text>
+      <text x="257" y="124" text-anchor="middle" font-size="9" opacity=".55">序列变长</text>
+      <rect x="60" y="164" width="252" height="44" rx="7" fill="none" stroke="currentColor" stroke-opacity=".5"/>
+      <text x="186" y="182" text-anchor="middle" font-size="11.5" font-weight="700">自注意力（第 1 次）</text>
+      <text x="186" y="198" text-anchor="middle" font-size="9.5" opacity=".6">原生位置编码</text>
+      <path d="M186,136 L186,160" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arF)"/>
+      <rect x="60" y="230" width="252" height="44" rx="7" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5" stroke-dasharray="5 3"/>
+      <text x="186" y="248" text-anchor="middle" font-size="11.5" font-weight="700">交叉注意力（第 2 次）</text>
+      <text x="186" y="264" text-anchor="middle" font-size="9.5" opacity=".7">多算一遍</text>
+      <path d="M186,212 L186,226" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arF)"/>
+      <rect x="60" y="296" width="252" height="38" rx="7" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+      <text x="186" y="320" text-anchor="middle">输出投影</text>
+      <path d="M186,278 L186,292" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arF)"/>
+      <text x="186" y="366" text-anchor="middle" font-size="10.5" opacity=".7">代价：新参数 · 多一遍注意力 · 序列变长</text>
+      <text x="186" y="384" text-anchor="middle" font-size="10.5" opacity=".7">风险：相机信息绕开了预训练学到的时空关系</text>
+
+      <text x="490" y="32" font-size="11.5" opacity=".6" letter-spacing="1.2">SolarWM · fused-PRoPE</text>
+      <rect x="490" y="48" width="118" height="36" rx="6" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+      <text x="549" y="71" text-anchor="middle">视频 token</text>
+      <rect x="640" y="48" width="230" height="36" rx="6" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+      <text x="755" y="65" text-anchor="middle">位姿 P + 逐帧内参 K</text>
+      <text x="755" y="78" text-anchor="middle" font-size="9" opacity=".55">不新增参数</text>
+      <rect x="490" y="96" width="118" height="34" rx="6" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+      <text x="549" y="117" text-anchor="middle">原生位置编码</text>
+      <path d="M549,88 L549,92" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arF)"/>
+      <rect x="640" y="96" width="230" height="34" rx="6" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="1.3"/>
+      <text x="755" y="117" text-anchor="middle" font-weight="700">相机变换 T(P, K)</text>
+      <path d="M755,88 L755,92" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arF)"/>
+      <rect x="490" y="158" width="76" height="40" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="528" y="176" text-anchor="middle" font-size="13" font-weight="700">Q</text>
+      <text x="528" y="191" text-anchor="middle" font-size="9" opacity=".6">变换</text>
+      <rect x="576" y="158" width="76" height="40" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="614" y="176" text-anchor="middle" font-size="13" font-weight="700">K</text>
+      <text x="614" y="191" text-anchor="middle" font-size="9" opacity=".6">变换</text>
+      <rect x="662" y="158" width="76" height="40" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="700" y="176" text-anchor="middle" font-size="13" font-weight="700">V</text>
+      <text x="700" y="191" text-anchor="middle" font-size="9" opacity=".6">变换</text>
+      <path d="M549,130 L549,144 M755,130 L755,144 M528,144 L755,144" stroke="currentColor" stroke-opacity=".55" fill="none"/>
+      <path d="M528,144 L528,154" stroke="currentColor" stroke-opacity=".55" fill="none" marker-end="url(#arF)"/>
+      <path d="M614,144 L614,154" stroke="currentColor" stroke-opacity=".55" fill="none" marker-end="url(#arF)"/>
+      <path d="M700,144 L700,154" stroke="currentColor" stroke-opacity=".55" fill="none" marker-end="url(#arF)"/>
+      <text x="752" y="160" font-size="9.5" opacity=".65">连 V 也变换：</text>
+      <text x="752" y="174" font-size="9.5" opacity=".65">取回来的内容</text>
+      <text x="752" y="188" font-size="9.5" opacity=".65">也在相对视角里</text>
+      <rect x="490" y="224" width="248" height="44" rx="7" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <text x="614" y="242" text-anchor="middle" font-size="11.5" font-weight="700">自注意力（只跑 1 次）</text>
+      <text x="614" y="258" text-anchor="middle" font-size="9.5" opacity=".6">还是原来那条路径</text>
+      <path d="M614,202 L614,220" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arF)"/>
+      <rect x="490" y="286" width="248" height="34" rx="7" fill="none" stroke="currentColor" stroke-opacity=".55"/>
+      <text x="614" y="308" text-anchor="middle">逆变换回来</text>
+      <path d="M614,272 L614,282" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arF)"/>
+      <rect x="490" y="336" width="248" height="32" rx="7" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+      <text x="614" y="357" text-anchor="middle">原生输出投影</text>
+      <path d="M614,324 L614,332" stroke="currentColor" stroke-opacity=".45" fill="none" marker-end="url(#arF)"/>
+      <text x="614" y="394" text-anchor="middle" font-size="10.5" opacity=".7">代价：不新增参数 · 注意力次数不变 · 序列不变</text>
+      <text x="614" y="412" text-anchor="middle" font-size="10.5" opacity=".7">相机成为「怎么比较两帧」的一部分</text>
+    </g>
+  </svg>
+  <figcaption><b>怎么看这张图：</b>左边是「外挂」做法（示意），要新参数、多跑一遍注意力；右边是 fused-PRoPE：相机信息变成作用在 Q、K、V 上的变换，注意力照常只跑一次，结束后再逆变换回来 <span class="src p">论文</span>。<b>连 V 也变换</b>意味着不只是「该看谁」考虑了相机，「取回来的内容」也处在相对视角里。好处是不新增参数，预训练模型原有的时空理解仍在原来的路径上起作用。</figcaption>
+</figure>
+
+<div class="note cam">
+<span class="tag">H3 路线的一处细节</span>
+<p>MiniMax-H3 每个注意力头有 128 维。SolarWM 没有把相机变换铺满整个头，而是<strong>切开</strong>：前 96 维保留原生的内容表示与位置编码，只有后 32 维（96–128）接收相机变换，而且只作用在首帧锚点和目标视频上 <span class="src p">论文</span>。等于给相机留一块专属子空间，不打乱预训练的分工。Wan 路线的配置里没有设这种切分 <span class="src c">仓库</span>，论文也没解释为什么只有 H3 这么做。</p>
+</div>
+
+<p class="take">相机控制不是多加一个输入，而是改变注意力「怎么比较两帧」。</p>
+
+<h2 id="s6"><span class="num">§ 6</span>三阶段训练，以及配置里那本论文没给的账</h2>
+
+<p class="lede">先说每个阶段在解决什么问题。编号用仓库的（0.5 / 1 / 2），因为配置文件都这么命名；论文里对应叫 Stage 1 / 2 / 3。</p>
+
+<div class="stages">
+  <div class="bid"><h4>Stage 0.5 · 双向相机适配</h4><span class="nm">论文 Stage 1</span><p>让原本只会按文字 / 图片生成的视频模型，学会<strong>按相机轨迹生成</strong>。此时它仍然「一次生成一整段」。</p></div>
+  <div class="ar"><h4>Stage 1 · TF-AnyFlow</h4><span class="nm">论文 Stage 2</span><p>把「整段互看」改成<strong>只看过去</strong>，并一次学会 <strong>4 步生成</strong>。给它看的过去是真实视频。</p></div>
+  <div class="dmd"><h4>Stage 2 · DMD + SGF</h4><span class="nm">论文 Stage 3</span><p>让它<strong>在自己生成的历史上练</strong>，治暴露偏差；冻结的双向模型当老师，保证画质不掉。</p></div>
+</div>
+
+<p>论文用三段文字和三个公式描述训练，<strong>没有给出任何训练超参数</strong>：学习率、batch、步数、GPU 数、分辨率都没有 <span class="src p">论文</span>，却在 Table 1 的「Exact Recipe（精确配方）」一栏给自己打了 ✓。这些数字都在发布仓库里，下图逐字摘自 <code>configs/examples/wan22_ti2v_5b/</code> <span class="src c">仓库</span>。</p>
+
+<figure>
+  <div class="fig-h">Figure G · 交互：点一个阶段，看真实配置（Wan2.2-5B 路线）</div>
+  <div class="ctl">
+    <span class="seg" id="f7st">
+      <button data-k="s05a" class="on">Stage 0.5 · 81 帧</button>
+      <button data-k="s05b">Stage 0.5 · 153 帧</button>
+      <button data-k="s1">Stage 1</button>
+      <button data-k="s2">Stage 2</button>
+    </span>
+  </div>
+  <svg id="f7" viewBox="0 0 900 380" role="img" aria-label="四次训练的配置对照：注意力形态、目标函数、帧数、学习率、步数、初始化来源。"></svg>
+  <figcaption><b>怎么看这张图：</b>左边的方格表示「生成第几块时能看到第几块」（行 = 正在生成的块，列 = 被看的块，着色 = 看得到）。切换阶段会看到它从「全部可见」变成「只看过去」，再变成「只看最近 6 块」。右边是该阶段的配置。两件论文没写的事：<b>双向阶段训练了两轮</b>（先 81 帧、再 153 帧）；<b>Stage 2 的老师用的是 81 帧那一轮</b>，而不是学生所继承的 153 帧那一轮。</figcaption>
+</figure>
+
+<h3>6.1 Stage 0.5：先学会听相机</h3>
+<p>目标就是普通视频模型的训练目标：给一段加了噪声的视频，让模型预测「该怎么去噪」<span class="src p">论文</span>：</p>
+<p style="text-align:center" class="eq">L<sub>bid</sub> = 𝔼<sub>z₀,t,ε</sub> ‖ f<sub>θ</sub>(z<sub>t</sub>, t, c) − u<sub>t</sub> ‖²₂</p>
+<p>读法：<span class="m">z<sub>t</sub></span> 是加了 t 程度噪声的视频 latent，<span class="m">c</span> 是文字、首帧和相机，<span class="m">u<sub>t</sub></span> 是正确的去噪方向。这一阶段整段互相可见，相机经 fused-PRoPE 注入。训完的模型有两个用处：下一阶段的起点，以及 Stage 2 里那个冻结的「老师」。</p>
+
+<div class="note bid">
+<span class="tag">「只用 5 秒序列训练」——论文自己和仓库都对不上</span>
+<ul style="margin:4px 0">
+<li><strong>论文的说法</strong> <span class="src p">论文</span>：摘要、引言（2 处）、实验（2 处）、结论都写「只在 5 秒序列上训练」；Figure 2 更直接把双向阶段标成 "5s TI2V Training"。</li>
+<li><strong>论文内部的矛盾</strong> <span class="src p">论文</span>：§7.1 又写「双向生成产出 10 秒片段」，Figure 6 四个双向模型也都生成 10 秒视频。只在 5 秒上训过的双向模型，一般不会直接拿来整段生成 10 秒。</li>
+<li><strong>仓库给出的解释</strong> <span class="src c">仓库</span>：双向阶段还有第二轮 <code>train_stage0p5_fm_153f.yaml</code>，153 帧 @16fps = <strong>9.56 秒</strong>；而 Stage 1 的启动命令明确从这个 153 帧权重初始化。</li>
+</ul>
+<p style="margin-bottom:0">所以：两个因果阶段确实只用了 5 秒（81 帧）；但按仓库的训练链路，模型见过的最长片段是 9.56 秒。按论文口径「5 秒 → 1 小时」是 720 倍，按仓库链路是 377 倍。依然很长，但这是两个不同的说法。也不能排除论文结果用的是另一条不含 153 帧的链路——那样的话，Figure 6 的 10 秒双向结果反而更难解释。</p>
+</div>
+
+<h3>6.2 Stage 1：改成只看过去，并直接学会 4 步</h3>
+<p>视频被切成一块一块（每块 3 个 latent）。生成第 <span class="m">k</span> 块时，模型只能看到：第 <span class="m">k</span> 块自己当前的带噪版本，以及前面各块的<strong>真实</strong>画面；后面的块全部遮住 <span class="src p">论文</span>。损失函数是：</p>
+<p style="text-align:center" class="eq">L<sub>TF-AF</sub> = 𝔼 [ Σ<sub>k</sub> ℓ<sub>AF</sub>( f<sub>φ</sub>; z<sub>t</sub><sup>k</sup>, t, r, z<sub>0</sub><sup>&lt;k</sup>, c ) ]</p>
+<p>读法：<span class="m">z<sub>t</sub><sup>k</sup></span> 是第 k 块在噪声水平 t 下的样子，<span class="m">z<sub>0</sub><sup>&lt;k</sup></span> 是前面各块的干净真值。<span class="m">ℓ<sub>AF</sub></span> 要求模型学会<strong>从噪声水平 t 直接跳到更低的噪声水平 r</strong>，而不只是跳到成品。</p>
+<p><strong>这为什么重要：</strong>普通方法只学「从 t 跳到成品」，这样的模型还得再经过一轮专门的蒸馏才能少步生成——Causal Forcing 为此多了一个 Causal-ODE 阶段，Causal Forcing++ 多了一个 Causal-CD 阶段。AnyFlow 学的是任意区间，而 4 步采样恰好就是 4 次区间跳跃，所以这一阶段训完就能 4 步生成，可以直接进入 Stage 2。这是本文最实在的一处简化，逻辑也说得通。</p>
+
+<figure>
+  <div class="fig-h">Figure H · 4 步采样在噪声轴上到底怎么走</div>
+  <svg id="f8" viewBox="0 0 900 220" role="img" aria-label="噪声轴示意：timestep_shift 等于 5 时，四步采样对应的噪声水平是 1.000、0.938、0.833、0.625，最后一步直接跳到 0，跨越了整根噪声轴的 62.5%。"></svg>
+  <figcaption><b>怎么看这张图：</b>横轴是噪声水平 σ：最左 σ = 1 是纯噪声，最右 σ = 0 是干净画面。4 步采样 = 从左往右跳 4 次。配置里 <code>timestep_shift: 5.0</code> 让格点很不均匀：前三步一共只走了 37.5%，<b>最后一步独自跨过 62.5%</b> <span class="src c">仓库</span>。4 步生成的画质几乎全押在最后这一大跳上——而「任意区间跳跃」正是为这种大跳准备的能力。下面的灰点是均匀 4 步，作对照。</figcaption>
+</figure>
+
+<div class="note ar">
+<span class="tag">从 AnyFlow 原样继承、两篇论文都没说的设置</span>
+<p>Stage 1 的配置几乎逐项对应 AnyFlow 的实现 <span class="src c">仓库</span>：<code>anyflow_gate: 0.25</code>、<code>anyflow_epsilon: 5.0</code>、<code>anyflow_diffusion_ratio: 0.5</code>、<code>anyflow_fuse_guidance_scale: 3.0</code>（把引导强度直接训进权重，推理时不再需要额外引导）；负面提示用的是 Wan 官方那份中文负面提示词 <code>wan_negemb_cn.pth</code>。其中两项值得注意：</p>
+<ul>
+<li><code>anyflow_consistency_ratio: 0.25</code>：按 AnyFlow 代码中同名参数的含义，这表示 <strong>25% 的训练样本被固定为 r = 0</strong>，也就是「直接跳到成品」的普通训练。所以「用区间跳跃取代普通蒸馏」在实现上其实是一个<em>混合比例</em>，而这个比例在两篇论文里都没有提，也没做过消融。</li>
+<li><code>objective_variant: v1_5</code>：发布权重用的是一个叫「TF-AnyFlow v1.5」的变体，<strong>两篇论文都没有描述过它</strong>；仓库文档还专门说明另一个 <code>train_stage1_tf_fm_81f.yaml</code>「不是发布用的 Stage 2 起点」。</li>
+</ul>
+</div>
+
+<h3>6.3 Stage 2：在自己生成的历史上练</h3>
+<p>Stage 1 训练时看到的历史是真实视频，实际使用时看到的却是自己生成的，这就是暴露偏差。Stage 2 让学生<strong>按实际使用的方式自己一块一块往下生成</strong>，再用 DMD 把它拉回老师的分布 <span class="src p">论文</span>：</p>
+<p style="text-align:center" class="eq">∇<sub>ψ</sub> L<sub>DMD</sub> = 𝔼 [ J<sup>⊤</sup><sub>G<sub>ψ</sub></sub> w(t) ( s<sub>fake</sub>(z<sub>t</sub>, t, c) − s<sub>real</sub>(z<sub>t</sub>, t, c) ) ]</p>
+<p>读法：<span class="m">s<sub>real</sub></span> 来自冻结的老师，表示「好视频往哪个方向」；<span class="m">s<sub>fake</sub></span> 来自跟着学生一起训练的评论员，表示「学生现在生成的东西往哪个方向」；两者之差乘上 <span class="m">J<sup>⊤</sup></span>（把这个差换算回学生的参数），就是学生该怎么改。配置里评论员每更新 5 次，学生更新 1 次 <span class="src c">仓库</span>。</p>
+
+<figure>
+  <div class="fig-h">Figure I · Self Forcing 与 SGF 的唯一区别：那道墙</div>
+  <svg viewBox="0 0 900 320" role="img" aria-label="对比图：上方 Self Forcing 的历史缓存在无梯度状态下写入，后面块的损失只能训练怎么读缓存；下方 Self Gradient Forcing 先无梯度生成一遍，再把生成结果作为固定输入并行重算一遍，使写缓存的计算也带梯度。">
+    <defs>
+      <marker id="arI" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    </defs>
+    <g font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor">
+      <text x="24" y="28" font-size="11" opacity=".6" letter-spacing="1.2">Self Forcing（及 AnyFlow 因果版）· 历史缓存是「冻结」的</text>
+      <rect x="24" y="44" width="120" height="44" rx="6" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+      <text x="84" y="63" text-anchor="middle">块 k−2</text><text x="84" y="78" text-anchor="middle" font-size="9" opacity=".55">写入缓存</text>
+      <rect x="200" y="44" width="120" height="44" rx="6" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+      <text x="260" y="63" text-anchor="middle">块 k−1</text><text x="260" y="78" text-anchor="middle" font-size="9" opacity=".55">写入缓存</text>
+      <rect x="376" y="44" width="120" height="44" rx="6" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+      <text x="436" y="63" text-anchor="middle">块 k</text><text x="436" y="78" text-anchor="middle" font-size="9" opacity=".55">读缓存 · 算损失</text>
+      <path d="M148,66 L196,66" stroke="currentColor" stroke-opacity=".5" fill="none" marker-end="url(#arI)"/>
+      <path d="M324,66 L372,66" stroke="currentColor" stroke-opacity=".5" fill="none" marker-end="url(#arI)"/>
+      <g stroke="currentColor" stroke-width="2.4" stroke-opacity=".85"><line x1="172" y1="36" x2="172" y2="96"/><line x1="348" y1="36" x2="348" y2="96"/></g>
+      <text x="172" y="112" text-anchor="middle" font-size="9.5" opacity=".8">梯度到此为止</text>
+      <text x="348" y="112" text-anchor="middle" font-size="9.5" opacity=".8">梯度到此为止</text>
+      <text x="530" y="56" font-size="10.5" opacity=".78">块 k 的损失能教模型「怎么读历史笔记」，</text>
+      <text x="530" y="72" font-size="10.5" opacity=".78">但历史笔记是在无梯度状态下写的 →</text>
+      <text x="530" y="88" font-size="10.5" opacity=".78">教不到「当初该怎么写笔记」。</text>
+
+      <line x1="24" y1="140" x2="876" y2="140" stroke="currentColor" stroke-opacity=".18"/>
+
+      <text x="24" y="170" font-size="11" opacity=".6" letter-spacing="1.2">SolarWM Stage 2 · Self Gradient Forcing · 跑两遍</text>
+      <rect x="24" y="186" width="120" height="44" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="84" y="205" text-anchor="middle">块 k−2</text><text x="84" y="220" text-anchor="middle" font-size="9" opacity=".55">重算写入</text>
+      <rect x="200" y="186" width="120" height="44" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="260" y="205" text-anchor="middle">块 k−1</text><text x="260" y="220" text-anchor="middle" font-size="9" opacity=".55">重算写入</text>
+      <rect x="376" y="186" width="120" height="44" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="436" y="205" text-anchor="middle">块 k</text><text x="436" y="220" text-anchor="middle" font-size="9" opacity=".55">读缓存 · 算损失</text>
+      <path d="M148,208 L196,208" stroke="currentColor" stroke-opacity=".5" fill="none" marker-end="url(#arI)"/>
+      <path d="M324,208 L372,208" stroke="currentColor" stroke-opacity=".5" fill="none" marker-end="url(#arI)"/>
+      <path d="M430,238 C 380,270 140,270 90,238" stroke="currentColor" stroke-width="1.6" fill="none" marker-end="url(#arI)"/>
+      <text x="260" y="282" text-anchor="middle" font-size="10" opacity=".85">损失回传到「写缓存」这一步</text>
+      <text x="260" y="300" text-anchor="middle" font-size="9.5" opacity=".6">（但不回传到这些块当初是怎么被生成的）</text>
+      <text x="530" y="194" font-size="10.5" opacity=".78">第 1 遍：照常无梯度地往下生成，</text>
+      <text x="530" y="210" font-size="10.5" opacity=".78">记下每一块的结果；</text>
+      <text x="530" y="230" font-size="10.5" opacity=".78">第 2 遍：把这些结果当固定输入，并行重算，</text>
+      <text x="530" y="246" font-size="10.5" opacity=".78">这次「写缓存」的计算带梯度 →</text>
+      <text x="530" y="262" font-size="10.5" opacity=".78">后面的损失能教模型把历史写成更好用的记忆。</text>
+    </g>
+  </svg>
+  <figcaption><b>怎么看这张图：</b>两行的区别只在那道墙。SGF 原文把缺掉的这条梯度叫作「历史上下文梯度缺口」<span class="src x">SGF 论文</span>：在 Self Forcing 里，后面块的损失只能训练「怎么读已缓存的历史」，历史是怎么被写进缓存的，得不到任何来自后文的监督。直接让整条缓存可微会爆显存（SGF 原文实测 OOM），所以 SGF 只在第二遍并行重算里把「写缓存」打开梯度。SolarWM 论文对这一步只用一个从句带过 <span class="src p">论文</span>。</figcaption>
+</figure>
+
+<h3>6.4 真实的算力分配：九成花在双向阶段</h3>
+<p>论文把「大部分训练量应放在双向阶段；因果适配收敛很快；DMD 需要的步数更少」列为三大发现之一，但没有给出任何训练曲线或步数 <span class="src p">论文</span>。仓库配置恰好能把这句话量化。</p>
+
+<figure>
+  <div class="fig-h">Figure J · 交互：各阶段训练步数</div>
+  <div class="ctl">
+    <span class="seg" id="f10m">
+      <button data-k="real" class="on">按推断的实际用量</button>
+      <button data-k="cfg">按配置上限</button>
+    </span>
+  </div>
+  <svg id="f10" viewBox="0 0 900 240" role="img" aria-label="训练步数分配条形图：双向两轮共六万步，约占九成；Stage 1 推断实际用三千步；Stage 2 四千步。"></svg>
+  <figcaption><b>怎么看这张图：</b>双向阶段两轮各 3 万步，占总步数约九成。Stage 1 配置上限是 2 万步，但 Stage 2 示例配置里学生权重的路径写作 <code>stage1-anyflow-step3000</code>；同一文件里老师的路径 <code>stage0p5-step30000</code> 正好等于双向阶段的步数上限，说明路径是按真实步数命名的 <span class="src c">仓库</span>。据此推断 Stage 1 实际只用了 3 千步 <span class="src i">推断</span>。论文那句发现是对的，只是证据没写进论文。</figcaption>
+</figure>
+
+<p class="take">三个阶段依次解决「听相机」「只看过去 + 4 步」「不怕自己的错误」；算力九成花在第一步。</p>
+
+<h2 id="s7"><span class="num">§ 7</span>四个底座：共享的是接口，不是实验条件</h2>
+
+<p class="lede">论文说，统一的数据和相机接口能「把不同底座之间的差异隔离出来」，也就是让四个模型处在可以直接比较的条件下 <span class="src p">论文</span>。把已经发布的两条路线的配置并排一看 <span class="src c">仓库</span>，分辨率、片段长度、相机归一化、数据配方、batch 大小，甚至训练方式（全量 vs LoRA）都不一样。</p>
+
+<div class="tw">
+<table>
+<thead><tr><th>项目</th><th>SolarWM-wan2.2-5B</th><th>SolarWM-minimax-h3-33B</th><th>一致吗</th></tr></thead>
+<tbody>
+<tr><td class="k">分辨率</td><td class="k">480 × 864</td><td class="k">768 × 1344</td><td><span class="pill bad">不一致</span></td></tr>
+<tr><td class="k">帧数 / latent</td><td class="k">81 / 21，153 / 39</td><td class="k">158 / 47</td><td><span class="pill bad">不一致</span></td></tr>
+<tr><td class="k">训练方式</td><td class="k">全量（配置中无 LoRA 项）</td><td class="k">LoRA 秩 384<br><span class="small">可训练 2,075,394,048 ≈ 33B 的 6.3%</span></td><td><span class="pill bad">不一致</span></td></tr>
+<tr><td class="k">相机平移归一化</td><td class="k">linear</td><td class="k">logd4</td><td><span class="pill bad">不一致</span></td></tr>
+<tr><td class="k">数据配方</td><td class="k">clean-81f / clean-153f</td><td class="k">clean-158f-h3-<b>nomind</b><br><span class="small">名字显示去掉了 MIND</span></td><td><span class="pill bad">不一致</span></td></tr>
+<tr><td class="k">global batch</td><td class="k">256</td><td class="k">128</td><td><span class="pill bad">不一致</span></td></tr>
+<tr><td class="k">timestep shift</td><td class="k">5.0</td><td class="k">12.0（音频 3.0）</td><td><span class="pill bad">不一致</span></td></tr>
+<tr><td class="k">卡数 / 序列并行</td><td class="k">256 / 1</td><td class="k">256 / 2</td><td><span class="pill warn">部分一致</span></td></tr>
+<tr><td class="k">Stage 0.5 步数上限</td><td class="k">30,000</td><td class="k">30,000</td><td><span class="pill ok">一致</span></td></tr>
+<tr><td class="k">相机注入</td><td class="k">fused-PRoPE（未设维度切分）</td><td class="k">fused-PRoPE（只用 96–128 维）</td><td><span class="pill warn">有意不同</span></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>更准确的说法是：四条路线共享的是数据格式和相机接口的<strong>形式</strong>，不是实验条件。这依然有价值，它证明同一套接口能接到四种差异很大的架构上；但不能拿来回答「哪个底座更好」。</p>
+
+<div class="note warn">
+<span class="tag">名字里的参数量 ≠ 实际训练的参数量</span>
+<ul style="margin:4px 0 0">
+<li><strong>wan2.2-14B</strong>：取自 Wan2.2 I2V-A14B（两个专家组成的混合模型）里的「高噪声专家」一个，当作普通模型在所有噪声水平上训练；原有的双专家切换规则被丢弃 <span class="src p">论文</span>。</li>
+<li><strong>ltx-2.5-22B</strong>：去掉 3.7B 音频流和 2.6B 音视频交叉注意力，保留 13.1B 视频主干 + 1.6B 冻结的 Gemma 连接器，共 14.7B <span class="src p">论文</span>。</li>
+<li><strong>minimax-h3-33B</strong>：至少 Stage 0.5 是 LoRA，秩 384，可训练 2.08B，约为 33B 的 6.3% <span class="src c">仓库</span>。</li>
+</ul>
+</div>
+
+<h3>7.1 各自的适配细节（论文 Table 5 + 正文）</h3>
+<div class="tw">
+<table>
+<thead><tr><th>模型</th><th>保留什么 / 去掉什么</th><th>首帧图片怎么接入</th><th>音频</th><th>压缩倍率（时 / 空）</th></tr></thead>
+<tbody>
+<tr><td class="k">wan2.2-5B</td><td>原生图文生视频路径，48 通道 latent</td><td>第一个 latent 就是干净的首帧，<b>不计入损失</b></td><td>—</td><td class="k">4× / 16×</td></tr>
+<tr><td class="k">wan2.2-14B</td><td>只取<b>高噪声专家</b>，当作一个模型在全部噪声水平上训练</td><td>官方做法：4 通道首帧掩码 + 16 通道首帧 latent，拼到带噪目标上；第一个目标 latent 仍带噪、仍计入损失</td><td>—</td><td class="k">4× / 8×</td></tr>
+<tr><td class="k">ltx-2.5-22B</td><td>去掉音频流与音视频交叉注意力；保留视频主干 + <b>冻结</b>的 Gemma 连接器</td><td>LTX 原生首帧约定</td><td>整条去掉</td><td class="k">8× / 32×</td></tr>
+<tr><td class="k">minimax-h3-33B</td><td>保留 H3 的多模态打包方式，不改成纯视频模型；Qwen 条件器与两个压缩器冻结</td><td>Qwen 图文条件 + 单帧首帧锚点</td><td>音频行保留，填入官方静音编码，<b>音频损失置零</b></td><td class="k">17n+5 ↦ 5n+2 / 16×</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="note risk">
+<span class="tag">最关键的一条：因果与长程能力只在 5B 上展示过</span>
+<p>论文的贡献列表写的是 "We train four 5B–33B models ... using ... a simple, efficient three-stage training procedure"（我们用三阶段流程训练了四个模型）；§3.2 写的是 "is designed for all four models"（为四个模型设计），并以 "This demonstrates…" 收尾 <span class="src p">论文</span>。</p>
+<p>但回头看实验图：<strong>Figure 7、8、9、10、11 这五张因果 / 长程结果图的图注全部是 <code>SolarWM-wan2.2-5B-fast</code></strong>；四条路线同框的只有 Figure 6，而那是双向阶段（Stage 0.5）的结果。</p>
+<p>仓库的发布表给出了原因 <span class="src c">仓库</span>：论文发出时（9 月 2 日）只有 Wan2.2-5B 跑完了三个阶段；MiniMax-H3 在 9 月 13 日补齐；<strong>Wan2.2-14B 和 LTX-2.5 的 Stage 1 / Stage 2 至今标着 "Coming soon"</strong>。</p>
+<div class="tw" style="margin:12px 0 4px">
+<table style="min-width:420px">
+<thead><tr><th>底座</th><th>Stage 0.5</th><th>Stage 1</th><th>Stage 2</th></tr></thead>
+<tbody>
+<tr><td class="k">Wan2.2-5B</td><td><span class="pill ok">✓</span></td><td><span class="pill ok">✓</span></td><td><span class="pill ok">✓</span></td></tr>
+<tr><td class="k">Wan2.2-14B</td><td><span class="pill ok">✓</span></td><td><span class="pill ghost">Coming soon</span></td><td><span class="pill ghost">Coming soon</span></td></tr>
+<tr><td class="k">LTX-2.5</td><td><span class="pill ok">✓</span></td><td><span class="pill ghost">Coming soon</span></td><td><span class="pill ghost">Coming soon</span></td></tr>
+<tr><td class="k">MiniMax-H3</td><td><span class="pill ok">✓</span></td><td><span class="pill ok">✓ <span class="small">9/13</span></span></td><td><span class="pill ok">✓ <span class="small">9/13</span></span></td></tr>
+</tbody>
+</table>
+</div>
+<p style="margin-bottom:0">结论要改成：<strong>相机适配（Stage 0.5）确实跨了四个底座；因果与长程部分，论文发表时只有 1 个底座有证据，现在是 2 个。</strong></p>
+</div>
+
+<p class="take">四个模型共享接口的形式；因果与长程能力，论文只在最小的 5B 上展示过。</p>
+
+<h2 id="s8"><span class="num">§ 8</span>为什么 5 秒训练能跑 1 小时</h2>
+
+<p class="lede">论文最抓眼球的主张：只在 5 秒片段上训练，推理时却能连续生成 60 分钟，不用 attention sink、不重启、不注入参考帧、不拼接 <span class="src p">论文</span>。这句话字面上成立，但容易让人以为模型「记住」了一小时的世界。答案在三行配置里 <span class="src c">仓库</span>，而论文正文一次也没提到它们。</p>
+
+<figure>
+  <div class="fig-h">Figure K · 交互：模型每一刻到底能看到多少历史</div>
+  <div class="ctl">
+    <label for="f11k">生成到第几块</label>
+    <input type="range" id="f11k" min="1" max="14" value="8">
+    <output id="f11out">—</output>
+  </div>
+  <svg id="f11" viewBox="0 0 900 260" role="img" aria-label="滑动窗口示意：每块 3 个 latent，最多保留 5 个历史块，加上当前块共 18 个 latent，约 72 帧、4.5 秒；更早的块被挤出后再也看不到。"></svg>
+  <figcaption><b>怎么看这张图：</b>拖动滑块模拟生成到第几块。紫色是当前能看到的历史，橙色是正在生成的块，灰色是已被挤出、再也看不到的块。三行配置 <span class="src c">仓库</span>：每块 3 个 latent（<code>num_frame_per_block: 3</code>）、最多保留 5 个历史块（<code>max_prior_clean_chunks: 5</code>）、注意力范围 18 个 latent（<code>local_attn_size: 18</code>）；另外 <code>sink_size: 0</code> 表示不保留任何「永远置顶」的开头帧。18 个 latent ≈ 72 帧 ≈ <b>4.5 秒</b>；从第 7 块开始，首帧所在的第 1 块就被挤出去了，对应视频的第 4.3 秒。</figcaption>
+</figure>
+
+<figure>
+  <div class="fig-h">Figure L · 交互：把几个时间长度放在同一根轴上</div>
+  <div class="ctl">
+    <label for="f1t">生成到</label>
+    <input type="range" id="f1t" min="0" max="1000" value="620">
+    <output id="f1out">—</output>
+    <span class="seg" id="f1scale">
+      <button data-k="log" class="on">对数轴</button>
+      <button data-k="lin">线性轴</button>
+    </span>
+  </div>
+  <svg id="f1" viewBox="0 0 900 390" role="img" aria-label="时间尺度对比：模型每刻能看到的历史约 4.5 秒，因果阶段训练片段 5.06 秒，双向阶段训练片段 9.56 秒，而要求生成的长度最长 3600 秒。"></svg>
+  <figcaption><b>怎么看这张图：</b>紫色是模型每刻能看到的历史（≈4.5 秒），黄色和蓝色是两种训练片段的长度，红色是要求生成的长度。拖动播放头，看「首帧还看得到吗」一栏；切到线性轴会看到，在 1 小时的尺度上，那 4.5 秒细得几乎画不出来。</figcaption>
+</figure>
+
+<div class="grid2">
+<div class="card">
+<h4 style="margin-top:0">这个设计换来了什么</h4>
+<ul style="margin-bottom:0">
+<li>历史缓存大小固定，显存和每块的计算量不随时长增长——想跑多久跑多久</li>
+<li>模型每刻看到的历史（≈4.5 秒）不超过训练片段（5 秒）；在「看多远」这一点上，推理没有超出训练</li>
+<li>Stage 2 训练时就在这种滑动窗口下自己生成过（21 个 latent 里，最后一块只看得到 18 个），训练和使用的注意力形态一致</li>
+</ul>
+</div>
+<div class="card">
+<h4 style="margin-top:0">它必然付出的代价</h4>
+<ul style="margin-bottom:0">
+<li>约 4.3 秒后，首帧就不在模型能看到的范围里了——<strong>没有长期记忆</strong></li>
+<li>「还是那个场景」只能靠固定不变的文字描述 + 一块接一块的接力来维持</li>
+<li>相机绕一圈回到原地，模型无法认出这里来过；回环一致没有任何机制保证</li>
+<li>1 小时里，整个可见窗口被完全换掉约 800 次</li>
+</ul>
+</div>
+</div>
+
+<div class="note warn">
+<span class="tag">两件需要分开看的事</span>
+<p><strong>固定窗口防不了误差累积。</strong>有界窗口解决的是「算力和上下文长度不会失控」；它不能阻止误差一块一块往下传、越积越多。压住漂移靠的是 Stage 2：让模型在自己生成的、带瑕疵的历史上训练，并用 SGF 让它学会把历史写成更好用的记忆。SGF 原文在 60 秒和 240 秒上做了对照实验支持这一点 <span class="src x">SGF 论文</span>；SolarWM 自己没有做任何漂移的定量测量。</p>
+<p style="margin-bottom:0"><strong>位置编号怎么处理没交代。</strong>配置里 <code>rope_train_frames: 21</code> <span class="src c">仓库</span>，即训练时位置编号只到第 21 个 latent；推理到第一万多个 latent 时位置怎么编号，论文和文档都没说。</p>
+</div>
+
+<div class="note warn">
+<span class="tag">「不用 attention sink」一定是优点吗</span>
+<p style="margin-bottom:0">论文把「不用 attention sink」作为长程生成的亮点之一 <span class="src p">论文</span>。但 SolarWM 所用的 SGF，原文在 Wan 压缩器上专门做过 sink 消融：只保留 1 个开头 latent 时，60 秒生成的美学分明显更低（0.627，保留 4 个时为 0.653），其余指标差别不大；它的块式设定用了 3 个 sink latent <span class="src x">SGF 论文</span>。SolarWM 设为 0，没有给出对应的消融。</p>
+</div>
+
+<div class="note risk">
+<span class="tag">该做而没做的那个实验：回环</span>
+<p>对一个只看最近 4.5 秒的世界模型，最直接的检验是<strong>回环</strong>：让相机沿闭合轨迹走一圈回到起点，把终点帧和起点帧放在一起比。论文有 11 张图，覆盖分布外首帧、第三人称、分钟级、小时级，<strong>唯独没有这一张</strong>。这恰恰是「世界模型」与「长视频生成器」的分界：能记住的是世界，只能往下接的是视频。</p>
+<p style="margin-bottom:0">同一条研究线上，MosaicMem 的混合空间记忆、MemRoPE 的位置无关缓存、AlayaVista 的全景状态 latent，做的正是把记忆从注意力窗口里拿出来单独存。SolarWM 选择不做记忆，对一篇基础设施论文是合理的取舍；但这个取舍应该写出来，而不是留给读者去翻配置文件。</p>
+</div>
+
+<p class="take">能跑 1 小时，是因为模型每一刻只看 4.5 秒；这保证了「能一直跑」，不保证「记得住」。</p>
+
+<h2 id="s9"><span class="num">§ 9</span>存疑清单：18 条，按严重度排序</h2>
+
+<p class="lede">「存疑」不等于「错」。这里分三类：论文与自己发布的代码对不上（可核对）；主张与证据不匹配（可指出）；该写而没写。每条都标了证据来源；凡是我推断的，都单独标出。<strong>也要公道地说：论文里凡是给了数字的地方，我逐项核过，全部自洽。</strong>问题不在数字造假，而在该有数字的地方是空的。</p>
+
+<div class="tw">
+<table class="ov">
+<thead><tr><th>#</th><th>严重度</th><th>一句话</th><th>证据</th></tr></thead>
+<tbody>
+<tr><td class="k">01</td><td><span class="sev hi">高</span></td><td><a href="#r01">全文没有性能数字，却两次称 state-of-the-art</a></td><td><span class="src p">论文</span></td></tr>
+<tr><td class="k">02</td><td><span class="sev hi">高</span></td><td><a href="#r02">摘要和结论写「实时」，没有任何速度测量</a></td><td><span class="src p">论文</span></td></tr>
+<tr><td class="k">03</td><td><span class="sev hi">高</span></td><td><a href="#r03">「只用 5 秒训练」与论文自身及仓库都对不上</a></td><td><span class="src p">论文</span><span class="src c">仓库</span></td></tr>
+<tr><td class="k">04</td><td><span class="sev hi">高</span></td><td><a href="#r04">因果与长程结果只在最小的 5B 模型上展示</a></td><td><span class="src p">论文</span><span class="src c">仓库</span></td></tr>
+<tr><td class="k">05</td><td><span class="sev hi">高</span></td><td><a href="#r05">小时级生成的关键设计（4.5 秒窗口）论文没写</a></td><td><span class="src c">仓库</span></td></tr>
+<tr><td class="k">06</td><td><span class="sev md">中</span></td><td><a href="#r06">H3-33B 实际是 LoRA，可训练约 6.3%</a></td><td><span class="src c">仓库</span></td></tr>
+<tr><td class="k">07</td><td><span class="sev md">中</span></td><td><a href="#r07">「可直接比较的模型家族」没有控制变量</a></td><td><span class="src c">仓库</span></td></tr>
+<tr><td class="k">08</td><td><span class="sev md">中</span></td><td><a href="#r08">Table 1 拿别人的已交付对比自己的承诺</a></td><td><span class="src p">论文</span></td></tr>
+<tr><td class="k">09</td><td><span class="sev md">中</span></td><td><a href="#r09">「完全开放」的数据主体需申请或自行重建</a></td><td><span class="src c">仓库</span></td></tr>
+<tr><td class="k">10</td><td><span class="sev md">中</span></td><td><a href="#r10">论文没有任何训练超参，包括 256 卡这个规模</a></td><td><span class="src p">论文</span><span class="src c">仓库</span></td></tr>
+<tr><td class="k">11</td><td><span class="sev md">中</span></td><td><a href="#r11">「算力该花在双向阶段」这条发现没给数据</a></td><td><span class="src p">论文</span></td></tr>
+<tr><td class="k">12</td><td><span class="sev md">中</span></td><td><a href="#r12">从 AnyFlow 继承的设置与多样性风险未检验</a></td><td><span class="src c">仓库</span><span class="src i">第三方</span></td></tr>
+<tr><td class="k">13</td><td><span class="sev md">中</span></td><td><a href="#r13">清场数据约占默认配方一半，影响未检验</a></td><td><span class="src i">推断</span></td></tr>
+<tr><td class="k">14</td><td><span class="sev lo">低</span></td><td><a href="#r14">Stage 2 的老师取自 81 帧双向，而非 153 帧</a></td><td><span class="src c">仓库</span></td></tr>
+<tr><td class="k">15</td><td><span class="sev lo">低</span></td><td><a href="#r15">测试集口径：论文 1,400 条，仓库 1,300 条</a></td><td><span class="src p">论文</span><span class="src c">仓库</span></td></tr>
+<tr><td class="k">16</td><td><span class="sev lo">低</span></td><td><a href="#r16">去掉 attention sink 没有消融</a></td><td><span class="src p">论文</span><span class="src x">SGF 论文</span></td></tr>
+<tr><td class="k">17</td><td><span class="sev lo">低</span></td><td><a href="#r17">14B 丢掉了双专家结构，没有对照</a></td><td><span class="src p">论文</span></td></tr>
+<tr><td class="k">18</td><td><span class="sev lo">低</span></td><td><a href="#r18">COLMAP 轨迹的真实尺度从哪来，没交代</a></td><td><span class="src p">论文</span></td></tr>
+</tbody>
+</table>
+</div>
+
+<details class="risk" id="r01" open>
+<summary><span class="sev hi">高</span><span class="idx">01</span><span>全文没有性能数字，却两次称 state-of-the-art</span></summary>
+<div class="body">
+<p>五张表分别是：发布情况（Table 1）、打标 prompt 格式（Table 2）、筛选规则（Table 3）、数据库存（Table 4）、底座差异（Table 5）。<strong>没有一张是性能表。</strong>六张实验图（Figure 6–11）全是示例截图。没有 VBench、WorldScore、FVD、用户研究、消融、误差棒，也没有任何对照方法。</p>
+<p>与此同时，引言写 "our models achieve <b>state-of-the-art performance</b> without specialized ODE or consistency-distillation initialization"，贡献列表再写一次 "The models achieve <b>state-of-the-art performance</b>" <span class="src p">论文</span>。</p>
+<p>我查了论文、项目页、GitHub README 三处，<strong>找不到任何一个可比的数字</strong>。对一篇把自己定位为「可复现基础」的论文，这一条尤其要紧：它连自己的基线都没有建立，后来者无从复现「达到了什么水平」。</p>
+</div>
+</details>
+
+<details class="risk" id="r02">
+<summary><span class="sev hi">高</span><span class="idx">02</span><span>摘要和结论写「实时」，没有任何速度测量</span></summary>
+<div class="body">
+<p>"real-time" 出现在摘要、Figure 2 和结论里 <span class="src p">论文</span>，但全文没有 FPS、每帧耗时、显存或硬件型号。唯一像速度的数字是 §7.1 的「16 fps、4 步采样」——<strong>16 fps 是输出视频的帧率</strong>，4 步是采样次数，都不是生成速度。</p>
+<p>5B 模型在 480×864、4 步下做到实时是可能的；但同一篇论文还有 33B、768×1344 的路线，它能不能实时完全未知。</p>
+</div>
+</details>
+
+<details class="risk" id="r03">
+<summary><span class="sev hi">高</span><span class="idx">03</span><span>「只用 5 秒训练」与论文自身及仓库都对不上</span></summary>
+<div class="body">
+<ul>
+<li><strong>论文说</strong>：摘要、引言（2 处）、实验（2 处）、结论都写「只在 5 秒序列上训练」；Figure 2 把双向阶段直接标成 "5s TI2V Training" <span class="src p">论文</span>。</li>
+<li><strong>论文又说</strong>：§7.1「双向生成产出 10 秒片段」，Figure 6 四个双向模型都生成 10 秒视频 <span class="src p">论文</span>。</li>
+<li><strong>仓库写的</strong>：双向阶段有第二轮 153 帧（9.56 秒）训练，Stage 1 的启动命令从这个 153 帧权重初始化 <span class="src c">仓库</span>。</li>
+</ul>
+<p>影响：按仓库链路，小时级外推的倍率是 3600 / 9.56 ≈ <strong>377 倍</strong>，不是按 5 秒算的 720 倍。依然惊人，但是两个不同的说法。如果论文结果用的是另一条链路，那就需要解释 Figure 6 的 10 秒双向结果从何而来。</p>
+</div>
+</details>
+
+<details class="risk" id="r04">
+<summary><span class="sev hi">高</span><span class="idx">04</span><span>因果与长程结果只在最小的 5B 模型上展示</span></summary>
+<div class="body">
+<p>贡献列表说「用三阶段流程训练了四个 5B–33B 模型」，§3.2 以「This demonstrates that the simple recipe is a reusable cross-backbone framework」收尾 <span class="src p">论文</span>。但 Figure 7–11 的图注全部是 <code>SolarWM-wan2.2-5B-fast</code>，四条路线同框的只有双向阶段的 Figure 6。</p>
+<p>仓库发布表显示 <span class="src c">仓库</span>：论文发出时只有 5B 跑完三阶段；H3 于 9 月 13 日补齐；<strong>14B 和 LTX-2.5 的 Stage 1 / 2 至今是 "Coming soon"</strong>。「跨底座可复用」在因果与长程环节上，论文发表时只有 1 个底座的证据。</p>
+</div>
+</details>
+
+<details class="risk" id="r05">
+<summary><span class="sev hi">高</span><span class="idx">05</span><span>小时级生成的关键设计（4.5 秒窗口）论文没写</span></summary>
+<div class="body">
+<p>论文强调「不用 attention sink、不重启、不注入参考帧、不拼接」，把小时级连贯作为主要发现。配置里 <code>sink_size: 0</code> 属实；但同一文件还有 <code>local_attn_size: 18</code>、<code>max_prior_clean_chunks: 5</code>、<code>num_frame_per_block: 3</code> <span class="src c">仓库</span>——模型每刻只看最近 18 个 latent（≈4.5 秒），更早的一律丢弃。<strong>论文正文对这个局部注意力窗口只字未提。</strong></p>
+<p>这会改变读者对结论的理解。它不是「模型学会了维持一小时的一致性」，而是「模型的视野永远只有 4.5 秒，所以时长本来就没有上限」。这是一个好设计；问题在于省略之后，读者很容易把它误读成记忆能力。见 §8。</p>
+</div>
+</details>
+
+<details class="risk" id="r06">
+<summary><span class="sev md">中</span><span class="idx">06</span><span>H3-33B 实际是 LoRA，可训练约 6.3%</span></summary>
+<div class="body">
+<p>论文写 "the H3 Omni Transformer is trained with its native temporal, masking, and camera semantics" <span class="src p">论文</span>，读起来像是整个 33B 模型都在训练。配置里是 <span class="src c">仓库</span>：<code>training_mode: lora</code>、秩与 alpha 都是 384、作用在注意力与前馈层、<code>expected_trainable_parameters: 2,075,394,048</code>。</p>
+<p>约 2.08B / 33B = <strong>6.3% 可训练</strong>。称它「33B 世界模型」不算错（推理确实用到 33B），但「训练了一个 33B 模型」和「在冻结的 33B 上训练了 2.1B 的 LoRA」，在算力、可迁移性和结论强度上是两回事。</p>
+</div>
+</details>
+
+<details class="risk" id="r07">
+<summary><span class="sev md">中</span><span class="idx">07</span><span>「可直接比较的模型家族」没有控制变量</span></summary>
+<div class="body">
+<p>论文 §6 说统一接口能「隔离出底座之间的差异」<span class="src p">论文</span>。实际上两条已发布路线的分辨率（480×864 vs 768×1344）、帧数（81/153 vs 158）、相机平移归一化（linear vs logd4）、batch（256 vs 128）、timestep shift（5.0 vs 12.0）、数据配方（后者名字显示去掉了 MIND）全都不同 <span class="src c">仓库</span>，见 §7 的表。</p>
+<p>它能证明同一套接口可以接到四种架构上；不能用来比较哪个底座更好。</p>
+</div>
+</details>
+
+<details class="risk" id="r08">
+<summary><span class="sev md">中</span><span class="idx">08</span><span>Table 1 拿别人的已交付对比自己的承诺</span></summary>
+<div class="body">
+<p>表注写得很明白：其他系统的发布状态 "was verified from official artifacts as of August 18, 2026"（还附了 commit 哈希），而 <strong>"SolarWM entries indicate <em>commitments</em> for this release"</strong> <span class="src p">论文</span>。这张表是全文的定位核心，要论证「现有开源方案都不完整，只有我们完整」，但一栏是按 commit 核验的事实，另一栏是作者的计划。</p>
+<p>公道地说：发表后三周，大部分承诺已经兑现，这很难得。但在论文发出的那一刻，这张表不是用同一把尺子量的。</p>
+</div>
+</details>
+
+<details class="risk" id="r09">
+<summary><span class="sev md">中</span><span class="idx">09</span><span>「完全开放」的数据主体需申请或自行重建</span></summary>
+<div class="body">
+<p>仓库 README 明确写：公开的 <code>SolarWM-Data</code> 包含发布说明、许可、配方与测试索引、小样例和纯标注包，<strong>"It does not include the full raw-wds or latent-wds payloads"</strong> <span class="src c">仓库</span>。</p>
+<p>要拿到完整视频有三条路：按标注包自行从各数据源重新下载、重新处理；下载某个配方对应的预压缩 latent（部分「仍在上传」）；<strong>填 Google 表单申请，审批通过后邮件发放</strong>。源数据集的许可限制是正当理由，「只发标注 + 重建工具」也是业界惯例；但 Table 1 里 SolarWM 的数据一栏打 ✓、标 25.85 TB，而可以直接下载的 ABot（2.74 TB）、minWM（527 GB）、ForgeWM（95 GB）打的是 ✓ 或 △，口径不一致。</p>
+</div>
+</details>
+
+<details class="risk" id="r10">
+<summary><span class="sev md">中</span><span class="idx">10</span><span>论文没有任何训练超参，包括 256 卡这个规模</span></summary>
+<div class="body">
+<p>全文没有出现学习率、batch、步数、GPU 数、优化器、EMA、训练分辨率 <span class="src p">论文</span>，却在 Table 1 给自己打了 "Exact Recipe ✓"。</p>
+<p>配置里写着 <span class="src c">仓库</span>：<code>world_size: 256</code>、<code>global_batch_size: 256</code>、双向阶段两轮各 30,000 步、学习率 5e-5、bf16。<strong>256 张卡 × 6 万步</strong>这个量级本身就该写进论文——它决定了论文里 "simple and highly efficient" 这个形容词的含义，也是读者判断「我能不能复现」的第一个数字。</p>
+</div>
+</details>
+
+<details class="risk" id="r11">
+<summary><span class="sev md">中</span><span class="idx">11</span><span>「算力该花在双向阶段」这条发现没给数据</span></summary>
+<div class="body">
+<p>原文："most optimization should be performed during bidirectional training; AR adaptation then converges rapidly, while DMD requires even fewer optimization steps" <span class="src p">论文</span>。这是一个定量主张，需要训练曲线或步数预算的对比来支持，论文两者都没有。</p>
+<p>有意思的是配置恰好支持它：约 60,000（双向两轮）: 3,000（Stage 1）: 4,000（Stage 2）≈ <strong>90% : 4.5% : 6%</strong> <span class="src i">推断</span>。证据存在，只是没进论文。3,000 这个数的推断依据见 §6.4。</p>
+</div>
+</details>
+
+<details class="risk" id="r12">
+<summary><span class="sev md">中</span><span class="idx">12</span><span>从 AnyFlow 继承的设置与多样性风险未检验</span></summary>
+<div class="body">
+<ul>
+<li><code>anyflow_consistency_ratio: 0.25</code> <span class="src c">仓库</span>：按 AnyFlow 代码中同名参数的含义，<strong>25% 的样本被固定为「直接跳到成品」</strong>的普通训练。「用区间跳跃取代普通蒸馏」在实现上是一个混合比例，两篇论文都没提这个比例，也都没做消融。</li>
+<li><code>objective_variant: v1_5</code> <span class="src c">仓库</span>：发布权重用的「TF-AnyFlow v1.5」<strong>两篇论文都没有描述</strong>。想按论文复现，就得用一个没被写下来的东西。</li>
+<li><strong>多样性没测。</strong>第三方的 CrossDistill（2609.14725）在 Wan2.1-1.3B 文生视频上测得：AnyFlow 蒸馏后的多样性只剩老师的约 66% <span class="src i">第三方</span>。对交互式世界模型，多样性塌缩意味着同一张首帧、同一条轨迹，模型永远给出同一个世界。SolarWM 继承了这条蒸馏路线，但没有测这一项。</li>
+</ul>
+</div>
+</details>
+
+<details class="risk" id="r13">
+<summary><span class="sev md">中</span><span class="idx">13</span><span>清场数据约占默认配方一半，影响未检验</span></summary>
+<div class="body">
+<p>三个清场分区在保留数据中占 34.9%；按 §4.6 的反推，在默认 81 帧配方里占训练行的 <strong>47.8%</strong>，原版 SpatialVID 和 Sekai-Walking 根本不在配方里 <span class="src i">推断</span>。论文诚实地说明了清场结果要重新打分、尺度不明就判不可用——这些都对。</p>
+<p>但它没有回答：<strong>近一半训练数据被系统性抹掉了人和车，模型遇到真实有人的场景会怎样？</strong>没有清场比例的消融，也没有「有人 / 无人」的分组评测；专门展示第三人称主体的 Figure 7 只有 3 个例子。另一层风险：被抹掉区域的内容是生成模型补出来的，模型可能学到「这类区域应该是静止的」，在真实交互中表现为对动态物体反应迟钝。</p>
+</div>
+</details>
+
+<details class="risk" id="r14">
+<summary><span class="sev lo">低</span><span class="idx">14</span><span>Stage 2 的老师取自 81 帧双向，而非 153 帧</span></summary>
+<div class="body">
+<p>仓库的 Stage 2 启动命令里，学生来自 Stage 1（其起点是 153 帧双向权重），而老师和评论员都指向 <code>SolarWM-5B-bid-stage0p5-<b>81f</b></code> <span class="src c">仓库</span>。也就是说，DMD 的质量基准来自一个训练片段比学生起点更短的模型。</p>
+<p>这未必是错的（Stage 2 本身就在 81 帧上训练，老师与之对齐也说得通），但论文只说 "a frozen bidirectional teacher"，没说是哪一个。对复现者，这是必须知道的。</p>
+</div>
+</details>
+
+<details class="risk" id="r15">
+<summary><span class="sev lo">低</span><span class="idx">15</span><span>测试集口径：论文 1,400 条，仓库 1,300 条</span></summary>
+<div class="body">
+<p>论文 §5.6：每个分区各发布 100 条独立测试样本，"1,400 rows in total"，即 14 个分区 × 100 <span class="src p">论文</span>。仓库 README："the current <b>1,300-example, 13-source</b> evaluation set" <span class="src c">仓库</span>。</p>
+<p>少了一个分区。最可能是 MIND（全库仅 533 条，H3 的配方名里也带着 nomind），但这是我的推测，仓库没说明。</p>
+</div>
+</details>
+
+<details class="risk" id="r16">
+<summary><span class="sev lo">低</span><span class="idx">16</span><span>去掉 attention sink 没有消融</span></summary>
+<div class="body">
+<p>论文把「不用 attention sink」当作长程生成的亮点 <span class="src p">论文</span>。但它 Stage 2 所用的 SGF，原文在 Wan 压缩器上做过 sink 消融：只留 1 个开头 latent 时 60 秒生成的美学分为 0.627，留 4 个时为 0.653，其余指标接近；SGF 的块式设定用了 3 个 sink <span class="src x">SGF 论文</span>。</p>
+<p>SolarWM 用的是 Wan2.2（压缩器不同），结论未必照搬；但既然把「不用 sink」列为优点，就该给出有无 sink 的对照。</p>
+</div>
+</details>
+
+<details class="risk" id="r17">
+<summary><span class="sev lo">低</span><span class="idx">17</span><span>14B 丢掉了双专家结构，没有对照</span></summary>
+<div class="body">
+<p>Wan2.2 I2V-A14B 的检查点含高噪声、低噪声两个专家。SolarWM 只用高噪声专家初始化，并当作一个模型在所有噪声水平上训练，「双专家切换规则及其噪声分界不予保留」<span class="src p">论文</span>。</p>
+<p>这等于放弃了该底座一半的设计。可能是对的（稠密模型更好蒸馏），但论文一句带过，没有保留双专家的对照版本。加上 14B 的 Stage 1 / 2 至今未发布，这一条暂时也无法从结果反推。</p>
+</div>
+</details>
+
+<details class="risk" id="r18">
+<summary><span class="sev lo">低</span><span class="idx">18</span><span>COLMAP 轨迹的真实尺度从哪来，没交代</span></summary>
+<div class="body">
+<p>论文说所有路径都输出以米为单位的相机轨迹；对已有 GT / COLMAP 位姿的数据，保留原轨迹，Pi3X 只负责对齐到「轨迹的公制尺度」<span class="src p">论文</span>。但 COLMAP 位姿本身没有真实尺度，而路径 A 的描述又说 Pi3X 的结构是「尺度不确定」的。</p>
+<p>那么走这条路的 COLMAP 数据（如 DL3DV，占保留数据约 14%），最终的「米」是从哪里来的？论文没有交代。对一个强调「公制相机」的数据集，这是需要一句话说明的地方。</p>
+</div>
+</details>
+
+<div class="note ok" style="margin-top:28px">
+<span class="tag">反过来说：这篇论文做对的地方</span>
+<ul style="margin-bottom:0">
+<li><strong>先全量处理、再挑选</strong>，549,101 条被拒样本连同机器可读的拒绝理由一起发布——整条研究线上最值得抄走的设计。</li>
+<li><strong>三层分开</strong>（物理语料 / 逻辑配方 / 模型视图）：改配方不复制视频，换压缩器不改变数据选择。</li>
+<li><strong>逐帧内参</strong>，而不是整段一个焦距——对变焦素材是必须的。</li>
+<li><strong>描述里禁止写镜头运动</strong>，堵住文字泄露相机控制的捷径。</li>
+<li><strong>每个分区一套筛选规则</strong>，并明确区分「用来筛选的分数」和「只作记录的分数」。</li>
+<li><strong>有真实位姿就不用 SLAM 覆盖</strong>，对齐只取残差最低的 80% 帧。</li>
+<li><strong>TF-AnyFlow 省掉一个初始化阶段</strong>：明确、可检验、逻辑自洽的简化。</li>
+<li><strong>所有给出的数字都自洽</strong>：Table 4 逐行逐列、Figure 5 直方图、81 帧配方的重复算术，都能精确对上，甚至能反推出配方用了哪十个分区。</li>
+</ul>
+</div>
+
+<h2 id="s10"><span class="num">§ 10</span>复现速查：论文没给、配置里有的数字</h2>
+
+<p class="lede">以下逐字来自 <code>configs/examples/wan22_ti2v_5b/</code> 与 <code>configs/examples/minimax_h3/</code> <span class="src c">仓库</span>。想复现或估算成本，直接看这张表。</p>
+
+<h3>10.1 Wan2.2-5B 路线（480 × 864，16 fps）</h3>
+<div class="tw">
+<table>
+<thead><tr><th>参数</th><th>Stage 0.5 · 81 帧</th><th>Stage 0.5 · 153 帧</th><th>Stage 1 · TF-AnyFlow</th><th>Stage 2 · DMD / SGF</th></tr></thead>
+<tbody>
+<tr><td class="k">帧数 / latent</td><td class="k">81 / 21</td><td class="k">153 / 39</td><td class="k">81 / 21</td><td class="k">81 / 21</td></tr>
+<tr><td class="k">注意力</td><td class="k">双向</td><td class="k">双向</td><td class="k">因果 · 看真值</td><td class="k">因果 · 看自己生成的</td></tr>
+<tr><td class="k">目标</td><td class="k">flow_matching</td><td class="k">flow_matching</td><td class="k">anyflow_forward_map:v1_5</td><td class="k">DMD（trainer: self_gradient_forcing）</td></tr>
+<tr><td class="k">数据</td><td class="k">原始视频<br>clean-81f</td><td class="k">预压缩 latent<br>clean-153f-480p-v1</td><td class="k">原始视频<br>clean-81f</td><td class="k">原始视频<br>clean-81f</td></tr>
+<tr><td class="k">卡数</td><td class="n">256</td><td class="n">256</td><td class="n">256</td><td class="n">256</td></tr>
+<tr><td class="k">global batch</td><td class="n">256</td><td class="n">256</td><td class="n">256</td><td class="n">256</td></tr>
+<tr><td class="k">步数上限</td><td class="n">30,000</td><td class="n">30,000</td><td class="n">20,000 <span class="small">（推断实际 3,000）</span></td><td class="n">4,000</td></tr>
+<tr><td class="k">warmup</td><td class="n">1,000</td><td class="n">1,000</td><td class="n">500</td><td class="n">0</td></tr>
+<tr><td class="k">学习率</td><td class="n">5e-5</td><td class="n">5e-5</td><td class="n">5e-5</td><td class="n">2e-6 <span class="small">（评论员 4e-7）</span></td></tr>
+<tr><td class="k">betas</td><td class="k">0.9 / 0.95</td><td class="k">0.9 / 0.95</td><td class="k">0.9 / 0.95</td><td class="k">0.0 / 0.999</td></tr>
+<tr><td class="k">weight decay</td><td class="n">0.01</td><td class="n">0.01</td><td class="n">0.01</td><td class="n">0.0</td></tr>
+<tr><td class="k">梯度裁剪</td><td class="n">1.0</td><td class="n">1.0</td><td class="n">1.0</td><td class="n">10.0</td></tr>
+<tr><td class="k">EMA</td><td class="n">0.9999</td><td class="n">0.9999</td><td class="n">0.999</td><td class="n">0.99 <span class="small">（从第 39 步起）</span></td></tr>
+<tr><td class="k">注意力范围</td><td class="n">21</td><td class="n">21</td><td class="n">21</td><td class="n">18 <span class="small">（评论员 21）</span></td></tr>
+<tr><td class="k">起点</td><td class="k">Wan2.2-TI2V-5B</td><td class="k">81 帧双向 @3 万步</td><td class="k">153 帧双向 @3 万步（EMA）</td><td class="k">学生 ← Stage 1 @3 千步（EMA）<br>老师 / 评论员 ← 81 帧双向 @3 万步</td></tr>
+<tr><td class="k">其他</td><td class="k">timestep_shift 5.0<br>首帧条件 dropout 0.1<br>FSDP · bf16</td><td class="k">同左<br>激活重计算开启</td><td class="k">gate 0.25 · ε 5.0<br>diffusion_ratio 0.5<br>consistency_ratio 0.25<br>fuse_guidance 3.0</td><td class="k">评论员 : 学生 = 5 : 1<br>采样格点 [1000, 750, 500, 250]<br>老师引导 3.0 / 评论员 0.0<br>sink_size 0</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>10.2 MiniMax-H3 路线（768 × 1344）</h3>
+<div class="kv card">
+<p style="margin:0"><b>训练方式</b> LoRA · <b>秩 / alpha</b> 384 / 384 · <b>作用层</b> 注意力 QKVO + 前馈 · <b>线性层数</b> 312 · <b>可训练参数</b> 2,075,394,048（≈33B 的 6.3%）<br>
+<b>帧数</b> 158 · <b>latent</b> 47 · <b>latent 尺寸</b> 24 通道 × 48 × 84 · <b>每块帧数</b> 5 · <b>最多历史块</b> 5<br>
+<b>卡数</b> 256 · <b>序列并行</b> 2 · <b>global batch</b> 128 · <b>步数上限</b> 30,000<br>
+<b>video timestep shift</b> 12.0 · <b>audio timestep shift</b> 3.0 · <b>首帧噪声增强</b> 0.999<br>
+<b>相机</b> fused-PRoPE，仅作用于头内第 96–128 维 · <b>平移归一化</b> logd4 · <b>内参模式</b> wan_fixed<br>
+<b>配方</b> clean-158f-h3 · <b>latent 版本</b> <code>minimax-h3-158f-768p-nomind-v1</code></p>
+</div>
+
+<h3>10.3 几个换算</h3>
+<div class="card kv">
+<p style="margin:0"><b>Wan2.2 压缩器（时间 4×）：</b>从首帧起算，像素帧 = 4 × (latent − 1) + 1；窗口在视频中段时，每个 latent = 4 帧<br>
+21 latent → 81 帧（5.06 s）· 39 → 153 帧（9.56 s）· <b>窗口 18 latent ≈ 72 帧（4.5 s）</b>，含首帧时为 69 帧（4.31 s）<br>
+<b>1 块</b> = 3 latent ≈ 12 帧 ≈ 0.75 s · <b>分钟级</b>：960 帧相机轨迹 → 240 latent<br>
+<b>H3 压缩器：</b>17n + 5 ↦ 5n + 2，n = 9 时 158 帧 ↦ 47 latent<br>
+<b>shift = 5 的噪声格点：</b>σ(t) = 5t / (1 + 4t) → [1.000, 0.938, 0.833, 0.625] → 0，最后一步跨度 <b>62.5%</b><br>
+<b>1 小时生成：</b>3600 s × 16 fps = 57,600 帧 ≈ 14,400 latent ≈ 4,800 块 ≈ 窗口被完全换掉 <b>800 次</b></p>
+</div>
+
+<h2 id="s11"><span class="num">§ 11</span>定位：它在这条研究线上补了哪一格</h2>
+
+<p>2026 年的交互式视频世界模型论文，大致分三类：<strong>做记忆</strong>的（MosaicMem 的混合空间记忆、MemRoPE 的位置无关缓存、AlayaVista 的全景状态 latent、OctWorld 的八叉树）；<strong>做蒸馏提速</strong>的（Causal Forcing / Causal Forcing++、AnyFlow、SGF、CrossDistill、DSA）；<strong>做系统</strong>的（minWM、BiWM、ForgeWM、AlayaWorld）。</p>
+
+<p>SolarWM 是第三类里目前规模最大的一份。它明确<strong>不做记忆</strong>——18 个 latent 的窗口就是它对「长」的全部回答；也不提出新的蒸馏目标。它押注的是：<em>只要数据构造、底座适配、训练阶段三件事对齐了，长程生成就不需要复杂的流水线，也不需要在长视频上烧算力</em>。这个押注有道理，逻辑上也自洽（训练片段 5 秒 ≥ 可见窗口 4.5 秒 → 训练与使用的注意力形态一致 → 时长没有上限）；缺的是一张能支撑它的定量表。</p>
+
+<div class="note dat">
+<span class="tag">对读这篇论文的人，三条实际建议</span>
+<ol style="margin-bottom:0">
+<li><strong>数据引擎可以单独拿走。</strong>即使不用它的模型，「全量处理 + 保留被拒样本 + 三层分开」这套做法可以直接搬到自己的数据上。被拒样本带理由这一点尤其关键，它把「数据集」变成了可以做消融的对象。</li>
+<li><strong>模型部分先看配置，再看论文。</strong>论文缺的超参、局部注意力窗口、LoRA、分辨率，全在 YAML 里。仓库文档在若干地方比论文更准确（比如写明了双向阶段有两轮、Stage 2 起点用的是哪个变体）。</li>
+<li><strong>别把「小时级」当成记忆能力的证据。</strong>它证明的是漂移足够慢、窗口结构足够自洽。要判断是不是世界模型，去跑回环轨迹。</li>
+</ol>
+</div>
+
+<h3>如果要接着做，这五个实验最值钱</h3>
+<ol>
+<li><strong>回环一致性。</strong>闭合相机轨迹，比较终点帧与起点帧。这直接测出 4.5 秒窗口的代价，也是区分「世界模型」和「长视频生成器」的硬指标。（对应存疑 05）</li>
+<li><strong>补一张定量表。</strong>哪怕只是 VBench + WorldScore + 一个相机轨迹跟随误差，四条路线各跑一遍。没有它，"state-of-the-art" 无法被任何人验证或反驳。（对应存疑 01）</li>
+<li><strong>实测速度。</strong>5B@480p 与 33B@768p 的每帧耗时、FPS、显存、硬件。「实时」现在还只是一个形容词。（对应存疑 02）</li>
+<li><strong>多样性。</strong>固定首帧 + 固定轨迹 + 多个随机种子，测结果之间的差异。（对应存疑 12）</li>
+<li><strong>清场比例消融。</strong>0% / 25% / 50% / 100% 清场数据，在「有人」和「无人」两组测试上分别评。数据引擎本身就支持这个实验——各分区本来就能独立配置。（对应存疑 13）</li>
+</ol>
+
+<footer>
+  <p><b>关于本页。</b>依据 arXiv:2609.02886v1 全文，2026-09-22 时 <code>github.com/Junchao-cs/SolarWM</code> 的 README、backend 文档与 <code>configs/examples/</code> 下的 YAML，以及 Self Gradient Forcing 原文（arXiv:2607.20368）。论文里的数字（Table 4 逐行逐列、Figure 5 直方图、81 帧配方的重复算术）我都验算过；凡是从配置推出、而非论文明写的结论，都标了 <span class="src c">仓库</span> 或 <span class="src i">推断</span>。2026-09-23 修订。</p>
+  <p class="srcs"><b>来源：</b>
+  <a href="https://arxiv.org/abs/2609.02886">SolarWM（arXiv:2609.02886）</a> ·
+  <a href="https://github.com/Junchao-cs/SolarWM">代码仓库</a> ·
+  <a href="https://junchao-cs.github.io/SolarWM-Web/">项目页</a> ·
+  <a href="https://huggingface.co/collections/junchaoh-cs/solarwm">模型集合</a> ·
+  <a href="https://arxiv.org/abs/2607.20368">Self Gradient Forcing</a> ·
+  <a href="https://arxiv.org/abs/2603.17117">MosaicMem</a> ·
+  <a href="https://arxiv.org/abs/2605.13724">AnyFlow</a> ·
+  <a href="https://arxiv.org/abs/2602.02214">Causal Forcing</a> ·
+  <a href="https://arxiv.org/abs/2605.15141">Causal Forcing++</a> ·
+  <a href="https://arxiv.org/abs/2605.15178">SANA-WM</a> ·
+  <a href="https://arxiv.org/abs/2609.14725">CrossDistill</a></p>
+</footer>
+
+</div>
+<script>
+/* ============================================================
+   SolarWM 精读 — interactive figures
+   ============================================================ */
+const CS = getComputedStyle(document.documentElement);
+function C(n){ return CS.getPropertyValue(n).trim() || '#888'; }
+function refreshTokens(){ /* re-read on theme change */ }
+const SVGNS='http://www.w3.org/2000/svg';
+function el(tag,attrs,text){
+  const n=document.createElementNS(SVGNS,tag);
+  for(const k in attrs) n.setAttribute(k,attrs[k]);
+  if(text!=null) n.textContent=text;
+  return n;
+}
+function seg(id,cb){
+  const box=document.getElementById(id); if(!box) return;
+  box.addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    [...box.querySelectorAll('button')].forEach(x=>x.classList.remove('on'));
+    b.classList.add('on'); cb(b.dataset.k);
+  });
+}
+const fmt=n=>n.toLocaleString('en-US');
+
+/* ---------- Figure 1 : time scales ---------- */
+const F1={scale:'log', t:0};
+const WIN=4.5, FIRST_OUT=4.3125;
+const F1MARKS=[
+  {v:WIN,    lab:'模型每刻能看到的历史', sub:'18 latent ≈ 72 帧',        col:'--cam'},
+  {v:5.0625, lab:'因果阶段训练片段',     sub:'81 帧 · Stage 1 / 2',      col:'--ar'},
+  {v:9.5625, lab:'双向阶段训练片段',     sub:'153 帧 · 仓库配置',        col:'--bid'},
+  {v:60,     lab:'分钟级生成',           sub:'960 帧 / 240 latent',      col:'--dmd'},
+  {v:3600,   lab:'小时级生成',           sub:'≈14,400 latent',           col:'--risk'}
+];
+function drawF1(){
+  const s=document.getElementById('f1'); if(!s) return;
+  s.innerHTML='';
+  const W=900,H=390,x0=64,x1=858,ax=230;
+  const tmin=1,tmax=3600;
+  const X = v => F1.scale==='log'
+      ? x0+(Math.log(Math.max(v,tmin))-Math.log(tmin))/(Math.log(tmax)-Math.log(tmin))*(x1-x0)
+      : x0+(v/tmax)*(x1-x0);
+  const t = 1+ (F1.t/1000)*(3600-1);
+
+  s.appendChild(el('text',{x:x0,y:24,'font-family':'JetBrains Mono, monospace','font-size':11,fill:C('--ink3'),'letter-spacing':'1.2'},
+    F1.scale==='log'?'时间长度（对数轴）':'时间长度（线性轴）'));
+
+  // axis
+  s.appendChild(el('line',{x1:x0,y1:ax,x2:x1,y2:ax,stroke:C('--axis'),'stroke-width':1.2}));
+  const ticks = F1.scale==='log' ? [1,3,10,30,100,300,1000,3600] : [0,600,1200,1800,2400,3000,3600];
+  ticks.forEach(v=>{
+    if(v<1 && F1.scale==='log') return;
+    const x=X(Math.max(v,F1.scale==='log'?1:0));
+    s.appendChild(el('line',{x1:x,y1:ax,x2:x,y2:ax+6,stroke:C('--axis')}));
+    s.appendChild(el('text',{x,y:ax+20,'text-anchor':'middle','font-family':'JetBrains Mono, monospace','font-size':10,fill:C('--ink3')},
+      v>=60? (Math.round(v/6)/10)+'min' : v+'s'));
+  });
+
+  // marks
+  F1MARKS.forEach((m,i)=>{
+    const x=X(m.v), col=C(m.col);
+    const y=50+i*34;
+    s.appendChild(el('line',{x1:x,y1:y+22,x2:x,y2:ax,stroke:col,'stroke-width':1.3,'stroke-dasharray':'3 3','stroke-opacity':.55}));
+    s.appendChild(el('circle',{cx:x,cy:ax,r:4,fill:col}));
+    const anchor = x>W-250?'end':'start';
+    const tx = x + (anchor==='end'?-10:10);
+    s.appendChild(el('text',{x:tx,y:y+4,'text-anchor':anchor,'font-family':'JetBrains Mono, monospace','font-size':11.5,fill:col,'font-weight':700},m.lab));
+    s.appendChild(el('text',{x:tx,y:y+18,'text-anchor':anchor,'font-family':'JetBrains Mono, monospace','font-size':9.5,fill:C('--ink3')},
+      m.sub+' · '+(m.v>=60?(m.v/60).toFixed(0)+' min':m.v.toFixed(2)+' s')));
+  });
+
+  // playhead
+  const px=X(t);
+  s.appendChild(el('line',{x1:px,y1:36,x2:px,y2:ax+26,stroke:C('--ink'),'stroke-width':2}));
+  s.appendChild(el('polygon',{points:`${px-6},${ax+26} ${px+6},${ax+26} ${px},${ax+36}`,fill:C('--ink')}));
+
+  // visible-window bar
+  const by=ax+58, bh=22;
+  s.appendChild(el('rect',{x:x0,y:by,width:x1-x0,height:bh,rx:4,fill:C('--surf3')}));
+  const genW = X(t)-x0;
+  s.appendChild(el('rect',{x:x0,y:by,width:Math.max(genW,1),height:bh,rx:4,fill:C('--ink3'),'fill-opacity':.35}));
+  const wStart = Math.max(tmin, t-WIN);
+  const wx0=X(wStart), wx1=X(t);
+  s.appendChild(el('rect',{x:wx0,y:by-3,width:Math.max(wx1-wx0,2.5),height:bh+6,rx:3,fill:C('--cam'),stroke:C('--cam-ink'),'stroke-width':1}));
+  s.appendChild(el('text',{x:x0,y:by+bh+17,'font-family':'JetBrains Mono, monospace','font-size':10,fill:C('--ink3')},'灰色 = 已经生成的部分'));
+  s.appendChild(el('text',{x:x1,y:by+bh+17,'text-anchor':'end','font-family':'JetBrains Mono, monospace','font-size':10,fill:C('--cam-ink')},'紫色 = 此刻模型能看见的全部上下文'));
+
+  // readout
+  const frames=Math.round(t*16), lat=Math.max(1,Math.round((frames-1)/4)+1), refr=(t/WIN);
+  const ro=[
+    ['已生成时长', t>=60?(t/60).toFixed(1)+' min':t.toFixed(1)+' s'],
+    ['帧 / latent', fmt(frames)+' / '+fmt(lat)],
+    ['可见窗口被完全换掉', refr.toFixed(1)+' 次'],
+    ['首帧还看得到吗', t<=FIRST_OUT?'看得到':'看不到了']
+  ];
+  ro.forEach((r,i)=>{
+    const bx=x0+i*(x1-x0)/4;
+    s.appendChild(el('text',{x:bx,y:378,'font-family':'JetBrains Mono, monospace','font-size':10,fill:C('--ink3')},r[0]));
+    s.appendChild(el('text',{x:bx,y:362,'font-family':'JetBrains Mono, monospace','font-size':13.5,'font-weight':700,
+      fill:(i===3&&t>FIRST_OUT)?C('--risk-ink'):C('--ink')},r[1]));
+  });
+  const out=document.getElementById('f1out');
+  if(out) out.textContent = t>=60?(t/60).toFixed(1)+' min':t.toFixed(1)+' s';
+}
+const f1t=document.getElementById('f1t');
+if(f1t){ F1.t=+f1t.value; f1t.addEventListener('input',e=>{F1.t=+e.target.value; drawF1();}); }
+seg('f1scale',k=>{F1.scale=k; drawF1();});
+
+/* ---------- Figure 3 : owners ---------- */
+const OWN=[
+ ['ABOT',30966,127,30715,124],
+ ['DL3DV-10s',120924,54528,60396,6000],
+ ['DL3DV-60s',10077,3578,6065,434],
+ ['MIND',533,117,402,14],
+ ['MiraData',140877,3683,17806,119388],
+ ['MiraData-Clean',135224,12865,5740,116619],
+ ['MultiCamVideo',123117,89587,5369,28161],
+ ['OmniWorld',19632,3773,13552,2307],
+ ['RealCam',45697,16154,16074,13469],
+ ['Sekai-Game',2550,537,1410,603],
+ ['Sekai-Walking',22990,6054,12976,3960],
+ ['Sekai-Walking-Clean',109248,46831,33660,28757],
+ ['SpatialVID',365345,100815,127180,137350],
+ ['SpatialVID-Clean',298514,133149,73450,91915]
+];
+const F3={sort:'all',mode:'abs'};
+function drawF3(){
+  const s=document.getElementById('f3'); if(!s) return;
+  s.innerHTML='';
+  const W=900,H=470,L=168,R=828,T=52,rowH=26;
+  let rows=OWN.slice();
+  if(F3.sort==='all') rows.sort((a,b)=>b[1]-a[1]);
+  else if(F3.sort==='keep') rows.sort((a,b)=>(b[2]+b[3])-(a[2]+a[3]));
+  else if(F3.sort==='rate') rows.sort((a,b)=>((b[2]+b[3])/b[1])-((a[2]+a[3])/a[1]));
+  else rows.sort((a,b)=>a[0].localeCompare(b[0]));
+  const max=Math.max(...rows.map(r=>r[1]));
+
+  s.appendChild(el('text',{x:16,y:24,'font-family':'JetBrains Mono, monospace','font-size':11,fill:C('--ink3')},
+    F3.mode==='abs'?'片段数（论文 Table 4）':'分区内三档占比'));
+  // legend
+  [['xhigh','--dat'],['high','--bid'],['rejected','--risk']].forEach((g,i)=>{
+    const x=560+i*110;
+    s.appendChild(el('rect',{x,y:14,width:11,height:11,rx:2,fill:C(g[1])}));
+    s.appendChild(el('text',{x:x+16,y:24,'font-family':'JetBrains Mono, monospace','font-size':11,fill:C('--ink2')},g[0]));
+  });
+
+  rows.forEach((r,i)=>{
+    const y=T+i*rowH;
+    const total=r[1], keep=r[2]+r[3], rate=keep/total;
+    s.appendChild(el('text',{x:L-10,y:y+13,'text-anchor':'end','font-family':'JetBrains Mono, monospace','font-size':11,fill:C('--ink2')},r[0]));
+    const full = F3.mode==='abs' ? (total/max)*(R-L) : (R-L);
+    let x=L;
+    const parts=[[r[3],'--dat'],[r[2],'--bid'],[r[4],'--risk']];
+    parts.forEach(p=>{
+      const w = F3.mode==='abs' ? (p[0]/max)*(R-L) : (p[0]/total)*(R-L);
+      if(w>0.4){
+        s.appendChild(el('rect',{x,y:y+2,width:w,height:16,fill:C(p[1]),'fill-opacity':.88}));
+      }
+      x+=w;
+    });
+    s.appendChild(el('rect',{x:L,y:y+2,width:full,height:16,fill:'none',stroke:C('--rule'),'stroke-width':.8}));
+    const lab = F3.mode==='abs' ? fmt(total) : (rate*100).toFixed(1)+'% 保留';
+    s.appendChild(el('text',{x:L+full+8,y:y+15,'font-family':'JetBrains Mono, monospace','font-size':10.5,
+      fill: (F3.mode==='pct'&&rate<0.25)?C('--risk-ink'):C('--ink3')},lab));
+  });
+  const yb=T+rows.length*rowH+18;
+  s.appendChild(el('line',{x1:L,y1:yb-10,x2:R,y2:yb-10,stroke:C('--rule')}));
+  s.appendChild(el('text',{x:L,y:yb+6,'font-family':'JetBrains Mono, monospace','font-size':11,fill:C('--ink2')},
+    '合计 1,425,694 = xhigh 404,795 + high 471,798 + rejected 549,101　· 25.85 TB / 29k shards'));
+}
+seg('f3sort',k=>{F3.sort=k; drawF3();});
+seg('f3mode',k=>{F3.mode=k; drawF3();});
+
+/* ---------- Figure 4 : length buckets ---------- */
+const BUCK=[
+ ['< 81 帧', 0, 0, 78.8],
+ ['81–152 帧', 155.4, 85.0, 59.4],
+ ['153–956 帧', 302.5, 251.4, 304.5],
+ ['≥ 957 帧', 13.9, 68.4, 106.5]
+];
+const F4={mode:'abs'};
+function drawF4(){
+  const s=document.getElementById('f4'); if(!s) return;
+  s.innerHTML='';
+  const W=900,H=300,L=80,R=846,B=226,T=48;
+  const maxV=900;
+  const bw=(R-L)/BUCK.length;
+  s.appendChild(el('text',{x:16,y:24,'font-family':'JetBrains Mono, monospace','font-size':11,fill:C('--ink3')},
+    F4.mode==='abs'?'片段数（千）· 论文 Figure 5':'档内三档占比'));
+  [['xhigh','--dat'],['high','--bid'],['rejected','--risk']].forEach((g,i)=>{
+    const x=560+i*110;
+    s.appendChild(el('rect',{x,y:14,width:11,height:11,rx:2,fill:C(g[1])}));
+    s.appendChild(el('text',{x:x+16,y:24,'font-family':'JetBrains Mono, monospace','font-size':11,fill:C('--ink2')},g[0]));
+  });
+  if(F4.mode==='abs'){
+    [0,200,400,600,800].forEach(v=>{
+      const y=B-(v/maxV)*(B-T);
+      s.appendChild(el('line',{x1:L,y1:y,x2:R,y2:y,stroke:C('--grid')}));
+      s.appendChild(el('text',{x:L-8,y:y+4,'text-anchor':'end','font-family':'JetBrains Mono, monospace','font-size':10,fill:C('--ink3')},v+'k'));
+    });
+  }
+  BUCK.forEach((b,i)=>{
+    const total=b[1]+b[2]+b[3];
+    const x=L+i*bw+bw*0.18, w=bw*0.64;
+    let y=B;
+    const parts=[[b[3],'--risk'],[b[2],'--dat'],[b[1],'--bid']];
+    parts.forEach(p=>{
+      const h = F4.mode==='abs' ? (p[0]/maxV)*(B-T) : (p[0]/total)*(B-T);
+      if(h>0.5){
+        y-=h;
+        s.appendChild(el('rect',{x,y,width:w,height:h,fill:C(p[1]),'fill-opacity':.88}));
+        if(h>11) s.appendChild(el('text',{x:x+w/2,y:y+h/2+3.5,'text-anchor':'middle','font-family':'JetBrains Mono, monospace','font-size':h>18?10.5:9,fill:C('--bg'),'font-weight':700},
+          F4.mode==='abs'?p[0].toFixed(1)+'k':((p[0]/total)*100).toFixed(0)+'%'));
+        else if(h>0.5) s.appendChild(el('text',{x:x+w+6,y:y+h/2+3.5,'font-family':'JetBrains Mono, monospace','font-size':9,fill:C(p[1])},
+          F4.mode==='abs'?p[0].toFixed(1)+'k':((p[0]/total)*100).toFixed(0)+'%'));
+      }
+    });
+    s.appendChild(el('text',{x:x+w/2,y:B+20,'text-anchor':'middle','font-family':'JetBrains Mono, monospace','font-size':11.5,fill:C('--ink'),'font-weight':700},b[0]));
+    const kr=(b[1]+b[2])/total;
+    s.appendChild(el('text',{x:x+w/2,y:B+35,'text-anchor':'middle','font-family':'JetBrains Mono, monospace','font-size':10,fill:kr<0.5?C('--risk-ink'):C('--ink3')},'保留 '+(kr*100).toFixed(0)+'%'));
+    s.appendChild(el('text',{x:x+w/2,y:B+52,'text-anchor':'middle','font-family':'JetBrains Mono, monospace','font-size':10,fill:C('--ink2')},'共 '+total.toFixed(1)+'k'));
+  });
+  s.appendChild(el('line',{x1:L,y1:B,x2:R,y2:B,stroke:C('--axis'),'stroke-width':1.2}));
+  s.appendChild(el('text',{x:L,y:316,'font-family':'JetBrains Mono, monospace','font-size':10,fill:C('--ink3')},
+    '≥957 帧那一档的 high 值 13.9k 在论文图中未标出，由列合计反推'));
+}
+seg('f4mode',k=>{F4.mode=k; drawF4();});
+/* ---------- Figure 7 : stage configs ---------- */
+const STAGES={
+ s05a:{name:'Stage 0.5 · 81 帧（第一轮）', col:'--bid', attn:'full',
+   rows:[['注意力','双向（整段互看）'],['目标','flow_matching（标准去噪）'],['帧数 / latent','81 / 21　→ 5.06 秒'],
+         ['学习率 / warmup','5e-5 / 1,000'],['步数上限','30,000'],['EMA','0.9999'],['batch × 卡数','256 × 256'],
+         ['后来被谁用','Stage 2 的老师与评论员']],
+   init:'Wan2.2-TI2V-5B（原始底座）', note:'让视频模型学会按相机轨迹生成'},
+ s05b:{name:'Stage 0.5 · 153 帧（第二轮）', col:'--bid', attn:'full',
+   rows:[['注意力','双向（整段互看）'],['目标','flow_matching（标准去噪）'],['帧数 / latent','153 / 39　→ 9.56 秒'],
+         ['学习率 / warmup','5e-5 / 1,000'],['步数上限','30,000'],['EMA','0.9999'],['数据','预压缩 latent · 480p'],
+         ['后来被谁用','Stage 1 的起点']],
+   init:'81 帧那一轮 @ 30,000 步', note:'9.56 秒 —— 论文「只用 5 秒训练」在这一步对不上'},
+ s1:{name:'Stage 1 · TF-AnyFlow', col:'--ar', attn:'tf',
+   rows:[['注意力','因果（只看过去 · 看真值）'],['目标','anyflow_forward_map : v1_5'],['帧数 / latent','81 / 21　→ 5.06 秒'],
+         ['学习率 / warmup','5e-5 / 500'],['步数','上限 20,000（推断实际 3,000）'],['EMA','0.999'],
+         ['AnyFlow 系数','gate .25 · ε 5.0 · consistency .25'],['引导','强度 3.0，训进权重']],
+   init:'153 帧那一轮 @ 30,000 步（EMA 权重，据仓库命令）', note:'改成只看过去，并直接学会 4 步生成'},
+ s2:{name:'Stage 2 · DMD + SGF', col:'--dmd', attn:'win',
+   rows:[['注意力','因果（只看最近 6 块 · 看自己生成的）'],['训练方式','self_gradient_forcing'],['帧数 / latent','81 / 21　→ 5.06 秒'],
+         ['学习率（学生 / 评论员）','2e-6 / 4e-7'],['步数','4,000'],['EMA','0.99'],
+         ['采样格点','[1000, 750, 500, 250] · 4 步'],['评论员 : 学生','5 : 1　· 老师引导 3.0']],
+   init:'学生 ← Stage 1 @3,000（EMA）　老师 & 评论员 ← 81 帧那一轮（不是 153 帧）',
+   note:'在自己生成的历史上练；老师取自第一轮'}
+};
+let F7k='s05a';
+function drawF7(){
+  const s=document.getElementById('f7'); if(!s) return;
+  s.innerHTML='';
+  const st=STAGES[F7k], col=C(st.col);
+  s.appendChild(el('text',{x:16,y:26,'font-family':'Familjen Grotesk, sans-serif','font-size':15,'font-weight':700,fill:col},st.name));
+  s.appendChild(el('text',{x:16,y:46,'font-family':'JetBrains Mono, monospace','font-size':10.5,fill:C('--ink3')},st.note));
+
+  /* attention mask grid */
+  const gx=28, gy=84, n=12, cell=17;
+  s.appendChild(el('text',{x:gx,y:gy-10,'font-family':'JetBrains Mono, monospace','font-size':10,fill:C('--ink3')},'行 = 正在生成的块 · 列 = 被看的块'));
+  for(let r=0;r<n;r++) for(let c=0;c<n;c++){
+    let on=false;
+    if(st.attn==='full') on=true;
+    else if(st.attn==='tf') on = c<=r;
+    else on = (c<=r && r-c<=5);
+    s.appendChild(el('rect',{x:gx+c*cell, y:gy+r*cell, width:cell-2, height:cell-2, rx:2,
+      fill: on?col:C('--surf3'), 'fill-opacity': on?(c===r?.95:.5):1,
+      stroke:C('--rule'),'stroke-width':.5}));
+  }
+  s.appendChild(el('text',{x:gx,y:gy+n*cell+18,'font-family':'JetBrains Mono, monospace','font-size':10,fill:C('--ink3')},
+    st.attn==='full'?'全部可见（含未来）':(st.attn==='tf'?'只看过去（真实视频）':'只看最近 5 个历史块 + 当前块')));
+  if(st.attn==='win'){
+    s.appendChild(el('text',{x:gx,y:gy+n*cell+34,'font-family':'JetBrains Mono, monospace','font-size':10,fill:C('--risk-ink')},
+      '这条斜带就是 local_attn_size: 18'));
+  }
+
+  /* config rows */
+  const cx=282;
+  st.rows.forEach((r,i)=>{
+    const y=78+i*30;
+    s.appendChild(el('text',{x:cx,y,'font-family':'JetBrains Mono, monospace','font-size':10.5,fill:C('--ink3')},r[0]));
+    s.appendChild(el('text',{x:cx+168,y,'font-family':'JetBrains Mono, monospace','font-size':12,fill:C('--ink'),'font-weight':500},r[1]));
+    s.appendChild(el('line',{x1:cx,y1:y+9,x2:874,y2:y+9,stroke:C('--rule')}));
+  });
+
+  /* init */
+  const iy=330;
+  s.appendChild(el('rect',{x:cx,y:iy-22,width:592,height:44,rx:7,fill:C('--surf2'),stroke:C('--rule')}));
+  s.appendChild(el('text',{x:cx+14,y:iy-6,'font-family':'JetBrains Mono, monospace','font-size':10,fill:C('--ink3')},'从哪个权重开始训'));
+  const t=el('text',{x:cx+14,y:iy+12,'font-family':'JetBrains Mono, monospace','font-size':11.5,fill:col});
+  t.textContent=st.init;
+  s.appendChild(t);
+}
+seg('f7st',k=>{F7k=k; drawF7();});
+
+/* ---------- Figure 8 : shift=5 noise grid ---------- */
+function drawF8(){
+  const s=document.getElementById('f8'); if(!s) return;
+  s.innerHTML='';
+  const L=70,R=846,Y=104;
+  const X=sig=>L+(1-sig)*(R-L);
+  const pts=[1.0,0.9375,0.8333,0.625,0.0];
+  const t=[1.0,0.75,0.5,0.25,0.0];
+  s.appendChild(el('text',{x:16,y:26,'font-family':'JetBrains Mono, monospace','font-size':11,fill:C('--ink3')},'噪声水平 σ（左 = 纯噪声，右 = 干净画面）　timestep_shift = 5.0'));
+  s.appendChild(el('line',{x1:L,y1:Y,x2:R,y2:Y,stroke:C('--axis'),'stroke-width':1.4}));
+  // even reference
+  s.appendChild(el('text',{x:16,y:184,'font-family':'JetBrains Mono, monospace','font-size':10,fill:C('--ink3')},'均匀 4 步'));
+  [1,0.75,0.5,0.25,0].forEach(v=>{
+    s.appendChild(el('circle',{cx:X(v),cy:172,r:3.5,fill:C('--ink3')}));
+  });
+  s.appendChild(el('line',{x1:L,y1:172,x2:R,y2:172,stroke:C('--rule2'),'stroke-dasharray':'3 3'}));
+
+  pts.forEach((v,i)=>{
+    const x=X(v);
+    s.appendChild(el('line',{x1:x,y1:Y-14,x2:x,y2:Y+14,stroke:C('--ar'),'stroke-width':2}));
+    s.appendChild(el('circle',{cx:x,cy:Y,r:5,fill:C('--ar')}));
+    s.appendChild(el('text',{x,y:Y-24,'text-anchor':'middle','font-family':'JetBrains Mono, monospace','font-size':11.5,fill:C('--ar-ink'),'font-weight':700},v.toFixed(3)));
+    s.appendChild(el('text',{x,y:Y+30,'text-anchor':'middle','font-family':'JetBrains Mono, monospace','font-size':10,fill:C('--ink3')},'t='+t[i].toFixed(2)));
+  });
+  // gaps
+  for(let i=0;i<pts.length-1;i++){
+    const a=X(pts[i]), b=X(pts[i+1]);
+    const gap=pts[i]-pts[i+1];
+    const big = gap>0.5;
+    s.appendChild(el('line',{x1:a+6,y1:Y+52,x2:b-6,y2:Y+52,stroke:big?C('--risk'):C('--ink3'),'stroke-width':big?2.4:1.2}));
+    s.appendChild(el('polygon',{points:`${b-6},${Y+52} ${b-12},${Y+48} ${b-12},${Y+56}`,fill:big?C('--risk'):C('--ink3')}));
+    s.appendChild(el('text',{x:(a+b)/2,y:Y+44,'text-anchor':'middle','font-family':'JetBrains Mono, monospace',
+      'font-size':big?12:10,'font-weight':big?700:400,fill:big?C('--risk-ink'):C('--ink3')},(gap*100).toFixed(1)+'%'));
+  }
+  s.appendChild(el('text',{x:R,y:Y+102,'text-anchor':'end','font-family':'JetBrains Mono, monospace','font-size':10.5,fill:C('--risk-ink')},
+    '最后一步独自跨过 62.5% —— 4 步的画质押在这一跳上'));
+}
+
+/* ---------- Figure 10 : step allocation ---------- */
+const ALLOC={
+ real:[['Stage 0.5 · 81 帧',30000,'--bid'],['Stage 0.5 · 153 帧',30000,'--bid'],['Stage 1 · TF-AnyFlow',3000,'--ar'],['Stage 2 · DMD/SGF',4000,'--dmd']],
+ cfg :[['Stage 0.5 · 81 帧',30000,'--bid'],['Stage 0.5 · 153 帧',30000,'--bid'],['Stage 1 · TF-AnyFlow',20000,'--ar'],['Stage 2 · DMD/SGF',4000,'--dmd']]
+};
+let F10m='real';
+function drawF10(){
+  const s=document.getElementById('f10'); if(!s) return;
+  s.innerHTML='';
+  const rows=ALLOC[F10m], tot=rows.reduce((a,r)=>a+r[1],0);
+  const L=20,R=880,Y=56,H=54;
+  s.appendChild(el('text',{x:L,y:28,'font-family':'JetBrains Mono, monospace','font-size':11,fill:C('--ink3')},
+    '总计 '+fmt(tot)+' 步 · global batch 256 · world_size 256'));
+  let x=L;
+  rows.forEach(r=>{
+    const w=(r[1]/tot)*(R-L);
+    s.appendChild(el('rect',{x,y:Y,width:Math.max(w-2,1),height:H,rx:5,fill:C(r[2]),'fill-opacity':.9}));
+    if(w>92){
+      s.appendChild(el('text',{x:x+w/2-1,y:Y+24,'text-anchor':'middle','font-family':'JetBrains Mono, monospace','font-size':12,'font-weight':700,fill:C('--bg')},fmt(r[1])));
+      s.appendChild(el('text',{x:x+w/2-1,y:Y+40,'text-anchor':'middle','font-family':'JetBrains Mono, monospace','font-size':10,fill:C('--bg'),'fill-opacity':.85},((r[1]/tot)*100).toFixed(1)+'%'));
+    }
+    x+=w;
+  });
+  // labels below
+  x=L; let small=0;
+  rows.forEach((r,i)=>{
+    const w=(r[1]/tot)*(R-L);
+    const cxp=x+w/2;
+    const tiny = w<92;
+    const ty = tiny ? (small++===0 ? 136 : 180) : 136;
+    const tx = Math.min(Math.max(cxp, 70), R-72);
+    if(tiny){
+      s.appendChild(el('line',{x1:cxp,y1:Y+H+2,x2:cxp,y2:ty-24,stroke:C(r[2]),'stroke-width':1,'stroke-opacity':.7}));
+      s.appendChild(el('line',{x1:cxp,y1:ty-24,x2:tx,y2:ty-14,stroke:C(r[2]),'stroke-width':1,'stroke-opacity':.7}));
+    }
+    s.appendChild(el('text',{x:tx,y:ty,'text-anchor':'middle','font-family':'JetBrains Mono, monospace','font-size':11,fill:C(r[2])},r[0]));
+    if(tiny) s.appendChild(el('text',{x:tx,y:ty+15,'text-anchor':'middle','font-family':'JetBrains Mono, monospace','font-size':10.5,fill:C('--ink3')},fmt(r[1])+' 步 · '+((r[1]/tot)*100).toFixed(1)+'%'));
+    x+=w;
+  });
+  const bidPct=((rows[0][1]+rows[1][1])/tot*100).toFixed(1);
+  s.appendChild(el('text',{x:L,y:226,'font-family':'JetBrains Mono, monospace','font-size':11.5,fill:C('--ink')},
+    '双向阶段占 '+bidPct+'%' + (F10m==='real'?'　—— 与论文「大部分训练量应放在双向阶段」一致':'　（若按配置上限，Stage 1 会占 23.8%）')));
+}
+seg('f10m',k=>{F10m=k; drawF10();});
+
+/* ---------- Figure 11 : sliding window ---------- */
+function drawF11(){
+  const s=document.getElementById('f11'); if(!s) return;
+  s.innerHTML='';
+  const k=+(document.getElementById('f11k')||{value:8}).value;
+  const N=14, L=40, R=862, Y=86, bw=(R-L)/N, lh=40;
+  s.appendChild(el('text',{x:L,y:30,'font-family':'JetBrains Mono, monospace','font-size':11,fill:C('--ink3')},
+    '每块 3 个 latent　· 最多保留 5 个历史块　· 紫 = 看得到　橙 = 正在生成　灰 = 已被挤出'));
+  for(let i=0;i<N;i++){
+    const x=L+i*bw;
+    const isCur = (i+1)===k;
+    const inWin = (i+1)<=k && (k-(i+1))<=5;
+    const future = (i+1)>k;
+    const col = isCur? C('--dmd') : (inWin? C('--cam') : C('--surf3'));
+    for(let j=0;j<3;j++){
+      s.appendChild(el('rect',{x:x+4+j*((bw-12)/3), y:Y, width:(bw-12)/3-3, height:lh, rx:3,
+        fill: future? 'none' : col, 'fill-opacity': future?0:(isCur?.95:(inWin?.6:1)),
+        stroke: future? C('--rule2') : C('--rule'), 'stroke-width':.8,
+        'stroke-dasharray': future?'3 3':'0'}));
+    }
+    s.appendChild(el('text',{x:x+bw/2-2,y:Y+lh+16,'text-anchor':'middle','font-family':'JetBrains Mono, monospace','font-size':10,
+      fill: isCur?C('--dmd-ink'):(inWin?C('--cam-ink'):C('--ink3'))},'块 '+(i+1)));
+  }
+  // window bracket
+  const wStart = Math.max(1, k-5), x0=L+(wStart-1)*bw+2, x1=L+k*bw-6;
+  s.appendChild(el('path',{d:`M${x0},${Y-16} L${x0},${Y-8} L${x1},${Y-8} L${x1},${Y-16}`,stroke:C('--cam-ink'),'stroke-width':1.6,fill:'none'}));
+  const nlat=(k-wStart+1)*3;
+  const nfr = (wStart===1) ? 4*(nlat-1)+1 : 4*nlat;
+  s.appendChild(el('text',{x:(x0+x1)/2,y:Y-24,'text-anchor':'middle','font-family':'JetBrains Mono, monospace','font-size':11.5,'font-weight':700,fill:C('--cam-ink')},
+    '能看到 '+nlat+' latent ≈ '+nfr+' 帧 ≈ '+(nfr/16).toFixed(2)+' 秒'));
+  // dropped
+  if(wStart>1){
+    const dx0=L+2, dx1=L+(wStart-1)*bw-6;
+    s.appendChild(el('path',{d:`M${dx0},${Y+lh+30} L${dx0},${Y+lh+38} L${dx1},${Y+lh+38} L${dx1},${Y+lh+30}`,stroke:C('--risk'),'stroke-width':1.4,fill:'none'}));
+    s.appendChild(el('text',{x:dx0,y:Y+lh+54,'font-family':'JetBrains Mono, monospace','font-size':11,fill:C('--risk-ink')},
+      '已被挤出 —— 再也看不到（包括首帧）'));
+  } else {
+    s.appendChild(el('text',{x:L,y:Y+lh+54,'font-family':'JetBrains Mono, monospace','font-size':11,fill:C('--ink3')},'历史还没超出窗口，首帧仍看得到'));
+  }
+  s.appendChild(el('text',{x:L,y:242,'font-family':'JetBrains Mono, monospace','font-size':10.5,fill:C('--ink3')},
+    '缓存恒定 18 latent → 显存与每块计算量不变 → 可以一直往下生成；但约 4.5 秒以外的内容一概看不到'));
+  const out=document.getElementById('f11out');
+  if(out){
+    const t=((4*(k*3-1)+1)/16);
+    out.textContent='第 '+k+' 块 · 生成到第 '+t.toFixed(2)+' 秒';
+  }
+}
+const f11k=document.getElementById('f11k');
+if(f11k) f11k.addEventListener('input',drawF11);
+
+/* ---------- boot ---------- */
+function redrawAll(){ drawF1(); drawF3(); drawF4(); drawF7(); drawF8(); drawF10(); drawF11(); }
+redrawAll();
+let rt;
+addEventListener('resize',()=>{clearTimeout(rt); rt=setTimeout(redrawAll,120);});
+if(window.matchMedia){
+  const mq=window.matchMedia('(prefers-color-scheme: dark)');
+  if(mq.addEventListener) mq.addEventListener('change',()=>setTimeout(redrawAll,60));
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Recency Forcing（arXiv 2609.19729）精读：位置响应 R(Δ,t)、随去噪步变化的注意力偏置 TRB、BAR 重参数化，以及对 VBench 数字的逐行复算与 20 条存疑。">
+<title>Recency Forcing 精读</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+/* ============================================================
+   Recency Forcing 精读 — design tokens (dark-first)
+   角色色：glb = 全局 sink 帧       his = 历史帧（被 TRB 衰减的那段，本文主角）
+           rec = 最近帧（不衰减）     cur = 当前去噪块
+           bar = BAR 重参数化        risk = 存疑
+           t1..t4 = 去噪步（单色序列，t1=噪声最大=最突出）
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0c1015; --surf:#12171d; --surf2:#181e25; --surf3:#212932;
+  --rule:#232b34; --rule2:#36414d;
+  --ink:#e7ecf1; --ink2:#a3adb8; --ink3:#76818d;
+  --glb:#9085e9; --glb-ink:#b1a8ff; --glb-soft:rgba(144,133,233,.16);
+  --his:#e0772f; --his-ink:#f39a5c; --his-soft:rgba(224,119,47,.16);
+  --rec:#1fae7c; --rec-ink:#4fd0a0; --rec-soft:rgba(31,174,124,.15);
+  --cur:#e66767; --cur-ink:#ff8f8f; --cur-soft:rgba(230,103,103,.16);
+  --bar:#3987e5; --bar-ink:#6da7ec; --bar-soft:rgba(57,135,229,.15);
+  --risk:#ea6791; --risk-ink:#ff8cb0; --risk-soft:rgba(234,103,145,.15);
+  --ok:#3fb27a; --ok-ink:#62cf95; --ok-soft:rgba(63,178,122,.14);
+  --bad:#e0605a; --bad-ink:#f0857f; --bad-soft:rgba(224,96,90,.14);
+  --warn:#e3b341; --warn-ink:#f0c766; --warn-soft:rgba(227,179,65,.14);
+  --t1:#cde2fb; --t2:#86b6ef; --t3:#3987e5; --t4:#1c5cab;
+  --grid:#1c232b; --axis:#3a4552; --evict:#1e252d; --future:#161b21;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 30px rgba(0,0,0,.34);
+  --font-display:"Familjen Grotesk","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"Source Serif 4",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f4f6; --surf:#ffffff; --surf2:#edf0f3; --surf3:#e1e6eb;
+    --rule:#dbe0e6; --rule2:#bcc4cd;
+    --ink:#10151b; --ink2:#424c57; --ink3:#6a7581;
+    --glb:#4a3aa7; --glb-ink:#3d2f8f; --glb-soft:rgba(74,58,167,.11);
+    --his:#d0601f; --his-ink:#a84a12; --his-soft:rgba(208,96,31,.12);
+    --rec:#0f8f63; --rec-ink:#0b6e4c; --rec-soft:rgba(15,143,99,.12);
+    --cur:#cf3f3f; --cur-ink:#a92f2f; --cur-soft:rgba(207,63,63,.11);
+    --bar:#2a78d6; --bar-ink:#1c5cab; --bar-soft:rgba(42,120,214,.11);
+    --risk:#c73a6f; --risk-ink:#a42c5b; --risk-soft:rgba(199,58,111,.11);
+    --ok:#138752; --ok-ink:#0d6c41; --ok-soft:rgba(19,135,82,.11);
+    --bad:#c5352e; --bad-ink:#a62923; --bad-soft:rgba(197,53,46,.10);
+    --warn:#b58312; --warn-ink:#8c6408; --warn-soft:rgba(181,131,18,.13);
+    --t1:#0d366b; --t2:#1c5cab; --t3:#3987e5; --t4:#86b6ef;
+    --grid:#e6eaee; --axis:#bcc4cd; --evict:#e6e9ed; --future:#f5f7f9;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f4f6; --surf:#ffffff; --surf2:#edf0f3; --surf3:#e1e6eb;
+  --rule:#dbe0e6; --rule2:#bcc4cd;
+  --ink:#10151b; --ink2:#424c57; --ink3:#6a7581;
+  --glb:#4a3aa7; --glb-ink:#3d2f8f; --glb-soft:rgba(74,58,167,.11);
+  --his:#d0601f; --his-ink:#a84a12; --his-soft:rgba(208,96,31,.12);
+  --rec:#0f8f63; --rec-ink:#0b6e4c; --rec-soft:rgba(15,143,99,.12);
+  --cur:#cf3f3f; --cur-ink:#a92f2f; --cur-soft:rgba(207,63,63,.11);
+  --bar:#2a78d6; --bar-ink:#1c5cab; --bar-soft:rgba(42,120,214,.11);
+  --risk:#c73a6f; --risk-ink:#a42c5b; --risk-soft:rgba(199,58,111,.11);
+  --ok:#138752; --ok-ink:#0d6c41; --ok-soft:rgba(19,135,82,.11);
+  --bad:#c5352e; --bad-ink:#a62923; --bad-soft:rgba(197,53,46,.10);
+  --warn:#b58312; --warn-ink:#8c6408; --warn-soft:rgba(181,131,18,.13);
+  --t1:#0d366b; --t2:#1c5cab; --t3:#3987e5; --t4:#86b6ef;
+  --grid:#e6eaee; --axis:#bcc4cd; --evict:#e6e9ed; --future:#f5f7f9;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth; -webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important; animation:none!important} }
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16.5px; line-height:1.74;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1000px; margin:0 auto; padding-inline:20px; padding-block:0 140px}
+@media(max-width:640px){ .wrap{padding-inline:16px; padding-block:0 120px} body{font-size:16px} }
+a{color:var(--bar-ink)}
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--bar); outline-offset:2px; border-radius:4px}
+
+/* ---------- header ---------- */
+header.hero{padding-block:58px 26px; border-bottom:1px solid var(--rule); margin-bottom:0}
+.kicker{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink3); margin-bottom:16px; display:flex; flex-wrap:wrap; gap:6px 14px}
+.kicker a{color:var(--his-ink); text-decoration:none; border-bottom:1px solid transparent}
+.kicker a:hover{border-bottom-color:currentColor}
+h1{font-family:var(--font-display); font-weight:700; font-size:clamp(32px,5.6vw,52px); line-height:1.08; letter-spacing:-.022em; margin:0 0 8px; text-wrap:balance}
+h1 .soft{color:var(--his-ink)}
+.sub{font-family:var(--font-display); font-weight:500; font-size:clamp(16px,2.5vw,20.5px); color:var(--ink2); line-height:1.5; margin:0 0 22px; max-width:60ch; text-wrap:balance}
+.thesis{font-family:var(--font-math); font-size:clamp(16.5px,2.3vw,19px); line-height:1.66; color:var(--ink); border-left:3px solid var(--his); padding:2px 0 2px 18px; margin:0 0 24px; max-width:66ch}
+.thesis b{color:var(--his-ink); font-weight:600}
+.statstrip{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:10px; overflow:hidden}
+.statstrip div{background:var(--surf); padding:12px 14px}
+.statstrip b{display:block; font-family:var(--font-display); font-size:21px; font-weight:700; letter-spacing:-.01em; line-height:1.2}
+.statstrip span{display:block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; color:var(--ink3); margin-top:4px; line-height:1.45}
+
+/* ---------- nav ---------- */
+nav.toc{position:sticky; top:env(safe-area-inset-top,0px); z-index:40; background:color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border-bottom:1px solid var(--rule); margin-inline:-20px; margin-block:0 40px; padding:9px 20px; overflow-x:auto; white-space:nowrap; scrollbar-width:none}
+@media(max-width:640px){ nav.toc{margin-inline:-16px; padding-inline:16px} }
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{display:inline-block; font-family:var(--font-mono); font-size:12px; color:var(--ink2); text-decoration:none; padding:5px 10px; border-radius:6px; margin-right:2px}
+nav.toc a:hover{background:var(--surf2); color:var(--ink)}
+nav.toc a.on{background:var(--his-soft); color:var(--his-ink)}
+
+/* ---------- sections ---------- */
+section{margin:0 0 76px; scroll-margin-top:64px}
+h2{font-family:var(--font-display); font-weight:700; font-size:clamp(24px,3.6vw,32px); letter-spacing:-.015em; line-height:1.2; margin:0 0 6px; text-wrap:balance}
+h2 .no{font-family:var(--font-mono); font-size:.5em; font-weight:500; color:var(--ink3); vertical-align:.45em; margin-right:10px; letter-spacing:.04em}
+.lede{color:var(--ink2); font-size:17px; margin:0 0 26px; max-width:66ch}
+h3{font-family:var(--font-display); font-weight:600; font-size:20px; letter-spacing:-.005em; margin:36px 0 10px; text-wrap:balance}
+h4{font-family:var(--font-display); font-weight:600; font-size:16.5px; margin:22px 0 6px}
+p{margin:0 0 14px; max-width:70ch}
+p.wide{max-width:none}
+ul,ol{margin:0 0 16px; padding-left:1.25em; max-width:70ch}
+li{margin:0 0 6px}
+b,strong{font-weight:600}
+code,.mono{font-family:var(--font-mono); font-size:.88em; background:var(--surf2); padding:1px 5px; border-radius:4px; border:1px solid var(--rule)}
+.m{font-family:var(--font-math); font-style:italic; white-space:nowrap}
+.m.up{font-style:normal}
+sub,sup{font-size:.72em; line-height:0}
+.dim{color:var(--ink3)}
+.small{font-size:14px}
+.tnum{font-variant-numeric:tabular-nums}
+
+.tag{display:inline-block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; padding:1px 7px; border-radius:99px; vertical-align:.12em; font-weight:500; white-space:nowrap}
+.tag.glb{background:var(--glb-soft); color:var(--glb-ink)}
+.tag.his{background:var(--his-soft); color:var(--his-ink)}
+.tag.rec{background:var(--rec-soft); color:var(--rec-ink)}
+.tag.cur{background:var(--cur-soft); color:var(--cur-ink)}
+.tag.bar{background:var(--bar-soft); color:var(--bar-ink)}
+.tag.risk{background:var(--risk-soft); color:var(--risk-ink)}
+.tag.ok{background:var(--ok-soft); color:var(--ok-ink)}
+.tag.bad{background:var(--bad-soft); color:var(--bad-ink)}
+.tag.warn{background:var(--warn-soft); color:var(--warn-ink)}
+.sw{display:inline-block; width:10px; height:10px; border-radius:3px; vertical-align:-.05em; margin-right:5px}
+
+/* ---------- callouts ---------- */
+.call{border:1px solid var(--rule); background:var(--surf); border-radius:10px; padding:16px 18px 6px; margin:22px 0}
+.call > .hd{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:8px; display:flex; align-items:center; gap:8px}
+.call.risk{border-color:color-mix(in srgb,var(--risk) 40%,var(--rule)); background:linear-gradient(0deg,var(--risk-soft),var(--risk-soft)),var(--surf)}
+.call.risk > .hd{color:var(--risk-ink)}
+.call.ok{border-color:color-mix(in srgb,var(--ok) 40%,var(--rule))}
+.call.ok > .hd{color:var(--ok-ink)}
+.call.me{border-color:color-mix(in srgb,var(--his) 40%,var(--rule)); background:linear-gradient(0deg,var(--his-soft),var(--his-soft)),var(--surf)}
+.call.me > .hd{color:var(--his-ink)}
+.call.plain > .hd{color:var(--ink3)}
+.call p, .call ul{max-width:none}
+
+/* ---------- figures / panels ---------- */
+.fig{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:18px 18px 14px; margin:22px 0; box-shadow:var(--shadow)}
+.fig .cap{font-size:13.5px; color:var(--ink3); margin-top:10px; line-height:1.6}
+.fig .cap b{color:var(--ink2)}
+.fig .ttl{font-family:var(--font-display); font-weight:600; font-size:15.5px; margin:0 0 4px}
+.fig .sub2{font-size:13px; color:var(--ink3); margin:0 0 12px}
+.svgbox{overflow-x:auto}
+.svgbox svg{display:block; width:100%; height:auto}
+.svgbox.wide svg{min-width:660px}
+svg text{font-family:var(--font-mono)}
+.controls{display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; margin:0 0 14px}
+.ctl{display:flex; align-items:center; gap:8px; font-size:13.5px; color:var(--ink2)}
+.ctl label{font-family:var(--font-mono); font-size:12px; color:var(--ink3); letter-spacing:.03em}
+.ctl output{font-family:var(--font-mono); font-size:12.5px; color:var(--ink); min-width:4.5em; font-variant-numeric:tabular-nums}
+input[type=range]{accent-color:var(--his); width:170px; max-width:46vw}
+.seg{display:inline-flex; border:1px solid var(--rule2); border-radius:8px; overflow:hidden; flex-wrap:wrap}
+.seg button{font:inherit; font-family:var(--font-mono); font-size:12px; background:transparent; color:var(--ink2); border:0; padding:6px 11px; cursor:pointer; border-right:1px solid var(--rule2)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--his-soft); color:var(--his-ink)}
+.seg button:hover{color:var(--ink)}
+.btn{font:inherit; font-family:var(--font-mono); font-size:12px; background:var(--surf2); color:var(--ink); border:1px solid var(--rule2); border-radius:7px; padding:6px 12px; cursor:pointer}
+.btn:hover{background:var(--surf3)}
+.readout{font-family:var(--font-mono); font-size:12.5px; color:var(--ink2); background:var(--surf2); border:1px solid var(--rule); border-radius:8px; padding:10px 12px; line-height:1.65; margin-top:12px; overflow-x:auto}
+.readout b{color:var(--ink)}
+.chip{display:inline-block; font-family:var(--font-mono); font-size:11px; padding:2px 8px; border-radius:99px; margin-left:6px}
+
+/* ---------- tables ---------- */
+.tblwrap{overflow-x:auto; margin:16px 0 20px; border:1px solid var(--rule); border-radius:10px; background:var(--surf)}
+table{border-collapse:collapse; width:100%; font-size:14px}
+th,td{padding:8px 11px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:top}
+th{font-family:var(--font-mono); font-size:11px; font-weight:500; letter-spacing:.06em; color:var(--ink3); background:var(--surf2); white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.num, th.num{text-align:right; font-variant-numeric:tabular-nums; font-family:var(--font-mono); font-size:13px; white-space:nowrap}
+tr.me td{background:var(--his-soft)}
+td.win{color:var(--ok-ink); font-weight:600}
+td.lose{color:var(--ink3)}
+td .note{display:block; font-size:12px; color:var(--ink3); font-family:var(--font-body)}
+tr.grp td{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; color:var(--ink3); background:var(--surf2); padding-block:5px}
+
+/* ---------- formula block ---------- */
+.eq{font-family:var(--font-math); font-size:18px; background:var(--surf); border:1px solid var(--rule); border-radius:10px; padding:14px 18px; margin:14px 0 18px; overflow-x:auto; line-height:1.9}
+.eq .lbl{float:right; font-family:var(--font-mono); font-size:11px; color:var(--ink3); font-style:normal; margin-left:14px}
+.eq i{font-style:italic}
+.eq .hl-his{color:var(--his-ink)}
+.eq .hl-bar{color:var(--bar-ink)}
+.eq .hl-risk{color:var(--risk-ink)}
+.frac{display:inline-flex; flex-direction:column; vertical-align:middle; text-align:center; margin:0 3px; line-height:1.3}
+.frac > span:first-child{border-bottom:1px solid currentColor; padding:0 4px}
+.frac > span:last-child{padding:0 4px}
+
+/* ---------- grids ---------- */
+.two{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+.three{display:grid; grid-template-columns:repeat(3,1fr); gap:14px}
+@media(max-width:760px){ .two,.three{grid-template-columns:1fr} }
+.two > *, .three > *{min-width:0}
+.massrow > span:last-child{white-space:nowrap}
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:10px; padding:14px 16px 8px}
+.card h4{margin-top:0}
+.card p{font-size:15px}
+
+/* ---------- step list (derivation) ---------- */
+.steps{counter-reset:st; list-style:none; padding:0; margin:12px 0 18px; max-width:none}
+.steps li{counter-increment:st; position:relative; padding:10px 14px 10px 46px; border:1px solid var(--rule); border-radius:10px; background:var(--surf); margin-bottom:8px}
+.steps li::before{content:counter(st); position:absolute; left:12px; top:10px; width:24px; height:24px; border-radius:50%; background:var(--bar-soft); color:var(--bar-ink); font-family:var(--font-mono); font-size:12px; display:flex; align-items:center; justify-content:center}
+
+/* ---------- doubts ---------- */
+.dfilter{display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px}
+.doubt{border:1px solid var(--rule); border-radius:10px; background:var(--surf); margin:0 0 10px; overflow:hidden}
+.doubt > summary{cursor:pointer; list-style:none; padding:12px 16px; display:grid; grid-template-columns:auto 1fr; gap:4px 12px; align-items:baseline}
+.doubt > summary::-webkit-details-marker{display:none}
+.doubt > summary .sev{font-family:var(--font-mono); font-size:11px; padding:2px 8px; border-radius:99px; letter-spacing:.05em}
+.doubt.h .sev{background:var(--bad-soft); color:var(--bad-ink)}
+.doubt.m .sev{background:var(--warn-soft); color:var(--warn-ink)}
+.doubt.l .sev{background:var(--surf3); color:var(--ink2)}
+.doubt > summary .t{font-weight:600}
+.doubt > summary:hover .t{color:var(--his-ink)}
+.doubt .body{padding:0 16px 12px 16px; border-top:1px solid var(--rule); padding-top:12px; font-size:15px}
+.doubt .body p{max-width:none}
+.doubt .ev{font-size:13px; color:var(--ink3)}
+
+/* ---------- tooltip ---------- */
+.tip{position:fixed; z-index:60; pointer-events:none; background:var(--surf3); color:var(--ink); border:1px solid var(--rule2); border-radius:8px; padding:8px 10px; font-family:var(--font-mono); font-size:12px; line-height:1.55; box-shadow:var(--shadow); max-width:300px}
+.tip[hidden]{display:none!important}
+
+/* heatmap */
+.hm{display:grid; grid-template-columns:auto repeat(4,1fr); gap:3px; font-family:var(--font-mono); font-size:12px; min-width:420px}
+.hm .h{color:var(--ink3); font-size:11px; padding:4px 6px; text-align:center}
+.hm .r{color:var(--ink2); padding:8px 8px 8px 0; white-space:nowrap}
+.hm .c{border-radius:6px; padding:8px 4px; text-align:center; font-variant-numeric:tabular-nums; border:1px solid var(--rule)}
+.massrow{display:grid; grid-template-columns:auto 1fr auto; gap:6px 10px; align-items:center; font-family:var(--font-mono); font-size:12px; margin-top:6px}
+.massbar{height:10px; background:var(--surf2); border-radius:3px; overflow:hidden; border:1px solid var(--rule)}
+.massbar > i{display:block; height:100%; background:var(--his); border-radius:0 3px 3px 0}
+
+footer{border-top:1px solid var(--rule); padding-top:22px; color:var(--ink3); font-size:13.5px}
+footer ol{max-width:none; font-size:13px}
+footer li{margin-bottom:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">
+    <span>arXiv <a href="https://arxiv.org/abs/2609.19729">2609.19729</a> v1</span>
+    <span>2026-09-17</span>
+    <span>Qualcomm AI Research</span>
+    <span>Wan2.1-T2V-1.3B · chunk-wise AR</span>
+    <span>代码：未公开</span>
+  </div>
+  <h1>Recency Forcing <span class="soft">精读</span></h1>
+  <p class="sub">给"中间那段历史帧"的注意力加一个随去噪步变化的负偏置，让它们在被踢出 KV cache 之前就已经无足轻重——外加一个把偏置搬到 softmax 外面、从而能用 FlashAttention 的代数恒等式。</p>
+  <p class="thesis">机制本身很小也很便宜，只是一张只看<b>时间距离 Δ</b>和<b>去噪步 t</b>的 logit 偏置表。但"为什么有效"和"有多有效"论文都没讲清楚。按它自己的 Eq.8 与 β = L<sub>history</sub>（按帧计，β = 12），<b>第 1 个去噪步里所有历史帧的权重都不超过约 10⁻⁴</b>，早期步骤实际上就是截断。Table 3 的 SOTA 质量分<b>全部来自 dynamic degree 一项</b>，扣掉这一项后训练版排在 Rolling Forcing 与 LongLive 之后。再者，最终选中的幂律族在"各步曲线在哪里分叉"这件事上，<b>正好和论文自己测到的 R̃ 相反</b>。</p>
+  <div class="statstrip">
+    <div><b>60 s</b><span>生成长度 · 训练 5 s → 12×</span></div>
+    <div><b>82.63 / 84.02</b><span>VBench-Long Quality<br>免训练 / 训练版</span></div>
+    <div><b>≈12 h</b><span>4×H100 · 3,500 步 · batch 4<br>只重跑 DMD 阶段</span></div>
+    <div><b>11.76×</b><span>BAR-FlashAttn vs FlexAttn+bias<br>全文唯一一组计时</span></div>
+    <div><b>2</b><span>自由超参 α<sub>base</sub>, γ<sub>base</sub>（论文口径）<br>实际用到的是 β, γ<sub>base</sub></span></div>
+  </div>
+</header>
+
+<nav class="toc" aria-label="目录">
+  <a href="#s1">一页读懂</a><a href="#s2">滚动 KV</a><a href="#s3">R(Δ,t)</a><a href="#s4">TRB</a><a href="#s5">BAR</a><a href="#s6">配置</a><a href="#s7">实验</a><a href="#s8">存疑</a><a href="#s9">公道话</a>
+</nav>
+
+<!-- ===================================================== 1 -->
+<section id="s1">
+  <h2><span class="no">§1</span>一页读懂</h2>
+  <p class="lede">先把论文的故事原样讲一遍，再说我的判断。</p>
+
+  <div class="three">
+    <div class="card">
+      <h4>问题</h4>
+      <p>Self-Forcing / Causal Forcing 这类"从双向模型蒸馏出的 4 步因果视频模型"只在 <b>5 秒</b>（21 个 latent 帧）片段上训练，推到 60 秒会出现颜色漂移、糊、重复或主体变形。</p>
+    </div>
+    <div class="card">
+      <h4>论文的诊断</h4>
+      <p><b>KV eviction mismatch</b>：训练时上下文帧全在 KV cache 里，推理时显存有限，最老的帧会被驱逐。论文认为模型"依赖过的上下文被拿走了"。</p>
+    </div>
+    <div class="card">
+      <h4>论文的药方</h4>
+      <p>不截断上下文，而是给 <span class="tag his">历史帧</span> 的注意力 logit 加一个 ≤ 0 的偏置 <b>TRB</b>：离得越远越负，并且在早期（高噪声）去噪步压得更狠。等某帧真被踢出时，它早就没什么权重了。</p>
+    </div>
+  </div>
+
+  <div class="fig">
+    <div class="ttl">全流程：两种用法共用同一套推理机制</div>
+    <div class="sub2">实线 = 论文明确写出的步骤；虚线框 = 沿用前作、并非本文贡献的部分</div>
+    <div class="svgbox wide">
+      <svg viewBox="0 0 940 300" role="img" aria-label="Recency Forcing 训练与推理流程图">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink3)"/></marker>
+        </defs>
+        <!-- training-based lane -->
+        <text x="12" y="26" fill="var(--ink3)" font-size="11" letter-spacing="1.2">训练版 TRAINING-BASED</text>
+        <rect x="12" y="38" width="190" height="72" rx="9" fill="var(--surf2)" stroke="var(--rule2)" stroke-dasharray="5 4"/>
+        <text x="107" y="66" text-anchor="middle" fill="var(--ink)" font-size="13">Causal Forcing</text>
+        <text x="107" y="86" text-anchor="middle" fill="var(--ink3)" font-size="11">因果 ODE 初始化权重</text>
+        <line x1="202" y1="74" x2="248" y2="74" stroke="var(--ink3)" stroke-width="1.5" marker-end="url(#ar)"/>
+        <rect x="250" y="30" width="260" height="88" rx="9" fill="var(--his-soft)" stroke="var(--his)"/>
+        <text x="380" y="56" text-anchor="middle" fill="var(--ink)" font-size="13">重跑 DMD 阶段（Self-Forcing 协议）</text>
+        <text x="380" y="76" text-anchor="middle" fill="var(--his-ink)" font-size="11.5">所有自注意力层换成 TRB（经 BAR 实现）</text>
+        <text x="380" y="96" text-anchor="middle" fill="var(--ink3)" font-size="11">α_base~U(0,2) · γ_base~U(0,1) · β=L_history</text>
+        <text x="380" y="112" text-anchor="middle" fill="var(--ink3)" font-size="11">3,500 步 · batch 4 · 4×H100 ≈12 h</text>
+        <line x1="510" y1="74" x2="580" y2="140" stroke="var(--ink3)" stroke-width="1.5" marker-end="url(#ar)"/>
+        <!-- training-free lane -->
+        <text x="12" y="186" fill="var(--ink3)" font-size="11" letter-spacing="1.2">免训练 TRAINING-FREE</text>
+        <rect x="12" y="198" width="190" height="72" rx="9" fill="var(--surf2)" stroke="var(--rule2)" stroke-dasharray="5 4"/>
+        <text x="107" y="226" text-anchor="middle" fill="var(--ink)" font-size="13">Self-Forcing</text>
+        <text x="107" y="246" text-anchor="middle" fill="var(--ink3)" font-size="11">官方 chunk-wise 权重，不改</text>
+        <line x1="202" y1="234" x2="580" y2="176" stroke="var(--ink3)" stroke-width="1.5" marker-end="url(#ar)"/>
+        <text x="390" y="224" text-anchor="middle" fill="var(--ink3)" font-size="11">参数"直接由 R̃ 设定"（数值未报告）</text>
+        <!-- inference -->
+        <rect x="582" y="96" width="346" height="124" rx="10" fill="var(--surf)" stroke="var(--rule2)"/>
+        <text x="755" y="120" text-anchor="middle" fill="var(--ink)" font-size="13">推理：滚动 KV cache，逐块生成 60 s</text>
+        <rect x="598" y="134" width="40" height="26" rx="4" fill="var(--glb-soft)" stroke="var(--glb)"/>
+        <text x="618" y="151" text-anchor="middle" fill="var(--glb-ink)" font-size="10.5">sink</text>
+        <rect x="642" y="134" width="150" height="26" rx="4" fill="var(--his-soft)" stroke="var(--his)"/>
+        <text x="717" y="151" text-anchor="middle" fill="var(--his-ink)" font-size="10.5">history × e^{TRB}</text>
+        <rect x="796" y="134" width="56" height="26" rx="4" fill="var(--rec-soft)" stroke="var(--rec)"/>
+        <text x="824" y="151" text-anchor="middle" fill="var(--rec-ink)" font-size="10.5">recent</text>
+        <rect x="856" y="134" width="56" height="26" rx="4" fill="var(--cur-soft)" stroke="var(--cur)"/>
+        <text x="884" y="151" text-anchor="middle" fill="var(--cur-ink)" font-size="10.5">current</text>
+        <text x="755" y="184" text-anchor="middle" fill="var(--ink3)" font-size="11">3 + 12 + 3 + 3 = 21 latent 帧 · γ_base = 0.1</text>
+        <text x="755" y="204" text-anchor="middle" fill="var(--ink3)" font-size="11">相对 RoPE（沿用 Rolling/Deep/Relax Forcing）</text>
+        <!-- BAR badge -->
+        <rect x="620" y="244" width="270" height="40" rx="8" fill="var(--bar-soft)" stroke="var(--bar)"/>
+        <text x="755" y="268" text-anchor="middle" fill="var(--bar-ink)" font-size="12">BAR：V̂ = e^B·[V;1] → 普通 FlashAttention → 除最后一维</text>
+        <line x1="755" y1="220" x2="755" y2="242" stroke="var(--bar)" stroke-width="1.5" marker-end="url(#ar)"/>
+      </svg>
+    </div>
+  </div>
+
+  <div class="call me">
+    <div class="hd">我的判断 · 一句话版</div>
+    <ul>
+      <li><b>真正新的</b>只有两样：<b>① 让 ALiBi/KERPLE 式的距离偏置随去噪步变化</b>，并把它用在"sink 与 recent 之间的那段历史"上；<b>② BAR 这个工程写法</b>（数学上精确，但不是唯一的精确写法）。</li>
+      <li>"KV eviction mismatch"这个诊断<b>并不新</b>：Self-Forcing §3.4 就发现过首块被驱逐导致的训练-推理不一致，并在训练时限制注意力窗口来模拟；LongLive 也用与推理一致的短窗口来训练。本文把两者都归为"截断"。</li>
+      <li>按论文自己测的 R̃，驱逐边界附近的帧影响只剩 <b>0.1%–0.4%</b>。"驱逐拿走了模型依赖的信息"很难解释 60 秒退化。更可能起作用的是：<b>压低漂移中的历史 + 随机强度的上下文增广 + 重训</b>。</li>
+      <li>结果层面，SOTA 靠的是 dynamic degree。所有默认超参也都是靠 dynamic degree 选出来的（<a href="#s7">§7 可交互复算</a>）。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================================================== 2 -->
+<section id="s2">
+  <h2><span class="no">§2</span>背景：滚动 KV cache 与"驱逐"</h2>
+  <p class="lede">先把"窗口里有什么、谁会被踢出去"看清楚，后面的一切都建立在这张图上。</p>
+
+  <p>Wan2.1 的 VAE 在时间上压 4 倍：21 个 latent 帧对应 81 个视频帧，16 fps 下约 5.06 秒。模型按 <b>块（chunk）</b> 生成，<b>每块 3 个 latent 帧</b>，每块做 4 步去噪。生成完的块会以"干净帧"的身份写进 KV cache，供后面的块做注意力。</p>
+  <p>推理时注意力窗口 <span class="m">L</span><sub>attention</sub> = 21 个 latent 帧，被切成四段：</p>
+  <ul>
+    <li><span class="tag glb">global</span> 视频最开头的 3 帧（第 0 块），永不驱逐，当 attention sink 用；</li>
+    <li><span class="tag his">history</span> 中间 12 帧（4 块），TRB <b>只作用在这一段</b>；</li>
+    <li><span class="tag rec">recent</span> 紧挨着的 3 帧（上一块），不衰减，负责短时运动连续性；</li>
+    <li><span class="tag cur">current</span> 正在去噪的 3 帧。</li>
+  </ul>
+
+  <div class="fig" id="winfig">
+    <div class="ttl">滚动窗口演示</div>
+    <div class="sub2">拖动滑块推进生成；切到"训练片段"看训练时最后一块看到的是什么</div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="模式">
+        <button type="button" id="wm-inf" aria-pressed="true">推理（长视频）</button>
+        <button type="button" id="wm-train" aria-pressed="false">训练片段（21 帧 = 7 块）</button>
+      </div>
+      <div class="ctl"><label for="wk">当前块 k</label><input type="range" id="wk" min="0" max="23" step="1" value="12"><output id="wk-o">12</output></div>
+    </div>
+    <div class="svgbox wide"><svg id="winsvg" viewBox="0 0 940 150" role="img" aria-label="滚动窗口示意"></svg></div>
+    <div class="readout" id="win-read"></div>
+  </div>
+
+  <div class="call me">
+    <div class="hd">训练和推理，到底差在哪</div>
+    <p>切到"训练片段"、把 k 拖到 6 就能看到：<b>训练时最后一块看到的上下文正好也是 18 帧</b>（第 0 块 + 中间 4 块 + 上一块），和推理时每一步看到的<b>数量完全一样</b>。所以在任何单独一步里，模型都没有被拿走"训练时能看到、推理时看不到"的帧。</p>
+    <p>真正不同的是<b>窗口里装的内容</b>：</p>
+    <ul>
+      <li>训练时最老的历史就是视频开头；推理时最老的历史是视频中段。</li>
+      <li>sink 与历史在内容上不连续，只能靠相对 RoPE 把位置"拼"起来。</li>
+      <li>推理时每一步都有一块离开窗口，历史整体在慢慢漂移。</li>
+    </ul>
+    <p>所以与其说这是"驱逐不匹配"，不如说是<b>窗口内容的分布偏移</b>。这个区分很重要：它决定了 TRB 的收益究竟来自"让驱逐变得无害"，还是来自"少依赖正在漂移的历史"。</p>
+  </div>
+</section>
+
+<!-- ===================================================== 3 -->
+<section id="s3">
+  <h2><span class="no">§3</span>诊断工具：位置响应 R(Δ, t)</h2>
+  <p class="lede">论文最有意思的部分：先量一量"模型到底有多依赖第 Δ 帧"，再按测到的形状去设计偏置。</p>
+
+  <h3>怎么量</h3>
+  <p>取当前帧 <span class="m">x<sup>i</sup></span>，在第 <span class="m">t</span> 个去噪步（t=1 噪声最大、t=4 最小），把距离为 Δ 的<b>某一个</b>上下文帧换成"同一个 prompt、换随机种子"生成的另一段视频里<b>同位置</b>的帧，看模型输出的速度场变了多少：</p>
+  <div class="eq"><span class="lbl">Eq.3 / Eq.4</span>
+    R(Δ, t) = 𝔼 ‖ v<sub>θ</sub>(x<sup>i</sup><sub>t</sub> | x<sup>&lt;i</sup><sub>0</sub>) − v<sub>θ</sub>(x<sup>i</sup><sub>t</sub> | δ<sub>Δ</sub>(x<sup>&lt;i</sup><sub>0</sub>)) ‖²
+    &nbsp;&nbsp;,&nbsp;&nbsp; R̃(Δ, t) = <span class="frac"><span>R(Δ, t)</span><span>R(1, t)</span></span>
+  </div>
+  <p>用"替换成另一段合理视频的帧"而不是"加噪声"，是为了让扰动留在数据分布内。这个选择是对的。统计量是 30 个 prompt × 20 个替代上下文的平均，测量对象是 <b>frame-wise 的 Causal Forcing</b>。</p>
+
+  <div class="fig" id="rfig">
+    <div class="ttl">R̃(Δ, t)：从论文 Fig. 2a 目测读数重绘</div>
+    <div class="sub2">数值是我从 PDF 放大到 220% 后逐点读出来的，误差约 ±15%，只用于看形状和数量级。悬停可看每个 Δ 的四个值</div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="视图">
+        <button type="button" id="rv-abs" aria-pressed="true">R̃（对数轴）</button>
+        <button type="button" id="rv-ratio" aria-pressed="false">t4 / t1 比值</button>
+      </div>
+      <div class="ctl small" id="rleg"></div>
+    </div>
+    <div class="svgbox wide"><svg id="rsvg" viewBox="0 0 940 340" role="img" aria-label="位置响应曲线"></svg></div>
+    <div class="cap"><b>图例颜色</b>是单色深浅：越突出 = 噪声越大的步（t1）。论文原图用的是蓝/橙/绿/红四色，排序相同。</div>
+  </div>
+
+  <h3>论文读出的三点，与我的补充</h3>
+  <div class="tblwrap"><table>
+    <thead><tr><th>论文的观察</th><th>图上能否看到</th><th>补充 / 保留意见</th></tr></thead>
+    <tbody>
+      <tr><td>① <b>单调排序</b>：各距离上曲线严格按 t 排序</td><td><span class="tag ok">成立</span></td><td>t4（噪声最小）在任何距离上都最高。</td></tr>
+      <tr><td>② <b>陡降</b>：几帧之内掉好几个数量级</td><td><span class="tag ok">成立</span></td><td>Δ=2 就只剩 0.08–0.10，Δ ≥ 9 以后在 1–5×10⁻³ 附近。</td></tr>
+      <tr><td>③ <b>步间差异集中在远处</b>：近处各步相似、远处分叉</td><td><span class="tag warn">方向成立，幅度小</span></td><td>t4/t1 从 Δ=2 的 ≈1.3× 增加到 Δ≥8 的 ≈2–2.7×，之后不再扩大。"分叉"只有 2–3 倍，而 TRB 在各步之间施加的差异高达 10²–10³ 倍（§4）。</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="call risk">
+    <div class="hd">这张图其实在削弱论文自己的故事</div>
+    <ul>
+      <li><b>驱逐边界上的帧本来就几乎没影响。</b>窗口 21 帧时，最老的历史帧离当前块约 Δ = 15–17。图上这里的 R̃ ≈ 1–4×10⁻³，也就是说，按论文自己的量法，基线模型对这些帧的依赖只有最近一帧的 0.1%–0.4%。如果驱逐前影响已经这么小，"驱逐拿走了模型依赖的上下文"就很难是 60 秒退化的主因。</li>
+      <li><b>尾部并不单调。</b>Δ ≈ 19–20 处曲线又抬头了。这正是视频最开头的几帧，也就是 sink 效应。Self-Forcing 论文专门讨论过 Wan 的第一个 latent 帧统计特性不同。这部分由显式的 global sink 负责，与 TRB 无关。</li>
+      <li><b>单帧替换会低估"一段历史"的集体作用。</b>相邻帧高度冗余：只换第 Δ 帧时，Δ±1 帧还保留着原内容，模型可以"绕过去"。要测历史整体有多重要，应该整段替换或整段删除。论文没做。</li>
+      <li><b>归一化让近处"相似"部分是人为的。</b>所有曲线在 Δ=1 处都被除成 1。"最近帧的响应在各步都接近最大，所以 recent 不衰减"这条理由因此有循环论证的成分。</li>
+      <li><b>测量对象与使用对象不一致。</b>R̃ 在 frame-wise Causal Forcing 上测，方法跑在 chunk-wise 上，免训练版又套在 Self-Forcing 上。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================================================== 4 -->
+<section id="s4">
+  <h2><span class="no">§4</span>TRB：Temporal Response Bias</h2>
+  <p class="lede">在 softmax 之前给每个 (query 块, key 帧) 对加一个只取决于时间距离和去噪步的数。</p>
+
+  <div class="eq"><span class="lbl">Eq.5</span>
+    SDPA(Q, K, V; B) = Softmax( <span class="frac"><span>QK<sup>⊤</sup></span><span>√d</span></span> + <span class="hl-his">B</span> ) V ,&nbsp;&nbsp; <span class="hl-his">B<sub>i,j</sub></span> = bias(Δ<sub>i,j</sub>, t<sub>denoise</sub>) ≤ 0
+  </div>
+  <p>三条设计原则：<b>(1)</b> 强度随去噪步变化，早期强、后期弱；<b>(2)</b> 随 Δ 快速衰减，对应 R̃ 的陡降；<b>(3)</b> 偏置非正，只压不放大。<span class="tag glb">global</span> 与 <span class="tag rec">recent</span> 不加偏置（B=0），只衰减 <span class="tag his">history</span>。</p>
+
+  <h3>三个候选族</h3>
+  <div class="eq">
+    <span class="lbl">Eq.6 线性</span>bias<sub>lin</sub> = − α(t) · (Δ − L<sub>recent</sub>)<br>
+    <span class="lbl">Eq.7 对数</span>bias<sub>log</sub> = − α(t) · log(1 + Δ − L<sub>recent</sub>)<br>
+    <span class="lbl">Eq.8 幂律 ★</span>bias<sub>pow</sub> = − <span class="hl-his">β</span> · Δ̃<sup>γ(t)</sup> ,&nbsp;&nbsp; Δ̃ = <span class="frac"><span>Δ − L<sub>recent</sub></span><span>L<sub>history</sub></span></span> ∈ (0, 1]
+  </div>
+  <div class="eq"><span class="lbl">Eq.9 步调度</span>
+    α(t) = α<sub>base</sub> − t/4 ,&nbsp;&nbsp; γ(t) = γ<sub>base</sub> · 2<sup>t</sup> &nbsp;&nbsp;(t ∈ {1,2,3,4})
+  </div>
+  <p>训练时 <span class="m">α</span><sub>base</sub> ~ U(0, 2)、<span class="m">γ</span><sub>base</sub> ~ U(0, 1)，<span class="m">β</span> = <span class="m">L</span><sub>history</sub>；推理时 <span class="m">γ</span><sub>base</sub> = 0.1。全文实验都用幂律。</p>
+
+  <div class="call plain">
+    <div class="hd">先把 Eq.8 读成人话</div>
+    <p>因为 Δ̃ 在 0 到 1 之间，<b>γ 越小，Δ̃<sup>γ</sup> 越接近 1，偏置越接近 −β，所有历史被一起压到底</b>；γ 越大，只有最远那一帧还被压（Δ̃=1 时恒等于 −β），近处的历史几乎不受影响。γ(t) = γ<sub>base</sub>·2<sup>t</sup> 随步数增大，所以<b>第 1 步压得最狠、第 4 步放得最松</b>。这符合原则 (1)。</p>
+    <p>还有一个没写出来的推论：<b>最远的历史帧在所有步上都被压到同一个值 e<sup>−β</sup></b>。各步曲线在远端强制汇合。</p>
+  </div>
+
+  <div class="fig" id="xfig">
+    <div class="ttl">偏置实验台：TRB 真正对历史做了什么</div>
+    <div class="sub2">推理时 Δ 按<b>块</b>计算：4 个历史块对应 Δ̃ = 0.25 / 0.50 / 0.75 / 1.00。默认值是论文的推理设置</div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="衰减族">
+        <button type="button" data-fam="pow" aria-pressed="true">幂律 Eq.8</button>
+        <button type="button" data-fam="lin" aria-pressed="false">线性 Eq.6</button>
+        <button type="button" data-fam="log" aria-pressed="false">对数 Eq.7</button>
+      </div>
+      <div class="ctl" id="c-gam"><label for="xg">γ_base</label><input type="range" id="xg" min="-2" max="0" step="0.01" value="-1"><output id="xg-o">0.100</output></div>
+      <div class="ctl" id="c-alp" hidden><label for="xa">α_base</label><input type="range" id="xa" min="0" max="2" step="0.01" value="1"><output id="xa-o">1.00</output></div>
+      <div class="seg" role="group" aria-label="单位" id="c-unit">
+        <button type="button" data-unit="f" aria-pressed="true">按帧：β = 12</button>
+        <button type="button" data-unit="c" aria-pressed="false">按块：β = 4</button>
+      </div>
+    </div>
+    <div class="two">
+      <div>
+        <div class="small dim" style="margin-bottom:6px">注意力乘子 w = e<sup>B</sup>（颜色按对数深浅）</div>
+        <div class="svgbox"><div class="hm" id="hm"></div></div>
+        <div class="small dim" style="margin:14px 0 2px">历史块能分到的注意力份额（假设所有 key 的内容 logit 相同；无偏置时 = 12/21 = 57%）</div>
+        <div id="mass"></div>
+      </div>
+      <div>
+        <div class="small dim" style="margin-bottom:6px">log₁₀ w 随历史位置的变化（连续曲线 + 4 个块的实际取值）</div>
+        <div class="svgbox"><svg id="xsvg" viewBox="0 0 440 260" role="img" aria-label="偏置曲线"></svg></div>
+      </div>
+    </div>
+    <div class="readout" id="xread"></div>
+    <div class="fig" style="margin:16px 0 0; box-shadow:none; background:var(--surf2)">
+      <div class="ttl" style="font-size:14.5px">"两轴结构"对得上吗？比较 t4 相对 t1 的倍数</div>
+      <div class="sub2">R̃ 取对应帧距 Δ = 6 / 9 / 12 / 15 处的读数。条形长度按对数刻度</div>
+      <div id="fan"></div>
+    </div>
+  </div>
+
+  <div class="call risk">
+    <div class="hd">从实验台能直接读出的四件事</div>
+    <ul>
+      <li><b>按帧、β=12、γ<sub>base</sub>=0.1（论文推理设置）时，第 1 步四个历史块的乘子只有 1.1×10⁻⁴ 到 6×10⁻⁶</b>，历史份额从 57% 降到约 0.01%。也就是说，<b>早期去噪步里 TRB 就等于"截断到 sink+recent+current 共 9 帧"</b>，正好是 Table 4 里被论文批评的那个截断基线的配置。只有到第 3–4 步，最近那个历史块才恢复到 2%–27%。</li>
+      <li><b>Table 6 的文字解释与公式方向相反。</b>论文说"γ<sub>base</sub> 小则压不够，大则过度压制历史"。按 Eq.8，情况恰好相反：γ<sub>base</sub>=0.01 时所有步所有历史块都是约 10⁻⁵（几乎全截断），γ<sub>base</sub>=1 时第 4 步前三个历史块都 ≥ 0.89（几乎不压）。二者必有一个写错，而没有代码可查。</li>
+      <li><b>幂律族与 R̃ 的"两轴结构"方向相反。</b>R̃ 的 t4/t1 倍数随距离<b>变大</b>（近处重合、远处分叉），幂律 TRB 的倍数随距离<b>变小</b>，到最远块强制为 1×。切到线性或对数就会发现，它们反而是"近处重合、远处分叉"。</li>
+      <li><b>α 在幂律里根本不出现。</b>论文称"α<sub>base</sub> 与 γ<sub>base</sub> 是仅有的两个自由参数"，训练时也采样 α<sub>base</sub> ~ U(0,2)，但 Eq.8 只含 β 和 γ。在线性/对数族里，α(4) = α<sub>base</sub> − 1 有 50% 的概率 ≤ 0，会违反原则 (3)。切到线性族、把 α<sub>base</sub> 拖到 1 以下就能看到。</li>
+    </ul>
+  </div>
+
+  <div class="call plain">
+    <div class="hd">单位歧义：β 到底是 12 还是 4？</div>
+    <p>附录说推理时"Δ 按块计算"，但 Eq.8 里的 <span class="m">L</span><sub>recent</sub> = 3、<span class="m">L</span><sub>history</sub> 都以<b>帧</b>为单位给出，<span class="m">β</span> = <span class="m">L</span><sub>history</sub>。按帧读，β = 12，最远历史乘子为 e<sup>−12</sup> ≈ 6×10⁻⁶；按块读，β = 4，最远乘子为 0.018。两种读法差 2–4 个数量级，而 Fig. 2d 画出来的远端是 10⁻³（对应 β ≈ 6.9），与两者都不一致。好在 Δ̃ 在两种读法下相同，都是 0.25 / 0.5 / 0.75 / 1。</p>
+  </div>
+</section>
+
+<!-- ===================================================== 5 -->
+<section id="s5">
+  <h2><span class="no">§5</span>BAR：把偏置搬到 softmax 外面</h2>
+  <p class="lede">FlashAttention 把 softmax 融进了 kernel，不给你插手 logit 的机会。BAR 的办法是：既然偏置只看位置、不看内容，就把它变成乘在 V 上的权重。</p>
+
+  <ol class="steps">
+    <li>对一个 query 块，偏置只取决于 key 的位置：<span class="m">B</span><sub>i,j</sub> 与 <span class="m">q</span><sub>i</sub>, <span class="m">k</span><sub>j</sub> 的内容无关。记 <span class="hl-bar m">w<sub>j</sub> = e<sup>B<sub>i,j</sub></sup></span> ∈ (0, 1]。</li>
+    <li>展开 softmax：<span class="m">o</span><sub>i</sub> = Σ<sub>j</sub> e<sup>s<sub>j</sub>+B<sub>j</sub></sup> v<sub>j</sub> / Σ<sub>j</sub> e<sup>s<sub>j</sub>+B<sub>j</sub></sup> = Σ<sub>j</sub> e<sup>s<sub>j</sub></sup> <span class="hl-bar">w<sub>j</sub></span> v<sub>j</sub> / Σ<sub>j</sub> e<sup>s<sub>j</sub></sup> <span class="hl-bar">w<sub>j</sub></span>，其中 s<sub>j</sub> = q<sub>i</sub>k<sub>j</sub><sup>⊤</sup>/√d。</li>
+    <li>构造增广的 value：<span class="hl-bar m">ṽ<sub>j</sub> = w<sub>j</sub> · [v<sub>j</sub> ; 1]</span> ∈ ℝ<sup>d+1</sup>，然后做一次<b>不带偏置</b>的标准注意力：<span class="m">õ</span><sub>i</sub> = Softmax(q<sub>i</sub>K<sup>⊤</sup>/√d) Ṽ。</li>
+    <li>õ 的前 d 维正比于分子，最后一维正比于分母，公共的 softmax 归一化常数约掉：<span class="m">o</span><sub>i</sub> = õ<sub>i</sub>[:d] / õ<sub>i</sub>[d]。精确，没有近似。</li>
+  </ol>
+
+  <div class="fig" id="bfig">
+    <div class="ttl">亲手验证：直接加偏置 vs BAR</div>
+    <div class="sub2">8 个 key（1 个 sink、4 个历史、2 个最近、1 个当前），d = 4。拖动偏置强度，两种算法的输出始终一致（差异是浮点舍入量级）</div>
+    <div class="controls">
+      <div class="ctl"><label for="bs">偏置强度 β</label><input type="range" id="bs" min="0" max="14" step="0.1" value="6"><output id="bs-o">6.0</output></div>
+      <button type="button" class="btn" id="bre">重新抽样 q / K / V</button>
+    </div>
+    <div class="tblwrap" style="margin:0"><table id="btab"></table></div>
+    <div class="readout" id="bread"></div>
+  </div>
+
+  <h3>但它既不是唯一的精确写法，也不严格"零开销"</h3>
+  <p>我用 fp64 对三种写法做了随机测试，与直接实现的最大误差：BAR 4.4×10⁻¹⁶，key 增广 2.2×10⁻¹⁶，按偏置分组 + LSE 合并 1.5×10⁻¹³。三者都精确。</p>
+  <div class="tblwrap"><table>
+    <thead><tr><th>写法</th><th>怎么做</th><th>精确？</th><th>代价</th><th>论文是否比较</th></tr></thead>
+    <tbody>
+      <tr><td><b>直接加偏置</b><span class="note">FlexAttention score_mod</span></td><td>在 kernel 里对每个 logit 加 B</td><td><span class="tag ok">是</span></td><td>FlexAttention 论文自报在 ALiBi 等变体上是 FA2 的 0.68–1.43×</td><td>是：70.34 ms（设置未说明）</td></tr>
+      <tr class="me"><td><b>BAR</b>（本文）</td><td>V 乘 w 并拼一列 w，FA 之后做一次除法</td><td><span class="tag ok">是</span></td><td>V 的 head dim 128→129。常见 FA 接口要求 Q/K/V 的 head dim 相同且按 8 对齐，通常要补零到更大的 head-dim 模板。</td><td>是：6.06 ms</td></tr>
+      <tr><td><b>key 增广</b></td><td>q' = [q; 1]，k' = [k; √d·B<sub>j</sub>]，于是 q'k'<sup>⊤</sup>/√d = qk<sup>⊤</sup>/√d + B<sub>j</sub></td><td><span class="tag ok">是</span></td><td>与 BAR 同样多一维，无需事后除法</td><td>否</td></tr>
+      <tr><td><b>分组 + LSE 合并</b></td><td>按偏置取值把 key 分组，各跑一次 FA 并取 logsumexp，再按 e<sup>lse+B</sup> 加权合并</td><td><span class="tag ok">是</span></td><td>不改 head dim；块级偏置下只有 5 组。多几次 kernel launch</td><td>否</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="call risk">
+    <div class="hd">BAR 相关的三处保留</div>
+    <ul>
+      <li><b>"零推理开销"没有被测量。</b>Table 1 只对比了 FlexAttention+bias 和 BAR-FlashAttention 两个数，没有给"不加偏置的 FlashAttention"的耗时，也没说明序列长度、硬件、FlexAttention 是否经过 <code>torch.compile</code>。11.76× 的差距与 FlexAttention 论文自报的量级（0.68–1.43× FA2）相去甚远，更像是未编译或非最优用法。</li>
+      <li><b>"一次标准 FlashAttention 调用"有前提。</b>要让一次调用里所有 query 共享同一个 Ṽ，同一次调用里的所有 query 必须看到同一行 w。这只在"Δ 按块计算、一次只算一个 query 块"时成立。Eq.5 写的是逐元素的 B<sub>i,j</sub>，按帧计算时每个 query 帧要一个自己的 Ṽ。</li>
+      <li><b>每个去噪步都要重算 Ṽ</b>，因为 w 依赖 t。代价是 O(Nd)，确实很小，但 KV cache 里得存原始 V。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================================================== 6 -->
+<section id="s6">
+  <h2><span class="no">§6</span>训练与推理配置</h2>
+  <p class="lede">把散落在正文和附录里的数字集中到一处，并与被比较的训练版基线对齐。</p>
+  <div class="tblwrap"><table>
+    <thead><tr><th>项</th><th>Recency Forcing（训练版）</th><th>Causal Forcing 官方 DMD 阶段</th></tr></thead>
+    <tbody>
+      <tr><td>底座</td><td>Wan2.1-T2V-1.3B，832×480，16 fps，chunk = 3 latent</td><td>同左</td></tr>
+      <tr><td>初始化</td><td>Causal Forcing 的因果 ODE checkpoint</td><td>同左</td></tr>
+      <tr><td>DMD 训练</td><td><b>3,500 步 × batch 4</b>，H100 ×4，约 12 h</td><td><b>750 步 × batch 64</b>，lr 2e-6，β=(0, 0.999)</td></tr>
+      <tr><td>样本数</td><td class="tnum">≈ 14,000</td><td class="tnum">≈ 48,000</td></tr>
+      <tr><td>数据</td><td>过滤并经 LLM 扩写的 VidProM prompt，5 s 片段</td><td>VidProM（同 Self-Forcing 协议）</td></tr>
+      <tr><td>注意力</td><td>全部自注意力层换成 TRB（BAR）；α<sub>base</sub>~U(0,2)、γ<sub>base</sub>~U(0,1)、β=L<sub>history</sub></td><td>标准因果注意力</td></tr>
+      <tr><td>推理窗口</td><td>3 sink + 12 history + 3 recent + 3 current = 21；相对 RoPE；γ<sub>base</sub>=0.1</td><td>论文基线行"也加上 sink 与相对 RoPE"</td></tr>
+      <tr><td>免训练版</td><td>直接套在官方 chunk-wise Self-Forcing 上；参数"直接由 R̃ 设定"，<b>数值未报告</b></td><td>—</td></tr>
+    </tbody>
+  </table></div>
+  <div class="call risk">
+    <div class="hd">缺了最关键的那一行对照</div>
+    <p>训练版与"Causal Forcing 基线"之间同时变了三件事：<b>(a)</b> 加了 TRB；<b>(b)</b> 用完全不同的步数、batch 和硬件把 DMD 重跑了一遍；<b>(c)</b> 训练时 γ<sub>base</sub> 在 U(0,1) 里随机采样，相当于在"近乎全截断"和"几乎不压"之间做随机的上下文增广。没有"同配方重跑 DMD、不加 TRB"，也没有"同配方、随机硬截断"，所以 Table 3/4 的提升无法归到 TRB 的形状上。</p>
+  </div>
+
+  <h3>与同类长视频方法的窗口设计对照</h3>
+  <div class="tblwrap"><table>
+    <thead><tr><th>方法</th><th>sink</th><th>局部窗口</th><th>训练时是否模拟推理窗口</th><th>对历史的处理</th></tr></thead>
+    <tbody>
+      <tr><td>Self-Forcing</td><td>无（实验过，称无效）</td><td>滚动 21</td><td><b>是</b>：训练时让最后一块看不到第一块</td><td>硬 FIFO 驱逐</td></tr>
+      <tr><td>Rolling Forcing</td><td>3 帧 + 动态 RoPE</td><td>3 temporal + 15 联合去噪</td><td>是（27 帧窗口训练）</td><td>硬窗口</td></tr>
+      <tr><td>LongLive</td><td>3 帧（frame sink）</td><td>9</td><td><b>是</b>：60 s 流式长调优，用同一短窗口</td><td>硬窗口</td></tr>
+      <tr><td>Deep Forcing</td><td>10 帧（deep sink）+ RoPE 对齐</td><td>压缩到 16</td><td>免训练</td><td>按注意力重要性选 Top-C</td></tr>
+      <tr class="me"><td><b>Recency Forcing</b></td><td>3 帧 + 相对 RoPE</td><td>12 history + 3 recent</td><td>训练版是（5 s 片段）</td><td><b>软衰减，随去噪步变化</b></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ===================================================== 7 -->
+<section id="s7">
+  <h2><span class="no">§7</span>实验：数字都对得上，但结论要打折</h2>
+  <p class="lede">先说好消息：我复算了论文里所有能复算的数，全部自洽，说明表格没有抄错或编错。问题出在"怎么读这些数"。</p>
+
+  <h3>7.1 VBench-Long 60 s（Table 3）：SOTA 从哪来</h3>
+  <p>VBench 的 Quality 分是 7 个维度的加权平均：6 个维度按官方常数做 min-max 归一化、权重 1，<b>dynamic degree 权重 0.5</b>，总权重 6.5。我用官方常数逐行复算了 Table 3 的 8 行，与论文报告值的误差都 ≤ 0.01。所以可以放心地做下面这件事：把 dynamic degree 拿掉，看其余 6 维的平均。</p>
+
+  <div class="fig" id="qfig">
+    <div class="ttl">Table 3 重排：切换指标看名次变化</div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="指标">
+        <button type="button" data-q="q" aria-pressed="true">论文的 Quality</button>
+        <button type="button" data-q="nd" aria-pressed="false">扣除 DD 的 6 维均值</button>
+        <button type="button" data-q="dd" aria-pressed="false">Dynamic Degree</button>
+      </div>
+    </div>
+    <div class="svgbox wide"><svg id="qsvg" viewBox="0 0 940 360" role="img" aria-label="Table 3 重排"></svg></div>
+    <div class="cap"><b>扣除 DD 的 6 维均值</b> = (6.5 × Quality − 0.5 × DD) / 6，是 Quality 公式的精确变形，不是近似。悬停查看每个方法的 7 个维度。</div>
+  </div>
+
+  <div class="call risk">
+    <div class="hd">读数</div>
+    <ul>
+      <li><b>训练版</b>：Quality 84.02 排第一；扣除 DD 后是 84.73，<b>落后于 Rolling Forcing（85.47）和 LongLive（85.24）</b>，排第 3。DD 为它贡献了 5.81 分，是所有方法里最多的。</li>
+      <li><b>免训练版</b>：三个免训练方法的 DD 几乎相同（56.01 / 56.22 / 56.27），扣除 DD 后本文仍排第一（84.83，对比 84.32 / 84.47），但领先只有 0.36–0.51，全文没有方差或多种子。</li>
+      <li><b>标准不一致</b>：论文在 Table 4 把截断带来的高 DD（88.58）解读为"不自然的运动和场景跳变"，在 Table 3 却把自己的最高 DD（75.48）当作主要卖点。Causal Forcing 论文也明确提醒过：DD 会被崩坏"病态地抬高"。</li>
+    </ul>
+  </div>
+
+  <h3>7.2 消融（Table 4–7，50 prompt 验证集）：每个默认值都靠 DD 胜出</h3>
+  <div class="fig" id="afig">
+    <div class="controls">
+      <div class="seg" role="group" aria-label="消融表">
+        <button type="button" data-a="t4" aria-pressed="true">T4 截断 vs 衰减</button>
+        <button type="button" data-a="t5" aria-pressed="false">T5 衰减族</button>
+        <button type="button" data-a="t6" aria-pressed="false">T6 γ_base</button>
+        <button type="button" data-a="t7" aria-pressed="false">T7 L_recent</button>
+      </div>
+    </div>
+    <div class="tblwrap" style="margin:0"><table id="atab"></table></div>
+    <div class="readout" id="aread"></div>
+  </div>
+
+  <h3>7.3 短视频 VBench（Table 2）：跨论文拼贴</h3>
+  <p>Table 2 的 9 个基线数字，我在原论文里一一找到了出处。它们来自不同的评测协议：</p>
+  <div class="tblwrap"><table>
+    <thead><tr><th>行</th><th class="num">Total / Quality / Semantic</th><th>出处</th><th>协议</th></tr></thead>
+    <tbody>
+      <tr><td>SkyReels-V2 · MAGI-1 · NOVA · Pyramid Flow · CausVid · Self Forcing</td><td class="num">原样</td><td>Self-Forcing 论文 Table 1</td><td>VBench 标准 prompt，<b>经 Qwen2.5-7B 改写</b></td></tr>
+      <tr><td>LongLive</td><td class="num">84.87 / 86.97 / 76.47</td><td>LongLive Table 1</td><td>VBench 标准 prompt</td></tr>
+      <tr><td>Rolling Forcing</td><td class="num">81.22 / 84.08 / 69.78</td><td>Rolling Forcing 附录 Table 3/4</td><td>全部 946 个 prompt，<b>不改写</b></td></tr>
+      <tr><td>Causal Forcing</td><td class="num">84.04 / 84.59 / 81.84</td><td>Causal Forcing Table 1</td><td>VBench 标准</td></tr>
+      <tr class="me"><td>Recency Forcing</td><td class="num">85.08 / 86.20 / 80.59</td><td>本文</td><td>未说明（正文只提"200 个 MovieGen prompt"，但这组 prompt 算不出 Semantic 分）</td></tr>
+    </tbody>
+  </table></div>
+  <div class="call risk">
+    <div class="hd">跨协议噪声大于领先幅度</div>
+    <ul>
+      <li>本文 Total 85.08 对 LongLive 84.87，<b>领先 0.21</b>；Quality 86.20 其实低于 LongLive 的 86.97，Semantic 80.59 低于 Causal Forcing 与 Self Forcing。</li>
+      <li>同一个 Self Forcing 模型，在 Causal Forcing 论文里复测为 <b>83.74</b>，原文是 <b>84.31</b>，<b>相差 0.57</b>，比本文的领先幅度还大。</li>
+      <li>Rolling Forcing 的 Semantic 69.78 低，主要是因为<b>没改写 prompt</b>：Rolling Forcing 在同一不改写的协议下测 Self Forcing，也只有 69.17，而改写后是 81.28。</li>
+    </ul>
+  </div>
+
+  <h3>7.4 用户研究（Fig. 6，23 人 × 20 prompt，≈1,620 票）</h3>
+  <div class="fig" id="ufig">
+    <div class="sub2">条形为 Recency Forcing 的胜率；细线为按每格约 135 票估算的 95% 二项置信区间（我的估算，论文未给）</div>
+    <div class="svgbox wide"><svg id="usvg" viewBox="0 0 940 364" role="img" aria-label="用户研究胜率"></svg></div>
+  </div>
+  <p>论文说"最大优势在运动动态"。这只对 LongLive 成立（67.2%）。对 Self Forcing，最大优势是整体质量（98.5%）；对 Rolling Forcing，最大优势是主体一致性（82.4%），运动动态反而最小（75.0%）。图注把"运动动态优势大"解释为"身份保持更好"，逻辑上是跳跃的。另外，附录把用户研究里的 Rolling Forcing 引成了 [25]，而 [25] 是 Rolling Sink。</p>
+
+  <h3>7.5 局限性（论文自己写的）</h3>
+  <p>附录 E 给出了 5 分钟视频的失败例：房柱颜色漂移，鸟消失后以不同外观重新出现。这很诚实。不过正文说"超过 4–5 分钟后退化"，图注却说房柱"约 2 分钟后"开始漂移，两处说法不一致。另外，没有长期记忆的方法（窗口 21 帧 ≈ 5 秒）本来就不会记得离开窗口的物体，"鸟重新出现时外观不一致"是结构上的必然，而非偶发。</p>
+</section>
+
+<!-- ===================================================== 8 -->
+<section id="s8">
+  <h2><span class="no">§8</span>存疑清单</h2>
+  <p class="lede">按严重程度排序。点开看依据；每一条都尽量给出可核对的数字或原文位置。</p>
+  <div class="dfilter" role="group" aria-label="按严重程度筛选">
+    <div class="seg">
+      <button type="button" data-sev="all" aria-pressed="true">全部 20</button>
+      <button type="button" data-sev="h" aria-pressed="false">高 5</button>
+      <button type="button" data-sev="m" aria-pressed="false">中 9</button>
+      <button type="button" data-sev="l" aria-pressed="false">低 6</button>
+    </div>
+  </div>
+  <div id="doubts">
+
+  <details class="doubt h"><summary><span class="sev">高</span><span class="t"><span class="dim tnum">1.</span> SOTA 质量分完全来自 dynamic degree</span></summary><div class="body">
+    <p>用 VBench 官方归一化常数逐行复算 Table 3，8 行全部吻合（误差 ≤ 0.01）。扣除 DD 后，训练版 84.73 &lt; LongLive 85.24 &lt; Rolling Forcing 85.47。训练版的领先完全来自 DD（贡献 5.81 分，Rolling Forcing 是 2.67）。</p>
+    <p class="ev">依据：Table 3；VBench 归一化常数；§7.1 可交互复算。</p></div></details>
+
+  <details class="doubt h"><summary><span class="sev">高</span><span class="t"><span class="dim tnum">2.</span> 消融里的每个默认选择都只在 DD 上胜出，且文字与表格矛盾</span></summary><div class="body">
+    <p>扣除 DD 后：线性 84.69 &gt; 幂律 84.39；γ<sub>base</sub> 0.01（84.77）&gt; 0.1（84.39）；L<sub>recent</sub> = 0（86.29）与 6（84.90）都 &gt; 3（84.39）。Table 4 中截断的 Quality 81.10 与 Imaging 66.40 都高于基线的 80.56 / 65.09，正文却说截断"harming the overall quality"。</p>
+    <p class="ev">依据：Table 4–7；§7.2。</p></div></details>
+
+  <details class="doubt h"><summary><span class="sev">高</span><span class="t"><span class="dim tnum">3.</span> Table 6 的解释与 Eq.8 方向相反</span></summary><div class="body">
+    <p>Δ̃ ∈ (0,1]，γ 越小 Δ̃<sup>γ</sup> 越接近 1，偏置越接近 −β，压制最强。论文却写"small values insufficiently suppress distant frames, while large values over-suppress history"。要么公式、要么解释写反了。没有代码，读者无法判断实际实现的是哪一个，这直接影响对 γ<sub>base</sub>=0.1 这一默认值的理解。</p>
+    <p class="ev">依据：Eq.8、§4.2 "Effect of decay strength"；§4 实验台。</p></div></details>
+
+  <details class="doubt h"><summary><span class="sev">高</span><span class="t"><span class="dim tnum">4.</span> 选中的幂律族与 R̃ 的"两轴结构"相反，"derived directly from R"没有拟合过程</span></summary><div class="body">
+    <p>R̃ 的步间差异随距离增大（t4/t1：1.3× → 约 2.5×）。幂律在远端强制汇合（Δ̃=1 时都等于 −β），差异集中在近端，β=12 时近端 t4/t1 ≈ 2,400×。线性和对数族反而是"近处重合、远处分叉"。全文没有任何从 R̃ 拟合 α/β/γ 的过程，免训练版的参数值也未报告。步间差异的量级也对不上：R̃ 是 2–3 倍，TRB 是 10²–10³ 倍。</p>
+    <p class="ev">依据：Fig. 2a/2d；Eq.8–9；§4"两轴结构"对照。</p></div></details>
+
+  <details class="doubt h"><summary><span class="sev">高</span><span class="t"><span class="dim tnum">5.</span> 训练版缺少"同配方、不加 TRB"的对照</span></summary><div class="body">
+    <p>训练版是在 4×H100 上以 3,500 步 × batch 4 重跑 DMD；Causal Forcing 官方是 750 步 × batch 64。基线用的是官方权重。此外，训练时 γ<sub>base</sub>~U(0,1) 的随机采样本身就是一种上下文增广。Table 3/4 的提升目前无法归因到 TRB 的形状。</p>
+    <p class="ev">依据：附录 B；Causal Forcing 附录 D。</p></div></details>
+
+  <details class="doubt m"><summary><span class="sev">中</span><span class="t"><span class="dim tnum">6.</span> "KV eviction mismatch 没有前人处理"不成立</span></summary><div class="body">
+    <p>Self-Forcing §3.4 明确描述了"模型习惯了总能看到第一帧，滚动时第一帧被驱逐后泛化失败"，并在训练时限制注意力窗口，让最后一块看不到第一块。LongLive 用与推理一致的短窗口 + frame sink 做"train-long-test-long"。本文把这两种都归为"截断"。它说截断损害运动一致性，证据只有 Fig. 3 一个例子，外加与正文相矛盾的 Table 4。</p>
+    <p class="ev">依据：Self-Forcing §3.4；LongLive §3.3。</p></div></details>
+
+  <details class="doubt m"><summary><span class="sev">中</span><span class="t"><span class="dim tnum">7.</span> 按论文自己的 R̃，驱逐边界上的帧本来就几乎没影响</span></summary><div class="body">
+    <p>最老的历史帧在 Δ ≈ 15–17，R̃ ≈ 1–4×10⁻³。按论文自己的量法，驱逐本来就几乎"无损"，那么把驱逐变得更无损，不能解释 60 秒的大幅改善。更可能起作用的是降低对漂移历史的依赖、随机上下文增广和重训。论文引入了 R 这个诊断工具，却没有在 TRB 模型上重测 R，也没有直接测"丢掉最老块前后输出变化多少"。</p>
+    <p class="ev">依据：Fig. 2a；§3。</p></div></details>
+
+  <details class="doubt m"><summary><span class="sev">中</span><span class="t"><span class="dim tnum">8.</span> 单帧替换扰动会低估历史的集体作用</span></summary><div class="body">
+    <p>相邻帧高度冗余，只换一帧时模型可以从邻帧"补"回来。陡降可能部分反映的是冗余，而不是"不用"。应补做整段历史替换或删除的成组消融。</p>
+    <p class="ev">依据：Eq.3 的定义。</p></div></details>
+
+  <details class="doubt m"><summary><span class="sev">中</span><span class="t"><span class="dim tnum">9.</span> β 与 Δ 的单位不明，读法不同效果差 2–4 个数量级</span></summary><div class="body">
+    <p>附录说推理时"Δ 按块计算"，但 L<sub>recent</sub>=3、β=L<sub>history</sub> 以帧给出。按帧 β=12，最远乘子 6×10⁻⁶；按块 β=4，为 0.018。Fig. 2d 的远端是 10⁻³，与两者都不符。</p>
+    <p class="ev">依据：Eq.8、附录 B、Fig. 2d。</p></div></details>
+
+  <details class="doubt m"><summary><span class="sev">中</span><span class="t"><span class="dim tnum">10.</span> α 在幂律中不出现；若出现，α(4) 有一半概率为负</span></summary><div class="body">
+    <p>论文称"α<sub>base</sub> 和 γ<sub>base</sub> 是仅有的自由参数"，训练时也采样 α<sub>base</sub>~U(0,2)，但所用的 Eq.8 只有 β、γ。在线性/对数族中，α(t)=α<sub>base</sub>−t/4 在 t=4 时 ≤ 0 的概率为 50%（t=3 时为 37.5%），会违背"非正偏置"原则。</p>
+    <p class="ev">依据：Eq.6–9、附录 B。</p></div></details>
+
+  <details class="doubt m"><summary><span class="sev">中</span><span class="t"><span class="dim tnum">11.</span> BAR 的"零开销"未测量，11.76× 的对照设置不明</span></summary><div class="body">
+    <p>Table 1 没有"不加偏置的 FA"这个基线，也没给序列长度、硬件、是否编译。FlexAttention 论文自报在 ALiBi 等变体上是 FA2 的 0.68–1.43×。另外 V 从 128 维变成 129 维，常见 FA 接口需要 Q/K/V 同 head dim 且按 8 对齐，一般会落到更大的 head-dim 模板上。</p>
+    <p class="ev">依据：Table 1；FlexAttention 论文 §6.2。</p></div></details>
+
+  <details class="doubt m"><summary><span class="sev">中</span><span class="t"><span class="dim tnum">12.</span> BAR 只和最慢的方案比，而且其"一次调用"有前提</span></summary><div class="body">
+    <p>key 增广、分组 + LSE 合并同样精确（我实测误差 ≤ 1.5×10⁻¹³）。后者不改 head dim。BAR 要求同一次调用内所有 query 共享同一行 w，只在块级 Δ 下成立。</p>
+    <p class="ev">依据：§5 验证。</p></div></details>
+
+  <details class="doubt m"><summary><span class="sev">中</span><span class="t"><span class="dim tnum">13.</span> Table 2 是跨协议拼贴，差距小于协议噪声</span></summary><div class="body">
+    <p>基线数字分别来自 Self-Forcing（改写 prompt）、LongLive、Rolling Forcing（不改写、946 prompt）、Causal Forcing 四篇论文。同一个 Self Forcing 在两篇论文里相差 0.57，而本文对 LongLive 的领先只有 0.21。</p>
+    <p class="ev">依据：§7.3。</p></div></details>
+
+  <details class="doubt m"><summary><span class="sev">中</span><span class="t"><span class="dim tnum">14.</span> 免训练版的增益可能主要来自共享的 sink + 相对 RoPE；并且漏引 ALiBi / KERPLE</span></summary><div class="body">
+    <p>三个免训练方法 DD 几乎相同（56.0–56.3），缺"Self-Forcing + sink + 相对 RoPE、不加 TRB"这一行；附录只说给 Causal Forcing 基线加了这两样。另外，Eq.6–8 分别就是 LLM 长度外推里的 ALiBi（线性）和 KERPLE 的对数、幂律变体（−r₁·log(1+r₂|m−n|)、−r₁|m−n|<sup>r₂</sup>），均未引用。"none of the three prior families modifies attention weighting"的说法过强：LongLive 的短窗口、Deep Forcing 的 Top-C 保留，本身都在改注意力能看到什么。</p>
+    <p class="ev">依据：Table 3、附录 B；KERPLE（NeurIPS 2022）。</p></div></details>
+
+  <details class="doubt l"><summary><span class="sev">低</span><span class="t"><span class="dim tnum">15.</span> Table 7 的解释与数据不符，且无方差</span></summary><div class="body">
+    <p>"Larger L<sub>recent</sub> improves motion stability with diminishing returns"，但 L<sub>recent</sub>=6 的 Quality（82.14）和 Dynamic（49.03）都比 3 差。DD 从 40.9 到 81.6 再到 49.0 大幅非单调，说明 50 prompt 验证集的方差很大，而全文没有误差棒。另外，L<sub>attention</sub> 固定时增大 L<sub>recent</sub> 会同时缩小 L<sub>history</sub> 和 β，两个变量被混在一起。</p></div></details>
+
+  <details class="doubt l"><summary><span class="sev">低</span><span class="t"><span class="dim tnum">16.</span> 用户研究的"最大优势在运动动态"只对 LongLive 成立，引用编号错</span></summary><div class="body">
+    <p>见 §7.4。对 LongLive 颜色一致性的 59.7%，按每格约 135 票估算，95% CI 下界约为 51%。附录把 Rolling Forcing 引成了 [25]（Rolling Sink）。</p></div></details>
+
+  <details class="doubt l"><summary><span class="sev">低</span><span class="t"><span class="dim tnum">17.</span> 评测描述自相矛盾</span></summary><div class="body">
+    <p>§4 写"All videos are 60 seconds"，Table 2 标题写"short (5-second)"；VBench 的 Semantic 分需要 VBench 自带的维度 prompt，而正文说用的是 200 个 MovieGen prompt。</p></div></details>
+
+  <details class="doubt l"><summary><span class="sev">低</span><span class="t"><span class="dim tnum">18.</span> 局限性的时间点前后不一</span></summary><div class="body">
+    <p>正文说"超过 4–5 分钟后退化"，Fig. 8 图注说房柱"约 2 分钟后"开始漂移。</p></div></details>
+
+  <details class="doubt l"><summary><span class="sev">低</span><span class="t"><span class="dim tnum">19.</span> 参考文献错误</span></summary><div class="body">
+    <p>[13] 与 [14] 是同一篇（Self-Resampling）；[24] "PyramidFlow" 引到了一篇 2023 CVPR 的缺陷定位论文，不是视频生成的 Pyramidal Flow Matching；[9] LoL 的作者列表与 [8] Self-Forcing++ 完全相同，疑为复制粘贴；附录 B 有 t<sub>dempose</sub> 笔误。</p></div></details>
+
+  <details class="doubt l"><summary><span class="sev">低</span><span class="t"><span class="dim tnum">20.</span> 无代码、项目页未给链接</span></summary><div class="body">
+    <p>附录 A 提到"Project Web Page"，但论文和 arXiv 页面都没给地址。Δ 单位、β、免训练参数、BAR 计时设置这些关键细节都无从核对。</p></div></details>
+
+  </div>
+</section>
+
+<!-- ===================================================== 9 -->
+<section id="s9">
+  <h2><span class="no">§9</span>公道话、定位与值得补的实验</h2>
+
+  <div class="call ok">
+    <div class="hd">做对的地方</div>
+    <ul>
+      <li><b>数字自洽</b>：Table 2 的 Total 都等于 (4·Quality + Semantic)/5；Table 3 的 Quality 都能用 VBench 常数精确复算；用户研究的百分比与"≈1,620 票"也对得上。</li>
+      <li><b>R(Δ, t) 是个好问题</b>：把"模型用了多少历史"变成可测的量，并且注意到它随去噪步变化。用"换成另一段合理视频的帧"来扰动，避免了加噪声带来的分布外问题。</li>
+      <li><b>BAR 数学上精确</b>，实现简单，不需要改 kernel。对部署在只支持标准 FA 的硬件（论文作者来自 Qualcomm）上很实用。</li>
+      <li><b>便宜</b>：免训练即插即用；训练版只要 4 张 H100 跑 12 小时。</li>
+      <li><b>局限性写得诚实</b>，给了 5 分钟的失败例。</li>
+    </ul>
+  </div>
+
+  <h3>定位</h3>
+  <p>2026 年这条线大致分三类：<b>做记忆</b>（MemRoPE / MosaicMem / AlayaVista 等），<b>做蒸馏效率</b>（Causal Forcing / AnyFlow / CrossDistill / DSA），<b>做"5 秒训练、推得更长"的外推</b>（Rolling Forcing / LongLive / Deep Forcing / ∞-RoPE / Rolling Sink / Relax Forcing）。Recency Forcing 属于第三类，而且是其中最轻的一种：<b>一个随去噪步变化的软窗口正则</b>。它与记忆类方法的方向正好相反。它的主张是"少依赖历史"，所以窗口外的东西注定会被忘掉，Fig. 8 里鸟的例子就是这样。对交互式世界模型来说，这意味着它能缓解画质漂移，但不解决"回头看还是不是原来的样子"。</p>
+
+  <h3>最值得补的六个实验</h3>
+  <ol>
+    <li><b>同配方重跑 DMD</b>，分三组：不加 TRB / 随机硬截断 / TRB。把"TRB 形状"和"重训 + 随机增广"分开（对应存疑 5）。</li>
+    <li><b>Table 3 加一列"扣除 DD"</b>，并报 Rolling Forcing 用的 ΔQuality<sub>drift</sub>（首末 5 秒画质差）和多种子方差（对应存疑 1、2）。</li>
+    <li><b>在 TRB 模型上重测 R̃</b>，并直接测"丢掉最老块 vs 保留"的输出差。这才是"驱逐不匹配被关闭"的直接证据（对应存疑 7）。</li>
+    <li><b>成组版 R</b>：整段历史替换或删除，衡量历史的集体作用（对应存疑 8）。</li>
+    <li><b>公开 β、Δ 单位和免训练参数</b>，并在"扣除 DD"的指标下重做衰减族比较（对应存疑 3、4、9）。</li>
+    <li><b>计时补全</b>：无偏置 FA / BAR / key 增广 / 分组 LSE 合并，在 Wan-1.3B 的真实形状上各跑一遍（对应存疑 11、12）。</li>
+  </ol>
+</section>
+
+<footer>
+  <p><b>核对方法</b>：论文全文逐段通读。公式推导与数值（BAR 等价性、TRB 取值、VBench Quality 复算、扣除 DD 的均值、用户研究置信区间）都用脚本复算过。Fig. 2a 与 Fig. 6 的数值是在浏览器里把 PDF 放大后目测读出的。相关工作的数字都回到原论文核对过。</p>
+  <p><b>主要来源</b></p>
+  <ol>
+    <li>Cao, Nguyen, Nguyen, Nguyen. <a href="https://arxiv.org/abs/2609.19729">Recency Forcing: Bridging the Long-Horizon Gap in Autoregressive Video Generation</a>. arXiv 2609.19729, 2026.</li>
+    <li>Huang et al. <a href="https://arxiv.org/abs/2506.08009">Self Forcing</a>（§3.4 滚动 KV 与首块驱逐；Table 1 基线数字）. arXiv 2506.08009.</li>
+    <li>Zhu et al. <a href="https://arxiv.org/abs/2602.02214">Causal Forcing</a>（DMD 配方；对 Self Forcing 的复测 83.74；DD 会被崩坏抬高）. arXiv 2602.02214.</li>
+    <li>Liu et al. <a href="https://arxiv.org/abs/2509.25161">Rolling Forcing</a>（附录 Table 3/4，不改写 prompt）. arXiv 2509.25161.</li>
+    <li>Yang et al. <a href="https://arxiv.org/abs/2509.22622">LongLive</a>（短窗口 + frame sink 训练；Table 1）. arXiv 2509.22622.</li>
+    <li>Yi et al. <a href="https://arxiv.org/abs/2512.05081">Deep Forcing</a>（60 s VBench-Long 基线）. arXiv 2512.05081.</li>
+    <li>Dong et al. <a href="https://arxiv.org/abs/2412.05496">FlexAttention</a>（0.68–1.43× FA2）. arXiv 2412.05496.</li>
+    <li>Chi et al. <a href="https://arxiv.org/abs/2205.09921">KERPLE</a>（幂律 / 对数相对位置偏置）. NeurIPS 2022.</li>
+  </ol>
+  <p class="small">这份精读由读者撰写，不代表论文作者。若与原文冲突，以原文为准。</p>
+</footer>
+</div>
+
+<div class="tip" id="tip" hidden></div>
+
+<script>
+(function(){
+"use strict";
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent, text){
+  const e = document.createElementNS(NS, tag);
+  if(attrs) for(const k in attrs) e.setAttribute(k, attrs[k]);
+  if(text != null) e.textContent = text;
+  if(parent) parent.appendChild(e);
+  return e;
+}
+function clear(n){ while(n.firstChild) n.removeChild(n.firstChild); }
+function sci(x, d=1){
+  if(x === 0) return "0";
+  if(x >= 0.01) return x.toFixed(x >= 0.1 ? 2 : 3);
+  const e = Math.floor(Math.log10(x)); const m = x / Math.pow(10, e);
+  return m.toFixed(d) + "e" + e;
+}
+function pressGroup(btns, on){ btns.forEach(b => b.setAttribute("aria-pressed", b === on ? "true" : "false")); }
+
+/* ---------- tooltip ---------- */
+const tip = $("#tip");
+function showTip(html, ev){
+  tip.innerHTML = html; tip.hidden = false;
+  const pad = 14; const w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = ev.clientX + pad, y = ev.clientY + pad;
+  if(x + w > window.innerWidth - 8) x = ev.clientX - w - pad;
+  if(y + h > window.innerHeight - 8) y = ev.clientY - h - pad;
+  tip.style.left = Math.max(8, x) + "px"; tip.style.top = Math.max(8, y) + "px";
+}
+function hideTip(){ tip.hidden = true; }
+
+/* ---------- toc highlight ---------- */
+const tocLinks = $$("nav.toc a");
+const secs = tocLinks.map(a => document.getElementById(a.getAttribute("href").slice(1)));
+function onScroll(){
+  let cur = 0; const y = window.scrollY + 120;
+  secs.forEach((s,i) => { if(s && s.offsetTop <= y) cur = i; });
+  tocLinks.forEach((a,i) => a.classList.toggle("on", i === cur));
+}
+window.addEventListener("scroll", onScroll, {passive:true}); onScroll();
+
+/* =========================================================
+   §2 rolling window
+   ========================================================= */
+(function(){
+  const svg = $("#winsvg"), slider = $("#wk"), out = $("#wk-o"), read = $("#win-read");
+  const bInf = $("#wm-inf"), bTr = $("#wm-train");
+  let mode = "inf";
+  const N = 24;
+  function role(j, k){
+    if(j > k) return "future";
+    if(j === k) return "cur";
+    if(j === 0) return "glb";
+    if(j === k-1) return "rec";
+    if(j >= k-5) return "his";
+    return "evict";
+  }
+  const COL = {glb:["var(--glb-soft)","var(--glb)","var(--glb-ink)"], his:["var(--his-soft)","var(--his)","var(--his-ink)"], rec:["var(--rec-soft)","var(--rec)","var(--rec-ink)"], cur:["var(--cur-soft)","var(--cur)","var(--cur-ink)"], evict:["var(--evict)","var(--rule2)","var(--ink3)"], future:["var(--future)","var(--rule)","var(--ink3)"]};
+  function draw(){
+    const k = +slider.value; out.textContent = k;
+    clear(svg);
+    const n = mode === "train" ? 7 : N;
+    const x0 = 14, W = 912, gap = 4;
+    const cw = (W - gap*(n-1)) / n;
+    el("text",{x:x0, y:16, fill:"var(--ink3)", "font-size":11}, svg, mode === "train" ? "训练片段：21 个 latent 帧 = 7 块，没有驱逐" : "推理：每块 3 个 latent 帧 ≈ 0.75 s");
+    for(let j=0;j<n;j++){
+      const r = role(j,k); const c = COL[r];
+      const x = x0 + j*(cw+gap);
+      el("rect",{x:x, y:30, width:cw, height:46, rx:5, fill:c[0], stroke:c[1], "stroke-width": r==="cur"?2:1}, svg);
+      if(r === "evict"){ el("line",{x1:x+4, y1:72, x2:x+cw-4, y2:34, stroke:"var(--rule2)", "stroke-width":1}, svg); }
+      el("text",{x:x+cw/2, y:57, "text-anchor":"middle", fill:c[2], "font-size": n>12?10:12}, svg, "#"+j);
+      if(r === "his"){
+        const dt = (k-1-j)/4; // chunk distance beyond recent: 1..4 -> 0.25..1
+        el("text",{x:x+cw/2, y:94, "text-anchor":"middle", fill:"var(--his-ink)", "font-size":9.5}, svg, "Δ̃="+dt.toFixed(2).replace(/0$/,""));
+      }
+    }
+    // legend
+    const L = [["glb","global sink"],["his","history (TRB)"],["rec","recent"],["cur","current"],["evict","已驱逐"]];
+    let lx = x0;
+    L.forEach(([r,t]) => { const c = COL[r]; el("rect",{x:lx, y:118, width:12, height:12, rx:3, fill:c[0], stroke:c[1]}, svg); const tt = el("text",{x:lx+17, y:128, fill:"var(--ink2)", "font-size":11}, svg, t); lx += 30 + t.length*7.2; });
+    // readout
+    const ctxChunks = []; let ev = 0, hs = [];
+    for(let j=0;j<k;j++){ const r = role(j,k); if(r==="evict") ev++; else ctxChunks.push(j); if(r==="his") hs.push(j); }
+    const ctxFrames = ctxChunks.length*3;
+    const frames = 12*(k+1) - 3; const sec = frames/16;
+    let s = `当前块 <b>#${k}</b> · 上下文 <b>${ctxChunks.length} 块 = ${ctxFrames} 个 latent 帧</b>`;
+    if(k>0){
+      s += ` · sink #0`;
+      if(hs.length) s += ` · 历史 #${hs[0]}–#${hs[hs.length-1]}`;
+      if(k>=2) s += ` · 最近 #${k-1}`;
+    }
+    s += `<br>已生成 ${frames} 个视频帧 ≈ <b>${sec.toFixed(2)} s</b> · 已驱逐 <b>${ev}</b> 块`;
+    if(mode === "train" && k === 6) s += `<br><span style="color:var(--his-ink)">↑ 训练时最后一块的上下文正好是 18 帧：和推理时每一步看到的数量相同。</span>`;
+    if(mode === "inf" && k >= 7) s += `<br>下一步 #${k-5} 将被驱逐：此刻它的 Δ̃ = 1，幂律 TRB 给它的乘子是 e<sup>−β</sup>（β=12 时 ≈ 6×10⁻⁶）。`;
+    read.innerHTML = s;
+  }
+  function setMode(m){
+    mode = m; pressGroup([bInf,bTr], m==="inf"?bInf:bTr);
+    slider.max = m === "train" ? 6 : 23;
+    if(+slider.value > +slider.max) slider.value = slider.max;
+    if(m === "train") slider.value = 6;
+    draw();
+  }
+  bInf.addEventListener("click", () => setMode("inf"));
+  bTr.addEventListener("click", () => setMode("train"));
+  slider.addEventListener("input", draw);
+  draw();
+})();
+
+/* =========================================================
+   §3 R-tilde (digitized from Fig. 2a, approx)
+   ========================================================= */
+const RD = {
+  d:  [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20],
+  t1: [1,.078,.031,.0124,.0051,.0036,.0029,.0024,.00153,.00143,.00153,.00176,.00148,.00104,.00108,.0017,.0016,.0018,.0026,.0019],
+  t2: [1,.084,.037,.0153,.0063,.0043,.0036,.0031,.0021,.0018,.0020,.0023,.0017,.00125,.00137,.0021,.0019,.0023,.0031,.0023],
+  t3: [1,.093,.043,.0170,.0078,.0055,.0049,.0046,.0029,.0025,.0026,.0030,.0023,.00164,.0018,.0025,.0026,.0030,.0038,.0031],
+  t4: [1,.100,.049,.0204,.0104,.0073,.0068,.0061,.0041,.0035,.0038,.0043,.0033,.0025,.0026,.0036,.0038,.0040,.0051,.0044]
+};
+const TCOL = ["var(--t1)","var(--t2)","var(--t3)","var(--t4)"];
+(function(){
+  const svg = $("#rsvg"); const bA = $("#rv-abs"), bR = $("#rv-ratio"); const leg = $("#rleg");
+  let view = "abs";
+  leg.innerHTML = ["t1 噪声最大","t2","t3","t4 噪声最小"].map((t,i)=>`<span><span class="sw" style="background:${TCOL[i]}"></span>${t}</span>`).join("&nbsp;&nbsp;");
+  function draw(){
+    clear(svg);
+    const L=64, R=920, T=18, B=296;
+    const xs = d => L + (d-1)/(19)*(R-L);
+    let ys, yticks, ylab;
+    if(view === "abs"){
+      const lo = -3.2, hi = 0.05;
+      ys = v => T + (hi - Math.log10(v))/(hi-lo)*(B-T);
+      yticks = [[1,"10⁰"],[0.1,"10⁻¹"],[0.01,"10⁻²"],[0.001,"10⁻³"]];
+      ylab = "R̃(Δ, t)";
+    } else {
+      const lo = 0.8, hi = 3.0;
+      ys = v => T + (hi - v)/(hi-lo)*(B-T);
+      yticks = [[1,"1×"],[1.5,"1.5×"],[2,"2×"],[2.5,"2.5×"],[3,"3×"]];
+      ylab = "R̃(t4) / R̃(t1)";
+    }
+    // eviction band
+    el("rect",{x:xs(15), y:T, width:xs(17)-xs(15), height:B-T, fill:"var(--his-soft)"}, svg);
+    el("text",{x:(xs(15)+xs(17))/2, y:T+14, "text-anchor":"middle", fill:"var(--his-ink)", "font-size":10.5}, svg, "驱逐边界 Δ≈15–17");
+    el("rect",{x:xs(18.6), y:T, width:xs(20)-xs(18.6), height:B-T, fill:"var(--glb-soft)"}, svg);
+    el("text",{x:xs(19.3), y:T+30, "text-anchor":"middle", fill:"var(--glb-ink)", "font-size":10.5}, svg, "首帧");
+    yticks.forEach(([v,t]) => { const y = ys(v); el("line",{x1:L, x2:R, y1:y, y2:y, stroke:"var(--grid)", "stroke-width":1}, svg); el("text",{x:L-8, y:y+4, "text-anchor":"end", fill:"var(--ink3)", "font-size":11}, svg, t); });
+    el("line",{x1:L, x2:R, y1:B, y2:B, stroke:"var(--axis)"}, svg);
+    for(let d=1; d<=20; d+=1){ if(d%2===1 || d===20){ el("text",{x:xs(d), y:B+17, "text-anchor":"middle", fill:"var(--ink3)", "font-size":11}, svg, d); } }
+    el("text",{x:(L+R)/2, y:B+36, "text-anchor":"middle", fill:"var(--ink3)", "font-size":11}, svg, "时间距离 Δ（latent 帧）");
+    el("text",{x:14, y:(T+B)/2, "text-anchor":"middle", fill:"var(--ink3)", "font-size":11, transform:`rotate(-90 14 ${(T+B)/2})`}, svg, ylab);
+    const series = view === "abs" ? ["t1","t2","t3","t4"] : ["ratio"];
+    series.forEach((s,i) => {
+      const vals = s === "ratio" ? RD.t4.map((v,j)=> v/RD.t1[j]) : RD[s];
+      const col = s === "ratio" ? "var(--his)" : TCOL[i];
+      const pts = RD.d.map((d,j) => `${xs(d).toFixed(1)},${ys(vals[j]).toFixed(1)}`).join(" ");
+      el("polyline",{points:pts, fill:"none", stroke:col, "stroke-width":2, "stroke-linejoin":"round", "stroke-linecap":"round"}, svg);
+      RD.d.forEach((d,j) => el("circle",{cx:xs(d), cy:ys(vals[j]), r:3.2, fill:col, stroke:"var(--surf)", "stroke-width":1.5}, svg));
+    });
+    if(view === "ratio"){
+      el("text",{x:xs(2)+6, y:ys(1.28)+18, fill:"var(--ink2)", "font-size":11}, svg, "近处：≈1.3×");
+      el("text",{x:xs(9), y:ys(2.68)-10, "text-anchor":"middle", fill:"var(--ink2)", "font-size":11}, svg, "远处：≈2–2.7×");
+    }
+    // hover
+    const cross = el("line",{x1:0,x2:0,y1:T,y2:B, stroke:"var(--ink3)", "stroke-width":1, opacity:0}, svg);
+    const hit = el("rect",{x:L, y:T, width:R-L, height:B-T, fill:"transparent"}, svg);
+    hit.addEventListener("mousemove", ev => {
+      const pt = svg.getBoundingClientRect(); const sx = (ev.clientX - pt.left) / pt.width * 940;
+      let d = Math.round((sx - L)/(R-L)*19 + 1); d = Math.max(1, Math.min(20, d)); const j = d-1;
+      cross.setAttribute("x1", xs(d)); cross.setAttribute("x2", xs(d)); cross.setAttribute("opacity", .6);
+      const r = (RD.t4[j]/RD.t1[j]).toFixed(2);
+      showTip(`<b>Δ = ${d}</b><br>t1 ${sci(RD.t1[j],2)}<br>t2 ${sci(RD.t2[j],2)}<br>t3 ${sci(RD.t3[j],2)}<br>t4 ${sci(RD.t4[j],2)}<br>t4/t1 = ${r}×`, ev);
+    });
+    hit.addEventListener("mouseleave", () => { cross.setAttribute("opacity",0); hideTip(); });
+  }
+  bA.addEventListener("click", () => { view="abs"; pressGroup([bA,bR], bA); draw(); });
+  bR.addEventListener("click", () => { view="ratio"; pressGroup([bA,bR], bR); draw(); });
+  draw();
+})();
+
+/* =========================================================
+   §4 TRB explorer
+   ========================================================= */
+(function(){
+  const famBtns = $$("#xfig [data-fam]"), unitBtns = $$("#xfig [data-unit]");
+  const g = $("#xg"), go = $("#xg-o"), a = $("#xa"), ao = $("#xa-o");
+  const cg = $("#c-gam"), ca = $("#c-alp");
+  const hm = $("#hm"), mass = $("#mass"), svg = $("#xsvg"), read = $("#xread"), fan = $("#fan");
+  let fam = "pow", unit = "f";
+  const DT = [0.25, 0.5, 0.75, 1.0];
+  function bias(dt, t){
+    const gb = Math.pow(10, +g.value), ab = +a.value;
+    if(fam === "pow"){ const beta = unit === "f" ? 12 : 4; return -beta * Math.pow(dt, gb * Math.pow(2,t)); }
+    const x = unit === "f" ? dt*12 : dt*4;      // Δ − L_recent in frames or chunks
+    const al = ab - t/4;
+    if(fam === "lin") return -al * x;
+    return -al * Math.log(1 + x);
+  }
+  function cellColor(w){
+    const lw = Math.max(-6, Math.log10(Math.max(w,1e-12)));   // -6..0
+    const a = w > 1 ? 1 : (1 + lw/6);                     // 0..1
+    return `color-mix(in srgb, var(--his) ${Math.round(8 + 80*a)}%, var(--surf))`;
+  }
+  function draw(){
+    const gb = Math.pow(10, +g.value); go.textContent = gb.toFixed(gb < 0.1 ? 3 : 2);
+    ao.textContent = (+a.value).toFixed(2);
+    cg.hidden = fam !== "pow"; ca.hidden = fam === "pow";
+    unitBtns[0].textContent = fam === "pow" ? "按帧：β = 12" : "按帧：Δ−L_recent = 3…12";
+    unitBtns[1].textContent = fam === "pow" ? "按块：β = 4" : "按块：Δ−L_recent = 1…4";
+    // heatmap
+    let h = `<div class="h"></div>` + DT.map((d,i)=>`<div class="h">历史块 ${i+1}<br>Δ̃=${d}</div>`).join("");
+    const W = [];
+    for(let t=1;t<=4;t++){
+      const row = DT.map(d => Math.exp(bias(d,t))); W.push(row);
+      h += `<div class="r">t${t}${t===1?" 噪声大":t===4?" 噪声小":""}</div>` + row.map(w => {
+        const lw = Math.log10(Math.max(w,1e-12));
+        const ink = (w > 1) ? "var(--bad-ink)" : (lw > -2.2 ? "var(--ink)" : "var(--ink2)");
+        return `<div class="c" style="background:${cellColor(w)};color:${ink}" title="B = ${Math.log(w).toFixed(2)}">${w > 1 ? "×"+w.toFixed(2)+" ↑" : sci(w)}</div>`;
+      }).join("");
+    }
+    hm.innerHTML = h;
+    // mass
+    let mh = "";
+    let minMass = 1;
+    for(let t=1;t<=4;t++){
+      const sw = W[t-1].reduce((s,w)=>s+3*w,0);  // 3 frames per chunk
+      const m = sw / (sw + 9);
+      minMass = Math.min(minMass, m);
+      const pct = 100*m;
+      const lab = pct < 0.01 ? "<0.01%" : pct < 1 ? pct.toFixed(2)+"%" : pct.toFixed(1)+"%";
+      const chip = pct < 1 ? `<span class="chip" style="background:var(--risk-soft);color:var(--risk-ink)">≈ 截断到 9 帧</span>` : "";
+      mh += `<div class="massrow"><span>t${t}</span><div class="massbar"><i style="width:${Math.min(100,pct/57.14*100)}%"></i></div><span>${lab}${chip}</span></div>`;
+    }
+    mass.innerHTML = mh;
+    // curve chart
+    clear(svg);
+    const L=46, R=430, T=12, B=212;
+    const lo = -7, hi = 0.3;
+    const xs = d => L + d*(R-L);
+    const ys = v => T + (hi - v)/(hi-lo)*(B-T);
+    [0,-1,-2,-3,-4,-5,-6,-7].forEach(v => { const y = ys(v); el("line",{x1:L,x2:R,y1:y,y2:y,stroke:"var(--grid)"}, svg); el("text",{x:L-6,y:y+4,"text-anchor":"end",fill:"var(--ink3)","font-size":10}, svg, v===0?"1":"10"+["","⁻¹","⁻²","⁻³","⁻⁴","⁻⁵","⁻⁶","⁻⁷"][-v]); });
+    el("line",{x1:L,x2:R,y1:B,y2:B,stroke:"var(--axis)"}, svg);
+    [0,0.25,0.5,0.75,1].forEach(d => el("text",{x:xs(d),y:B+15,"text-anchor":"middle",fill:"var(--ink3)","font-size":10}, svg, d));
+    el("text",{x:(L+R)/2,y:B+32,"text-anchor":"middle",fill:"var(--ink3)","font-size":10.5}, svg, "Δ̃（0 = 紧挨 recent，1 = 即将驱逐）");
+    for(let t=1;t<=4;t++){
+      const pts = []; for(let k=1;k<=100;k++){ const d = k/100; let v = bias(d,t)/Math.LN10; v = Math.max(lo, Math.min(hi, v)); pts.push(`${xs(d).toFixed(1)},${ys(v).toFixed(1)}`); }
+      el("polyline",{points:pts.join(" "), fill:"none", stroke:TCOL[t-1], "stroke-width":2, "stroke-linejoin":"round"}, svg);
+      DT.forEach(d => { let v = bias(d,t)/Math.LN10; v = Math.max(lo, Math.min(hi, v)); el("circle",{cx:xs(d), cy:ys(v), r:3.6, fill:TCOL[t-1], stroke:"var(--surf)", "stroke-width":1.5}, svg); });
+    }
+    // legend
+    ["t1","t2","t3","t4"].forEach((t,i) => { el("rect",{x:L+8+i*52, y:T+4, width:10, height:10, rx:2, fill:TCOL[i]}, svg); el("text",{x:L+22+i*52, y:T+13, fill:"var(--ink2)","font-size":10.5}, svg, t); });
+    // readout
+    let warn = "";
+    if(fam !== "pow"){
+      const neg = [1,2,3,4].filter(t => (+a.value - t/4) < 0);
+      if(neg.length) warn = `<br><span style="color:var(--bad-ink)">α(t) = α_base − t/4 在 t = ${neg.join(", ")} 时为负，偏置变正：远处的帧反而被放大，违反原则 (3)。</span>`;
+    } else {
+      warn = `<br>最远历史块（Δ̃ = 1）在所有步上都等于 e<sup>−β</sup> = ${sci(Math.exp(unit==="f"?-12:-4),1)}，各步曲线在远端汇合。`;
+    }
+    const t1n = W[0][0], t4n = W[3][0];
+    read.innerHTML = `最近的历史块：t1 乘子 <b>${sci(t1n)}</b>，t4 乘子 <b>${sci(t4n)}</b>。历史份额最低点 <b>${(100*minMass).toFixed(minMass<0.01?3:1)}%</b>（无偏置时为 57%）。${warn}`;
+    // fan-out comparison
+    const rIdx = [5,8,11,14]; // Δ = 6,9,12,15
+    const rRatio = rIdx.map(j => RD.t4[j]/RD.t1[j]);
+    const tRatio = DT.map((d,i) => W[3][i]/W[0][i]);
+    const maxLog = 4;
+    function bar(r, col){
+      const lr = Math.log10(Math.max(r, 1e-9));
+      const wPct = Math.min(100, Math.abs(lr)/maxLog*100);
+      const txt = r >= 1e4 ? r.toExponential(1) + "×" : r >= 100 ? Math.round(r).toLocaleString() + "×" : r.toFixed(r < 10 ? 2 : 1) + "×";
+      const dir = lr < 0 ? " ↓" : "";
+      return `<div style="display:grid;grid-template-columns:1fr 92px;gap:8px;align-items:center"><div class="massbar" style="height:9px"><i style="width:${Math.max(1,wPct)}%;background:${col}"></i></div><span class="tnum">${txt}${dir}</span></div>`;
+    }
+    let fh = `<div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:6px 16px;font-family:var(--font-mono);font-size:12px;align-items:center;min-width:420px">`;
+    fh += `<span></span><span class="dim">R̃：t4 / t1（论文测得）</span><span class="dim">TRB：w(t4) / w(t1)</span>`;
+    DT.forEach((d,i) => { fh += `<span>历史块 ${i+1}</span>${bar(rRatio[i], "var(--t3)")}${bar(tRatio[i], "var(--his)")}`; });
+    fh += `</div>`;
+    const inc = tRatio[3] > tRatio[0];
+    fh += `<div class="small" style="margin-top:8px;color:var(--ink2)">R̃ 的倍数<b>随距离增大</b>（近处重合、远处分叉）；当前设置下 TRB 的倍数<b>${inc ? "随距离增大，方向一致" : "随距离减小，方向相反"}</b>。</div>`;
+    fan.innerHTML = `<div class="svgbox">${fh}</div>`;
+  }
+  famBtns.forEach(b => b.addEventListener("click", () => { fam = b.dataset.fam; pressGroup(famBtns, b); draw(); }));
+  unitBtns.forEach(b => b.addEventListener("click", () => { unit = b.dataset.unit; pressGroup(unitBtns, b); draw(); }));
+  g.addEventListener("input", draw); a.addEventListener("input", draw);
+  draw();
+})();
+
+/* =========================================================
+   §5 BAR demo
+   ========================================================= */
+(function(){
+  const s = $("#bs"), so = $("#bs-o"), btn = $("#bre"), tab = $("#btab"), read = $("#bread");
+  let seed = 7;
+  function rng(){ seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+  function gauss(){ let u = rng() || 1e-9, v = rng(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+  const d = 4;
+  const KEYS = [["sink","glb",null],["h1","his",1],["h2","his",2],["h3","his",3],["h4","his",4],["r1","rec",null],["r2","rec",null],["c","cur",null]];
+  let q, K, V;
+  function sample(){ q = Array.from({length:d}, gauss).map(x=>x*1.6); K = KEYS.map(()=>Array.from({length:d}, gauss)); V = KEYS.map(()=>Array.from({length:d}, gauss)); }
+  function draw(){
+    const beta = +s.value; so.textContent = beta.toFixed(1);
+    const sc = K.map(k => k.reduce((acc,x,i)=>acc + x*q[i], 0)/Math.sqrt(d));
+    const B = KEYS.map(k => k[2] ? -beta*Math.pow(k[2]/4, 0.8) : 0);
+    // direct
+    const z = sc.map((x,i)=>x+B[i]); const mz = Math.max(...z);
+    const e = z.map(x=>Math.exp(x-mz)); const se = e.reduce((a,b)=>a+b,0); const p = e.map(x=>x/se);
+    const oD = Array(d).fill(0); p.forEach((pi,j)=>V[j].forEach((v,i)=>oD[i]+=pi*v));
+    // BAR
+    const w = B.map(b=>Math.exp(b));
+    const ms = Math.max(...sc); const e2 = sc.map(x=>Math.exp(x-ms)); const s2 = e2.reduce((a,b)=>a+b,0); const p2 = e2.map(x=>x/s2);
+    const oT = Array(d+1).fill(0); p2.forEach((pi,j)=>{ V[j].forEach((v,i)=>oT[i]+=pi*w[j]*v); oT[d]+=pi*w[j]; });
+    const oB = oT.slice(0,d).map(x=>x/oT[d]);
+    const diff = Math.max(...oD.map((x,i)=>Math.abs(x-oB[i])));
+    let h = `<thead><tr><th>key</th><th class="num">s = qk/√d</th><th class="num">B</th><th class="num">w = e^B</th><th class="num">softmax(s+B)</th><th class="num">softmax(s)</th><th class="num">softmax(s)·w</th></tr></thead><tbody>`;
+    KEYS.forEach((k,j) => {
+      h += `<tr><td><span class="tag ${k[1]}">${k[0]}</span></td><td class="num">${sc[j].toFixed(3)}</td><td class="num">${B[j].toFixed(2)}</td><td class="num">${sci(w[j],2)}</td><td class="num">${p[j].toFixed(4)}</td><td class="num">${p2[j].toFixed(4)}</td><td class="num">${(p2[j]*w[j]).toFixed(4)}</td></tr>`;
+    });
+    h += `</tbody>`;
+    tab.innerHTML = h;
+    const f = a => "[" + a.map(x=>(x>=0?" ":"")+x.toFixed(6)).join(", ") + "]";
+    read.innerHTML = `直接加偏置 o = ${f(oD)}<br>BAR：õ[:d]/õ[d] = ${f(oB)}<br>õ[d] = Σ softmax(s)·w = <b>${oT[d].toFixed(4)}</b>（最后一列之和，就是被约掉的归一化比例）<br>最大差 = <b>${diff.toExponential(1)}</b>`;
+  }
+  btn.addEventListener("click", () => { seed = (seed + 97) >>> 0; sample(); draw(); });
+  s.addEventListener("input", draw);
+  sample(); draw();
+})();
+
+/* =========================================================
+   §7.1 Table 3 re-rank
+   ========================================================= */
+const T3 = [
+  {n:"∞-RoPE", g:"免训练", Q:82.30,DD:56.22,MS:98.53,TF:97.41,IQ:67.14,AQ:59.20,SC:97.31,BC:96.15},
+  {n:"Deep Forcing", g:"免训练", Q:82.14,DD:56.01,MS:98.10,TF:96.88,IQ:68.22,AQ:59.85,SC:97.35,BC:96.30},
+  {n:"Recency Forcing", g:"免训练", me:1, Q:82.63,DD:56.27,MS:98.23,TF:96.98,IQ:68.94,AQ:60.48,SC:97.81,BC:96.64},
+  {n:"Self Forcing", g:"训练版", Q:80.11,DD:34.50,MS:98.48,TF:97.77,IQ:65.93,AQ:56.55,SC:96.97,BC:96.24},
+  {n:"Causal Forcing", g:"训练版", Q:78.98,DD:65.19,MS:96.94,TF:95.21,IQ:63.44,AQ:51.35,SC:95.39,BC:95.51},
+  {n:"Rolling Forcing", g:"训练版", Q:81.56,DD:34.68,MS:98.71,TF:97.62,IQ:70.18,AQ:59.93,SC:97.74,BC:96.54},
+  {n:"LongLive", g:"训练版", Q:81.98,DD:42.85,MS:98.75,TF:97.61,IQ:68.71,AQ:61.48,SC:97.09,BC:95.99},
+  {n:"Recency Forcing", g:"训练版", me:1, Q:84.02,DD:75.48,MS:98.00,TF:96.32,IQ:70.50,AQ:61.31,SC:97.68,BC:96.49}
+];
+T3.forEach(r => { r.nd = (6.5*r.Q - 0.5*r.DD)/6; r.dd = r.DD; r.q = r.Q; });
+(function(){
+  const svg = $("#qsvg"); const btns = $$("#qfig [data-q]");
+  let key = "q";
+  function draw(){
+    clear(svg);
+    const groups = ["免训练","训练版"];
+    const L = 170, R = 880, rowH = 30; let y = 10;
+    let lo, hi;
+    if(key === "dd"){ lo = 0; hi = 100; } else { lo = 76; hi = 87; }
+    const xs = v => L + (v-lo)/(hi-lo)*(R-L);
+    const ticks = key === "dd" ? [0,20,40,60,80,100] : [76,78,80,82,84,86];
+    const rows = [];
+    groups.forEach(gname => {
+      const rs = T3.filter(r=>r.g===gname).slice().sort((a,b)=>b[key]-a[key]);
+      rows.push({hdr:gname}); rs.forEach((r,i)=>rows.push({r, rank:i+1, n:rs.length}));
+    });
+    const H = 22 + rows.length*rowH + 30;
+    svg.setAttribute("viewBox", `0 0 940 ${H}`);
+    ticks.forEach(t => { const x = xs(t); el("line",{x1:x,x2:x,y1:14,y2:H-30,stroke:"var(--grid)"}, svg); el("text",{x:x,y:H-12,"text-anchor":"middle",fill:"var(--ink3)","font-size":11}, svg, t); });
+    y = 22;
+    rows.forEach(row => {
+      if(row.hdr){ el("text",{x:10,y:y+18,fill:"var(--ink3)","font-size":11,"letter-spacing":1}, svg, row.hdr); y += rowH; return; }
+      const r = row.r; const v = r[key];
+      const col = r.me ? "var(--his)" : "var(--ink3)";
+      el("text",{x:L-10,y:y+15,"text-anchor":"end",fill:r.me?"var(--ink)":"var(--ink2)","font-size":12,"font-weight":r.me?700:400}, svg, `#${row.rank}  ${r.n}`);
+      const x0 = xs(lo), x1 = xs(v);
+      el("rect",{x:x0,y:y+4,width:Math.max(2,x1-x0),height:16,rx:4,fill:col,opacity:r.me?1:.55}, svg);
+      el("text",{x:x1+6,y:y+16,fill:"var(--ink)","font-size":11.5}, svg, v.toFixed(2));
+      const hit = el("rect",{x:0,y:y,width:940,height:rowH-2,fill:"transparent"}, svg);
+      hit.addEventListener("mousemove", ev => showTip(`<b>${r.n}（${r.g}）</b><br>Quality ${r.Q.toFixed(2)} · 扣除 DD ${r.nd.toFixed(2)}<br>Dynamic ${r.DD} · Smooth ${r.MS} · Flicker ${r.TF}<br>Imaging ${r.IQ} · Aesthetic ${r.AQ}<br>Subject ${r.SC} · Background ${r.BC}<br>DD 贡献 = 0.5×DD/6.5 = ${(0.5*r.DD/6.5).toFixed(2)}`, ev));
+      hit.addEventListener("mouseleave", hideTip);
+      y += rowH;
+    });
+  }
+  btns.forEach(b => b.addEventListener("click", () => { key = b.dataset.q; pressGroup(btns, b); draw(); }));
+  draw();
+})();
+
+/* =========================================================
+   §7.2 ablations
+   ========================================================= */
+(function(){
+  const A = {
+    t4:{title:"Table 4 · 截断 vs TRB（第 1 行即 Causal Forcing 基线 + sink + 相对 RoPE）", cols:["L_attention / 衰减"], rows:[["21 / 无（基线）",80.56,65.09,78.32],["9 / 无（截断）",81.10,66.40,88.58],["21 / TRB",84.17,69.05,81.55,1]],
+        note:"论文正文说截断\"harming the overall quality\"，但表中截断的 Quality 与 Imaging 都<b>高于</b>基线。只有扣除 DD 后，截断（80.48）才略低于基线（80.75）。另外，第 3 行是重训过的模型，前两行没有重训。"},
+    t5:{title:"Table 5 · 衰减族", cols:["bias"], rows:[["线性 Eq.6",83.26,68.90,66.06],["对数 Eq.7",83.16,69.42,72.06],["幂律 Eq.8",84.17,69.05,81.55,1]],
+        note:"幂律的 Quality 优势（+0.91）小于它在 DD 上领先带来的加成（15.5×0.5/6.5 = 1.19）。扣除 DD 后，<b>线性最好</b>，Imaging 则是对数最好。"},
+    t6:{title:"Table 6 · γ_base（推理时改变）", cols:["γ_base"], rows:[["0.01",84.36,69.63,79.42],["0.1",84.17,69.05,81.55,1],["0.5",82.91,67.05,81.94],["1.0",82.61,65.98,83.93]],
+        note:"γ_base = 0.01 在 Quality、Imaging、扣除 DD 三项上都最好。按 Eq.8，它意味着所有步、所有历史块都几乎被压到零（≈ 截断）。选 0.1 的唯一理由是 DD 更高。"},
+    t7:{title:"Table 7 · L_recent", cols:["L_recent"], rows:[["0",82.80,69.86,40.90],["3",84.17,69.05,81.55,1],["6",82.14,69.51,49.03]],
+        note:"扣除 DD 后 L_recent = 0（86.29）最好，6（84.90）次之，默认值 3 最差。DD 在三行之间大幅非单调（40.9 → 81.6 → 49.0）。L_attention 固定时，L_recent 变了，L_history 与 β 也跟着变。"}
+  };
+  const btns = $$("#afig [data-a]"); const tab = $("#atab"); const read = $("#aread");
+  function draw(k){
+    const a = A[k];
+    const rows = a.rows.map(r => ({lab:r[0], Q:r[1], I:r[2], D:r[3], me:!!r[4], nd:(6.5*r[1]-0.5*r[3])/6}));
+    const best = f => Math.max(...rows.map(r=>r[f]));
+    const bQ = best("Q"), bI = best("I"), bD = best("D"), bN = best("nd");
+    let h = `<thead><tr><th>${a.cols[0]}</th><th class="num">Quality</th><th class="num">Imaging</th><th class="num">Dynamic</th><th class="num">扣除 DD 的 6 维均值 ★</th></tr></thead><tbody><tr class="grp"><td colspan="5">${a.title}</td></tr>`;
+    rows.forEach(r => {
+      const c = (v,b) => `<td class="num ${v===b?"win":""}">${v.toFixed(2)}</td>`;
+      h += `<tr class="${r.me?"me":""}"><td>${r.lab}${r.me?' <span class="tag his">论文默认</span>':""}</td>${c(r.Q,bQ)}${c(r.I,bI)}${c(r.D,bD)}${c(r.nd,bN)}</tr>`;
+    });
+    h += `</tbody>`; tab.innerHTML = h;
+    read.innerHTML = `<b>绿色</b> = 该列最高。★ 列为我按 VBench 公式反解，论文未给。<br>${a.note}`;
+  }
+  btns.forEach(b => b.addEventListener("click", () => { pressGroup(btns, b); draw(b.dataset.a); }));
+  draw("t4");
+})();
+
+/* =========================================================
+   §7.4 user study
+   ========================================================= */
+(function(){
+  const svg = $("#usvg");
+  const crit = ["整体质量","颜色一致性","运动动态","主体一致性"];
+  const D = {"Self Forcing":[98.5,97.1,97.1,97.1],"Rolling Forcing":[79.4,79.4,75.0,82.4],"LongLive":[62.7,59.7,67.2,61.2]};
+  const names = Object.keys(D);
+  const L = 150, R = 790, T = 30, GH = 104;
+  const H = T + names.length*GH + 22;
+  svg.setAttribute("viewBox", `0 0 940 ${H}`);
+  const xs = v => L + (v-50)/(50)*(R-L);
+  [50,60,70,80,90,100].forEach(v => { el("line",{x1:xs(v),x2:xs(v),y1:T-6,y2:H-26,stroke:v===50?"var(--axis)":"var(--grid)"}, svg); el("text",{x:xs(v),y:16,"text-anchor":"middle",fill:"var(--ink3)","font-size":11}, svg, v+"%"); });
+  let y = T;
+  names.forEach(n => {
+    el("text",{x:10,y:y+12,fill:"var(--ink)","font-size":12,"font-weight":600}, svg, "Recency Forcing vs " + n);
+    const mx = Math.max(...D[n]);
+    D[n].forEach((p,i) => {
+      const yy = y + 22 + i*19;
+      el("text",{x:L-10,y:yy+11,"text-anchor":"end",fill:"var(--ink3)","font-size":10.5}, svg, crit[i]);
+      const isMax = p === mx;
+      el("rect",{x:xs(50),y:yy,width:Math.max(2,xs(p)-xs(50)),height:13,rx:3,fill:i===2?"var(--his)":"var(--ink3)",opacity:i===2?1:.5}, svg);
+      const q = p/100, se = Math.sqrt(q*(1-q)/135)*196;
+      const lo = Math.max(50, p-se), hi = Math.min(100, p+se);
+      [["line",xs(lo),xs(hi),yy+6.5,yy+6.5],["line",xs(lo),xs(lo),yy+2,yy+11],["line",xs(hi),xs(hi),yy+2,yy+11]].forEach(a => el("line",{x1:a[1],x2:a[2],y1:a[3],y2:a[4],stroke:"var(--ink)","stroke-width":1.2}, svg));
+      el("text",{x:R+14,y:yy+11,fill:isMax?"var(--ink)":"var(--ink2)","font-size":11,"font-weight":isMax?700:400}, svg, p.toFixed(1)+"%"+(isMax?"  ← 该组最大":""));
+    });
+    y += GH;
+  });
+  el("rect",{x:L,y:H-16,width:10,height:10,rx:2,fill:"var(--his)"}, svg);
+  el("text",{x:L+15,y:H-7,fill:"var(--ink2)","font-size":10.5}, svg, "运动动态（论文声称的最大优势项）");
+})();
+
+/* =========================================================
+   §8 doubt filter
+   ========================================================= */
+(function(){
+  const btns = $$("[data-sev]"); const items = $$("#doubts .doubt");
+  btns.forEach(b => b.addEventListener("click", () => {
+    pressGroup(btns, b); const s = b.dataset.sev;
+    items.forEach(it => { it.hidden = !(s === "all" || it.classList.contains(s)); });
+  }));
+})();
+})();
+</script>
+</body>
+</html>

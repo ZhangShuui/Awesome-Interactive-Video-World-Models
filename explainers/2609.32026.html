@@ -1,0 +1,1676 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PhiBE-Flow 精读</title>
+<meta name="description" content="PhiBE-Flow（arXiv 2609.32026）精读：用成对转移学出与 SDE 同边缘分布的概率流速度场。逐式推导、OU 浏览器内复现、代码与论文差异、17 条存疑。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=Noto+Serif+SC:wght@600;700&family=STIX+Two+Text:ital@0;1&display=swap">
+<style>
+/* ============================================================
+   PhiBE-Flow 精读 — tokens（深色优先；浅色为记录本）
+   角色色（与 dataviz 参考调色板一致，已跑验证脚本）：
+     raw   = PhiBE-Flow 原版（原始二阶矩）   蓝
+     nojac = 去掉 Jacobian 项（只回归漂移）   橙
+     cen   = 中心化二阶矩（我的对照）         青
+     pt    = 逐时刻拟合（论文 Cor.3 设置）    黄
+     sde   = 真实 SDE 样本                    中性灰
+     paper/code = 论文描述 / 代码实际
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0f1115; --surf:#16191e; --surf2:#1c2027; --surf3:#262b34;
+  --rule:#262c35; --rule2:#3a424e;
+  --ink:#e8ebef; --ink2:#aab2bd; --ink3:#7f8894;
+  --raw:#3987e5; --raw-ink:#86b6ef; --raw-soft:rgba(57,135,229,.16);
+  --nojac:#d95926; --nojac-ink:#f0936a; --nojac-soft:rgba(217,89,38,.16);
+  --cen:#199e70; --cen-ink:#5fd3a6; --cen-soft:rgba(25,158,112,.16);
+  --pt:#c98500; --pt-ink:#f0bf55; --pt-soft:rgba(201,133,0,.16);
+  --sde:#9aa3ae; --sde-soft:rgba(154,163,174,.14);
+  --band:rgba(154,163,174,.13);
+  --risk:#e0534f; --risk-ink:#f28b86; --risk-soft:rgba(224,83,79,.14);
+  --med:#e5a92a; --med-ink:#f2c55e; --med-soft:rgba(229,169,42,.14);
+  --low:#7f8894; --low-soft:rgba(127,136,148,.16);
+  --grid:#20252d; --axis:#3b4452;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 32px rgba(0,0,0,.30);
+  --f-head:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --f-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --f-math:"STIX Two Text","Times New Roman",Georgia,serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#eef1f4; --surf:#ffffff; --surf2:#e9edf1; --surf3:#dde3e9;
+    --rule:#d6dce3; --rule2:#b7c0cb;
+    --ink:#121820; --ink2:#3f4955; --ink3:#66717d;
+    --raw:#2a78d6; --raw-ink:#1c5cab; --raw-soft:rgba(42,120,214,.10);
+    --nojac:#eb6834; --nojac-ink:#b4461c; --nojac-soft:rgba(235,104,52,.11);
+    --cen:#1baf7a; --cen-ink:#0e7a54; --cen-soft:rgba(27,175,122,.11);
+    --pt:#eda100; --pt-ink:#8a5d00; --pt-soft:rgba(237,161,0,.13);
+    --sde:#6b7580; --sde-soft:rgba(107,117,128,.12);
+    --band:rgba(107,117,128,.12);
+    --risk:#d03b3b; --risk-ink:#a52a2a; --risk-soft:rgba(208,59,59,.09);
+    --med:#c98a00; --med-ink:#7a5500; --med-soft:rgba(201,138,0,.11);
+    --low:#66717d; --low-soft:rgba(102,113,125,.12);
+    --grid:#e4e9ee; --axis:#b7c0cb;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#eef1f4; --surf:#ffffff; --surf2:#e9edf1; --surf3:#dde3e9;
+  --rule:#d6dce3; --rule2:#b7c0cb;
+  --ink:#121820; --ink2:#3f4955; --ink3:#66717d;
+  --raw:#2a78d6; --raw-ink:#1c5cab; --raw-soft:rgba(42,120,214,.10);
+  --nojac:#eb6834; --nojac-ink:#b4461c; --nojac-soft:rgba(235,104,52,.11);
+  --cen:#1baf7a; --cen-ink:#0e7a54; --cen-soft:rgba(27,175,122,.11);
+  --pt:#eda100; --pt-ink:#8a5d00; --pt-soft:rgba(237,161,0,.13);
+  --sde:#6b7580; --sde-soft:rgba(107,117,128,.12);
+  --band:rgba(107,117,128,.12);
+  --risk:#d03b3b; --risk-ink:#a52a2a; --risk-soft:rgba(208,59,59,.09);
+  --med:#c98a00; --med-ink:#7a5500; --med-soft:rgba(201,138,0,.11);
+  --low:#66717d; --low-soft:rgba(102,113,125,.12);
+  --grid:#e4e9ee; --axis:#b7c0cb;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.72}
+a{color:var(--raw-ink);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:2px solid var(--raw);outline-offset:2px;border-radius:4px}
+b,strong{font-weight:600;color:var(--ink)}
+sub,sup{font-size:.72em;line-height:0}
+.tnum{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono);font-size:.92em}
+.mv{font-family:var(--f-math);font-style:italic;font-size:1.07em;white-space:nowrap}
+.mr{font-family:var(--f-math);font-size:1.07em;white-space:nowrap}
+.dim{color:var(--ink3)}
+.wrap{max-width:1120px;margin:0 auto;padding:0 20px 120px}
+@media (max-width:520px){ .wrap{padding:0 16px 110px} }
+
+/* ---------- hero ---------- */
+.hero{padding:34px 0 22px;display:grid;gap:18px}
+.slate{border:1px solid var(--rule2);border-radius:10px;overflow:hidden;background:var(--surf);box-shadow:var(--shadow)}
+.slate .strip{height:20px;position:relative;overflow:hidden;background:var(--surf2);border-bottom:1px solid var(--rule)}
+.slate .strip svg{position:absolute;inset:0;width:100%;height:100%}
+.slate .strip span{position:absolute;top:2px;font-family:var(--f-mono);font-size:10.5px;line-height:16px;color:var(--ink2);padding:0 6px;margin:0 4px;z-index:1;background:var(--surf2);border-radius:4px}
+.slate .strip span.r{right:0}
+.slate dl{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.slate dl div{padding:10px 14px;border-right:1px solid var(--rule);border-top:1px solid var(--rule);min-width:0}
+.slate dt{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;color:var(--ink3);text-transform:uppercase}
+.slate dd{margin:2px 0 0;font-size:13.5px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.slate dd .no{color:var(--risk-ink);font-weight:600}
+.slate dd .ok{color:var(--cen-ink);font-weight:600}
+h1{font-family:var(--f-head);font-weight:700;font-size:clamp(34px,5.4vw,54px);line-height:1.12;margin:6px 0 0;letter-spacing:.01em;text-wrap:balance}
+h1 .soft{color:var(--ink3);font-weight:600}
+.sub{font-size:18px;line-height:1.7;color:var(--ink2);max-width:62em;margin:0}
+.thesis{max-width:64em;margin:0;padding:14px 18px;border-left:3px solid var(--cen);background:var(--cen-soft);border-radius:0 8px 8px 0;font-size:15.5px}
+.thesis ol{margin:6px 0 0;padding-left:1.4em}
+.thesis li{margin:4px 0}
+.statstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+.statstrip div{background:var(--surf);padding:12px 14px;display:grid;gap:2px;align-content:start}
+.statstrip b{font-family:var(--f-mono);font-weight:500;font-size:18px;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.statstrip span{font-size:12.5px;line-height:1.45;color:var(--ink3)}
+
+/* ---------- TOC ---------- */
+nav.toc{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--rule);margin-inline:-20px;padding:8px 20px;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;align-items:center}
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{flex:none;font-size:13px;color:var(--ink2);text-decoration:none;padding:5px 10px;border-radius:999px;white-space:nowrap}
+nav.toc a .n{font-family:var(--f-mono);font-size:11px;color:var(--ink3);margin-right:4px}
+nav.toc a:hover,nav.toc a.on{background:var(--surf3);color:var(--ink)}
+nav.toc .sp{flex:1 0 8px}
+nav.toc button.theme{flex:none;font:inherit;font-size:12px;border:1px solid var(--rule2);background:var(--surf2);color:var(--ink2);border-radius:999px;padding:4px 10px;cursor:pointer}
+@media (max-width:520px){ nav.toc{margin-inline:-16px;padding-inline:16px} }
+
+/* ---------- sections ---------- */
+section{padding-block:44px 8px;scroll-margin-top:56px}
+h2{font-family:var(--f-head);font-weight:700;font-size:clamp(24px,3.2vw,31px);line-height:1.3;margin:0 0 6px;text-wrap:balance;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+h2 .no{font-family:var(--f-mono);font-weight:500;font-size:.6em;color:var(--ink3);letter-spacing:.04em}
+h3{font-family:var(--f-head);font-weight:600;font-size:20px;line-height:1.4;margin:32px 0 8px;text-wrap:balance}
+h4{font-size:14px;font-weight:600;margin:0 0 6px;letter-spacing:.02em}
+p{margin:0 0 14px}
+.lede{color:var(--ink2);font-size:16.5px;max-width:60em}
+.prose{max-width:48em}
+ul.tight,ol.tight{margin:0 0 14px;padding-left:1.3em}
+ul.tight li,ol.tight li{margin:4px 0}
+
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:18px 0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:14px;margin:18px 0}
+.card{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;min-width:0}
+.card p:last-child,.card ul:last-child{margin-bottom:0}
+.card h4{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);font-weight:500}
+.card.raw{border-top:3px solid var(--raw)} .card.nojac{border-top:3px solid var(--nojac)} .card.cen{border-top:3px solid var(--cen)} .card.pt{border-top:3px solid var(--pt)} .card.risk{border-top:3px solid var(--risk)} .card.sde{border-top:3px solid var(--sde)}
+
+.tag{display:inline-block;font-size:12px;line-height:1.5;padding:0 7px;border-radius:5px;font-weight:600;white-space:nowrap}
+.tag.raw{background:var(--raw-soft);color:var(--raw-ink)}
+.tag.nojac{background:var(--nojac-soft);color:var(--nojac-ink)}
+.tag.cen{background:var(--cen-soft);color:var(--cen-ink)}
+.tag.pt{background:var(--pt-soft);color:var(--pt-ink)}
+.tag.risk{background:var(--risk-soft);color:var(--risk-ink)}
+.tag.med{background:var(--med-soft);color:var(--med-ink)}
+.tag.plain{background:var(--surf3);color:var(--ink2)}
+
+.note{border:1px solid var(--rule2);background:var(--surf);border-radius:10px;padding:14px 16px;margin:16px 0;font-size:15px}
+.note > .hd{font-family:var(--f-mono);font-weight:500;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);display:block;margin-bottom:4px}
+.note.mine{border-color:color-mix(in srgb,var(--cen) 45%,var(--rule2))}
+.note.mine > .hd{color:var(--cen-ink)}
+.note.warn{border-color:color-mix(in srgb,var(--risk) 50%,var(--rule2));background:color-mix(in srgb,var(--risk-soft) 55%,var(--surf))}
+.note.warn > .hd{color:var(--risk-ink)}
+.note.med{border-color:color-mix(in srgb,var(--med) 50%,var(--rule2));background:color-mix(in srgb,var(--med-soft) 50%,var(--surf))}
+.note.med > .hd{color:var(--med-ink)}
+.note p:last-child,.note ul:last-child,.note ol:last-child{margin-bottom:0}
+
+/* ---------- equations ---------- */
+.eq{font-family:var(--f-math);font-size:18px;line-height:1.9;text-align:center;padding:10px 12px;margin:10px 0 14px;background:var(--surf2);border:1px solid var(--rule);border-radius:8px;overflow-x:auto;white-space:nowrap}
+.eq i{font-style:italic}
+.eq .lbl{font-family:var(--f-mono);font-size:11px;color:var(--ink3);margin-left:14px;vertical-align:middle}
+.eq .hl-raw{background:var(--raw-soft);border-radius:4px;padding:1px 4px}
+.eq .hl-nojac{background:var(--nojac-soft);border-radius:4px;padding:1px 4px}
+.eq .hl-cen{background:var(--cen-soft);border-radius:4px;padding:1px 4px}
+.eq .hl-pt{background:var(--pt-soft);border-radius:4px;padding:1px 4px}
+.frac{display:inline-flex;flex-direction:column;vertical-align:middle;text-align:center;margin:0 2px;line-height:1.15}
+.frac > span:first-child{border-bottom:1px solid currentColor;padding:0 3px}
+.frac > span:last-child{padding:0 3px}
+
+/* ---------- figures ---------- */
+.fig{margin:22px 0;background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:16px 18px 14px;min-width:0}
+.fig .ttl{font-weight:600;font-size:15px;margin-bottom:2px}
+.fig .sub2{font-size:13px;color:var(--ink3);margin-bottom:10px}
+.fig .cap{font-size:13.5px;color:var(--ink2);margin-top:10px;line-height:1.65}
+.svgbox{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.svgbox svg{display:block;width:100%;height:auto;min-width:720px}
+.chart svg{display:block;width:100%;height:auto}
+.chart{position:relative}
+svg text{font-family:var(--f-body)}
+svg .lbl{font-size:13px;fill:var(--ink)}
+svg .sm{font-size:11.5px;fill:var(--ink3)}
+svg .xs{font-size:10.5px;fill:var(--ink3)}
+svg .mono{font-family:var(--f-mono);font-size:11px;fill:var(--ink2)}
+svg .math{font-family:var(--f-math);font-size:14px;fill:var(--ink);font-style:italic}
+svg .box{fill:var(--surf2);stroke:var(--rule2)}
+svg .edge{stroke:var(--ink3);stroke-width:1.5;fill:none}
+svg .gridl{stroke:var(--grid);stroke-width:1}
+svg .axl{stroke:var(--axis);stroke-width:1}
+svg .tick{font-size:11px;fill:var(--ink3);font-family:var(--f-mono)}
+svg .axt{font-size:12px;fill:var(--ink2)}
+.s-raw{stroke:var(--raw)} .s-nojac{stroke:var(--nojac)} .s-cen{stroke:var(--cen)} .s-pt{stroke:var(--pt)} .s-sde{stroke:var(--sde)} .s-ink{stroke:var(--ink)}
+.f-raw{fill:var(--raw)} .f-nojac{fill:var(--nojac)} .f-cen{fill:var(--cen)} .f-pt{fill:var(--pt)} .f-sde{fill:var(--sde)} .f-ink{fill:var(--ink)}
+.t-raw{fill:var(--raw-ink)} .t-nojac{fill:var(--nojac-ink)} .t-cen{fill:var(--cen-ink)} .t-pt{fill:var(--pt-ink)} .t-sde{fill:var(--ink2)} .t-ink{fill:var(--ink)}
+.tip{position:absolute;pointer-events:none;background:var(--surf);border:1px solid var(--rule2);border-radius:8px;padding:7px 10px;font-size:12.5px;line-height:1.55;box-shadow:var(--shadow);z-index:5;min-width:140px;color:var(--ink)}
+.tip .h{font-family:var(--f-mono);font-size:11px;color:var(--ink3);margin-bottom:2px}
+.tip .r{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.tip .r i{display:inline-block;width:10px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.tip .r b{font-family:var(--f-mono);font-weight:500}
+canvas{display:block;width:100%;height:auto;border-radius:8px;background:var(--surf2)}
+
+/* ---------- controls ---------- */
+.ctrl{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin:4px 0 12px}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--rule2);border-radius:8px;overflow:hidden;background:var(--surf2)}
+.seg button{font:inherit;font-size:13px;border:0;background:transparent;color:var(--ink2);padding:6px 12px;cursor:pointer;border-right:1px solid var(--rule2)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.seg button:hover:not([aria-pressed="true"]){background:var(--surf3);color:var(--ink)}
+.ctrl label{font-size:13px;color:var(--ink2);display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ctrl label output{font-family:var(--f-mono);font-size:12.5px;color:var(--ink);min-width:3.4em}
+.ctrl select{font:inherit;font-size:13px;background:var(--surf2);color:var(--ink);border:1px solid var(--rule2);border-radius:6px;padding:4px 6px}
+.btn{font:inherit;font-size:13px;border:1px solid var(--rule2);background:var(--surf2);color:var(--ink);border-radius:8px;padding:6px 14px;cursor:pointer}
+.btn.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.btn:hover{filter:brightness(1.08)}
+input[type=range]{accent-color:var(--cen);width:160px;max-width:100%}
+.readout{font-family:var(--f-mono);font-size:13px;color:var(--ink2);line-height:1.7}
+.readout b{color:var(--ink);font-weight:500}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:10px 0}
+.kpi{background:var(--surf2);border:1px solid var(--rule);border-radius:8px;padding:8px 10px;min-width:0}
+.kpi .k{font-size:11.5px;color:var(--ink3);line-height:1.35}
+.kpi .v{font-family:var(--f-mono);font-size:17px;color:var(--ink);font-variant-numeric:tabular-nums}
+.kpi .v small{font-size:12px;color:var(--ink3)}
+.kpi.raw{border-left:3px solid var(--raw)} .kpi.nojac{border-left:3px solid var(--nojac)} .kpi.cen{border-left:3px solid var(--cen)} .kpi.sde{border-left:3px solid var(--sde)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--ink2);margin:6px 0}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:18px;height:3px;border-radius:2px}
+.legend i.dash{background:repeating-linear-gradient(90deg,currentColor 0 5px,transparent 5px 8px)!important;height:2px}
+.split{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:14px;align-items:start}
+.busy{font-family:var(--f-mono);font-size:12px;color:var(--med-ink)}
+
+/* ---------- stepper ---------- */
+.stepper{border:1px solid var(--rule);border-radius:12px;background:var(--surf);overflow:hidden;margin:18px 0}
+.stepper .tabs{display:flex;overflow-x:auto;border-bottom:1px solid var(--rule);background:var(--surf2);scrollbar-width:none}
+.stepper .tabs button{flex:none;font:inherit;font-size:13px;border:0;background:transparent;color:var(--ink2);padding:9px 14px;cursor:pointer;border-right:1px solid var(--rule)}
+.stepper .tabs button[aria-selected="true"]{background:var(--surf);color:var(--ink);box-shadow:inset 0 -2px 0 var(--cen)}
+.stepper .pane{padding:16px 18px}
+.stepper .nav{display:flex;justify-content:space-between;gap:8px;padding:0 18px 14px}
+
+/* ---------- tables ---------- */
+.tbl{width:100%;border-collapse:collapse;font-size:14px;margin:8px 0 14px}
+.tbl th,.tbl td{padding:7px 10px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+.tbl th{font-weight:600;color:var(--ink2);font-size:12.5px;background:var(--surf2)}
+.tbl td.n,.tbl th.n{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.tbl tr.me td{background:var(--raw-soft)}
+.tblwrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--rule);border-radius:10px;background:var(--surf);margin:10px 0 18px}
+.tblwrap .tbl{margin:0}
+.ok{color:var(--cen-ink);font-weight:600}
+.bad{color:var(--risk-ink);font-weight:600}
+.warnc{color:var(--med-ink);font-weight:600}
+
+/* ---------- doubts ---------- */
+details.doubt{border:1px solid var(--rule);border-radius:10px;background:var(--surf);margin:10px 0;overflow:hidden}
+details.doubt > summary{list-style:none;cursor:pointer;padding:12px 14px;display:flex;gap:10px;align-items:baseline}
+details.doubt > summary::-webkit-details-marker{display:none}
+details.doubt .idx{font-family:var(--f-mono);font-size:12px;color:var(--ink3);flex:none}
+details.doubt .sev{flex:none;font-size:11.5px;font-weight:600;padding:0 7px;border-radius:5px}
+details.doubt.h .sev{background:var(--risk-soft);color:var(--risk-ink)}
+details.doubt.m .sev{background:var(--med-soft);color:var(--med-ink)}
+details.doubt.l .sev{background:var(--low-soft);color:var(--ink2)}
+details.doubt .t{font-weight:600;line-height:1.5}
+details.doubt[open] > summary{border-bottom:1px solid var(--rule);background:var(--surf2)}
+details.doubt .body{padding:12px 16px 4px;font-size:15px}
+details.doubt .ev{font-size:13px;color:var(--ink3)}
+details.doubt.h{border-left:3px solid var(--risk)} details.doubt.m{border-left:3px solid var(--med)} details.doubt.l{border-left:3px solid var(--low)}
+
+.src{font-size:13.5px;color:var(--ink2)}
+.src li{margin:3px 0}
+footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--rule);font-size:13px;color:var(--ink3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="slate" aria-label="论文信息">
+    <div class="strip" aria-hidden="true"><svg id="stripSvg" preserveAspectRatio="none"></svg><span>SDE 样本路径（抖）</span><span class="r">概率流 ODE（顺）</span></div>
+    <dl>
+      <div><dt>Paper</dt><dd>Continuous-Time Trajectory Generation from Discrete Observations with Stochasticity（方法名 PhiBE-Flow）</dd></div>
+      <div><dt>arXiv</dt><dd><a href="https://arxiv.org/abs/2609.32026">2609.32026</a> v1 · stat.ML · <span class="tnum">2026-09-25</span></dd></div>
+      <div><dt>Unit</dt><dd>Ruifeng Shang（芝加哥大学统计系）、Shu Liu（佛罗里达州立大学数学系）共同一作；通讯 Yuhua Zhu（UCLA 统计与数据科学系，PhiBE 原作者）</dd></div>
+      <div><dt>Code</dt><dd><a href="https://github.com/R1fe/PhiBE-Flow">R1fe/PhiBE-Flow</a> <span class="ok">已公开</span>；不含数据与权重（2026-09-29 查）</dd></div>
+      <div><dt>Experiments</dt><dd>2D OU（可逆 / 非可逆）· 随机双摆 Acrobot（状态 / 图像：正文 28×28，表 2 与配置 32×32）· 随机 NS（PFI 基准）· KTH 64×64</dd></div>
+      <div><dt>本仓库</dt><dd><span class="no">不在 data/papers.jsonl</span>；没有动作条件，不满足 systems 标准，也不属于现有任何标签</dd></div>
+    </dl>
+  </div>
+
+  <h1>PhiBE-Flow <span class="soft">精读</span></h1>
+  <p class="sub">这篇论文想做的事可以用一句话说：<b>只给你一堆"相邻两次观测"的数据对，学一个确定性的速度场 <span class="mv">v</span>(<span class="mv">x</span>, <span class="mv">t</span>)，让 ODE 推着一群点走时，每个时刻的分布都和背后那个未知的随机微分方程（SDE）一样。</b>这样的速度场叫"概率流"。难点是它依赖未知的漂移 <span class="mv">b</span>、扩散 <span class="mv">Σ</span> 和密度的 score。作者用分部积分消掉 score，再用相邻两帧的差分 <span class="mv">Δx</span>/<span class="mv">Δt</span>、<span class="mv">ΔxΔx</span><sup>⊤</sup>/<span class="mv">Δt</span> 顶替 <span class="mv">b</span> 和 <span class="mv">Σ</span>，得到一个只需成对数据、不需要 score 网络、不需要模拟 SDE 的损失。</p>
+  <div class="thesis">
+    <b>我的判断。</b>方法本身干净、推导正确（我逐式核过，附录里 OU 的解析数字全部复算吻合），在 OU 上的验证也扎实。但"视频生成"这半边的证据撑不起标题：
+    <ol>
+      <li><b>代码里的 NS 与 KTH 实验，实际上是一个"确定性下一帧预测器"</b>：一步就是一个观测间隔（KTH 为 1 帧；NS 为 2 个快照，即 1.0 个物理时间单位），每个间隔只走一步 Euler，模型还条件于前一帧。"连续时间"和"概率流"两个卖点，在高维实验里都没有被检验到。</li>
+      <li><b>缺最关键的消融：去掉 Jacobian（扩散）项。</b>去掉之后，损失就是普通的 MSE 回归。胜过随机基线的那部分，可能全来自"确定性 + MSE"本身。代码的训练入口甚至会拒绝关掉这一项。</li>
+      <li><b>比较方式偏向确定性方法。</b>MCVD 和 PFI 是随机采样器，比较用的却是逐点指标。表 1 的 PSNR 在五行里都恰好等于 −10·log<sub>10</sub>(MSE)，和 MSE 是同一个量。基线数字也和各自原文对不上：PFI 在 KTH 上的 FVD 原文是 39.13，这里是 280.1；MCVD 的 PSNR 原文是 27.5，这里是 20.68。论文只给了指标公式和 FVD 实现，没交代上下文与预测帧数、每个视频几个样本、基线是否重训。</li>
+      <li><b>我在浏览器里复现 OU 时，发现一个论文没讨论的适用条件。</b>一阶 PhiBE 用的是原始二阶矩 <span class="mv">ΔxΔx</span><sup>⊤</sup>/<span class="mv">Δt</span>。当"每步漂移位移"不再远小于"每步噪声"时，它会把运动误当成扩散，生成分布的方差被放大几十倍，甚至发散。先减去拟合出的漂移（中心化）就能修好。视频按 <span class="mv">Δt</span> = 1 帧采样，恰好可能落在这个危险区。</li>
+    </ol>
+  </div>
+  <div class="statstrip">
+    <div><b>1 步 / 观测</b><span>代码里 NS/KTH 每个观测间隔<br>只积分一步 Euler（KTH 为 1 帧）</span></div>
+    <div><b>PSNR ≡ MSE</b><span>表 1 五行 PSNR 都等于<br>−10·log<sub>10</sub>(MSE)（在舍入精度内）</span></div>
+    <div><b>280.1 vs 39.13</b><span>PFI 在 KTH 上的 FVD：本文表 1 vs 原文<br>（协议不同，论文未交代）</span></div>
+    <div><b>0.23–0.34×</b><span>OU 复现：去掉 Jacobian 项后<br>终态协方差只剩这么多</span></div>
+    <div><b>×1.5 → ×40</b><span>OU 复现：原始二阶矩在 R≈0.4 → R≈2<br>时的终态方差放大（§4）</span></div>
+    <div><b>2π√11 ≈ 20.84</b><span>非可逆 OU 概率流的周期<br>附录 B.1 复算吻合</span></div>
+  </div>
+</header>
+
+<nav class="toc" aria-label="目录">
+  <a href="#s1"><span class="n">§1</span>一页读懂</a>
+  <a href="#s2"><span class="n">§2</span>概率流是什么</a>
+  <a href="#s3"><span class="n">§3</span>损失怎么来的</a>
+  <a href="#s4"><span class="n">§4</span>Δt 该多小</a>
+  <a href="#s5"><span class="n">§5</span>理论</a>
+  <a href="#s6"><span class="n">§6</span>实验重读</a>
+  <a href="#s7"><span class="n">§7</span>代码里的事实</a>
+  <a href="#s8"><span class="n">§8</span>存疑</a>
+  <a href="#s9"><span class="n">§9</span>公道话 · 启示</a>
+  <span class="sp"></span>
+  <button class="theme" id="themeBtn" type="button" aria-label="切换深浅色">◐ 主题</button>
+</nav>
+
+<!-- ============================================ §1 -->
+<section id="s1">
+  <h2><span class="no">§1</span>一页读懂</h2>
+  <p class="lede">先照论文自己的逻辑走一遍，我的判断放到 §4 以后。</p>
+
+  <div class="grid3">
+    <div class="card sde">
+      <h4>Problem · 问题</h4>
+      <p>物理系统在连续时间里演化，我们只能在离散时刻观测到它。主流生成方法学的要么是"帧到帧的映射"（自回归），要么是一条人造的"噪声→数据"路径（扩散、桥、流匹配），<b>都不是物理时间里的演化本身</b>。如果系统是随机的，漂移 <span class="mv">b</span> 和扩散 <span class="mv">Σ</span> 都未知，而描述分布演化的"概率速度"还依赖未知的密度 score ∇log <span class="mv">ρ</span>。</p>
+    </div>
+    <div class="card raw">
+      <h4>Idea · 思路</h4>
+      <p>直接学一个确定性速度场 <span class="mv">v<sub>θ</sub></span>(<span class="mv">x</span>, <span class="mv">t</span>)，让 ODE <span class="mv">ẋ</span> = <span class="mv">v<sub>θ</sub></span> 推动的分布和 SDE 一致。<b>目标里的 score 用分部积分消掉</b>；<span class="mv">b</span> 和 <span class="mv">Σ</span> <b>用相邻观测的差分顶替</b>（PhiBE 的一阶近似）。这样只需要成对数据 (<span class="mv">x<sub>t</sub></span>, <span class="mv">x</span><sub><span class="mv">t</span>+<span class="mv">Δt</span></sub>)，损失是无偏的样本平均。</p>
+    </div>
+    <div class="card cen">
+      <h4>Claims · 论文声称</h4>
+      <p>误差界是 <span class="mr">O(</span><span class="mv">Δt</span><span class="mr">)</span> 加上 <span class="mr">O(√(</span><span class="mv">p</span> log/(<span class="mv">N Δt</span>)<span class="mr">))</span>。在 OU 上准确复现了解析概率流，包括非可逆情形的环流；双摆上给出定性结果。在随机 NS 和 KTH 上优于 MCVD 和 PFI（双摆没有基线）。KTH 上与 PFI 比：MSE 0.44 对 0.66（×10<sup>−2</sup>），FVD 227.5 对 280.1。</p>
+    </div>
+  </div>
+
+  <figure class="fig" id="pipeFig">
+    <div class="ttl">PhiBE-Flow 的流程：论文描述 vs 代码实际（NS / KTH）</div>
+    <div class="sub2">切换两种视图。橙色标出的是论文正文没写、只能在代码里看到的设定（§7 有完整对照表）。</div>
+    <div class="ctrl"><div class="seg" role="group" aria-label="视图">
+      <button type="button" data-pipe="paper" aria-pressed="true">论文描述</button>
+      <button type="button" data-pipe="code" aria-pressed="false">代码实际（NS·KTH）</button>
+    </div></div>
+    <div class="svgbox">
+      <svg id="pipe" data-mode="paper" viewBox="0 0 1000 318" role="img" aria-label="PhiBE-Flow 流程图：从离散观测到损失函数再到 ODE 生成；代码视图下显示条件于前一帧、Δt=1、每帧一步 Euler。">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink3)"/></marker>
+          <marker id="arO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--nojac)"/></marker>
+        </defs>
+        <style>
+          #pipe[data-mode="paper"] .code{display:none}
+          #pipe[data-mode="code"] .paper{display:none}
+          #pipe .cbox{fill:var(--nojac-soft);stroke:var(--nojac)}
+          #pipe .ctext{fill:var(--nojac-ink)}
+        </style>
+        <!-- box 1 -->
+        <rect class="box" x="8" y="30" width="176" height="128" rx="10"/>
+        <text class="scr" x="20" y="22" style="font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;fill:var(--ink3)">① DATA</text>
+        <g class="paper">
+          <text class="lbl" x="20" y="58">离散观测</text>
+          <text class="math" x="20" y="84">{ x<tspan baseline-shift="super" font-size="10">(k)</tspan><tspan baseline-shift="sub" font-size="10">tᵢ</tspan> }</text>
+          <text class="sm" x="20" y="108">N 条独立轨迹</text>
+          <text class="sm" x="20" y="126">取相邻两帧组成数据对</text>
+          <text class="sm" x="20" y="144">(x<tspan baseline-shift="sub" font-size="9">tᵢ</tspan>, x<tspan baseline-shift="sub" font-size="9">tᵢ₊₁</tspan>)</text>
+        </g>
+        <g class="code">
+          <rect class="cbox" x="8" y="30" width="176" height="128" rx="10"/>
+          <text class="lbl" x="20" y="58">三帧一组</text>
+          <text class="math" x="20" y="84">(x<tspan baseline-shift="sub" font-size="10">t−1</tspan>, x<tspan baseline-shift="sub" font-size="10">t</tspan>, x<tspan baseline-shift="sub" font-size="10">t+1</tspan>)</text>
+          <text class="sm ctext" x="20" y="108">NS：64×64，隔 2 个快照</text>
+          <text class="sm ctext" x="20" y="126">（Δ = 1.0 物理时间）</text>
+          <text class="sm ctext" x="20" y="144">KTH：VQ 潜变量 4×8×8</text>
+        </g>
+        <path class="edge" d="M186,94 L214,94" marker-end="url(#ar)"/>
+
+        <!-- box 2 -->
+        <rect class="box" x="216" y="30" width="176" height="128" rx="10"/>
+        <text x="228" y="22" style="font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;fill:var(--ink3)">② 两个"观测量"</text>
+        <text class="math" x="228" y="60">Δx / Δt  ≈  b̂(x)</text>
+        <text class="math" x="228" y="88">ΔxΔxᵀ / Δt  ≈  Σ̂(x)</text>
+        <text class="sm" x="228" y="114">一阶 PhiBE：条件矩</text>
+        <text class="sm" x="228" y="132">的单样本无偏估计</text>
+        <g class="code"><text class="sm ctext" x="228" y="150">Δt = 1（一个观测间隔）</text></g>
+        <g class="paper"><text class="sm" x="228" y="150">要求 Δt 足够小</text></g>
+        <path class="edge" d="M394,94 L422,94" marker-end="url(#ar)"/>
+
+        <!-- box 3 -->
+        <rect class="box" x="424" y="30" width="176" height="128" rx="10"/>
+        <text x="436" y="22" style="font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;fill:var(--ink3)">③ LOSS（式 14）</text>
+        <text class="math" x="436" y="58">‖v‖² − 2 v·Δx/Δt</text>
+        <text class="math" x="436" y="82">− Δxᵀ(∇ₓv)Δx / Δt</text>
+        <text class="sm" x="436" y="108">无 score 网络</text>
+        <text class="sm" x="436" y="126">不模拟 SDE</text>
+        <g class="paper"><text class="sm" x="436" y="146">正文称"高维代价大"</text></g>
+        <g class="code"><text class="sm ctext" x="436" y="146">一次 VJP（与维度无关）</text></g>
+        <path class="edge" d="M602,94 L630,94" marker-end="url(#ar)"/>
+
+        <!-- box 4 -->
+        <rect class="box" x="632" y="30" width="176" height="128" rx="10"/>
+        <text x="644" y="22" style="font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;fill:var(--ink3)">④ MODEL</text>
+        <g class="paper">
+          <text class="math" x="644" y="60">v<tspan baseline-shift="sub" font-size="10">θ</tspan>(x, t)</text>
+          <text class="sm" x="644" y="86">MLP / 残差 MLP</text>
+          <text class="sm" x="644" y="104">NS、KTH 的网络</text>
+          <text class="sm" x="644" y="122">结构正文未写</text>
+        </g>
+        <g class="code">
+          <rect class="cbox" x="632" y="30" width="176" height="128" rx="10"/>
+          <text class="math" x="644" y="60">v<tspan baseline-shift="sub" font-size="10">θ</tspan>(x<tspan baseline-shift="sub" font-size="10">t</tspan>, t | x<tspan baseline-shift="sub" font-size="10">t−1</tspan>)</text>
+          <text class="sm ctext" x="644" y="86">条件于前一帧（正文未写）</text>
+          <text class="sm ctext" x="644" y="104">NS：UNet，128 通道</text>
+          <text class="sm ctext" x="644" y="122">KTH：RIVER 式空间</text>
+          <text class="sm ctext" x="644" y="140">Transformer，768 宽</text>
+        </g>
+        <path class="edge" d="M810,94 L838,94" marker-end="url(#ar)"/>
+
+        <!-- box 5 -->
+        <rect class="box" x="840" y="30" width="152" height="128" rx="10"/>
+        <text x="852" y="22" style="font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;fill:var(--ink3)">⑤ GENERATE</text>
+        <g class="paper">
+          <text class="math" x="852" y="60">ẋ = v<tspan baseline-shift="sub" font-size="10">θ</tspan>(x, t)</text>
+          <text class="sm" x="852" y="86">X₀ ~ μ₀ 出发积分</text>
+          <text class="sm" x="852" y="104">任意 t 都能取样</text>
+          <text class="sm" x="852" y="122">（"连续时间"）</text>
+        </g>
+        <g class="code">
+          <rect class="cbox" x="840" y="30" width="152" height="128" rx="10"/>
+          <text class="math" x="852" y="60">x<tspan baseline-shift="sub" font-size="10">t+1</tspan> = x<tspan baseline-shift="sub" font-size="10">t</tspan> + 1·v<tspan baseline-shift="sub" font-size="10">θ</tspan></text>
+          <text class="sm ctext" x="852" y="86">每帧一步 Euler</text>
+          <text class="sm ctext" x="852" y="104">只在观测帧评测</text>
+          <text class="sm ctext" x="852" y="122">KTH：10 帧上下文</text>
+          <text class="sm ctext" x="852" y="140">只用最后 2 帧</text>
+        </g>
+
+        <!-- bottom band -->
+        <g class="paper">
+          <rect x="8" y="186" width="984" height="116" rx="10" fill="var(--surf2)" stroke="var(--rule)"/>
+          <text class="lbl" x="24" y="212" style="font-weight:600">论文的叙事</text>
+          <text class="sm" x="24" y="236">• 学到的是物理时间里的"概率速度"，而不是帧到帧映射或人造的去噪路径（Fig.1）。</text>
+          <text class="sm" x="24" y="258">• 同一个 v 可以在任意时间分辨率上积分，所以叫"连续时间轨迹生成"。</text>
+          <text class="sm" x="24" y="280">• 生成是确定性的，随机性只来自初始点 X₀ ~ μ₀；保证的是每个时刻的边缘分布，而不是单条路径。</text>
+        </g>
+        <g class="code">
+          <rect x="8" y="186" width="984" height="116" rx="10" fill="var(--nojac-soft)" stroke="var(--nojac)"/>
+          <text class="lbl" x="24" y="212" style="font-weight:600">代码实际做的（configs/nse.yaml、configs/kth.yaml、src/method/loss.py、src/trainers/*）</text>
+          <text class="sm ctext" x="24" y="236">• 训练：每个样本是 (xₜ₋₁, xₜ, xₜ₊₁)，网络输入含前一帧；Jacobian 只对 xₜ 求。目标里的 score 因此变成"一步转移密度"的 score（§7 玩具）。</text>
+          <text class="sm ctext" x="24" y="258">• 生成：xₜ₊₁ = xₜ + Δt·v，Δt = 1 个观测间隔，每个间隔只走一步 → 等价于一个确定性下一帧预测器。</text>
+          <text class="sm ctext" x="24" y="280">• 评测：只在观测帧上算；每个测试视频一个确定性样本；FVD 的"生成视频"里包含 10 帧真实上下文。</text>
+        </g>
+      </svg>
+    </div>
+    <div class="cap">论文 Fig.1 只画了"主流方法学帧间关系 / PhiBE-Flow 学概率速度"的对比；这里按正文和附录重画，并补上代码视图。代码视图的每一条都能在仓库对应文件里找到，§7 列了出处。</div>
+  </figure>
+
+  <div class="note mine"><span class="hd">一句话人话</span>
+    <p>把损失配方以后（§3 第 6 步），PhiBE-Flow 的训练目标 = <b>「把 <span class="mv">v</span> 回归到 <span class="mv">Δx</span>/<span class="mv">Δt</span>」</b> + <b>「奖励 <span class="mv">v</span> 在观测到的抖动方向上往外张」</b>。第一项单独用，学到的是条件均值漂移，生成的分布会越走越窄（§2 的橙线）。第二项在期望上正好补回噪声造成的扩散。整篇论文的正确性，都取决于第二项估得准不准；§4 说明它在什么条件下会估歪。</p>
+  </div>
+</section>
+
+<!-- ============================================ §2 -->
+<section id="s2">
+  <h2><span class="no">§2</span>概率流：同一群人，三种走法</h2>
+  <p class="lede">这是读这篇论文最需要先建立的直觉。SDE 描述的是"每个粒子怎么随机游走"；概率流描述的是"一个<b>不随机</b>的速度场，推着整群粒子走，让每个时刻的分布和 SDE 一模一样"。两者边缘分布相同，单条轨迹完全不同。</p>
+
+  <figure class="fig" id="figA">
+    <div class="ttl">一维 OU：SDE、只回归漂移、概率流</div>
+    <div class="sub2"><span class="mv">dX</span> = −(<span class="mv">X</span> − 0)<span class="mv">dt</span> + <span class="mv">σ dB</span>，<span class="mv">X</span><sub>0</sub> ~ N(2, <span class="mv">s</span><sub>0</sub><sup>2</sup>)。灰带是真实边缘分布 <span class="mv">m<sub>t</sub></span> ± 2√<span class="mv">V<sub>t</sub></span>（解析解）。三组粒子用同一批起点。</div>
+    <div class="ctrl">
+      <div class="seg" role="group" aria-label="显示">
+        <button type="button" data-a="all" aria-pressed="true">全部</button>
+        <button type="button" data-a="sde" aria-pressed="false">SDE</button>
+        <button type="button" data-a="drift" aria-pressed="false">只回归漂移</button>
+        <button type="button" data-a="pf" aria-pressed="false">概率流</button>
+      </div>
+      <label>噪声 <span class="mv">σ</span> <input type="range" id="aSig" min="0.2" max="1.5" step="0.05" value="0.9"><output id="aSigO">0.90</output></label>
+      <label>初始宽度 <span class="mv">s</span><sub>0</sub> <input type="range" id="aS0" min="0.05" max="1.4" step="0.05" value="0.15"><output id="aS0O">0.15</output></label>
+      <button class="btn" type="button" id="aReseed">重新采样噪声</button>
+    </div>
+    <div class="legend" id="aLegend">
+      <span><i style="background:var(--sde)"></i>SDE 样本路径</span>
+      <span><i style="background:var(--nojac)"></i>只回归漂移 <span class="mv">ẋ</span> = <span class="mv">b</span>(<span class="mv">x</span>)</span>
+      <span><i style="background:var(--raw)"></i>概率流 <span class="mv">ẋ</span> = <span class="mv">b</span> − ½<span class="mv">σ</span>²∂<sub><span class="mv">x</span></sub>log <span class="mv">ρ<sub>t</sub></span></span>
+      <span><i style="background:var(--band);height:10px"></i>真实分布 ±2σ</span>
+    </div>
+    <div class="chart" id="aChart"></div>
+    <div class="kpis" id="aKpis"></div>
+    <div class="cap">把 <span class="mv">s</span><sub>0</sub> 拉小（初始很集中）：概率流一开始会<b>往外张</b>，因为这时 −½<span class="mv">σ</span>²∂log <span class="mv">ρ</span> = +<span class="mv">σ</span>²(<span class="mv">x</span> − <span class="mv">m<sub>t</sub></span>)/(2<span class="mv">V<sub>t</sub></span>) 很大。把 <span class="mv">s</span><sub>0</sub> 拉大：它会往里收。只回归漂移的橙线不管初始宽窄都一路收窄，方差按 <span class="mv">s</span><sub>0</sub><sup>2</sup><span class="mv">e</span><sup>−2<span class="mv">t</span></sup> 衰减。这正是"确定性回归预测会塌缩到均值"的最小版本。</div>
+  </figure>
+
+  <ol class="tight prose">
+    <li><b>概率流只保证每个时刻的分布对，不保证单条轨迹像 SDE。</b>它没有抖动，也不会分叉。生成轨迹的自相关、粗糙度这些路径统计，与真实过程都不一样。</li>
+    <li><b>从一个确定的点出发，ODE 只能走到一个确定的点。</b>所以它表达不了"同一个起点，未来有多种可能"。对"给定当前帧预测未来"这类任务，这是结构性的限制（§8 第 9 条）。论文标题里的 "with stochasticity"，随机性其实只来自初始分布 <span class="mv">μ</span><sub>0</sub>。</li>
+    <li><b>概率流并不唯一。</b>任取一个满足 ∇·(<span class="mv">ρw</span>) = 0 的 <span class="mv">w</span>，加到速度场上，边缘分布都不变。PhiBE-Flow 选的是由 <span class="mv">b</span> 和 <span class="mv">Σ</span> 决定的那一个，也就是物理上真实存在的概率流。它和"只看各时刻边缘分布"的方法（例如 Action Matching）的本质区别就在这里，下图可以直接看到。</li>
+  </ol>
+
+  <figure class="fig" id="figB">
+    <div class="ttl">非可逆 OU：分布不变，概率却在转圈（重画 Fig.2a/b）</div>
+    <div class="sub2">两边都从平稳分布 N(0, <span class="mv">B</span>) 出发。左：SDE 粒子（Euler–Maruyama）。右：概率流 ODE。实线椭圆是 <span class="mv">B</span> 的 1σ、2σ 等高线，亮点拖着轨迹。</div>
+    <div class="ctrl">
+      <div class="seg" role="group" aria-label="过程">
+        <button type="button" data-b="nonrev" aria-pressed="true">非可逆（论文 B.1 参数）</button>
+        <button type="button" data-b="rev" aria-pressed="false">可逆</button>
+      </div>
+      <label>速度 <input type="range" id="bSpeed" min="0.25" max="4" step="0.25" value="1.5"><output id="bSpeedO">1.5×</output></label>
+      <button class="btn" type="button" id="bPlay">暂停</button>
+      <button class="btn" type="button" id="bReset">重置</button>
+    </div>
+    <div class="split">
+      <div><div class="readout" style="margin-bottom:4px"><b>SDE</b> 粒子</div><canvas id="bL" width="520" height="420" aria-label="SDE 粒子动画"></canvas></div>
+      <div><div class="readout" style="margin-bottom:4px"><b>概率流 ODE</b> 粒子</div><canvas id="bR" width="520" height="420" aria-label="概率流粒子动画"></canvas></div>
+    </div>
+    <div class="readout" id="bRead" style="margin-top:8px"></div>
+    <div class="cap">参数取自附录 B.1：<span class="mv">Γ</span> = [[−2, −1], [−1, −2]]，<span class="mv">σ</span> = diag(1, 1/√2)。我复算得到 <span class="mv">B</span> = (1/16)[[5, −2], [−2, 3]]；平稳概率流为 <span class="mv">ẋ</span> = 𝔅<span class="mv">x</span>，其中 𝔅 = (1/11)[[2, 5], [−3, −2]]，𝔅² = −<span class="mv">I</span>/11，所以轨道是椭圆，周期 2π√11 ≈ 20.84，与论文一致。切到"可逆"后，漂移与扩散满足细致平衡，平稳时概率流速度处处为 0：右边的粒子一动不动，分布照样正确。<b>只看边缘分布的方法（例如 Action Matching 学唯一的梯度场）在两种情况下都给出 0。</b>PhiBE-Flow 用的是成对转移，能把左图这种环流学出来。这是本文在方法论上最站得住的卖点，可惜正文没有和这类方法做对比。</div>
+  </figure>
+</section>
+
+<!-- ============================================ §3 -->
+<section id="s3">
+  <h2><span class="no">§3</span>损失函数是怎么一步步推出来的</h2>
+  <p class="lede">六步。前五步是论文 §3 的内容，每一步我都自己推过一遍；第六步是我做的配方改写，用它解读全文最方便。</p>
+
+  <div class="stepper" id="stepper">
+    <div class="tabs" role="tablist" aria-label="推导步骤">
+      <button role="tab" type="button" aria-selected="true" data-st="0">① SDE 与 FP</button>
+      <button role="tab" type="button" aria-selected="false" data-st="1">② 概率速度</button>
+      <button role="tab" type="button" aria-selected="false" data-st="2">③ 想回归，score 未知</button>
+      <button role="tab" type="button" aria-selected="false" data-st="3">④ 分部积分</button>
+      <button role="tab" type="button" aria-selected="false" data-st="4">⑤ 相邻帧顶替</button>
+      <button role="tab" type="button" aria-selected="false" data-st="5">⑥ 配方（我的改写）</button>
+    </div>
+
+    <div class="pane" data-pane="0">
+      <div class="eq"><i>dX<sub>t</sub></i> = <i>b</i>(<i>X<sub>t</sub></i>) <i>dt</i> + <i>σ</i>(<i>X<sub>t</sub></i>) <i>dB<sub>t</sub></i>,&nbsp;&nbsp; <i>Σ</i> := <i>σσ</i><sup>⊤</sup><span class="lbl">式 (1)</span></div>
+      <div class="eq">∂<sub><i>t</i></sub><i>ρ</i> = −∇·(<i>bρ</i>) + ½ Σ<sub><i>i,j</i></sub> ∂<sub><i>i</i></sub>∂<sub><i>j</i></sub>(<i>Σ<sub>ij</sub>ρ</i>)<span class="lbl">式 (5)，Fokker–Planck</span></div>
+      <p><b>人话：</b>单个粒子在随机游走，一大群粒子的密度 <span class="mv">ρ</span>(<span class="mv">x</span>, <span class="mv">t</span>) 则按 FP 方程确定地演化。<span class="mv">b</span> 和 <span class="mv">σ</span> 都不知道，手上只有 <span class="mv">N</span> 条轨迹在离散时刻 <span class="mv">t</span><sub>0</sub> &lt; … &lt; <span class="mv">t<sub>N<sub>t</sub></sub></span> 的观测。</p>
+    </div>
+    <div class="pane" data-pane="1" hidden>
+      <div class="eq">∂<sub><i>t</i></sub><i>ρ</i> + ∇·(<i>ρ v</i>) = 0,&nbsp;&nbsp; <i>v</i> = <span class="hl-nojac"><i>b</i></span> − <span class="hl-raw">½ <i>Σ</i> ∇log <i>ρ</i></span> − ½ ∇·<i>Σ</i><span class="lbl">式 (6)–(7)</span></div>
+      <p><b>人话：</b>把"扩散"改写成一个依赖密度形状的额外速度。−½<span class="mv">Σ</span>∇log <span class="mv">ρ</span> 指向密度下降的方向，意思是：噪声会把粒子从拥挤的地方推开，这里用一个确定的"推开"速度来代替它。当 <span class="mv">Σ</span> = <span class="mv">σ</span>²<span class="mv">I</span> 是常数时，第三项为 0。</p>
+      <p class="dim" style="font-size:14px">我核过：½∂<sub><span class="mv">i</span></sub>∂<sub><span class="mv">j</span></sub>(<span class="mv">Σ<sub>ij</sub>ρ</span>) = ∇·[½(∇·<span class="mv">Σ</span>)<span class="mv">ρ</span> + ½<span class="mv">Σ</span>∇<span class="mv">ρ</span>]（<span class="mv">Σ</span> 对称，约定 (∇·<span class="mv">A</span>)<sub><span class="mv">i</span></sub> = Σ<sub><span class="mv">j</span></sub>∂<sub><span class="mv">j</span></sub><span class="mv">A<sub>ij</sub></span>）。代入即得式 (7)，符号与论文一致。</p>
+    </div>
+    <div class="pane" data-pane="2" hidden>
+      <div class="eq">min<sub><i>θ</i></sub> ∫<sub>0</sub><sup><i>T</i></sup> 𝔼<sub><i>X<sub>t</sub></i>~<i>ρ</i>(·,<i>t</i>)</sub> ‖<i>v<sub>θ</sub></i>(<i>X<sub>t</sub></i>, <i>t</i>) − <i>v</i>(<i>X<sub>t</sub></i>, <i>t</i>)‖² <i>dt</i><span class="lbl">式 (8)</span></div>
+      <p><b>人话：</b>这是最自然的回归目标，问题是 <span class="mv">v</span> 里含有密度的 score ∇log <span class="mv">ρ</span>，而它是未知的。常规做法是另外训练一个 score 网络（Boffi &amp; Vanden-Eijnden 2023 的"概率流解 FP"就是这个思路），本文不想这么做。</p>
+    </div>
+    <div class="pane" data-pane="3" hidden>
+      <div class="eq">𝔼[<i>v<sub>θ</sub></i>·(<i>Σ</i>∇log <i>ρ</i> + ∇·<i>Σ</i>)] = −𝔼[<i>Σ</i> : ∇<i>v<sub>θ</sub></i>]</div>
+      <div class="eq">⇒ min<sub><i>θ</i></sub> ∫ 𝔼[ ‖<i>v<sub>θ</sub></i>‖² − 2<i>v<sub>θ</sub></i>·<i>b</i> − <i>Σ</i> : ∇<i>v<sub>θ</sub></i> ] <i>dt</i><span class="lbl">式 (9)</span></div>
+      <p><b>人话：</b>把平方展开，扔掉与 <span class="mv">θ</span> 无关的 ‖<span class="mv">v</span>‖²。含 score 的交叉项用分部积分，换成"<span class="mv">v<sub>θ</sub></span> 的 Jacobian 与 <span class="mv">Σ</span> 做内积"，score 就消掉了。这是 score matching 里 Hyvärinen 的老技巧。Li、Hurault、Solomon（NeurIPS 2023）命题 3.1 用的正是同一个恒等式，只不过那里 <span class="mv">b</span> 和扩散系数是已知的。成立的前提是边界项消失，论文附录 A.1 用截断函数 <span class="mv">χ<sub>R</sub></span> 处理了这一点。</p>
+    </div>
+    <div class="pane" data-pane="4" hidden>
+      <div class="eq"><i>b̂</i>(<i>x</i>) = 𝔼[Δ<i>x</i> | <i>x</i>] / Δ<i>t</i>,&nbsp;&nbsp; <span class="hl-raw"><i>Σ̂</i>(<i>x</i>) = 𝔼[Δ<i>x</i>Δ<i>x</i><sup>⊤</sup> | <i>x</i>] / Δ<i>t</i></span><span class="lbl">式 (10)–(11)</span></div>
+      <div class="eq"><i>Ĵ</i>(<i>θ</i>) = <span class="frac"><span>1</span><span><i>N N<sub>t</sub></i></span></span> Σ<sub><i>i,k</i></sub> [ ‖<i>v<sub>θ</sub></i>‖² − 2<i>v<sub>θ</sub></i>·<span class="frac"><span>Δ<i>x</i></span><span>Δ<i>t</i></span></span> − <span class="frac"><span>1</span><span>Δ<i>t</i></span></span> Δ<i>x</i><sup>⊤</sup>(∇<sub><i>x</i></sub><i>v<sub>θ</sub></i>)Δ<i>x</i> ]<span class="lbl">式 (14)</span></div>
+      <p><b>人话：</b>条件期望直接用样本代替，把每一对 (<span class="mv">x<sub>t<sub>i</sub></sub></span>, <span class="mv">x<sub>t<sub>i+1</sub></sub></span>) 的差塞进去，就得到一个无偏的随机目标。这其实就是经典的 Kramers–Moyal 条件矩估计（一阶），误差是 <span class="mr">O(</span><span class="mv">Δt</span><span class="mr">)</span>。<b>要注意 <span class="mv">Σ̂</span> 是原始二阶矩，不是协方差：</b></p>
+      <div class="eq"><i>Σ̂</i>(<i>x</i>) = Cov(Δ<i>x</i> | <i>x</i>) / Δ<i>t</i> + <span class="hl-nojac"><i>b̂ b̂</i><sup>⊤</sup> Δ<i>t</i></span></div>
+      <p>第二项是纯粹的离散化副产品，和噪声没有关系。§4 会说明它什么时候会喧宾夺主。</p>
+    </div>
+    <div class="pane" data-pane="5" hidden>
+      <div class="eq"><i>Ĵ</i> = <span class="hl-nojac">‖<i>v<sub>θ</sub></i> − Δ<i>x</i>/Δ<i>t</i>‖²</span> − <span class="hl-raw">Δ<i>x</i><sup>⊤</sup>(∇<i>v<sub>θ</sub></i>)Δ<i>x</i> / Δ<i>t</i></span> + 常数</div>
+      <p><b>人话：</b>第一项是"把 <span class="mv">v</span> 回归到有限差分速度"。单独用它，学到的是条件均值漂移 <span class="mv">b̂</span>，也就是 §2 的橙线，分布会塌缩。第二项在期望上等于 𝔼[<span class="mv">v<sub>θ</sub></span>·(<span class="mv">Σ̂</span>∇log <span class="mv">ρ</span> + ∇·<span class="mv">Σ̂</span>)]：它奖励 <span class="mv">v</span> 沿着观测到的抖动方向往外张，把噪声造成的扩散补回来。代码里 NS 版的损失正好多加了一个常数 ‖<span class="mv">Δx</span>/<span class="mv">Δt</span>‖²，写出来就是这个配方。</p>
+      <p><b>计算代价：</b><span class="mv">Δx</span><sup>⊤</sup>(∇<span class="mv">v</span>)<span class="mv">Δx</span> 只需要一次 Jacobian-向量积（一次 VJP 或 JVP），成本和维度无关，NS/KTH 的代码就是这么实现的（<span class="mono">spatial_diffusion()</span>）。论文 §3.3 说"协方差加权的 Jacobian 项在高维时代价大"，并为此引出各向同性简化；Algorithm 1 写的也是先求 <span class="mv">J</span> = ∇<sub><span class="mv">x</span></sub><span class="mv">v</span> 再算 Tr(<span class="mv">AJ</span>)（双摆版代码确实逐行算了完整 Jacobian，4 维时无所谓）。对经验目标 (14) 而言，一次 VJP 就够了。</p>
+    </div>
+    <div class="nav">
+      <button class="btn" type="button" id="stPrev">← 上一步</button>
+      <button class="btn primary" type="button" id="stNext">下一步 →</button>
+    </div>
+  </div>
+
+  <figure class="fig">
+    <div class="ttl">损失的解剖：两项各管什么</div>
+    <div class="sub2">橙 = 回归项（单独使用会塌缩），蓝 = 发散奖励（论文的核心），红虚线 = 它的软肋。</div>
+    <div class="svgbox">
+      <svg viewBox="0 0 1000 300" role="img" aria-label="损失分解示意：回归项学到条件均值漂移，发散奖励在期望上补回 score 项；两者相加得到概率流速度；原始二阶矩在 R 大时含运动成分。">
+        <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink3)"/></marker></defs>
+        <rect class="box" x="10" y="108" width="150" height="80" rx="10"/>
+        <text class="lbl" x="24" y="136">一对观测</text>
+        <text class="math" x="24" y="162">Δx = x′ − x</text>
+        <path class="edge" d="M162,132 C200,132 200,70 236,70" marker-end="url(#ar2)"/>
+        <path class="edge" d="M162,164 C200,164 200,226 236,226" marker-end="url(#ar2)"/>
+
+        <rect x="238" y="30" width="260" height="80" rx="10" fill="var(--nojac-soft)" stroke="var(--nojac)"/>
+        <text class="lbl" x="252" y="56" style="font-weight:600">回归项</text>
+        <text class="math" x="252" y="84">‖v − Δx/Δt‖²</text>
+        <text class="sm" x="360" y="56">（普通 MSE）</text>
+        <path class="edge" d="M500,70 L536,70" marker-end="url(#ar2)"/>
+        <rect class="box" x="538" y="30" width="200" height="80" rx="10"/>
+        <text class="sm" x="552" y="54">最优解：条件均值漂移</text>
+        <text class="math" x="552" y="82">b̂(x) = 𝔼[Δx|x]/Δt</text>
+        <text class="xs" x="552" y="102">单独用 → 方差塌缩</text>
+
+        <rect x="238" y="186" width="260" height="80" rx="10" fill="var(--raw-soft)" stroke="var(--raw)"/>
+        <text class="lbl" x="252" y="212" style="font-weight:600">发散奖励</text>
+        <text class="math" x="252" y="240">− Δxᵀ(∇v)Δx / Δt</text>
+        <path class="edge" d="M500,226 L536,226" marker-end="url(#ar2)"/>
+        <rect class="box" x="538" y="186" width="200" height="80" rx="10"/>
+        <text class="sm" x="552" y="210">期望 = 𝔼[v·(Σ̂∇log ρ + ∇·Σ̂)]</text>
+        <text class="math" x="552" y="238">→ − ½Σ̂∇log ρ − ½∇·Σ̂</text>
+        <text class="xs" x="552" y="258">往低密度处推，补回扩散</text>
+
+        <path class="edge" d="M740,70 C790,70 790,140 820,140" marker-end="url(#ar2)"/>
+        <path class="edge" d="M740,226 C790,226 790,156 820,156" marker-end="url(#ar2)"/>
+        <rect class="box" x="822" y="108" width="170" height="80" rx="10" style="stroke:var(--ink2)"/>
+        <text class="lbl" x="836" y="134" style="font-weight:600">概率流速度</text>
+        <text class="math" x="836" y="162">v̂ = b̂ − ½Σ̂∇log ρ</text>
+        <text class="xs" x="836" y="180">− ½∇·Σ̂（式 25）</text>
+
+        <rect x="238" y="276" width="500" height="20" rx="4" fill="none" stroke="var(--risk)" stroke-dasharray="5 4"/>
+        <text class="xs" x="248" y="290" style="fill:var(--risk-ink)">Σ̂ = Cov(Δx|x)/Δt + b̂b̂ᵀΔt：每步漂移位移不再小于噪声时，第二项主导，"扩散"其实是运动（§4）</text>
+      </svg>
+    </div>
+  </figure>
+</section>
+
+<!-- ============================================ §4 -->
+<section id="s4">
+  <h2><span class="no">§4</span>一阶近似的代价：Δt 要多小才算小？</h2>
+  <p class="lede">一阶 PhiBE 近似的误差是 <span class="mr">O(</span><span class="mv">Δt</span><span class="mr">)</span>。问题在于常数有多大，"<span class="mv">Δt</span> 足够小"到底要小到什么程度。论文的 OU 实验用 <span class="mv">N<sub>t</sub></span> = 2000、<span class="mv">Δt</span> = 5×10<sup>−4</sup>，非常安全；而代码里 NS 和 KTH 都是"一个观测间隔一步"（KTH 为 1 帧，NS 为 1.0 个物理时间单位）。我在浏览器里把 OU 实验复现了一遍，专门看这个问题。</p>
+
+  <div class="note warn"><span class="hd">判别量（论文没有）</span>
+    <p>记 <b><span class="mv">R</span> = 𝔼‖<span class="mv">b</span>‖²<span class="mv">Δt</span> / tr <span class="mv">Σ</span></b>，即"每步漂移位移的平方 ÷ 每步噪声方差"。</p>
+    <ul class="tight">
+      <li><span class="mv">R</span> ≪ 1：原始二阶矩 ≈ <span class="mv">Σ</span>，发散奖励估得准，PhiBE-Flow 是对的。</li>
+      <li><span class="mv">R</span> ≳ 1：<span class="mv">Σ̂</span> 里的 <span class="mv">b̂b̂</span><sup>⊤</sup><span class="mv">Δt</span> 占主导。"扩散修正"其实是把运动本身当成了扩散，往外推的力过大，生成分布的方差被放大。</li>
+    </ul>
+    <p>视频按帧采样时，帧间变化大多是可预测的运动，<span class="mv">R</span> 很可能远大于 1。论文和代码都没有报告这个量。</p>
+  </div>
+
+  <figure class="fig" id="figC">
+    <div class="ttl">PhiBE-Flow 试验台：在你的浏览器里重跑附录 B.1 的 OU 实验</div>
+    <div class="sub2">设定同论文：<span class="mv">X</span><sub>0</sub> ~ N(0, <span class="mv">I</span>)，<span class="mv">μ</span> = (4, 4)，<span class="mv">T</span> = 1，精确转移采样。拟合线性速度场 <span class="mv">v</span> = <span class="mv">A</span>(<span class="mv">t</span>)<span class="mv">x</span> + <span class="mv">c</span>(<span class="mv">t</span>)，同时比较三种 <span class="mv">Σ̂</span> 处理，用真值速度场逐时刻评估，再把拟合出的场积分到 <span class="mv">T</span>，看生成分布对不对。</div>
+    <div class="ctrl">
+      <div class="seg" role="group" aria-label="过程">
+        <button type="button" data-c-proc="rev" aria-pressed="true">可逆（Fig.2c）</button>
+        <button type="button" data-c-proc="nonrev" aria-pressed="false">非可逆（Fig.2a）</button>
+      </div>
+      <div class="seg" role="group" aria-label="拟合方式">
+        <button type="button" data-c-fit="pool" aria-pressed="true">跨时间共享（像 MLP）</button>
+        <button type="button" data-c-fit="pt" aria-pressed="false">逐时刻仿射（Cor.3）</button>
+      </div>
+      <label>轨迹数 <span class="mv">N</span>
+        <select id="cN"><option>500</option><option>1000</option><option selected>2000</option><option>5000</option></select></label>
+      <label><span class="mv">Δt</span>
+        <select id="cH"><option>0.1</option><option>0.05</option><option>0.02</option><option selected>0.01</option><option>0.005</option><option>0.002</option></select></label>
+      <button class="btn primary" type="button" id="cRun">运行</button>
+      <span class="busy" id="cBusy" hidden>计算中…</span>
+    </div>
+    <div class="kpis" id="cKpis"></div>
+    <div class="split">
+      <div>
+        <div class="readout" style="margin-bottom:2px">逐时刻速度相对误差 ‖<span class="mv">v<sub>θ</sub></span> − <span class="mv">v</span>*‖ / ‖<span class="mv">v</span>*‖</div>
+        <div class="legend">
+          <span><i style="background:var(--raw)"></i>原始二阶矩（论文）</span>
+          <span><i style="background:var(--cen)"></i>中心化（我的对照）</span>
+          <span><i style="background:var(--nojac)"></i>去掉 Jacobian 项</span>
+        </div>
+        <div class="chart" id="cChart"></div>
+      </div>
+      <div>
+        <div class="ctrl" style="margin:0 0 6px">
+          <span class="readout">终态 <span class="mv">t</span> = <span class="mv">T</span> 的粒子：</span>
+          <div class="seg" role="group" aria-label="粒子显示">
+            <button type="button" data-c-show="raw" aria-pressed="true">原始</button>
+            <button type="button" data-c-show="cen" aria-pressed="false">中心化</button>
+            <button type="button" data-c-show="nojac" aria-pressed="false">去 Jacobian</button>
+          </div>
+        </div>
+        <canvas id="cCanvas" width="560" height="420" aria-label="终态粒子与真实 2σ 椭圆"></canvas>
+        <div class="readout" id="cNote" style="margin-top:6px"></div>
+      </div>
+    </div>
+    <div class="cap">"中心化"是我加的对照：先用同一批数据只拟合漂移，拿残差 <span class="mv">Δx</span> − <span class="mv">Δt</span>·<span class="mv">b̂</span>(<span class="mv">x</span>) 代替 <span class="mv">Δx</span> 去算二阶矩。PhiBE 原文（Zhu 2024，Remark 6）给出过协方差型的 <span class="mv">Σ̃</span>，指出它的无偏估计需要"双采样"（同一起点的两个独立下一步），并说用相邻增量来近似会引入额外偏差。"减去拟合出的漂移"是本页自己的做法，同样有偏差；但从这里看，它的偏差比原始二阶矩小得多。"跨时间共享"用 <span class="mv">A</span>(<span class="mv">t</span>)、<span class="mv">c</span>(<span class="mv">t</span>) 关于 <span class="mv">t</span> 的三次多项式，相当于一个对时间光滑的 MLP；"逐时刻仿射"是附录 B.1 和推论 3 的做法。所有计算都在本页 JS 里完成，速度场用解析真值评估。</div>
+  </figure>
+
+  <figure class="fig" id="figSweep">
+    <div class="ttl">扫描 Δt：误差和终态方差（离线 Python，3 个种子取平均）</div>
+    <div class="sub2">同一个实验在 9 个 <span class="mv">Δt</span> 上各跑 3 次。两张图共用横轴；上方的数字是对应的 <span class="mv">R</span>。</div>
+    <div class="ctrl">
+      <div class="seg" role="group" aria-label="过程">
+        <button type="button" data-sw-proc="rev" aria-pressed="true">可逆</button>
+        <button type="button" data-sw-proc="nonrev" aria-pressed="false">非可逆</button>
+      </div>
+      <div class="seg" role="group" aria-label="样本量">
+        <button type="button" data-sw-n="2000" aria-pressed="true">N = 2000</button>
+        <button type="button" data-sw-n="20000" aria-pressed="false">N = 20000</button>
+      </div>
+    </div>
+    <div class="grid2" style="margin:6px 0 0">
+      <div>
+        <div class="readout">速度 L² 相对误差（%，对数轴）</div>
+        <div class="chart" id="swErr"></div>
+      </div>
+      <div>
+        <div class="readout">终态 tr <span class="mv">C<sub>T</sub></span> ÷ 真值（对数轴；1 = 正确）</div>
+        <div class="chart" id="swCov"></div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--raw)"></i>原始二阶矩 · 共享（论文目标 + 类 MLP）</span>
+      <span style="color:var(--pt)"><i class="dash" style="background:var(--pt)"></i><span style="color:var(--ink2)">原始二阶矩 · 逐时刻（Cor.3）</span></span>
+      <span><i style="background:var(--cen)"></i>中心化 · 共享</span>
+      <span><i style="background:var(--nojac)"></i>去掉 Jacobian · 共享</span>
+    </div>
+    <div class="cap" id="swCap"></div>
+  </figure>
+
+  <ul class="tight prose">
+    <li><b>去掉 Jacobian 项</b>（橙）：速度误差停在约 14%，这正好是 score 项的大小。终态协方差只剩真值的 23–34%，分布塌缩了。所以这一项在理论上确实是必要的。</li>
+    <li><b>原始二阶矩</b>（蓝，论文）：<span class="mv">Δt</span> 足够小时表现不错。<span class="mv">Δt</span> = 0.002（<span class="mv">R</span> ≈ 0.07–0.09）时，误差 1.7–2.3%，协方差 ×1.05–1.09。<span class="mv">R</span> ≈ 0.4（<span class="mv">Δt</span> = 0.01）时，协方差已经 ×1.44–1.60；<span class="mv">R</span> ≈ 2（<span class="mv">Δt</span> = 0.05）时 ×31–47；<span class="mv">Δt</span> ≥ 0.1 时放大到 10<sup>3</sup> 倍以上。它和"去掉 Jacobian"的速度误差在 <span class="mv">Δt</span> ≈ 0.015（<span class="mv">R</span> ≈ 0.6）附近交叉：比这更粗的采样，加上发散奖励反而比不加更差。</li>
+    <li><b>中心化</b>（青）：所有 <span class="mv">Δt</span> 下终态协方差都在 0.87–1.01，速度误差始终最低。修复只需要多一遍前向。</li>
+    <li><b>逐时刻拟合</b>（黄虚线）：<span class="mv">Δt</span> 太小时反而变差，误差呈 U 形，这与定理 2 里的 1/√(<span class="mv">N Δt</span>) 项一致；跨时间共享参数则一路下降。§5 解释原因。</li>
+  </ul>
+</section>
+
+<!-- ============================================ §5 -->
+<section id="s5">
+  <h2><span class="no">§5</span>理论：说了什么，没说什么</h2>
+  <p class="lede">论文 §4 把误差拆成两部分："用相邻帧顶替 <span class="mv">b</span>、<span class="mv">Σ</span>"带来的偏差，和"样本有限"带来的方差。</p>
+
+  <div class="grid2">
+    <div class="card raw">
+      <h4>Lemma 1 · 系数一阶一致</h4>
+      <p>‖<span class="mv">b</span> − <span class="mv">b̂</span>‖<sub>∞</sub> ≤ <span class="mv">L<sub>b</sub>Δt</span>，‖<span class="mv">Σ</span> − <span class="mv">Σ̂</span>‖<sub>∞</sub> ≤ <span class="mv">L<sub>Σ</sub>Δt</span> + <span class="mr">o(</span><span class="mv">Δt</span><span class="mr">)</span>，散度同理。证明是半群的二阶展开：<span class="mv">b̂</span> = <span class="mv">b</span> + (<span class="mv">Δt</span>/2)<span class="mv">𝓛b</span> + …。<b>这里的常数 <span class="mv">L<sub>Σ</sub></span> 就包含 <span class="mv">bb</span><sup>⊤</sup> 那一项</b>，所以它随漂移大小平方增长。</p>
+    </div>
+    <div class="card raw">
+      <h4>Theorem 1 · 总体误差</h4>
+      <p>‖<span class="mv">v</span> − <span class="mv">v̂</span>‖ ≤ <span class="mv">L<sub>v</sub>Δt</span> + <span class="mr">o(</span><span class="mv">Δt</span><span class="mr">)</span>，其中 <span class="mv">L<sub>v</sub></span> = <span class="mv">L<sub>b</sub></span> + ½<span class="mv">L<sub>Σ</sub>S</span><sub>1</sub> + ½<span class="mv">L</span><sub>div</sub>，<span class="mv">S</span><sub>1</sub> = sup‖∇log <span class="mv">ρ</span>‖。轨迹误差 ≤ (<span class="mv">e<sup>Kt</sup></span> − 1)/<span class="mv">K</span> · <span class="mv">L<sub>v</sub>Δt</span> + <span class="mr">o(</span><span class="mv">Δt</span><span class="mr">)</span>。<b><span class="mv">L<sub>Σ</sub>S</span><sub>1</sub> 这个乘积</b>正是 §4 中方差爆炸的来源：漂移大、分布窄时，它会非常大。</p>
+    </div>
+    <div class="card pt">
+      <h4>Theorem 2 · 有限样本（线性基）</h4>
+      <p>对固定的基函数 <span class="mv">v<sub>θ</sub></span> = Σ<span class="mv">θ</span><sub>ℓ</sub><span class="mv">ψ</span><sub>ℓ</sub>，以概率 1 − <span class="mv">δ</span>：‖<span class="mv">v<sub>N</sub></span> − <span class="mv">v̂</span>‖ ≤ <span class="mv">C<sub>V</sub></span>√(<span class="mv">p</span> log(2<span class="mv">p</span>/<span class="mv">δ</span>)/(<span class="mv">N Δt</span>))。关键假设：单条轨迹的残差 <span class="mv">η</span><sub>Ξ</sub> 满足 ‖·‖<sub><span class="mv">ψ</span><sub>1</sub></sub> ≤ <span class="mv">K<sub>R</sub></span>/√<span class="mv">Δt</span>。</p>
+    </div>
+    <div class="card pt">
+      <h4>Corollary 1 · 合起来</h4>
+      <p>‖<span class="mv">v<sub>N</sub></span> − <span class="mv">v</span>‖ ≤ <span class="mv">L<sub>v</sub>Δt</span> + <span class="mv">C<sub>V</sub></span>√(<span class="mv">p</span> log/(<span class="mv">N Δt</span>))。字面上这是一个关于 <span class="mv">Δt</span> 的 U 形，最优 <span class="mv">Δt</span>* ∝ <span class="mv">N</span><sup>−1/3</sup>。作者自己也注明：它只管观测时刻的速度误差，不直接给出学到的场的轨迹误差。</p>
+    </div>
+  </div>
+
+  <div class="note med"><span class="hd">定理 2 的方差项偏悲观，和实验趋势对不上</span>
+    <p>Fig.2(d) 里，速度误差随 <span class="mv">N<sub>t</sub></span> 一路按 <span class="mr">O(</span><span class="mv">N<sub>t</sub></span><sup>−1</sup><span class="mr">)</span> 下降，<span class="mv">Δt</span> 一直小到约 1/2560，都没出现 U 形的右半边。论文说这"与推论 2、3 的标度一致"，可推论 3（逐时刻仿射）同样有 1/√(<span class="mv">N Δt</span>) 项，同样预测 U 形。</p>
+    <p>我认为原因是：单条轨迹的残差是 <span class="mv">L</span> = <span class="mv">T</span>/<span class="mv">Δt</span> 个鞅增量的平均，每个增量的量级是 1/√<span class="mv">Δt</span>，但它们彼此不相关。只要基函数对 <span class="mv">t</span> 光滑（MLP 就是这样），平均之后的方差是 (1/<span class="mv">L</span>)·(1/<span class="mv">Δt</span>) = 1/<span class="mv">T</span>，与 <span class="mv">Δt</span> 无关。假设 1 直接给了 <span class="mv">K<sub>R</sub></span>/√<span class="mv">Δt</span>，没有利用这种平均。§4 扫描图里的黄虚线（逐时刻）和蓝线（共享）正好对应这两种情况：前者 U 形，后者单调。所以对实际用的神经网络，<span class="mv">Δt</span> 可以尽量小，限制只剩偏差，也就是 §4 的 <span class="mv">R</span>。</p>
+  </div>
+
+  <h3>定理没有覆盖的地方</h3>
+  <ol class="tight prose">
+    <li><b>联合训练的神经网络。</b>定理 2 只对"特征固定、只训最后一层"成立，作者承认这一点。</li>
+    <li><b>学到的场生成出的分布误差</b>，例如 <span class="mv">W</span><sub>2</sub>(生成分布, <span class="mv">ρ<sub>t</sub></span>)。推论 1 只管速度，作者也承认。</li>
+    <li><b>条件于前一帧的模型</b>，也就是代码里 NS/KTH 的实际设计。这时目标中的 score 变成一步转移密度的 score，量级是 1/√<span class="mv">Δt</span>，理论里的所有常数都会随之爆炸（§7 玩具）。</li>
+    <li><b>退化噪声。</b>PFI 基准的 NS 只在少数几个 Fourier 模态上加随机强迫（PFI 附录：8 个独立 Wiener 过程），<span class="mv">Σ</span> 严重秩亏；而定理假设密度处处为正、足够光滑。</li>
+    <li><b>常数的大小。</b><span class="mv">L<sub>v</sub></span> 含 sup‖∇log <span class="mv">ρ</span>‖，在高维或窄分布下可以非常大；<span class="mv">K</span> 在 <span class="mv">e<sup>Kt</sup></span> 里，长时间轨迹界基本没有信息量。</li>
+  </ol>
+</section>
+
+<!-- ============================================ §6 -->
+<section id="s6">
+  <h2><span class="no">§6</span>实验重读</h2>
+  <p class="lede">四组实验，复杂度逐级上升。只有 OU 有定量的真值对照；双摆和 NS 只有定性图；KTH 有一张 3 行 × 8 列的表（4 个标准指标 + 4 个调整后指标）。</p>
+
+  <h3>6.1 OU：解析数字全部复算吻合</h3>
+  <div class="tblwrap"><table class="tbl">
+    <thead><tr><th>项目</th><th>论文（附录 A.5 / B.1）</th><th>我复算</th></tr></thead>
+    <tbody>
+      <tr><td>非可逆情形 <span class="mv">Γ</span> 的特征值</td><td>−1, −3</td><td class="ok">一致</td></tr>
+      <tr><td>Lyapunov 解 <span class="mv">B</span></td><td>(1/16)[[5, −2], [−2, 3]]</td><td class="ok">一致</td></tr>
+      <tr><td><span class="mv">B</span><sup>−1</sup></td><td>(16/11)[[3, 2], [2, 5]]</td><td class="ok">一致</td></tr>
+      <tr><td>平稳概率流矩阵 𝔅</td><td>(1/11)[[2, 5], [−3, −2]]</td><td class="ok">一致</td></tr>
+      <tr><td>𝔅² 与周期</td><td>−<span class="mv">I</span>/11，2π√11</td><td class="ok">一致（≈ 20.84）</td></tr>
+      <tr><td><span class="mv">ΓΣ</span> ≠ <span class="mv">ΣΓ</span>（破坏细致平衡）</td><td>"不交换"</td><td class="ok">[[−2, −½], [−1, −1]] ≠ 转置</td></tr>
+      <tr><td>可逆情形 <span class="mv">Σ<sub>t</sub></span> 与 <span class="mv">v</span>*</td><td>式 (33)、(34)</td><td class="ok">一致</td></tr>
+      <tr><td>推论 2 中 ∇·<span class="mv">Σ̂</span></td><td>(<span class="mv">M</span>²<span class="mv">x</span> + tr(<span class="mv">M</span>)<span class="mv">Mx</span>)/<span class="mv">h</span></td><td class="ok">一致</td></tr>
+      <tr><td>式 (37) 法方程的因子</td><td><span class="mv">C</span> = <span class="mv">ΔXΔX</span><sup>⊤</sup>/(2<span class="mv">Δt</span>)</td><td class="ok">一致（§4 试验台即按此实现）</td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose">两处值得注意。<b>第一</b>，非可逆情形的演示（Fig.2a/b、Fig.8 右）用的是"每个时刻一组仿射系数"，这个函数类恰好精确包含解析速度场。所以它检验的是"目标函数对不对"，而不是"神经网络能不能学出环流"。神经网络只在可逆情形上跑过（Fig.2c–e）。<b>第二</b>，漂移的符号约定前后不一：式 (22)/(28) 写成 −<span class="mv">Γ</span>(<span class="mv">X</span> − <span class="mv">μ</span>)，式 (29) 写成 +<span class="mv">Γ</span>(<span class="mv">X</span> − <span class="mv">μ</span>)。读的时候容易绕晕，但结论没有错。</p>
+
+  <h3>6.2 随机双摆（Acrobot）：只有定性图</h3>
+  <p class="prose">状态实验：4 维状态，残差 MLP（隐藏 256，2 个残差块），1000 条轨迹 × 240 帧，前向 Euler 自回归生成。图像实验：几何保持编码器 → 3 维潜变量 → 拼上有限差分速度变成 6 维状态。正文说图像是 28×28，附录表 2 和配置文件都是 32×32。两个实验都只给了 Fig.3、Fig.4 的定性曲线和图，<b>没有任何数值指标，也没有基线</b>。另外，代码里的数据生成器与式 (23) 不符，见 §7 第 12 行。</p>
+
+  <h3>6.3 随机 Navier–Stokes：只有误差图和一条谱</h3>
+  <p class="prose">数据来自 PFI 的基准（<span class="mv">ν</span> = 10<sup>−3</sup>，<span class="mv">α</span> = 0.1，<span class="mv">ε</span> = 1，每 0.5 个时间单位存一帧）。按代码实际设置：场先降到 64×64，每隔 2 个快照取一帧（每步 1.0 个时间单位）；UNet 同时输入当前帧和前一帧；生成时每步走一次 Euler。评测只有 Fig.5 的误差图和 Fig.6 的拟涡能谱，<b>没有数值指标</b>。PFI 原文的评测方式是：从 50 个初始条件各跑 300 个样本，比较条件均值、条件标准差和条件谱。PhiBE-Flow 从同一个初始条件只能给出一个样本，没法做这种集合比较。确定性预报的逐点误差天然更小（它更接近条件均值），所以"误差图更小"很大程度上反映的是这一点，而不一定是动力学学得更好。</p>
+
+  <h3>6.4 KTH：唯一的定量表</h3>
+  <figure class="fig" id="figK">
+    <div class="ttl">表 1 重画</div>
+    <div class="sub2">"调整后"是和 VQ 重建后的真值比（MCVD 的调整后指标论文留空，没说原因；我推测是因为它在像素空间建模）。每个小图的方向不同，标题注明了越低越好还是越高越好。</div>
+    <div class="ctrl"><div class="seg" role="group" aria-label="指标版本">
+      <button type="button" data-k="std" aria-pressed="true">标准</button>
+      <button type="button" data-k="adj" aria-pressed="false">调整后</button>
+    </div></div>
+    <div class="grid2" id="kGrid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr))"></div>
+    <div class="cap"><b>我复算的：</b>五行的 PSNR 都等于 −10·log<sub>10</sub>(MSE)，在两位小数的舍入精度内完全一致（例如 −10·log<sub>10</sub>(0.004405) = 23.5605）。也就是说，这张表里 PSNR 和 MSE 是同一个量，"四项全胜"实际上是三个独立指标，其中两个（MSE、SSIM）都是逐点指标。相对 PFI：MSE 降 33.6%，FVD 降 18.8%。</div>
+  </figure>
+
+  <div class="tblwrap"><table class="tbl">
+    <thead><tr><th>基线</th><th>本文表 1</th><th>原论文自报</th><th>协议差异</th></tr></thead>
+    <tbody>
+      <tr><td><b>PFI</b>（Chen et al., ICML 2024）</td><td class="mono">FVD 280.1<br>（调整后 247.1）</td><td class="mono">FVD 39.13<br>（250k 步；RIVER 41.88；编解码器下界 33.45）</td><td>PFI：同一个 RIVER VQGAN，10 帧 → 30 帧，最后 5 人作测试，256 个测试视频 × 每个 100 条补全。本文代码：官方受试者划分，每个视频 1 个样本，FVD 实现不同。</td></tr>
+      <tr><td><b>MCVD</b>（Voleti et al., NeurIPS 2022）</td><td class="mono">PSNR 20.68<br>SSIM 0.699<br>FVD 307.3</td><td class="mono">PSNR 27.5<br>SSIM 0.835<br>FVD 323（10 → 30）</td><td>MCVD 原文 FVD 接近本文，但 PSNR/SSIM 高出很多。该领域 KTH 的 PSNR/SSIM 常按"多样本取最好"计算（MCVD 的 SMMNIST 表注明 SSIM 取 10 条中的最大值，KTH 表没写明）。本文如果只取 1 个随机样本，逐点指标对随机方法天然不利。</td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose dim" style="font-size:14px">说明：不同论文的 KTH FVD 能差一个数量级（MCVD 原文约 300，RIVER/PFI 原文约 40），所以 280 对 39 本身不能证明 PFI 被训差了。但它说明本文的 FVD 协议和 PFI 原文不同。论文附录只给了指标公式和 FVD 实现，没有交代上下文与预测帧数、每个视频的样本数、基线是否重训以及训了多久。</p>
+</section>
+
+<!-- ============================================ §7 -->
+<section id="s7">
+  <h2><span class="no">§7</span>论文没写、代码里才看得到的事实</h2>
+  <p class="lede">仓库 <a href="https://github.com/R1fe/PhiBE-Flow">R1fe/PhiBE-Flow</a> 做得相当规范：数据划分有哈希校验，检查点带数据身份，防泄漏考虑得很细。但它和论文正文之间有不少差异，有几条直接影响对结论的理解。以下都在 2026-09-29 的仓库版本里逐文件核对过。</p>
+
+  <div class="tblwrap"><table class="tbl" id="diffTbl">
+    <thead><tr><th>#</th><th>项目</th><th>论文</th><th>代码</th><th>为什么重要</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>模型输入</td><td><span class="mv">v<sub>θ</sub></span>(<span class="mv">x</span>, <span class="mv">t</span>)</td><td>NS：<span class="mono">model(x1, t, condition=x0)</span>；KTH：<span class="mono">model(z, t, ref=z_prev)</span>。Jacobian 只对当前帧求。</td><td class="warnc">目标变成了"条件概率流"，score 换成一步转移密度的 score，理论不再直接适用（见下方玩具）</td></tr>
+      <tr><td>2</td><td>Δt</td><td>"足够小"</td><td>NS <span class="mono">time_delta: 1.0</span>、<span class="mono">time_lag: 2</span>（快照间隔 0.5 → 每步 1.0 时间单位）；KTH <span class="mono">frame_time_delta: 1.0</span></td><td class="warnc">"连续时间"没有被检验；<span class="mv">R</span> 可能远大于 1（§4）</td></tr>
+      <tr><td>3</td><td>生成</td><td>NS/KTH 正文未写（附录 Alg.1/3 的双摆也是每个间隔一步 Euler）</td><td><span class="mono">following = current + self.dt * model(...)</span>，每个观测间隔一步</td><td>等价于一个确定性下一帧预测器</td></tr>
+      <tr><td>4</td><td>KTH 上下文</td><td>未写</td><td><span class="mono">condition_frames: 10</span>，但代码注释原话是 "Only the last two latents condition the source model, not all 10 frames."</td><td>10 帧上下文里 8 帧没用上</td></tr>
+      <tr><td>5</td><td>NS 分辨率</td><td>128 × 128</td><td><span class="mono">lo_size: 64, hi_size: 64</span>（双线性降采样）</td><td>无法确认 Fig.5/6 用的是哪种分辨率</td></tr>
+      <tr><td>6</td><td>KTH 数据与划分</td><td>2,391 个序列，80/20</td><td>整段 AVI；官方受试者划分：训练 11–18，测试 2、3、5–10、22，另外 8 名验证受试者默认排除。随机 80/20 只作为"合成测试的显式备选"</td><td>与论文描述不符，也不同于 PFI（最后 5 人作测试）</td></tr>
+      <tr><td>7</td><td>评测样本</td><td>未写</td><td>每个测试视频 1 个确定性样本；FVD 的"生成视频"是 10 帧真实上下文 + 30 帧预测</td><td>基线取几个样本论文没说；若也只取 1 个随机样本，逐点指标天然偏向确定性方法</td></tr>
+      <tr><td>8</td><td>FVD 实现</td><td>Google Research TF 代码 + OneDrive 上的 I3D 权重</td><td>FVD.md："does not execute the Google Research TensorFlow implementation"；用 TorchScript I3D；"previously referenced OneDrive weights" 不能直接替换</td><td>论文描述的协议和发布的代码不同</td></tr>
+      <tr><td>9</td><td>PSNR</td><td>表中 = −10·log<sub>10</sub>(平均 MSE)</td><td><span class="mono">kth_frame_metrics</span>：逐帧算 PSNR 再平均（按 Jensen 不等式会更高）</td><td>表 1 可能不是用现在的评测代码算出来的</td></tr>
+      <tr><td>10</td><td>检查点历史</td><td>—</td><td>拒绝加载 "Legacy KTH v(z,ref) checkpoints"（没有时间输入）；README："Old time-independent checkpoints are not interchangeable"</td><td>发表结果所用的模型，可能不是论文公式里的 <span class="mv">v</span>(<span class="mv">x</span>, <span class="mv">t</span>)</td></tr>
+      <tr><td>11</td><td>扩散项开关</td><td>—</td><td>训练入口 <span class="mono">scripts/train.py</span> 对所有数据集都在 <span class="mono">include_diffusion=false</span> 时抛出 "PhiBE training requires include_diffusion=true."（KTH 训练器里还有一道同样的检查）；NS 的损失函数根本没有这个开关。只有双摆的 <span class="mono">velocity_loss</span> 支持关闭，其注释称之为 "an explicit loss-level ablation"</td><td class="bad">最关键的消融，在现有代码里要改代码才能跑</td></tr>
+      <tr><td>12</td><td>Acrobot 噪声</td><td>式 (23)：只加在角加速度上，形式是 <span class="mv">dB</span></td><td>每次 RK45 调用右端函数时，给全部 4 个分量加 0.5·N(0, 1)。DATASETS.md 自己写了 "not a standard SDE discretization"。默认 10,000 条轨迹，帧间隔 8/239</td><td>有效扩散随自适应步长变化，并不是一个良定义的 SDE</td></tr>
+      <tr><td>13</td><td>KTH 主干与预算</td><td>未写</td><td>改造自 RIVER 的空间 Transformer：宽 768，4+5+4 层，8 头；400k 步，batch 128，lr 2e-4，EMA 0.9999</td><td>基线用的主干和训练预算都没说，存在混杂</td></tr>
+      <tr><td>14</td><td>NS 主干</td><td>未写</td><td>UNet（denoising-diffusion-pytorch），128 通道，dim_mults [1, 2, 2, 2]，100 epoch</td><td>同上</td></tr>
+    </tbody>
+  </table></div>
+
+  <figure class="fig" id="figD">
+    <div class="ttl">条件于前一帧，会学出什么？一维玩具，可以解析算</div>
+    <div class="sub2">平稳 OU：<span class="mv">dX</span> = −<span class="mv">X dt</span> + √2 <span class="mv">dB</span>，<span class="mv">X</span> ~ N(0, 1)。数据是三元组 (<span class="mv">x</span><sub><span class="mv">t</span>−1</sub>, <span class="mv">x<sub>t</sub></span>, <span class="mv">x</span><sub><span class="mv">t</span>+1</sub>)。用论文的损失（原始二阶矩）拟合两种模型，下面的数字都是总体最优解的闭式结果，不含采样噪声。</div>
+    <div class="ctrl">
+      <label><span class="mv">Δt</span>
+        <select id="dH"><option>0.02</option><option>0.05</option><option selected>0.1</option><option>0.2</option></select></label>
+      <button class="btn" type="button" id="dReseed">重新采样 SDE 路径</button>
+    </div>
+    <div class="kpis" id="dKpis"></div>
+    <div class="legend">
+      <span><i style="background:var(--sde)"></i>真实 SDE</span>
+      <span><i style="background:var(--raw)"></i>无条件概率流 <span class="mv">v</span>(<span class="mv">x</span>)（论文公式）</span>
+      <span style="color:var(--pt)"><i style="background:var(--pt)"></i><span style="color:var(--ink2)">条件概率流 <span class="mv">v</span>(<span class="mv">x<sub>t</sub></span> | <span class="mv">x</span><sub><span class="mv">t</span>−1</sub>)（代码做法）</span></span>
+      <span><i class="dash" style="background:var(--nojac);color:var(--nojac)"></i>条件均值 <span class="mv">e</span><sup>−<span class="mv">t</span></sup><span class="mv">x</span><sub>0</sub></span>
+    </div>
+    <div class="grid2" style="margin:6px 0 0;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))">
+      <div><div class="readout">从 <span class="mv">x</span><sub>0</sub> = 1.5 出发的路径</div><div class="chart" id="dPaths"></div></div>
+      <div><div class="readout">生成分布的方差 Var(<span class="mv">x<sub>t</sub></span>)（真值恒为 1）</div><div class="chart" id="dVar"></div></div>
+      <div><div class="readout">相关系数 corr(<span class="mv">x</span><sub>0</sub>, <span class="mv">x<sub>t</sub></span>)（真值 <span class="mv">e</span><sup>−<span class="mv">t</span></sup>）</div><div class="chart" id="dCorr"></div></div>
+    </div>
+    <div class="cap">
+      <p style="margin-bottom:8px"><b>无条件模型</b>：记 <span class="mv">a</span> = <span class="mv">e</span><sup>−<span class="mv">Δt</span></sup>，把损失的正规方程写出来，斜率恰好是 [(<span class="mv">a</span> − 1) + ((<span class="mv">a</span> − 1)² + 1 − <span class="mv">a</span>²)/2]/<span class="mv">Δt</span> = 0。<b>对任意 <span class="mv">Δt</span>，<span class="mv">v</span> ≡ 0</b>，生成轨迹一动不动，边缘分布正确，自相关却恒为 1。这就是"可逆系统在平稳态的概率流为零"。</p>
+      <p style="margin-bottom:0"><b>条件模型</b> <span class="mv">v</span> = <span class="mv">αx<sub>t</sub></span> + <span class="mv">βx</span><sub><span class="mv">t</span>−1</sub>：闭式解为 <span class="mv">α</span> = <span class="mv">a</span>²/(<span class="mv">Δt</span>(1 + <span class="mv">a</span>))，<span class="mv">β</span> = −<span class="mv">a</span>/(<span class="mv">Δt</span>(1 + <span class="mv">a</span>))，量级都是 1/(2<span class="mv">Δt</span>)。所以学到的速度约等于"上一步位移的一半"。rollout 递推 <span class="mv">x</span><sub><span class="mv">k</span>+1</sub> = <span class="mv">x<sub>k</sub></span> + <span class="mv">Δt</span>(<span class="mv">αx<sub>k</sub></span> + <span class="mv">βx</span><sub><span class="mv">k</span>−1</sub>) 的特征根恰好是 <span class="mv">a</span> 和 1/(1 + <span class="mv">a</span>) ≈ ½。后者很快衰减，剩下的主模态每步乘 <span class="mv">e</span><sup>−<span class="mv">Δt</span></sup>，<b>也就是条件均值路径</b>：生成方差最终按 <span class="mv">e</span><sup>−2<span class="mv">t</span></sup> 的速率塌缩。这恰恰是 PhiBE 的发散奖励本来要避免的"回归到均值"。我另外用 40 万个样本做了蒙特卡洛拟合，系数与闭式解吻合（<span class="mv">Δt</span> = 0.1：4.28 / −4.73，闭式 4.30 / −4.75）。当然，这只是线性高斯玩具，不能直接推到 NS/KTH 的非线性高维情形；但它说明代码里的设计和论文的理论讲的不是同一件事。</p>
+    </div>
+  </figure>
+</section>
+
+<!-- ============================================ §8 -->
+<section id="s8">
+  <h2><span class="no">§8</span>存疑清单</h2>
+  <p class="lede">按对结论的影响排序。"高"会改变你对标题结论的理解，"中"削弱某个分论点，"低"是细节或复现问题。每条都附了可以自己核对的出处。</p>
+  <div class="ctrl"><div class="seg" role="group" aria-label="筛选" id="dfSeg">
+    <button type="button" data-df="all" aria-pressed="true">全部 17</button>
+    <button type="button" data-df="h" aria-pressed="false">高 6</button>
+    <button type="button" data-df="m" aria-pressed="false">中 6</button>
+    <button type="button" data-df="l" aria-pressed="false">低 5</button>
+  </div></div>
+
+  <div id="doubts">
+  <details class="doubt h"><summary><span class="idx">01</span><span class="sev">高</span><span class="t">缺最关键的消融：去掉 Jacobian（扩散）项</span></summary><div class="body">
+    <p>在 NS/KTH 上，代码里的 PhiBE-Flow 就是"确定性下一帧预测器 <span class="mv">x</span><sub><span class="mv">t</span>+1</sub> = <span class="mv">x<sub>t</sub></span> + <span class="mv">v</span>"加上一个 Jacobian 正则。去掉正则，剩下的就是普通的 MSE 回归。表 1 里的全部优势，都可能来自"确定性 + MSE"本身，再加上 RIVER 式 Transformer / UNet 主干和 400k 步训练，与 PhiBE 无关。论文没有做这个消融。代码的训练入口 <span class="mono">scripts/train.py</span> 对所有数据集都拒绝关掉这一项，NS 的损失函数也没有这个开关。</p>
+    <p>我的 OU 复现说明，这一项在小 <span class="mv">Δt</span> 下确实必要：去掉后终态协方差只剩 23–34%。但它在 <span class="mv">Δt</span> = 1 帧时还有没有用、是帮忙还是添乱，目前没有任何证据。</p>
+    <p class="ev">证据：论文 §5.2–5.3 无消融；<span class="mono">scripts/train.py</span> 的 <span class="mono">main()</span>、<span class="mono">KTHTrainer.__init__</span>；§4 扫描图。</p>
+  </div></details>
+
+  <details class="doubt h"><summary><span class="idx">02</span><span class="sev">高</span><span class="t">确定性方法对随机基线，用逐点指标比，而且 PSNR 与 MSE 是同一个量</span></summary><div class="body">
+    <p>MSE 和 PSNR 奖励的是条件均值（SSIM 也偏向平滑的预测）；随机采样器即使完美，单样本的逐点误差也更大，因为它多了一份条件方差。PhiBE-Flow 每个测试视频只给一个确定性样本，MCVD 和 PFI 用了几个样本、怎么汇总，论文没说。表 1 五行的 PSNR 都等于 −10·log<sub>10</sub>(MSE)，所以"四项全胜"实际是三个指标，其中两个是逐点的。唯一的分布指标 FVD 是单次结果、没有置信区间，"生成视频"里还拼进了 10 帧真实上下文。"逐点指标天然偏向确定性预测"是我的统计论证；PFI 原文论证的是另一面：随机系统需要概率预报，条件均值本身信息量不足。</p>
+    <p class="ev">证据：表 1；§6.4 复算；<span class="mono">kth_trainer.evaluate_loader</span>；PFI 论文 §1–2（"Deterministic vs Probabilistic Forecasting"）。</p>
+  </div></details>
+
+  <details class="doubt h"><summary><span class="idx">03</span><span class="sev">高</span><span class="t">"连续时间"在高维实验里没有被检验</span></summary><div class="body">
+    <p>按代码，NS 和 KTH 都是每个观测间隔只走一步前向 Euler（KTH 一步 = 1 帧），只在观测帧上评测。附录里双摆的 Algorithm 1/3 也是每个间隔一步。论文没有做时间超分辨率（训练用 <span class="mv">Δt</span>，测试时取 <span class="mv">Δt</span>/2）、不规则采样或变步长的实验。NS 的一步实际是 1.0 个物理时间单位（隔 2 个快照，每个间隔 0.5），很难说"足够小"。标题里的 continuous-time，只在 OU 上真正体现出来。</p>
+    <p class="ev">证据：<span class="mono">configs/nse.yaml</span>、<span class="mono">configs/kth.yaml</span>、两个 trainer 的 <span class="mono">rollout()</span>。</p>
+  </div></details>
+
+  <details class="doubt h"><summary><span class="idx">04</span><span class="sev">高</span><span class="t">原始二阶矩把运动当成扩散：R ≳ 1 时生成分布方差被放大，甚至发散</span></summary><div class="body">
+    <p><span class="mv">Σ̂</span> = Cov(<span class="mv">Δx</span>|<span class="mv">x</span>)/<span class="mv">Δt</span> + <span class="mv">b̂b̂</span><sup>⊤</sup><span class="mv">Δt</span>。我的 OU 复现：<span class="mv">R</span> ≈ 0.4 时，终态协方差 ×1.44–1.60；<span class="mv">R</span> ≈ 2 时 ×31–47；<span class="mv">R</span> > 4 时 ×10<sup>3</sup> 以上。和"去掉 Jacobian"的速度误差交叉点在 <span class="mv">R</span> ≈ 0.6 附近。中心化以后，终态协方差在所有 <span class="mv">Δt</span> 下都是 0.87–1.01。论文的 OU 用 <span class="mv">Δt</span> = 5×10<sup>−4</sup>（<span class="mv">R</span> ≈ 0.02），所以没暴露这个问题。视频按 1 帧采样、帧间变化以可预测运动为主，<span class="mv">R</span> 很可能远大于 1（未验证）。高维非线性里后果是什么样，不好说：可能被解码器截断、被非线性抑制，也可能表现成多余的高频。这正需要消融和 <span class="mv">R</span> 的报告来回答。</p>
+    <p class="ev">证据：式 (11)；引理 1 的证明（<span class="mv">L<sub>Σ</sub></span> 含 <span class="mv">𝓛</span>²<span class="mv">g</span>）；§4 试验台与扫描。</p>
+  </div></details>
+
+  <details class="doubt h"><summary><span class="idx">05</span><span class="sev">高</span><span class="t">代码里 NS/KTH 模型条件于前一帧，论文完全没提，而这会改变目标的含义</span></summary><div class="body">
+    <p>条件于 <span class="mv">x</span><sub><span class="mv">t</span>−1</sub> 之后，损失的最优解是"条件密度 <span class="mv">p</span>(<span class="mv">x<sub>t</sub></span> | <span class="mv">x</span><sub><span class="mv">t</span>−1</sub>) 的概率流"，score 变成一步转移密度的 score（量级 1/√<span class="mv">Δt</span>）。论文的理论和"边缘分布一致"的叙事都不再直接适用，自回归 rollout 也不再保证边缘分布。§7 的一维玩具可以解析算出：这样学到的速度约等于"上一步位移的一半"，rollout 的主模态就是条件均值路径，生成方差按 <span class="mv">e</span><sup>−2<span class="mv">t</span></sup> 的速率塌缩。对视频而言，条件于前一帧是必要的（单帧潜变量不是马尔可夫状态）；更一致的做法是像论文的双摆图像实验那样，把速度并入状态，再对整个状态求 Jacobian。</p>
+    <p class="ev">证据：<span class="mono">nse_velocity_loss</span>（condition=x0）、<span class="mono">kth_velocity_loss</span>（ref=reference）；§7 玩具的闭式推导。</p>
+  </div></details>
+
+  <details class="doubt h"><summary><span class="idx">06</span><span class="sev">高</span><span class="t">基线数字与原文对不上，评测协议和基线训练都没交代</span></summary><div class="body">
+    <p>MCVD 原文（KTH，10 → 30）是 PSNR 27.5 / SSIM 0.835 / FVD 323；本文是 20.68 / 0.699 / 307.3。FVD 接近，逐点指标却差很多，这符合"原文多样本取最好、本文单样本"的解释。PFI 原文用同一个 VQGAN、同样 10 → 30，FVD 是 39.13；本文是 280.1。论文附录只给了指标公式和 FVD 实现，没说上下文与预测帧数、基线是否重训、主干和预算是什么、每个视频几个样本。正文写的 KTH 划分（2,391 个序列，80/20）还和代码（整段 AVI、官方受试者划分）不一致。</p>
+    <p class="ev">证据：MCVD 表 2 与附录表 10；PFI 表 1 与 §4.3；§6.4、§7 第 6–8 行。</p>
+  </div></details>
+
+  <details class="doubt m"><summary><span class="idx">07</span><span class="sev">中</span><span class="t">有限样本界比实际悲观，和实验趋势对不上；论文说"一致"并不准确</span></summary><div class="body">
+    <p>推论 1 的 <span class="mv">L<sub>v</sub>Δt</span> + <span class="mv">C</span>√(<span class="mv">p</span> log/(<span class="mv">N Δt</span>)) 预测 U 形，最优 <span class="mv">Δt</span>* ∝ <span class="mv">N</span><sup>−1/3</sup>；Fig.2(d) 却一路单调下降到 <span class="mv">Δt</span> = 1/2560。问题出在假设 1 的 <span class="mv">K<sub>R</sub></span>/√<span class="mv">Δt</span>：它没有利用轨迹内鞅增量的平均。对 <span class="mv">t</span> 光滑的模型，方差其实是 <span class="mr">O(1/(</span><span class="mv">NT</span><span class="mr">))</span>，与 <span class="mv">Δt</span> 无关。我的复现里，逐时刻拟合确实呈 U 形，共享参数则单调，两种情况都能看到。另外，定理只覆盖固定基的线性模型，只控制观测时刻的速度误差，这两点作者都承认了。</p>
+    <p class="ev">证据：定理 2、假设 1、推论 1/3；Fig.2(d)(e)；§4 扫描图（黄虚线对比蓝线）。</p>
+  </div></details>
+
+  <details class="doubt m"><summary><span class="idx">08</span><span class="sev">中</span><span class="t">新颖性的边界：关键技巧都有先例，最相关的方法没引也没比</span></summary><div class="body">
+    <p>用分部积分消去 score 是 Hyvärinen 的技巧。用神经网络学 Fokker–Planck 概率流本身也有先例（Shen et al. 2022 的 self-consistency；Boffi &amp; Vanden-Eijnden 2023，后者另训 score）。同一个分部积分恒等式，Li、Hurault、Solomon（NeurIPS 2023）命题 3.1 已经用过，只是那里 <span class="mv">b</span> 和扩散系数已知。一阶 <span class="mv">b̂</span>、<span class="mv">Σ̂</span> 就是经典的 Kramers–Moyal 条件矩估计。Action Matching（ICML 2023）从各时刻的边缘样本学概率流速度，是最直接的对照，全文没有提。</p>
+    <p>本文真正新的地方是这个组合：用成对转移代替已知系数，因此能识别非可逆环流，而 Action Matching 的梯度场做不到（§2 的 2D 动画）。这一点值得肯定，但应该用实验对比来支撑。</p>
+    <p class="ev">证据：论文参考文献列表；SCVM 论文命题 3.1；Action Matching 定理 2.1/2.2。</p>
+  </div></details>
+
+  <details class="doubt m"><summary><span class="idx">09</span><span class="sev">中</span><span class="t">概率流不是样本路径：标题里的 "with stochasticity" 容易被误读</span></summary><div class="body">
+    <p>方法只保证各时刻的边缘分布，单条生成轨迹的时间统计（自相关、粗糙度、分叉）都不对。可逆系统在平稳态的概率流恒为 0，生成的轨迹静止不动（§7 玩具里无条件模型的解析结果）。从单个观测状态出发，ODE 是"点到点"，表达不了预测的不确定性，这恰好是 PFI 设计"从点质量出发的 SDE"要解决的问题。论文 §5.3 用"更少的累积漂移"来解释 KTH 的结果，而这本身就是确定性预报的典型特征。</p>
+    <p class="ev">证据：式 (4)；§2 两个交互图；PFI §1。</p>
+  </div></details>
+
+  <details class="doubt m"><summary><span class="idx">10</span><span class="sev">中</span><span class="t">高阶 PhiBE 现成可用，却没有用</span></summary><div class="body">
+    <p>PhiBE 原文（同一位通讯作者，Zhu 2024）已经给出二阶估计：<span class="mv">b̂</span><sub>2</sub> = [2(<span class="mv">x<sub>Δt</sub></span> − <span class="mv">x</span><sub>0</sub>) − ½(<span class="mv">x</span><sub>2<span class="mv">Δt</span></sub> − <span class="mv">x</span><sub>0</sub>)]/<span class="mv">Δt</span>，<span class="mv">Σ̂</span><sub>2</sub> 同理，误差 <span class="mr">O(</span><span class="mv">Δt</span>²<span class="mr">)</span>。在 <span class="mv">Δt</span> = 1 帧的视频上，这正是最该先试的改进，数据也现成（有三帧窗口）。论文只用了一阶，也没讨论这个选择。</p>
+    <p class="ev">证据：PhiBE 论文定义 3、式 (18)、Remark 6。</p>
+  </div></details>
+
+  <details class="doubt m"><summary><span class="idx">11</span><span class="sev">中</span><span class="t">实验规模与统计：单种子、无误差棒，两个实验只有定性图</span></summary><div class="body">
+    <p>全文没有任何误差棒或多种子结果。NS 只有误差图和一条谱曲线，没有数值指标，也没有 PFI 那种集合统计（条件均值、条件标准差、条件谱）。双摆两个实验只有定性图，没有基线。KTH 表只有 3 行，没有确定性回归基线，也没有与 RIVER 比较，而 PhiBE 的主干正是从 RIVER 改来的。</p>
+    <p class="ev">证据：Fig.3–7、表 1。</p>
+  </div></details>
+
+  <details class="doubt m"><summary><span class="idx">12</span><span class="sev">中</span><span class="t">NS 的设置描述与代码不一致</span></summary><div class="body">
+    <p>论文写的是 128×128 网格；代码配置是 <span class="mono">lo_size = hi_size = 64</span>，场被双线性降到 64×64 再训练和评测，每步跨 2 个快照。无法确认 Fig.5/6 用的是哪一套。论文说 1,000 条轨迹、2×10<sup>5</sup> 个快照，可按 <span class="mv">t</span> ∈ [50, 100]、每 0.5 存一帧算只有 10<sup>5</sup> 个，两个数字自相矛盾。另外，这里的随机强迫只作用在少数几个 Fourier 模态上（PFI 附录：8 个独立 Wiener 过程），扩散矩阵严重秩亏，与理论的假设相去较远。</p>
+    <p class="ev">证据：论文 §5.2、附录 B.3；<span class="mono">configs/nse.yaml</span>；PFI 附录 C.2。</p>
+  </div></details>
+
+  <details class="doubt l"><summary><span class="idx">13</span><span class="sev">低</span><span class="t">双摆的"随机"数据不是良定义的 SDE</span></summary><div class="body">
+    <p>代码在 RK45 每次调用右端函数时，给全部 4 个分量加 0.5·N(0, 1)，包括角度分量；式 (23) 写的是只加在角加速度上、形式为 <span class="mv">dB</span>。自适应步长下，积分后的噪声方差正比于步长（而不是 √<span class="mv">dt</span> 标度），有效扩散系数随求解器的步长控制变化。作者在 DATASETS.md 里自己写了 "not a standard SDE discretization"。此外默认轨迹数是 10,000，正文写 1,000。</p>
+    <p class="ev">证据：<span class="mono">scripts/generate_acrobot_benchmark.py</span>、DATASETS.md。</p>
+  </div></details>
+
+  <details class="doubt l"><summary><span class="idx">14</span><span class="sev">低</span><span class="t">FVD 与 PSNR 的计算方式，论文和代码对不上</span></summary><div class="body">
+    <p>论文说用 Google Research 的 TF 实现加 OneDrive 上的 I3D 权重；FVD.md 明确说不执行 TF 实现，改用 TorchScript I3D，并说"之前引用的 OneDrive 权重"不能直接替换。PSNR 在代码里是逐帧计算再平均，表 1 却恰好等于 −10·log<sub>10</sub>(平均 MSE)。</p>
+    <p class="ev">证据：附录 B.4；FVD.md；<span class="mono">src/utils/metrics.py</span>。</p>
+  </div></details>
+
+  <details class="doubt l"><summary><span class="idx">15</span><span class="sev">低</span><span class="t">发表结果所用的模型，可能与论文公式不同</span></summary><div class="body">
+    <p>代码会拒绝加载"legacy KTH v(z, ref)"检查点，也就是没有时间输入的旧模型；README 也提到"old time-independent checkpoints"。这说明至少有一版 KTH 模型是 <span class="mv">v</span>(<span class="mv">z</span>, <span class="mv">ref</span>)，不含 <span class="mv">t</span>。表 1 来自哪一版，无从得知。对平稳的视频数据，去掉 <span class="mv">t</span> 也许影响不大，但与论文的形式化 <span class="mv">v<sub>θ</sub></span>(<span class="mv">x</span>, <span class="mv">t</span>) 不一致。</p>
+    <p class="ev">证据：<span class="mono">KTHTrainer.load()</span>；README "Configuration and Outputs" 一节。</p>
+  </div></details>
+
+  <details class="doubt l"><summary><span class="idx">16</span><span class="sev">低</span><span class="t">"高维代价大"的说法对经验目标不成立</span></summary><div class="body">
+    <p><span class="mv">Δx</span><sup>⊤</sup>(∇<span class="mv">v</span>)<span class="mv">Δx</span> 只需要一次 VJP 或 JVP，NS/KTH 的代码就是这么实现的（<span class="mono">spatial_diffusion</span>）。论文 §3.3 却说它在高维时代价大，还为此引出各向同性简化。Algorithm 1 写成"先求 <span class="mv">J</span> = ∇<sub><span class="mv">x</span></sub><span class="mv">v</span>，再算 Tr(<span class="mv">AJ</span>)"，双摆版代码（<span class="mono">compute_full_jacobian</span>）也确实逐行求完整 Jacobian，代价是 <span class="mr">O(</span><span class="mv">d</span><span class="mr">)</span> 次反传；在 4 维里无所谓，但会让读者以为必须这么算。附录 A.4 自己也指出，各向同性简化并不自动适用于经验目标。</p>
+    <p class="ev">证据：§3.3、Algorithm 1、附录 A.4；<span class="mono">src/method/loss.py</span>。</p>
+  </div></details>
+
+  <details class="doubt l"><summary><span class="idx">17</span><span class="sev">低</span><span class="t">记号与笔误</span></summary><div class="body">
+    <p>OU 漂移的符号在式 (22)/(28)（−<span class="mv">Γ</span>）和式 (29)（+<span class="mv">Γ</span>）之间翻转。<span class="mv">Σ</span> 同时表示扩散协方差和 OU 的边缘协方差 <span class="mv">Σ<sub>t</sub></span>。<span class="mv">B</span> 同时表示 Lyapunov 解和附录里的增量矩阵。双摆图像一处写 28×28，另一处写 32×32。配置 <span class="mono">acrobot_angles.yaml</span> 的学习率是 1e-4，附录写 1e-3。</p>
+    <p class="ev">证据：附录 B.1、B.2、表 2；<span class="mono">configs/acrobot_angles.yaml</span>。</p>
+  </div></details>
+  </div>
+</section>
+
+<!-- ============================================ §9 -->
+<section id="s9">
+  <h2><span class="no">§9</span>公道话 · 对交互式视频世界模型的启示</h2>
+
+  <h3>做对了的地方</h3>
+  <ul class="tight prose">
+    <li><b>推导干净、正确。</b>式 (5) → (7) → (9) → (14) 我逐步核过，附录里 OU 的解析数字也全部复算吻合。</li>
+    <li><b>目标函数简单、可扩展。</b>不需要 score 网络，不需要模拟 SDE，每个样本一次 VJP，就能在 4096 维的场和 256 维的视频潜空间上训练。</li>
+    <li><b>用的是成对转移，不只是边缘分布</b>，因此能学出非可逆系统的物理环流。只匹配边缘分布的方法在原则上做不到这一点。Fig.2(a) 是个很好的正确性检验。</li>
+    <li><b>理论讲清了偏差和方差的结构</b>：偏差 <span class="mr">O(</span><span class="mv">Δt</span><span class="mr">)</span>，方差随 1/(<span class="mv">N Δt</span>) 增长。对逐时刻估计器，这是一个真实的警告。</li>
+    <li><b>代码开源</b>，数据划分和检查点身份的工程做得非常认真，这使得本页 §7 的每一条核对都成为可能。</li>
+  </ul>
+
+  <h3>对交互式视频世界模型的启示</h3>
+  <ol class="tight prose">
+    <li><b>可以把 −<span class="mv">Δz</span><sup>⊤</sup>(∇<span class="mv">v</span>)<span class="mv">Δz</span>/<span class="mv">Δt</span> 当作一个便宜的"防塌缩正则"</b>，挂在任何确定性的潜空间预测头上，只多一次 VJP。挂之前先算 <span class="mv">R</span>（可预测位移² ÷ 残差方差）。<span class="mv">R</span> ≫ 1 时，改用中心化二阶矩或二阶 PhiBE，否则很可能适得其反。</li>
+    <li><b>世界模型需要的是条件分布</b> <span class="mv">p</span>(<span class="mv">x</span><sub><span class="mv">t</span>+1</sub> | 历史, 动作)。确定性概率流从单点出发，表达不了分叉和不确定性，用于规划或探索时会低估风险。PFI 式"从点质量出发的 SDE"、扩散或流匹配采样器，仍然是必要的。</li>
+    <li><b>"连续时间"要靠多速率训练和测试来证明。</b>网络输入里有 <span class="mv">t</span>，不等于模型能在任意帧率下生成。可变帧率、任意时刻查询对交互式世界模型很有价值，但需要专门设计实验。</li>
+    <li><b>确定性模型和随机模型放在一起比较时</b>，要报 best-of-K、CRPS 或集合的 spread–skill，不能只看 PSNR 和 SSIM。</li>
+  </ol>
+
+  <h3>最值得补的实验（按性价比排序）</h3>
+  <ol class="tight prose">
+    <li><b>去掉 Jacobian 项的消融</b>：同主干、同预算，在 NS、KTH、双摆上都跑。</li>
+    <li><b>报告 <span class="mv">R</span></b>，并对比原始二阶矩、中心化二阶矩、二阶 PhiBE 三种 <span class="mv">Σ̂</span>。</li>
+    <li><b>Δt 扫描与跨步长测试</b>：NS 的 time_lag 取 1/2/4，KTH 的帧步长取 1/2/4；训练用 <span class="mv">Δt</span>，测试用 <span class="mv">Δt</span>/2。</li>
+    <li><b>概率指标</b>：同一初始状态下的集合 spread、CRPS、条件谱（沿用 PFI 的协议）。</li>
+    <li><b>按原文协议复现基线</b>，例如 PFI 的 10 → 30、每个视频 100 条样本的 FVD；做不到的话，至少解释差距来自哪里。</li>
+    <li><b>多种子加置信区间</b>，并补上确定性 MSE 回归（同主干）、Action Matching、drift-only 神经 SDE 三个对照。</li>
+  </ol>
+</section>
+
+<section id="src" style="padding-top:28px">
+  <h3 style="margin-top:0">Sources</h3>
+  <ul class="src">
+    <li><a href="https://arxiv.org/abs/2609.32026">Shang, Liu, Zhu — Continuous-Time Trajectory Generation from Discrete Observations with Stochasticity (arXiv 2609.32026v1)</a></li>
+    <li><a href="https://github.com/R1fe/PhiBE-Flow">R1fe/PhiBE-Flow（代码仓库，2026-09-29 核对）</a></li>
+    <li><a href="https://arxiv.org/abs/2403.13724">Chen et al. — Probabilistic Forecasting with Stochastic Interpolants and Föllmer Processes (PFI, ICML 2024)</a></li>
+    <li><a href="https://arxiv.org/abs/2205.09853">Voleti et al. — MCVD: Masked Conditional Video Diffusion (NeurIPS 2022)</a></li>
+    <li><a href="https://arxiv.org/abs/2405.12535">Zhu — PhiBE: A PDE-based Bellman Equation for Continuous Time Policy Evaluation</a></li>
+    <li><a href="https://arxiv.org/abs/2210.06662">Neklyudov et al. — Action Matching: Learning Stochastic Dynamics from Samples (ICML 2023)</a></li>
+    <li><a href="https://arxiv.org/abs/2301.13737">Li, Hurault, Solomon — Self-Consistent Velocity Matching of Probability Flows (NeurIPS 2023)</a></li>
+  </ul>
+</section>
+
+<footer>
+  这份精读由 Claude 根据论文 v1 和代码仓库（2026-09-29 版本）整理。§2 与 §4 的交互计算在浏览器里完成；§4 的扫描图来自离线 Python（NumPy/SciPy，3 个种子）。本页不是论文，也不代表作者本人的说法；两者冲突时，以论文为准。
+</footer>
+
+</div>
+
+<script>
+(function(){
+"use strict";
+/* ============================================================
+   数据：离线扫描（Python，3 个种子平均）。误差为相对 L² 百分比，cov 为 trC_T/真值
+   ============================================================ */
+const SWEEP = {"rev":{"h":[0.2,0.1,0.05,0.03,0.02,0.01,0.005,0.003,0.002],"R":[15.585,5.844,2.497,1.417,0.906,0.438,0.215,0.128,0.085],"vn":6.3852,"2000":{"pt_raw":[125.2,71.86,38.7,24.26,16.72,10.14,9.4,11.26,13.62],"pl_raw":[125.13,71.7,38.51,23.95,16.17,8.29,4.36,2.86,2.16],"pl_cen":[40.25,19.37,9.49,5.74,3.89,2.17,1.65,1.44,1.37],"pl_nojac":[40.82,21.77,15.19,13.93,13.68,13.62,13.54,13.84,13.78],"cov_raw":[67955.0,1096.0,31.3528,5.9908,2.7817,1.4839,1.1936,1.1011,1.0772],"cov_cen":[0.9402,0.9697,0.9522,0.9929,0.9829,1.0109,1.0121,1.0054,1.0135],"cov_nojac":[0.3847,0.3603,0.3356,0.3467,0.332,0.3395,0.3435,0.3406,0.3396]},"20000":{"pt_raw":[125.04,71.83,38.52,23.9,16.11,8.38,4.94,4.3,4.63],"pl_raw":[124.99,71.73,38.43,23.83,16.02,8.18,4.2,2.63,1.87],"pl_cen":[40.2,19.29,9.41,5.64,3.78,2.02,1.23,0.96,0.86],"pl_nojac":[40.72,21.68,15.02,13.72,13.46,13.5,13.63,13.62,13.7],"cov_raw":[65688.0,1089.0,32.4331,5.8288,2.6505,1.4403,1.1607,1.0888,1.049],"cov_cen":[0.9827,0.9677,0.9771,0.9864,0.9792,0.9865,0.9877,0.9938,0.9893],"cov_nojac":[0.4035,0.3647,0.3469,0.3461,0.3324,0.3299,0.3273,0.3287,0.326]}},"nonrev":{"h":[0.2,0.1,0.05,0.03,0.02,0.01,0.005,0.003,0.002],"R":[11.506,4.481,1.957,1.121,0.72,0.35,0.172,0.103,0.068],"vn":7.0088,"2000":{"pt_raw":[131.13,73.39,38.97,24.32,16.83,10.58,10.46,12.64,15.18],"pl_raw":[131.09,73.29,38.8,23.98,16.15,8.26,4.38,2.9,2.25],"pl_cen":[32.3,15.55,7.57,4.54,3.12,1.81,1.58,1.4,1.38],"pl_nojac":[33.58,19.42,15.12,14.22,14.14,14.1,14.0,14.21,14.06],"cov_raw":[414221.0,2295.0,47.3024,8.0769,3.3539,1.6012,1.2088,1.1117,1.0881],"cov_cen":[0.8696,0.9262,0.9371,0.9884,0.9706,0.9982,0.984,0.9943,1.011],"cov_nojac":[0.2736,0.2544,0.2399,0.2459,0.2315,0.237,0.2295,0.2338,0.2363]},"20000":{"pt_raw":[130.01,72.75,38.41,23.69,15.95,8.34,5.07,4.6,5.07],"pl_raw":[130.01,72.72,38.37,23.65,15.87,8.06,4.1,2.52,1.74],"pl_cen":[32.37,15.65,7.69,4.63,3.09,1.6,0.92,0.65,0.56],"pl_nojac":[33.55,19.39,14.96,14.19,14.1,14.13,14.26,14.24,14.3],"cov_raw":[340039.0,2121.0,45.9771,7.5037,3.1616,1.5598,1.1967,1.105,1.0583],"cov_cen":[0.9218,0.9414,0.9642,0.9787,0.9791,0.9896,0.9868,0.9915,0.987],"cov_nojac":[0.2916,0.262,0.2474,0.2471,0.2393,0.2372,0.2333,0.2329,0.2304]}}};
+
+/* ---------- helpers ---------- */
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const NSV = "http://www.w3.org/2000/svg";
+function S(tag, attrs, parent){
+  const el = document.createElementNS(NSV, tag);
+  if (attrs) for (const k in attrs){
+    const v = attrs[k];
+    if (v === undefined || v === null) continue;
+    if (k === "text") el.textContent = v; else el.setAttribute(k, v);
+  }
+  if (parent) parent.appendChild(el);
+  return el;
+}
+const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const clamp = (x,a,b) => Math.max(a, Math.min(b, x));
+const fmt = (v, d) => (v === null || !isFinite(v)) ? "—" : Number(v).toFixed(d);
+function fmtBig(v){
+  if (!isFinite(v)) return "发散";
+  if (v >= 1000) return "×" + (v >= 1e5 ? v.toExponential(1).replace("e+", "e") : Math.round(v).toLocaleString("en-US"));
+  if (v >= 10) return "×" + v.toFixed(1);
+  return "×" + v.toFixed(2);
+}
+function segBind(sel, attr, cb){
+  $$(sel).forEach(b => b.addEventListener("click", () => {
+    const grp = b.parentElement;
+    $$("button", grp).forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    cb(b.getAttribute(attr));
+  }));
+}
+function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function makeGauss(seed){
+  const u = mulberry32(seed); let spare = null;
+  return function(){
+    if (spare !== null){ const s = spare; spare = null; return s; }
+    let a, b, r;
+    do { a = 2*u() - 1; b = 2*u() - 1; r = a*a + b*b; } while (r >= 1 || r === 0);
+    const f = Math.sqrt(-2*Math.log(r)/r); spare = b*f; return a*f;
+  };
+}
+function invNorm(p){ // Acklam
+  const a=[-3.969683028665376e+01,2.209460984245205e+02,-2.759285104469687e+02,1.383577518672690e+02,-3.066479806614716e+01,2.506628277459239e+00];
+  const b=[-5.447609879822406e+01,1.615858368580409e+02,-1.556989798598866e+02,6.680131188771972e+01,-1.328068155288572e+01];
+  const c=[-7.784894002430293e-03,-3.223964580411365e-01,-2.400758277161838e+00,-2.549732539343734e+00,4.374664141464968e+00,2.938163982698783e+00];
+  const d=[7.784695709041462e-03,3.224671290700398e-01,2.445134137142996e+00,3.754408661907416e+00];
+  const pl=0.02425, ph=1-pl; let q, r;
+  if (p < pl){ q=Math.sqrt(-2*Math.log(p)); return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1); }
+  if (p <= ph){ q=p-0.5; r=q*q; return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q/(((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1); }
+  q=Math.sqrt(-2*Math.log(1-p)); return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+}
+
+/* ---------- 2×2 linear algebra: matrices as [a,b,c,d] = [[a,b],[c,d]] ---------- */
+const M2 = {
+  mul:(A,B)=>[A[0]*B[0]+A[1]*B[2], A[0]*B[1]+A[1]*B[3], A[2]*B[0]+A[3]*B[2], A[2]*B[1]+A[3]*B[3]],
+  add:(A,B)=>[A[0]+B[0],A[1]+B[1],A[2]+B[2],A[3]+B[3]],
+  sub:(A,B)=>[A[0]-B[0],A[1]-B[1],A[2]-B[2],A[3]-B[3]],
+  sc:(A,s)=>[A[0]*s,A[1]*s,A[2]*s,A[3]*s],
+  T:A=>[A[0],A[2],A[1],A[3]],
+  inv:A=>{ const det=A[0]*A[3]-A[1]*A[2]; return [A[3]/det,-A[1]/det,-A[2]/det,A[0]/det]; },
+  mv:(A,v)=>[A[0]*v[0]+A[1]*v[1], A[2]*v[0]+A[3]*v[1]],
+  tr:A=>A[0]+A[3],
+  I:()=>[1,0,0,1],
+  expm:(A)=>{ // scaling & squaring + Taylor(14)
+    const nrm=Math.max(Math.abs(A[0])+Math.abs(A[1]),Math.abs(A[2])+Math.abs(A[3]));
+    let s=0; while (nrm/Math.pow(2,s) > 0.25) s++;
+    const As=M2.sc(A,1/Math.pow(2,s));
+    let E=M2.I(), term=M2.I();
+    for (let k=1;k<=14;k++){ term=M2.sc(M2.mul(term,As),1/k); E=M2.add(E,term); }
+    for (let i=0;i<s;i++) E=M2.mul(E,E);
+    return E;
+  },
+  lyap:(A,Sg)=>{ // A B + B A^T = -Sg, B symmetric [b11,b12,b12,b22]
+    const a11=A[0],a12=A[1],a21=A[2],a22=A[3];
+    const M=[[2*a11,2*a12,0],[a21,a11+a22,a12],[0,2*a21,2*a22]];
+    const r=[-Sg[0],-Sg[1],-Sg[3]];
+    const x=solveN(M,r); return [x[0],x[1],x[1],x[2]];
+  },
+  chol:(C)=>{ const l11=Math.sqrt(C[0]); const l21=C[2]/l11; const l22=Math.sqrt(Math.max(C[3]-l21*l21,0)); return [l11,0,l21,l22]; },
+  eig:(C)=>{ // symmetric: returns {l1,l2,angle}
+    const a=C[0],b=C[1],d=C[3]; const tr=a+d, df=Math.sqrt(((a-d)/2)**2+b*b);
+    const l1=tr/2+df, l2=tr/2-df; const ang=0.5*Math.atan2(2*b,a-d); return {l1,l2,ang};
+  }
+};
+function solveN(Ain, bin){ // Gaussian elimination with partial pivoting; returns x
+  const n=bin.length; const A=Ain.map(r=>r.slice()); const b=bin.slice();
+  for (let c=0;c<n;c++){
+    let p=c; for (let r=c+1;r<n;r++) if (Math.abs(A[r][c])>Math.abs(A[p][c])) p=r;
+    [A[c],A[p]]=[A[p],A[c]]; [b[c],b[p]]=[b[p],b[c]];
+    const piv=A[c][c]||1e-300;
+    for (let r=c+1;r<n;r++){ const f=A[r][c]/piv; if (!f) continue; for (let k=c;k<n;k++) A[r][k]-=f*A[c][k]; b[r]-=f*b[c]; }
+  }
+  const x=new Array(n).fill(0);
+  for (let r=n-1;r>=0;r--){ let s=b[r]; for (let k=r+1;k<n;k++) s-=A[r][k]*x[k]; x[r]=s/(A[r][r]||1e-300); }
+  return x;
+}
+
+/* ---------- theme ---------- */
+(function(){
+  const btn=$("#themeBtn"), root=document.documentElement;
+  try { const st=localStorage.getItem("phibe-theme"); if (st) root.setAttribute("data-theme", st); } catch(e){}
+  btn.addEventListener("click", () => {
+    const cur = root.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    const next = cur === "light" ? "dark" : "light";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("phibe-theme", next); } catch(e){}
+    document.dispatchEvent(new Event("themechange"));
+  });
+  matchMedia("(prefers-color-scheme: light)").addEventListener?.("change", () => document.dispatchEvent(new Event("themechange")));
+})();
+
+/* ---------- TOC highlight ---------- */
+(function(){
+  const links = $$("nav.toc a"); const map = {};
+  links.forEach(a => map[a.getAttribute("href").slice(1)] = a);
+  if (!("IntersectionObserver" in window)) return;
+  const io = new IntersectionObserver(es => {
+    es.forEach(e => { if (e.isIntersecting){ links.forEach(l => l.classList.remove("on")); const a = map[e.target.id]; if (a) a.classList.add("on"); } });
+  }, {rootMargin:"-45% 0px -50% 0px"});
+  $$("section[id]").forEach(s => io.observe(s));
+})();
+
+/* ---------- hero strip ---------- */
+function drawStrip(){
+  const svg=$("#stripSvg"); if (!svg) return; svg.innerHTML="";
+  const W=1000, H=20; svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  const g=makeGauss(7); let y=10, d1="M0,10", d2="M0,10";
+  for (let i=1;i<=200;i++){ const x=i*5; y+= -0.08*(y-10) + 1.3*g(); y=clamp(y,2,18); d1+=` L${x},${y.toFixed(1)}`; }
+  for (let i=1;i<=100;i++){ const x=i*10; const yy=10+5*Math.sin(i/9); d2+=` L${x},${yy.toFixed(1)}`; }
+  S("path",{d:d1,fill:"none",stroke:"var(--sde)","stroke-width":1.1,opacity:.8},svg);
+  S("path",{d:d2,fill:"none",stroke:"var(--raw)","stroke-width":1.6},svg);
+}
+drawStrip();
+
+/* ============================================================
+   通用折线图（SVG，带悬停）
+   ============================================================ */
+function lineChart(host, o){
+  host.innerHTML = "";
+  const W=o.W||640, H=o.H||300;
+  const m=Object.assign({l:54, r:o.endLabels?108:18, t:o.topLabels?30:14, b:42}, o.m||{});
+  const svg=S("svg",{viewBox:`0 0 ${W} ${H}`, role:"img", "aria-label":o.aria||""}, host);
+  const X=o.x, Y=o.y;
+  const tx=v=>X.log?Math.log10(v):v, ty=v=>Y.log?Math.log10(v):v;
+  const X0=tx(X.min), X1=tx(X.max), Y0=ty(Y.min), Y1=ty(Y.max);
+  const pw=W-m.l-m.r, ph=H-m.t-m.b;
+  const sx=v=>m.l+(tx(v)-X0)/(X1-X0)*pw;
+  const syRaw=v=>H-m.b-(ty(v)-Y0)/(Y1-Y0)*ph;
+  const sy=v=>syRaw(clamp(v, Y.min, Y.max));
+  const yT = Y.ticks || [], xT = X.ticks || [];
+  yT.forEach(v=>{ const y=sy(v); S("line",{x1:m.l,x2:W-m.r,y1:y,y2:y,class:"gridl"},svg); S("text",{x:m.l-7,y:y+3.5,"text-anchor":"end",class:"tick",text:(Y.fmt||String)(v)},svg); });
+  xT.forEach(v=>{ const x=sx(v); S("line",{x1:x,x2:x,y1:H-m.b,y2:H-m.b+4,class:"axl"},svg); S("text",{x:x,y:H-m.b+16,"text-anchor":"middle",class:"tick",text:(X.fmt||String)(v)},svg); });
+  S("line",{x1:m.l,x2:W-m.r,y1:H-m.b,y2:H-m.b,class:"axl"},svg);
+  S("line",{x1:m.l,x2:m.l,y1:m.t,y2:H-m.b,class:"axl"},svg);
+  if (X.label) S("text",{x:m.l+pw/2,y:H-6,"text-anchor":"middle",class:"axt",text:X.label},svg);
+  if (Y.label) S("text",{x:12,y:m.t+ph/2,"text-anchor":"middle",class:"axt",transform:`rotate(-90 12 ${m.t+ph/2})`,text:Y.label},svg);
+  (o.hlines||[]).forEach(h=>{ const y=sy(h.y); S("line",{x1:m.l,x2:W-m.r,y1:y,y2:y,stroke:"var(--ink2)","stroke-width":1.2,"stroke-dasharray":"4 4"},svg); if (h.label) S("text",{x:m.l+6,y:y-5,class:"xs",text:h.label},svg); });
+  (o.topLabels||[]).forEach(t=>{ S("text",{x:sx(t.x),y:m.t-12,"text-anchor":"middle",class:"xs",text:t.text},svg); });
+  if (o.topCaption) S("text",{x:m.l-8,y:m.t-12,"text-anchor":"end",class:"xs",text:o.topCaption},svg);
+  const clipId="c"+Math.random().toString(36).slice(2,8);
+  const cp=S("clipPath",{id:clipId},svg); S("rect",{x:m.l,y:m.t-6,width:pw,height:ph+12},cp);
+  const gS=S("g",{"clip-path":`url(#${clipId})`},svg);
+  const ends=[];
+  (o.series||[]).forEach(s=>{
+    let d=""; let started=false;
+    s.pts.forEach(p=>{ if (p[1]===null||!isFinite(p[1])){ started=false; return; } const yy=clamp(syRaw(p[1]),-4*H,5*H); d+=(started?" L":"M")+sx(p[0]).toFixed(1)+","+yy.toFixed(1); started=true; });
+    S("path",{d, fill:"none", class:"s-"+s.cls, "stroke-width":s.width||2, "stroke-dasharray":s.dash||null, "stroke-linejoin":"round", "stroke-linecap":"round", opacity:s.opacity||1},gS);
+    if (s.markers) s.pts.forEach(p=>{ if (p[1]===null) return;
+      if (p[1] > Y.max){ const x=sx(p[0]), y=m.t-2; S("path",{d:`M${x-5},${y+7} L${x},${y-1} L${x+5},${y+7} z`,class:"f-"+s.cls},svg); }
+      else S("circle",{cx:sx(p[0]),cy:sy(p[1]),r:4,class:"f-"+s.cls,stroke:"var(--surf)","stroke-width":2},gS); });
+    if (o.endLabels && s.label){ const ok=s.pts.filter(p=>p[1]!==null&&isFinite(p[1])); if (ok.length){ const last=ok.reduce((a,b)=>b[0]>a[0]?b:a); ends.push({y:sy(last[1]),text:s.label,cls:s.cls}); } }
+  });
+  if (ends.length){ ends.sort((a,b)=>a.y-b.y); for (let i=1;i<ends.length;i++) if (ends[i].y-ends[i-1].y<13) ends[i].y=ends[i-1].y+13;
+    ends.forEach(e=>S("text",{x:W-m.r+6,y:e.y+4,class:"sm t-"+e.cls,style:"font-size:11.5px",text:e.text},svg)); }
+  // hover
+  if (o.hover!==false && o.xs){
+    const tip=document.createElement("div"); tip.className="tip"; tip.hidden=true; host.appendChild(tip);
+    const vl=S("line",{y1:m.t,y2:H-m.b,stroke:"var(--ink3)","stroke-width":1,"stroke-dasharray":"3 3",visibility:"hidden"},svg);
+    const dots=(o.series||[]).map(s=>S("circle",{r:5,class:"f-"+s.cls,stroke:"var(--surf)","stroke-width":2,visibility:"hidden"},svg));
+    const ov=S("rect",{x:m.l,y:m.t,width:pw,height:ph,fill:"transparent",style:"cursor:crosshair"},svg);
+    const move=ev=>{
+      const r=svg.getBoundingClientRect(); const px=(ev.clientX-r.left)/r.width*W;
+      let bi=0, bd=1e9; o.xs.forEach((xv,i)=>{ const dd=Math.abs(sx(xv)-px); if (dd<bd){bd=dd;bi=i;} });
+      const xv=o.xs[bi], X_=sx(xv); vl.setAttribute("x1",X_); vl.setAttribute("x2",X_); vl.setAttribute("visibility","visible");
+      o.series.forEach((s,k)=>{ const p=s.pts[bi]; if (p && p[1]!==null && isFinite(p[1]) && p[1]<=Y.max && p[1]>=Y.min){ dots[k].setAttribute("cx",X_); dots[k].setAttribute("cy",sy(p[1])); dots[k].setAttribute("visibility","visible"); } else dots[k].setAttribute("visibility","hidden"); });
+      tip.innerHTML=(o.tipFmt?o.tipFmt(bi):"");
+      tip.hidden=false;
+      const hr=host.getBoundingClientRect(); let left=ev.clientX-hr.left+14, top=ev.clientY-hr.top+10;
+      if (left+tip.offsetWidth>hr.width) left=ev.clientX-hr.left-tip.offsetWidth-14;
+      tip.style.left=Math.max(0,left)+"px"; tip.style.top=top+"px";
+    };
+    ov.addEventListener("pointermove",move); ov.addEventListener("pointerdown",move);
+    ov.addEventListener("pointerleave",()=>{ tip.hidden=true; vl.setAttribute("visibility","hidden"); dots.forEach(d=>d.setAttribute("visibility","hidden")); });
+  }
+  return {svg, sx, sy};
+}
+function tipRows(title, rows){
+  return `<div class="h">${title}</div>` + rows.map(r=>`<div class="r"><span><i style="background:var(--${r.cls})"></i>${r.label}</span><b>${r.v}</b></div>`).join("");
+}
+const logTicks=(lo,hi,mult)=>{ const out=[]; for (let e=Math.floor(Math.log10(lo)); e<=Math.ceil(Math.log10(hi)); e++){ (mult||[1]).forEach(k=>{ const v=k*Math.pow(10,e); if (v>=lo*0.999 && v<=hi*1.001) out.push(v); }); } return out; };
+const numFmt=v=> v>=1000? (v/1000)+"k" : (v>=1? String(+v.toFixed(2)) : String(+v.toPrecision(2)));
+
+/* ============================================================
+   §1 流程图切换
+   ============================================================ */
+segBind("[data-pipe]","data-pipe", v => $("#pipe").setAttribute("data-mode", v));
+
+/* ============================================================
+   §2 Widget A：一维 OU 三种走法
+   ============================================================ */
+(function(){
+  const host=$("#aChart"); if (!host) return;
+  const th=1, mu=0, m0=2, T=3, nP=28, nS=300;
+  let mode="all", seed=11;
+  const sig=$("#aSig"), s0=$("#aS0");
+  function render(){
+    const sg=+sig.value, sz=+s0.value;
+    $("#aSigO").textContent=sg.toFixed(2); $("#aS0O").textContent=sz.toFixed(2);
+    const mt=t=>mu+(m0-mu)*Math.exp(-th*t);
+    const Vt=t=>sz*sz*Math.exp(-2*th*t)+sg*sg/(2*th)*(1-Math.exp(-2*th*t));
+    let lo=1e9, hi=-1e9;
+    for (let i=0;i<=60;i++){ const t=T*i/60; const s=Math.sqrt(Vt(t)); lo=Math.min(lo,mt(t)-2.6*s); hi=Math.max(hi,mt(t)+2.6*s); }
+    const W=720,H=330,m={l:44,r:16,t:12,b:36};
+    host.innerHTML="";
+    const svg=S("svg",{viewBox:`0 0 ${W} ${H}`,role:"img","aria-label":"一维 OU：SDE 路径、只回归漂移路径与概率流路径，叠加真实分布带"},host);
+    const sx=t=>m.l+t/T*(W-m.l-m.r), sy=x=>H-m.b-(x-lo)/(hi-lo)*(H-m.t-m.b);
+    const yt=[]; const step=Math.pow(10,Math.floor(Math.log10((hi-lo)/4))); const st=[1,2,5].map(k=>k*step).find(s=>(hi-lo)/s<=6)||step*10;
+    for (let v=Math.ceil(lo/st)*st; v<=hi; v+=st) yt.push(+v.toFixed(6));
+    yt.forEach(v=>{ S("line",{x1:m.l,x2:W-m.r,y1:sy(v),y2:sy(v),class:"gridl"},svg); S("text",{x:m.l-6,y:sy(v)+3.5,"text-anchor":"end",class:"tick",text:String(+v.toFixed(2))},svg); });
+    [0,0.5,1,1.5,2,2.5,3].forEach(t=>{ S("text",{x:sx(t),y:H-m.b+16,"text-anchor":"middle",class:"tick",text:String(t)},svg); });
+    S("text",{x:(m.l+W-m.r)/2,y:H-4,"text-anchor":"middle",class:"axt",text:"时间 t"},svg);
+    S("line",{x1:m.l,x2:W-m.r,y1:H-m.b,y2:H-m.b,class:"axl"},svg);
+    // band
+    let up="",dn="";
+    for (let i=0;i<=120;i++){ const t=T*i/120, s=Math.sqrt(Vt(t)); up+=(i?" L":"M")+sx(t).toFixed(1)+","+sy(mt(t)+2*s).toFixed(1); dn=" L"+sx(t).toFixed(1)+","+sy(mt(t)-2*s).toFixed(1)+dn; }
+    S("path",{d:up+dn.replace(/^ L/," L")+" Z",fill:"var(--band)"},svg);
+    let md=""; for (let i=0;i<=120;i++){ const t=T*i/120; md+=(i?" L":"M")+sx(t).toFixed(1)+","+sy(mt(t)).toFixed(1); }
+    S("path",{d:md,fill:"none",stroke:"var(--ink3)","stroke-width":1,"stroke-dasharray":"4 4"},svg);
+    const cp=S("clipPath",{id:"aclip"},svg); S("rect",{x:m.l,y:m.t,width:W-m.l-m.r,height:H-m.t-m.b},cp);
+    const g=S("g",{"clip-path":"url(#aclip)"},svg);
+    const x0s=[]; for (let i=0;i<nP;i++) x0s.push(m0+sz*invNorm((i+0.5)/nP));
+    const dt=T/nS;
+    const show=k=>mode==="all"||mode===k;
+    if (show("sde")){ const G=makeGauss(seed);
+      x0s.forEach(x0=>{ let x=x0, d="M"+sx(0).toFixed(1)+","+sy(x).toFixed(1);
+        for (let k=1;k<=nS;k++){ x+= -th*(x-mu)*dt + sg*Math.sqrt(dt)*G(); d+=" L"+sx(k*dt).toFixed(1)+","+sy(x).toFixed(1); }
+        S("path",{d,fill:"none",stroke:"var(--sde)","stroke-width":1,opacity:mode==="all"?.55:.85},g); }); }
+    if (show("drift")) x0s.forEach(x0=>{ let d=""; for (let k=0;k<=nS;k+=3){ const t=k*dt; const x=mu+(x0-mu)*Math.exp(-th*t); d+=(k?" L":"M")+sx(t).toFixed(1)+","+sy(x).toFixed(1); } S("path",{d,fill:"none",stroke:"var(--nojac)","stroke-width":1.5,opacity:.9},g); });
+    if (show("pf")) x0s.forEach(x0=>{ let d=""; const V0=sz*sz; for (let k=0;k<=nS;k+=3){ const t=k*dt; const x=mt(t)+Math.sqrt(Vt(t)/V0)*(x0-m0); d+=(k?" L":"M")+sx(t).toFixed(1)+","+sy(x).toFixed(1); } S("path",{d,fill:"none",stroke:"var(--raw)","stroke-width":1.6},g); });
+    // KPIs：终态方差
+    const G2=makeGauss(seed+999); let s1=0,s2=0; const nM=4000;
+    for (let i=0;i<nM;i++){ let x=m0+sz*invNorm((i+0.5)/nM); for (let k=1;k<=nS;k++) x+= -th*(x-mu)*dt + sg*Math.sqrt(dt)*G2(); s1+=x; s2+=x*x; }
+    const vSDE=s2/nM-(s1/nM)**2, vT=Vt(T), vDr=sz*sz*Math.exp(-2*th*T);
+    $("#aKpis").innerHTML=`
+      <div class="kpi"><div class="k">真实方差 V(T=3)</div><div class="v">${vT.toFixed(3)}</div></div>
+      <div class="kpi sde"><div class="k">SDE 样本方差（4000 条）</div><div class="v">${vSDE.toFixed(3)}</div></div>
+      <div class="kpi nojac"><div class="k">只回归漂移</div><div class="v">${vDr<0.001?vDr.toExponential(1):vDr.toFixed(3)} <small>${(vDr/vT*100).toFixed(vDr/vT<0.01?2:1)}%</small></div></div>
+      <div class="kpi raw"><div class="k">概率流</div><div class="v">${vT.toFixed(3)} <small>100%</small></div></div>`;
+  }
+  segBind("[data-a]","data-a",v=>{mode=v;render();});
+  sig.addEventListener("input",render); s0.addEventListener("input",render);
+  $("#aReseed").addEventListener("click",()=>{seed=(seed*7+13)%100000;render();});
+  render();
+})();
+
+/* ============================================================
+   §2 Widget B：二维环流动画
+   ============================================================ */
+(function(){
+  const cL=$("#bL"), cR=$("#bR"); if (!cL) return;
+  const P={
+    nonrev:{A:[-2,-1,-1,-2], S:[1,0,0,1/Math.sqrt(2)]},
+    rev:{A:[-1,0,0,-4], S:[1/Math.sqrt(2),0,0,1/Math.sqrt(2)]}
+  };
+  let proc="nonrev", playing=!matchMedia("(prefers-reduced-motion: reduce)").matches, speed=1.5, tSim=0;
+  const NP=420, NH=3, TRAIL=260, TRAIL_SDE=45;
+  let st=null;
+  function setup(){
+    const p=P[proc]; const Sg=M2.mul(p.S,M2.T(p.S)); const B=M2.lyap(p.A,Sg);
+    const F=M2.add(p.A, M2.sc(M2.mul(Sg,M2.inv(B)),0.5));
+    const L=M2.chol(B); const G=makeGauss(2024);
+    const xs=[], ys=[];
+    for (let i=0;i<NP;i++){ const z=[G(),G()]; const v=M2.mv(L,z); xs.push(v); ys.push(v.slice()); }
+    // highlight particles: pick ones at ~1σ on different angles
+    const E=M2.eig(B); const hl=[];
+    for (let k=0;k<NH;k++){ const ang=k*2*Math.PI/NH+0.4; const r=1.2; const u=[r*Math.sqrt(E.l1)*Math.cos(ang), r*Math.sqrt(E.l2)*Math.sin(ang)]; const c=Math.cos(E.ang), s=Math.sin(E.ang); const v=[c*u[0]-s*u[1], s*u[0]+c*u[1]]; xs[k]=v.slice(); ys[k]=v.slice(); hl.push(k); }
+    st={p,Sg,B,F,xs,ys,G:makeGauss(99),trL:hl.map(i=>[xs[i].slice()]),trR:hl.map(i=>[ys[i].slice()]),hl};
+    tSim=0;
+  }
+  function stepSim(dtTot){
+    const n=Math.max(1,Math.round(dtTot/0.005)), dt=dtTot/n, sq=Math.sqrt(dt);
+    const A=st.p.A, Sm=st.p.S, F=st.F, G=st.G;
+    for (let k=0;k<n;k++){
+      for (let i=0;i<NP;i++){
+        const x=st.xs[i]; const g1=G(), g2=G();
+        const dx=A[0]*x[0]+A[1]*x[1], dy=A[2]*x[0]+A[3]*x[1];
+        x[0]+=dx*dt+(Sm[0]*g1+Sm[1]*g2)*sq; x[1]+=dy*dt+(Sm[2]*g1+Sm[3]*g2)*sq;
+        const y=st.ys[i];
+        const k1x=F[0]*y[0]+F[1]*y[1], k1y=F[2]*y[0]+F[3]*y[1];
+        const mx=y[0]+0.5*dt*k1x, my=y[1]+0.5*dt*k1y;
+        y[0]+=dt*(F[0]*mx+F[1]*my); y[1]+=dt*(F[2]*mx+F[3]*my);
+      }
+    }
+    tSim+=dtTot;
+    st.hl.forEach((i,k)=>{ st.trL[k].push(st.xs[i].slice()); st.trR[k].push(st.ys[i].slice()); if (st.trL[k].length>TRAIL_SDE) st.trL[k].shift(); if (st.trR[k].length>TRAIL) st.trR[k].shift(); });
+  }
+  function fitCanvas(c){ const r=c.getBoundingClientRect(); const dpr=window.devicePixelRatio||1; const w=Math.max(200,Math.round(r.width*dpr)); const h=Math.round(w*420/520); if (c.width!==w||c.height!==h){ c.width=w; c.height=h; } }
+  function draw(c, pts, trails, col){
+    fitCanvas(c);
+    const ctx=c.getContext("2d"), W=c.width, H=c.height, R=1.55;
+    const sc=Math.min(W,H)/(2*R), cx=W/2, cy=H/2;
+    const X=v=>cx+v[0]*sc, Y=v=>cy-v[1]*sc;
+    ctx.fillStyle=cssv("--surf2"); ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle=cssv("--grid"); ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,cy); ctx.lineTo(W,cy); ctx.moveTo(cx,0); ctx.lineTo(cx,H); ctx.stroke();
+    const E=M2.eig(st.B);
+    [1,2].forEach(k=>{ ctx.beginPath(); ctx.strokeStyle=cssv("--ink3"); ctx.lineWidth=k===1?1.4:1; ctx.setLineDash(k===1?[]:[5,5]);
+      ctx.ellipse(cx,cy,k*Math.sqrt(E.l1)*sc,k*Math.sqrt(E.l2)*sc,-E.ang,0,2*Math.PI); ctx.stroke(); });
+    ctx.setLineDash([]);
+    ctx.fillStyle=col; ctx.globalAlpha=.75;
+    const r=Math.max(1.6,W/360);
+    pts.forEach(p=>{ ctx.beginPath(); ctx.arc(X(p),Y(p),r,0,2*Math.PI); ctx.fill(); });
+    ctx.globalAlpha=1;
+    const ink=cssv("--ink");
+    trails.forEach(tr=>{ if (tr.length<1) return; ctx.beginPath(); ctx.strokeStyle=ink; ctx.lineWidth=Math.max(1.2,W/400); ctx.globalAlpha=.85;
+      tr.forEach((p,i)=>{ if (i===0) ctx.moveTo(X(p),Y(p)); else ctx.lineTo(X(p),Y(p)); }); ctx.stroke(); ctx.globalAlpha=1;
+      const q=tr[tr.length-1]; ctx.beginPath(); ctx.fillStyle=ink; ctx.arc(X(q),Y(q),r*2.4,0,2*Math.PI); ctx.fill(); ctx.strokeStyle=cssv("--surf2"); ctx.lineWidth=2; ctx.stroke(); });
+  }
+  function cov(pts){ let a=0,b=0,c=0,mx=0,my=0; pts.forEach(p=>{mx+=p[0];my+=p[1];}); mx/=pts.length; my/=pts.length; pts.forEach(p=>{a+=(p[0]-mx)**2;b+=(p[0]-mx)*(p[1]-my);c+=(p[1]-my)**2;}); const n=pts.length-1; return [a/n,b/n,c/n]; }
+  function readout(){
+    const cl=cov(st.xs), cr=cov(st.ys), B=st.B;
+    const per=proc==="nonrev"?"概率流周期 2π√11 ≈ 20.84":"概率流速度 ≡ 0（细致平衡）";
+    $("#bRead").innerHTML=`t = <b>${tSim.toFixed(1)}</b> · 真值 B = [${B[0].toFixed(3)}, ${B[1].toFixed(3)}; ${B[3].toFixed(3)}] · SDE 云协方差 [${cl[0].toFixed(3)}, ${cl[1].toFixed(3)}; ${cl[2].toFixed(3)}] · 概率流云 [${cr[0].toFixed(3)}, ${cr[1].toFixed(3)}; ${cr[2].toFixed(3)}] · ${per}`;
+  }
+  let visible=true, last=0, raf=0, frames=0;
+  function frame(ts){
+    raf=0;
+    if (playing && visible){ stepSim(speed*0.02); }
+    draw(cL, st.xs, st.trL, cssv("--sde")); draw(cR, st.ys, st.trR, cssv("--raw"));
+    if ((frames++)%6===0) readout();
+    if (playing && visible) raf=requestAnimationFrame(frame);
+  }
+  function kick(){ if (!raf) raf=requestAnimationFrame(frame); }
+  setup(); kick();
+  $("#bPlay").textContent=playing?"暂停":"播放";
+  segBind("[data-b]","data-b",v=>{proc=v;setup();kick();});
+  $("#bSpeed").addEventListener("input",e=>{speed=+e.target.value; $("#bSpeedO").textContent=speed+"×";});
+  $("#bPlay").addEventListener("click",()=>{playing=!playing; $("#bPlay").textContent=playing?"暂停":"播放"; kick();});
+  $("#bReset").addEventListener("click",()=>{setup();kick();});
+  if ("IntersectionObserver" in window){ new IntersectionObserver(es=>{ visible=es[0].isIntersecting; if (visible) kick(); },{threshold:0.05}).observe($("#figB")); }
+  document.addEventListener("themechange",()=>{ requestAnimationFrame(()=>{ draw(cL, st.xs, st.trL, cssv("--sde")); draw(cR, st.ys, st.trR, cssv("--raw")); }); });
+  window.addEventListener("resize",()=>kick());
+})();
+
+/* ============================================================
+   §3 stepper
+   ============================================================ */
+(function(){
+  const tabs=$$("#stepper [data-st]"), panes=$$("#stepper [data-pane]"); let cur=0;
+  function go(i){ cur=clamp(i,0,tabs.length-1); tabs.forEach((t,k)=>t.setAttribute("aria-selected",k===cur?"true":"false")); panes.forEach((p,k)=>p.hidden=k!==cur); $("#stPrev").disabled=cur===0; $("#stNext").disabled=cur===tabs.length-1; }
+  tabs.forEach((t,k)=>t.addEventListener("click",()=>go(k)));
+  $("#stPrev").addEventListener("click",()=>go(cur-1)); $("#stNext").addEventListener("click",()=>go(cur+1));
+  go(0);
+})();
+
+/* ============================================================
+   §4 Widget C：PhiBE 试验台（浏览器内 OU）
+   ============================================================ */
+(function(){
+  const host=$("#cChart"); if (!host) return;
+  const PROC={
+    rev:{A:[-1,0,0,-4], Sg:[0.5,0,0,0.5]},
+    nonrev:{A:[-2,-1,-1,-2], Sg:[1,0,0,0.5]}
+  };
+  const mu=[4,4], m0=[0,0], C0=[1,0,0,1], T=1, K=3;
+  let proc="rev", fit="pool", show="raw", res=null;
+  function exact(p,t){ const E=M2.expm(M2.sc(p.A,t)); const m=M2.mv(E,[m0[0]-mu[0],m0[1]-mu[1]]); const C=M2.add(M2.mul(M2.mul(E,M2.sub(C0,p.B)),M2.T(E)),p.B); return {m:[mu[0]+m[0],mu[1]+m[1]],C}; }
+  function vstar(p,m,C){ const Ci=M2.inv(C); const H=M2.sc(M2.mul(p.Sg,Ci),0.5); const F=M2.add(p.A,H); const Am=M2.mv(p.A,mu), Hm=M2.mv(H,m); return {F, g:[-Am[0]-Hm[0], -Am[1]-Hm[1]]}; }
+  function err2(F,g,Fs,gs,m,C){ const E=M2.sub(F,Fs); const f=[g[0]-gs[0],g[1]-gs[1]]; const r=M2.mv(E,m); const r0=r[0]+f[0], r1=r[1]+f[1]; return r0*r0+r1*r1+M2.tr(M2.mul(M2.mul(E,C),M2.T(E))); }
+
+  function run(){
+    const N=+$("#cN").value, h=+$("#cH").value, L=Math.round(T/h);
+    const p=Object.assign({},PROC[proc]); p.B=M2.lyap(p.A,p.Sg);
+    const E=M2.expm(M2.sc(p.A,h)); const Q=M2.sub(p.B,M2.mul(M2.mul(E,p.B),M2.T(E))); const Lq=M2.chol(Q);
+    const seed=1234+N+Math.round(1/h)*7+(proc==="rev"?0:5);
+    // per-time accumulators
+    const Z=new Float64Array(L*6), D=new Float64Array(L*6), WW=new Float64Array(L*3);
+    function simulate(cb){
+      const G=makeGauss(seed);
+      for (let k=0;k<N;k++){
+        let x0=m0[0]+G(), x1=m0[1]+G();
+        for (let j=0;j<L;j++){
+          const g1=G(), g2=G();
+          const y0=mu[0]+E[0]*(x0-mu[0])+E[1]*(x1-mu[1])+Lq[0]*g1;
+          const y1=mu[1]+E[2]*(x0-mu[0])+E[3]*(x1-mu[1])+Lq[2]*g1+Lq[3]*g2;
+          cb(j,x0,x1,y0-x0,y1-x1);
+          x0=y0; x1=y1;
+        }
+      }
+    }
+    simulate((j,x0,x1,w0,w1)=>{ const o=j*6;
+      Z[o]+=x0*x0; Z[o+1]+=x0*x1; Z[o+2]+=x1*x1; Z[o+3]+=x0; Z[o+4]+=x1; Z[o+5]+=1;
+      D[o]+=w0*x0; D[o+1]+=w0*x1; D[o+2]+=w0; D[o+3]+=w1*x0; D[o+4]+=w1*x1; D[o+5]+=w1;
+      const q=j*3; WW[q]+=w0*w0; WW[q+1]+=w0*w1; WW[q+2]+=w1*w1; });
+    const tp=j=>{ const tau=j*h/T; return [1,tau,tau*tau,tau*tau*tau]; };
+    const H3=j=>{ const o=j*6; return [[Z[o]/N,Z[o+1]/N,Z[o+3]/N],[Z[o+1]/N,Z[o+2]/N,Z[o+4]/N],[Z[o+3]/N,Z[o+4]/N,1]]; };
+    // per-time fits: M (2x3) solves M H = Dm  -> H M^T = Dm^T
+    function ptFit(extraWW){ const out=[]; for (let j=0;j<L;j++){ const Hj=H3(j), o=j*6;
+        const rows=[0,1].map(i=>{ const d=[D[o+3*i]/(N*h), D[o+3*i+1]/(N*h), D[o+3*i+2]/(N*h)];
+          if (extraWW){ const w=extraWW(j); d[0]+=0.5*w[i][0]; d[1]+=0.5*w[i][1]; }
+          return solveN(Hj,d); });
+        out.push(rows); } return out; }
+    // pooled: features f∈{x0,x1,1} × k∈0..3, index f*4+k
+    const q=12; const Hp=[...Array(q)].map(()=>new Array(q).fill(0)); const cW=[new Array(q).fill(0),new Array(q).fill(0)]; const cnt=N*L;
+    for (let j=0;j<L;j++){ const Hj=H3(j), t=tp(j), o=j*6;
+      for (let f=0;f<3;f++) for (let k=0;k<4;k++) for (let f2=0;f2<3;f2++) for (let k2=0;k2<4;k2++) Hp[f*4+k][f2*4+k2]+=Hj[f][f2]*t[k]*t[k2]*N/cnt;
+      for (let i=0;i<2;i++) for (let f=0;f<3;f++) for (let k=0;k<4;k++) cW[i][f*4+k]+=D[o+3*i+f]/h*t[k]/cnt; }
+    function poolFit(wwFn){ const rhs=[cW[0].slice(),cW[1].slice()];
+      if (wwFn) for (let j=0;j<L;j++){ const w=wwFn(j), t=tp(j); for (let i=0;i<2;i++) for (let f=0;f<2;f++) for (let k=0;k<4;k++) rhs[i][f*4+k]+=0.5*w[i][f]*t[k]*N/cnt; }
+      return [solveN(Hp,rhs[0]),solveN(Hp,rhs[1])]; }
+    const poolM=(th,t)=>{ const tau=t/T, tt=[1,tau,tau*tau,tau*tau*tau]; const r=[0,1].map(i=>[0,1,2].map(f=>th[i][f*4]*tt[0]+th[i][f*4+1]*tt[1]+th[i][f*4+2]*tt[2]+th[i][f*4+3]*tt[3])); return {F:[r[0][0],r[0][1],r[1][0],r[1][1]], g:[r[0][2],r[1][2]]}; };
+    const ptM=(ms,t)=>{ const j=clamp(Math.floor(t/h+1e-9),0,L-1); const r=ms[j]; return {F:[r[0][0],r[0][1],r[1][0],r[1][1]], g:[r[0][2],r[1][2]]}; };
+    const wwRaw=j=>{ const q3=j*3; const a=WW[q3]/(N*h), b=WW[q3+1]/(N*h), c=WW[q3+2]/(N*h); return [[a,b],[b,c]]; };
+    // drift-only fits
+    const ptDrift=ptFit(null), plDrift=poolFit(null);
+    // second pass: centered residual moments
+    const RRp=new Float64Array(L*3), RRt=new Float64Array(L*3);
+    const plDriftAt=[]; for (let j=0;j<L;j++) plDriftAt.push(poolM(plDrift,j*h));
+    simulate((j,x0,x1,w0,w1)=>{
+      const a=plDriftAt[j]; const r0=w0-h*(a.F[0]*x0+a.F[1]*x1+a.g[0]), r1=w1-h*(a.F[2]*x0+a.F[3]*x1+a.g[1]);
+      const qq=j*3; RRp[qq]+=r0*r0; RRp[qq+1]+=r0*r1; RRp[qq+2]+=r1*r1;
+      const md=ptDrift[j]; const s0=w0-h*(md[0][0]*x0+md[0][1]*x1+md[0][2]), s1=w1-h*(md[1][0]*x0+md[1][1]*x1+md[1][2]);
+      RRt[qq]+=s0*s0; RRt[qq+1]+=s0*s1; RRt[qq+2]+=s1*s1; });
+    const wwFrom=arr=>j=>{ const q3=j*3; const a=arr[q3]/(N*h), b=arr[q3+1]/(N*h), c=arr[q3+2]/(N*h); return [[a,b],[b,c]]; };
+    let plRaw=null, plCen=null;
+    let F_raw, F_cen, F_nojac;
+    if (fit==="pool"){ plRaw=poolFit(wwRaw); plCen=poolFit(wwFrom(RRp));
+      F_raw=t=>poolM(plRaw,t); F_cen=t=>poolM(plCen,t); F_nojac=t=>poolM(plDrift,t); }
+    else { const r=ptFit(wwRaw), c=ptFit(wwFrom(RRt));
+      F_raw=t=>ptM(r,t); F_cen=t=>ptM(c,t); F_nojac=t=>ptM(ptDrift,t); }
+    // evaluation
+    const ts=[], ex=[], vs=[]; let vn2=0, Rsum=0;
+    for (let j=0;j<L;j++){ const t=j*h; const e=exact(p,t); const v=vstar(p,e.m,e.C); ts.push(t); ex.push(e); vs.push(v);
+      vn2+=err2(v.F,v.g,[0,0,0,0],[0,0],e.m,e.C);
+      const bm=M2.mv(p.A,[e.m[0]-mu[0],e.m[1]-mu[1]]); Rsum+=(bm[0]*bm[0]+bm[1]*bm[1]+M2.tr(M2.mul(M2.mul(p.A,e.C),M2.T(p.A))))*h/M2.tr(p.Sg); }
+    vn2=0; for (let i=0;i<1000;i++){ const e=exact(p,i*0.001); const v=vstar(p,e.m,e.C); vn2+=err2(v.F,v.g,[0,0,0,0],[0,0],e.m,e.C); }
+    vn2/=1000; const vn=Math.sqrt(vn2), Rbar=Rsum/L;
+    const modes={raw:F_raw, cen:F_cen, nojac:F_nojac};
+    const out={N,h,L,Rbar,curves:{},err:{},cov:{},parts:{}};
+    const eT=exact(p,T), trE=M2.tr(eT.C);
+    const sub=Math.max(1,Math.round(h/0.002)), dd=h/sub;
+    const G0=makeGauss(77), NPp=600, init=[]; for (let i=0;i<NPp;i++) init.push([m0[0]+G0(),m0[1]+G0()]);
+    for (const k in modes){ const fn=modes[k]; let s=0; const cur=[];
+      for (let j=0;j<L;j++){ const mm=fn(ts[j]); const e2=err2(mm.F,mm.g,vs[j].F,vs[j].g,ex[j].m,ex[j].C); s+=e2; cur.push([ts[j],Math.sqrt(e2)/vn*100]); }
+      out.curves[k]=cur; out.err[k]=Math.sqrt(s/L)/vn*100;
+      // push-forward moments + particles
+      let m=m0.slice(), C=C0.slice(); const pts=init.map(v=>v.slice()); let bad=false;
+      for (let j=0;j<L;j++) for (let s2=0;s2<sub;s2++){ const t=j*h+s2*dd; const mm=fn(t); const F=mm.F, g=mm.g;
+        const dm=M2.mv(F,m); m=[m[0]+dd*(dm[0]+g[0]), m[1]+dd*(dm[1]+g[1])];
+        C=M2.add(C, M2.sc(M2.add(M2.mul(F,C),M2.mul(C,M2.T(F))),dd));
+        if (!bad) for (const q2 of pts){ const a=F[0]*q2[0]+F[1]*q2[1]+g[0], b=F[2]*q2[0]+F[3]*q2[1]+g[1]; q2[0]+=dd*a; q2[1]+=dd*b; }
+        if (!isFinite(C[0])||Math.abs(C[0])>1e12){ bad=true; } }
+      out.cov[k]=bad?Infinity:M2.tr(C)/trE; out.parts[k]=pts; }
+    out.eT=eT;
+    res=out; renderC();
+  }
+  function renderC(){
+    if (!res) return;
+    const r=res;
+    $("#cKpis").innerHTML=`
+      <div class="kpi"><div class="k">判别量 R = 𝔼‖b‖²Δt / trΣ（时间平均）</div><div class="v">${r.Rbar.toFixed(2)}</div></div>
+      <div class="kpi"><div class="k">转移对数 N × L</div><div class="v">${(r.N*r.L).toLocaleString("en-US")}</div></div>
+      <div class="kpi raw"><div class="k">原始二阶矩：速度误差 · 终态方差</div><div class="v">${r.err.raw.toFixed(1)}% <small>${fmtBig(r.cov.raw)}</small></div></div>
+      <div class="kpi cen"><div class="k">中心化：速度误差 · 终态方差</div><div class="v">${r.err.cen.toFixed(1)}% <small>${fmtBig(r.cov.cen)}</small></div></div>
+      <div class="kpi nojac"><div class="k">去掉 Jacobian：速度误差 · 终态方差</div><div class="v">${r.err.nojac.toFixed(1)}% <small>${fmtBig(r.cov.nojac)}</small></div></div>`;
+    const xs=r.curves.raw.map(p=>p[0]);
+    const lab={raw:"原始",cen:"中心化",nojac:"去 Jacobian"};
+    lineChart(host,{W:500,H:300,xs, x:{min:0,max:1,ticks:[0,0.25,0.5,0.75,1],fmt:v=>String(v),label:"时间 t"},
+      y:{min:0.1,max:300,log:true,ticks:[0.1,1,10,100],fmt:v=>v+"%",label:"相对误差"},
+      series:["raw","cen","nojac"].map(k=>({cls:k,label:lab[k],pts:r.curves[k],width:2})), endLabels:true, m:{r:84},
+      aria:"逐时刻速度相对误差曲线",
+      tipFmt:i=>tipRows("t = "+xs[i].toFixed(3),["raw","cen","nojac"].map(k=>({cls:k,label:lab[k],v:r.curves[k][i][1].toFixed(2)+"%"})))});
+    drawParts();
+  }
+  function drawParts(){
+    const c=$("#cCanvas"); if (!res) return;
+    const rct=c.getBoundingClientRect(), dpr=window.devicePixelRatio||1; const w=Math.max(240,Math.round(rct.width*dpr)), hh=Math.round(w*420/560);
+    if (c.width!==w||c.height!==hh){ c.width=w; c.height=hh; }
+    const ctx=c.getContext("2d"), W=c.width, H=c.height; const e=res.eT; const Ei=M2.eig(e.C);
+    const half=4.2*Math.sqrt(Ei.l1); const sc=Math.min(W,H)/(2*half), cx=W/2, cy=H/2;
+    const X=v=>cx+(v[0]-e.m[0])*sc, Y=v=>cy-(v[1]-e.m[1])*sc;
+    ctx.fillStyle=cssv("--surf2"); ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle=cssv("--grid"); ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,cy); ctx.lineTo(W,cy); ctx.moveTo(cx,0); ctx.lineTo(cx,H); ctx.stroke();
+    const col=cssv("--"+show); const pts=res.parts[show]; let out=0;
+    ctx.fillStyle=col; ctx.globalAlpha=.7; const rr=Math.max(1.8,W/300);
+    pts.forEach(p=>{ const x=X(p), y=Y(p); if (!isFinite(x)||x<0||x>W||y<0||y>H){ out++; return; } ctx.beginPath(); ctx.arc(x,y,rr,0,2*Math.PI); ctx.fill(); });
+    ctx.globalAlpha=1;
+    ctx.strokeStyle=cssv("--ink"); ctx.lineWidth=Math.max(1.5,W/350); ctx.setLineDash([6,5]);
+    ctx.beginPath(); ctx.ellipse(cx,cy,2*Math.sqrt(Ei.l1)*sc,2*Math.sqrt(Ei.l2)*sc,-Ei.ang,0,2*Math.PI); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=cssv("--ink"); ctx.beginPath(); ctx.arc(cx,cy,rr*1.6,0,2*Math.PI); ctx.fill();
+    ctx.font=`${Math.round(12*W/560)}px ${cssv("--f-mono")||"monospace"}`; ctx.fillStyle=cssv("--ink2");
+    ctx.fillText("虚线：真实 2σ 椭圆（t = T）",10*W/560,20*W/560);
+    const name={raw:"原始二阶矩",cen:"中心化",nojac:"去掉 Jacobian"}[show];
+    $("#cNote").innerHTML=`${name}：终态方差 = 真值的 <b>${fmtBig(res.cov[show]).replace("×","")}</b> 倍` + (out?` · ${out}/${pts.length} 个粒子落在画面外`:"") + ` · 画面半宽 = 真值最大标准差的 4.2 倍`;
+  }
+  segBind("[data-c-proc]","data-c-proc",v=>{proc=v;});
+  segBind("[data-c-fit]","data-c-fit",v=>{fit=v;});
+  segBind("[data-c-show]","data-c-show",v=>{show=v;drawParts();});
+  $("#cRun").addEventListener("click",()=>{ const b=$("#cBusy"); b.hidden=false; setTimeout(()=>{ try{ run(); } finally { b.hidden=true; } },30); });
+  document.addEventListener("themechange",()=>requestAnimationFrame(drawParts));
+  window.addEventListener("resize",()=>{ if (res) drawParts(); });
+  run();
+})();
+
+/* ============================================================
+   §4 扫描图
+   ============================================================ */
+(function(){
+  const hE=$("#swErr"), hC=$("#swCov"); if (!hE) return;
+  let proc="rev", N="2000";
+  function render(){
+    const d=SWEEP[proc], s=d[N], hs=d.h;
+    const top=hs.map((h,i)=>({x:h,text:(d.R[i]<1?d.R[i].toFixed(2):d.R[i].toFixed(1))}));
+    const xT=[0.002,0.005,0.01,0.02,0.05,0.1,0.2];
+    const pts=k=>hs.map((h,i)=>[h,s[k][i]]);
+    const lab={pl_raw:"原始·共享",pt_raw:"原始·逐时刻",pl_cen:"中心化",pl_nojac:"去 Jacobian"};
+    const cls={pl_raw:"raw",pt_raw:"pt",pl_cen:"cen",pl_nojac:"nojac"};
+    lineChart(hE,{W:520,H:320,xs:hs,x:{min:0.0018,max:0.22,log:true,ticks:xT,fmt:v=>String(v),label:"Δt（对数轴）"},
+      y:{min:0.5,max:200,log:true,ticks:[1,2,5,10,20,50,100,200],fmt:v=>String(v)},
+      topLabels:top, topCaption:"R =", m:{r:92,t:34},
+      series:["pl_raw","pt_raw","pl_cen","pl_nojac"].map(k=>({cls:cls[k],label:lab[k],pts:pts(k),markers:true,dash:k==="pt_raw"?"6 4":null})),
+      endLabels:true, aria:"速度误差随 Δt 变化",
+      tipFmt:i=>tipRows(`Δt = ${hs[i]} · R = ${d.R[i]}`,["pl_raw","pt_raw","pl_cen","pl_nojac"].map(k=>({cls:cls[k],label:lab[k],v:s[k][i].toFixed(2)+"%"})))});
+    const cpts=k=>hs.map((h,i)=>[h,s[k][i]]);
+    const clab={cov_raw:"原始",cov_cen:"中心化",cov_nojac:"去 Jacobian"}, ccls={cov_raw:"raw",cov_cen:"cen",cov_nojac:"nojac"};
+    lineChart(hC,{W:520,H:320,xs:hs,x:{min:0.0018,max:0.22,log:true,ticks:xT,fmt:v=>String(v),label:"Δt（对数轴）"},
+      y:{min:0.1,max:1000,log:true,ticks:[0.1,0.3,1,3,10,100,1000],fmt:v=>String(v)},
+      topLabels:top, topCaption:"R =", m:{r:92,t:34}, hlines:[{y:1,label:"1 = 正确"}],
+      series:["cov_raw","cov_cen","cov_nojac"].map(k=>({cls:ccls[k],label:clab[k],pts:cpts(k),markers:true})),
+      endLabels:true, aria:"终态协方差比值随 Δt 变化（超出 1000 的点用三角标在顶部）",
+      tipFmt:i=>tipRows(`Δt = ${hs[i]} · R = ${d.R[i]}`,["cov_raw","cov_cen","cov_nojac"].map(k=>({cls:ccls[k],label:clab[k],v:fmtBig(s[k][i])})))});
+    const i002=hs.indexOf(0.002), i01=hs.indexOf(0.01), i05=hs.indexOf(0.05);
+    $("#swCap").innerHTML=`当前：${proc==="rev"?"可逆":"非可逆"}，N = ${Number(N).toLocaleString("en-US")}。原始二阶矩在 Δt = 0.002（R = ${d.R[i002]}）时误差 ${s.pl_raw[i002]}%、终态方差 ${fmtBig(s.cov_raw[i002])}；Δt = 0.01（R = ${d.R[i01]}）时 ${fmtBig(s.cov_raw[i01])}；Δt = 0.05（R = ${d.R[i05]}）时 ${fmtBig(s.cov_raw[i05])}。中心化全程 ${Math.min(...s.cov_cen).toFixed(2)}–${Math.max(...s.cov_cen).toFixed(2)}；去掉 Jacobian 全程 ${Math.min(...s.cov_nojac).toFixed(2)}–${Math.max(...s.cov_nojac).toFixed(2)}。右图超过 1000 的点以顶部三角表示，数值见悬停提示。逐时刻拟合（黄虚线）在 N = 2000 时的 U 形最明显。`;
+  }
+  segBind("[data-sw-proc]","data-sw-proc",v=>{proc=v;render();});
+  segBind("[data-sw-n]","data-sw-n",v=>{N=v;render();});
+  render();
+})();
+
+/* ============================================================
+   §6 KTH small multiples
+   ============================================================ */
+(function(){
+  const host=$("#kGrid"); if (!host) return;
+  const D={
+    std:{MCVD:[0.8550,307.3,20.68,0.6986], PFI:[0.6637,280.1,21.78,0.7254], PhiBE:[0.4405,227.5,23.56,0.7663]},
+    adj:{PFI:[0.6576,247.1,21.82,0.7372], PhiBE:[0.4305,192.7,23.66,0.7800]}
+  };
+  const MET=[{n:"MSE (×10⁻²)",dir:"↓ 越低越好",d:4},{n:"FVD",dir:"↓ 越低越好",d:1},{n:"PSNR (dB)",dir:"↑ 越高越好",d:2},{n:"SSIM",dir:"↑ 越高越好",d:4}];
+  const COL={MCVD:"sde",PFI:"pt",PhiBE:"raw"};
+  let v="std";
+  function render(){
+    host.innerHTML="";
+    const data=D[v]; const meths=Object.keys(data);
+    MET.forEach((mt,mi)=>{
+      const box=document.createElement("div"); box.className="chart"; host.appendChild(box);
+      const W=260,H=200,m={l:12,r:12,t:34,b:30};
+      const svg=S("svg",{viewBox:`0 0 ${W} ${H}`,role:"img","aria-label":`KTH ${mt.n}`},box);
+      S("text",{x:m.l,y:14,class:"lbl",style:"font-weight:600;font-size:13px",text:mt.n},svg);
+      S("text",{x:m.l,y:28,class:"xs",text:mt.dir},svg);
+      const vals=meths.map(k=>data[k][mi]); const mx=Math.max(...vals)*1.12;
+      const bw=Math.min(52,(W-m.l-m.r)/meths.length-18), gap=((W-m.l-m.r)-bw*meths.length)/(meths.length);
+      const sy=x=>H-m.b-(x/mx)*(H-m.t-m.b);
+      S("line",{x1:m.l,x2:W-m.r,y1:H-m.b,y2:H-m.b,class:"axl"},svg);
+      const tip=document.createElement("div"); tip.className="tip"; tip.hidden=true; box.appendChild(tip);
+      meths.forEach((k,i)=>{
+        const x=m.l+gap/2+i*(bw+gap), y=sy(data[k][mi]);
+        const hgt=H-m.b-y; const rr=Math.min(4,hgt);
+        const d=`M${x},${H-m.b} L${x},${y+rr} Q${x},${y} ${x+rr},${y} L${x+bw-rr},${y} Q${x+bw},${y} ${x+bw},${y+rr} L${x+bw},${H-m.b} Z`;
+        const bar=S("path",{d,class:"f-"+COL[k],style:"cursor:default"},svg);
+        S("text",{x:x+bw/2,y:y-5,"text-anchor":"middle",class:"mono",style:"font-size:11px;fill:var(--ink)",text:data[k][mi].toFixed(mt.d)},svg);
+        S("text",{x:x+bw/2,y:H-m.b+15,"text-anchor":"middle",class:"sm",style:"fill:var(--ink2)",text:k==="PhiBE"?"PhiBE-Flow":k},svg);
+        const show=ev=>{ const base=data.PhiBE[mi]; const rel=(data[k][mi]/base-1)*100;
+          tip.innerHTML=`<div class="h">${mt.n} · ${v==="std"?"标准":"调整后"}</div><div class="r"><span>${k==="PhiBE"?"PhiBE-Flow":k}</span><b>${data[k][mi].toFixed(mt.d)}</b></div>`+(k!=="PhiBE"?`<div class="r"><span>相对 PhiBE-Flow</span><b>${rel>0?"+":""}${rel.toFixed(1)}%</b></div>`:"");
+          tip.hidden=false; const hr=box.getBoundingClientRect(); tip.style.left=clamp(ev.clientX-hr.left+10,0,hr.width-150)+"px"; tip.style.top=(ev.clientY-hr.top-50)+"px"; };
+        bar.addEventListener("pointermove",show); bar.addEventListener("pointerdown",show); bar.addEventListener("pointerleave",()=>tip.hidden=true);
+      });
+    });
+  }
+  segBind("[data-k]","data-k",x=>{v=x;render();});
+  render();
+})();
+
+/* ============================================================
+   §7 Widget D：条件于前一帧的一维玩具（闭式）
+   ============================================================ */
+(function(){
+  const hP=$("#dPaths"); if (!hP) return;
+  let seed=5;
+  function render(){
+    const h=+$("#dH").value, a=Math.exp(-h), s=Math.sqrt(1-a*a);
+    const al=a*a/(h*(1+a)), be=-a/(h*(1+a));
+    const Tm=3, K=Math.round(Tm/h);
+    // recursion coefficients for cond PF: x_k = p x0 + q c0
+    let p=1,q=0,pc=0,qc=1; const V=[], Cr=[], ts=[];
+    for (let k=0;k<=K;k++){ const t=k*h; ts.push(t); const v=p*p+q*q+2*p*q*a; V.push(v); Cr.push((p+q*a)/Math.sqrt(v));
+      const np=p+h*(al*p+be*pc), nq=q+h*(al*q+be*qc); pc=p; qc=q; p=np; q=nq; }
+    const idx1=Math.round(1/h);
+    $("#dKpis").innerHTML=`
+      <div class="kpi raw"><div class="k">无条件模型的斜率（闭式）</div><div class="v">0 <small>对任意 Δt</small></div></div>
+      <div class="kpi"><div class="k">条件模型 α（x<sub>t</sub> 的系数）</div><div class="v">${al.toFixed(2)}</div></div>
+      <div class="kpi"><div class="k">条件模型 β（x<sub>t−1</sub> 的系数）</div><div class="v">${be.toFixed(2)}</div></div>
+      <div class="kpi"><div class="k">rollout 特征根</div><div class="v">${a.toFixed(3)} <small>与 ${(1/(1+a)).toFixed(3)}</small></div></div>
+      <div class="kpi"><div class="k">t = 1 时条件模型的生成方差</div><div class="v">${V[idx1].toFixed(3)} <small>真值 1</small></div></div>`;
+    // paths
+    const x0=1.5, G=makeGauss(seed);
+    const series=[];
+    for (let r=0;r<6;r++){ let x=x0; const pts=[[0,x]]; for (let k=1;k<=K;k++){ x=a*x+s*G(); pts.push([k*h,x]); } series.push({cls:"sde",pts,width:1.2,opacity:.8}); }
+    series.push({cls:"raw",label:"无条件 PF",pts:ts.map(t=>[t,x0]),width:2.4});
+    for (let r=0;r<3;r++){ const c0=a*x0+s*G(); let xp=c0, x=x0; const pts=[[0,x]]; for (let k=1;k<=K;k++){ const nx=x+h*(al*x+be*xp); xp=x; x=nx; pts.push([k*h,x]); } series.push({cls:"pt",label:r===0?"条件 PF":null,pts,width:2}); }
+    series.push({cls:"nojac",label:"条件均值",pts:ts.map(t=>[t,x0*Math.exp(-t)]),width:1.6,dash:"5 4"});
+    lineChart(hP,{W:360,H:260,xs:ts,hover:false,x:{min:0,max:3,ticks:[0,1,2,3],fmt:String,label:"t"},y:{min:-2.5,max:3,ticks:[-2,-1,0,1,2,3],fmt:String},series,endLabels:false,m:{r:14,l:36},aria:"一维玩具的样本路径"});
+    const sV=[{cls:"sde",label:"SDE",pts:ts.map(t=>[t,1]),width:2},{cls:"raw",label:"无条件 PF",pts:ts.map(t=>[t,1]),width:2,dash:"2 5"},{cls:"pt",label:"条件 PF",pts:ts.map((t,i)=>[t,V[i]]),width:2.2},{cls:"nojac",label:"条件均值",pts:ts.map(t=>[t,Math.exp(-2*t)]),width:1.6,dash:"5 4"}];
+    const step=Math.max(1,Math.round(0.1/h)); const xsS=ts.filter((_,i)=>i%step===0);
+    const pick=arr=>arr.filter((_,i)=>i%step===0);
+    lineChart($("#dVar"),{W:360,H:260,xs:xsS,x:{min:0,max:3,ticks:[0,1,2,3],fmt:String,label:"t"},y:{min:0,max:1.1,ticks:[0,0.25,0.5,0.75,1],fmt:String},
+      series:sV.map(o=>Object.assign({},o,{pts:pick(o.pts)})),m:{r:14,l:40},aria:"生成方差随时间",
+      tipFmt:i=>{ const k=i*step; return tipRows("t = "+ts[k].toFixed(2),[{cls:"sde",label:"SDE",v:"1.000"},{cls:"raw",label:"无条件 PF",v:"1.000"},{cls:"pt",label:"条件 PF",v:V[k].toFixed(3)},{cls:"nojac",label:"条件均值",v:Math.exp(-2*ts[k]).toFixed(3)}]); }});
+    const sC=[{cls:"sde",pts:ts.map(t=>[t,Math.exp(-t)]),width:2},{cls:"raw",pts:ts.map(t=>[t,1]),width:2,dash:"2 5"},{cls:"pt",pts:ts.map((t,i)=>[t,Cr[i]]),width:2.2},{cls:"nojac",pts:ts.map(t=>[t,1]),width:1.6,dash:"5 4"}];
+    lineChart($("#dCorr"),{W:360,H:260,xs:xsS,x:{min:0,max:3,ticks:[0,1,2,3],fmt:String,label:"t"},y:{min:0,max:1.05,ticks:[0,0.25,0.5,0.75,1],fmt:String},
+      series:sC.map(o=>Object.assign({},o,{pts:pick(o.pts)})),m:{r:14,l:40},aria:"与初值的相关系数",
+      tipFmt:i=>{ const k=i*step; return tipRows("t = "+ts[k].toFixed(2),[{cls:"sde",label:"SDE",v:Math.exp(-ts[k]).toFixed(3)},{cls:"raw",label:"无条件 PF",v:"1.000"},{cls:"pt",label:"条件 PF",v:Cr[k].toFixed(3)},{cls:"nojac",label:"条件均值",v:"1.000"}]); }});
+  }
+  $("#dH").addEventListener("change",render);
+  $("#dReseed").addEventListener("click",()=>{seed=(seed*13+7)%100000;render();});
+  render();
+})();
+
+/* ============================================================
+   §8 doubts filter
+   ============================================================ */
+segBind("#dfSeg [data-df]","data-df",v=>{ $$("#doubts details.doubt").forEach(d=>{ d.hidden = !(v==="all"||d.classList.contains(v)); }); });
+
+})();
+</script>
+</body>
+</html>

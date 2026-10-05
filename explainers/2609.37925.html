@@ -1,0 +1,1405 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RMD 精读</title>
+<meta name="description" content="Rollout-Marginal Distillation（arXiv 2609.37925）精读：自展开时照旧依赖历史，DMD 打分时让老师只看单个块；再用一段视频级 DMD 补回连贯。含老师视角对照、两频段玩具、一次迭代分解、出口步与打分噪声、时间尺、主表与消融复算、代码里才看得到的细节与 19 条存疑。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=Noto+Serif+SC:wght@600;700&family=STIX+Two+Text:ital@0;1&display=swap">
+<style>
+/* ============================================================
+   RMD 精读 — tokens（深色优先；浅色：纸面）
+   方法色（全页固定，跟随实体，不随排名变）：
+     rmd = RMD（蓝） sf = Self Forcing（橙） cf = Causal Forcing（青绿）
+     vd = 消融“只做视频级 DMD”（紫） mg = 消融“只做边缘”（黄） rx = 消融“随机出口”（品红）
+     cmd = CMD 因果前缀打分（绿，仅老师视角图）
+   存疑：risk = 高  med = 中  low = 低  ok = 已核验
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#101316; --surf:#161a1e; --surf2:#1c2126; --surf3:#262c33;
+  --rule:#283038; --rule2:#3a434d;
+  --ink:#e6eaee; --ink2:#a9b2bb; --ink3:#7c8690;
+  --rmd:#3987e5; --rmd-ink:#8ab8f2; --rmd-soft:rgba(57,135,229,.17);
+  --sf:#d95926; --sf-ink:#f3a37d; --sf-soft:rgba(217,89,38,.16);
+  --cf:#199e70; --cf-ink:#6fd6b0; --cf-soft:rgba(25,158,112,.16);
+  --vd:#9085e9; --vd-ink:#b7afff; --vd-soft:rgba(144,133,233,.16);
+  --mg:#c98500; --mg-ink:#ecc766; --mg-soft:rgba(201,133,0,.16);
+  --rx:#d55181; --rx-ink:#f09bbf; --rx-soft:rgba(213,81,129,.16);
+  --cmd:#3fa34d; --cmd-ink:#8fd49a; --cmd-soft:rgba(63,163,77,.16);
+  --risk:#e5544c; --risk-ink:#f68a83; --risk-soft:rgba(229,84,76,.15);
+  --med:#d4b144; --med-ink:#ecd07a; --med-soft:rgba(212,177,68,.15);
+  --low:#7f8a97; --low-ink:#b3bcc6; --low-soft:rgba(127,138,151,.15);
+  --ok:#3dba80; --ok-ink:#72d8a7; --ok-soft:rgba(61,186,128,.14);
+  --grid:#20272e; --axis:#3a4550;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 32px rgba(0,0,0,.30);
+  --f-head:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --f-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --f-math:"STIX Two Text","Times New Roman",Georgia,serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f3f0; --surf:#fbfbf9; --surf2:#eceee9; --surf3:#e0e3dd;
+    --rule:#d8dbd4; --rule2:#b9beb6;
+    --ink:#13161b; --ink2:#414852; --ink3:#69717b;
+    --rmd:#2a78d6; --rmd-ink:#1b56a3; --rmd-soft:rgba(42,120,214,.11);
+    --sf:#eb6834; --sf-ink:#9c3d10; --sf-soft:rgba(235,104,52,.11);
+    --cf:#1baf7a; --cf-ink:#0c6a4f; --cf-soft:rgba(27,175,122,.12);
+    --vd:#4a3aa7; --vd-ink:#3b2d92; --vd-soft:rgba(74,58,167,.10);
+    --mg:#eda100; --mg-ink:#7f5b00; --mg-soft:rgba(237,161,0,.13);
+    --rx:#e87ba4; --rx-ink:#96275a; --rx-soft:rgba(232,123,164,.14);
+    --cmd:#008300; --cmd-ink:#006400; --cmd-soft:rgba(0,131,0,.10);
+    --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+    --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+    --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.12);
+    --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.10);
+    --grid:#e6e8e3; --axis:#b9beb6;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f3f0; --surf:#fbfbf9; --surf2:#eceee9; --surf3:#e0e3dd;
+  --rule:#d8dbd4; --rule2:#b9beb6;
+  --ink:#13161b; --ink2:#414852; --ink3:#69717b;
+  --rmd:#2a78d6; --rmd-ink:#1b56a3; --rmd-soft:rgba(42,120,214,.11);
+  --sf:#eb6834; --sf-ink:#9c3d10; --sf-soft:rgba(235,104,52,.11);
+  --cf:#1baf7a; --cf-ink:#0c6a4f; --cf-soft:rgba(27,175,122,.12);
+  --vd:#4a3aa7; --vd-ink:#3b2d92; --vd-soft:rgba(74,58,167,.10);
+  --mg:#eda100; --mg-ink:#7f5b00; --mg-soft:rgba(237,161,0,.13);
+  --rx:#e87ba4; --rx-ink:#96275a; --rx-soft:rgba(232,123,164,.14);
+  --cmd:#008300; --cmd-ink:#006400; --cmd-soft:rgba(0,131,0,.10);
+  --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+  --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+  --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.12);
+  --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.10);
+  --grid:#e6e8e3; --axis:#b9beb6;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.75;}
+a{color:var(--rmd-ink);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:2px solid var(--rmd);outline-offset:2px;border-radius:4px}
+b,strong{font-weight:600;color:var(--ink)}
+sub,sup{font-size:.72em;line-height:0}
+code,.mono{font-family:var(--f-mono);font-size:.88em}
+code{background:var(--surf2);border:1px solid var(--rule);border-radius:4px;padding:0 4px;overflow-wrap:anywhere}
+.mv{font-family:var(--f-math);font-style:italic;font-size:1.07em;white-space:nowrap}
+.dim{color:var(--ink3)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:1px;margin-right:5px}
+.dot.rmd{background:var(--rmd)} .dot.sf{background:var(--sf)} .dot.cf{background:var(--cf)} .dot.vd{background:var(--vd)} .dot.mg{background:var(--mg)} .dot.rx{background:var(--rx)} .dot.cmd{background:var(--cmd)}
+.wrap{max-width:1100px;margin:0 auto;padding-inline:20px;padding-block:24px 110px}
+@media (max-width:520px){ .wrap{padding-inline:16px} }
+
+/* ---------- hero ---------- */
+.hero{padding-block:8px 28px;border-bottom:1px solid var(--rule);display:grid;gap:18px}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.kicker{font-family:var(--f-mono);font-size:12px;letter-spacing:.14em;color:var(--ink3);text-transform:uppercase}
+.themebtn{font:inherit;font-size:12.5px;color:var(--ink2);background:var(--surf);border:1px solid var(--rule2);border-radius:999px;padding:4px 12px;cursor:pointer}
+.themebtn:hover{color:var(--ink)}
+h1{font-family:var(--f-head);font-weight:700;font-size:clamp(30px,5vw,48px);line-height:1.16;margin:4px 0 0;letter-spacing:.01em;text-wrap:balance}
+h1 .soft{color:var(--ink3);font-weight:600;font-size:.6em;display:block;margin-top:8px}
+.sub{font-size:17px;line-height:1.72;color:var(--ink2);max-width:62em;margin:0}
+.thesis{max-width:66em;margin:0;padding:14px 18px;border-left:3px solid var(--rmd);background:var(--rmd-soft);border-radius:0 8px 8px 0;font-size:15.5px}
+.thesis .lab{font-family:var(--f-mono);font-size:11px;letter-spacing:.13em;color:var(--ink3);display:block;margin-bottom:2px}
+.patch{border:1px solid var(--rule2);border-radius:10px;overflow:hidden;background:var(--surf);box-shadow:var(--shadow)}
+.patch .rail{height:14px;background:linear-gradient(90deg,var(--rmd) 0 4.8%,transparent 4.8% 5.3%,var(--rmd-soft) 5.3% 100%);border-bottom:1px solid var(--rule)}
+.patch dl{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));}
+.patch dl div{padding:10px 14px;border-right:1px solid var(--rule);border-top:1px solid var(--rule);min-width:0}
+.patch dt{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;color:var(--ink3);text-transform:uppercase}
+.patch dd{margin:2px 0 0;font-size:13.5px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.patch dd .no{color:var(--risk-ink);font-weight:600}
+.statstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+.statstrip div{background:var(--surf);padding:12px 14px;display:grid;gap:2px;align-content:start}
+.statstrip div>b{font-family:var(--f-body);font-weight:600;font-size:22px;letter-spacing:-.01em}
+.statstrip span{font-size:12.5px;line-height:1.45;color:var(--ink3)}
+.statstrip .warn>b{color:var(--risk-ink)}
+.statstrip .good>b{color:var(--rmd-ink)}
+
+/* ---------- TOC ---------- */
+nav.toc{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--rule);margin-inline:-20px;padding:8px 20px;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{flex:none;font-size:13px;color:var(--ink2);text-decoration:none;padding:5px 10px;border-radius:999px;white-space:nowrap}
+nav.toc a .n{font-family:var(--f-mono);font-size:11px;color:var(--ink3);margin-right:4px}
+nav.toc a:hover,nav.toc a.on{background:var(--surf3);color:var(--ink)}
+@media (max-width:520px){ nav.toc{margin-inline:-16px;padding-inline:16px} }
+
+/* ---------- sections ---------- */
+section{padding-block:46px 8px;scroll-margin-top:56px}
+h2{font-family:var(--f-head);font-weight:700;font-size:clamp(24px,3.2vw,31px);line-height:1.3;margin:0 0 8px;text-wrap:balance;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+h2 .no{font-family:var(--f-mono);font-weight:600;font-size:.56em;color:var(--ink3);letter-spacing:.06em}
+h3{font-family:var(--f-head);font-weight:600;font-size:20px;line-height:1.4;margin:32px 0 8px;text-wrap:balance}
+h4{font-size:14px;font-weight:600;margin:0 0 6px;letter-spacing:.02em}
+p{margin:0 0 14px}
+.lede{color:var(--ink2);font-size:16.5px;max-width:62em}
+.prose{max-width:50em}
+ul.tight,ol.tight{margin:0 0 14px;padding-left:1.25em}
+ul.tight li,ol.tight li{margin:5px 0}
+
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:18px 0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:18px 0}
+.card{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;min-width:0}
+.card p:last-child,.card ul:last-child,.card ol:last-child{margin-bottom:0}
+.card h4{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink3);font-weight:600}
+.card .big{font-family:var(--f-head);font-size:18px;font-weight:600;margin:0 0 6px;line-height:1.45}
+.card.rmd{border-top:3px solid var(--rmd)} .card.sf{border-top:3px solid var(--sf)} .card.cf{border-top:3px solid var(--cf)} .card.cmd{border-top:3px solid var(--cmd)} .card.ok{border-top:3px solid var(--ok)} .card.risk{border-top:3px solid var(--risk)} .card.med{border-top:3px solid var(--med)} .card.low{border-top:3px solid var(--low)}
+
+.tag{display:inline-block;font-size:12px;line-height:1.55;padding:0 7px;border-radius:5px;font-weight:600;white-space:nowrap;vertical-align:1px}
+.tag.rmd{background:var(--rmd-soft);color:var(--rmd-ink)}
+.tag.sf{background:var(--sf-soft);color:var(--sf-ink)}
+.tag.cf{background:var(--cf-soft);color:var(--cf-ink)}
+.tag.risk{background:var(--risk-soft);color:var(--risk-ink)}
+.tag.med{background:var(--med-soft);color:var(--med-ink)}
+.tag.low{background:var(--low-soft);color:var(--low-ink)}
+.tag.ok{background:var(--ok-soft);color:var(--ok-ink)}
+.tag.src{background:var(--surf3);color:var(--ink2);font-weight:500;font-family:var(--f-mono);font-size:11px}
+
+.callout{border:1px solid var(--rule);border-left:3px solid var(--rmd);background:var(--surf);border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0;font-size:15px}
+.callout.warn{border-left-color:var(--risk)}
+.callout.mine{border-left-color:var(--ok)}
+.callout.med{border-left-color:var(--med)}
+.callout p:last-child,.callout ul:last-child,.callout ol:last-child{margin-bottom:0}
+.callout .lab{font-family:var(--f-mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink3);display:block;margin-bottom:2px}
+
+/* equations */
+.eq{font-family:var(--f-math);font-size:18px;line-height:1.7;background:var(--surf);border:1px solid var(--rule);border-radius:8px;padding:12px 16px;margin:12px 0;overflow-x:auto;white-space:nowrap}
+.eq .no{float:right;font-family:var(--f-mono);font-size:12px;color:var(--ink3);margin-left:18px;font-style:normal}
+.eq i{font-style:italic}
+.eq .hl-rmd{color:var(--rmd-ink)} .eq .hl-sf{color:var(--sf-ink)} .eq .hl-risk{color:var(--risk-ink)} .eq .hl-cf{color:var(--cf-ink)}
+.eqnote{font-size:14px;color:var(--ink2);margin:-4px 0 14px}
+@media (max-width:520px){ .eq{font-size:16px;padding:10px 12px} .eq .no{float:none;display:block;margin:0 0 2px} }
+
+/* figures */
+figure{margin:20px 0;background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:16px;min-width:0;position:relative}
+figure svg{display:block;width:100%;height:auto;max-width:100%}
+figcaption{font-size:13.5px;line-height:1.6;color:var(--ink2);margin-top:10px}
+figcaption b{color:var(--ink)}
+.svgtxt{font-family:var(--f-body);font-size:12px;fill:currentColor}
+.svgmono{font-family:var(--f-mono);font-size:11px;fill:currentColor}
+
+/* controls */
+.ctrls{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin:4px 0 12px}
+.ctrls .lbl{font-size:12.5px;color:var(--ink3);font-family:var(--f-mono);letter-spacing:.06em}
+.seg{display:inline-flex;border:1px solid var(--rule2);border-radius:8px;overflow:hidden;flex-wrap:wrap}
+.seg button{font:inherit;font-size:13px;padding:5px 11px;background:var(--surf);color:var(--ink2);border:0;border-right:1px solid var(--rule);cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--surf3);color:var(--ink);font-weight:600}
+.seg button:hover{color:var(--ink)}
+.btn{font:inherit;font-size:13px;padding:5px 12px;background:var(--surf);color:var(--ink);border:1px solid var(--rule2);border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:var(--surf3)}
+label.sl{display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--ink2);flex:1 1 240px;min-width:0}
+label.sl input[type=range]{flex:1;min-width:110px;accent-color:var(--rmd)}
+label.sl output{font-family:var(--f-mono);font-size:13px;color:var(--ink);min-width:3.4em;text-align:right}
+label.ck{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;color:var(--ink2);cursor:pointer}
+label.ck input{accent-color:var(--rmd)}
+.readout{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:8px;overflow:hidden;margin:10px 0}
+.readout div{background:var(--surf2);padding:8px 11px;min-width:0}
+.readout span{display:block;font-size:11.5px;color:var(--ink3);line-height:1.35}
+.readout b{font-family:var(--f-mono);font-weight:500;font-size:15px;font-variant-numeric:tabular-nums}
+.readout .warn b{color:var(--risk-ink)} .readout .good b{color:var(--ok-ink)}
+.presets{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}
+.presets .btn[aria-pressed="true"]{border-color:var(--rmd);background:var(--rmd-soft);color:var(--ink)}
+
+/* tables */
+.tbl-wrap{overflow-x:auto;margin:14px 0;border:1px solid var(--rule);border-radius:10px;background:var(--surf)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;border-bottom:1px solid var(--rule);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td.l,th.l{text-align:left;white-space:normal}
+td.c,th.c{text-align:center}
+thead th{font-weight:600;color:var(--ink2);background:var(--surf2);font-size:12.5px}
+tbody tr:last-child td{border-bottom:0}
+td.best{font-weight:600;color:var(--ink)}
+td .d,th .d{display:block;font-size:11px;color:var(--ink3);font-weight:400}
+td.up{background:var(--ok-soft)} td.dn{background:var(--risk-soft)} td.unk{color:var(--med-ink);font-weight:600}
+tr.ours td{background:var(--rmd-soft)}
+tr.sep td{border-top:2px solid var(--rule2)}
+td.no{color:var(--risk-ink);font-weight:600} td.yes{color:var(--ok-ink);font-weight:600}
+
+/* doubts */
+.dfilter{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+.doubts{display:grid;gap:10px;margin:14px 0}
+details.dbt{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:0}
+details.dbt[open]{border-color:var(--rule2)}
+details.dbt summary{list-style:none;cursor:pointer;padding:12px 16px;display:flex;gap:10px;align-items:baseline}
+details.dbt summary::-webkit-details-marker{display:none}
+details.dbt summary .id{font-family:var(--f-mono);font-size:12px;color:var(--ink3);flex:none}
+details.dbt summary .t{flex:1;font-weight:600;line-height:1.55}
+details.dbt summary::after{content:"+";font-family:var(--f-mono);color:var(--ink3);flex:none}
+details.dbt[open] summary::after{content:"−"}
+details.dbt .body{padding:0 16px 14px 16px;font-size:15px;color:var(--ink2)}
+details.dbt .body p:last-child{margin-bottom:0}
+details.dbt .body .fix{font-size:14px;border-top:1px dashed var(--rule2);padding-top:8px;margin-top:8px}
+details.dbt.h{border-left:3px solid var(--risk)} details.dbt.m{border-left:3px solid var(--med)} details.dbt.l{border-left:3px solid var(--low)}
+
+/* legend */
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--ink2);margin:6px 0}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:16px;height:10px;border-radius:2px}
+
+/* tooltip */
+.tip{position:absolute;pointer-events:none;z-index:30;background:var(--surf3);color:var(--ink);border:1px solid var(--rule2);border-radius:8px;padding:7px 10px;font-size:12.5px;line-height:1.5;box-shadow:var(--shadow);max-width:280px;opacity:0;transition:opacity .08s}
+.tip.on{opacity:1}
+.tip b{font-family:var(--f-mono);font-weight:500}
+
+/* stepper */
+.algo{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:12px 0}
+@media (max-width:900px){ .algo{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media (max-width:560px){ .algo{grid-template-columns:repeat(2,minmax(0,1fr))} }
+.algo button{font:inherit;text-align:left;background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:9px 11px;color:var(--ink2);cursor:pointer;font-size:13px;line-height:1.45}
+.algo button .k{font-family:var(--f-mono);font-size:11px;color:var(--ink3);display:block}
+.algo button b{display:block;color:var(--ink);font-size:13.5px;margin-bottom:1px}
+.algo button[aria-pressed="true"]{border-color:var(--rmd);background:var(--rmd-soft)}
+.algo-detail{background:var(--surf2);border:1px solid var(--rule);border-radius:10px;padding:12px 16px;font-size:14.5px;color:var(--ink2);min-height:7em}
+.algo-detail b{color:var(--ink)}
+#pipe .stp{transition:opacity .15s}
+#pipe.focus .stp{opacity:.28}
+#pipe.focus .stp.on{opacity:1}
+#pipe .box{fill:var(--surf2);stroke:var(--rule2);stroke-width:1}
+#pipe .stp.on .box{stroke:var(--rmd);stroke-width:2}
+
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--rule);font-size:13px;color:var(--ink3)}
+.two-col{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:820px){ .two-col{grid-template-columns:minmax(0,1fr)} }
+.small{font-size:13.5px;color:var(--ink2)}
+.hs{overflow-x:auto;-webkit-overflow-scrolling:touch}
+@media (max-width:760px){ .hs svg.wide{min-width:720px} .hs{padding-bottom:4px} .swipe{display:block!important} }
+.swipe{display:none;text-align:center;font-size:11px;color:var(--ink3);font-family:var(--f-mono);margin-top:4px}
+.vlist{display:grid;gap:8px;margin:14px 0;padding:0;list-style:none}
+.vlist li{background:var(--surf);border:1px solid var(--rule);border-radius:8px;padding:9px 14px 9px 40px;position:relative;font-size:14.5px;color:var(--ink2)}
+.vlist li::before{content:"✓";position:absolute;left:14px;top:9px;color:var(--ok-ink);font-weight:700}
+.vlist li.x::before{content:"≈";color:var(--med-ink)}
+.vlist li.bad::before{content:"✗";color:var(--risk-ink)}
+.vlist li b{color:var(--ink)}
+.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0;counter-reset:st}
+.flow div{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:10px 12px;font-size:13.5px;color:var(--ink2);position:relative}
+.flow div::before{counter-increment:st;content:counter(st);font-family:var(--f-mono);font-size:11px;color:var(--ink3);display:block}
+.flow div b{color:var(--ink)}
+.flow div.me{border-color:var(--rmd);background:var(--rmd-soft)}
+.meter{height:10px;border-radius:5px;background:var(--surf3);overflow:hidden;margin:4px 0 10px}
+.meter i{display:block;height:100%;border-radius:5px;transition:width .2s}
+.tvtext{font-size:14.5px;color:var(--ink2)}
+.tvtext b{color:var(--ink)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13.5px;margin:8px 0}
+.kv dt{color:var(--ink3);font-family:var(--f-mono);font-size:12px}
+.kv dd{margin:0;color:var(--ink2)}
+.codefacts{display:grid;gap:10px;margin:14px 0}
+.codefacts .card{display:grid;grid-template-columns:minmax(0,1fr);gap:4px}
+.codefacts .head{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.codefacts .head b{font-size:15.5px}
+.hs2{overflow-x:auto;-webkit-overflow-scrolling:touch}
+@media (max-width:640px){ .hs2 svg.mw{min-width:600px} .hs2{padding-bottom:4px} }
+table.wide{min-width:760px}
+table.t2l td:nth-child(2),table.t2l th:nth-child(2){text-align:left}
+.pathline{font-family:var(--f-mono);font-size:12px;color:var(--ink3);overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="topbar">
+    <span class="kicker">arXiv 2609.37925 · v1 · 2026-09-29 · 精读</span>
+    <button type="button" class="themebtn" id="themeBtn" aria-label="切换深浅色">◐ 深 / 浅</button>
+  </div>
+  <h1>Rollout-Marginal Distillation<span class="soft">长时自回归视频：打分时让老师“只看这一块”</span></h1>
+  <p class="sub">港中文 MMLab × 腾讯 AIPD（Chenjian Gao、Zhihao Hu 共同一作；通讯 Jun Zhang、Tianfan Xue）。在 Self Forcing 式的“自展开 + DMD”后训练里，这篇论文只动了一件事：<b>生成时照旧依赖历史，给每一块打分时老师不看历史</b>。块间连贯因此变差，所以后面再接一段普通的视频级 DMD 把连贯补回来。</p>
+  <p class="thesis"><span class="lab">一句话</span>把 DMD 的比较对象从“整段 rollout 的联合分布”换成“rollout 里单个块的边缘分布”，相当于给每一块加了一股往“干净画面”拉的恢复力，不管它前面有多脏。代价是这股力不关心连贯性，所以第二阶段用小学习率的视频级 DMD 修回来。5 秒训练，60 秒 VBench-Long Total 81.3，两个基线是 69.9–70.9。</p>
+  <div class="patch" role="group" aria-label="论文速览">
+    <div class="rail"></div>
+    <dl>
+      <div><dt>学生</dt><dd>Wan2.1-1.3B 因果版，4 步；从 Causal Forcing 的因果 ODE 权重出发</dd></div>
+      <div><dt>老师</dt><dd>Wan2.1-14B；给续块打分的那份加了 LoRA（rank 128）</dd></div>
+      <div><dt>训练视界</dt><dd>81 帧 = 21 潜帧 ≈ 5.06 s；推理窗口 21 潜帧，<b>无 sink、无记忆</b></dd></div>
+      <div><dt>评测</dt><dd>VBench-Long，944 条提示 × 5 个样本，≈ 60 s；块大小 1 与 3 各一套</dd></div>
+      <div><dt>推理开销</dt><dd>与基线完全相同（网络结构、采样流程都没动）</dd></div>
+      <div><dt>代码 / 权重</dt><dd>github.com/cjeen/RMD（Apache-2.0）· HF cjeen/RMD；<span class="no">只发布了块大小 1</span></dd></div>
+      <div><dt>训练成本</dt><dd><span class="no">未报告</span>（参考配方 8 卡、全局 batch 8）</dd></div>
+    </dl>
+  </div>
+  <div class="statstrip">
+    <div class="good"><b>81.26</b><span>60 s Total（块 1）。Self Forcing 70.94，Causal Forcing 69.88</span></div>
+    <div class="good"><b>−0.16</b><span>RMD 的 Quality 从 10 s 到 60 s 只掉了这么多；同期 Self Forcing 的 Total 掉 8.18</span></div>
+    <div><b>150 + 160</b><span>两阶段<b>实际</b>的生成器更新次数（按代码计数；论文写“900 / 800 步”，没说步数怎么数）</span></div>
+    <div class="warn"><b>≈ −5.7</b><span>精修阶段隐含的 AQ + IQ + ½DD 合计变化（归一化分，我按 VBench 公式倒推）</span></div>
+    <div class="warn"><b>19</b><span>条存疑，其中 5 条“高”</span></div>
+  </div>
+  <div class="callout">
+    <span class="lab">先说结论</span>
+    <ul class="tight">
+      <li><b>现象大概率成立</b>：60 秒时比两个视频级 DMD 基线高约 10 个 Total 分，远大于评测噪声；代码与权重都能查。</li>
+      <li><b>机制归因不干净</b>：消融把“打分方式”和出口步、CFG、学习率、陪练初始化、首帧遮挡绑在一起；论文核心的“耦合困境”没有被单独测量过。</li>
+      <li><b>代价没报全</b>：第二阶段让四项时间指标上涨，但按分数倒推，其余三项（动态程度、美学、成像）合计降了约 5.7 个归一化分，论文只列了上涨的四项。</li>
+      <li><b>对世界模型</b>：这是一种零推理成本的“外观恢复力”，值得借鉴；但它鼓励“外观不依赖历史”，和记忆、回访一致性之间有张力。</li>
+    </ul>
+  </div>
+</header>
+
+<nav class="toc" aria-label="目录">
+  <a href="#s1"><span class="n">01</span>定位</a>
+  <a href="#s2"><span class="n">02</span>补课</a>
+  <a href="#s3"><span class="n">03</span>耦合困境</a>
+  <a href="#s4"><span class="n">04</span>目标函数</a>
+  <a href="#s5"><span class="n">05</span>一次迭代</a>
+  <a href="#s6"><span class="n">06</span>代码细节</a>
+  <a href="#s7"><span class="n">07</span>时间尺</a>
+  <a href="#s8"><span class="n">08</span>主结果</a>
+  <a href="#s9"><span class="n">09</span>消融</a>
+  <a href="#s10"><span class="n">10</span>复算</a>
+  <a href="#s11"><span class="n">11</span>存疑</a>
+  <a href="#s12"><span class="n">12</span>结论</a>
+</nav>
+
+<!-- ======================================================== 01 -->
+<section id="s1">
+  <h2><span class="no">01</span>一句话与定位</h2>
+  <p class="lede">自回归视频模型一块一块往后生成，每块都以前面自己生成的块为上下文。每块都有一点小错，错误会被下一块当成“事实”继承，越滚越大。训练只看 5 秒，推理要跑 1 分钟甚至更久，这个问题就会暴露出来：颜色越来越艳、纹理越来越碎，最后结构崩掉。</p>
+  <p class="prose">Self Forcing 这一派的办法是训练时就让模型在自己的输出上自展开，再用 DMD（分布匹配蒸馏）拿一个 14B 老师给整段视频打分。RMD 认为问题出在“给整段打分”上：老师看到历史里已经脏了，为了让整段看起来连贯，宁可让当前块也跟着脏。所以它把打分改成逐块、不看上下文，但生成过程完全不变。</p>
+
+  <div class="flow" aria-label="谱系">
+    <div><b>CausVid</b><br>把双向视频模型蒸成因果少步生成器，DMD 第一次用在因果视频上</div>
+    <div><b>Self Forcing</b><br>训练时自展开，视频级 DMD；训练时让最后一块看不到首块（§3.4），缓解滑窗外推的首帧问题</div>
+    <div><b>Causal Forcing</b><br>用因果老师做 ODE 初始化，再做 Self-Forcing DMD。<b>RMD 从它的因果 ODE 权重出发</b></div>
+    <div><b>Solaris 重放</b><br>先无梯度自展开，再一次并行重放把梯度补回来，省显存。RMD 直接采用</div>
+    <div><b>DP-DMD</b><br>“挑哪一个去噪步施加监督”这个想法的来源。RMD 据此设计了非对称出口</div>
+    <div class="me"><b>RMD</b><br>逐块、不看上下文的边缘匹配 + 首帧单独一套分数网络 + 非对称出口，之后接视频级 DMD 精修</div>
+  </div>
+
+  <div class="grid2">
+    <div class="card rmd">
+      <h4>RMD 改了什么</h4>
+      <ul class="tight">
+        <li><b>打分对象</b>：从整段 21 潜帧，改成单个块（块大小 1 时就是单个潜帧）。老师与陪练都只做块内注意力。</li>
+        <li><b>老师</b>：续块用一个 LoRA 改造过的 14B，让它把“视频中间的一块”当成合法样本；首帧另用一套原版 14B。</li>
+        <li><b>出口步</b>：首块在随机一步施加损失，续块只在最后一步施加。</li>
+        <li><b>第二阶段</b>：换回视频级 DMD，生成器学习率降 10 倍（陪练降 50 倍），训 800 步（其中生成器更新 160 次）。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>没改什么</h4>
+      <ul class="tight">
+        <li>生成器结构与推理流程：21 潜帧的全滑动窗口，没有 sink，没有额外记忆。</li>
+        <li>DMD 的更新形式：仍是“陪练预测 − 老师预测”的分数差，外加同样的归一化。</li>
+        <li>数据：不需要真实视频，只用 7 万条文本提示（来自 Self Forcing）。另外，LoRA 老师的训练素材是 Wan 自己生成的视频。</li>
+      </ul>
+    </div>
+  </div>
+  <p class="small">最接近的工作是 <b>CMD</b>（Context-Matched Distillation，2608.13391）：它用<b>因果</b>老师在学生真实生成的前缀上打分，还会给前缀加噪（prefix corruption），以降低老师对颜色、纹理漂移的关注。RMD 走到了这条路的尽头：前缀干脆不给。两篇没有互相比较，详见第 03 节的老师视角对照和存疑 #L4。</p>
+</section>
+
+<!-- ======================================================== 02 -->
+<section id="s2">
+  <h2><span class="no">02</span>先补课：自展开 + DMD 的梯度长什么样</h2>
+  <p class="lede">DMD 可以理解成两个“去噪器”对同一张加了噪的学生画面各猜一次原图。老师（real score，冻结的 14B）猜的是“好视频里这里应该长什么样”；陪练（fake score，在线训练的 1.3B）一直在学“学生现在一般会画成什么样”。两者之差，就是“学生身上比老师多出来的东西”，把学生往反方向推一点。</p>
+  <div class="eq"><span class="no">式 3</span>∇<sub>θ</sub>ℒ ≈ 𝔼 [ <i>w</i>(τ) · <i>J</i><sub>θ</sub>(<i>x</i>)<sup>⊤</sup> ( <span class="hl-sf">s<sub>fake</sub>(x<sub>τ</sub>)</span> − <span class="hl-rmd">s<sub>real</sub>(x<sub>τ</sub>)</span> ) ]</div>
+  <div class="eq"><span class="no">式 6</span><i>g</i><sub>i</sub> = ( <span class="hl-sf">D<sub>fake,i</sub></span> − <span class="hl-rmd">D<sub>real,i</sub></span> ) / mean| <i>x</i><sub>i</sub> − <span class="hl-rmd">D<sub>real,i</sub></span> |</div>
+  <p class="eqnote">D 是两个网络对同一个加噪输入给出的“干净图猜测”（x₀ 预测）。分母是 DMD 原文就有的归一化，让不同样本、不同噪声水平下的步长大致相同。</p>
+  <p class="prose">实现上，梯度 g 不是直接塞给参数，而是写成一个替身损失：<span class="mv">ℒ = ½‖x − sg(x − g)‖²</span>（sg 表示停止梯度）。对 x 求导恰好得到 g，再由自动求导沿生成器传回参数。Self Forcing 里，老师和陪练都看<b>整段</b> 21 潜帧。所以第 i 块拿到的 g 同时取决于它前面和后面的内容，这就是论文说的“耦合”。</p>
+  <div class="grid3">
+    <div class="card"><h4>自展开</h4><p>训练时生成器就按推理的方式跑：第 1 块从噪声去噪 4 步，写进 KV 缓存；第 2 块在它的基础上再去噪 4 步……上下文全是自己的输出。</p></div>
+    <div class="card"><h4>出口步</h4><p>每块只在某一个去噪步保留梯度（出口），用那一步的 x₀ 预测当作该块的输出。Self Forcing 每次迭代随机抽一个出口，所有块共用。</p></div>
+    <div class="card"><h4>重放（Solaris）</h4><p>先不留计算图跑完整个自展开，记下每块出口时的带噪输入；再做一次 teacher-forcing 前向，把所有块的出口预测并行算一遍，这一次带梯度。</p></div>
+  </div>
+</section>
+
+<!-- ======================================================== 03 -->
+<section id="s3">
+  <h2><span class="no">03</span>核心论点：“耦合困境”，以及老师到底该看什么</h2>
+  <p class="lede">论文用一张猫头鹰图说明问题（图 2）：长 rollout 里背景的树叶越来越碎，出现过锐化和斑驳的色斑。视频级老师给最后一块预测“干净图”时，会<b>保留</b>这些脏污，因为它看到的是整段视频；突然变干净会显得不连贯。RMD 的老师只看这一块，给出的预测里树叶就是干净的。</p>
+
+  <div class="callout mine">
+    <span class="lab">我的换一种说法</span>
+    <p>这其实不是“老师不够好”，而是<b>条件匹配这个目标本身没有恢复力</b>。就算老师完美，<span class="mv">p(x<sub>i</sub> | 已经脏了的历史)</span> 也会倾向于延续脏历史，因为真实视频里下一帧本来就和上一帧长得像。视频级 DMD 让学生去匹配这种条件分布，自然也学会“延续”。RMD 把目标换成边缘分布 <span class="mv">p(x<sub>i</sub>)</span>：不管前面是什么，这一块都应该像一块正常画面。这就给了一股恢复力，但这股力对“和前面连不连得上”一无所知。所以恢复力和连贯性其实是<b>同一个旋钮的两头</b>：老师看到的上下文越多，越能约束连贯，也越会继承脏污。下面的图把几种做法放在这个旋钮上。</p>
+  </div>
+
+  <figure id="tvFig">
+    <div class="ctrls">
+      <span class="lbl">老师视角</span>
+      <div class="seg" id="tvMode">
+        <button data-v="sf" aria-pressed="true">视频级（SF / CF）</button>
+        <button data-v="cmd" aria-pressed="false">因果前缀（CMD）</button>
+        <button data-v="cmdc" aria-pressed="false">前缀加噪（CMD + ρ）</button>
+        <button data-v="rmd" aria-pressed="false">逐块边缘（RMD 阶段一）</button>
+      </div>
+      <label class="sl" id="tvRhoWrap" hidden>前缀加噪 ρ <input type="range" id="tvRho" min="0" max="1" step="0.05" value="0.25"><output id="tvRhoOut">0.25</output></label>
+    </div>
+    <div class="two-col">
+      <div>
+        <svg id="tvSvg" viewBox="0 0 330 360" role="img" aria-label="打分时老师能看到哪些块的注意力示意"></svg>
+        <div class="legend" id="tvLegend"></div>
+      </div>
+      <div>
+        <div class="tvtext" id="tvText"></div>
+        <div class="small" style="margin-top:10px">老师目标里会继承多少上下文脏污（示意）</div>
+        <div class="meter"><i id="tvM1"></i></div>
+        <div class="small">老师还能替你约束多少连贯性（示意）</div>
+        <div class="meter"><i id="tvM2"></i></div>
+        <p class="small">点左图某一行，可以看“给第 i 块打分时”的情形。两条进度条是同一个量的两面：都等于“老师看到的上下文有多少信息”。</p>
+      </div>
+    </div>
+    <figcaption><b>图 A　四种打分方式，老师分别看到什么。</b>以 7 个块（块大小 3）为例。行是被打分的块，列是老师能看到的块。视频级 DMD 用双向老师，过去和未来都看得到；CMD 用因果老师，只看学生实际生成的前缀；CMD 的前缀加噪 ρ 越大，前缀的信息越少；RMD 阶段一只看自己。进度条是示意，不是测量值。</figcaption>
+  </figure>
+
+  <div class="tbl-wrap">
+    <table class="wide">
+      <thead><tr><th>方案</th><th class="c">看过去</th><th class="c">看未来</th><th class="l">过去是什么</th><th class="l">老师需要改造吗</th><th class="l">能主动“洗掉”历史脏污吗</th></tr></thead>
+      <tbody>
+        <tr><td><span class="dot sf"></span>Self Forcing / Causal Forcing</td><td class="c yes">✓</td><td class="c yes">✓</td><td class="l">学生自展开</td><td class="l">不需要（原版双向 14B）</td><td class="l">弱：会为连贯而保留脏污</td></tr>
+        <tr><td><span class="dot cmd"></span>CMD（前缀打分）</td><td class="c yes">✓</td><td class="c no">✗</td><td class="l">学生自展开（干净前缀）</td><td class="l">要训一个因果老师</td><td class="l">弱：同样会延续前缀</td></tr>
+        <tr><td><span class="dot cmd"></span>CMD + 前缀加噪</td><td class="c">部分</td><td class="c no">✗</td><td class="l">学生前缀 × (1−ρ) + 噪声 × ρ</td><td class="l">同上</td><td class="l">中：ρ 越大越能洗，也越不连贯</td></tr>
+        <tr><td>OPSD-V</td><td class="c yes">✓</td><td class="c">—</td><td class="l">更干净的缓存，可含真实长视频上下文</td><td class="l">可选用真实长视频上下文</td><td class="l">取决于缓存有多干净</td></tr>
+        <tr class="ours"><td><span class="dot rmd"></span>RMD 阶段一</td><td class="c no">✗</td><td class="c no">✗</td><td class="l">不看</td><td class="l">LoRA 改造 14B，让它接受“视频中段的单块”</td><td class="l">强：只管这一块像不像正常画面</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>一个两频段的玩具：恢复力与连贯性怎么交换</h3>
+  <p class="prose">下面是我自己搭的示意模型，<b>不是论文的实验</b>，数值没有物理意义，只用来展示方向。每个块有两个量：<b>外观偏移 a</b>（颜色、纹理的累积误差，干净画面是 0）和<b>结构位置 s</b>（主体在画面里的位置，本应匀速移动）。每生成一块，外观按 <span class="mv">a<sub>t</sub> = g·a<sub>t−1</sub> + μ + σ·ε</span> 演化，μ 是每块都会引入的一点固定偏差。g 是模型学到的“照抄上下文外观”的程度，由老师看多少上下文（w）决定：w = 1 时 g ≈ 0.995，几乎全抄；w = 0 时 g = 0.5。σ 取 <span class="mv">0.2·√(1 − g²)</span>，保证不管 g 是多少，单块外观的整体分布宽度都一样：这正是“边缘分布对得上”的意思。照抄得越少，每块自带的随机性就得越大。结构那一路只有在“随机出口”时才会受到边缘项的拉扯，这对应论文的消融：早期去噪步决定结构和运动，只在最后一步施加边缘监督，就碰不到结构。</p>
+  <figure id="toyFig">
+    <div class="presets" id="toyPresets">
+      <button type="button" class="btn" data-p="sf" aria-pressed="true">视频级 DMD（w = 1）</button>
+      <button type="button" class="btn" data-p="cmdc" aria-pressed="false">前缀加噪（w = 0.6）</button>
+      <button type="button" class="btn" data-p="rmd1" aria-pressed="false">RMD 只做阶段一</button>
+      <button type="button" class="btn" data-p="rmd" aria-pressed="false">RMD 完整（+ 精修）</button>
+      <button type="button" class="btn" data-p="rx" aria-pressed="false">随机出口消融</button>
+    </div>
+    <div class="ctrls">
+      <label class="sl">老师看到的上下文 w <input type="range" id="toyW" min="0" max="1" step="0.05" value="1"><output id="toyWOut">1.00</output></label>
+      <label class="ck"><input type="checkbox" id="toyRx"> 随机出口（边缘项也作用于结构）</label>
+      <label class="ck"><input type="checkbox" id="toyRef"> 第二阶段精修</label>
+      <button type="button" class="btn" id="toySeed">换一组随机数</button>
+    </div>
+    <div class="hs2"><svg id="toySvg" class="mw" viewBox="0 0 680 240" role="img" aria-label="60 秒内外观偏移随时间变化"></svg></div>
+    <div class="legend"><span><i style="background:var(--rmd)"></i>当前设置</span><span><i style="background:var(--ink3);height:2px"></i>对照：视频级 DMD（w = 1）</span><span><i style="background:var(--surf3)"></i>训练视界 0–5 s</span></div>
+    <div class="hs2"><svg id="toyStrip" class="mw" viewBox="0 0 680 78" role="img" aria-label="每 5 秒一格的示意画面"></svg></div>
+    <div class="readout" id="toyRO"></div>
+    <figcaption><b>图 B　恢复力换连贯性（示意）。</b>w = 1 时，外观偏差逐块累积，5 秒内还不明显，之后一路上涨，对应基线“训练视界内正常、之后崩坏”。w = 0 时偏差被压住，但每块外观各自独立，相邻块之间的“闪烁”变大，对应论文里只做边缘时时空切片出现锯齿。打开随机出口，结构位置也开始乱跳，对应消融里的“severe temporal jitter”。精修会把 g 往上拉一点：闪烁降下来，漂移略有回升。</figcaption>
+  </figure>
+
+  <div class="callout warn">
+    <span class="lab">关于论文图 2，要打个折扣</span>
+    <p>图 2 画的只是<b>老师的预测 D<sub>real</sub></b>，不是训练信号。真正推动学生的是 D<sub>fake</sub> − D<sub>real</sub>，而陪练同样看不到上下文，它的预测也会是“干净但泛化”的。图里没给打分用的噪声水平；训练时打分噪声的中位数是 0.83（见 05 节），在这个噪声下 x₀ 预测本来就接近“这个提示词的平均画面”。</p>
+    <p>还有一个图里就能看到、正文没说的现象：RMD 那一行的老师预测<b>连主体都换了</b>。对照 (a) 行的最后一帧，rollout 里是一只黑白斑纹、黄眼睛的猫头鹰，RMD 老师的预测却是一只粉紫色、深色眼睛、头型不同的猫头鹰，枝干角度也变了。其实从第一帧起，(c) 行就和 (a) 行不太一样（棕色、虚化背景），越往后越偏粉；(b) 行的视频级老师也把猫头鹰从棕色画成了浅灰。所以“不保内容”是程度问题：高噪声下、不看上下文的预测天然更“泛”。上下文无关的目标是“干净”的，但它更不保内容。最终梯度是否会把主体身份往“提示词平均”的方向拽，论文没有测（存疑 #M1）。</p>
+  </div>
+</section>
+
+<!-- ======================================================== 04 -->
+<section id="s4">
+  <h2><span class="no">04</span>目标函数：把“逐块边缘”写成公式</h2>
+  <p class="lede">生成仍然是因果分解 <span class="mv">q<sub>θ</sub>(x|c) = ∏ q<sub>θ</sub>(x<sub>i</sub> | x<sub>&lt;i</sub>, c)</span>。RMD 只改“拿什么去和老师比”。</p>
+  <div class="eq"><span class="no">式 4</span><span class="hl-rmd">q<sup>(T)</sup><sub>θ,chunk</sub>(x | c)</span> = <sup>1</sup>⁄<sub>T−1</sub> ∑<sub>i=2</sub><sup>T</sup> 𝔼<sub>x<sub>&lt;i</sub> ∼ q<sub>θ</sub></sub> [ q<sub>θ</sub>(x | x<sub>&lt;i</sub>, c) ]</div>
+  <p class="eqnote">人话：一次 rollout 里的第 2…T 块全倒进一个池子。这个池子的分布就是“续块边缘”。它对历史和位置都做了平均，所以“评判一块”既不需要知道它前面是什么，也不需要知道它是第几块。</p>
+  <div class="eq"><span class="no">式 5</span>ℒ<sub>RMD</sub> = 𝔼<sub>c,τ</sub> [ <sup>1</sup>⁄<sub>T</sub> · D<sub>KL</sub>( q<sub>θ,1,τ</sub> ‖ p<sub>1,τ</sub> ) + <sup>T−1</sup>⁄<sub>T</sub> · D<sub>KL</sub>( <span class="hl-rmd">q<sup>(T)</sup><sub>θ,chunk,τ</sub></span> ‖ <span class="hl-rmd">p<sub>chunk,τ</sub></span> ) ]</div>
+  <p class="eqnote">块大小 1 时 T = 21，首帧权重 1/21，续块合计 20/21。代码里的 <code>combine_frame_losses</code> 与此一致，单元测试也专门验证了这个比例。</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>为什么首帧要单独一套</h4>
+      <p>Wan 的因果 VAE 把 81 帧编码成 1 + 20 个潜帧：第 1 个潜帧只编码第 1 帧图像，没有时间压缩；后面每个潜帧压 4 帧。两者统计特性完全不同。一个没改过的视频老师看到“孤零零的一块”，会把它当成视频开头，期待一个未压缩的首帧。所以续块要用 LoRA 改造过的老师，首帧则直接用原版 14B（相当于把 T2V 模型当图像模型用）。</p>
+      <div class="kv"><dt>81 帧</dt><dd>[1] + 20 × [4] → 21 潜帧</dd><dt>块 1</dt><dd>T = 21：首块 = 首帧，20 个续块</dd><dt>块 3</dt><dd>T = 7：首块含首帧 + 2 个续潜帧</dd></div>
+    </div>
+    <div class="card risk">
+      <h4>最优解陷阱（论文没明说）</h4>
+      <p>只看式 5，<b>一个完全不看历史、每块独立采样的生成器也能拿满分</b>，因为边缘分布对了就行，块和块之间连不连贯它不管。RMD 靠四样东西阻止模型滑向这个解：</p>
+      <ol class="tight">
+        <li>从因果 ODE 权重出发，自带时间先验；</li>
+        <li>续块只在最后一个去噪步施加监督，前 3 步（决定结构和运动）不受边缘项影响；</li>
+        <li>只做 150 次生成器更新；</li>
+        <li>第二阶段用视频级 DMD 精修。</li>
+      </ol>
+      <p>这四样都是<b>隐式正则</b>，没有一样写进目标函数。论文没有给“连贯性随训练步数怎么变”的曲线。</p>
+    </div>
+  </div>
+  <p class="prose">还有一个论文没探索的旋钮：<b>打分窗口 K</b>。K = 1 是 RMD，K = 21 是视频级 DMD，中间还有一整条连续谱。K 帧窗口能在窗口内保留一部分连贯约束。发布代码其实支持“打分块大小 ≠ 生成块大小”（<code>score_chunk_size</code>，注释举例：生成按 3 帧、打分按 1 帧），论文没有做这个扫描。</p>
+</section>
+
+<!-- ======================================================== 05 -->
+<section id="s5">
+  <h2><span class="no">05</span>一次迭代里到底发生了什么</h2>
+  <p class="lede">以下按发布代码（块大小 1，阶段一）逐步拆开。点上面的步骤，图里对应的部分会高亮。</p>
+  <div class="algo" id="algo">
+    <button data-s="1" aria-pressed="true"><span class="k">STEP 1</span><b>无梯度自展开</b>21 潜帧，记录出口输入</button>
+    <button data-s="2" aria-pressed="false"><span class="k">STEP 2</span><b>可微重放</b>一次并行前向，带梯度</button>
+    <button data-s="3" aria-pressed="false"><span class="k">STEP 3</span><b>首帧打分</b>原版 14B + 1.3B 陪练</button>
+    <button data-s="4" aria-pressed="false"><span class="k">STEP 4</span><b>续块逐个打分</b>×20，看不到邻居</button>
+    <button data-s="5" aria-pressed="false"><span class="k">STEP 5</span><b>替身损失与反传</b>1 : 20 加权</button>
+    <button data-s="6" aria-pressed="false"><span class="k">STEP 6</span><b>陪练更新</b>5 次陪练 → 1 次生成器</button>
+  </div>
+  <figure>
+    <div class="hs">
+      <svg id="pipe" class="wide focus" viewBox="0 0 960 400" role="img" aria-label="RMD 阶段一一次迭代的流程图">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink3)"/></marker>
+        </defs>
+        <g class="stp" data-s="1 5">
+          <rect class="box" x="14" y="150" width="130" height="96" rx="10"/>
+          <text class="svgtxt" x="79" y="184" text-anchor="middle" style="font-weight:600;font-size:13px">生成器 G<tspan baseline-shift="sub" font-size="9">θ</tspan></text>
+          <text class="svgtxt" x="79" y="204" text-anchor="middle" style="fill:var(--ink2)">Wan-1.3B 因果</text>
+          <text class="svgtxt" x="79" y="222" text-anchor="middle" style="fill:var(--ink2)">4 步 · 21 潜帧窗</text>
+        </g>
+        <g class="stp" data-s="1">
+          <text class="svgtxt" x="170" y="30" style="font-weight:600">① 无梯度自展开：每潜帧 4 步去噪，记下出口时的带噪输入</text>
+          <g id="row1"></g>
+          <text class="svgtxt" x="170" y="92" style="fill:var(--ink3)">首帧：随机一步出口</text>
+          <text class="svgtxt" x="800" y="92" text-anchor="end" style="fill:var(--ink3)">续块：固定在第 4 步出口（输入 σ = 0.625）</text>
+        </g>
+        <g class="stp" data-s="2">
+          <text class="svgtxt" x="170" y="118" style="font-weight:600">② 可微重放：一次 teacher-forcing 前向，历史 = ① 的输出（detach）</text>
+          <g id="row2"></g>
+          <text class="svgtxt" x="740" y="180" text-anchor="end" style="fill:var(--risk-ink)">⊘ 第 11–20 潜帧在重放里看不到首帧（① 里看得到）</text>
+        </g>
+        <g class="stp" data-s="3">
+          <rect class="box" x="170" y="196" width="250" height="100" rx="10"/>
+          <text class="svgtxt" x="184" y="218" style="font-weight:600">③ 首帧打分</text>
+          <text class="svgtxt" x="184" y="240" style="fill:var(--ink2)">老师：Wan-14B 原版（冻结）</text>
+          <text class="svgtxt" x="184" y="258" style="fill:var(--ink2)">陪练：Wan-1.3B 原版（可训）</text>
+          <text class="svgtxt" x="184" y="280" style="fill:var(--ink)">→ g₁，权重 1/21</text>
+        </g>
+        <g class="stp" data-s="4">
+          <rect class="box" x="436" y="196" width="364" height="100" rx="10"/>
+          <text class="svgtxt" x="450" y="218" style="font-weight:600">④ 续块逐个打分 × 20（块内注意力，看不到邻居）</text>
+          <text class="svgtxt" x="450" y="240" style="fill:var(--ink2)">老师：14B + LoRA r128（冻结）· 陪练：1.3B（预适配）</text>
+          <text class="svgtxt" x="450" y="258" style="fill:var(--ink2)">加噪 τ（中位 0.83），g<tspan baseline-shift="sub" font-size="9">i</tspan> = (D<tspan baseline-shift="sub" font-size="9">fake</tspan> − D<tspan baseline-shift="sub" font-size="9">real</tspan>) / mean|x<tspan baseline-shift="sub" font-size="9">i</tspan> − D<tspan baseline-shift="sub" font-size="9">real</tspan>|</text>
+          <text class="svgtxt" x="450" y="280" style="fill:var(--ink)">→ g₂ … g₂₁，合计权重 20/21</text>
+        </g>
+        <g class="stp" data-s="5">
+          <rect class="box" x="170" y="316" width="630" height="58" rx="10"/>
+          <text class="svgtxt" x="184" y="340" style="font-weight:600">⑤ 替身损失 ℒ = ½‖x̂<tspan baseline-shift="sub" font-size="9">replay</tspan> − sg(x<tspan baseline-shift="sub" font-size="9">rollout</tspan> − g)‖²</text>
+          <text class="svgtxt" x="184" y="360" style="fill:var(--ink2)">梯度只沿每块自己那次出口预测传回 G；历史是 detach 的，不会通过“作为上下文”这条路传梯度</text>
+        </g>
+        <g class="stp" data-s="6">
+          <rect class="box" x="816" y="196" width="130" height="178" rx="10"/>
+          <text class="svgtxt" x="881" y="220" text-anchor="middle" style="font-weight:600">⑥ 陪练更新</text>
+          <text class="svgtxt" x="881" y="244" text-anchor="middle" style="fill:var(--ink2)">5 次只训陪练</text>
+          <text class="svgtxt" x="881" y="262" text-anchor="middle" style="fill:var(--ink2)">↓</text>
+          <text class="svgtxt" x="881" y="280" text-anchor="middle" style="fill:var(--ink2)">1 次只训 G</text>
+          <text class="svgtxt" x="881" y="306" text-anchor="middle" style="fill:var(--ink3)">同一批提示词</text>
+          <text class="svgtxt" x="881" y="324" text-anchor="middle" style="fill:var(--ink3)">每次重新自展开</text>
+          <text class="svgtxt" x="881" y="352" text-anchor="middle" style="fill:var(--ink3)">lr 2e-5（两者相同）</text>
+        </g>
+        <path d="M144,178 C156,178 150,57 166,57" style="fill:none;stroke:var(--ink3);stroke-width:1.2" marker-end="url(#arr)"/>
+        <path d="M806,57 C826,57 826,143 806,143" style="fill:none;stroke:var(--ink3);stroke-width:1.2" marker-end="url(#arr)"/>
+        <path d="M295,162 L295,194" style="fill:none;stroke:var(--ink3);stroke-width:1.2" marker-end="url(#arr)"/>
+        <path d="M770,162 L770,194" style="fill:none;stroke:var(--ink3);stroke-width:1.2" marker-end="url(#arr)"/>
+        <path d="M295,296 L295,314" style="fill:none;stroke:var(--ink3);stroke-width:1.2" marker-end="url(#arr)"/>
+        <path d="M618,296 L618,314" style="fill:none;stroke:var(--ink3);stroke-width:1.2" marker-end="url(#arr)"/>
+        <path d="M816,246 L802,246" style="fill:none;stroke:var(--ink3);stroke-width:1.2" marker-end="url(#arr)"/>
+        <path d="M170,366 L79,366 L79,250" style="fill:none;stroke:var(--rmd);stroke-width:1.5;stroke-dasharray:5 4" marker-end="url(#arr)"/>
+        <text class="svgtxt" x="86" y="300" style="fill:var(--rmd-ink)">反传</text>
+      </svg>
+    </div>
+    <div class="swipe">← 左右滑动查看 →</div>
+    <div class="algo-detail" id="algoDetail"></div>
+    <figcaption><b>图 C　阶段一一次生成器更新的完整流程</b>（依据 <code>model/text_frame_dmd_replay_first_frame_dmd.py</code>、<code>model/frame_dmd_replay.py</code>、<code>pipeline/self_forcing_training.py</code>、<code>trainer/distillation.py</code>）。浅色方框在当前步骤之外，淡出显示。</figcaption>
+  </figure>
+
+  <h3>阶段一同时挂着五个网络</h3>
+  <div class="tbl-wrap">
+    <table class="wide">
+      <thead><tr><th>网络</th><th>规模</th><th>状态</th><th class="l">打分时看什么</th><th class="l">初始化</th><th class="l">论文写了吗</th></tr></thead>
+      <tbody>
+        <tr><td>生成器 G</td><td>1.3B 因果</td><td>训练，lr 2e-5</td><td class="l">21 潜帧因果窗口</td><td class="l">Causal Forcing framewise/causal_ode.pt</td><td class="l">写了</td></tr>
+        <tr><td>续块老师</td><td>14B + LoRA</td><td>冻结</td><td class="l">单个潜帧（块内）</td><td class="l">Wan2.1-T2V-14B + teacher_lora（rank 128，3,800 步）</td><td class="l">写了 LoRA，没写 rank / 步数 / 数据量</td></tr>
+        <tr><td>续块陪练</td><td>1.3B</td><td>训练，lr 2e-5</td><td class="l">单个潜帧</td><td class="l"><b>fake_score.pt（预先适配过的完整 1.3B）</b></td><td class="l no">只在图 3 图注提到 “Adapted score networks”</td></tr>
+        <tr><td>首帧老师</td><td>14B</td><td>冻结</td><td class="l">首个潜帧（即首帧图像）</td><td class="l">Wan2.1-T2V-14B 原版</td><td class="l">写了“单独的目标”</td></tr>
+        <tr><td>首帧陪练</td><td>1.3B</td><td>训练，lr 2e-5</td><td class="l">首个潜帧</td><td class="l">Wan2.1-T2V-1.3B 原版</td><td class="l">没单独写</td></tr>
+        <tr class="sep"><td>阶段二老师 / 陪练</td><td>14B / 1.3B</td><td>冻结 / lr 4e-7</td><td class="l">整段 21 潜帧</td><td class="l">原版 / 原版 1.3B（陪练从头来）</td><td class="l">写了学习率</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>出口步：到底在哪一步施加边缘监督</h3>
+  <p class="prose">论文说续块只在“最后、噪声最低的一步”施加损失，那一步“负责修局部细节”。按代码里的调度（<code>warp_denoising_step</code>，shift = 5），4 个去噪步的输入噪声水平是 σ = 1.000 / 0.938 / 0.833 / 0.625。也就是说，最后一步的输入里信号只占 37.5%。它能改的远不止局部细节，全局色调、中频纹理也在这一步定型。这也正好解释了它为什么能压住颜色漂移。</p>
+  <figure id="exFig">
+    <div class="ctrls">
+      <span class="lbl">出口策略</span>
+      <div class="seg" id="exMode">
+        <button data-v="rmd" aria-pressed="true">RMD 阶段一：非对称</button>
+        <button data-v="rand" aria-pressed="false">随机出口（消融 / SF 默认 / RMD 阶段二）</button>
+      </div>
+    </div>
+    <div class="hs2"><svg id="exSvg" class="mw" viewBox="0 0 680 216" role="img" aria-label="各去噪步被选为出口的概率"></svg></div>
+    <figcaption><b>图 D　每个去噪步被选为“施加损失的出口”的概率。</b>圆面积正比于概率。随机出口时，所有块每次迭代共用同一个随机步（<code>same_step_across_blocks: true</code>）。上方的横条是该步输入里的信号占比 1 − σ。</figcaption>
+  </figure>
+
+  <h3>打分噪声：老师大多在“很糊”的地方做判断</h3>
+  <p class="prose">打分时，每块再加一次噪声 τ，然后让老师和陪练各猜一次 x₀。代码里 τ 先在 0–1000 上均匀抽，再做 shift = 5 的扭曲，最后截到 [0.02, 0.98]。结果 83% 的打分发生在 τ &gt; 0.5，中位数 0.833。在这么高的噪声下，一个看不到上下文的老师，给出的 x₀ 预测基本就是“这个提示词下一帧画面平均长什么样”，所以它主要约束的是低频外观：整体色调、亮度、构图。这股力正好对付“越来越艳”的漂移，但它也会把主体往“提示词平均”那边拽（见图 2 里变色的猫头鹰）。</p>
+  <figure>
+    <div class="hs2"><svg id="tauSvg" class="mw" viewBox="0 0 680 220" role="img" aria-label="打分噪声 τ 的分布直方图"></svg></div>
+    <figcaption><b>图 E　打分噪声 τ 的分布（按代码解析计算）。</b>竖线标出生成器 4 个去噪步的输入 σ 和 τ 的中位数。首帧、续块、陪练训练都用同一个分布；阶段二也一样。</figcaption>
+  </figure>
+
+  <div class="callout mine">
+    <span class="lab">算力：逐块打分反而更省</span>
+    <p>按 Wan-14B 的形状粗算（40 层，宽 5120，FFN 13824，每潜帧 1,560 个 token）：视频级打分是一次 32,760 token 的前向，视频 token 上的线性层约 7.8×10¹⁴ FLOPs，自注意力约 8.8×10¹⁴。逐块打分是 21 次 1,560 token 的前向，视频 token 上的线性层总量不变，自注意力降到约 1/21（4.2×10¹³）。只算这两项，逐块约为视频级的 0.50 倍；再算上对 512 个文本 token 的交叉注意力，以及每块都要重算一次的文本 K/V（约 4.4×10¹³），约为 <b>0.53 倍</b>（CFG 让两边都翻倍，比例不变）。不过代码是一块一块串行算的（<code>independent_frame_chunk_size: 1</code>），实际墙钟时间取决于小序列时 GPU 的利用率，论文没有报告。</p>
+  </div>
+</section>
+
+<!-- ======================================================== 06 -->
+<section id="s6">
+  <h2><span class="no">06</span>代码里才看得到的东西</h2>
+  <p class="lede">发布的仓库（2026-09-29 提交 2bfa1f4）与论文对得上的地方很多：学习率、步数、batch、AdamW 参数都一致。但有几处论文完全没提，而其中两三处可能直接影响结论。</p>
+  <div class="codefacts">
+    <div class="card risk"><div class="head"><span class="tag risk">影响结论</span><b>CFG：阶段一 1.0，阶段二 3.0，论文一个字没提</b></div>
+      <p>DMD 里老师的预测是 <span class="mv">cond + g·(cond − uncond)</span>。<code>configs/stage1.yaml</code> 设 g = 1.0，相当于常规 CFG 权重 2；<code>stage2.yaml</code> 设 g = 3.0，相当于权重 4，与 Self Forcing 的默认值相同。无条件分支用的是 Wan 默认的中文负向提示词，里面就有“色调艳丽，过曝”。高 CFG 的 DMD 容易过饱和，而过饱和正是基线在长 rollout 里的失效模式。“只做视频级 DMD”那组消融用的 CFG 没有交代。第二阶段 Semantic 从 63.59 升到 68.24，也可能部分来自 CFG 从 2 提到 4，而不只是“恢复连贯”。</p>
+      <div class="pathline">configs/stage1.yaml: guidance_scale: 1.0 · configs/stage2.yaml: guidance_scale: 3.0 · model/dmd.py: pred_real = cond + (cond − uncond) × scale</div></div>
+    <div class="card risk"><div class="head"><span class="tag risk">影响结论</span><b>首帧遮挡：看起来只给了 RMD 阶段一</b></div>
+      <p>论文写了“在重放预测时遮挡首块”。代码里，阶段一在重放时让第 11–20 潜帧看不到首帧（概率 1.0）；自展开时则看得到（没设 <code>rollout_hide_first_frame_after</code>），这一点论文没说。视频级 DMD 的实现（<code>VideoDMDReplay</code>）默认<b>不</b>遮挡，注释写的是 “Opt in: existing VideoDMD runs keep their original visibility”，暗示作者的视频级 DMD 运行没有这个补丁。Self Forcing 原文已经说明，首帧离开滑窗是外推伪影的主要来源之一。</p>
+      <div class="pathline">configs/stage1.yaml: tf_replay_hide_first_frame_after: 10, tf_replay_hide_first_frame_prob: 1.0 · model/video_dmd_replay.py: prob 默认 0.0</div></div>
+    <div class="card med"><div class="head"><span class="tag med">论文未提</span><b>自展开不遮挡，于是损失里多出一项自蒸馏</b></div>
+      <p>因为只在重放里遮挡首帧，第 11–20 潜帧的重放预测 x̂ 和自展开输出 x 不再相同。替身损失对 x̂ 的梯度是 <span class="mv">(x̂ − x) + g</span>：除了 DMD 项，还多了一项“看不到首帧时，也要画出看得到首帧时的样子”。这恰好是在教模型应对“首帧被逐出窗口”的情形，但论文把它写成“Following Self-Forcing”。另外，陪练是在重放预测上训练的（<code>critic_training_distribution: replay</code>），而 DMD 打分用的是自展开输出，两者也略有错位。</p></div>
+    <div class="card med"><div class="head"><span class="tag med">论文只一笔带过</span><b>陪练不是从原版 1.3B 起步，而是一个预适配过的权重</b></div>
+      <p>续块陪练加载 <code>training/fake_score.pt</code>，是一个完整的 1.3B（5.68 GB），HF 上标注为 “Adapted fake-score initialization”。论文只在图 3 的图注里写了一句 “Adapted score networks”（复数）。加载 LoRA 与这份权重的函数注释写着 “Load the score initialization used by the matching Dual-Matching run”。怎么适配的、训了多久，论文和 README 都没说。首帧陪练则是原版 1.3B。</p></div>
+    <div class="card med"><div class="head"><span class="tag med">论文未提</span><b>老师 LoRA 的规模：约 6.1 亿参数</b></div>
+      <p><code>teacher_adapter.json</code>：rank 128，α 128，目标模块 q/k/v/o/ffn.0/ffn.2，训了 3,800 步，模式 <code>independent_frame_serial</code>。q/k/v/o 这几个名字会同时命中自注意力和交叉注意力。按 Wan-14B 的维度算，每层 8 个 5120×5120 线性层加 2 个 FFN 层，共 15,335,424 个 LoRA 参数，40 层合计 <b>613,416,960</b>。fp32 存储约 2.45 GB，与 HF 上 training/ 目录 8.13 GB 减去 fake_score.pt 5.68 GB 正好吻合。训练素材是“Wan 生成的视频里切出来的续块”，生成了多少条视频没说。</p></div>
+    <div class="card med"><div class="head"><span class="tag med">口径</span><b>“900 步 / 800 步”是外循环步，生成器只更新了 150 / 160 次</b></div>
+      <p>论文写了阶段一“每 1 次生成器更新配 5 次陪练更新”，但没说“900 步”数的是什么。<code>utils/training_schedule.py</code> 表明是外循环：阶段一每 6 步里 5 步只训陪练、1 步只训生成器，而且这 6 步共用同一批提示词；阶段二（论文没写节奏）每步都训陪练，每 5 步训一次生成器。全局 batch 是 8（Self Forcing 是 64）。按此计算，阶段一用到的提示词约 150 × 8 = 1,200 条，只占 7 万条语料的 1.7%。</p></div>
+    <div class="card low"><div class="head"><span class="tag low">复现</span><b>只发布了块大小 1；README 里 500 秒的命令跑不通</b></div>
+      <p><code>inference.py</code> 强制 <code>num_frame_per_block == 1</code>，块大小 3 的配置（包括论文写的陪练 lr 2e-7）没有发布。另外，因果 RoPE 的时间位置表只有 1,024 项（<code>rope_params(1024, …)</code>），而位置按绝对帧号取。我把 <code>causal_rope_apply</code> 单独拿出来测：start_frame = 1023 正常，1024 起报维度不匹配。README 给的 <code>--latent-frames 2001</code>（≈500 s）会在第 1,024 个潜帧、约 256 秒处报错。仓库自己也写了：“has not been independently validated with a full accelerator training or inference run”。</p></div>
+  </div>
+</section>
+
+<!-- ======================================================== 07 -->
+<section id="s7">
+  <h2><span class="no">07</span>时间尺：训练 5 秒，推理 60 秒、500 秒</h2>
+  <p class="lede">一个潜帧对应 4 帧（首个潜帧只有 1 帧），16 FPS 下约 0.25 秒。窗口固定 21 个潜帧，没有 sink。拖动滑块，看窗口里还剩什么、首帧何时离开窗口，以及发布代码的 RoPE 表在哪里用完。</p>
+  <figure id="tlFig">
+    <div class="ctrls">
+      <label class="sl">当前潜帧 t <input type="range" id="tlT" min="0" max="2001" step="1" value="20"><output id="tlOut">20</output></label>
+      <div class="presets" style="margin:0">
+        <button type="button" class="btn" data-t="20">5 s（训练视界末）</button>
+        <button type="button" class="btn" data-t="240">60 s（评测）</button>
+        <button type="button" class="btn" data-t="1024">≈256 s（RoPE 表尽头）</button>
+        <button type="button" class="btn" data-t="2000">500 s（图 1）</button>
+      </div>
+    </div>
+    <div class="hs2"><svg id="tlSvg" class="mw" viewBox="0 0 680 190" role="img" aria-label="潜帧时间轴与滑动窗口"></svg></div>
+    <div class="tvtext" id="tlText"></div>
+    <div class="hs2"><svg id="maskSvg" class="mw" viewBox="0 0 680 92" role="img" aria-label="训练时重放里的首帧可见性" style="margin-top:12px"></svg></div>
+    <figcaption><b>图 F　上：推理时间轴；下：训练时的首帧遮挡。</b>训练 rollout 只有 21 个潜帧，推理时首帧在第 21 个潜帧之后就被挤出窗口，训练时从没见过这种情况。Self Forcing 的补丁是训练时让最后一块看不到首块；RMD 阶段一把它扩到后半段（第 11–20 潜帧），但只在重放里做。潜帧与帧的换算：帧数 = 4 × 潜帧数 − 3，所以 21 → 81 帧（5.06 s），241 → 961 帧（60.06 s），2001 → 8001 帧（500.06 s）。</figcaption>
+  </figure>
+</section>
+
+<!-- ======================================================== 08 -->
+<section id="s8">
+  <h2><span class="no">08</span>主结果：60 秒的三个汇总分</h2>
+  <p class="lede">表 1 只给了 VBench-Long 的 Total / Quality / Semantic 三个汇总分，没有 16 个分项。六行都满足 Total = 0.8 × Quality + 0.2 × Semantic（我逐行核过，最大误差 0.008），说明用的是 VBench 的标准加权。</p>
+  <figure id="resFig">
+    <div class="ctrls">
+      <span class="lbl">块大小</span>
+      <div class="seg" id="resChunk"><button data-v="1" aria-pressed="true">1（逐潜帧）</button><button data-v="3" aria-pressed="false">3</button></div>
+    </div>
+    <div class="legend"><span><i style="background:var(--sf)"></i>Self Forcing</span><span><i style="background:var(--cf)"></i>Causal Forcing</span><span><i style="background:var(--rmd)"></i>RMD</span></div>
+    <div class="hs2"><svg id="resSvg" class="mw" viewBox="0 0 680 300" role="img" aria-label="60 秒 VBench-Long 汇总分对比"></svg></div>
+    <div class="tip" id="resTip"></div>
+    <figcaption><b>图 G　论文表 1 重画。</b>横轴从 0 开始。块大小 1 时 RMD 领先约 10 个 Total 分，块大小 3 时领先 4 分（对 SF）。</figcaption>
+  </figure>
+  <div class="tbl-wrap">
+    <table class="t2l">
+      <thead><tr><th>块大小</th><th>方法</th><th>Total</th><th>Quality</th><th>Semantic</th><th>0.8Q + 0.2S</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><span class="dot sf"></span>Self Forcing</td><td>70.94</td><td>77.89</td><td>43.17</td><td>70.946</td></tr>
+        <tr><td>1</td><td><span class="dot cf"></span>Causal Forcing</td><td>69.88</td><td>78.34</td><td>36.03</td><td>69.878</td></tr>
+        <tr class="ours"><td>1</td><td><span class="dot rmd"></span>RMD</td><td class="best">81.26</td><td class="best">84.52</td><td class="best">68.24</td><td>81.264</td></tr>
+        <tr class="sep"><td>3</td><td><span class="dot sf"></span>Self Forcing</td><td>77.44</td><td>81.99</td><td>59.22</td><td>77.436</td></tr>
+        <tr><td>3</td><td><span class="dot cf"></span>Causal Forcing</td><td>74.88</td><td>80.53</td><td>52.27</td><td>74.878</td></tr>
+        <tr class="ours"><td>3</td><td><span class="dot rmd"></span>RMD</td><td class="best">81.48</td><td class="best">85.03</td><td class="best">67.24</td><td>81.472</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>随时长的衰减：论文正文给了两组端点</h3>
+  <div class="grid2">
+    <div class="card sf"><h4>Self Forcing · Total（块 1）</h4><p class="big">79.12 → 70.94</p><p>从 10 秒到 60 秒掉了 8.18 分。注意 10 秒时就已经比它逐帧版在 5 秒 VBench 上自报的 84.26 低了一截（评测协议不同，只能当线索）。</p></div>
+    <div class="card rmd"><h4>RMD · Quality（块 1）</h4><p class="big">84.68 → 84.52</p><p>同一区间只掉 0.16 分；60 秒时 Semantic 68.24。图 5 其余中间点无法从 PDF 文本中取出，这里不重画曲线。</p></div>
+  </div>
+  <p class="prose">500 秒只有图 1 的一个定性例子，不在任何汇总分里。定性对比（图 4）显示两个基线在 20 秒以后出现饱和色与结构崩坏，RMD 保持稳定。</p>
+
+  <h3>放到同类工作里（只能粗略定位）</h3>
+  <p class="prose">论文没有和任何长视频专用方法比较。能找到的最接近的外部数字，来自同月的 Recency Forcing（2609.19729）表 3：同样是 60 秒 VBench-Long，但用的是 200 条 MovieGen 提示，而且它给 Causal Forcing 加了 sink 与相对 RoPE。两边都测了块大小 3 的 SF 和 CF，RMD 论文的数字比 Recency Forcing 高 1.5–1.9 分，说明两套协议本身就有系统差。</p>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>方法（块 3，除注明外）</th><th>Quality @60 s<span class="d">RMD 论文协议（944 × 5）</span></th><th>Quality @60 s<span class="d">Recency Forcing 协议（200 MovieGen）</span></th></tr></thead>
+      <tbody>
+        <tr><td><span class="dot sf"></span>Self Forcing</td><td>81.99</td><td>80.11</td></tr>
+        <tr><td><span class="dot cf"></span>Causal Forcing</td><td>80.53</td><td>78.98<span class="d">加了 sink + 相对 RoPE</span></td></tr>
+        <tr><td>Rolling Forcing</td><td>—</td><td>81.56</td></tr>
+        <tr><td>LongLive</td><td>—</td><td>81.98</td></tr>
+        <tr><td>Recency Forcing（训练版）</td><td>—</td><td>84.02</td></tr>
+        <tr class="ours"><td><span class="dot rmd"></span>RMD</td><td class="best">85.03</td><td>—</td></tr>
+        <tr class="ours"><td><span class="dot rmd"></span>RMD（块 1）</td><td>84.52</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">只有 SF 这一对大致同条件（CF 那一对还混着 sink 与相对 RoPE 的差别）。如果粗暴地把 SF 的协议差（1.88 分）扣掉，RMD 块 3 大约相当于 83.2，落在 LongLive 与 Recency Forcing 之间。这只是量级参考，不能当作比较结论：提示集不同、样本数不同，Recency Forcing 的质量分又主要来自动态程度（见本项目 Recency Forcing 笔记）。</p>
+</section>
+
+<!-- ======================================================== 09 -->
+<section id="s9">
+  <h2><span class="no">09</span>消融：三件事各贡献多少，以及没报的那几项</h2>
+  <p class="lede">表 2 都用块大小 1。四个变体：只做视频级 DMD、只做边缘（即阶段一）、随机出口、完整 RMD。</p>
+  <figure id="abFig">
+    <div class="legend"><span><i style="background:var(--vd)"></i>只做视频级 DMD</span><span><i style="background:var(--mg)"></i>只做边缘（阶段一）</span><span><i style="background:var(--rx)"></i>随机出口</span><span><i style="background:var(--rmd)"></i>完整 RMD</span></div>
+    <div class="hs2"><svg id="abSvg" class="mw" viewBox="0 0 680 340" role="img" aria-label="消融汇总分对比"></svg></div>
+    <div class="tip" id="abTip"></div>
+    <figcaption><b>图 H　论文表 2(a) 重画。</b>“只做边缘”的 Quality 最高（84.90），完整 RMD 的 Total 和 Semantic 最高。第二阶段让 Quality 下降 0.38，下面会说明这意味着什么。</figcaption>
+  </figure>
+
+  <h3>第二阶段精修：涨的四项与没报的三项</h3>
+  <div class="two-col">
+    <div class="tbl-wrap" style="margin-top:0">
+      <table>
+        <thead><tr><th>指标（表 2b）</th><th>只做边缘</th><th>完整</th><th>归一化后变化</th></tr></thead>
+        <tbody>
+          <tr><td>Subject Consistency</td><td>97.29</td><td>98.05</td><td class="up">+0.89</td></tr>
+          <tr><td>Background Consistency</td><td>96.26</td><td>96.89</td><td class="up">+0.85</td></tr>
+          <tr><td>Temporal Flickering</td><td>99.06</td><td>99.41</td><td class="up">+0.94</td></tr>
+          <tr><td>Motion Smoothness</td><td>98.79</td><td>98.96</td><td class="up">+0.58</td></tr>
+          <tr class="sep"><td>四项合计 ÷ 6.5 → Quality</td><td></td><td></td><td class="up">+0.50</td></tr>
+          <tr><td>实际 Quality 变化</td><td>84.90</td><td>84.52</td><td class="dn">−0.38</td></tr>
+          <tr><td>其余三项（AQ、IQ、½DD）</td><td>?</td><td>?</td><td class="dn">−0.88 × 6.5 = −5.74</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <p class="small">VBench 的 Quality 是 7 个维度归一化后的加权平均：动态程度（DD）权重 0.5，其余 1，总权重 6.5。四个时间指标的归一化区间是 SC [0.1462, 1]、BC [0.2615, 1]、TF [0.6293, 1]、MS [0.706, 0.9975]（本项目多篇笔记用它们复算过，误差 ≤ 0.01）。四项上涨合计给 Quality 贡献 +0.50，但 Quality 实际降了 0.38。所以美学（AQ）、成像（IQ）和半个动态程度，合计必须下降 <b>5.74 ± 0.15</b> 个归一化分（误差来自两位小数的舍入）。</p>
+      <p class="small">这四个时间指标都偏爱“动得少”的视频。最省事的解释是：<b>精修让视频变静了</b>。</p>
+    </div>
+  </div>
+  <figure id="wfFig">
+    <div class="ctrls">
+      <label class="sl">假设其中由动态程度承担的比例 <input type="range" id="wfP" min="0" max="1" step="0.05" value="1"><output id="wfOut">100%</output></label>
+    </div>
+    <div class="hs2"><svg id="wfSvg" class="mw" viewBox="0 0 680 230" role="img" aria-label="第二阶段 Quality 变化的瀑布分解"></svg></div>
+    <div class="readout" id="wfRO"></div>
+    <figcaption><b>图 I　Quality 从 84.90 到 84.52 的分解。</b>中间那根红柱的大小是由数据决定的；它在 DD 与 AQ+IQ 之间怎么分，数据给不出来，用滑块自己设。全部由 DD 承担时，动态程度下降约 11.5 个百分点。</figcaption>
+  </figure>
+
+  <h3>消融到底控制住了什么</h3>
+  <p class="prose">把论文和代码能确认的信息放进同一张表，“?”表示论文与代码都无法确定。第一列和第二列之间，不只“打分方式”一个区别。</p>
+  <div class="tbl-wrap">
+    <table class="wide">
+      <thead><tr><th>因素</th><th><span class="dot vd"></span>只做视频级 DMD</th><th><span class="dot mg"></span>只做边缘</th><th><span class="dot rx"></span>随机出口</th><th><span class="dot rmd"></span>完整 RMD</th><th>SF / CF 基线</th></tr></thead>
+      <tbody>
+        <tr><td>打分对象</td><td>整段</td><td>单块</td><td>单块</td><td>单块 → 整段</td><td>整段</td></tr>
+        <tr><td>续块出口</td><td class="unk">?（通常随机）</td><td>最后一步</td><td>随机</td><td>最后一步 → 随机</td><td>随机</td></tr>
+        <tr><td>CFG（guidance_scale）</td><td class="unk">?</td><td>1.0</td><td class="unk">?</td><td>1.0 → 3.0</td><td>3.0</td></tr>
+        <tr><td>生成器学习率</td><td class="unk">?</td><td>2e-5</td><td class="unk">?</td><td>2e-5 → 2e-6</td><td>2e-6</td></tr>
+        <tr><td>陪练初始化</td><td class="unk">?（代码默认原版）</td><td>预适配</td><td class="unk">?</td><td>预适配 → 原版</td><td>原版 1.3B</td></tr>
+        <tr><td>首帧遮挡</td><td class="unk">?（代码默认关）</td><td>重放中开</td><td class="unk">?</td><td>开 → 关</td><td>SF：最后一块；CF：?</td></tr>
+        <tr><td>生成器更新次数</td><td class="unk">?</td><td>150</td><td class="unk">?</td><td>150 + 160</td><td>各自官方</td></tr>
+        <tr><td>全局 batch</td><td>8</td><td>8</td><td>8</td><td>8</td><td>SF 64</td></tr>
+        <tr class="sep"><td>Total（块 1）</td><td>72.44</td><td>80.64</td><td>78.29</td><td class="best">81.26</td><td>70.94 / 69.88</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">另一个参照：“只做视频级 DMD”和 Causal Forcing 名义上是同一套配方（CF 因果 ODE 初始化 + 视频级 DMD），60 秒 Total 却差 2.56 分（72.44 对 69.88）。这说明配方细节本身就能挪动几分。“只做边缘”和“完整”之间只差 0.62，比这个量级还小。</p>
+</section>
+
+<!-- ======================================================== 10 -->
+<section id="s10">
+  <h2><span class="no">10</span>我复算 / 核验过的</h2>
+  <ul class="vlist">
+    <li><b>Total = 0.8Q + 0.2S</b>：表 1 六行、表 2 四行全部吻合，最大偏差 0.008。</li>
+    <li><b>论文超参与代码一致</b>：阶段一 lr 2e-5（生成器与陪练）、900 步；阶段二 2e-6 / 4e-7、800 步；AdamW β = (0, 0.999)、wd 0.01；全局 batch 8；21 潜帧训练视界。</li>
+    <li><b>式 5 的权重</b>：代码 <code>combine_frame_losses</code> 给首帧 1/21、续块 20/21，单元测试 <code>test_combine_frame_losses_is_exact_21_frame_average</code> 覆盖。</li>
+    <li><b>式 6 是逐块归一化</b>：<code>_compute_kl_grad</code> 的归一化在每个打分样本（即每块）的维度 [1,2,3,4] 上取均值。</li>
+    <li><b>去噪调度</b>：用仓库里的 <code>FlowMatchScheduler</code>（shift 5）实跑，[1000, 750, 500, 250] 扭曲后为 t = 1000 / 937.5 / 833.3 / 625，即 σ = 1.000 / 0.938 / 0.833 / 0.625。</li>
+    <li><b>打分噪声分布</b>：u ∼ U{0..999}/1000，τ = 5u/(1+4u)，截断到 [0.02, 0.98]；P(τ &gt; 0.5) = 0.833，中位数 0.833。</li>
+    <li><b>生成器更新次数</b>：按 <code>training_phases</code>，阶段一 step % 6 == 5 训生成器，900 步共 150 次；阶段二 step % 5 == 0，800 步共 160 次。</li>
+    <li><b>LoRA 参数量</b>：15,335,424 / 层 × 40 = 613,416,960，fp32 约 2.45 GB，与 HF 上 training/ 目录大小对得上。</li>
+    <li><b>时间换算</b>：21 → 81 帧 → 5.06 s；241 → 961 帧 → 60.06 s；2001 → 8001 帧 → 500.06 s。</li>
+    <li class="x"><b>精修阶段的隐藏分项</b>：ΔAQ + ΔIQ + ½ΔDD = −5.74 ± 0.15（归一化分，前提是 VBench-Long 沿用 VBench 的归一化与权重；Total 公式吻合，支持这个前提）。</li>
+    <li class="x"><b>逐块打分的 FLOPs</b>：只算视频 token 的线性层与自注意力，约为视频级的 0.50 倍；加上文本交叉注意力和逐块重算的文本 K/V，约 0.53 倍（按 Wan-14B 形状粗算，未计 LoRA 的额外 ~5%）。</li>
+    <li class="x"><b>“只做视频级 DMD”与 Causal Forcing 相差 2.56</b>：两者名义上同配方，差值可以当作“配方细节带来的波动”的一个参考量级。</li>
+    <li class="bad"><b>500 秒推理</b>：发布代码的 <code>causal_rope_apply</code> 在 start_frame ≥ 1024 时报错（单独测试：1023 正常，1024 / 1500 / 2000 报维度不匹配）。README 的 2001 潜帧命令跑不到底。</li>
+    <li class="bad"><b>块大小 3</b>：配置与权重没有发布，论文里 2e-7 的陪练学习率无法核对。</li>
+  </ul>
+</section>
+
+<!-- ======================================================== 11 -->
+<section id="s11">
+  <h2><span class="no">11</span>存疑清单</h2>
+  <p class="lede">分三档。<span class="tag risk">高</span>动摇主要结论或其解释；<span class="tag med">中</span>削弱某项结论，或影响复现与使用；<span class="tag low">低</span>口径或表述问题。每条尽量给出能消除疑问的实验。来源标注：<span class="tag src">论文</span> <span class="tag src">代码</span> <span class="tag src">复算</span> <span class="tag src">推断</span>。</p>
+  <div class="dfilter">
+    <div class="seg" id="dbFilter"><button data-v="all" aria-pressed="true">全部 19</button><button data-v="h" aria-pressed="false">高 5</button><button data-v="m" aria-pressed="false">中 8</button><button data-v="l" aria-pressed="false">低 6</button></div>
+    <button type="button" class="btn" id="dbOpen">全部展开 / 收起</button>
+  </div>
+  <div class="doubts" id="doubts">
+
+    <details class="dbt h" open><summary><span class="id">#H1</span><span class="t"><span class="tag risk">高</span> 消融把至少五个因素绑在一起，收益不能直接归因于“独立打分”</span></summary><div class="body">
+      <p><span class="tag src">论文</span> <span class="tag src">代码</span> 表 2 里“只做视频级 DMD”（72.44）到“只做边缘”（80.64）的 8.2 分，被解读为“上下文无关的打分防止了退化”。但按论文与代码，两者至少还在这些地方不同：续块出口（随机 vs 最后一步）、CFG（阶段一 1.0；视频级那组没说明，SF 惯例是 3.0）、生成器学习率（阶段一 2e-5，是 SF 惯例的 10 倍）、陪练初始化（预适配 vs 原版）、首帧遮挡（见 #H2）。</p>
+      <p>“随机出口”一行只拆了出口这一项，而且是在“独立打分”的前提下拆的。缺的恰好是“视频级打分 + 非对称出口”这一格。没有它，无法区分收益来自打分方式，还是来自“只在最后一步施加监督”。另外，“只做视频级 DMD”和 Causal Forcing 名义上同配方，却相差 2.56 分，配方细节的影响量级不小。</p>
+      <p class="fix"><b>怎样消除：</b>做 2 × 2（打分：整段 / 单块 × 出口：随机 / 非对称），统一 CFG、学习率、陪练初始化、首帧遮挡和生成器更新次数；每格至少 2–3 个训练种子。</p>
+    </div></details>
+
+    <details class="dbt h" open><summary><span class="id">#H2</span><span class="t"><span class="tag risk">高</span> 首帧遮挡是已知的外推补丁，却可能只给了 RMD</span></summary><div class="body">
+      <p><span class="tag src">论文</span> <span class="tag src">代码</span> Self Forcing §3.4 与附录 B 已说明：首个潜帧没有时间压缩，统计特殊；滑窗外推时它一离开窗口，模型就进入没见过的状态，产生严重伪影；训练时限制注意力即可缓解。RMD 阶段一对第 11–20 潜帧在重放里屏蔽首帧（概率 1.0）。而视频级 DMD 的实现默认不屏蔽，注释写 “existing VideoDMD runs keep their original visibility”，暗示作者跑的视频级 DMD（很可能包括消融里那组）没有这个补丁。</p>
+      <p>基线这边：SF 论文说它训练时带有“去噪最后一块时看不到首块”的限制，但范围比 RMD 窄；块大小 1 的 SF 基线是怎么训的没交代（见 #M7），CF 有没有这个补丁也不清楚。推理时它们同样在第 21 个潜帧后丢掉首帧。所以“基线 5 秒后崩溃”至少有一部分可能来自首帧逐出，而不是“耦合困境”。SF 在 10 秒时已经只有 79.12，时间点吻合，但评测协议不同，只能当线索。</p>
+      <p class="fix"><b>怎样消除：</b>给视频级 DMD 基线加上同样的首帧遮挡（或 sink）重训；在第 20/21 潜帧前后测画质突变；再单独关掉 RMD 的遮挡看掉多少。</p>
+    </div></details>
+
+    <details class="dbt h" open><summary><span class="id">#H3</span><span class="t"><span class="tag risk">高</span> 精修的“时间一致性提升”伴随约 5.7 个归一化分的隐藏下降</span></summary><div class="body">
+      <p><span class="tag src">复算</span> 表 2(b) 用 SC、BC、TF、MS 四项上涨证明精修恢复了连贯。按 VBench 的归一化与权重，这四项给 Quality 贡献 +0.50，而 Quality 实际从 84.90 降到 84.52。所以其余三项必须满足 ΔAQ + ΔIQ + ½ΔDD ≈ −5.74（±0.15）。若全部由动态程度承担，DD 约掉 11.5 个百分点。这四个时间指标本身都偏爱静止视频。论文只列了上涨的四项，全文没有报告任何方法的 DD。</p>
+      <p>这不否定精修有用（Total、Semantic 都升了，时空切片也更平滑），但“恢复连贯”和“变得更静”在现有数字里分不开。</p>
+      <p class="fix"><b>怎样消除：</b>报告两阶段与基线的 16 个分项、光流幅度，以及按时间窗口的 DD 曲线。</p>
+    </div></details>
+
+    <details class="dbt h"><summary><span class="id">#H4</span><span class="t"><span class="tag risk">高</span> CFG 从未出现在论文里，却在阶段之间、方法之间不一致</span></summary><div class="body">
+      <p><span class="tag src">代码</span> 阶段一 guidance_scale = 1.0（按实现公式相当于常规 CFG 权重 2），阶段二 3.0（权重 4，与 SF 默认相同）；负向提示词是 Wan 默认那段，含“色调艳丽，过曝”。高 CFG 的 DMD 容易过饱和，而过饱和正是基线在长 rollout 里的主要症状（图 4 的描述就是 “color saturation”）。如果“只做视频级 DMD”那组用的是 3.0，那么它和阶段一的对比里就混进了 CFG。反过来，阶段二 Semantic +4.65 可能部分来自 CFG 从 2 提到 4。</p>
+      <p class="fix"><b>怎样消除：</b>在论文里写明每个阶段和每个消融的 CFG；补“视频级 DMD，CFG 1.0”与“阶段一，CFG 3.0”两组。</p>
+    </div></details>
+
+    <details class="dbt h"><summary><span class="id">#H5</span><span class="t"><span class="tag risk">高</span> 没有和任何长视频专用方法比较</span></summary><div class="body">
+      <p><span class="tag src">论文</span> 基线只有 Self Forcing 和 Causal Forcing，两者都不是为长视频设计的。论文在相关工作里引了 LongLive、Rolling Sink、OPSD-V、CMD，却一个都没比；Rolling Forcing、Self-Forcing++、Deep Forcing、∞-RoPE 也没有出现。Self Forcing 官方甚至发布了一个 10 秒版本的权重（<code>self_forcing_10s.pt</code>），可以作为更强的 SF 基线。论文的措辞限定在“优于视频级 DMD 基线”，这句话本身成立；但标题和摘要讲的是“长时生成”，读者需要知道它在这类方法中的位置。第 08 节的跨论文粗略定位显示 RMD 大概是有竞争力的，但不足以下结论。</p>
+      <p class="fix"><b>怎样消除：</b>在同一评测下至少比较 LongLive、Rolling Forcing、Self-Forcing++、CMD 长视频版，以及 SF 的 10 秒权重。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#M1</span><span class="t"><span class="tag med">中</span> 图 2 展示的不是训练信号，而且 RMD 的老师预测连主体都变了</span></summary><div class="body">
+      <p><span class="tag src">论文</span> 图 2 只画了 D<sub>real</sub>；推动学生的是 D<sub>fake</sub> − D<sub>real</sub>，而陪练同样看不到上下文。打分噪声水平没给，训练时 τ 的中位数是 0.83，那里的 x₀ 预测本来就接近“提示词平均画面”。图 2(c) 的最后一帧里，rollout 中黑白斑纹、黄眼睛的猫头鹰被老师画成了粉紫色、深色眼睛、头型不同的一只。(c) 行从第一帧起就和 rollout 有差别，(b) 行也有颜色漂移，所以这是程度问题；但上下文无关的目标明显更“干净而不保内容”。它会不会让长视频里的主体身份慢慢漂向“提示词平均”，论文没有测；VBench 的 Subject Consistency 对这种缓慢漂移并不敏感。</p>
+      <p class="fix"><b>怎样消除：</b>直接可视化 g<sub>i</sub>；报告 60 秒内主体与首帧的身份相似度曲线（DINO / 人脸特征），并与视频级 DMD 对比。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#M2</span><span class="t"><span class="tag med">中</span> “耦合困境”只有论证和一张示意图，没有测量</span></summary><div class="body">
+      <p><span class="tag src">推断</span> 论文的核心机制是“联合打分会为连贯而保留历史脏污”。这很可信，但全文没有一个定量实验直接检验它。第 03 节的换一种说法（条件匹配本身没有恢复力）给出的预测是可检验的：在历史里注入受控的色偏或纹理腐蚀，视频级梯度与“去腐蚀方向”的夹角应接近 90°，边缘梯度应明显为负。</p>
+      <p class="fix"><b>怎样消除：</b>合成腐蚀实验：固定当前块，给历史加不同强度的色偏，计算两种 g 与（干净 − 腐蚀）方向的余弦；再测训练后模型从腐蚀历史中恢复的速度。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#M3</span><span class="t"><span class="tag med">中</span> 阶段一目标的最优解包括“完全不看历史”的生成器</span></summary><div class="body">
+      <p><span class="tag src">推断</span> 式 5 只约束边缘分布，每块独立采样的生成器同样最优。时间连贯完全靠隐式正则撑着：因果 ODE 初始化、只在最后一步施加监督、只训 150 次生成器更新、阶段二精修。论文没有给出连贯性随阶段一训练步数变化的曲线。训久了会不会塌、换一个初始化还行不行，都不知道；阶段二用 1/10 学习率修补，更像止血。</p>
+      <p class="fix"><b>怎样消除：</b>报告阶段一 300 / 900 / 1800 步时的时空切片与 TF / MS / DD；考虑把连贯项显式写进目标（例如 K 帧窗口打分）。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#M4</span><span class="t"><span class="tag med">中</span> 隐藏的前置阶段与成本</span></summary><div class="body">
+      <p><span class="tag src">代码</span> 真正的流程是：先用 Wan-14B 生成一批视频（数量未知），切成单个潜帧，训一个 6.1 亿参数的 LoRA（3,800 步）；再得到一个预适配的 1.3B 陪练（论文只在图 3 图注写了 “Adapted score networks”，方法没说；加载函数的注释提到另一次 “Dual-Matching run”）；然后才是阶段一和阶段二。论文没有报告任何一步的 GPU·h，也没和基线的训练成本对比。</p>
+      <p class="fix"><b>怎样消除：</b>写清 LoRA 数据量、陪练预适配方法，报告全部阶段的 GPU·h；做“不用 LoRA”和“陪练从原版起步”两个消融。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#M5</span><span class="t"><span class="tag med">中</span> 训练量的口径，以及块 3 那个几乎冻结的陪练</span></summary><div class="body">
+      <p><span class="tag src">论文</span> <span class="tag src">代码</span> 论文写了阶段一 5:1 的交替，也写了“训练 900 步 / 800 步”，但没说步数数的是外循环；按代码，生成器实际只更新 150 / 160 次，每 6 步共用同一批提示词；阶段二的更新节奏论文没写。块大小 3 时，论文写陪练学习率 2e-7，是生成器的 1/100；750 步里陪练几乎不动，更接近“对一个固定参照做分数蒸馏”，而不是 DMD。论文没有解释这个设定，块 3 的配置也没发布，无法确认是不是笔误。</p>
+      <p class="fix"><b>怎样消除：</b>改用“生成器更新次数 × batch”报告训练量；发布块 3 配置；给出陪练学习率的扫描。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#M6</span><span class="t"><span class="tag med">中</span> 自展开不遮挡、重放遮挡，引入了一个没写出来的自蒸馏项</span></summary><div class="body">
+      <p><span class="tag src">论文</span> <span class="tag src">代码</span> 论文说的是“重放预测时遮挡”，没说自展开时不遮挡。代码里自展开时第 11–20 潜帧看得到首帧，重放时看不到，于是重放预测 x̂ ≠ 自展开输出 x。替身损失对 x̂ 的梯度变成 (x̂ − x) + g：多了一项“没有首帧也要画出有首帧时的样子”。它正好在训练模型应对首帧被逐出，可能也是长时稳定的来源之一，但论文把功劳全记在边缘打分上。陪练在重放预测上训练，DMD 却在自展开输出上打分，两者也有一点错位。</p>
+      <p class="fix"><b>怎样消除：</b>三组对照：不遮挡 / 自展开与重放都遮挡 / 只在重放遮挡（现状）；分别报告 60 秒指标。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#M7</span><span class="t"><span class="tag med">中</span> 评测报告粒度不足</span></summary><div class="body">
+      <p><span class="tag src">论文</span> 只报三个汇总分，没有 16 个分项、没有训练种子方差或置信区间、没有人评。块大小 1 的 Self Forcing 基线从哪来没说：SF 官方只发布了块大小 3 的 DMD 权重，这一行应该是作者自己训的，但配置未知。图 5 只给了三条曲线，中间点也没列表。</p>
+      <p class="fix"><b>怎样消除：</b>附录给全部分项、每 10 秒的表格、块 1 SF 基线的训练配置；至少 3 个训练种子。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#M8</span><span class="t"><span class="tag med">中</span> 500 秒只有一个定性例子，而且发布代码跑不到那么远</span></summary><div class="body">
+      <p><span class="tag src">代码</span> <span class="tag src">复算</span> 图 1 的 500 秒是单个例子（论文也承认不在指标里）。发布代码的因果 RoPE 表只有 1,024 个时间位置，并且按绝对帧号取值。我单独测了 <code>causal_rope_apply</code>：start_frame = 1023 正常，≥ 1024 报维度不匹配。所以 README 给的 2001 潜帧命令会在约 256 秒处中断。作者生成图 1 时一定改过位置编码（例如扩表或改成相对位置），但没有说明。由于 RoPE 的注意力只依赖相对位移，扩表本身大概率不影响结果，问题主要在复现与透明度。</p>
+      <p class="fix"><b>怎样消除：</b>修复并说明位置编码处理；给出 2–5 分钟的多例定量结果。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">#L1</span><span class="t"><span class="tag low">低</span> “最后一步只修局部细节”的说法不准确</span></summary><div class="body">
+      <p><span class="tag src">复算</span> 按代码调度，最后一步的输入是 σ = 0.625，信号只占 37.5%（SNR 0.36）。这一步仍决定大量中低频外观，包括全局色调。方向上没错（比前三步更偏细节），但“局部细节”低估了它的作用，也掩盖了它能修颜色漂移的真正原因。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">#L2</span><span class="t"><span class="tag low">低</span> 池化边缘只约束位置平均</span></summary><div class="body">
+      <p><span class="tag src">推断</span> 式 4 把 20 个位置混在一起，陪练学到的也只是混合分布。随位置变化的漂移（例如前面偏冷、后面偏暖）在混合里可以互相抵消。5 秒内问题不大，但它意味着目标本身不直接惩罚“随时间变化的外观趋势”。</p>
+      <p class="fix"><b>怎样消除：</b>按位置分组检查边缘统计（颜色直方图、亮度），或给陪练加位置条件。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">#L3</span><span class="t"><span class="tag low">低</span> 逐块归一化是另一个没拆开的差异</span></summary><div class="body">
+      <p><span class="tag src">代码</span> 式 6 的分母按每块单独计算，视频级 DMD 则对整段只算一个分母。逐块归一化让每块拿到大致相同的步长：已经脏了的后段块，和干净的前段块被同等对待。这本身可能就有助于压住后段漂移，是和“看不看上下文”叠在一起的另一个变量。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">#L4</span><span class="t"><span class="tag low">低</span> 与 CMD 的关系只写了“不同路线”，没点出它们其实在一条连续谱上</span></summary><div class="body">
+      <p><span class="tag src">推断</span> CMD 的前缀加噪 (1−ρ)x + ρε，在 ρ → 1 时就退化为“不给上下文”。RMD 大致是这个极限，外加一个 LoRA 改造的双向块老师。打分窗口 K（1 到 21）是另一条连续谱。两篇互不比较，中间态都没探索，而代码里其实已经支持打分块大小与生成块大小不同。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">#L5</span><span class="t"><span class="tag low">低</span> 对世界模型：“长时”不等于“长时一致”</span></summary><div class="body">
+      <p><span class="tag src">推断</span> 窗口只有 21 个潜帧（约 5 秒），没有记忆，而阶段一的目标恰恰奖励“外观不依赖历史”。论文的主张只关于画质，不涉及回访一致性或长程记忆，这一点论文没说错；但“long-horizon”容易被读成“长时一致”，用于交互式世界模型时要单独评测。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">#L6</span><span class="t"><span class="tag low">低</span> 表述与复现上的小问题</span></summary><div class="body">
+      <ul class="tight">
+        <li>“Following Self-Forcing, we mask attention to the initial block … in the latter half”：SF 原文是“去噪最后一块时看不到首块”，RMD 扩成后半段，而且自展开时不遮挡，是推广而不是照搬（见 #M6）。</li>
+        <li>陪练在阶段二从原版 1.3B 重新开始，与阶段一的预适配陪练无关，论文没说明。</li>
+        <li>仓库自述训练与推理都未经完整的加速器验证；块 3 与 LoRA 训练脚本均未发布。</li>
+      </ul>
+    </div></details>
+
+  </div>
+</section>
+
+<!-- ======================================================== 12 -->
+<section id="s12">
+  <h2><span class="no">12</span>结论、做对的地方、对交互式世界模型的启示</h2>
+  <div class="grid2">
+    <div class="card ok">
+      <h4>做对的地方</h4>
+      <ul class="tight">
+        <li>诊断具体，改动很小：只改“打分时老师看什么”，推理零改动、零开销。</li>
+        <li>抓住了一个结构性问题：条件匹配没有恢复力（论文用“老师为连贯而妥协”来描述）。</li>
+        <li>坦白承认只做边缘会丢连贯，并用消融和时空切片展示出来。</li>
+        <li>评测规模不小：944 条提示 × 5 个样本 × 60 秒，两种块大小。</li>
+        <li>代码、两个阶段的权重、LoRA 与陪练初始化全部开源，还附了单元测试；论文里的超参和代码一致。</li>
+        <li>效应量大：60 秒 Total +10。即使上面的混杂全部成立，“长时画质明显更好”这个现象本身大概率站得住，存疑针对的主要是“为什么”。</li>
+      </ul>
+    </div>
+    <div class="card rmd">
+      <h4>对交互式世界模型的启示</h4>
+      <ol class="tight">
+        <li><b>外观恢复力不需要动作条件老师。</b>阶段一的老师只需要“单块外观先验”，任何高质量的图像或视频模型都能当；动作跟随交给初始化和阶段二。对缺少动作条件双向老师的世界模型，这个门槛很低。</li>
+        <li><b>但它和记忆有张力。</b>边缘项鼓励外观独立于历史。接入记忆（压缩记忆、检索帧、sink）时，建议只在最后一步、只对外观施加，并单独评测回访一致性与身份一致性。</li>
+        <li><b>首帧遮挡要当独立开关。</b>世界模型通常有 sink 或记忆 token；RMD 的长时稳定可能部分来自首帧遮挡（#H2、#M6），移植时要拆开验证。</li>
+        <li><b>打分窗口 K 是个新旋钮。</b>对动作条件模型，覆盖一个“动作 → 响应”周期的 K 帧窗口，可能比单块更好。</li>
+        <li><b>评测要成套。</b>长时画质（VBench-Long）加动态程度、身份与回访一致性、动作跟随，缺一项都可能把“变静”误读成“变稳”。</li>
+      </ol>
+    </div>
+  </div>
+  <h3>最值钱的后续实验</h3>
+  <ol class="tight prose">
+    <li>2 × 2（整段 / 单块打分 × 随机 / 非对称出口），统一 CFG、学习率、陪练初始化、首帧遮挡和更新次数，多种子。</li>
+    <li>报告 16 个分项（尤其 DD）与光流幅度，分别给阶段一、阶段二的 60 秒曲线。</li>
+    <li>首帧遮挡的三组对照：关 / 两处都开 / 只在重放开。</li>
+    <li>打分窗口 K ∈ {1, 3, 7, 21} 的扫描，以及 CMD 式前缀加噪 ρ 的扫描，找恢复力与连贯的平衡点。</li>
+    <li>合成腐蚀恢复测试：历史里注入色偏或纹理噪声，测梯度方向与恢复速度。</li>
+    <li>与 LongLive、Rolling Forcing、Self-Forcing++、CMD 在同一协议下比较；加 60 秒身份一致性曲线。</li>
+    <li>去掉 LoRA、陪练从原版起步的消融，并报告全流程 GPU·h。</li>
+  </ol>
+</section>
+
+<footer class="foot">
+  <p><b>来源</b>：论文 arXiv 2609.37925v1（2026-09-29）；项目页 cjeen.github.io/RMD；代码 github.com/cjeen/RMD（提交 2bfa1f4，2026-09-29）；权重 huggingface.co/cjeen/RMD；Self Forcing（2506.08009）；Context-Matched Distillation（2608.13391）；Recency Forcing（2609.19729）。</p>
+  <p>本页是读者笔记，不是作者的说法。与论文冲突时以论文为准；标注为“代码”的内容来自上述提交，标注为“复算”“推断”的是我自己的计算和判断。图 B 的两频段玩具是示意模型，不是论文实验。2026-09-30 整理。</p>
+</footer>
+
+</div>
+
+<script>
+(function(){
+"use strict";
+const NS="http://www.w3.org/2000/svg";
+function el(tag,attrs,parent,text){const e=document.createElementNS(NS,tag);if(attrs)for(const k in attrs){e.setAttribute(k,attrs[k]);}if(text!=null)e.textContent=text;if(parent)parent.appendChild(e);return e;}
+function clear(n){while(n.firstChild)n.removeChild(n.firstChild);}
+function $(s,r){return (r||document).querySelector(s);}
+function $$(s,r){return Array.from((r||document).querySelectorAll(s));}
+function segBind(root,cb){$$('button',root).forEach(b=>b.addEventListener('click',()=>{$$('button',root).forEach(x=>x.setAttribute('aria-pressed',x===b?'true':'false'));cb(b.dataset.v);}));}
+function ro(root,items){root.innerHTML=items.map(it=>`<div class="${it.c||''}"><span>${it.k}</span><b>${it.v}</b></div>`).join('');}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function gauss(r){let u=0,v=0;while(u===0)u=r();while(v===0)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function sgn(v,d){d=d==null?2:d;return (v>=0?'+':'−')+Math.abs(v).toFixed(d);}
+/* horizontal bar with 4px rounded data end, square at the baseline */
+function hbarPath(x0,x1,y,h,r){r=Math.min(r,(x1-x0)/2,h/2);if(x1-x0<=0.5)return `M${x0},${y}h0.5v${h}h-0.5z`;return `M${x0},${y}H${x1-r}Q${x1},${y} ${x1},${y+r}V${y+h-r}Q${x1},${y+h} ${x1-r},${y+h}H${x0}Z`;}
+function vbarPath(x,w,yTop,yBot,r){r=Math.min(r,w/2,(yBot-yTop)/2);return `M${x},${yBot}V${yTop+r}Q${x},${yTop} ${x+r},${yTop}H${x+w-r}Q${x+w},${yTop} ${x+w},${yTop+r}V${yBot}Z`;}
+
+/* ---------- theme ---------- */
+const root=document.documentElement;
+try{const t=localStorage.getItem('rmd-theme');if(t==='light'||t==='dark')root.setAttribute('data-theme',t);}catch(e){}
+$('#themeBtn').addEventListener('click',()=>{
+  const cur=root.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  const nx=cur==='light'?'dark':'light';root.setAttribute('data-theme',nx);
+  try{localStorage.setItem('rmd-theme',nx);}catch(e){}
+});
+
+/* ---------- toc highlight ---------- */
+const tocLinks=$$('nav.toc a');
+if('IntersectionObserver' in window){
+  const io=new IntersectionObserver(es=>{es.forEach(en=>{if(en.isIntersecting){const id=en.target.id;tocLinks.forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+id));}});},{rootMargin:'-40% 0px -55% 0px'});
+  $$('section[id]').forEach(s=>io.observe(s));
+}
+
+/* ---------- tooltip helper ---------- */
+function tipAt(tip,fig,evt,html){
+  tip.innerHTML=html;tip.classList.add('on');
+  const fr=fig.getBoundingClientRect();
+  let x=evt.clientX-fr.left+14,y=evt.clientY-fr.top+14;
+  const tw=tip.offsetWidth||200;
+  if(x+tw>fr.width-8)x=Math.max(8,evt.clientX-fr.left-tw-14);
+  tip.style.left=x+'px';tip.style.top=y+'px';
+}
+function tipOff(tip){tip.classList.remove('on');}
+
+/* =====================================================================
+   03 · teacher view
+   ===================================================================== */
+const TV={mode:'sf',q:4,rho:0.25};
+const TVN=7, ART=[0.04,0.10,0.20,0.32,0.47,0.64,0.82];
+const TVCOL={sf:'var(--sf)',cmd:'var(--cmd)',cmdc:'var(--cmd)',rmd:'var(--rmd)'};
+function tvState(i,j){
+  if(i===j)return 'target';
+  const m=TV.mode;
+  if(m==='sf')return j<i?'past':'future';
+  if(m==='cmd')return j<i?'past':'none';
+  if(m==='cmdc')return j<i?'corrupt':'none';
+  return 'none';
+}
+function tvDraw(){
+  const svg=$('#tvSvg');clear(svg);
+  const x0=64,y0=48,c=34,col=TVCOL[TV.mode];
+  el('text',{x:x0+c*TVN/2,y:16,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink2)'},svg,'打分时老师能看到的块 →');
+  for(let j=0;j<TVN;j++)el('text',{x:x0+c*j+(c-3)/2,y:y0-8,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},svg,String(j+1));
+  const ym=y0+c*TVN/2;
+  el('text',{x:14,y:ym,transform:`rotate(-90 14 ${ym})`,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink2)'},svg,'被打分的块 ↓');
+  for(let i=0;i<TVN;i++){
+    el('text',{x:x0-10,y:y0+c*i+c/2+2,'text-anchor':'end',class:'svgmono',style:'fill:'+(i===TV.q?'var(--ink)':'var(--ink3)')},svg,String(i+1));
+    for(let j=0;j<TVN;j++){
+      const st=tvState(i,j),x=x0+c*j,y=y0+c*i,w=c-3;
+      let style;
+      if(st==='target')style=`fill:${col};opacity:1`;
+      else if(st==='past')style=`fill:${col};opacity:.55`;
+      else if(st==='future')style=`fill:${col};opacity:.26`;
+      else if(st==='corrupt')style=`fill:${col};opacity:${(.55*(1-TV.rho)+.07).toFixed(3)}`;
+      else style='fill:none;stroke:var(--rule2);stroke-width:1';
+      el('rect',{x,y,width:w,height:w,rx:4,style},svg);
+      if(st==='target')el('text',{x:x+w/2,y:y+w/2+4,'text-anchor':'middle',class:'svgmono',style:'fill:var(--bg);font-weight:600'},svg,'★');
+    }
+    const hit=el('rect',{x:x0-30,y:y0+c*i-1,width:c*TVN+30,height:c,style:'fill:transparent;cursor:pointer'},svg);
+    hit.addEventListener('click',()=>{TV.q=i;tvRender();});
+  }
+  el('rect',{x:x0-3,y:y0+c*TV.q-3,width:c*TVN+3,height:c+3,rx:6,style:'fill:none;stroke:var(--ink);stroke-width:1.5'},svg);
+  const ys=y0+c*TVN+30;
+  el('text',{x:x0,y:ys-8,class:'svgtxt',style:'fill:var(--ink3)'},svg,'上下文里的脏污（示意：越往后越重）');
+  for(let j=0;j<TVN;j++){
+    const st=tvState(TV.q,j);
+    el('rect',{x:x0+c*j,y:ys,width:c-3,height:22,rx:4,style:`fill:var(--risk);opacity:${(ART[j]*.85+.08).toFixed(3)}`},svg);
+    if(st==='past'||st==='future'||st==='corrupt')el('rect',{x:x0+c*j-1.5,y:ys-1.5,width:c,height:25,rx:5,style:`fill:none;stroke:${col};stroke-width:2`},svg);
+    if(j===TV.q)el('text',{x:x0+c*j+(c-3)/2,y:ys+15,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink);font-weight:600'},svg,'★');
+  }
+}
+function tvRender(){
+  tvDraw();
+  const m=TV.mode,q=TV.q,rho=TV.rho;
+  let ctx=0;
+  if(m==='sf')ctx=1;else if(m==='cmd')ctx=q>0?.85:0;else if(m==='cmdc')ctx=q>0?.85*(1-rho):0;
+  const vis=[];for(let j=0;j<TVN;j++){const s=tvState(q,j);if(s==='past'||s==='future'||s==='corrupt')vis.push(ART[j]);}
+  const inh=vis.length?ctx*(vis.reduce((a,b)=>a+b,0)/vis.length)/ART[TVN-1]:0;
+  $('#tvM1').style.width=(Math.min(1,inh)*100).toFixed(1)+'%';$('#tvM1').style.background='var(--risk)';
+  $('#tvM2').style.width=(ctx*100).toFixed(1)+'%';$('#tvM2').style.background='var(--ok)';
+  const n=q+1,after=TVN-1-q;
+  const T={
+    sf:`<b>视频级 DMD（Self Forcing / Causal Forcing）</b>：给第 ${n} 块打分时，14B 双向老师看得到全部 ${TVN} 块，包括它后面的 ${after} 块。它给出的“干净图猜测”必须和前后连得上，所以前面的脏污会被当成“这段视频本来的样子”保留下来。连贯约束最强，恢复力最弱。`,
+    cmd:q===0?`<b>CMD 前缀打分</b>：第 1 块没有前缀，因果老师只看它自己，和 RMD 的情况一样。点下面几行看有前缀时的情形。`:`<b>CMD 前缀打分</b>：因果老师只看第 ${n} 块之前、学生真实生成的 ${q} 块，看不到未来。它解决的是“老师偷看未来”（对相机、动作控制尤其要紧），但前缀里的脏污照样会被延续。`,
+    cmdc:q===0?`<b>CMD + 前缀加噪</b>：第 1 块没有前缀。点下面几行看加噪前缀的效果。`:`<b>CMD + 前缀加噪</b>：前缀被替换成 (1−ρ)·x + ρ·ε，当前 ρ = ${rho.toFixed(2)}。CMD 论文加它的理由正是“降低老师对颜色、纹理漂移的关注”。ρ 越大越接近 RMD；ρ = 1 时前缀只剩噪声，就等于不给上下文。`,
+    rmd:`<b>RMD 阶段一</b>：LoRA 改造过的 14B 只看第 ${n} 块自己，块内双向注意力。它不知道这是第几块，也不知道前面是什么，只问“这一块像不像一块正常画面”。恢复力最强，但对连贯一无所知，所以才需要阶段二。`
+  };
+  $('#tvText').innerHTML=T[m];
+  const col=TVCOL[m];
+  const items=[['target','被打分的块（★，带噪）',1],['past','可见：学生生成的前缀',.55]];
+  if(m==='sf')items.push(['future','可见：后面的块',.26]);
+  if(m==='cmdc')items.push(['corrupt','可见：加噪后的前缀',.55*(1-rho)+.07]);
+  items.push(['none','看不到',0]);
+  $('#tvLegend').innerHTML=items.filter(it=>!(m==='rmd'&&it[0]==='past')).map(it=>it[0]==='none'?`<span><i style="background:transparent;border:1px solid var(--rule2)"></i>${it[1]}</span>`:`<span><i style="background:${col};opacity:${it[2]}"></i>${it[1]}</span>`).join('');
+}
+segBind($('#tvMode'),v=>{TV.mode=v;$('#tvRhoWrap').hidden=v!=='cmdc';tvRender();});
+$('#tvRho').addEventListener('input',e=>{TV.rho=+e.target.value;$('#tvRhoOut').textContent=TV.rho.toFixed(2);tvRender();});
+tvRender();
+
+/* =====================================================================
+   03 · two-band toy
+   ===================================================================== */
+const TOY={w:1,rx:true,ref:false,seed:11};
+const PRESETS={sf:{w:1,rx:true,ref:false},cmdc:{w:.6,rx:false,ref:false},rmd1:{w:0,rx:false,ref:false},rmd:{w:0,rx:false,ref:true},rx:{w:0,rx:true,ref:true}};
+const TT=240,MU=0.010,SV=0.2,VEL=1/48;
+function toySim(w,rx,ref,seed){
+  const r=mulberry32(seed);
+  let g=0.5+0.495*w;if(ref)g=g+0.55*(0.995-g);
+  const sj=0.0025+(rx?0.05*(1-w):0)*(ref?0.5:1);
+  const a=new Float64Array(TT+1),s=new Float64Array(TT+1);
+  a[0]=0;s[0]=0.1;
+  const sig=SV*Math.sqrt(1-g*g);
+  for(let t=1;t<=TT;t++){a[t]=g*a[t-1]+MU+sig*gauss(r);s[t]=s[t-1]+VEL+sj*gauss(r);}
+  return {a,s,g,sj};
+}
+function toyRender(){
+  const cur=toySim(TOY.w,TOY.rx,TOY.ref,TOY.seed);
+  const ref=toySim(1,false,false,TOY.seed);
+  const svg=$('#toySvg');clear(svg);
+  const L=52,R=664,Tp=16,B=204,YM=2.0,Y0=-0.6;
+  const X=t=>L+(t/TT)*(R-L),Y=v=>B-((Math.max(Y0,Math.min(YM,v))-Y0)/(YM-Y0))*(B-Tp);
+  el('rect',{x:L,y:Tp,width:X(21)-L,height:B-Tp,style:'fill:var(--surf3);opacity:.7'},svg);
+  el('text',{x:L+4,y:Tp+13,class:'svgtxt',style:'fill:var(--ink3)'},svg,'训练视界');
+  for(let v=-0.5;v<=YM+1e-9;v+=0.5){el('line',{x1:L,x2:R,y1:Y(v),y2:Y(v),style:Math.abs(v)<1e-9?'stroke:var(--axis);stroke-width:1':'stroke:var(--grid);stroke-width:1'},svg);el('text',{x:L-6,y:Y(v)+4,'text-anchor':'end',class:'svgmono',style:'fill:var(--ink3)'},svg,(v<0?'−':'')+Math.abs(v).toFixed(1));}
+  for(let sec=0;sec<=60;sec+=10){const t=sec*4;el('text',{x:X(t),y:B+16,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},svg,sec+' s');}
+  el('line',{x1:L,x2:R,y1:B,y2:B,style:'stroke:var(--axis);stroke-width:1'},svg);
+  el('text',{x:12,y:(Tp+B)/2,transform:`rotate(-90 12 ${(Tp+B)/2})`,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink3)'},svg,'外观偏移 a');
+  const path=arr=>{let d='';for(let t=0;t<=TT;t++)d+=(t?'L':'M')+X(t).toFixed(1)+','+Y(arr[t]).toFixed(1);return d;};
+  el('path',{d:path(ref.a),style:'fill:none;stroke:var(--ink3);stroke-width:1.2;opacity:.8'},svg);
+  el('path',{d:path(cur.a),style:'fill:none;stroke:var(--rmd);stroke-width:2;stroke-linejoin:round;stroke-linecap:round'},svg);
+  const endV=cur.a[TT];
+  el('circle',{cx:X(TT),cy:Y(endV),r:4,style:'fill:var(--rmd);stroke:var(--surf);stroke-width:2'},svg);
+  // filmstrip
+  const st=$('#toyStrip');clear(st);
+  const n=12,tw=50,th=38,gap=(680-20-n*tw)/(n-1);
+  for(let k=0;k<n;k++){
+    const t=k*20,a=Math.max(-0.8,Math.min(2,cur.a[t])),x=10+k*(tw+gap),y=6;
+    const sky=`hsl(${(205+50*a).toFixed(0)},${Math.max(8,38+24*a).toFixed(0)}%,${(64-6*a).toFixed(0)}%)`;
+    const gnd=`hsl(${(105-40*a).toFixed(0)},${Math.max(8,32+30*a).toFixed(0)}%,${(40+4*a).toFixed(0)}%)`;
+    el('rect',{x,y,width:tw,height:th*0.6,style:`fill:${sky}`},st);
+    el('rect',{x,y:y+th*0.6,width:tw,height:th*0.4,style:`fill:${gnd}`},st);
+    const fx=((cur.s[t]%1)+1)%1;
+    el('circle',{cx:x+6+fx*(tw-12),cy:y+th*0.6,r:5,style:'fill:#f4efe6;stroke:#1d2126;stroke-width:1.2'},st);
+    el('rect',{x,y,width:tw,height:th,rx:3,style:'fill:none;stroke:var(--rule2);stroke-width:1'},st);
+    el('text',{x:x+tw/2,y:y+th+15,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},st,(k*5)+' s');
+  }
+  let drift=0;for(let t=TT-20;t<=TT;t++)drift+=cur.a[t];drift/=21;
+  let fl=0,sj=0;for(let t=1;t<=TT;t++){fl+=Math.abs(cur.a[t]-cur.a[t-1]);sj+=Math.abs(cur.s[t]-cur.s[t-1]-VEL);}fl/=TT;sj/=TT;
+  let fl0=0;for(let t=1;t<=TT;t++)fl0+=Math.abs(ref.a[t]-ref.a[t-1]);fl0/=TT;
+  ro($('#toyRO'),[
+    {k:'学到的照抄系数 g',v:cur.g.toFixed(3)},
+    {k:'60 s 时外观偏移（末 5 s 均值）',v:drift.toFixed(2),c:drift>0.5?'warn':'good'},
+    {k:'外观闪烁 mean|Δa| ×100',v:(fl*100).toFixed(2)+(fl>fl0*1.15?' ↑':''),c:fl>fl0*1.15?'warn':''},
+    {k:'结构抖动 mean|Δs − v| ×100',v:(sj*100).toFixed(2),c:sj>0.01?'warn':'good'}
+  ]);
+}
+function toySync(){
+  $('#toyW').value=TOY.w;$('#toyWOut').textContent=(+TOY.w).toFixed(2);
+  $('#toyRx').checked=TOY.rx;$('#toyRef').checked=TOY.ref;
+}
+$$('#toyPresets .btn').forEach(b=>b.addEventListener('click',()=>{
+  $$('#toyPresets .btn').forEach(x=>x.setAttribute('aria-pressed',x===b?'true':'false'));
+  Object.assign(TOY,PRESETS[b.dataset.p]);toySync();toyRender();
+}));
+function toyManual(){$$('#toyPresets .btn').forEach(x=>x.setAttribute('aria-pressed','false'));}
+$('#toyW').addEventListener('input',e=>{TOY.w=+e.target.value;$('#toyWOut').textContent=TOY.w.toFixed(2);toyManual();toyRender();});
+$('#toyRx').addEventListener('change',e=>{TOY.rx=e.target.checked;toyManual();toyRender();});
+$('#toyRef').addEventListener('change',e=>{TOY.ref=e.target.checked;toyManual();toyRender();});
+$('#toySeed').addEventListener('click',()=>{TOY.seed=(TOY.seed*7919+13)%100003;toyRender();});
+toySync();toyRender();
+
+/* =====================================================================
+   05 · pipeline stepper
+   ===================================================================== */
+(function(){
+  const r1=$('#row1'),r2=$('#row2');
+  for(let i=0;i<21;i++){
+    const x=170+i*30;
+    const ff=i===0;
+    el('rect',{x,y:42,width:26,height:30,rx:4,style:ff?'fill:var(--surf3);stroke:var(--ink2);stroke-width:1.2;stroke-dasharray:3 2':'fill:var(--rmd-soft);stroke:var(--rmd);stroke-width:1'},r1);
+    el('rect',{x,y:128,width:26,height:30,rx:4,style:ff?'fill:var(--surf3);stroke:var(--ink2);stroke-width:1.2;stroke-dasharray:3 2':(i>=11?'fill:var(--risk-soft);stroke:var(--risk);stroke-width:1':'fill:var(--rmd-soft);stroke:var(--rmd);stroke-width:1')},r2);
+    if(i===0||i===10||i===20){
+      el('text',{x:x+13,y:61,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink)'},r1,String(i+1));
+      el('text',{x:x+13,y:147,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink)'},r2,String(i+1));
+    }
+    if(i>=11&&i!==20)el('text',{x:x+13,y:147,'text-anchor':'middle',class:'svgmono',style:'fill:var(--risk-ink)'},r2,'⊘');
+  }
+  const D={
+    1:'生成器按推理的方式跑完 21 个潜帧，全程不留计算图。每个潜帧去噪 4 步（输入 σ = 1.000 → 0.938 → 0.833 → 0.625），在出口那一步把 x₀ 预测当作输出，并写入 KV 缓存给后面的潜帧用。首帧的出口随机选（4 选 1），其余潜帧固定在第 4 步出口。每个潜帧出口时的带噪输入都被记下来，留给第 2 步。',
+    2:'把 21 个潜帧的带噪输入，连同第 1 步的输出（作为干净历史，detach），送进一次 teacher-forcing 前向（注意力约 6.5 万 token），并行地重新算出每个潜帧的出口预测 x̂。这一次保留梯度，即 Solaris 的 checkpointed self forcing。<b>第 11–20 潜帧在这次前向里看不到首帧</b>；第 1 步时它们其实看得到，所以 x̂ 与第 1 步的输出并不完全相同（见 06 节）。',
+    3:'首帧单独处理：给第 1 步输出的首帧加噪 τ，交给原版 Wan-14B（老师）和原版 Wan-1.3B（陪练）各猜一次 x₀，得到 g₁。CFG 参数为 1.0。首帧在总损失里的权重是 1/21。',
+    4:'第 2–21 个潜帧逐个处理：每个潜帧各自加噪 τ，交给 LoRA 改造过的 14B 老师和预适配过的 1.3B 陪练；两者都只看这一个潜帧，看不到任何邻居。g<sub>i</sub> = (D<sub>fake</sub> − D<sub>real</sub>) / mean|x<sub>i</sub> − D<sub>real</sub>|，分母按每个潜帧单独算。代码里这 20 个潜帧是串行送进老师的。',
+    5:'替身损失 ℒ = ½‖x̂ − sg(x − g)‖²，对 x̂ 的梯度就是 g；对第 11–20 潜帧还多出一项 x̂ − x。按首帧 1/21、续块 20/21 加权后反传。历史是 detach 的，所以梯度只沿“每块自己的那次预测”回到参数，不会经过“作为后面块的上下文”这条路。',
+    6:'阶段一以 6 个外循环步为一组：前 5 步只训陪练（续块陪练和首帧陪练都在重放预测上做去噪回归），第 6 步只训生成器。这 6 步共用同一批 8 条提示词，但每一步都重新自展开一次。900 步 = 750 次陪练更新 + 150 次生成器更新。阶段二改为每步训陪练、每 5 步训一次生成器（800 步 = 800 + 160）。'
+  };
+  function set(s){
+    $$('#algo button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.s===String(s)?'true':'false'));
+    $$('#pipe .stp').forEach(g=>{const ss=(g.dataset.s||'').split(' ');g.classList.toggle('on',ss.includes(String(s)));});
+    $('#algoDetail').innerHTML=D[s];
+  }
+  $$('#algo button').forEach(b=>b.addEventListener('click',()=>set(+b.dataset.s)));
+  set(1);
+})();
+
+/* =====================================================================
+   05 · exit widget
+   ===================================================================== */
+function exDraw(mode){
+  const svg=$('#exSvg');clear(svg);
+  const sig=[1,0.9375,0.8333,0.625],xs=[260,360,460,560];
+  el('text',{x:20,y:30,class:'svgtxt',style:'fill:var(--ink3)'},svg,'去噪步');
+  el('text',{x:20,y:66,class:'svgtxt',style:'fill:var(--ink3)'},svg,'输入里的信号占比');
+  xs.forEach((x,k)=>{
+    el('text',{x,y:24,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink);font-weight:600'},svg,`第 ${k+1} 步`);
+    el('text',{x,y:42,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},svg,`σ = ${sig[k].toFixed(3)}`);
+    el('rect',{x:x-40,y:54,width:80,height:8,rx:4,style:'fill:var(--surf3)'},svg);
+    if(sig[k]<1)el('rect',{x:x-40,y:54,width:80*(1-sig[k]),height:8,rx:4,style:'fill:var(--ink3)'},svg);
+    el('text',{x,y:80,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink2)'},svg,((1-sig[k])*100).toFixed(1)+'%');
+  });
+  const rows=[{y:122,lab:'首块（第 1 潜帧）',p:[.25,.25,.25,.25]},{y:176,lab:'续块（第 2–21 潜帧）',p:mode==='rmd'?[0,0,0,1]:[.25,.25,.25,.25]}];
+  const col=mode==='rmd'?'var(--rmd)':'var(--rx)';
+  el('line',{x1:20,x2:660,y1:96,y2:96,style:'stroke:var(--grid);stroke-width:1'},svg);
+  rows.forEach(r=>{
+    el('text',{x:20,y:r.y+4,class:'svgtxt',style:'fill:var(--ink)'},svg,r.lab);
+    r.p.forEach((p,k)=>{
+      if(p>0)el('circle',{cx:xs[k],cy:r.y,r:(15*Math.sqrt(p)).toFixed(2),style:`fill:${col};stroke:var(--surf);stroke-width:2`},svg);
+      else el('circle',{cx:xs[k],cy:r.y,r:4,style:'fill:none;stroke:var(--rule2);stroke-width:1'},svg);
+      el('text',{x:xs[k]+20,y:r.y+4,class:'svgmono',style:'fill:var(--ink3)'},svg,p===1?'1':p===0?'0':'¼');
+    });
+  });
+  el('text',{x:20,y:208,class:'svgtxt',style:'fill:var(--ink3)'},svg,mode==='rmd'?'续块只在第 4 步（输入 σ = 0.625）施加边缘监督；前 3 步决定的结构与运动不受边缘项影响。':'所有块共用同一个随机步：边缘项会落到决定结构与运动的早期步上，消融里出现严重的时间抖动。');
+}
+segBind($('#exMode'),exDraw);exDraw('rmd');
+
+/* =====================================================================
+   05 · scoring-noise histogram
+   ===================================================================== */
+(function(){
+  const svg=$('#tauSvg');
+  const nb=20,bins=new Array(nb).fill(0);
+  for(let u=0;u<1000;u++){let tau=5*(u/1000)/(1+4*(u/1000));tau=Math.min(0.98,Math.max(0.02,tau));bins[Math.min(nb-1,Math.floor(tau*nb))]+=1/1000;}
+  const L=50,R=660,T=34,B=180,ym=0.25;
+  const X=v=>L+v*(R-L),Y=v=>B-(v/ym)*(B-T);
+  for(let v=0;v<=ym+1e-9;v+=0.05){el('line',{x1:L,x2:R,y1:Y(v),y2:Y(v),style:'stroke:var(--grid);stroke-width:1'},svg);el('text',{x:L-6,y:Y(v)+4,'text-anchor':'end',class:'svgmono',style:'fill:var(--ink3)'},svg,Math.round(v*100)+'%');}
+  const bw=(R-L)/nb;
+  bins.forEach((p,i)=>{
+    if(p<=0)return;
+    const pth=el('path',{d:vbarPath(X(i/nb)+1,bw-2,Y(p),B,3),style:'fill:var(--ink2);opacity:.75'},svg);
+    el('title',null,pth,`τ ∈ [${(i/nb).toFixed(2)}, ${((i+1)/nb).toFixed(2)})：${(p*100).toFixed(1)}%`);
+  });
+  el('line',{x1:L,x2:R,y1:B,y2:B,style:'stroke:var(--axis);stroke-width:1'},svg);
+  for(let v=0;v<=1.0001;v+=0.2)el('text',{x:X(v),y:B+16,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},svg,v.toFixed(1));
+  el('text',{x:(L+R)/2,y:B+34,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink3)'},svg,'打分噪声 τ（0 = 干净，1 = 纯噪声）');
+  [[0.625,'④'],[0.8333,'③'],[0.9375,'②']].forEach(([v,lab])=>{
+    el('line',{x1:X(v),x2:X(v),y1:T-6,y2:B,style:'stroke:var(--rmd);stroke-width:1.5'},svg);
+    el('text',{x:X(v),y:T-10,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink);font-weight:600'},svg,lab);
+  });
+  el('text',{x:X(0.8333)-6,y:T+12,'text-anchor':'end',class:'svgtxt',style:'fill:var(--ink2)'},svg,'τ 中位数 0.833 →');
+  el('text',{x:L+4,y:T-10,class:'svgtxt',style:'fill:var(--ink3)'},svg,'竖线 = 生成器第 ④ / ③ / ② 步的输入 σ（0.625 / 0.833 / 0.938）');
+})();
+
+/* =====================================================================
+   07 · timeline
+   ===================================================================== */
+function tlRender(t){
+  t=Math.max(0,Math.min(2001,Math.round(t)));
+  $('#tlT').value=t;$('#tlOut').textContent=t;
+  const svg=$('#tlSvg');clear(svg);
+  const L=20,R=660,X=l=>L+(l/2001)*(R-L);
+  const AY=50;
+  el('rect',{x:X(1024),y:AY-4,width:X(2001)-X(1024),height:8,style:'fill:var(--risk-soft)'},svg);
+  el('line',{x1:L,x2:R,y1:AY,y2:AY,style:'stroke:var(--axis);stroke-width:1'},svg);
+  [0,500,1000,1500,2000].forEach(l=>{el('line',{x1:X(l),x2:X(l),y1:AY,y2:AY+5,style:'stroke:var(--axis);stroke-width:1'},svg);el('text',{x:X(l),y:AY+34,'text-anchor':l===0?'start':(l===2000?'end':'middle'),class:'svgmono',style:'fill:var(--ink3)'},svg,l===0?'0':`${l}（${(l/4).toFixed(0)} s）`);});
+  const mk=[[21,'训练 21','var(--ok)','start'],[241,'评测 241','var(--rmd)','start'],[1024,'RoPE 表尽头 1024','var(--risk)','start'],[2001,'图 1：2001','var(--ink2)','end']];
+  mk.forEach(([l,lab,c,anc])=>{el('line',{x1:X(l),x2:X(l),y1:24,y2:AY,style:`stroke:${c};stroke-width:1.5`},svg);el('text',{x:X(l)+(anc==='start'?3:0),y:18,'text-anchor':anc,class:'svgtxt',style:'fill:var(--ink2)'},svg,lab);});
+  const a=Math.max(0,t-20);
+  el('rect',{x:X(a),y:AY-8,width:Math.max(4,X(t)-X(a)+1),height:16,rx:2,style:'fill:var(--rmd);opacity:.6'},svg);
+  el('path',{d:`M${X(t)},${AY+9} L${X(t)+5},${AY+17} L${X(t)-5},${AY+17} Z`,style:'fill:var(--rmd)'},svg);
+  // zoom strip
+  const n=41,start=t-34,cw=15.6,y=124;
+  el('text',{x:L,y:y-8,class:'svgtxt',style:'fill:var(--ink2)'},svg,`放大：第 ${Math.max(0,start)}–${t+6} 个潜帧；窗口 = ${a}–${t}（${t-a+1} 个）`);
+  for(let k=0;k<n;k++){
+    const idx=start+k;if(idx<0)continue;
+    const x=L+k*cw;let style;
+    if(idx===t)style='fill:var(--rmd);stroke:var(--rmd)';
+    else if(idx>=a&&idx<t)style='fill:var(--rmd-soft);stroke:var(--rmd)';
+    else if(idx<a)style='fill:var(--surf3);stroke:var(--rule)';
+    else style='fill:none;stroke:var(--rule2)';
+    if(idx>=1024)style+=';stroke:var(--risk);stroke-width:1.5';else style+=';stroke-width:1';
+    if(idx===0)style+=';stroke-dasharray:3 2';
+    el('rect',{x,y,width:cw-2,height:22,rx:3,style},svg);
+    if(idx===0)el('text',{x:x+(cw-2)/2,y:y+15,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink);font-size:10px'},svg,'首');
+    if(idx%10===0)el('text',{x:x+(cw-2)/2,y:y+38,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3);font-size:10px'},svg,String(idx));
+  }
+  el('text',{x:R,y:y+54,'text-anchor':'end',class:'svgtxt',style:'fill:var(--ink3)'},svg,'实心 = 当前潜帧；浅蓝 = 窗口内；灰 = 已逐出；红框 = 超出 RoPE 表');
+  const sec=(4*t/16);
+  let s=`<b>t = ${t}</b>：对应第 ${t===0?0:4*t-3}–${4*t} 帧（0 起算），约 ${sec.toFixed(2)} 秒。`;
+  if(t<=20)s+='首帧还在窗口里，这就是训练时的常态：21 个潜帧的 rollout 里，每个潜帧都（在自展开时）看得到首帧。';
+  else s+=`首帧已经在第 21 个潜帧之后被逐出，窗口 ${a}–${t} 里全是模型自己生成的续块。训练时唯一见过“看不到首帧”的，是重放里的第 11–20 潜帧。`;
+  if(t>240)s+=' 已超出论文定量评测的 60 秒（241 个潜帧）。';
+  if(t>=1024)s+=' <span style="color:var(--risk-ink)"><b>按发布代码，生成这个潜帧会报错</b>：因果 RoPE 的时间位置表只有 1,024 项，且按绝对帧号取值（单测 causal_rope_apply：1023 正常，1024 报维度不匹配）。图 1 的 500 秒必然用了改过的位置编码。</span>';
+  $('#tlText').innerHTML=s;
+}
+$('#tlT').addEventListener('input',e=>tlRender(+e.target.value));
+$$('#tlFig .presets .btn').forEach(b=>b.addEventListener('click',()=>tlRender(+b.dataset.t)));
+tlRender(20);
+(function(){
+  const svg=$('#maskSvg');
+  const x0=156,cw=24.2;
+  const rows=[{y:14,lab:'自展开（无梯度）',hide:false},{y:50,lab:'重放（带梯度）',hide:true}];
+  rows.forEach(r=>{
+    el('text',{x:0,y:r.y+16,class:'svgtxt',style:'fill:var(--ink2)'},svg,r.lab);
+    for(let i=0;i<21;i++){
+      const x=x0+i*cw;let style,txt='';
+      if(i===0){style='fill:var(--surf3);stroke:var(--ink2);stroke-dasharray:3 2';txt='首';}
+      else if(r.hide&&i>=11){style='fill:var(--risk-soft);stroke:var(--risk)';txt='✗';}
+      else {style='fill:var(--ok-soft);stroke:var(--ok)';txt='✓';}
+      el('rect',{x,y:r.y,width:cw-3,height:24,rx:3,style:style+';stroke-width:1'},svg);
+      el('text',{x:x+(cw-3)/2,y:r.y+16,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink);font-size:10.5px'},svg,txt);
+    }
+  });
+  el('text',{x:x0,y:90,class:'svgtxt',style:'fill:var(--ink3)'},svg,'每格 = 一个潜帧；✓ / ✗ = 这个潜帧能否看到首帧（阶段一，块大小 1）');
+})();
+
+/* =====================================================================
+   08 · results chart
+   ===================================================================== */
+const MET=['Total','Quality','Semantic'];
+const RES={1:{sf:[70.94,77.89,43.17],cf:[69.88,78.34,36.03],rmd:[81.26,84.52,68.24]},3:{sf:[77.44,81.99,59.22],cf:[74.88,80.53,52.27],rmd:[81.48,85.03,67.24]}};
+const NAMES={sf:'Self Forcing',cf:'Causal Forcing',rmd:'RMD',vd:'只做视频级 DMD',mg:'只做边缘',rx:'随机出口'};
+function barChart(svg,tip,fig,series,data,refKey){
+  clear(svg);
+  const L=110,R=626,T=10,bh=16,gp=3,gg=26;
+  const X=v=>L+(v/100)*(R-L);
+  const groupH=series.length*(bh+gp)-gp;
+  const B=T+MET.length*(groupH+gg)-gg+8;
+  for(let v=0;v<=100;v+=20){el('line',{x1:X(v),x2:X(v),y1:T-4,y2:B,style:'stroke:var(--grid);stroke-width:1'},svg);el('text',{x:X(v),y:B+16,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},svg,String(v));}
+  el('line',{x1:X(0),x2:X(0),y1:T-4,y2:B,style:'stroke:var(--axis);stroke-width:1'},svg);
+  MET.forEach((m,gi)=>{
+    const y0=T+gi*(groupH+gg);
+    el('text',{x:L-12,y:y0+groupH/2+4,'text-anchor':'end',class:'svgtxt',style:'fill:var(--ink);font-weight:600'},svg,m);
+    series.forEach((k,si)=>{
+      const v=data[k][gi],y=y0+si*(bh+gp);
+      el('path',{d:hbarPath(X(0),X(v),y,bh,4),style:`fill:var(--${k})`},svg);
+      el('text',{x:X(v)+6,y:y+bh/2+4,class:'svgmono',style:'fill:var(--ink2)'},svg,v.toFixed(2));
+      const hit=el('rect',{x:X(0),y:y-1,width:Math.max(X(v)-X(0)+50,60),height:bh+2,style:'fill:transparent;cursor:default'},svg);
+      const dv=refKey&&k!==refKey?` <span style="color:var(--ink3)">（比 ${NAMES[refKey]} ${sgn(v-data[refKey][gi])}）</span>`:'';
+      hit.addEventListener('mousemove',e=>tipAt(tip,fig,e,`${NAMES[k]} · ${m}：<b>${v.toFixed(2)}</b>${dv}`));
+      hit.addEventListener('mouseleave',()=>tipOff(tip));
+    });
+  });
+  svg.setAttribute('viewBox',`0 0 680 ${B+26}`);
+}
+function resRender(ch){barChart($('#resSvg'),$('#resTip'),$('#resFig'),['sf','cf','rmd'],RES[ch],'rmd');}
+segBind($('#resChunk'),resRender);resRender('1');
+barChart($('#abSvg'),$('#abTip'),$('#abFig'),['vd','mg','rx','rmd'],{vd:[72.44,78.68,47.50],mg:[80.64,84.90,63.59],rx:[78.29,82.48,61.56],rmd:[81.26,84.52,68.24]},'rmd');
+
+/* =====================================================================
+   09 · waterfall
+   ===================================================================== */
+const NORM={SC:[0.1462,1],BC:[0.2615,1],TF:[0.6293,1],MS:[0.706,0.9975]};
+const MARG={SC:97.29,BC:96.26,TF:99.06,MS:98.79},FULL={SC:98.05,BC:96.89,TF:99.41,MS:98.96};
+let tsum=0;for(const k in NORM){const[lo,hi]=NORM[k];tsum+=((FULL[k]/100-lo)/(hi-lo)-(MARG[k]/100-lo)/(hi-lo))*100;}
+const CT=tsum/6.5, DQ=84.52-84.90, REST=DQ-CT, NEED=REST*6.5;
+function wfRender(p){
+  const svg=$('#wfSvg');clear(svg);
+  const L=60,R=660,T=14,B=178,lo=84.2,hi=85.6;
+  const Y=v=>B-(v-lo)/(hi-lo)*(B-T);
+  for(let v=84.2;v<=85.6+1e-9;v+=0.2){el('line',{x1:L,x2:R,y1:Y(v),y2:Y(v),style:'stroke:var(--grid);stroke-width:1'},svg);el('text',{x:L-6,y:Y(v)+4,'text-anchor':'end',class:'svgmono',style:'fill:var(--ink3)'},svg,v.toFixed(1));}
+  el('text',{x:L,y:B+46,class:'svgtxt',style:'fill:var(--ink3)'},svg,'纵轴从 84.2 起（只看变化量）');
+  const cols=[{lab:'只做边缘',a:lo,b:84.90,c:'var(--mg)',v:'84.90'},{lab:'四项时间指标',a:84.90,b:84.90+CT,c:'var(--ok)',v:sgn(CT)},{lab:'AQ + IQ + ½DD',a:84.90+CT,b:84.52,c:'var(--risk)',v:sgn(REST)},{lab:'完整 RMD',a:lo,b:84.52,c:'var(--rmd)',v:'84.52'}];
+  const cw=(R-L)/cols.length,bw=46;
+  cols.forEach((c,i)=>{
+    const x=L+i*cw+cw/2-bw/2,y1=Y(Math.max(c.a,c.b)),y2=Y(Math.min(c.a,c.b));
+    el('rect',{x,y:y1,width:bw,height:Math.max(1,y2-y1),rx:3,style:`fill:${c.c}`},svg);
+    el('text',{x:x+bw/2,y:y1-6,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink)'},svg,c.v);
+    el('text',{x:x+bw/2,y:B+18,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink2)'},svg,c.lab);
+    if(i<cols.length-1){const nx=L+(i+1)*cw+cw/2-bw/2;el('line',{x1:x+bw,x2:nx,y1:Y(c.b),y2:Y(c.b),style:'stroke:var(--axis);stroke-width:1'},svg);}
+  });
+  el('line',{x1:L,x2:R,y1:B,y2:B,style:'stroke:var(--axis);stroke-width:1'},svg);
+  const dd=NEED*p/0.5,aqiq=NEED*(1-p);
+  ro($('#wfRO'),[
+    {k:'四项时间指标的归一化增量合计',v:'+'+tsum.toFixed(2)},
+    {k:'其余三项必须贡献（归一化分）',v:NEED.toFixed(2),c:'warn'},
+    {k:'动态程度 DD 变化（百分点）',v:Math.abs(dd)<0.05?'0.0':'−'+Math.abs(dd).toFixed(1),c:Math.abs(dd)>=0.05?'warn':''},
+    {k:'AQ + IQ 合计变化（百分点）',v:Math.abs(aqiq)<0.05?'0.0':'−'+Math.abs(aqiq).toFixed(1),c:Math.abs(aqiq)>=0.05?'warn':''}
+  ]);
+}
+$('#wfP').addEventListener('input',e=>{const p=+e.target.value;$('#wfOut').textContent=Math.round(p*100)+'%';wfRender(p);});
+wfRender(1);
+
+/* =====================================================================
+   11 · doubts filter
+   ===================================================================== */
+segBind($('#dbFilter'),v=>{$$('#doubts details').forEach(d=>{d.hidden=!(v==='all'||d.classList.contains(v));});});
+$('#dbOpen').addEventListener('click',()=>{const ds=$$('#doubts details').filter(d=>!d.hidden);const anyClosed=ds.some(d=>!d.open);ds.forEach(d=>d.open=anyClosed);});
+
+})();
+</script>
+</body>
+</html>

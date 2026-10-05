@@ -1,0 +1,1615 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DyMD 精读</title>
+<meta name="description" content="DyMD（arXiv 2609.31349）精读：DMD 为何让机器人视频“定住”、教师转向先验与亲和度采样、critic 重加权，逐表复算、矢量图重建与存疑清单。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=Noto+Serif+SC:wght@600;700&family=STIX+Two+Text:ital@0;1&display=swap">
+<style>
+/* ============================================================
+   DyMD 精读 — tokens（深色优先：实验台；浅色：实验记录本）
+   角色色：tch  = 教师 PF-Wan 14B（琥珀）
+           stu  = 学生/生成器（蓝）
+           cri  = critic / fake score（紫）
+           dy   = DyMD 新增部分（青绿）
+           base = Base DMD（灰）   fun = 未蒸馏 1.3B（石板蓝）
+           risk = 存疑·高（红）    med = 存疑·中（黄）
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0f1216; --surf:#151a20; --surf2:#1b2129; --surf3:#242c36;
+  --rule:#26303b; --rule2:#3a4654;
+  --ink:#e6ebf0; --ink2:#a9b3be; --ink3:#7d8894;
+  --tch:#e0a33a; --tch-ink:#f2c46e; --tch-soft:rgba(224,163,58,.15);
+  --stu:#4f93ea; --stu-ink:#8ab9f5; --stu-soft:rgba(79,147,234,.15);
+  --cri:#a184e6; --cri-ink:#c7b3f5; --cri-soft:rgba(161,132,230,.15);
+  --dy:#2fb99c;  --dy-ink:#6fdcc2;  --dy-soft:rgba(47,185,156,.15);
+  --base:#7d8894; --base-soft:rgba(125,136,148,.18);
+  --fun:#8a9bc4; --fun-soft:rgba(138,155,196,.16);
+  --risk:#e5544c; --risk-ink:#f68a83; --risk-soft:rgba(229,84,76,.15);
+  --med:#d4b144; --med-ink:#ecd07a; --med-soft:rgba(212,177,68,.15);
+  --grid:#1f262f; --axis:#3b4654;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 32px rgba(0,0,0,.32);
+  --f-head:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --f-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --f-math:"STIX Two Text","Times New Roman",Georgia,serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#eef1f4; --surf:#ffffff; --surf2:#e9edf1; --surf3:#dde3e9;
+    --rule:#d6dce3; --rule2:#b7c0cb;
+    --ink:#131922; --ink2:#3f4955; --ink3:#66717d;
+    --tch:#b7790f; --tch-ink:#8a5a06; --tch-soft:rgba(183,121,15,.11);
+    --stu:#1f63c6; --stu-ink:#174f9f; --stu-soft:rgba(31,99,198,.10);
+    --cri:#6b4fc4; --cri-ink:#553ba6; --cri-soft:rgba(107,79,196,.10);
+    --dy:#11866e; --dy-ink:#0b6a57; --dy-soft:rgba(17,134,110,.10);
+    --base:#8a949f; --base-soft:rgba(138,148,159,.16);
+    --fun:#5a6d9c; --fun-soft:rgba(90,109,156,.12);
+    --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+    --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+    --grid:#e4e9ee; --axis:#b7c0cb;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#eef1f4; --surf:#ffffff; --surf2:#e9edf1; --surf3:#dde3e9;
+  --rule:#d6dce3; --rule2:#b7c0cb;
+  --ink:#131922; --ink2:#3f4955; --ink3:#66717d;
+  --tch:#b7790f; --tch-ink:#8a5a06; --tch-soft:rgba(183,121,15,.11);
+  --stu:#1f63c6; --stu-ink:#174f9f; --stu-soft:rgba(31,99,198,.10);
+  --cri:#6b4fc4; --cri-ink:#553ba6; --cri-soft:rgba(107,79,196,.10);
+  --dy:#11866e; --dy-ink:#0b6a57; --dy-soft:rgba(17,134,110,.10);
+  --base:#8a949f; --base-soft:rgba(138,148,159,.16);
+  --fun:#5a6d9c; --fun-soft:rgba(90,109,156,.12);
+  --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+  --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+  --grid:#e4e9ee; --axis:#b7c0cb;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.72}
+a{color:var(--stu-ink);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:2px solid var(--stu);outline-offset:2px;border-radius:4px}
+b,strong{font-weight:600;color:var(--ink)}
+sub,sup{font-size:.72em;line-height:0}
+.tnum{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono);font-size:.92em}
+.mv{font-family:var(--f-math);font-style:italic;font-size:1.06em;white-space:nowrap}
+.dim{color:var(--ink3)}
+.wrap{max-width:1080px;margin:0 auto;padding-inline:20px;padding-block:28px 96px}
+@media (max-width:520px){ .wrap{padding-inline:16px} }
+
+/* ---------- hero: 标本卡 ---------- */
+.hero{padding-block:8px 28px;border-bottom:1px solid var(--rule);display:grid;gap:18px}
+.slate{border:1px solid var(--rule2);border-radius:10px;overflow:hidden;background:var(--surf);box-shadow:var(--shadow)}
+.slate .noise{height:18px;position:relative;background:linear-gradient(90deg,var(--stu) 0%,color-mix(in srgb,var(--stu) 55%,var(--base)) 55%,var(--base) 88%,var(--ink3) 100%)}
+.slate .noise::after{content:"";position:absolute;inset:0;opacity:.55;background:
+  repeating-linear-gradient(90deg,transparent 0 2px,rgba(0,0,0,.18) 2px 3px),
+  linear-gradient(90deg,transparent 0%,transparent 55%,rgba(255,255,255,.25) 100%)}
+.slate .noise span{position:absolute;top:0;font-family:var(--f-mono);font-size:10.5px;line-height:18px;color:#fff;padding:0 8px;z-index:1;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+.slate .noise span.r{right:0}
+.slate dl{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+.slate dl div{padding:10px 14px;border-right:1px solid var(--rule);border-top:1px solid var(--rule);min-width:0}
+.slate dt{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;color:var(--ink3);text-transform:uppercase}
+.slate dd{margin:2px 0 0;font-size:13.5px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.slate dd .no{color:var(--risk-ink);font-weight:600}
+.slate dd .ok{color:var(--dy-ink);font-weight:600}
+h1{font-family:var(--f-head);font-weight:700;font-size:clamp(34px,5.4vw,54px);line-height:1.12;margin:6px 0 0;letter-spacing:.01em;text-wrap:balance}
+h1 .soft{color:var(--ink3);font-weight:600}
+.sub{font-size:18px;line-height:1.7;color:var(--ink2);max-width:62em;margin:0}
+.thesis{max-width:62em;margin:0;padding:14px 18px;border-left:3px solid var(--dy);background:var(--dy-soft);border-radius:0 8px 8px 0;font-size:15.5px}
+.thesis ol{margin:6px 0 0;padding-left:1.4em}
+.thesis li{margin:3px 0}
+.statstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+.statstrip div{background:var(--surf);padding:12px 14px;display:grid;gap:2px;align-content:start}
+.statstrip b{font-family:var(--f-mono);font-weight:500;font-size:18px;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.statstrip span{font-size:12.5px;line-height:1.45;color:var(--ink3)}
+
+/* ---------- TOC ---------- */
+nav.toc{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--rule);margin-inline:-20px;padding:8px 20px;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;align-items:center}
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{flex:none;font-size:13px;color:var(--ink2);text-decoration:none;padding:5px 10px;border-radius:999px;white-space:nowrap}
+nav.toc a .n{font-family:var(--f-mono);font-size:11px;color:var(--ink3);margin-right:4px}
+nav.toc a:hover,nav.toc a.on{background:var(--surf3);color:var(--ink)}
+nav.toc .sp{flex:1 0 8px}
+nav.toc button.theme{flex:none;font:inherit;font-size:12px;border:1px solid var(--rule2);background:var(--surf2);color:var(--ink2);border-radius:999px;padding:4px 10px;cursor:pointer}
+@media (max-width:520px){ nav.toc{margin-inline:-16px;padding-inline:16px} }
+
+/* ---------- sections ---------- */
+section{padding-block:44px 8px;scroll-margin-top:56px}
+h2{font-family:var(--f-head);font-weight:700;font-size:clamp(24px,3.2vw,31px);line-height:1.3;margin:0 0 6px;text-wrap:balance;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+h2 .no{font-family:var(--f-mono);font-weight:500;font-size:.6em;color:var(--ink3);letter-spacing:.04em}
+h3{font-family:var(--f-head);font-weight:600;font-size:20px;line-height:1.4;margin:32px 0 8px;text-wrap:balance}
+h4{font-size:14px;font-weight:600;margin:0 0 6px;letter-spacing:.02em}
+p{margin:0 0 14px}
+.lede{color:var(--ink2);font-size:16.5px;max-width:60em}
+.prose{max-width:46em}
+ul.tight,ol.tight{margin:0 0 14px;padding-left:1.3em}
+ul.tight li,ol.tight li{margin:4px 0}
+
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:18px 0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:18px 0}
+.card{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;min-width:0}
+.card p:last-child{margin-bottom:0}
+.card h4{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);font-weight:500}
+.card.tch{border-top:3px solid var(--tch)} .card.cri{border-top:3px solid var(--cri)} .card.dy{border-top:3px solid var(--dy)} .card.stu{border-top:3px solid var(--stu)} .card.risk{border-top:3px solid var(--risk)}
+
+.tag{display:inline-block;font-size:12px;line-height:1.5;padding:0 7px;border-radius:5px;font-weight:600;white-space:nowrap}
+.tag.tch{background:var(--tch-soft);color:var(--tch-ink)}
+.tag.stu{background:var(--stu-soft);color:var(--stu-ink)}
+.tag.cri{background:var(--cri-soft);color:var(--cri-ink)}
+.tag.dy{background:var(--dy-soft);color:var(--dy-ink)}
+.tag.risk{background:var(--risk-soft);color:var(--risk-ink)}
+.tag.plain{background:var(--surf3);color:var(--ink2)}
+
+.note{border:1px solid var(--rule2);background:var(--surf);border-radius:10px;padding:14px 16px;margin:16px 0;font-size:15px}
+.note > .hd{font-family:var(--f-mono);font-weight:500;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);display:block;margin-bottom:4px}
+.note.mine{border-color:color-mix(in srgb,var(--dy) 45%,var(--rule2))}
+.note.mine > .hd{color:var(--dy-ink)}
+.note.warn{border-color:color-mix(in srgb,var(--risk) 50%,var(--rule2));background:color-mix(in srgb,var(--risk-soft) 55%,var(--surf))}
+.note.warn > .hd{color:var(--risk-ink)}
+.note.med{border-color:color-mix(in srgb,var(--med) 50%,var(--rule2));background:color-mix(in srgb,var(--med-soft) 50%,var(--surf))}
+.note.med > .hd{color:var(--med-ink)}
+.note p:last-child,.note ul:last-child{margin-bottom:0}
+
+/* ---------- figures ---------- */
+.fig{margin:22px 0;background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:16px 18px 14px;min-width:0}
+.fig .ttl{font-weight:600;font-size:15px;margin-bottom:2px}
+.fig .sub2{font-size:13px;color:var(--ink3);margin-bottom:10px}
+.fig .cap{font-size:13.5px;color:var(--ink2);margin-top:10px;line-height:1.65}
+.svgbox{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.svgbox svg{display:block;width:100%;height:auto;min-width:720px}
+.svgbox.narrow svg{min-width:520px}
+.chart svg{display:block;width:100%;height:auto}
+.chart.wide{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.chart.wide svg{min-width:640px}
+.grid2x2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:14px;margin:18px 0}
+svg text{font-family:var(--f-body)}
+svg .lbl{font-size:13px;fill:var(--ink)}
+svg .sm{font-size:11.5px;fill:var(--ink3)}
+svg .xs{font-size:10.5px;fill:var(--ink3)}
+svg .mono{font-family:var(--f-mono);font-size:11px;fill:var(--ink2)}
+svg .scr{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;fill:var(--ink3)}
+svg .box{fill:var(--surf2);stroke:var(--rule2)}
+svg .edge{stroke:var(--ink3);stroke-width:1.5;fill:none}
+svg .gridl{stroke:var(--grid);stroke-width:1}
+svg .axl{stroke:var(--axis);stroke-width:1}
+
+/* ---------- controls ---------- */
+.ctrl{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin:4px 0 12px}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--rule2);border-radius:8px;overflow:hidden;background:var(--surf2)}
+.seg button{font:inherit;font-size:13px;border:0;background:transparent;color:var(--ink2);padding:6px 12px;cursor:pointer;border-right:1px solid var(--rule2)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.seg button:hover:not([aria-pressed="true"]){background:var(--surf3);color:var(--ink)}
+.ctrl label{font-size:13px;color:var(--ink2);display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ctrl label output{font-family:var(--f-mono);font-size:12.5px;color:var(--ink);min-width:3.6em}
+input[type=range]{accent-color:var(--dy);width:170px;max-width:100%}
+.readout{font-family:var(--f-mono);font-size:13px;color:var(--ink2);line-height:1.7}
+.readout b{color:var(--ink);font-weight:500}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:10px 0}
+.kpi{background:var(--surf2);border:1px solid var(--rule);border-radius:8px;padding:8px 10px}
+.kpi .k{font-size:11.5px;color:var(--ink3);line-height:1.35}
+.kpi .v{font-family:var(--f-mono);font-size:17px;color:var(--ink);font-variant-numeric:tabular-nums}
+.kpi.dy .v{color:var(--dy-ink)} .kpi.tch .v{color:var(--tch-ink)} .kpi.base .v{color:var(--ink2)} .kpi.risk .v{color:var(--risk-ink)} .kpi.cri .v{color:var(--cri-ink)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--ink2);margin:6px 0}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.legend i.ln{height:3px;vertical-align:3px;border-radius:0}
+.legend i.dash{height:0;border-top:2px dashed currentColor;vertical-align:4px;background:none!important}
+
+/* ---------- tables ---------- */
+.tbl{overflow-x:auto;margin:14px 0;border:1px solid var(--rule);border-radius:10px;background:var(--surf)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--rule);white-space:nowrap;font-variant-numeric:tabular-nums}
+th{font-weight:600;color:var(--ink2);font-size:12.5px;background:var(--surf2)}
+td:first-child,th:first-child{text-align:left}
+tr:last-child td{border-bottom:0}
+td.num{font-family:var(--f-mono);font-size:12.5px}
+tr.grp td{background:var(--surf2);color:var(--ink3);font-size:12px;text-align:left;font-style:italic}
+td.best{color:var(--dy-ink);font-weight:600}
+td.lose{color:var(--risk-ink)}
+td.warnc{color:var(--med-ink)}
+tr.hl td{background:color-mix(in srgb,var(--dy-soft) 60%,transparent)}
+td.wr{white-space:normal;min-width:14em;text-align:left;line-height:1.6}
+
+/* html bars */
+.bars{display:grid;gap:5px;margin:6px 0 4px}
+.brow{display:grid;grid-template-columns:minmax(7.5em,12em) 1fr 5.4em;gap:10px;align-items:center;font-size:13px}
+.brow .lab{color:var(--ink2);text-align:right;line-height:1.3;overflow-wrap:anywhere}
+.brow .trk{position:relative;height:18px;border-radius:3px;background:linear-gradient(90deg,var(--grid) 1px,transparent 1px) 0 0/10% 100%, var(--surf2)}
+.brow .bar{position:absolute;left:0;top:3px;bottom:3px;border-radius:2px}
+.brow .val{font-family:var(--f-mono);font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--ink)}
+.brow.sep{margin-top:6px;padding-top:6px;border-top:1px dashed var(--rule2)}
+.c-tch{background:var(--tch)} .c-stu{background:var(--stu)} .c-cri{background:var(--cri)} .c-dy{background:var(--dy)} .c-base{background:var(--base)} .c-fun{background:var(--fun)} .c-risk{background:var(--risk)}
+@media (max-width:560px){ .brow{grid-template-columns:6.4em 1fr 4.4em;gap:7px;font-size:12px} }
+
+/* formulas */
+.eq{font-family:var(--f-math);font-size:18px;line-height:1.8;background:var(--surf);border:1px solid var(--rule);border-radius:8px;padding:10px 16px;margin:10px 0;overflow-x:auto;white-space:nowrap}
+.eq .no{float:right;font-family:var(--f-mono);font-size:12px;color:var(--ink3);font-style:normal;margin-left:16px}
+.eq i{font-style:italic}
+.eq .c-t{color:var(--tch-ink)} .eq .c-c{color:var(--cri-ink)} .eq .c-d{color:var(--dy-ink)} .eq .c-s{color:var(--stu-ink)}
+.gloss{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:14px;margin:6px 0 14px}
+.gloss dt{font-family:var(--f-math);font-style:italic;color:var(--ink);white-space:nowrap}
+.gloss dd{margin:0;color:var(--ink2)}
+
+/* ---------- doubts ---------- */
+.dfilter{margin:8px 0 14px}
+details.doubt{min-width:0;border:1px solid var(--rule);border-left-width:4px;border-radius:8px;background:var(--surf);margin:8px 0}
+details.doubt.h{border-left-color:var(--risk)}
+details.doubt.m{border-left-color:var(--med)}
+details.doubt.l{border-left-color:var(--rule2)}
+details.doubt summary{cursor:pointer;list-style:none;padding:11px 14px;display:flex;gap:10px;align-items:baseline}
+details.doubt summary::-webkit-details-marker{display:none}
+details.doubt summary .sev{flex:none;font-size:11.5px;font-weight:600;padding:0 7px;border-radius:4px}
+details.doubt summary .idx{flex:none;font-family:var(--f-mono);font-size:12px;color:var(--ink3)}
+details.doubt.h .sev{background:var(--risk-soft);color:var(--risk-ink)}
+details.doubt.m .sev{background:var(--med-soft);color:var(--med-ink)}
+details.doubt.l .sev{background:var(--surf3);color:var(--ink2)}
+details.doubt summary .t{font-weight:600;line-height:1.5;flex:1;min-width:0;overflow-wrap:anywhere}
+details.doubt summary::after{content:"+";margin-left:auto;font-family:var(--f-mono);color:var(--ink3)}
+details.doubt[open] summary::after{content:"−"}
+details.doubt .body{padding:0 16px 12px 16px;font-size:14.5px;color:var(--ink2)}
+details.doubt .body b{color:var(--ink)}
+details.doubt .ev{font-size:12.5px;color:var(--ink3);margin:0}
+
+.checks{display:grid;gap:4px;font-size:14px;margin:8px 0 14px;padding:0;list-style:none}
+.checks li{position:relative;padding-left:1.6em}
+.checks li::before{content:"✓";position:absolute;left:0;top:0;color:var(--dy-ink);font-weight:700}
+.checks li.x::before{content:"≈";color:var(--med-ink)}
+
+/* pipeline toggles */
+#pipe .dyonly{transition:opacity .2s}
+#pipe[data-mode="base"] .dyonly{opacity:.13}
+#pipe[data-mode="base"] .baseonly{opacity:1}
+#pipe .baseonly{opacity:0;transition:opacity .2s}
+
+/* vector drawing widget */
+.vecbox{display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:16px;align-items:start}
+.vecbox > *{min-width:0}
+#affVec svg{max-width:320px;margin:0 auto}
+@media (max-width:700px){ .vecbox{grid-template-columns:1fr} }
+
+/* stacked share bars */
+.share{display:grid;gap:8px;margin:10px 0}
+.share .row{display:grid;grid-template-columns:minmax(8em,12em) 1fr 4.6em;gap:10px;align-items:center;font-size:13px}
+.share .row .lab{color:var(--ink2);text-align:right;line-height:1.3}
+.share .row .st{display:flex;height:20px;border-radius:4px;overflow:hidden;border:1px solid var(--rule2)}
+.share .row .st div{height:100%}
+.share .row .v{font-family:var(--f-mono);font-size:12.5px}
+@media (max-width:560px){ .share .row{grid-template-columns:6.5em 1fr 3.8em;font-size:12px} }
+
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--rule);font-size:13px;color:var(--ink3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="slate" aria-label="论文信息">
+    <div class="noise" aria-hidden="true"><span>σ = 0 · 干净</span><span class="r">σ → 1 · 纯噪声</span></div>
+    <dl>
+      <div><dt>Paper</dt><dd>DyMD：在少步视频世界模型的分布匹配蒸馏中保住交互动态</dd></div>
+      <div><dt>arXiv</dt><dd><a href="https://arxiv.org/abs/2609.31349">2609.31349</a> v1 · cs.CV · <span class="tnum">2026-09-25</span></dd></div>
+      <div><dt>Unit</dt><dd>北京航空航天大学；京东未来学院（JD Future Academy）。通讯作者 Linjiang Huang，项目负责人 Jie Huang</dd></div>
+      <div><dt>Teacher → Student</dt><dd>PF-Wan 14B（80 NFE）→ Wan2.1-Fun-1.3B-InP，4 NFE；图像+文本 → 81 帧 @16 fps</dd></div>
+      <div><dt>Data</dt><dd>RoVid-X 的 2,824,039 段 → 筛到 32,897 段；训练 2,500 步 × batch 32</dd></div>
+      <div><dt>Status</dt><dd><span class="no">论文没有给代码或权重链接</span>（2026-09-28 查）。教师 PF-Wan 的权重已在 HF 公开（<a href="https://huggingface.co/DAGroup-PKU/PF_Wan">DAGroup-PKU/PF_Wan</a>）</dd></div>
+    </dl>
+  </div>
+
+  <h1>DyMD <span class="soft">精读</span></h1>
+  <p class="sub">这是一篇少步蒸馏论文，领域是机器人操作视频。PF-Wan 是 14B 的"首帧 + 指令 → 5 秒视频"模型，DyMD 把它蒸成只用 4 步去噪的 1.3B 学生。作者先观察到：用标准 DMD（分布匹配蒸馏）蒸出来的学生<b>画面清楚，但不怎么动</b>，机械臂比划几下，箱子没被抬起来。DyMD 在训练时改了两处：<b>① 重加噪的时间步怎么采</b>，更多地放到极高噪声段，比例按每个样本"动得对不对"来调；<b>② critic（fake score）的损失按"预测拟合难度"重新加权</b>。推理时不加任何模块。</p>
+  <div class="thesis">
+    <b>我的判断。</b>主结果可信，也有用：同样 4 步，R-Bench 任务遵循度 TAC 从 34.6 升到 44.2。但"为什么有效"的说法要打折：
+    <ol>
+      <li><b>+9.6 分里，单独一个 Shift-25 对照（把 flow shift 从 5 调到 25）就拿回了 +5.4</b>，这是现成的旋钮。教师先验又比 Shift-25 多出 +2.5，可这组对照只在 σ&gt;0.5 上配平了采样质量。我从论文的矢量图里抽出 Fig.5 的原始数据，重建了教师先验：σ&gt;0.99 的采样占比是 43%，Shift-25 只有 18%，相当于 shift≈90。</li>
+      <li><b>组件二（critic 重加权）在组件一之上只多了 +0.7</b>，落在评测噪声带内。它的动机也有两处站不住。第一，高噪声下 FM 损失主要是<b>不可约误差</b>，完美 critic 同样会让损失和运动正相关。第二，按 <span class="mv">x</span><sub>0</sub> 加权会<b>改变 critic 的最优解</b>，在理想极限下反而会压低运动。</li>
+      <li>论文的核心主张是"恢复运动"，却<b>没有报告 R-Bench 自带的运动幅度指标 MAS</b>。它用来证明"画质持平"的 Quality 指标本身偏爱静止视频：Base DMD 的 Quality 甚至高于教师。</li>
+      <li>蒸出来的 1.3B 学生，TAC <b>仍低于蒸馏前的 1.3B 初始化</b>（44.2 vs 47.3），离教师的 75.3 也还很远。</li>
+    </ol>
+  </div>
+  <div class="statstrip">
+    <div><b>14B → 1.3B</b><span>教师 80 NFE → 学生 4 NFE<br>（NFE 计入 CFG 两支）</span></div>
+    <div><b>34.6 → 44.2</b><span>R-Bench TAC（%）<br>Base DMD → DyMD；教师 75.3</span></div>
+    <div><b>74.4 → 79.5</b><span>PAI-Bench-G Domain<br>Quality 都是 78.1</span></div>
+    <div><b>16% → 34%</b><span>WorldArena 两任务平均成功率<br>按铃 31→66 · 调瓶 1→2</span></div>
+    <div><b>+5.4 · +2.5 · +1.0 · +0.7</b><span>TAC 链式差值：Shift-25 · 先验形状<br>· 亲和度调节 · critic 重加权（§6.4）</span></div>
+    <div><b>43% vs 18%</b><span>σ&gt;0.99 的采样占比<br>教师先验（重建）vs Shift-25</span></div>
+  </div>
+</header>
+
+<nav class="toc" aria-label="目录">
+  <a href="#s1"><span class="n">§1</span>一页读懂</a>
+  <a href="#s2"><span class="n">§2</span>DMD 人话版</a>
+  <a href="#s3"><span class="n">§3</span>病因</a>
+  <a href="#s4"><span class="n">§4</span>组件一：怎么采 t</a>
+  <a href="#s5"><span class="n">§5</span>组件二：critic 加权</a>
+  <a href="#s6"><span class="n">§6</span>实验重排</a>
+  <a href="#s7"><span class="n">§7</span>存疑</a>
+  <a href="#s8"><span class="n">§8</span>公道话 · 启示</a>
+  <span class="sp"></span>
+  <button class="theme" id="themeBtn" type="button" aria-label="切换深浅色">◐ 主题</button>
+</nav>
+
+<!-- ============================================ §1 -->
+<section id="s1">
+  <h2><span class="no">§1</span>一页读懂</h2>
+  <p class="lede">先照论文自己的逻辑走一遍。我的判断放在 §4 以后。</p>
+
+  <div class="grid3">
+    <div class="card stu">
+      <h4>Problem · 问题</h4>
+      <p>视频世界模型给机器人"想象未来"，需要多步采样，太慢。DMD 能把它压成 4 步，但作者发现，蒸出来的学生会<b>丢掉机器人和物体之间的交互运动</b>：画面锐利，动作却没做完。R-Bench 的 TAC 从初始化的 47.3 跌到 34.6。</p>
+    </div>
+    <div class="card tch">
+      <h4>Diagnosis · 病因</h4>
+      <p><b>(i) 教师"锁死"：</b>学生样本加噪太轻时，教师对"原视频长什么样"的猜测仍然贴着这个静止样本，给不出"应该动起来"的信号（命题 2）。<b>(ii) critic 跟不上：</b>在固定噪声下，运动越大的样本，critic 的 FM 损失越高（Fig.3），作者把它解读为"更难拟合"。</p>
+    </div>
+    <div class="card dy">
+      <h4>Fix · 两个训练期组件</h4>
+      <p><b>(i) 亲和度调节的重加噪采样：</b>用教师速度的"转向率"离线造一个偏向高噪声的时间步先验 <span class="mv">ν</span><sub>κ</sub>。再用 V-JEPA 特征比较学生和真实视频的运动，比较结果 <span class="mv">A</span><sub>i</sub> 决定这个样本在先验和基础分布之间怎么混。<b>(ii) 动态引导的 critic 重加权：</b>用一个小 MLP 从潜空间运动统计预测"拟合难度"，按 <span class="mv">e</span><sup>βr̂</sup> 给 critic 的 FM 损失加权。</p>
+    </div>
+  </div>
+
+  <figure class="fig" id="pipeFig">
+    <div class="ttl">DyMD 在 DMD 主回路上加了什么（重画 Fig.4）</div>
+    <div class="sub2">蓝 = 学生／生成器，琥珀 = 冻结教师，紫 = critic，青绿 = DyMD 新增。切到 Base DMD，可以看哪些部分是新加的。</div>
+    <div class="ctrl"><div class="seg" role="group" aria-label="模式">
+      <button type="button" data-pipe="dymd" aria-pressed="true">DyMD</button>
+      <button type="button" data-pipe="base" aria-pressed="false">Base DMD</button>
+    </div></div>
+    <div class="svgbox">
+      <svg id="pipe" data-mode="dymd" viewBox="0 0 1000 470" role="img" aria-label="DyMD 流程：上排由时间亲和度决定时间步采样分布，中排是 DMD 主回路，下排由难度预测器给 critic 损失加权。">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink3)"/></marker>
+          <marker id="arD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--dy)"/></marker>
+        </defs>
+        <!-- lane labels -->
+        <text class="scr" x="16" y="22">① 重加噪采样 · §4（DyMD 新增）</text>
+        <text class="scr" x="16" y="176">DMD 主回路 · §2</text>
+        <text class="scr" x="16" y="340">② critic 重加权 · §5（DyMD 新增）</text>
+
+        <!-- Row B: DMD core -->
+        <rect x="16" y="200" width="118" height="60" rx="9" class="box"/>
+        <text class="lbl" x="75" y="226" text-anchor="middle" font-weight="600">ξ + 首帧 + 文本</text>
+        <text class="sm" x="75" y="245" text-anchor="middle">噪声与条件</text>
+        <rect x="156" y="200" width="132" height="60" rx="9" fill="var(--stu-soft)" stroke="var(--stu)"/>
+        <text class="lbl" x="222" y="226" text-anchor="middle" font-weight="600">生成器 G<tspan dy="3" font-size="0.75em">θ</tspan></text>
+        <text class="sm" x="222" y="245" text-anchor="middle">1.3B · 4 步去噪</text>
+        <rect x="310" y="200" width="100" height="60" rx="9" class="box"/>
+        <text class="lbl" x="360" y="226" text-anchor="middle" font-weight="600">rollout x₀</text>
+        <text class="sm" x="360" y="245" text-anchor="middle">21 个潜块</text>
+        <rect x="432" y="200" width="156" height="60" rx="9" class="box"/>
+        <text class="lbl" x="510" y="226" text-anchor="middle" font-weight="600">取 t，重加噪</text>
+        <text class="sm" x="510" y="245" text-anchor="middle">x_t = (1−σ)x₀ + σε</text>
+        <text class="sm baseonly" x="510" y="280" text-anchor="middle" style="fill:var(--ink2)">t ~ ν_base（shift 5，对所有样本相同）</text>
+        <text class="sm dyonly" x="510" y="280" text-anchor="middle" style="fill:var(--dy-ink)">t ~ ν_i（每个样本不同）</text>
+        <rect x="612" y="174" width="170" height="50" rx="9" fill="var(--tch-soft)" stroke="var(--tch)"/>
+        <text class="lbl" x="697" y="195" text-anchor="middle" font-weight="600">教师 s_T</text>
+        <text class="sm" x="697" y="213" text-anchor="middle">PF-Wan 14B · CFG 5 · 冻结</text>
+        <rect x="612" y="238" width="170" height="50" rx="9" fill="var(--cri-soft)" stroke="var(--cri)"/>
+        <text class="lbl" x="697" y="259" text-anchor="middle" font-weight="600">critic s_φ</text>
+        <text class="sm" x="697" y="277" text-anchor="middle">1.3B · 在线流匹配</text>
+        <rect x="806" y="200" width="178" height="60" rx="9" fill="var(--stu-soft)" stroke="var(--stu)"/>
+        <text class="lbl" x="895" y="226" text-anchor="middle" font-weight="600">更新 G<tspan dy="3" font-size="0.75em">θ</tspan></text>
+        <text class="sm" x="895" y="245" text-anchor="middle">沿 (s_φ − s_T) 的反方向</text>
+        <line x1="134" y1="230" x2="152" y2="230" class="edge" marker-end="url(#ar)"/>
+        <line x1="288" y1="230" x2="306" y2="230" class="edge" marker-end="url(#ar)"/>
+        <line x1="410" y1="230" x2="428" y2="230" class="edge" marker-end="url(#ar)"/>
+        <path d="M588 220 L608 202" class="edge" marker-end="url(#ar)"/>
+        <path d="M588 240 L608 258" class="edge" marker-end="url(#ar)"/>
+        <path d="M782 202 L802 220" class="edge" marker-end="url(#ar)"/>
+        <path d="M782 260 L802 242" class="edge" marker-end="url(#ar)"/>
+
+        <!-- Row A: sampling (DyMD only) -->
+        <g class="dyonly">
+          <rect x="156" y="40" width="132" height="56" rx="9" fill="var(--dy-soft)" stroke="var(--dy)"/>
+          <text class="lbl" x="222" y="64" text-anchor="middle" font-weight="600">参考视频 V*</text>
+          <text class="sm" x="222" y="82" text-anchor="middle">真实配对片段</text>
+          <rect x="310" y="40" width="150" height="56" rx="9" fill="var(--dy-soft)" stroke="var(--dy)"/>
+          <text class="lbl" x="385" y="64" text-anchor="middle" font-weight="600">V-JEPA 2.1-L</text>
+          <text class="sm" x="385" y="82" text-anchor="middle">16 帧 → 8 × (3×3) 特征</text>
+          <rect x="482" y="40" width="120" height="56" rx="9" fill="var(--dy-soft)" stroke="var(--dy)"/>
+          <text class="lbl" x="542" y="64" text-anchor="middle" font-weight="600">亲和度 A_i</text>
+          <text class="sm" x="542" y="82" text-anchor="middle">时间差分对齐</text>
+          <rect x="624" y="40" width="150" height="56" rx="9" fill="var(--dy-soft)" stroke="var(--dy)"/>
+          <text class="lbl" x="699" y="64" text-anchor="middle" font-weight="600">先验权重 g_i</text>
+          <text class="sm" x="699" y="82" text-anchor="middle">α / (α + (1−α)A_i)</text>
+          <rect x="796" y="40" width="188" height="56" rx="9" fill="var(--dy-soft)" stroke="var(--dy)"/>
+          <text class="lbl" x="890" y="64" text-anchor="middle" font-weight="600">采样分布 ν_i</text>
+          <text class="sm" x="890" y="82" text-anchor="middle">(1−g_i)·ν_base + g_i·ν_κ</text>
+          <line x1="288" y1="68" x2="306" y2="68" class="edge" marker-end="url(#ar)"/>
+          <line x1="460" y1="68" x2="478" y2="68" class="edge" marker-end="url(#ar)"/>
+          <line x1="602" y1="68" x2="620" y2="68" class="edge" marker-end="url(#ar)"/>
+          <line x1="774" y1="68" x2="792" y2="68" class="edge" marker-end="url(#ar)"/>
+          <path d="M360 198 L360 100" stroke="var(--dy)" stroke-width="1.5" fill="none" stroke-dasharray="4 3" marker-end="url(#arD)"/>
+          <text class="xs" x="366" y="150" style="fill:var(--dy-ink)">解码成 RGB</text>
+          <path d="M890 98 L890 150 L530 150 L530 196" stroke="var(--dy)" stroke-width="1.5" fill="none" marker-end="url(#arD)"/>
+          <text class="xs" x="700" y="144" text-anchor="middle" style="fill:var(--dy-ink)">生成器和 critic 都按自己 rollout 的 ν_i 取 t</text>
+          <text class="xs" x="900" y="118" style="fill:var(--ink3)">ν_κ 离线算好</text>
+          <text class="xs" x="900" y="131" style="fill:var(--ink3)">（Fig.5，§4.2）</text>
+        </g>
+        <text class="sm baseonly" x="570" y="72" text-anchor="middle" style="fill:var(--ink2)">Base DMD：没有这一排，ν ≡ ν_base</text>
+
+        <!-- Row C: critic weighting (DyMD only) -->
+        <g class="dyonly">
+          <rect x="310" y="362" width="100" height="56" rx="9" fill="var(--dy-soft)" stroke="var(--dy)"/>
+          <text class="lbl" x="360" y="386" text-anchor="middle" font-weight="600">sg[x₀]</text>
+          <text class="sm" x="360" y="404" text-anchor="middle">截断梯度</text>
+          <rect x="432" y="362" width="156" height="56" rx="9" fill="var(--dy-soft)" stroke="var(--dy)"/>
+          <text class="lbl" x="510" y="386" text-anchor="middle" font-weight="600">时间描述子 d_i</text>
+          <text class="sm" x="510" y="404" text-anchor="middle">20 维潜空间差分统计</text>
+          <rect x="612" y="362" width="170" height="56" rx="9" fill="var(--dy-soft)" stroke="var(--dy)"/>
+          <text class="lbl" x="697" y="386" text-anchor="middle" font-weight="600">难度预测器 f</text>
+          <text class="sm" x="697" y="404" text-anchor="middle">MLP(d_i, e(t)) → r̂_i</text>
+          <rect x="806" y="362" width="178" height="56" rx="9" fill="var(--dy-soft)" stroke="var(--dy)"/>
+          <text class="lbl" x="895" y="386" text-anchor="middle" font-weight="600">加权 FM 损失</text>
+          <text class="sm" x="895" y="404" text-anchor="middle">w_i = e^{βr̂_i} / 批内均值</text>
+          <path d="M360 262 L360 358" stroke="var(--dy)" stroke-width="1.5" fill="none" stroke-dasharray="4 3" marker-end="url(#arD)"/>
+          <line x1="410" y1="390" x2="428" y2="390" class="edge" marker-end="url(#ar)"/>
+          <line x1="588" y1="390" x2="608" y2="390" class="edge" marker-end="url(#ar)"/>
+          <line x1="782" y1="390" x2="802" y2="390" class="edge" marker-end="url(#ar)"/>
+          <path d="M895 360 L895 318 L740 318 L740 292" stroke="var(--dy)" stroke-width="1.5" fill="none" marker-end="url(#arD)"/>
+          <text class="xs" x="818" y="312" text-anchor="middle" style="fill:var(--dy-ink)">更新 critic</text>
+          <path d="M895 420 L895 446 L697 446 L697 422" stroke="var(--ink3)" stroke-width="1.2" fill="none" stroke-dasharray="3 3" marker-end="url(#ar)"/>
+          <text class="xs" x="796" y="462" text-anchor="middle">目标 r_i = log ℓ_FM − 噪声分箱 EMA 基线（Huber 损失训练 f）</text>
+        </g>
+        <text class="sm baseonly" x="650" y="394" text-anchor="middle" style="fill:var(--ink2)">Base DMD：没有这一排，critic 用等权 FM 损失</text>
+      </svg>
+    </div>
+    <div class="cap">两个组件都只在训练时起作用，推理就是 4 步的 1.3B 学生。代价是训练时多出来的计算：每次更新生成器和 critic，都要把 81 帧解码成 RGB、跑一次 V-JEPA 2.1-L；critic 更新还要多跑一个小 MLP。论文没有报告这部分开销。</div>
+  </figure>
+</section>
+
+<!-- ============================================ §2 -->
+<section id="s2">
+  <h2><span class="no">§2</span>DMD 在做什么：人话版</h2>
+  <p class="lede">这篇论文的两个改动，一个改"在哪个噪声水平上比较"，一个改"critic 怎么学"。所以得先把 DMD 的主回路说清楚。</p>
+
+  <div class="prose">
+    <p><b>一句话：</b>DMD 让学生出一段视频，再请两个"鉴定师"看它。<span class="tag tch">教师</span>冻结的大模型，知道<b>真视频</b>长什么样。<span class="tag cri">critic</span>一个边训边学的小模型，只负责记住<b>学生最近出的视频</b>长什么样。两者的差，就是"学生离真分布还差在哪"。</p>
+    <p>但两个鉴定师都是扩散模型，只会看<b>加过噪的</b>视频。所以每次先把学生的 rollout 加噪到某个水平 σ，再让两者给出"得分"（score，即对数密度的梯度），学生沿两者之差往回改：</p>
+  </div>
+  <div class="eq">∇<sub>θ</sub>L<sub>G</sub> ≈ 𝔼[ (∂x₀<sup>S</sup>/∂θ)<sup>⊤</sup> ( <span class="c-c">s<sub>φ</sub></span> − <span class="c-t">s<sub>T</sub></span> ) ]，　 x<sub>t</sub> = (1−σ<sub>t</sub>)x₀<sup>S</sup> + σ<sub>t</sub>ε<span class="no">(1)</span></div>
+  <div class="eq"><span class="c-c">s<sub>φ</sub></span>(x<sub>t</sub>) = −[x<sub>t</sub> + (1−σ<sub>t</sub>)v<sub>φ</sub>(x<sub>t</sub>)] / σ<sub>t</sub>，　 L<sub>FM</sub> ∝ 𝔼‖v<sub>φ</sub>(x<sub>t</sub>) − (ε − x₀<sup>S</sup>)‖²<span class="no">(2)(3)</span></div>
+  <div class="prose">
+    <p>critic 实际学的是一个速度场 <span class="mv">v</span><sub>φ</sub>，训练方法是标准的流匹配：给它学生的加噪 rollout，让它回归"噪声 − 原视频"。附录 C.1 有一个更好懂的写法（式 19）：</p>
+  </div>
+  <div class="eq"><span class="c-c">s<sub>q</sub></span> − <span class="c-t">s<sub>T</sub></span> = (1−σ<sub>t</sub>)/σ<sub>t</sub>² · ( <span class="c-c">μ<sub>q</sub></span> − <span class="c-t">μ<sub>T</sub></span> )<span class="no">(19)</span></div>
+  <dl class="gloss">
+    <dt>μ_T</dt><dd>教师看到加噪视频 <span class="mv">x</span><sub>t</sub> 后，对"原本的干净视频"的平均猜测（后验均值，Tweedie 公式）。</dd>
+    <dt>μ_q</dt><dd>critic 代表的"学生分布"对同一个 <span class="mv">x</span><sub>t</sub> 的平均猜测。</dd>
+    <dt>梯度</dt><dd>学生被推向 <span class="mv">μ</span><sub>T</sub> − <span class="mv">μ</span><sub>q</sub> 的方向。<b>两个猜测一样，学生就收不到任何信号。</b></dd>
+  </dl>
+  <div class="note mine">
+    <span class="hd">这一节要带走的两件事</span>
+    <ul class="tight">
+      <li><b>噪声水平 σ 决定两个鉴定师能看出什么差别。</b>σ 小，<span class="mv">x</span><sub>t</sub> 几乎就是学生原样，两个猜测都贴着它，能纠正的只是细节。σ 大，<span class="mv">x</span><sub>t</sub> 几乎是纯噪声，两个猜测都回到各自分布的"平均画面"，差异才体现在整体结构和运动上。σ 从哪个分布里采（论文记作 <span class="mv">ν</span>），就是组件一要改的地方。</li>
+      <li><b>critic 必须实时跟上学生。</b>学生一变，critic 学到的"学生分布"就过时了。critic 学得不准，<span class="mv">s</span><sub>φ</sub> 的误差会原样进入学生的梯度。组件二改的是 critic 的损失。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================================ §3 -->
+<section id="s3">
+  <h2><span class="no">§3</span>病因：为什么 DMD 会让视频"定住"</h2>
+  <p class="lede">论文给了两个病因。第一个我认为讲得清楚，而且能量化。第二个的证据有另一种解释，见 §5。</p>
+
+  <h3>3.1 教师侧"锁死"（命题 2）</h3>
+  <div class="prose">
+    <p>最简化的模型：教师只认两种干净视频，一种<b>静止</b> <span class="mv">x</span><sub>s</sub>，一种<b>动了</b> <span class="mv">x</span><sub>m</sub>，两者之差是 <span class="mv">d</span>。学生已经塌缩到静止版本。把它加噪到 σ 后，教师判断"原视频其实是运动版"的对数几率是：</p>
+  </div>
+  <div class="eq">𝔼<sub>ε</sub>[ log p<sub>T</sub>(x<sub>m</sub>|x<sub>t</sub>) / p<sub>T</sub>(x<sub>s</sub>|x<sub>t</sub>) ] = log(π<sub>m</sub>/π<sub>s</sub>) − ½ · SNR<sub>t</sub> · ‖d‖²，　 SNR<sub>t</sub> = (1−σ<sub>t</sub>)²/σ<sub>t</sub>²<span class="no">(20)</span></div>
+  <div class="prose">
+    <p>我按式 (20) 自己推了一遍，没有问题。<b>人话</b>：<span class="mv">x</span><sub>t</sub> 里残留的学生信号越强（SNR 大），或者"动"和"不动"差得越多（‖d‖² 大），教师就越确信原视频是静止的，<span class="mv">μ</span><sub>T</sub> 贴着学生，梯度约等于零。论文没点明一点：<b>视频潜变量的维度极高，‖d‖² 是个大数</b>，所以要 SNR 小到 1/‖d‖² 量级，锁才解得开。你可以在下面拖动看看。</p>
+  </div>
+
+  <figure class="fig" id="lockFig">
+    <div class="ttl">锁死计算器：σ 要多大，教师才肯说"它应该动"</div>
+    <div class="sub2">按 480×640、81 帧估算未来潜块元素数：16 通道 × 20 块 × 60 × 80 = 1,536,000（PF-Wan 推理配置 max_area = 307,200）。‖d‖² = 元素数 × 运动区域占比 × 每个元素的潜变量差²。先验几率取 1:1。</div>
+    <div class="ctrl">
+      <label>运动区域占比 <input type="range" id="lkF" min="0" max="100" value="50"> <output id="lkFo"></output></label>
+      <label>每个元素潜变量差 δ <input type="range" id="lkD" min="5" max="100" value="50"> <output id="lkDo"></output></label>
+      <label>DyMD 的 g <input type="range" id="lkG" min="0" max="100" value="30"> <output id="lkGo"></output></label>
+    </div>
+    <div class="kpis" id="lkKpi"></div>
+    <div class="chart wide" id="lkChart"></div>
+    <div class="legend">
+      <span><i class="ln" style="background:var(--tch)"></i>教师后验里"运动版"的期望概率（纵轴左）</span>
+      <span><i style="background:var(--base-soft);border:1px solid var(--base)"></i>Base DMD 的 t 分布</span>
+      <span><i style="background:var(--med-soft);border:1px solid var(--med)"></i>Shift-25</span>
+      <span><i style="background:var(--dy-soft);border:1px solid var(--dy)"></i>教师先验 ν<sub>κ</sub>（按 Fig.5 重建）</span>
+    </div>
+    <div class="cap">横轴是 −log₁₀(1−σ)：0.9、0.99、0.999 各占一格，方便看高噪声那一端。背景阴影是三种调度把 t 采到各处的概率，按"每格概率"画，面积可以直接比。<b>注意</b>：两点分布的模型会夸大锁死。真实后验是连续的，<span class="mv">μ</span><sub>T</sub> 会逐渐移动，不会突然跳变。但"SNR·‖d‖² 要降到 1 左右才解锁"这个量级判断，放到局部高斯后验上同样成立。</div>
+  </figure>
+
+  <div class="note mine">
+    <span class="hd">我从这里读出的东西</span>
+    <p>在我认为合理的范围里（运动区域占画面 2–20%，δ 取 0.3–1），解锁阈值 σ* 落在 0.98–0.998。Base DMD 用 shift 5，只有约 0.5–8% 的样本落在这么高的噪声上。所以<b>把重加噪往极高噪声段挪</b>，本身就该有大收益。这不需要"转向率"，调大 shift 就能做到。后面 §4.2 和 §6.4 的数据也是这么说的。</p>
+  </div>
+
+  <h3>3.2 critic 侧"跟不上"（Fig.3）</h3>
+  <div class="prose">
+    <p>作者拿 step-1500 的 critic，在 32 个冻结的学生 rollout 上测 FM 损失，发现<b>运动越大（VAE 潜空间的 RMS 差分），损失越高</b>，而且 σ 越大，这个相关越强。下图是从论文矢量图里抽出来的原始点，不是我目测描的。</p>
+  </div>
+  <figure class="fig">
+    <div class="ttl">Fig.3 重绘：左边是 σ=0.97 时的 32 个点，右边是四个噪声水平下的 Spearman ρ</div>
+    <div class="grid2" style="margin:6px 0 0">
+      <div class="chart" id="f3a"></div>
+      <div class="chart" id="f3b"></div>
+    </div>
+    <div class="cap">从 SVG 复算：左图 Spearman ρ = 0.692，和论文一致；右图四点依次是 0.349 / 0.559 / 0.634 / 0.692。论文由此得出"运动大的样本 critic 更难拟合"，并据此设计了组件二。<b>我的疑问</b>：一个完美的 critic 也会画出这两张图，见 §5.2。</div>
+  </figure>
+</section>
+
+<!-- ============================================ §4 -->
+<section id="s4">
+  <h2><span class="no">§4</span>组件一：重加噪的 t 从哪里采</h2>
+  <p class="lede">这个组件分两层：先离线造一个固定的"教师先验"<span class="mv">ν</span><sub>κ</sub>，再在线用亲和度 <span class="mv">A</span><sub>i</sub> 决定每个样本在先验和基础分布之间怎么混。</p>
+
+  <h3>4.1 教师速度的"转向率" κ</h3>
+  <div class="prose">
+    <p>拿冻结的教师 PF-Wan，从纯噪声出发，用官方的 40 步采样器（shift 5，CFG 5）生成 32 条轨迹。每一步教师都会给一个速度 <span class="mv">v̂</span><sub>T</sub>，意思是"往哪个方向去噪"。作者先把这个速度<b>中心化</b>：丢掉首帧所在的块，每个未来块再减去所有未来块的平均。剩下的只是"随时间变化的那部分方向"，可以理解为和运动相关的去噪方向。然后看相邻两步之间，这个方向<b>转了多少角度</b>，再除以两步之间的 Δσ：</p>
+  </div>
+  <div class="eq">u<sub>m</sub>(σ) = C v̂<sub>T</sub> / ‖C v̂<sub>T</sub>‖，　 κ̂<sub>m,k</sub> = arccos( u<sub>m</sub>(σ<sub>k</sub>)<sup>⊤</sup>u<sub>m</sub>(σ<sub>k+1</sub>) ) / |σ<sub>k+1</sub> − σ<sub>k</sub>|<span class="no">(5)(6)</span></div>
+  <div class="prose">
+    <p>转向率小，说明这个噪声段里教师"去哪儿"的主意很稳定。转向率大，说明教师正在<b>改主意</b>，也就是在决定运动的大结构。命题 1 把两者联系起来：</p>
+  </div>
+  <div class="eq">𝔼<sub>m</sub>[ I<sub>m</sub>(σ) ] ≥ C<sub>I</sub> · κ̄(σ)²，　 I<sub>m</sub>(σ)：教师后验沿 σ 的 Fisher 信息<span class="no">(9)</span></div>
+  <div class="grid2">
+    <div class="card dy">
+      <h4>命题 1 说了什么</h4>
+      <p>方向转得快的噪声段，教师对"原视频是什么"的整体判断（后验分布）一定在快速变化。我逐行核对了附录 C.3 的证明（式 23–32）：从 <span class="mv">μ</span> = <span class="mv">x</span> − σ<span class="mv">v</span> 求导，用得分函数恒等式，再用 Cauchy–Schwarz 和 Jensen，<b>推导正确</b>。</p>
+    </div>
+    <div class="card risk">
+      <h4>没说什么</h4>
+      <p>① 它只是个<b>下界</b>，而且只有一个方向：转向大能推出后验变化大，反过来推不出来（方向不变、只有幅度变，后验也可以剧烈变化）。② 它<b>没有推出"采样密度应该 ∝ κ̄²"</b>，这一步是设计选择。③ 命题针对的是精确的条件流，实际统计量来自 CFG=5 的离散轨迹，作者在附录里自己承认了这一点。④ 轨迹是教师<b>从纯噪声出发</b>走出来的，而 DMD 用的是<b>学生样本加噪</b>后的状态，两者不一定落在同一片区域。</p>
+    </div>
+  </div>
+  <div class="eq">h<sub>κ</sub>(t) = ( κ̃(σ<sub>t</sub>) + ϵ<sub>κ</sub> )²，　 ν<sub>κ</sub>(t) = h<sub>κ</sub>(t) / ∫<sub>𝒯</sub> h<sub>κ</sub>(u)du，　 ϵ<sub>κ</sub> = 0.1·median(κ̃)，　 𝒯 = [0.020, 0.999)<span class="no">(10)</span></div>
+
+  <h3>4.2 重建教师先验，并和 shift 调度对比</h3>
+  <div class="prose">
+    <p>论文的 Fig.5 是矢量图，我从 arXiv HTML 版的 SVG 里抽出了 39 个均值点和四分位带。按式 (10) 重建先验：点间线性插值，超出 σ=0.9965 后取常数，ϵ<sub>κ</sub> = 0.1 × 39 个点的中位数 = 0.868。算出 σ&gt;0.5 的质量是 <b>95.73%</b>，论文附录 B.3 报告的是 <b>95.69%</b>，基本吻合。所以下面的数字可以当作对论文实际所用先验的可靠近似。</p>
+  </div>
+  <figure class="fig" id="schedFig">
+    <div class="ttl">教师先验 vs shift 调度：配平了 σ&gt;0.5，没配平极高噪声段</div>
+    <div class="sub2">左边切换视图，右边拖动"自定义 shift"，看它在哪个阈值上追平教师先验。</div>
+    <div class="ctrl">
+      <div class="seg" role="group" aria-label="视图">
+        <button type="button" data-sv="kappa" aria-pressed="true">转向曲线 κ̄(σ)</button>
+        <button type="button" data-sv="dens" aria-pressed="false">采样密度</button>
+        <button type="button" data-sv="cdf" aria-pressed="false">尾部质量 P(σ&gt;x)</button>
+      </div>
+      <label>自定义 shift <input type="range" id="shS" min="0" max="100" value="60"> <output id="shSo"></output></label>
+    </div>
+    <div class="chart wide" id="schedChart"></div>
+    <div class="legend" id="schedLegend"></div>
+    <div class="tbl"><table id="schedTbl"></table></div>
+    <div class="cap">"等效 shift"是指：要让 shift 调度在这个阈值以上的质量追平教师先验，shift 需要多大。σ&gt;0.5 时约 22，接近论文选的 25；σ&gt;0.9 时约 49；σ&gt;0.99 时约 89。<b>Table 3 的对照只配平了第一列。</b>结合 §3.1 的锁死计算器，"教师先验比 Shift-25 多出的 +2.5 TAC"，完全可以只是"更多样本落进 σ&gt;0.99"的效果，跟"转向几何"本身无关。要分清这两种解释，至少需要 shift = 50、100 这两个对照。</div>
+  </figure>
+  <div class="note med">
+    <span class="hd">附带观察：这条曲线有多少是"这个教师"特有的</span>
+    <p>PF-Wan 的骨干来自 Wan2.2-I2V-A14B 的<b>高噪专家</b>。官方配置里，高、低噪专家的切换边界是 <span class="mono">boundary = 0.900</span>。PhysisForcing 把这个专家适配到全部时间步，发布的 PF-Wan 只有一个 28.6 GB 的 <span class="mono">backbone.pth</span>，推理是单骨干，不再切换专家。Fig.5 用黄色标出的"高噪区 σ∈[0.9, 1]"恰好从这个边界开始，曲线在 σ≈0.876 附近还有一个小鼓包。这不能证明什么，但提示转向曲线可能部分反映教师的训练经历，而不是蒸馏问题的普遍规律。作者在 Limitations 里也承认，换个教师要重新测。</p>
+  </div>
+
+  <h3>4.3 时间亲和度：学生"动得对不对"</h3>
+  <div class="prose">
+    <p>先验对所有样本都一样。DyMD 的第二层是：每个学生 rollout 先解码成 RGB，均匀取 16 帧，过 V-JEPA 2.1-L，在 3×3 空间网格内池化，得到 8 个时间块的特征。拿训练集里<b>同一首帧和指令对应的真实视频</b>做同样的处理，然后比较两者在 lag = 1、2、4 上的<b>时间差分</b>，权重分别是 0.2、0.3、0.5：</p>
+  </div>
+  <div class="eq">A<sub>i</sub> = 2[ (δz<sub>i</sub><sup>S</sup>)<sup>⊤</sup>δz<sub>i</sub><sup>⋆</sup> ]<sub>+</sub> / ( ‖δz<sub>i</sub><sup>S</sup>‖² + ‖δz<sub>i</sub><sup>⋆</sup>‖² )，　 g<sub>i</sub> = α / ( α + (1−α)A<sub>i</sub> )，　 ν<sub>i</sub> = (1−g<sub>i</sub>)ν<sub>base</sub> + g<sub>i</sub>ν<sub>κ</sub><span class="no">(12)(13)</span></div>
+  <div class="prose">
+    <p><span class="mv">A</span><sub>i</sub> 是一个 Dice 式的相似度：两段运动完全一样时等于 1，学生不动时等于 0，方向偏了或幅度不对都会让它变小。<span class="mv">g</span><sub>i</sub> 是"这个样本从教师先验里采 t 的概率"，最低是 α = 0.3，也就是 <span class="mv">A</span>=1 时；最高是 1，也就是 <span class="mv">A</span>=0 时。</p>
+  </div>
+  <figure class="fig" id="affFig">
+    <div class="ttl">亲和度 → 混合权重 → 这个样本的 t 落在哪里</div>
+    <div class="sub2">琥珀色箭头是真实视频的运动差分 δz*，长度固定为 1。蓝色箭头是学生的。拖动滑块改变学生运动的幅度和方向。</div>
+    <div class="vecbox">
+      <div class="chart" id="affVec"></div>
+      <div>
+        <div class="ctrl">
+          <label>幅度比 ‖δz<sup>S</sup>‖/‖δz*‖ <input type="range" id="afM" min="0" max="200" value="50"> <output id="afMo"></output></label>
+          <label>夹角 <input type="range" id="afT" min="0" max="180" value="20"> <output id="afTo"></output></label>
+          <label>α（下限） <input type="range" id="afA" min="5" max="100" value="30"> <output id="afAo"></output></label>
+        </div>
+        <div class="kpis" id="afKpi"></div>
+        <div class="chart wide" id="affDens"></div>
+      </div>
+    </div>
+    <div class="cap">几个值得注意的点。幅度只有目标的一半、方向完全对时，<span class="mv">A</span> = 0.8，<span class="mv">g</span> 只有 0.35。只有 <span class="mv">A</span> 很小时，<span class="mv">g</span> 才会明显变大。论文<b>没有报告</b>训练中 <span class="mv">A</span><sub>i</sub> 的分布，所以没法知道 <span class="mv">g</span> 实际在什么范围里变化。另外，目标只有一段真实视频，<b>另一种同样合理的动作</b>（比如先抓左边那个）也会被判成低亲和度。</div>
+  </figure>
+
+  <h3>4.4 为什么用 V-JEPA 而不用 VAE：证据的强度</h3>
+  <div class="prose">
+    <p>作者用 CoTracker3 在 32 对"学生—目标"视频上算了一个点轨迹一致性 <span class="mv">T</span><sub>i</sub> 作参照，比较两种空间里算出的亲和度和它的排序相关。我从 Fig.7a 的矢量点复算：VAE 空间 ρ = 0.162，Kendall 0.117；V-JEPA ρ = 0.374，Kendall 0.246；最差 8 个的召回率分别是 25% 和 50%。和论文完全一致。但 n = 32 时，95% 置信区间很宽：</p>
+  </div>
+  <div class="fig" style="padding-bottom:10px">
+    <div class="bars" id="rhoBars"></div>
+    <div class="cap">V-JEPA 亲和度和轨迹一致性的相关 ρ = 0.374，p≈0.035，只解释约 14% 的排序方差。换句话说，<span class="mv">A</span><sub>i</sub> 作为"交互保真度"的代理<b>是弱信号</b>，而且它只在 [α, 1] 的范围里调节 <span class="mv">g</span>。训练结果上，V-JEPA 比 DINOv2 在 TAC 上高 1.7（43.5 vs 41.8，Table S5），也在单次运行的噪声带内。</div>
+  </div>
+</section>
+
+<!-- ============================================ §5 -->
+<section id="s5">
+  <h2><span class="no">§5</span>组件二：给 critic 的损失加权</h2>
+  <p class="lede">机制本身很简单，问题出在动机和副作用上。这一节是全文我最不认同的部分。</p>
+
+  <h3>5.1 机制</h3>
+  <div class="eq">r<sub>i</sub> = sg[ log ℓ<sub>i</sub><sup>FM</sup> − b<sub>k(t<sub>i</sub>)</sub> ]，　 r̂<sub>i</sub> = f( d<sub>i</sub>, e(t<sub>i</sub>) )，　 d<sub>i</sub> = D<sub>temp</sub>(sg[x₀<sub>,i</sub>])<span class="no">(14)(15)</span></div>
+  <div class="eq">w<sub>i</sub> = exp(β r̂<sub>i</sub>) / ( B<sup>−1</sup>Σ<sub>j</sub> exp(β r̂<sub>j</sub>) )，　 L<sub>C</sub> = B<sup>−1</sup> Σ<sub>i</sub> sg[w<sub>i</sub>] ℓ<sub>i</sub><sup>FM</sup>(φ) + λ<sub>pred</sub>L<sub>pred</sub><span class="no">(16)(17)</span></div>
+  <dl class="gloss">
+    <dt>b_k</dt><dd>每个噪声分箱里 log FM 损失的指数滑动平均（衰减 0.99）。减去它，是为了让不同噪声水平的样本能放在一起比。</dd>
+    <dt>d_i</dt><dd>20 维描述子。在潜空间里，对 lag 1/2/4/8 的块间差分和"相对首块的位移"各取 RMS 序列，每条序列再算 mean/std/max/末值，最后取 log(1+x)。</dd>
+    <dt>f</dt><dd>有两个隐藏层的 MLP，输入 <span class="mv">d</span><sub>i</sub> 加上噪声水平的 Fourier 嵌入，在线用 Huber 损失回归 <span class="mv">r</span><sub>i</sub>。</dd>
+    <dt>w_i</dt><dd>β = 0.5，在全局 minibatch 内归一化到均值 1（论文的有效 batch 是 32）。critic 的更新次数不变，只是更"照顾"预测为难拟合的样本。</dd>
+  </dl>
+
+  <h3>5.2 疑问 A：高噪声下的 FM 损失，大部分根本"不可约"</h3>
+  <div class="prose">
+    <p>论文把"FM 损失高"解读为"critic 对这个样本拟合得不好，需要多花力气"。可是单个样本的 FM 损失并不等于 critic 的误差。假设 critic 已经<b>完美</b>，也就是 <span class="mv">v</span><sub>φ</sub> 等于真实的条件速度 <span class="mv">v</span>* = (<span class="mv">x</span><sub>t</sub> − <span class="mv">μ</span>*)/σ，那么：</p>
+  </div>
+  <div class="eq">𝔼<sub>ε</sub>[ ℓ<sup>FM</sup>(x₀, σ) ] = 𝔼<sub>ε</sub>‖ x₀ − μ*(x<sub>t</sub>) ‖² / σ²　 →<sub>σ→1</sub>　 ‖ x₀ − 𝔼[x₀ | 首帧, 文本] ‖²<span class="no">我的推导</span></div>
+  <div class="prose">
+    <p><b>人话</b>：在 σ = 0.97 时，<span class="mv">x</span><sub>t</sub> 里只剩 3% 的信号，critic 根本看不出"这个样本具体怎么动"，只能按首帧和指令猜"通常会怎样"。样本动得越多、离首帧越远，猜不中的部分就越大。<b>这部分误差训练再久也消不掉。</b>而描述子里恰好有"相对首块的位移"这一项。</p>
+    <p>这个解释能说明论文里的三个现象：Fig.3b 中 ρ 随 σ 上升（0.35→0.69）；Table S2 中预测器的 ρ 同样随 σ 上升（0.758 → 0.898 → 0.952）；以及 σ = 0.97 时预测器几乎完美。这些都是"<b>不可约部分占比随 σ 变大</b>"应有的样子，<b>不能说明 critic 在高运动样本上"滞后"</b>。</p>
+  </div>
+  <figure class="fig" id="toyFig">
+    <div class="ttl">玩具实验：完美 critic 也能画出 Fig.3b</div>
+    <div class="sub2">32 个 rollout，每个有"低秩的运动分量"（幅度因样本而异）和"逐维的外观细节"（复杂度因样本而异）。critic 用<b>精确的</b>贝叶斯后验，拟合误差可以另外加（和运动无关）。按论文协议，每个样本在每个噪声水平上取 3 次 ε 的平均 FM 损失，再和"测得的运动量"算 Spearman ρ，重复 40 次取平均。</div>
+    <div class="ctrl">
+      <label>critic 拟合误差（与运动无关） <input type="range" id="tyE" min="0" max="30" value="0"> <output id="tyEo"></output></label>
+      <label>运动量的测量噪声 <input type="range" id="tyM" min="0" max="100" value="50"> <output id="tyMo"></output></label>
+      <label>外观复杂度与运动的耦合 <input type="range" id="tyC" min="0" max="80" value="40"> <output id="tyCo"></output></label>
+    </div>
+    <div class="chart wide" id="toyChart"></div>
+    <div class="legend">
+      <span><i class="ln" style="background:var(--cri)"></i>玩具模型：ρ(运动, FM 损失)</span>
+      <span><i style="background:var(--tch);border-radius:50%"></i>论文 Fig.3b 实测</span>
+      <span><i style="background:var(--dy);border-radius:50%"></i>论文 Table S2：训练后的预测器 ρ(r̂, FM 损失)</span>
+    </div>
+    <div class="cap">参数是我挑的，只为说明<b>形状</b>：critic 误差为零时，这条"σ 越大相关越强"的曲线照样出现。把"critic 拟合误差"调大，曲线只会整体变低，形状不变。要真正支持论文的解读，需要把损失拆成两部分。一个可行的办法：冻住生成器，让 critic 多训 N 步，测每个样本的损失<b>下降了多少</b>（可约部分），再看这个下降量和运动量是否相关。</div>
+  </figure>
+
+  <h3>5.3 疑问 B：加权会改变 critic 学到的"学生分布"</h3>
+  <div class="prose">
+    <p>Fig.4 的图注说，这些权重"不改变 FM 的回归目标"。对单个样本来说确实如此。但 <span class="mv">w</span><sub>i</sub> 取决于 <span class="mv">x</span>₀（通过 <span class="mv">d</span><sub>i</sub>），而 critic 只能看到 <span class="mv">x</span><sub>t</sub>。带权回归的最优解是：</p>
+  </div>
+  <div class="eq">v<sub>φ</sub>* (x<sub>t</sub>) = 𝔼[ w(x₀,t)·(ε − x₀) | x<sub>t</sub> ] / 𝔼[ w(x₀,t) | x<sub>t</sub> ]　 =　 q<sub>w</sub>(x₀) ∝ w(x₀,t)·q(x₀) 的速度场<span class="no">我的推导</span></div>
+  <div class="prose">
+    <p>也就是说，即使 critic 容量无限、训练充分，它学到的也是一个<b>向高运动样本倾斜</b>的"学生分布"。代入式 (19)：critic 以为学生已经比实际动得多，<span class="mv">μ</span><sub>q</sub> 偏向运动，教师把学生往运动方向拉的力 <span class="mv">μ</span><sub>T</sub> − <span class="mv">μ</span><sub>q</sub> 就<b>变弱了</b>。理想极限下，平衡点满足 <span class="mv">q</span> ∝ <span class="mv">p</span><sub>T</sub>/<span class="mv">w</span>，学生最终的运动比例会<b>低于</b>教师，方向和论文的动机正好相反。</p>
+  </div>
+  <figure class="fig" id="tiltFig">
+    <div class="ttl">倾斜计算器：两模态（静止／运动）的极简版本</div>
+    <div class="sub2">设运动样本比静止样本的预测难度高 Δr，权重比就是 e<sup>βΔr</sup>。论文没有报告 r̂ 的分布，所以 Δr 由你设。</div>
+    <div class="ctrl">
+      <label>β <input type="range" id="tlB" min="0" max="150" value="50"> <output id="tlBo"></output></label>
+      <label>Δr（运动 − 静止） <input type="range" id="tlR" min="0" max="200" value="100"> <output id="tlRo"></output></label>
+      <label>学生当前的运动占比 <input type="range" id="tlQ" min="1" max="99" value="20"> <output id="tlQo"></output></label>
+      <label>教师的运动占比 <input type="range" id="tlP" min="1" max="99" value="50"> <output id="tlPo"></output></label>
+    </div>
+    <div class="share" id="tiltShare"></div>
+    <div class="cap">这是理想极限下的论证：critic 充分收敛，而且每个噪声水平上的倾斜方向一致。有限步数下，"把更新次数分配给难样本"这个效应可能占上风，但论文对两种效应都没有给出证据。另外，论文说 critic 误差会"妨碍学习交互动态"，却<b>没有分析误差的符号</b>：一个跟不上的 critic，还停留在"学生不太动"的印象里，给出的反而是<b>更强</b>的"往动的方向走"信号。</div>
+  </figure>
+
+  <h3>5.4 实证上，这个组件贡献了多少</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>设置（α = 0.3）</th><th>R-Bench TAC</th><th>PAI Domain</th><th>PAI Quality</th><th>EZS Domain</th></tr></thead>
+    <tbody>
+      <tr><td>β = 0（只有采样，Table 2 w/o Tracking）</td><td class="num">43.5</td><td class="num">78.5</td><td class="num">78.1</td><td class="num">75.1</td></tr>
+      <tr><td>β = 0.1</td><td class="num">43.8</td><td class="num">79.1</td><td class="num">78.0</td><td class="num">75.4</td></tr>
+      <tr class="hl"><td>β = 0.5（DyMD，主表）</td><td class="num best">44.2</td><td class="num best">79.5</td><td class="num">78.1</td><td class="num best">76.2</td></tr>
+      <tr><td>β = 1.0</td><td class="num">43.6</td><td class="num">78.4</td><td class="num">78.1</td><td class="num">75.1</td></tr>
+      <tr class="grp"><td colspan="5">只加组件二、不加组件一（Table 2 w/o Sampling）：38.3 / 75.4 / 78.0 / 74.0；Base DMD：34.6 / 74.4 / 78.1 / 73.3</td></tr>
+    </tbody>
+  </table></div>
+  <div class="prose">
+    <p>在组件一之上，组件二的 TAC 增益是 +0.7。β 取 0、0.1、0.5、1.0 时，TAC 最高和最低只差 0.7（Table 4 的三行之间只差 0.6）。TAC 的评测噪声带估计在 ±2.9～3.4（§6.4），这还没算训练种子带来的方差。三个指标都在 β = 0.5 处取最高，方向一致，算是弱证据。但 β 是在<b>测试基准上</b>挑出来的，最高点本身就带乐观偏差。组件二单独用时能让 TAC 从 34.6 升到 38.3（+3.7），这个量级不太像纯噪声。可结合 5.2 和 5.3，它为什么有用，论文给的解释站不住。</p>
+  </div>
+</section>
+
+<!-- ============================================ §6 -->
+<section id="s6">
+  <h2><span class="no">§6</span>实验重排</h2>
+  <p class="lede">论文的表格按"方法"组织。我换成按"要回答的问题"重排，顺手把能复算的都复算了一遍。</p>
+
+  <h3>6.1 设置一览</h3>
+  <div class="tbl"><table>
+    <tbody>
+      <tr><td>教师</td><td class="wr">PF-Wan 14B（图生视频，机器人操作数据 + PhysisForcing 物理对齐微调）。官方 40 步、shift 5、CFG 5，NFE 80。</td></tr>
+      <tr><td>学生 / critic</td><td class="wr">都从 Wan2.1-Fun-V1.1-1.3B-InP 初始化，双向（非自回归）。学生在模型时间 {1, 0.75, 0.5, 0.25} 上走 4 步，shift 5，出 21 个潜块，解码为 81 帧、16 fps。critic 条件生成，不用 CFG。</td></tr>
+      <tr><td>数据</td><td class="wr">RoVid-X 共 2,824,039 段。先做 caption 语义去重（贪心覆盖，阈值 0.95）剩 448,528；再保留图文相似度前 50%，剩 224,264；最后按 CoTracker3 筛选（至少 50 条轨迹，平均可见度 ≥ 0.6），剩 32,897。</td></tr>
+      <tr><td>训练</td><td class="wr">所有 DMD 变体都跑 2,500 步，有效 batch 32。α = 0.3，β = 0.5，λ<sub>pred</sub> = 1，EMA 衰减 0.99，重加噪区间 𝒯 = [0.020, 0.999)。<b>学习率、critic 与生成器的更新比、GPU 数量和型号都没有报告。</b></td></tr>
+      <tr><td>R-Bench TAC</td><td class="wr">R-Bench 形态子集的 400 对"图像 + 指令"，覆盖双臂、人形、单臂、四足。GPT-5 看 6 帧拼图，打 1–5 分，换算成 (r−1)/4。先在每种形态内平均，再对 4 种形态等权平均。</td></tr>
+      <tr><td>PAI-Bench-G</td><td class="wr">机器人子集 174 个条件，共 913 道二元问答，Qwen3-VL-235B 看 8 帧作答。Domain 是每个视频准确率的平均。Quality 是 8 项官方指标的平均。</td></tr>
+      <tr><td>EZS-Bench</td><td class="wr">196 个没见过的"机器人—任务—场景"组合，共 2,272 道题。Qwen3-VL-32B-Thinking 负责出题，Qwen2.5-VL-72B 负责判。提示词先由 GPT-5 压成 40–60 词。</td></tr>
+      <tr><td>WorldArena</td><td class="wr">RoboTwin 2.0 的调瓶、按铃两个任务。学生冻结，取最高噪声那一步的中间 DiT 特征，训练任务专属的 VPP 动作头（每个任务 50 条示范，200 个 epoch），闭环跑 100 回合。</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>6.2 主表：四个模型放在一起看</h3>
+  <figure class="fig" id="mainFig">
+    <div class="ttl">Table 1 点图</div>
+    <div class="ctrl"><div class="seg" role="group" aria-label="基准">
+      <button type="button" data-mg="rb" aria-pressed="true">R-Bench TAC</button>
+      <button type="button" data-mg="pai" aria-pressed="false">PAI-Bench-G</button>
+      <button type="button" data-mg="ezs" aria-pressed="false">EZS-Bench</button>
+    </div></div>
+    <div class="chart wide" id="mainChart"></div>
+    <div class="legend">
+      <span><i style="background:var(--tch);border-radius:50%"></i>PF-Wan 14B · 80 NFE（教师）</span>
+      <span><i style="background:var(--fun);border-radius:50%"></i>Wan2.1-Fun 1.3B · 100 NFE（未蒸馏的初始化）</span>
+      <span><i style="background:var(--base);border-radius:50%"></i>Base DMD · 4 NFE</span>
+      <span><i style="background:var(--dy);border-radius:50%"></i>DyMD · 4 NFE</span>
+    </div>
+    <div class="cap" id="mainCap"></div>
+  </figure>
+
+  <div class="grid2">
+    <div class="card risk">
+      <h4>论文没点出来的对比</h4>
+      <p>Wan2.1-Fun 1.3B 是论文所说的"未蒸馏学生"，也就是学生的初始化权重（论文没有提对它做过机器人数据微调），用 100 NFE 采样。它的 TAC 是 47.3，<b>高于 DyMD 的 44.2</b>。分形态看，DyMD 只在单臂上略胜（31.2 vs 30.8）。换句话说，从 14B 机器人专用教师蒸馏到 1.3B 后，任务遵循度<b>还不如不蒸</b>。好处是步数从 100 降到 4，这当然很值钱。但"把教师的交互能力迁移给学生"这一点，证据不足。教师是 75.3，DyMD 只找回了 40.7 分落差里的 9.6 分。</p>
+    </div>
+    <div class="card med" style="border-top:3px solid var(--med)">
+      <h4>"Physics"和"Quality"都偏爱静止</h4>
+      <p>论文提到了 PAI 的 Physics：Base DMD 比 DyMD 高 1.6。<b>EZS 的 Physics 也一样</b>：Base DMD 86.0，高于 DyMD 的 84.4 和未蒸馏 1.3B 的 83.9，只比教师的 89.2 低。Quality 上，Base DMD 和 DyMD 都是 78.1，<b>教师反而只有 76.9</b>。这类指标会奖励"没动、所以没出错"的视频。所以"画质持平"这句话不能用来证明"动起来了，而且没变糊"。</p>
+    </div>
+  </div>
+
+  <h3>6.3 Quality 的八个子项：唯一看得出"动了"的指标没动</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>模型</th><th>Quality</th><th>主体一致 SC</th><th>背景一致 BC</th><th>运动平滑 MS</th><th>美学 AQ</th><th>成像 IQ</th><th>整体一致 OC</th><th>I2V 主体 IS</th><th>I2V 背景 IB</th></tr></thead>
+    <tbody>
+      <tr><td>PF-Wan 14B</td><td class="num">76.9</td><td class="num warnc">90.3</td><td class="num">90.6</td><td class="num">98.9</td><td class="num">50.1</td><td class="num">71.6</td><td class="num">19.9</td><td class="num">96.2</td><td class="num">97.5</td></tr>
+      <tr><td>Wan2.1-Fun 1.3B</td><td class="num">75.3</td><td class="num">87.8</td><td class="num">91.6</td><td class="num">98.6</td><td class="num">47.6</td><td class="num">67.2</td><td class="num">19.4</td><td class="num">94.4</td><td class="num">96.0</td></tr>
+      <tr><td>Base DMD</td><td class="num">78.1</td><td class="num warnc">95.3</td><td class="num">91.9</td><td class="num">99.5</td><td class="num">48.6</td><td class="num">73.2</td><td class="num">19.5</td><td class="num">97.8</td><td class="num">98.9</td></tr>
+      <tr class="hl"><td>DyMD</td><td class="num">78.1</td><td class="num warnc">95.3</td><td class="num">92.2</td><td class="num">99.6</td><td class="num">48.5</td><td class="num">73.1</td><td class="num">19.6</td><td class="num">97.9</td><td class="num">98.9</td></tr>
+    </tbody>
+  </table></div>
+  <div class="prose">
+    <p>四行的 Quality 都等于八项的平均，差距不超过 0.05，已复算。<b>主体一致性 SC</b> 衡量帧与帧之间主体特征是否稳定，对"动没动"最敏感：教师 90.3，Base DMD 和 DyMD 都是 95.3，一模一样。这不能证明 DyMD 没动，因为 SC 看的是整体特征，局部的机械臂动作对它影响有限。但它说明 Quality 这一栏<b>分辨不出</b>论文关心的那种差别。R-Bench 自带一个<b>运动幅度分 MAS</b>：用 GroundingDINO 和 SAM 抠出机器人，用 CoTracker 跟踪，并扣除相机运动。它就是为"画面平滑但机器人不动"这种失败设计的，论文没有报告。</p>
+  </div>
+
+  <h3>6.4 消融瀑布：+9.6 分从哪里来</h3>
+  <figure class="fig" id="wfFig">
+    <div class="ttl">从 Base DMD 一路到 DyMD（Table 3 + Table 2）</div>
+    <div class="sub2">每一段是和上一行的差。灰色须线是<b>只算评测抽样</b>的 95% 噪声带，按"同一批题、两个模型配对"估计；训练种子的方差没算进去。</div>
+    <div class="ctrl">
+      <div class="seg" role="group" aria-label="指标">
+        <button type="button" data-wf="tac" aria-pressed="true">R-Bench TAC（n=400）</button>
+        <button type="button" data-wf="pai" aria-pressed="false">PAI Domain（n=174）</button>
+        <button type="button" data-wf="ezs" aria-pressed="false">EZS Domain（n=196）</button>
+      </div>
+      <label>单样本分数标准差 <input type="range" id="wfS" min="10" max="45" value="32"> <output id="wfSo"></output></label>
+      <label>两模型配对相关 <input type="range" id="wfR" min="0" max="90" value="50"> <output id="wfRo"></output></label>
+    </div>
+    <div class="chart wide" id="wfChart"></div>
+    <div class="cap">几点要说明。① Shift-25、教师先验、亲和度调节三行都是 β = 0 的替代方案，不是逐层叠加。我把它们按"越来越复杂"排成一条链，差值就是替代方案之间的差。② TAC 的单样本分数只有 0、0.25、0.5、0.75、1 五档，均值约 0.4，标准差取 0.30–0.35 比较合理。配对相关取 0.5 时，95% 噪声带约 ±2.9～3.4。③ 超出噪声带的，只有 Shift-25 这一步和总增益。</div>
+  </figure>
+  <div class="note warn">
+    <span class="hd">缺的两个对照</span>
+    <ul class="tight">
+      <li><b>更大 shift</b>（50、100）：用来分清"转向几何"和"极高噪声段的采样质量"。见 §4.2，教师先验在 σ&gt;0.99 上相当于 shift≈89。</li>
+      <li><b>固定混合权重</b> <span class="mv">g</span> ≡ 𝔼[<span class="mv">g</span><sub>i</sub>]，不看亲和度：用来分清"按样本自适应"和"只是混进了一些基础分布"。α 扫描的规律（α = 0.1 时 39.2，0.3 时 43.5，0.5 时 43.8；按式 (13)，α = 1 即 <span class="mv">g</span>≡1，对应 Table 3 的纯教师先验 42.5）同样可以用"平均有多少质量落在高噪声段"来解释。</li>
+    </ul>
+  </div>
+
+  <h3>6.5 其余敏感性</h3>
+  <div class="grid2">
+    <div class="tbl" style="margin:0"><table>
+      <thead><tr><th>α（无 tracking）</th><th>TAC</th><th>PAI Dom.</th><th>EZS Dom.</th></tr></thead>
+      <tbody>
+        <tr><td>0.1</td><td class="num lose">39.2</td><td class="num">77.4</td><td class="num">73.2</td></tr>
+        <tr class="hl"><td>0.3（选定）</td><td class="num">43.5</td><td class="num best">78.5</td><td class="num best">75.1</td></tr>
+        <tr><td>0.5</td><td class="num best">43.8</td><td class="num">78.2</td><td class="num">74.8</td></tr>
+        <tr><td>1.0 ≡ 纯教师先验（按式 13 对应 Table 3）</td><td class="num">42.5</td><td class="num">77.9</td><td class="num">75.0</td></tr>
+      </tbody>
+    </table></div>
+    <div class="tbl" style="margin:0"><table>
+      <thead><tr><th>亲和度编码器（无 tracking）</th><th>TAC</th><th>PAI Dom.</th><th>EZS Dom.</th></tr></thead>
+      <tbody>
+        <tr class="hl"><td>V-JEPA 2.1-L（视频原生）</td><td class="num best">43.5</td><td class="num best">78.5</td><td class="num best">75.1</td></tr>
+        <tr><td>DINOv2-L（逐帧）</td><td class="num">41.8</td><td class="num">76.7</td><td class="num">75.0</td></tr>
+        <tr class="grp"><td colspan="4">差距 1.7 / 1.8 / 0.1，都在单次运行的噪声带内</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+  <p class="prose" style="margin-top:12px">α 和 β 是在报告结果的同一批测试基准上挑的（Table S6、Table 4），编码器的选择也部分依赖 Table S5，论文没有单独的验证集。这些"选定值"的数字都带一点"在测试集上取最大"的乐观偏差。（Shift-25 不在此列：它是按 σ&gt;0.5 的质量与教师先验配平来定的，不看基准。）</p>
+
+  <h3>6.6 下游：WorldArena 动作规划</h3>
+  <figure class="fig" id="waFig">
+    <div class="ttl">Table 5：上半段抄自 PhysisForcing，下半段是本文</div>
+    <div class="chart wide" id="waChart"></div>
+    <div class="legend">
+      <span><i style="background:var(--base)"></i>调瓶 Adjust Bottle</span>
+      <span><i style="background:var(--stu)"></i>按铃 Click Bell</span>
+      <span><i style="background:transparent;border:1.5px dashed var(--ink3)"></i>PhysisForcing 原表里有、本文没抄的一行</span>
+    </div>
+    <div class="cap">按铃 31 → 66，Fisher 精确检验 p≈1×10⁻⁶，这个差异是真的。调瓶 1 → 2，p = 1.0，两个学生和上半段的 TesserAct（1%）、Vidar（2%）持平，低于其余四个模型（8–20%）。平均成功率从 16% 升到 34%，这 18 分里有 17.5 分来自按铃，<b>几乎全部由这一个任务贡献</b>。</div>
+  </figure>
+  <ul class="tight prose">
+    <li><b>两段的协议不同。</b>WorldArena 原文说，上半段的模型都按官方实现<b>在 RoboTwin 数据上后训练过</b>。本文的骨干是冻结的，只训练每个任务专属的 VPP 头（6 层 Video Former，399 个 latent query）。</li>
+    <li><b>漏抄了一行。</b>本文说上半段"引自 PhysisForcing"，但 PhysisForcing 原表里 "+ PhysisForcing（Wan2.2-TI2V-5B）22 / 26 / 24" 这一行没有抄过来。不影响排名，但属于选择性引用。</li>
+    <li><b>检查点怎么挑的没说。</b>调瓶用的是第 13,904 步和第 15,010 步，按铃用的是第 4,509 步和第 5,319 步。这些数字很"零碎"，像是挑出来的，挑选规则没写。每个骨干、每个任务只训了一个头（论文没提多种子）。</li>
+    <li><b>缺参照。</b>教师 PF-Wan 和未蒸馏的 Wan2.1-Fun 都没跑这个协议，所以说不清是 DyMD"保住了"规划能力，还是 Base DMD"破坏了"它。</li>
+  </ul>
+
+  <h3>6.7 我复算、核对过的</h3>
+  <ul class="checks prose">
+    <li>R-Bench Overall = 四种形态等权平均：Base DMD 34.600，DyMD 44.200，教师 75.325，全部吻合。</li>
+    <li class="x">Wan2.1-Fun 的 Overall 写 47.3，四列等权平均是 47.425；即使四列都取舍入前的最小值，平均也有 47.375，仍舍入为 47.4，所以这是 0.1 的小不一致，不是舍入造成的。另外 Base DMD 人形那一格的 33.4，和"每种形态 100 条、1–5 整数分"不兼容，其余 15 格都兼容。但论文没写每种形态的样本数。</li>
+    <li>PAI Quality = Table S4 八项平均：4 行全部吻合，误差 ≤ 0.05。</li>
+    <li>正文里的增量：+9.6 / +5.1 / +2.9，Physics −1.6，Table 5 平均列 8 行，全部吻合。</li>
+    <li>数据漏斗：448,528 / 2 = 224,264；32,897 / 224,264 = 14.67%（附录 A 写 14.7%）。</li>
+    <li>表间一致：Table 2 的 "w/o Tracking" = Table 3 的 "Affinity-conditioned" = Table S5 的 V-JEPA 行 = Table S6 的 α=0.3 行 = 43.5 / 78.5 / 78.1 / 75.1。Table 4 的 β=0.5 行 = Table 1。</li>
+    <li>Shift-25 在 σ&gt;0.5 的质量：按式 (18) 解析计算是 96.14%，吻合。</li>
+    <li>教师先验按 Fig.5 的 SVG 数据重建，σ&gt;0.5 的质量是 95.73%，论文写 95.69%。</li>
+    <li>Fig.3a 的 32 个点，Spearman ρ = 0.692。Fig.3b 的四点是 0.349 / 0.559 / 0.634 / 0.692。</li>
+    <li>Fig.7a 的矢量点：VAE / V-JEPA 的 ρ = 0.162 / 0.374，Kendall 0.117 / 0.246，四分位召回 25% / 50%，全部吻合。</li>
+    <li>式 (2)(7)(19)(23) 与 flow matching 的参数化一致。命题 2 的式 (20) 和命题 1 的证明（式 24–32），我逐步推导过，没有发现错误。</li>
+  </ul>
+</section>
+
+<!-- ============================================ §7 -->
+<section id="s7">
+  <h2><span class="no">§7</span>存疑清单</h2>
+  <p class="lede">按对结论的影响排序。"高"表示会改变你对标题结论的理解，"中"表示削弱某个分论点，"低"是细节或复现问题。每条都附了能自己核对的证据位置。</p>
+  <div class="ctrl dfilter"><div class="seg" role="group" aria-label="筛选">
+    <button type="button" data-df="all" aria-pressed="true">全部 17</button>
+    <button type="button" data-df="h" aria-pressed="false">高 6</button>
+    <button type="button" data-df="m" aria-pressed="false">中 6</button>
+    <button type="button" data-df="l" aria-pressed="false">低 5</button>
+  </div></div>
+
+  <div id="doubts">
+  <details class="doubt h"><summary><span class="idx">01</span><span class="sev">高</span><span class="t">增益的大头是"更多极高噪声"，而对照组没有在极高噪声段配平</span></summary><div class="body">
+    <p>TAC +9.6 里，Shift 从 5 改成 25 就拿到了 +5.4。教师先验又比 Shift-25 多 +2.5，论文说这是在"相近的高噪声质量"下比较的，但只配平了 SNR&lt;1，也就是 σ&gt;0.5。按 Fig.5 重建（σ&gt;0.5 的质量 95.73%，论文写 95.69%，可信），各段的质量如下：σ&gt;0.9，教师先验 84%，Shift-25 73%；σ&gt;0.99，43% 对 18%，等效 shift≈89。锁死计算器（§3.1）表明，解锁恰好发生在 σ≈0.98–0.998。所以"转向几何"带来的额外好处，可能只是"更多样本落到 σ&gt;0.99"。</p>
+    <p class="ev">证据：Table 3；附录 B.3；Fig.5 的 SVG 数据；§4.2 重建；§3.1 计算器。补救：加 shift = 50、100 的对照，或者直接按 σ&gt;0.99 的质量配平。</p>
+  </div></details>
+
+  <details class="doubt h"><summary><span class="idx">02</span><span class="sev">高</span><span class="t">"按样本自适应"没有被单独验证：缺一个固定混合权重的对照</span></summary><div class="body">
+    <p>论文的第二个卖点是"按每个 rollout 当前的交互保真度来调节"。可是亲和度调节对照的是纯教师先验（<span class="mv">g</span>≡1），两者同时差在两处：一是"混进了基础分布"，二是"混合比例按 <span class="mv">A</span><sub>i</sub> 变"。差值只有 +1.0 / +0.6 / +0.1，在噪声带内。要说明自适应本身有用，需要一个 <span class="mv">g</span> 固定为训练中 𝔼[<span class="mv">g</span><sub>i</sub>] 的对照。论文也没报告 <span class="mv">A</span><sub>i</sub> 和 <span class="mv">g</span><sub>i</sub> 的分布。α 扫描（39.2 → 43.5 → 43.8 → 42.5）同样可以用"平均高噪声质量"来解释。另外，<span class="mv">A</span><sub>i</sub> 作为保真度代理本身就弱：它和轨迹一致性的 ρ 只有 0.374，95% CI 是 [0.03, 0.64]。</p>
+    <p class="ev">证据：Table 3、Table S6、Fig.7a；§4.3、§4.4。</p>
+  </div></details>
+
+  <details class="doubt h"><summary><span class="idx">03</span><span class="sev">高</span><span class="t">组件二的诊断把"不可约误差"当成了"critic 拟合得不好"</span></summary><div class="body">
+    <p>完美 critic 下，单个样本的 FM 损失等于 𝔼‖<span class="mv">x</span>₀ − <span class="mv">μ</span>*(<span class="mv">x</span><sub>t</sub>)‖²/σ²；σ→1 时，趋近于 ‖<span class="mv">x</span>₀ − 𝔼[<span class="mv">x</span>₀|首帧, 文本]‖²。运动大、离首帧远的样本，这一项天然就大，而描述子里正好有"相对首块位移"。Fig.3b 的 ρ 随 σ 上升，Table S2 里预测器的 ρ 也随 σ 上升（0.758 → 0.952），这正是不可约部分占比变大的表现。§5.2 的玩具模型里，critic 误差为零，同样能复现这个形状。论文没有做任何拆分可约和不可约部分的实验。</p>
+    <p class="ev">证据：Fig.3、Fig.7b、Table S2、附录 D.2/D.3；§5.2。补救：冻结生成器，让 critic 多训 N 步，测每个样本损失下降多少，再看下降量和运动的相关。</p>
+  </div></details>
+
+  <details class="doubt h"><summary><span class="idx">04</span><span class="sev">高</span><span class="t">核心主张是"恢复运动"，却没有直接测运动；报告的画质和物理指标都偏爱静止</span></summary><div class="body">
+    <p>R-Bench 自带运动幅度分 MAS，专门针对"平滑但不动"的失败，论文只报告了 TAC。PAI 的 Quality 上，Base DMD 78.1 高于教师 76.9。主体一致性 SC 上，DyMD 和 Base DMD 同为 95.3，教师 90.3。两个 Physics 轴都是 Base DMD 高于 DyMD（82.8 对 81.2，86.0 对 84.4）；EZS 的 Physics 上，Base DMD 还高于未蒸馏的 1.3B（83.9）。论文用 Quality 持平来说"画质没有损失"，但这个指标本身会奖励静止。光流幅度、MAS、轨迹一致性，一个都没有在评测集上报告。</p>
+    <p class="ev">证据：Table 1、Table S4；RBench 原文附录 B.4；§6.2、§6.3。</p>
+  </div></details>
+
+  <details class="doubt h"><summary><span class="idx">05</span><span class="sev">高</span><span class="t">全部是单次训练、单个种子、没有置信区间；多数消融差值落在噪声带内，超参数还是在测试集上挑的</span></summary><div class="body">
+    <p>TAC 只有 400 条、5 档打分，只算评测抽样的配对差，95% 噪声带就有约 ±3（单样本标准差取 0.30–0.35、配对相关取 0.5 时，是 ±2.9～3.4）。PAI（174 条）和 EZS（196 条）约 ±2～3。消融里的 +2.5、+1.0、+0.7，β 扫描的 0.7 极差，编码器之间的 1.7，都在带内，这还没算训练种子的方差（DMD 训练的方差出了名的大）。α、β 和编码器是在报告结果的同一批基准上选的（Shift-25 除外，它按采样质量配平来定）。评委 GPT-5 和 Qwen3-VL 本身也有随机性，论文没说解码温度和重复次数。</p>
+    <p class="ev">证据：Table 2–4、Table S5–S6；§6.4 的噪声带控件。</p>
+  </div></details>
+
+  <details class="doubt h"><summary><span class="idx">06</span><span class="sev">高</span><span class="t">蒸馏后的学生，任务遵循度仍低于它自己的初始化</span></summary><div class="body">
+    <p>未蒸馏的 Wan2.1-Fun 1.3B（即学生的初始化，100 NFE；论文没提对它做过机器人数据微调）TAC 是 47.3，DyMD 是 44.2。四种形态里，DyMD 只在单臂上高 0.4。所以"从 14B 机器人专用教师迁移交互能力"这件事，在 TAC 上还没有发生，DyMD 只是把 DMD 造成的损失补回了一部分。论文把 Wan2.1-Fun 列为"参考模型"，但没有讨论这一点。更有说服力的基线应该包括：直接用 32,897 段数据微调 1.3B，或者先微调、再在同尺寸上做 DMD。</p>
+    <p class="ev">证据：Table 1；§6.2。</p>
+  </div></details>
+
+  <details class="doubt m"><summary><span class="idx">07</span><span class="sev">中</span><span class="t">给 critic 损失按样本加权，会改变它的最优解；理想极限下这会压低运动</span></summary><div class="body">
+    <p>权重 <span class="mv">w</span>(<span class="mv">x</span>₀, <span class="mv">t</span>) 依赖 critic 看不到的 <span class="mv">x</span>₀，带权回归的最优解就变成了倾斜分布 <span class="mv">q</span><sub>w</sub> ∝ <span class="mv">w</span>·<span class="mv">q</span> 的速度场。critic 会以为学生动得比实际多，于是往运动方向拉的梯度变弱。平衡点满足 <span class="mv">q</span> ∝ <span class="mv">p</span><sub>T</sub>/<span class="mv">w</span>，学生的运动比例会低于教师。Fig.4 图注里"不改变回归目标"的说法只对单个样本成立，对总体最优解不成立。偏差有多大，取决于 <span class="mv">r̂</span> 的分布，论文没报告。反过来，论文说 critic 误差"妨碍学习交互动态"，也没有分析误差的符号：一个跟不上、还以为学生不太动的 critic，给出的反而是更强的"往动的方向走"信号。</p>
+    <p class="ev">证据：式 (16)(17)、Fig.4 图注；§5.3 的计算器。</p>
+  </div></details>
+
+  <details class="doubt m"><summary><span class="idx">08</span><span class="sev">中</span><span class="t">只和 Base DMD 比；相关工作里的 DMD 改进一个都没比，而 DyMD 其实用了配对的真实视频</span></summary><div class="body">
+    <p>相关工作列了 DMD2（带 GAN 项）、Phased DMD、Adaptive Matching Distillation、CoDMD、Adaptive Video Distillation、RTDMD，实验里一个都没有。更关键的一点：亲和度需要<b>真实的配对目标视频</b>，这是 Base DMD 用不到的额外监督。最自然的对照是同样利用真实数据的 DMD2 GAN 项，或者"DMD + 配对回归"。</p>
+    <p class="ev">证据：§2 相关工作；式 (11)；附录 B.2（目标特征缓存为 8×9×1024 fp16）。</p>
+  </div></details>
+
+  <details class="doubt m"><summary><span class="idx">09</span><span class="sev">中</span><span class="t">WorldArena 的领先几乎全部来自一个任务，上下两段协议不同，检查点怎么选的没说</span></summary><div class="body">
+    <p>按铃 31 → 66，差异显著。调瓶 1 → 2，不显著，和上半段的 TesserAct（1%）、Vidar（2%）持平，低于其余四个模型（8–20%）；18 分的平均提升里，17.5 分来自按铃。上半段的模型在 RoboTwin 上后训练过；本文是冻结骨干 + 每个任务单独训练的 VPP 头。PhysisForcing 原表里 "+ PhysisForcing 24.0" 那一行没抄。VPP 头的评测检查点是 13,904 / 15,010 / 4,509 / 5,319 这些"零碎"步数，挑选规则没写。每个骨干、每个任务只训了一个头（论文没提多种子）。教师和未蒸馏的 1.3B 都没评，所以不知道 VPP 头本身贡献了多少。</p>
+    <p class="ev">证据：Table 5、附录 F.1；PhysisForcing Table 3；WorldArena §4.1。</p>
+  </div></details>
+
+  <details class="doubt m"><summary><span class="idx">10</span><span class="sev">中</span><span class="t">主表来自哪个检查点没说，几处分析用的步数也各不相同</span></summary><div class="body">
+    <p>训练预算是 2,500 步。但 Fig.S1 的图注写明用的是 "step-1500 checkpoints"，并说和正文定性结果（Fig.6）"matched"，可以推断 Fig.6 也是 step-1500，critic 难度分析（D.2）用的是 step-1500 的 critic，预测器分析（D.3）用的是 step-2000。主表的数字是 2,500 步的最终模型，还是某个中间最好的检查点，论文没交代。如果是在测试基准上挑的检查点，又多了一层乐观偏差。</p>
+    <p class="ev">证据：§4.1、附录 D.2、D.3、Fig.S1 图注。</p>
+  </div></details>
+
+  <details class="doubt m"><summary><span class="idx">11</span><span class="sev">中</span><span class="t">不可复现：没有代码，关键训练超参没给，训练开销也没报告</span></summary><div class="body">
+    <p>没有代码链接。DMD 的学习率、优化器、critic 与生成器的更新比（DMD2 用的是 5:1）、Base DMD 的损失归一化方式、GPU 数量和型号、训练时长都没写。每一步都要把生成器和 critic 的 rollout 解码成 81 帧 RGB，再跑 V-JEPA 2.1-L，这笔开销没有量化。Table S3 只列了 DyMD 自己的超参数。好在教师 PF-Wan 的权重是公开的。</p>
+    <p class="ev">证据：§4.1、Table S3；HF 上的 DAGroup-PKU/PF_Wan。</p>
+  </div></details>
+
+  <details class="doubt m"><summary><span class="idx">12</span><span class="sev">中</span><span class="t">亲和度只和一段真实视频比，另一种合理的动作也会被判成"不忠实"</span></summary><div class="body">
+    <p>给定首帧和指令，合理的未来有很多种。<span class="mv">A</span><sub>i</sub> 却只和训练集里那一段对齐：学生如果换了一种合理的抓法或路径，也会得到低亲和度，被多分配高噪声采样。在机器人数据里多样性比较低，这个问题可能不严重，但论文没讨论。这也意味着采样分布里掺进了"模仿这一条轨迹"的偏好。</p>
+    <p class="ev">证据：式 (11)(12)、论文 §3.3；本页 §4.3。</p>
+  </div></details>
+
+  <details class="doubt l"><summary><span class="idx">13</span><span class="sev">低</span><span class="t">命题 1 只是动机，不是推导：下界是单向的，也推不出"密度 ∝ κ̄²"</span></summary><div class="body">
+    <p>证明本身没有问题。但转向大只能推出后验变化大，反过来不成立；"按 κ̄² 采样"是设计选择；统计量来自 CFG 引导的离散教师轨迹，而且是从纯噪声出发，不是从学生样本加噪出发。作者在附录 C.3 末尾承认了第三点（CFG 引导的离散轨迹不等于精确的条件流），也说命题只提供动机、不构成推导，但没有提到下界是单向的。一个更直接的检验是：换一个形状不同、但极高噪声质量相同的先验，看结果变不变。</p>
+    <p class="ev">证据：附录 C.3 "Connection to the empirical statistic"。</p>
+  </div></details>
+
+  <details class="doubt l"><summary><span class="idx">14</span><span class="sev">低</span><span class="t">转向曲线可能部分反映 PF-Wan 自己的训练经历</span></summary><div class="body">
+    <p>PF-Wan 的骨干是 Wan2.2-I2V-A14B 的高噪专家（官方边界 <span class="mono">boundary=0.900</span>），后来被适配到全部时间步。Fig.5 标出的高噪区 σ∈[0.9, 1] 正好从这个边界开始，曲线在 σ≈0.876 附近还有一个小鼓包。这不构成反驳，但说明"转向曲线"不一定能推广到别的教师。作者也写了"换教师需要重测"。</p>
+    <p class="ev">证据：PhysisForcing 附录 A；Wan2.2 的 <span class="mono">wan_i2v_A14B.py</span>；PF_Wan 模型卡（单骨干）。</p>
+  </div></details>
+
+  <details class="doubt l"><summary><span class="idx">15</span><span class="sev">低</span><span class="t">表征选择的证据太弱：n = 32，还用 4 折交叉验证</span></summary><div class="body">
+    <p>VAE 和 V-JEPA 亲和度的 ρ 是 0.162 和 0.374，95% CI 分别是 [−0.20, 0.48] 和 [0.03, 0.64]，大幅重叠。critic 那边，V-JEPA 描述子在 4 折 CV 下"一致负相关"（−0.35 到 −0.24）。只有 32 个 rollout 时，折外负相关常常是小样本过拟合的产物，不一定真表示"反向"。结论方向也许没错，但这些证据撑不起论文里那么确定的措辞。</p>
+    <p class="ev">证据：Fig.7、附录 D.1/D.2。</p>
+  </div></details>
+
+  <details class="doubt l"><summary><span class="idx">16</span><span class="sev">低</span><span class="t">评测细节偏离官方协议：单视频、改写提示词、稀疏抽帧</span></summary><div class="body">
+    <p>R-Bench 官方是每个样本生成 3 个视频取平均；本文只说所有模型用相同的首帧、提示词和随机种子，没说每条生成几个视频。EZS 的原始描述先被 GPT-5 压成 40–60 词，这是沿用 PhysisForcing 的做法。VLM 评委只看 6 帧或 8 帧，对"动作做没做完"这种时序判断比较粗。全文没有人工评测。R-Bench 和训练数据 RoVid-X 出自同一个团队，论文说 400 对是"held-out"，但没报告有没有做去重。</p>
+    <p class="ev">证据：附录 F；RBench §5.1。</p>
+  </div></details>
+
+  <details class="doubt l"><summary><span class="idx">17</span><span class="sev">低</span><span class="t">几处笔误和不一致</span></summary><div class="body">
+    <ul class="tight">
+      <li>式 (18) 写成 σ<sub>t</sub> = t = f<sub>s</sub>(u) = 1000·s(u)/(1+(s−1)u)，把 0–1000 的时间步和 0–1 的 σ 混在一起。</li>
+      <li>Table S3 的 "Latent measurement / spatial size: 21 blocks" 缺了空间尺寸。</li>
+      <li>Table S4 的文本层里残留了一个 "dymd" 字样（可能只是 PDF 文本层的痕迹，渲染后未必可见）。</li>
+      <li>教师 CFG 写的是 5，Wan2.2-I2V-A14B 官方是 3.5；PF-Wan 自己的推荐值没有查到。</li>
+      <li>Base DMD 人形那一格 33.4 与"每形态 100 条 × 整数分"不兼容；Wan2.1-Fun 的 Overall 47.3，四列平均是 47.4。</li>
+      <li>摘要说"distill a 14B teacher"，而教师的骨干来自一个 MoE 模型（A14B，总参数 27B）中的一个专家。严格说是一个 14B 的单骨干，这个说法没错，但值得交代它的来历。</li>
+    </ul>
+  </div></details>
+  </div>
+</section>
+
+<!-- ============================================ §8 -->
+<section id="s8">
+  <h2><span class="no">§8</span>公道话，以及对交互式视频世界模型的启示</h2>
+
+  <h3>做对了的地方</h3>
+  <ul class="checks prose">
+    <li><b>问题找得准，现象讲得清楚。</b>"DMD 让机器人视频定住"是真实存在、而且很多人会碰到的失败。Fig.2 用同一个静止 rollout 在不同噪声下让教师重画，一张图就讲明白了。</li>
+    <li><b>把 DMD 的梯度讲成"两个后验均值之差"（式 19），再用两点模型量化锁死</b>，这个视角干净，也有用。</li>
+    <li><b>推理时零额外开销</b>，所有辅助模块只在训练时用。</li>
+    <li><b>主动做了 Shift-25 对照</b>，让读者能看出单是调大 shift 就能拿回一半以上的增益。<b>主动报告了反例</b>：Base DMD 的 Physics 更高。</li>
+    <li><b>附录很完整，数字也经得起核</b>：图是矢量的，能复算的表我都复算了，只发现两处 0.1 量级的小不一致（见 §6.7）。</li>
+  </ul>
+
+  <h3>对交互式视频世界模型的启示</h3>
+  <div class="grid2x2">
+    <div class="card dy">
+      <h4>1 · 自回归蒸馏也要看尾部</h4>
+      <p>Self-Forcing 和 CausVid 这一系的实时世界模型，都用 DMD 类方法把教师压到 4 步以内。如果动作响应变弱、画面变"静"，先查<b>重加噪采样在 σ&gt;0.99 上有多少质量</b>。按 §3.1 的估算，高维潜变量要到这个区间，教师才会给出"应该动"的信号。</p>
+    </div>
+    <div class="card dy">
+      <h4>2 · 评测要直接测"动没动"</h4>
+      <p>一致性、平滑度、I2V 保真度这类画质指标都会奖励静止。交互式世界模型最关心动作能不能跟上，应该报告运动幅度（MAS、光流）和动作跟随度，而不只是 Quality 和 VLM 打分。</p>
+    </div>
+    <div class="card cri">
+      <h4>3 · 给 critic 重加权要小心</h4>
+      <p>如果权重依赖 critic 看不到的量（比如 <span class="mv">x</span>₀），就会改变 critic 学到的分布。想"多照顾难样本"，更稳妥的做法是用 <span class="mv">x</span><sub>t</sub> 上可观测的量来定权重，或者做重要性校正，并且把可约和不可约误差分开来看。</p>
+    </div>
+    <div class="card tch">
+      <h4>4 · 真实配对视频可以用得更直接</h4>
+      <p>DyMD 只用真实视频来决定"在哪个噪声上比较"。既然已经有配对数据，DMD2 式的 GAN 项或配对回归，可能是更直接的"把运动拉回来"的手段，值得作为基线。</p>
+    </div>
+  </div>
+
+  <h3>最值得补的实验（按性价比排序）</h3>
+  <ol class="tight prose">
+    <li><b>shift 扫描</b>（10 / 25 / 50 / 100）和<b>按 σ&gt;0.99 配平</b>的教师先验对照。</li>
+    <li><b>固定 <span class="mv">g</span> 的混合</b>（取训练中 𝔼[<span class="mv">g</span><sub>i</sub>]），并报告 <span class="mv">A</span><sub>i</sub> 和 <span class="mv">g</span><sub>i</sub> 的分布。</li>
+    <li><b>报告 R-Bench MAS 和光流幅度</b>，并在 R-Bench 全部 650 条上给出 TC 和 VQ 总分。</li>
+    <li><b>3 个训练种子</b>加上按样本的 bootstrap 置信区间。另留一个验证集，用来挑 α、β 和检查点。</li>
+    <li><b>拆分 FM 损失</b>：冻结生成器、延长 critic 训练，看高运动样本的可约误差是不是真的更大。</li>
+    <li><b>补基线</b>：DMD2（GAN 项）、同尺寸的 SFT、在 1.3B 上做 SFT 再做 DMD。WorldArena 上补教师和未蒸馏模型，多跑几个任务和种子。</li>
+  </ol>
+</section>
+
+<footer class="foot">
+  <p><b>说明。</b>这份精读由读者编写，不是论文作者的说法。它和论文有出入时，以论文为准。文中标注"我的推导""重建""玩具实验"的部分是我的分析，可能有错；数字都注明了来源，便于核对。Fig.3、Fig.5、Fig.7 的数据点，来自 arXiv HTML 版随附的 SVG 矢量文件，按坐标轴刻度换算。</p>
+  <p><b>来源。</b>
+    <a href="https://arxiv.org/abs/2609.31349">DyMD（arXiv 2609.31349）</a> ·
+    <a href="https://arxiv.org/abs/2606.28128">PhysisForcing（arXiv 2606.28128）</a> ·
+    <a href="https://arxiv.org/abs/2602.08971">WorldArena（arXiv 2602.08971）</a> ·
+    <a href="https://arxiv.org/abs/2601.15282">RBench / RoVid-X（arXiv 2601.15282）</a> ·
+    <a href="https://github.com/Wan-Video/Wan2.2/blob/main/wan/configs/wan_i2v_A14B.py">Wan2.2 wan_i2v_A14B.py</a> ·
+    <a href="https://huggingface.co/DAGroup-PKU/PF_Wan">DAGroup-PKU/PF_Wan</a> ·
+    <a href="https://github.com/DAGroup-PKU/PhysisForcing">PhysisForcing 代码</a>
+  </p>
+  <p class="dim">编写于 2026-09-28。</p>
+</footer>
+
+</div>
+
+<script>
+(function(){
+"use strict";
+/* ============================================================
+   数据：Fig.5（从 arXiv HTML 版 SVG 抽取）与 Fig.3a 散点
+   ============================================================ */
+const FIG = {"sig":[0.16,0.247,0.3215,0.386,0.442,0.491,0.5345,0.573,0.6075,0.639,0.6675,0.6935,0.717,0.7385,0.7585,0.777,0.7945,0.8105,0.825,0.839,0.852,0.864,0.8755,0.8865,0.897,0.9065,0.9155,0.924,0.932,0.94,0.9475,0.9545,0.9615,0.968,0.974,0.98,0.986,0.9915,0.9965],"kap":[3.63,2.58,2.35,2.3,2.54,2.59,2.72,3.07,3.33,3.62,3.92,4.2,4.69,5.17,5.5,5.91,6.5,7.38,8.03,8.68,9.37,11.51,13.94,11.47,12.52,14.49,15.46,18.3,19.5,19.58,22.16,24.64,26.78,30.14,33.89,38.23,45.05,59.32,106.62],"q1":[3.5,2.47,2.25,2.17,2.36,2.38,2.49,2.75,2.98,3.26,3.53,3.68,4.17,4.53,4.88,5.36,5.8,6.66,7.38,7.93,8.03,10.19,13.04,10.28,11.23,12.78,13.81,16.03,16.84,17.81,20.94,22.44,24.58,27.95,32.7,30.59,35.81,46.94,99.82],"q3":[3.74,2.64,2.4,2.41,2.69,2.75,2.95,3.32,3.62,4.0,4.29,4.57,5.24,5.7,6.01,6.28,6.98,8.29,8.95,10.05,10.68,12.46,15.42,12.12,14.17,16.45,16.54,18.96,20.23,21.94,23.1,26.53,27.28,32.37,36.77,45.23,53.12,63.95,125.63],"fig3a":[[0.3235,0.075],[0.333,0.0709],[0.4139,0.0763],[0.4091,0.1172],[0.337,0.0913],[0.2292,0.0551],[0.3817,0.0698],[0.382,0.0979],[0.2629,0.0652],[0.3206,0.0633],[0.2528,0.0515],[0.3759,0.0989],[0.3509,0.1052],[0.3658,0.0936],[0.3614,0.0959],[0.3558,0.0788],[0.3351,0.0845],[0.4105,0.1206],[0.4016,0.0871],[0.3041,0.0829],[0.2854,0.0457],[0.4129,0.0895],[0.3474,0.1003],[0.3493,0.0861],[0.4057,0.0849],[0.4668,0.1057],[0.302,0.0684],[0.3498,0.083],[0.4174,0.1157],[0.3437,0.0922],[0.393,0.0949],[0.3919,0.0899]]};
+const SIG = FIG.sig, KAP = FIG.kap, Q1 = FIG.q1, Q3 = FIG.q3;
+const LO = 0.020, HI = 0.999, LN10 = Math.LN10;
+
+/* ---------- helpers ---------- */
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const NS = "http://www.w3.org/2000/svg";
+function S(tag, attrs, parent){
+  const el = document.createElementNS(NS, tag);
+  if (attrs) for (const k in attrs){
+    const v = attrs[k];
+    if (v === undefined || v === null) continue;
+    if (k === "text") el.textContent = v;
+    else el.setAttribute(k, v);
+  }
+  if (parent) parent.appendChild(el);
+  return el;
+}
+function svgRoot(host, w, h, label){
+  host.innerHTML = "";
+  const svg = S("svg", {viewBox:`0 0 ${w} ${h}`, role:"img", "aria-label":label||""});
+  host.appendChild(svg);
+  return svg;
+}
+const clamp = (x,a,b) => Math.max(a, Math.min(b, x));
+const fmtPct = (p, d=1) => (100*p).toFixed(d) + "%";
+const zOf = s => -Math.log10(1 - s);
+const sOf = z => 1 - Math.pow(10, -z);
+function debounce(fn, ms){ let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+/* ---------- 调度：shift 与教师先验 ---------- */
+function uShift(s, x){ return x / (s - (s - 1) * x); }
+function shiftMassAbove(s, a){
+  a = clamp(a, LO, HI);
+  return (uShift(s, HI) - uShift(s, a)) / (uShift(s, HI) - uShift(s, LO));
+}
+function shiftDensSigma(s, x){ // 对 σ 的密度，定义域 [LO,HI)
+  if (x < LO || x > HI) return 0;
+  const d = s - (s - 1) * x;
+  return (s / (d * d)) / (uShift(s, HI) - uShift(s, LO));
+}
+function interpK(x){
+  if (x <= SIG[0]) return KAP[0];
+  if (x >= SIG[SIG.length-1]) return KAP[KAP.length-1];
+  let i = 1; while (SIG[i] < x) i++;
+  const t = (x - SIG[i-1]) / (SIG[i] - SIG[i-1]);
+  return KAP[i-1] + t * (KAP[i] - KAP[i-1]);
+}
+const sortedK = KAP.slice().sort((a,b)=>a-b);
+const EPS_K = 0.1 * (sortedK.length % 2 ? sortedK[(sortedK.length-1)/2] : 0.5*(sortedK[sortedK.length/2-1]+sortedK[sortedK.length/2]));
+// 在 z 网格上积分（高噪声端更密）
+const ZG = (function(){ const n = 6000, z0 = zOf(LO), z1 = zOf(HI); const a = new Float64Array(n); for (let i=0;i<n;i++) a[i] = z0 + (z1 - z0) * i/(n-1); return a; })();
+const SG = Float64Array.from(ZG, z => sOf(z));
+const PRIOR = (function(){
+  const n = ZG.length, h = new Float64Array(n);
+  for (let i=0;i<n;i++){ const k = interpK(SG[i]) + EPS_K; h[i] = k*k; }
+  // ∫ h dσ，dσ = (1-σ) ln10 dz
+  let Z = 0; const tail = new Float64Array(n); // tail[i] = ∫_{σ_i}^{HI} h dσ
+  for (let i=n-2;i>=0;i--){
+    const f0 = h[i]*(1-SG[i])*LN10, f1 = h[i+1]*(1-SG[i+1])*LN10;
+    tail[i] = tail[i+1] + 0.5*(f0+f1)*(ZG[i+1]-ZG[i]);
+  }
+  Z = tail[0];
+  return {dens: Float64Array.from(h, v => v / Z), tail: Float64Array.from(tail, v => v / Z)};
+})();
+function priorDensSigma(x){
+  if (x < LO || x > HI) return 0;
+  const k = interpK(x) + EPS_K; return (k*k) / (PRIOR_NORM);
+}
+const PRIOR_NORM = (function(){ // 同一积分常数
+  const n = ZG.length; let Z = 0;
+  for (let i=0;i<n-1;i++){
+    const k0 = interpK(SG[i]) + EPS_K, k1 = interpK(SG[i+1]) + EPS_K;
+    Z += 0.5*(k0*k0*(1-SG[i]) + k1*k1*(1-SG[i+1]))*LN10*(ZG[i+1]-ZG[i]);
+  }
+  return Z;
+})();
+function priorMassAbove(a){
+  a = clamp(a, LO, HI);
+  const z = zOf(a); const n = ZG.length;
+  if (z <= ZG[0]) return 1;
+  let i = 1; while (i < n && ZG[i] < z) i++;
+  if (i >= n) return 0;
+  const t = (z - ZG[i-1]) / (ZG[i] - ZG[i-1]);
+  return PRIOR.tail[i-1] + t * (PRIOR.tail[i] - PRIOR.tail[i-1]);
+}
+function equivShift(a){ // 让 shift 调度在 σ>a 的质量追平教师先验
+  const target = priorMassAbove(a);
+  let lo = 1.0001, hi = 5000;
+  for (let it=0; it<80; it++){ const mid = Math.sqrt(lo*hi); if (shiftMassAbove(mid, a) < target) lo = mid; else hi = mid; }
+  return Math.sqrt(lo*hi);
+}
+const BASE_S = 5;
+
+/* ---------- 通用坐标轴 ---------- */
+function axesZ(svg, P, zmin, zmax, ylab, yticks, ymax, opts){
+  opts = opts || {};
+  const X = z => P.l + (z - zmin) / (zmax - zmin) * (P.w);
+  const Y = v => P.t + P.h - v / ymax * P.h;
+  const g = S("g", null, svg);
+  yticks.forEach(v => {
+    S("line", {x1:P.l, x2:P.l+P.w, y1:Y(v), y2:Y(v), class:"gridl"}, g);
+    S("text", {x:P.l-6, y:Y(v)+4, "text-anchor":"end", class:"xs", text: opts.yfmt ? opts.yfmt(v) : v}, g);
+  });
+  const ticks = [[0.5,"0.5"],[0.8,"0.8"],[0.9,"0.9"],[0.95,"0.95"],[0.98,"0.98"],[0.99,"0.99"],[0.995,"0.995"],[0.999,"0.999"]].filter(t => zOf(t[0]) >= zmin - 1e-9 && zOf(t[0]) <= zmax + 1e-9);
+  ticks.forEach(([s,l]) => {
+    const x = X(zOf(s));
+    S("line", {x1:x, x2:x, y1:P.t, y2:P.t+P.h, class:"gridl"}, g);
+    S("text", {x:x, y:P.t+P.h+15, "text-anchor":"middle", class:"xs", text:l}, g);
+  });
+  S("line", {x1:P.l, x2:P.l+P.w, y1:P.t+P.h, y2:P.t+P.h, class:"axl"}, g);
+  S("text", {x:P.l+P.w/2, y:P.t+P.h+32, "text-anchor":"middle", class:"sm", text:"噪声水平 σ（横轴按 −log₁₀(1−σ) 拉伸）"}, g);
+  if (ylab) S("text", {x:P.l-40, y:P.t+P.h/2, transform:`rotate(-90 ${P.l-40} ${P.t+P.h/2})`, "text-anchor":"middle", class:"sm", text:ylab}, g);
+  return {X, Y};
+}
+
+/* ============================================================
+   §1 流程图切换
+   ============================================================ */
+$$("[data-pipe]").forEach(b => b.addEventListener("click", () => {
+  $$("[data-pipe]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  $("#pipe").setAttribute("data-mode", b.dataset.pipe);
+}));
+
+/* ============================================================
+   §3.1 锁死计算器
+   ============================================================ */
+const NLAT = 16*20*60*80;
+function sigmoid(x){ return 1/(1+Math.exp(-x)); }
+const GH = (function(){ // 标准正态的简单求积
+  const pts = [], n = 41; let wsum = 0;
+  for (let i=0;i<n;i++){ const x = -5 + 10*i/(n-1); const w = Math.exp(-x*x/2); pts.push([x,w]); wsum += w; }
+  return pts.map(([x,w]) => [x, w/wsum]);
+})();
+function pMoving(sig, d2){
+  const snr = Math.pow((1-sig)/sig, 2), tau = snr * d2;
+  const mu = -tau/2, sd = Math.sqrt(tau);
+  let p = 0; for (const [x,w] of GH) p += w * sigmoid(mu + sd*x);
+  return p;
+}
+function drawLock(){
+  const fv = +$("#lkF").value, dv = +$("#lkD").value, gv = +$("#lkG").value/100;
+  const f = Math.pow(10, -2.3 + 2*fv/100), dl = dv/100;
+  $("#lkFo").textContent = fmtPct(f, f < 0.1 ? 1 : 0);
+  $("#lkDo").textContent = dl.toFixed(2);
+  $("#lkGo").textContent = gv.toFixed(2);
+  const d2 = NLAT * f * dl * dl, dn = Math.sqrt(d2), sstar = dn/(1+dn);
+  const mb = shiftMassAbove(BASE_S, sstar), m25 = shiftMassAbove(25, sstar), mp = priorMassAbove(sstar);
+  const mmix = (1-gv)*mb + gv*mp;
+  $("#lkKpi").innerHTML =
+    `<div class="kpi"><div class="k">‖d‖²（元素数×占比×δ²）</div><div class="v">${Math.round(d2).toLocaleString("en-US")}</div></div>`+
+    `<div class="kpi risk"><div class="k">解锁阈值 σ*（SNR·‖d‖² = 1）</div><div class="v">${sstar.toFixed(4)}</div></div>`+
+    `<div class="kpi base"><div class="k">Base DMD（shift 5）落在 σ&gt;σ* 的比例</div><div class="v">${fmtPct(mb)}</div></div>`+
+    `<div class="kpi"><div class="k">Shift-25</div><div class="v" style="color:var(--med-ink)">${fmtPct(m25)}</div></div>`+
+    `<div class="kpi dy"><div class="k">教师先验 ν<sub>κ</sub>（g = 1）</div><div class="v">${fmtPct(mp)}</div></div>`+
+    `<div class="kpi dy"><div class="k">DyMD 混合（g = ${gv.toFixed(2)}）</div><div class="v">${fmtPct(mmix)}</div></div>`;
+  const W = 760, H = 300, P = {l:56, t:14, w:640, h:220};
+  const svg = svgRoot($("#lkChart"), W, H, "教师后验中运动模式的概率随噪声水平变化，以及三种时间步调度的分布");
+  const zmin = zOf(0.5), zmax = zOf(0.999);
+  // 调度密度（每单位 z）
+  const N = 260, dens = {b:[], s:[], p:[]}; let dmax = 0;
+  for (let i=0;i<N;i++){
+    const z = zmin + (zmax-zmin)*i/(N-1), s = sOf(z), jac = (1-s)*LN10;
+    const b = shiftDensSigma(BASE_S, s)*jac, s25 = shiftDensSigma(25, s)*jac, p = priorDensSigma(s)*jac;
+    dens.b.push([z,b]); dens.s.push([z,s25]); dens.p.push([z,p]); dmax = Math.max(dmax, b, s25, p);
+  }
+  const A = axesZ(svg, P, zmin, zmax, "运动模式的后验概率", [0,0.25,0.5], 0.5, {yfmt:v=>v.toFixed(2)});
+  const Yd = v => P.t + P.h - v/dmax*P.h*0.92;
+  const area = (arr, col) => {
+    let d = `M${A.X(arr[0][0])},${P.t+P.h}`;
+    arr.forEach(([z,v]) => d += ` L${A.X(z).toFixed(1)},${Yd(v).toFixed(1)}`);
+    d += ` L${A.X(arr[arr.length-1][0])},${P.t+P.h} Z`;
+    S("path", {d, style:`fill:var(--${col}-soft);stroke:var(--${col});stroke-width:1`}, svg);
+  };
+  area(dens.b, "base"); area(dens.s, "med"); area(dens.p, "dy");
+  // σ*
+  if (sstar > 0.5){
+    const xs = A.X(zOf(Math.min(sstar, 0.999)));
+    S("line", {x1:xs, x2:xs, y1:P.t, y2:P.t+P.h, style:"stroke:var(--risk);stroke-width:1.5;stroke-dasharray:5 3"}, svg);
+    S("text", {x:xs-4, y:P.t+12, "text-anchor":"end", class:"xs", style:"fill:var(--risk-ink)", text:`σ* = ${sstar.toFixed(4)}`}, svg);
+  }
+  // p_moving 曲线
+  let d = "";
+  for (let i=0;i<N;i++){ const z = zmin + (zmax-zmin)*i/(N-1); const p = pMoving(sOf(z), d2); d += (i?" L":"M") + A.X(z).toFixed(1) + "," + A.Y(p).toFixed(1); }
+  S("path", {d, style:"fill:none;stroke:var(--tch);stroke-width:2.4"}, svg);
+  S("text", {x:P.l+P.w+6, y:P.t+10, class:"xs", text:"阴影："}, svg);
+  S("text", {x:P.l+P.w+6, y:P.t+24, class:"xs", text:"t 的采样"}, svg);
+  S("text", {x:P.l+P.w+6, y:P.t+38, class:"xs", text:"分布"}, svg);
+}
+["#lkF","#lkD","#lkG"].forEach(id => $(id).addEventListener("input", drawLock));
+
+/* ============================================================
+   §3.2 Fig.3 重绘
+   ============================================================ */
+function drawFig3(){
+  { // a
+    const W = 360, H = 260, P = {l:52, t:14, w:290, h:196};
+    const svg = svgRoot($("#f3a"), W, H, "Fig.3a 重绘：32 个 rollout 的潜空间运动与 critic FM 损失");
+    const xmin = 0.2, xmax = 0.5, ymin = 0.04, ymax = 0.13;
+    const X = v => P.l + (v-xmin)/(xmax-xmin)*P.w, Y = v => P.t + P.h - (v-ymin)/(ymax-ymin)*P.h;
+    [0.05,0.07,0.09,0.11,0.13].forEach(v => { S("line",{x1:P.l,x2:P.l+P.w,y1:Y(v),y2:Y(v),class:"gridl"},svg); S("text",{x:P.l-6,y:Y(v)+4,"text-anchor":"end",class:"xs",text:v.toFixed(2)},svg); });
+    [0.2,0.3,0.4,0.5].forEach(v => { S("line",{x1:X(v),x2:X(v),y1:P.t,y2:P.t+P.h,class:"gridl"},svg); S("text",{x:X(v),y:P.t+P.h+15,"text-anchor":"middle",class:"xs",text:v.toFixed(1)},svg); });
+    S("text",{x:P.l+P.w/2,y:H-8,"text-anchor":"middle",class:"sm",text:"VAE 潜空间运动幅度"},svg);
+    S("text",{x:14,y:P.t+P.h/2,transform:`rotate(-90 14 ${P.t+P.h/2})`,"text-anchor":"middle",class:"sm",text:"critic FM 损失（σ=0.97）"},svg);
+    FIG.fig3a.forEach(([m,l]) => S("circle",{cx:X(m),cy:Y(l),r:4.2,style:"fill:var(--cri-soft);stroke:var(--cri);stroke-width:1.3"},svg));
+    S("text",{x:P.l+8,y:P.t+14,class:"mono",text:"ρ = 0.692（n = 32）"},svg);
+  }
+  { // b
+    const W = 360, H = 260, P = {l:52, t:14, w:290, h:196};
+    const svg = svgRoot($("#f3b"), W, H, "Fig.3b 重绘：不同噪声水平下运动与 FM 损失的 Spearman 相关");
+    const X = v => P.l + (v-0.45)/(1.0-0.45)*P.w, Y = v => P.t + P.h - v*P.h;
+    [0,0.25,0.5,0.75,1].forEach(v => { S("line",{x1:P.l,x2:P.l+P.w,y1:Y(v),y2:Y(v),class:"gridl"},svg); S("text",{x:P.l-6,y:Y(v)+4,"text-anchor":"end",class:"xs",text:v.toFixed(2)},svg); });
+    [0.5,0.6,0.7,0.8,0.9,1.0].forEach(v => { S("line",{x1:X(v),x2:X(v),y1:P.t,y2:P.t+P.h,class:"gridl"},svg); S("text",{x:X(v),y:P.t+P.h+15,"text-anchor":"middle",class:"xs",text:v.toFixed(1)},svg); });
+    S("text",{x:P.l+P.w/2,y:H-8,"text-anchor":"middle",class:"sm",text:"噪声水平 σ"},svg);
+    S("text",{x:14,y:P.t+P.h/2,transform:`rotate(-90 14 ${P.t+P.h/2})`,"text-anchor":"middle",class:"sm",text:"Spearman ρ"},svg);
+    const pts = [[0.5,0.349],[0.8,0.559],[0.92,0.634],[0.97,0.692]];
+    S("path",{d:pts.map((p,i)=>(i?"L":"M")+X(p[0])+","+Y(p[1])).join(" "),style:"fill:none;stroke:var(--tch);stroke-width:2"},svg);
+    pts.forEach(([s,r]) => { S("circle",{cx:X(s),cy:Y(r),r:4.5,style:"fill:var(--tch)"},svg); S("text",{x:X(s),y:Y(r)-9,"text-anchor":"middle",class:"mono",text:r.toFixed(3)},svg); });
+  }
+}
+
+/* ============================================================
+   §4.2 调度图
+   ============================================================ */
+let schedView = "kappa";
+function shiftFromSlider(v){ return Math.pow(10, 0.5 + 2*v/100); } // 3.2 … 316
+function drawSched(){
+  const sv = +$("#shS").value, sc = shiftFromSlider(sv);
+  $("#shSo").textContent = sc < 10 ? sc.toFixed(1) : Math.round(sc);
+  const host = $("#schedChart");
+  const W = 760, H = 300, P = {l:56, t:14, w:660, h:220};
+  const leg = $("#schedLegend");
+  if (schedView === "kappa"){
+    const svg = svgRoot(host, W, H, "Fig.5 重绘：教师速度转向率随噪声水平变化");
+    const xmin = 0.1, xmax = 1.0, ymax = 150;
+    const X = v => P.l + (v-xmin)/(xmax-xmin)*P.w, Y = v => P.t + P.h - Math.min(v,ymax)/ymax*P.h;
+    [0,30,60,90,120,150].forEach(v => { S("line",{x1:P.l,x2:P.l+P.w,y1:Y(v),y2:Y(v),class:"gridl"},svg); S("text",{x:P.l-6,y:Y(v)+4,"text-anchor":"end",class:"xs",text:v},svg); });
+    [0.2,0.4,0.6,0.8,1.0].forEach(v => { S("line",{x1:X(v),x2:X(v),y1:P.t,y2:P.t+P.h,class:"gridl"},svg); S("text",{x:X(v),y:P.t+P.h+15,"text-anchor":"middle",class:"xs",text:v.toFixed(1)},svg); });
+    S("rect",{x:X(0.9),y:P.t,width:X(1.0)-X(0.9),height:P.h,style:"fill:var(--med-soft)"},svg);
+    S("text",{x:X(0.9)-4,y:P.t+14,"text-anchor":"end",class:"xs",style:"fill:var(--med-ink)",text:"论文标出的高噪区 σ∈[0.9,1] →"},svg);
+    let band = "M" + SIG.map((s,i)=>X(s)+","+Y(Q3[i])).join(" L") + " L" + SIG.slice().reverse().map((s,j)=>{const i=SIG.length-1-j; return X(s)+","+Y(Q1[i]);}).join(" L") + " Z";
+    S("path",{d:band,style:"fill:var(--stu-soft);stroke:none"},svg);
+    S("path",{d:"M"+SIG.map((s,i)=>X(s)+","+Y(KAP[i])).join(" L"),style:"fill:none;stroke:var(--stu);stroke-width:2"},svg);
+    SIG.forEach((s,i)=>S("circle",{cx:X(s),cy:Y(KAP[i]),r:2.2,style:"fill:var(--stu)"},svg));
+    S("text",{x:P.l+P.w/2,y:H-10,"text-anchor":"middle",class:"sm",text:"噪声水平 σ（线性，同原图）"},svg);
+    S("text",{x:14,y:P.t+P.h/2,transform:`rotate(-90 14 ${P.t+P.h/2})`,"text-anchor":"middle",class:"sm",text:"平均转向率 κ̄(σ)（弧度 / 单位 σ）"},svg);
+    S("text",{x:X(0.9965)-6,y:Y(106.6)-6,"text-anchor":"end",class:"mono",text:"σ=0.9965：κ̄≈107"},svg);
+    leg.innerHTML = `<span><i class="ln" style="background:var(--stu)"></i>32 条教师轨迹的平均转向率（39 个步间中点）</span><span><i style="background:var(--stu-soft)"></i>四分位带</span><span>平方后作为先验：峰值与中位数之比约 (107.5/9.55)² ≈ 127</span>`;
+  } else {
+    const svg = svgRoot(host, W, H, schedView === "dens" ? "三种调度的采样密度" : "三种调度的尾部质量");
+    const zmin = zOf(0.3), zmax = zOf(0.999), N = 300;
+    const curves = [
+      {k:"base", name:"Base DMD（shift 5）", f:s=>shiftDensSigma(BASE_S,s), m:a=>shiftMassAbove(BASE_S,a), col:"base", w:2},
+      {k:"s25", name:"Shift-25（论文对照）", f:s=>shiftDensSigma(25,s), m:a=>shiftMassAbove(25,a), col:"med", w:2},
+      {k:"pri", name:"教师先验 ν_κ（重建）", f:priorDensSigma, m:priorMassAbove, col:"dy", w:2.6},
+      {k:"cus", name:`自定义 shift = ${sc<10?sc.toFixed(1):Math.round(sc)}`, f:s=>shiftDensSigma(sc,s), m:a=>shiftMassAbove(sc,a), col:"cri", w:1.8, dash:"5 4"}
+    ];
+    if (schedView === "dens"){
+      let dmax = 0; const data = curves.map(c => { const arr=[]; for(let i=0;i<N;i++){ const z=zmin+(zmax-zmin)*i/(N-1), s=sOf(z); const v=c.f(s)*(1-s)*LN10; arr.push([z,v]); dmax=Math.max(dmax,v);} return arr; });
+      const ymax = Math.ceil(dmax*10)/10;
+      const A = axesZ(svg, P, zmin, zmax, "每单位 −log₁₀(1−σ) 的概率", [0, ymax/2, ymax], ymax, {yfmt:v=>v.toFixed(2)});
+      data.forEach((arr,ci) => { const c = curves[ci]; S("path",{d:"M"+arr.map(([z,v])=>A.X(z).toFixed(1)+","+A.Y(v).toFixed(1)).join(" L"),style:`fill:none;stroke:var(--${c.col});stroke-width:${c.w};${c.dash?`stroke-dasharray:${c.dash}`:""}`},svg); });
+    } else {
+      const A = axesZ(svg, P, zmin, zmax, "P(σ > x)", [0,0.25,0.5,0.75,1], 1, {yfmt:v=>(v*100)+"%"});
+      curves.forEach(c => { let d=""; for(let i=0;i<N;i++){ const z=zmin+(zmax-zmin)*i/(N-1); d+=(i?" L":"M")+A.X(z).toFixed(1)+","+A.Y(c.m(sOf(z))).toFixed(1);} S("path",{d,style:`fill:none;stroke:var(--${c.col});stroke-width:${c.w};${c.dash?`stroke-dasharray:${c.dash}`:""}`},svg); });
+      [0.9,0.99].forEach(a => { const x=A.X(zOf(a)); S("line",{x1:x,x2:x,y1:P.t,y2:P.t+P.h,style:"stroke:var(--risk);stroke-width:1;stroke-dasharray:3 3"},svg); });
+    }
+    leg.innerHTML = curves.map(c => `<span><i class="ln" style="background:var(--${c.col})"></i>${c.name}</span>`).join("");
+  }
+  // 表
+  const th = [0.5, 0.9, 0.95, 0.99];
+  const rows = [
+    ["Base DMD（shift 5）", a=>shiftMassAbove(BASE_S,a)],
+    ["Shift-25（Table 3 对照）", a=>shiftMassAbove(25,a)],
+    ["教师先验 ν_κ（按 Fig.5 重建）", priorMassAbove],
+    [`DyMD 混合，g = 0.3（α 下限）`, a=>0.7*shiftMassAbove(BASE_S,a)+0.3*priorMassAbove(a)],
+    [`自定义 shift = ${sc<10?sc.toFixed(1):Math.round(sc)}`, a=>shiftMassAbove(sc,a)]
+  ];
+  let html = "<thead><tr><th>调度</th>" + th.map(a=>`<th>σ &gt; ${a}</th>`).join("") + "</tr></thead><tbody>";
+  rows.forEach(([n,f],ri) => { html += `<tr${ri===2?' class="hl"':''}><td>${n}</td>` + th.map(a=>`<td class="num">${fmtPct(f(a))}</td>`).join("") + "</tr>"; });
+  html += `<tr class="grp"><td>等效 shift（追平教师先验）</td>` + th.map(a=>`<td class="num" style="font-style:normal">≈ ${Math.round(equivShift(a))}</td>`).join("") + "</tr></tbody>";
+  $("#schedTbl").innerHTML = html;
+}
+$$("[data-sv]").forEach(b => b.addEventListener("click", () => { $$("[data-sv]").forEach(x=>x.setAttribute("aria-pressed", String(x===b))); schedView = b.dataset.sv; drawSched(); }));
+$("#shS").addEventListener("input", drawSched);
+
+/* ============================================================
+   §4.3 亲和度
+   ============================================================ */
+function drawAff(){
+  const m = +$("#afM").value/100, th = +$("#afT").value, al = +$("#afA").value/100;
+  $("#afMo").textContent = m.toFixed(2); $("#afTo").textContent = th + "°"; $("#afAo").textContent = al.toFixed(2);
+  const c = Math.cos(th*Math.PI/180);
+  const A = (2*Math.max(0, m*c)) / (m*m + 1);
+  const g = al / (al + (1-al)*A);
+  const mix = a => (1-g)*shiftMassAbove(BASE_S,a) + g*priorMassAbove(a);
+  $("#afKpi").innerHTML =
+    `<div class="kpi dy"><div class="k">亲和度 A</div><div class="v">${A.toFixed(3)}</div></div>`+
+    `<div class="kpi dy"><div class="k">先验权重 g</div><div class="v">${g.toFixed(3)}</div></div>`+
+    `<div class="kpi"><div class="k">这个样本 σ&gt;0.9 的概率</div><div class="v">${fmtPct(mix(0.9))}</div></div>`+
+    `<div class="kpi"><div class="k">σ&gt;0.99 的概率</div><div class="v">${fmtPct(mix(0.99))}</div></div>`;
+  // 向量图
+  const W = 300, H = 250, cx = 70, cy = 150, L = 75;
+  const svg = svgRoot($("#affVec"), W, H, "学生与目标的运动差分向量");
+  S("circle",{cx,cy,r:L,style:"fill:none;stroke:var(--rule2);stroke-dasharray:3 4"},svg);
+    S("line",{x1:cx-20,x2:W-6,y1:cy,y2:cy,class:"gridl"},svg);
+  const defs = S("defs",null,svg);
+  const mk = (id,col) => { const mm = S("marker",{id, viewBox:"0 0 10 10", refX:"8", refY:"5", markerWidth:"7", markerHeight:"7", orient:"auto"},defs); S("path",{d:"M0,0 L10,5 L0,10 z",style:`fill:var(--${col})`},mm); };
+  mk("mkT","tch"); mk("mkS","stu");
+  S("line",{x1:cx,y1:cy,x2:cx+L,y2:cy,style:"stroke:var(--tch);stroke-width:3","marker-end":"url(#mkT)"},svg);
+  const ex = cx + m*L*Math.cos(th*Math.PI/180), ey = cy - m*L*Math.sin(th*Math.PI/180);
+  if (m > 0.01) S("line",{x1:cx,y1:cy,x2:ex,y2:ey,style:"stroke:var(--stu);stroke-width:3","marker-end":"url(#mkS)"},svg);
+  else S("circle",{cx,cy,r:4,style:"fill:var(--stu)"},svg);
+  const ar = 34, a0 = 0, a1 = th*Math.PI/180;
+  if (th > 2 && m > 0.01) S("path",{d:`M${cx+ar},${cy} A${ar},${ar} 0 ${th>180?1:0} 0 ${cx+ar*Math.cos(a1)},${cy-ar*Math.sin(a1)}`,style:"fill:none;stroke:var(--ink3)"},svg);
+  S("text",{x:cx+L+4,y:cy+16,class:"xs",style:"fill:var(--tch-ink)",text:"δz*（目标）"},svg);
+  S("text",{x:clamp(ex+6,4,W-70),y:clamp(ey-6,12,H-4),class:"xs",style:"fill:var(--stu-ink)",text:"δz^S（学生）"},svg);
+  S("text",{x:8,y:18,class:"xs",text:"虚线圆：幅度与目标相同"},svg);
+  // 密度小图
+  const W2 = 460, H2 = 180, P = {l:20, t:26, w:420, h:110};
+  const svg2 = svgRoot($("#affDens"), W2, H2, "这个样本的时间步采样密度");
+  const zmin = zOf(0.3), zmax = zOf(0.999), N = 220;
+  const arr = [], arrB = [], arrP = []; let dmax = 0;
+  for (let i=0;i<N;i++){ const z=zmin+(zmax-zmin)*i/(N-1), s=sOf(z), j=(1-s)*LN10; const b=shiftDensSigma(BASE_S,s)*j, p=priorDensSigma(s)*j; arrB.push([z,b]); arrP.push([z,p]); arr.push([z,(1-g)*b+g*p]); dmax=Math.max(dmax,b,p); }
+  const Ax = axesZ(svg2, P, zmin, zmax, "", [0], dmax, {yfmt:()=>""});
+  const pth = (a, st) => S("path",{d:"M"+a.map(([z,v])=>Ax.X(z).toFixed(1)+","+Ax.Y(v).toFixed(1)).join(" L"),style:st},svg2);
+  pth(arrB,"fill:none;stroke:var(--base);stroke-width:1.2;stroke-dasharray:4 3");
+  pth(arrP,"fill:none;stroke:var(--dy);stroke-width:1.2;stroke-dasharray:4 3");
+  pth(arr,"fill:none;stroke:var(--stu);stroke-width:2.4");
+  S("text",{x:P.l,y:12,class:"xs",text:"蓝实线 = 这个样本的 ν_i；灰虚线 = ν_base；青虚线 = ν_κ"},svg2);
+}
+["#afM","#afT","#afA"].forEach(id => $(id).addEventListener("input", drawAff));
+
+/* ============================================================
+   §4.4 ρ 置信区间条
+   ============================================================ */
+function drawRho(){
+  const rows = [["VAE 潜空间亲和度", 0.162, -0.20, 0.48, "base"],["V-JEPA 2.1 亲和度（采用）", 0.374, 0.03, 0.64, "dy"]];
+  const lo = -0.4, hi = 1.0, P = v => (v-lo)/(hi-lo)*100;
+  let h = "";
+  rows.forEach(([n,r,a,b,c]) => {
+    h += `<div class="brow"><div class="lab">${n}</div><div class="trk">`+
+      `<div class="bar c-${c}" style="left:${P(Math.min(0,r))}%;width:${Math.abs(P(r)-P(0))}%;opacity:.85"></div>`+
+      `<div style="position:absolute;top:8px;height:2px;left:${P(a)}%;width:${P(b)-P(a)}%;background:var(--ink2)"></div>`+
+      `<div style="position:absolute;top:3px;bottom:3px;width:1.5px;left:${P(a)}%;background:var(--ink2)"></div>`+
+      `<div style="position:absolute;top:3px;bottom:3px;width:1.5px;left:${P(b)}%;background:var(--ink2)"></div>`+
+      `<div style="position:absolute;top:0;bottom:0;width:1px;left:${P(0)}%;background:var(--ink3)"></div>`+
+      `</div><div class="val">${r.toFixed(3)}</div></div>`;
+  });
+  h += `<div class="brow"><div class="lab dim" style="font-size:11.5px">轴：ρ ∈ [−0.4, 1.0]</div><div class="dim" style="font-size:11.5px">须线 = Fisher z 变换下 n = 32 的 95% 置信区间；竖线在 ρ = 0</div><div></div></div>`;
+  $("#rhoBars").innerHTML = h;
+}
+
+/* ============================================================
+   §5.2 玩具实验
+   ============================================================ */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function makeGauss(rng){let spare=null;return function(){if(spare!==null){const s=spare;spare=null;return s}let u,v,s;do{u=rng()*2-1;v=rng()*2-1;s=u*u+v*v}while(s>=1||s===0);const m=Math.sqrt(-2*Math.log(s)/s);spare=v*m;return u*m}}
+function rank(a){const idx=a.map((v,i)=>[v,i]).sort((x,y)=>x[0]-y[0]);const r=new Array(a.length);for(let i=0;i<idx.length;){let j=i;while(j+1<idx.length&&idx[j+1][0]===idx[i][0])j++;const rr=(i+j)/2+1;for(let k=i;k<=j;k++)r[idx[k][1]]=rr;i=j+1}return r}
+function spearman(a,b){const ra=rank(a),rb=rank(b);const n=a.length;let ma=0,mb=0;for(let i=0;i<n;i++){ma+=ra[i];mb+=rb[i]}ma/=n;mb/=n;let sab=0,saa=0,sbb=0;for(let i=0;i<n;i++){const x=ra[i]-ma,y=rb[i]-mb;sab+=x*y;saa+=x*x;sbb+=y*y}return sab/Math.sqrt(saa*sbb)}
+function fmToy(opt){
+  const {sigmas,n=32,D=128,k=4,Smin=0.15,Smax=0.5,saMed=0.1,saSpread=0.35,couple=0.4,critErr=0,measNoise=0.5,draws=3,reps=30,seed=7}=opt;
+  const rng=mulberry32(seed),g=makeGauss(rng);
+  const acc=sigmas.map(()=>0);
+  for(let r=0;r<reps;r++){
+    const S_=[],sa=[],motion=[],wm=[],wa=[];
+    let mS=0;for(let i=0;i<n;i++){S_.push(Smin+(Smax-Smin)*rng());mS+=S_[i]}mS/=n;
+    let vS=0;for(let i=0;i<n;i++)vS+=(S_[i]-mS)**2;const sdS=Math.sqrt(vS/n)||1;
+    for(let i=0;i<n;i++){
+      const zS=(S_[i]-mS)/sdS;
+      sa.push(saMed*Math.exp(saSpread*(couple*zS+Math.sqrt(1-couple*couple)*g())));
+      let mm=0;const w=[];for(let l=0;l<k;l++){const z=g()*S_[i];mm+=z*z;w.push(Math.sqrt(D/k)*z+g()*sa[i])}
+      wm.push(w);
+      const wa_i=new Float64Array(D-k);for(let j=0;j<D-k;j++)wa_i[j]=g()*sa[i];wa.push(wa_i);
+      motion.push(Math.sqrt(mm/k)*Math.exp(measNoise*g()));
+    }
+    sigmas.forEach((s,si)=>{
+      const L=[];
+      for(let i=0;i<n;i++){
+        const lamM=(D/k)*S_[i]*S_[i]+sa[i]*sa[i],lamA=sa[i]*sa[i];
+        const dM=(1-s)*(1-s)*lamM+s*s,dA=(1-s)*(1-s)*lamA+s*s;
+        const aM=s*s/dM,gM=(1-s)*lamM/dM,aA=s*s/dA,gA=(1-s)*lamA/dA;
+        const ce=critErr*Math.exp(0.5*g());
+        let tot=0;
+        for(let d=0;d<draws;d++){
+          for(let l=0;l<k;l++){const e=(aM*wm[i][l]-gM*s*g())/s+ce*g();tot+=e*e}
+          for(let j=0;j<D-k;j++){const e=(aA*wa[i][j]-gA*s*g())/s+ce*g();tot+=e*e}
+        }
+        L.push(tot/draws/D);
+      }
+      acc[si]+=spearman(motion,L);
+    });
+  }
+  return acc.map(v=>v/reps);
+}
+const TOY_SIG = [0.3,0.5,0.65,0.8,0.9,0.92,0.95,0.97,0.985];
+function drawToy(){
+  const ce = +$("#tyE").value/100, mn = +$("#tyM").value/100, cp = +$("#tyC").value/100;
+  $("#tyEo").textContent = ce.toFixed(2); $("#tyMo").textContent = mn.toFixed(2); $("#tyCo").textContent = cp.toFixed(2);
+  const res = fmToy({sigmas:TOY_SIG, critErr:ce, measNoise:mn, couple:cp});
+  const W = 760, H = 290, P = {l:56, t:14, w:660, h:220};
+  const svg = svgRoot($("#toyChart"), W, H, "玩具模型与论文实测的 ρ 随噪声水平变化");
+  const X = v => P.l + (v-0.25)/(1.0-0.25)*P.w, Y = v => P.t + P.h - (v+0.1)/(1.1)*P.h;
+  [0,0.25,0.5,0.75,1].forEach(v => { S("line",{x1:P.l,x2:P.l+P.w,y1:Y(v),y2:Y(v),class:"gridl"},svg); S("text",{x:P.l-6,y:Y(v)+4,"text-anchor":"end",class:"xs",text:v.toFixed(2)},svg); });
+  [0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0].forEach(v => { S("line",{x1:X(v),x2:X(v),y1:P.t,y2:P.t+P.h,class:"gridl"},svg); S("text",{x:X(v),y:P.t+P.h+15,"text-anchor":"middle",class:"xs",text:v.toFixed(1)},svg); });
+  S("text",{x:P.l+P.w/2,y:H-10,"text-anchor":"middle",class:"sm",text:"噪声水平 σ"},svg);
+  S("text",{x:14,y:P.t+P.h/2,transform:`rotate(-90 14 ${P.t+P.h/2})`,"text-anchor":"middle",class:"sm",text:"Spearman ρ"},svg);
+  S("path",{d:"M"+TOY_SIG.map((s,i)=>X(s).toFixed(1)+","+Y(res[i]).toFixed(1)).join(" L"),style:"fill:none;stroke:var(--cri);stroke-width:2.4"},svg);
+  TOY_SIG.forEach((s,i)=>S("circle",{cx:X(s),cy:Y(res[i]),r:2.6,style:"fill:var(--cri)"},svg));
+  [[0.5,0.349],[0.8,0.559],[0.92,0.634],[0.97,0.692]].forEach(([s,r])=>S("circle",{cx:X(s),cy:Y(r),r:5,style:"fill:var(--tch);stroke:var(--bg);stroke-width:1.5"},svg));
+  [[0.5,0.758],[0.8,0.898],[0.97,0.952]].forEach(([s,r])=>S("circle",{cx:X(s),cy:Y(r),r:5,style:"fill:var(--dy);stroke:var(--bg);stroke-width:1.5"},svg));
+  S("text",{x:P.l+8,y:P.t+14,class:"mono",text: ce === 0 ? "critic 误差 = 0：完美 critic" : `critic 误差 = ${ce.toFixed(2)}`},svg);
+}
+const drawToyD = debounce(drawToy, 120);
+["#tyE","#tyM","#tyC"].forEach(id => $(id).addEventListener("input", () => { const ce=+$("#tyE").value/100, mn=+$("#tyM").value/100, cp=+$("#tyC").value/100; $("#tyEo").textContent=ce.toFixed(2); $("#tyMo").textContent=mn.toFixed(2); $("#tyCo").textContent=cp.toFixed(2); drawToyD(); }));
+
+/* ============================================================
+   §5.3 倾斜计算器
+   ============================================================ */
+function drawTilt(){
+  const b = +$("#tlB").value/100, dr = +$("#tlR").value/100, q = +$("#tlQ").value/100, p = +$("#tlP").value/100;
+  $("#tlBo").textContent = b.toFixed(2); $("#tlRo").textContent = dr.toFixed(2); $("#tlQo").textContent = fmtPct(q,0); $("#tlPo").textContent = fmtPct(p,0);
+  const r = Math.exp(b*dr);
+  const qw = q*r/(q*r + (1-q));
+  const eq = p/(p + (1-p)*r);
+  const pull0 = p - q, pull1 = p - qw;
+  const bar = (lab, share, col, note) => `<div class="row"><div class="lab">${lab}</div><div class="st"><div style="width:${share*100}%;background:var(--${col})"></div><div style="width:${(1-share)*100}%;background:var(--surf3)"></div></div><div class="v">${fmtPct(share,1)}</div></div>` + (note?`<div class="row"><div></div><div class="dim" style="font-size:12px;margin-top:-4px">${note}</div><div></div></div>`:"");
+  $("#tiltShare").innerHTML =
+    bar("学生实际的运动占比", q, "stu") +
+    bar("加权 critic 以为的", qw, "cri", `权重比 e^(βΔr) = ${r.toFixed(2)}`) +
+    bar("教师", p, "tch") +
+    bar("理想极限下的平衡点", eq, "risk", `平衡点 q ∝ p_T / w；和教师差 ${((eq-p)*100).toFixed(1)} 个百分点`) +
+    `<div class="row"><div class="lab">往"动"的拉力</div><div class="readout">不加权 ∝ ${pull0.toFixed(3)}　→　加权后 ∝ ${pull1.toFixed(3)}（${pull0>0?("减弱 "+Math.round((1-pull1/pull0)*100)+"%"):"—"}）</div><div></div></div>`;
+}
+["#tlB","#tlR","#tlQ","#tlP"].forEach(id => $(id).addEventListener("input", drawTilt));
+
+/* ============================================================
+   §6.2 主表点图
+   ============================================================ */
+const MODELS = [["PF-Wan 14B","tch"],["Wan2.1-Fun 1.3B","fun"],["Base DMD","base"],["DyMD","dy"]];
+const MAIN = {
+  rb: {cols:["Overall","双臂","人形","单臂","四足"], v:[[75.3,72.5,79.8,71.8,77.2],[47.3,42.5,53.2,30.8,63.2],[34.6,25.2,33.4,25.8,54.0],[44.2,38.8,48.0,31.2,58.8]],
+       cap:"TAC 在四种形态上都是教师 ≫ 未蒸馏 1.3B > DyMD > Base DMD，只有单臂例外，DyMD 以 31.2 对 30.8 略胜未蒸馏模型。单臂上三个 1.3B 模型都离教师很远（71.8）。"},
+  pai: {cols:["Domain","Space","Physics","Time","Quality"], v:[[89.0,91.8,92.2,88.4,76.9],[79.0,79.7,82.5,76.4,75.3],[74.4,77.0,82.8,64.7,78.1],[79.5,82.4,81.2,73.5,78.1]],
+       cap:"DyMD 最大的改善在 Time（+8.8），这正是“动作有没有推进”。Physics 上 Base DMD 更高，Quality 上两个学生都高于教师：这两栏都偏爱静止视频。"},
+  ezs: {cols:["Domain","Space","Physics","Time"], v:[[83.2,80.9,89.2,78.0],[75.5,71.7,83.9,68.8],[73.3,66.9,86.0,64.8],[76.2,71.8,84.4,70.8]],
+       cap:"EZS 是分布外基准，改善幅度更小：Domain +2.9，接近噪声带。Physics 上同样是 Base DMD（86.0）高于 DyMD（84.4）。论文没有报告 EZS 的 Quality。"}
+};
+let mainKey = "rb";
+function drawMain(){
+  const M = MAIN[mainKey], nR = M.cols.length;
+  const W = 760, rowH = 38, P = {l:90, t:24, w:620};
+  const H = P.t + nR*rowH + 34;
+  const svg = svgRoot($("#mainChart"), W, H, "主表点图");
+  const all = M.v.flat(); const lo = Math.floor((Math.min(...all)-4)/10)*10, hi = Math.min(100, Math.ceil((Math.max(...all)+3)/10)*10);
+  const X = v => P.l + (v-lo)/(hi-lo)*P.w;
+  for (let t=lo; t<=hi; t+=10){ S("line",{x1:X(t),x2:X(t),y1:P.t-8,y2:P.t+nR*rowH,class:"gridl"},svg); S("text",{x:X(t),y:P.t+nR*rowH+16,"text-anchor":"middle",class:"xs",text:t},svg); }
+  M.cols.forEach((c,ri) => {
+    const y = P.t + ri*rowH + rowH/2;
+    S("text",{x:P.l-10,y:y+4,"text-anchor":"end",class:"lbl",text:c},svg);
+    S("line",{x1:P.l,x2:P.l+P.w,y1:y,y2:y,style:"stroke:var(--rule);stroke-width:1"},svg);
+    const b = M.v[2][ri], d = M.v[3][ri];
+    S("line",{x1:X(b),x2:X(d),y1:y,y2:y,style:`stroke:${d>=b?"var(--dy)":"var(--risk)"};stroke-width:3;opacity:.55`},svg);
+    MODELS.forEach(([n,col],mi) => {
+      const v = M.v[mi][ri];
+      S("circle",{cx:X(v),cy:y,r:mi===3?7:6,style:`fill:var(--${col});stroke:var(--bg);stroke-width:1.5`},svg);
+    });
+    S("text",{x:P.l+P.w+8,y:y+4,class:"mono",text:(d-b>=0?"+":"")+(d-b).toFixed(1)},svg);
+  });
+  S("text",{x:P.l+P.w+8,y:P.t-8,class:"xs",text:"DyMD−Base"},svg);
+  $("#mainCap").textContent = M.cap;
+}
+$$("[data-mg]").forEach(b => b.addEventListener("click", () => { $$("[data-mg]").forEach(x=>x.setAttribute("aria-pressed", String(x===b))); mainKey = b.dataset.mg; drawMain(); }));
+
+/* ============================================================
+   §6.4 消融瀑布
+   ============================================================ */
+const WF = {
+  tac:{n:400, sd:0.32, v:[34.6,40.0,42.5,43.5,44.2]},
+  pai:{n:174, sd:0.20, v:[74.4,77.2,77.9,78.5,79.5]},
+  ezs:{n:196, sd:0.15, v:[73.3,74.6,75.0,75.1,76.2]}
+};
+const WF_LAB = ["Base DMD（shift 5）","Shift-25","教师先验（g ≡ 1）","亲和度调节（α=0.3）","＋critic 重加权 = DyMD"];
+const WF_COL = ["base","med","tch","dy","cri"];
+let wfKey = "tac";
+function drawWF(){
+  const sd = +$("#wfS").value/100, rho = +$("#wfR").value/100, M = WF[wfKey];
+  $("#wfSo").textContent = sd.toFixed(2); $("#wfRo").textContent = rho.toFixed(2);
+  const se = Math.sqrt(2*sd*sd*(1-rho)/M.n)*100, ci = 1.96*se;
+  const W = 760, rowH = 40, P = {l:170, t:16, w:470};
+  const nR = WF_LAB.length + 1, H = P.t + nR*rowH + 36;
+  const svg = svgRoot($("#wfChart"), W, H, "消融瀑布");
+  const lo = Math.floor(M.v[0]-3), hi = Math.ceil(M.v[4]+4);
+  const X = v => P.l + (v-lo)/(hi-lo)*P.w;
+  for (let t=Math.ceil(lo); t<=hi; t+=(hi-lo>12?2:1)){ S("line",{x1:X(t),x2:X(t),y1:P.t-6,y2:P.t+nR*rowH,class:"gridl"},svg); S("text",{x:X(t),y:P.t+nR*rowH+16,"text-anchor":"middle",class:"xs",text:t},svg); }
+  WF_LAB.forEach((lab,i) => {
+    const y = P.t + i*rowH + rowH/2, v = M.v[i];
+    S("text",{x:P.l-10,y:y+4,"text-anchor":"end",class:"lbl",text:lab},svg);
+    if (i === 0){
+      S("line",{x1:X(v),x2:X(v),y1:y-12,y2:y+12,style:"stroke:var(--base);stroke-width:3"},svg);
+      S("text",{x:X(v)+8,y:y+4,class:"mono",text:v.toFixed(1)},svg);
+      return;
+    }
+    const pv = M.v[i-1], dlt = v - pv, sig = Math.abs(dlt) > ci;
+    S("rect",{x:Math.min(X(pv),X(v)),y:y-10,width:Math.max(2,Math.abs(X(v)-X(pv))),height:20,rx:3,style:`fill:var(--${WF_COL[i]});opacity:${sig?0.95:0.45}`},svg);
+    S("line",{x1:X(pv),x2:X(pv),y1:y-rowH/2-2,y2:y+10,style:"stroke:var(--ink3);stroke-dasharray:2 2"},svg);
+    // 噪声带：以上一行为基准 ±ci
+    S("line",{x1:X(pv-ci),x2:X(pv+ci),y1:y+14,y2:y+14,style:"stroke:var(--ink3);stroke-width:1.5"},svg);
+    S("line",{x1:X(pv-ci),x2:X(pv-ci),y1:y+10,y2:y+18,style:"stroke:var(--ink3);stroke-width:1.5"},svg);
+    S("line",{x1:X(pv+ci),x2:X(pv+ci),y1:y+10,y2:y+18,style:"stroke:var(--ink3);stroke-width:1.5"},svg);
+    S("text",{x:P.l+P.w+10,y:y+4,class:"mono",style:sig?"fill:var(--dy-ink)":"fill:var(--ink3)",text:`${dlt>=0?"+":""}${dlt.toFixed(1)}  ${sig?"超出噪声带":"噪声带内"}`},svg);
+  });
+  const y = P.t + WF_LAB.length*rowH + rowH/2, tot = M.v[4]-M.v[0], sig = Math.abs(tot) > ci;
+  S("text",{x:P.l-10,y:y+4,"text-anchor":"end",class:"lbl",style:"font-weight:600",text:"总增益"},svg);
+  S("rect",{x:X(M.v[0]),y:y-10,width:X(M.v[4])-X(M.v[0]),height:20,rx:3,style:"fill:none;stroke:var(--dy);stroke-width:2"},svg);
+  S("text",{x:P.l+P.w+10,y:y+4,class:"mono",style:"fill:var(--dy-ink)",text:`+${tot.toFixed(1)}  ±${ci.toFixed(1)}（95%）`},svg);
+  S("text",{x:P.l,y:P.t-4,class:"xs",text:`单次比较的 95% 噪声带 ≈ ±${ci.toFixed(2)} 分（SE ${se.toFixed(2)}）`},svg);
+}
+$$("[data-wf]").forEach(b => b.addEventListener("click", () => {
+  $$("[data-wf]").forEach(x=>x.setAttribute("aria-pressed", String(x===b))); wfKey = b.dataset.wf;
+  $("#wfS").value = Math.round(WF[wfKey].sd*100); drawWF();
+}));
+["#wfS","#wfR"].forEach(id => $(id).addEventListener("input", drawWF));
+
+/* ============================================================
+   §6.6 WorldArena
+   ============================================================ */
+function drawWA(){
+  const rows = [
+    ["Genie Envisioner",10,20],["TesserAct",1,35],["RoboMaster",8,20],["Vidar",2,19],["WoW",20,21],["Wan2.2-TI2V-5B",12,20],
+    ["+ PhysisForcing（5B）",22,26,"omit"],
+    ["Base DMD（1.3B）",1,31,"ours"],["DyMD（1.3B）",2,66,"ours"]
+  ];
+  const W = 760, rowH = 30, P = {l:170, t:12, w:470};
+  const H = P.t + rows.length*rowH + 40;
+  const svg = svgRoot($("#waChart"), W, H, "WorldArena 成功率");
+  const X = v => P.l + v/80*P.w;
+  [0,20,40,60,80].forEach(t => { S("line",{x1:X(t),x2:X(t),y1:P.t,y2:P.t+rows.length*rowH+6,class:"gridl"},svg); S("text",{x:X(t),y:P.t+rows.length*rowH+20,"text-anchor":"middle",class:"xs",text:t+"%"},svg); });
+  rows.forEach(([n,a,b,k],i) => {
+    const y = P.t + i*rowH + (i>=7?10:0);
+    if (i === 7) S("line",{x1:10,x2:W-10,y1:y-4,y2:y-4,style:"stroke:var(--rule2);stroke-dasharray:4 3"},svg);
+    S("text",{x:P.l-10,y:y+15,"text-anchor":"end",class:"lbl",style:k==="ours"?"font-weight:600":(k==="omit"?"fill:var(--ink3)":""),text:n},svg);
+    const st = k==="omit" ? "fill:none;stroke:var(--ink3);stroke-dasharray:3 2" : "";
+    S("rect",{x:X(0),y:y+3,width:X(a)-X(0),height:10,rx:2,style:st||"fill:var(--base)"},svg);
+    S("rect",{x:X(0),y:y+14,width:X(b)-X(0),height:10,rx:2,style:st||"fill:var(--stu)"},svg);
+    S("text",{x:P.l+P.w+10,y:y+17,class:"mono",style:k==="ours"?"fill:var(--ink)":"",text:`${a} / ${b}　均 ${((a+b)/2).toFixed(1)}`},svg);
+  });
+  S("text",{x:P.l+P.w+10,y:H-6,class:"xs",text:"调瓶 / 按铃"},svg);
+}
+
+/* ============================================================
+   存疑筛选、目录高亮、主题
+   ============================================================ */
+$$("[data-df]").forEach(b => b.addEventListener("click", () => {
+  $$("[data-df]").forEach(x=>x.setAttribute("aria-pressed", String(x===b)));
+  const f = b.dataset.df;
+  $$("#doubts details").forEach(d => { d.hidden = !(f === "all" || d.classList.contains(f)); });
+}));
+(function(){
+  const links = $$("nav.toc a");
+  const map = new Map(links.map(a => [a.getAttribute("href").slice(1), a]));
+  if (!("IntersectionObserver" in window)) return;
+  const io = new IntersectionObserver(es => {
+    es.forEach(e => { if (e.isIntersecting){ links.forEach(a=>a.classList.remove("on")); const a = map.get(e.target.id); if (a) a.classList.add("on"); } });
+  }, {rootMargin:"-45% 0px -50% 0px"});
+  $$("section[id]").forEach(s => io.observe(s));
+})();
+$("#themeBtn").addEventListener("click", () => {
+  const root = document.documentElement;
+  const cur = root.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  root.setAttribute("data-theme", cur === "light" ? "dark" : "light");
+});
+
+/* ---------- 初次绘制 ---------- */
+drawLock(); drawFig3(); drawSched(); drawAff(); drawRho(); drawTilt(); drawMain(); drawWF(); drawWA();
+setTimeout(drawToy, 30);
+})();
+</script>
+</body>
+</html>

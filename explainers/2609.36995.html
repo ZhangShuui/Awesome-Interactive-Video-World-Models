@@ -1,0 +1,1300 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Salt++ 精读</title>
+<meta name="description" content="Salt++（arXiv 2609.36995）精读：在 LTX-2 上做少步流式音视频生成的两阶段后训练——因果 Self-Flow 训练因果老师，上下文对齐的 AR–AR DMD 先在干净前缀、再在生成前缀上蒸馏；附 960p 尺度阶段。含可见性浏览器、CSF 历史加噪演示、噪声网格、引导校准、结果浏览器、百分比陷阱、复算清单与 18 条存疑。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=Noto+Serif+SC:wght@600;700&family=STIX+Two+Text:ital@0;1&display=swap">
+<style>
+/* ============================================================
+   Salt++ 精读 — tokens（深色优先；浅色：纸面）
+   实体色（全页固定）：
+     ar   = Salt++ AR–AR 路线（青）        dcm  = Salt++ TF-dCM 路线（琥珀）
+     omni = OmniForcing（橙）              ltx  = LTX-2 Base（灰蓝）
+     tea  = CSF 因果老师（紫）              hr   = Salt++ 960p（深青）
+   打分器色：bi = 双向打分（玫红）  ars = 因果/AR 打分（蓝）
+   块状态：gt = 干净真值  gen = 生成  noisy = 带噪目标  leak = 未来可见
+   存疑：risk = 高  med = 中  low = 低  ok = 已复算
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0f1215; --surf:#15191d; --surf2:#1b2025; --surf3:#252b32;
+  --rule:#272e36; --rule2:#39424c;
+  --ink:#e6eaee; --ink2:#a9b2bb; --ink3:#7b858f;
+  --ar:#1fae97; --ar-ink:#72d9c7; --ar-soft:rgba(31,174,151,.16);
+  --dcm:#d3a129; --dcm-ink:#ecc766; --dcm-soft:rgba(211,161,41,.16);
+  --omni:#e0662f; --omni-ink:#f3a37d; --omni-soft:rgba(224,102,47,.16);
+  --ltx:#7d93ad; --ltx-ink:#aebfd3; --ltx-soft:rgba(125,147,173,.16);
+  --tea:#8b7cf0; --tea-ink:#bdb3ff; --tea-soft:rgba(139,124,240,.17);
+  --hr:#15897a; --hr-ink:#5fcab8;
+  --bi:#d0558a; --bi-ink:#f09bbf; --bi-soft:rgba(208,85,138,.16);
+  --ars:#3f8ae6; --ars-ink:#8cbaf2; --ars-soft:rgba(63,138,230,.16);
+  --gt:#8b96a2; --gen:#1fae97; --noisy:#c9ced4;
+  --risk:#e5544c; --risk-ink:#f68a83; --risk-soft:rgba(229,84,76,.15);
+  --med:#d4b144; --med-ink:#ecd07a; --med-soft:rgba(212,177,68,.15);
+  --low:#7f8a97; --low-ink:#b3bcc6; --low-soft:rgba(127,138,151,.15);
+  --ok:#3dba80; --ok-ink:#72d8a7; --ok-soft:rgba(61,186,128,.14);
+  --grid:#1f262d; --axis:#3a4550;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 32px rgba(0,0,0,.30);
+  --f-head:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --f-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --f-math:"STIX Two Text","Times New Roman",Georgia,serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f3f0; --surf:#fbfbf9; --surf2:#eceee9; --surf3:#e0e3dd;
+    --rule:#d8dbd4; --rule2:#b9beb6;
+    --ink:#13161b; --ink2:#414852; --ink3:#69717b;
+    --ar:#128a77; --ar-ink:#0b6a5b; --ar-soft:rgba(18,138,119,.11);
+    --dcm:#b88408; --dcm-ink:#7f5b00; --dcm-soft:rgba(184,132,8,.13);
+    --omni:#d45a22; --omni-ink:#9c3d10; --omni-soft:rgba(212,90,34,.11);
+    --ltx:#5c7391; --ltx-ink:#3f5572; --ltx-soft:rgba(92,115,145,.12);
+    --tea:#6a5bd8; --tea-ink:#4b3db5; --tea-soft:rgba(106,91,216,.11);
+    --hr:#0d6f63; --hr-ink:#0a5a50;
+    --bi:#c23f79; --bi-ink:#96275a; --bi-soft:rgba(194,63,121,.11);
+    --ars:#2a72d0; --ars-ink:#1b56a3; --ars-soft:rgba(42,114,208,.11);
+    --gt:#8d959e; --gen:#128a77; --noisy:#5b636c;
+    --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+    --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+    --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.12);
+    --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.10);
+    --grid:#e6e8e3; --axis:#b9beb6;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f3f0; --surf:#fbfbf9; --surf2:#eceee9; --surf3:#e0e3dd;
+  --rule:#d8dbd4; --rule2:#b9beb6;
+  --ink:#13161b; --ink2:#414852; --ink3:#69717b;
+  --ar:#128a77; --ar-ink:#0b6a5b; --ar-soft:rgba(18,138,119,.11);
+  --dcm:#b88408; --dcm-ink:#7f5b00; --dcm-soft:rgba(184,132,8,.13);
+  --omni:#d45a22; --omni-ink:#9c3d10; --omni-soft:rgba(212,90,34,.11);
+  --ltx:#5c7391; --ltx-ink:#3f5572; --ltx-soft:rgba(92,115,145,.12);
+  --tea:#6a5bd8; --tea-ink:#4b3db5; --tea-soft:rgba(106,91,216,.11);
+  --hr:#0d6f63; --hr-ink:#0a5a50;
+  --bi:#c23f79; --bi-ink:#96275a; --bi-soft:rgba(194,63,121,.11);
+  --ars:#2a72d0; --ars-ink:#1b56a3; --ars-soft:rgba(42,114,208,.11);
+  --gt:#8d959e; --gen:#128a77; --noisy:#5b636c;
+  --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+  --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+  --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.12);
+  --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.10);
+  --grid:#e6e8e3; --axis:#b9beb6;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.75;}
+a{color:var(--ars-ink);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:2px solid var(--ars);outline-offset:2px;border-radius:4px}
+b,strong{font-weight:600;color:var(--ink)}
+sub,sup{font-size:.72em;line-height:0}
+.tnum{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono);font-size:.9em}
+.mv{font-family:var(--f-math);font-style:italic;font-size:1.07em;white-space:nowrap}
+.dim{color:var(--ink3)}
+.c-ar{color:var(--ar-ink)} .c-dcm{color:var(--dcm-ink)} .c-omni{color:var(--omni-ink)} .c-ltx{color:var(--ltx-ink)} .c-tea{color:var(--tea-ink)} .c-bi{color:var(--bi-ink)} .c-ars{color:var(--ars-ink)} .c-hr{color:var(--hr-ink)}
+.c-risk{color:var(--risk-ink)} .c-ok{color:var(--ok-ink)} .c-med{color:var(--med-ink)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:1px;margin-right:5px}
+.dot.ar{background:var(--ar)} .dot.dcm{background:var(--dcm)} .dot.omni{background:var(--omni)} .dot.ltx{background:var(--ltx)} .dot.tea{background:var(--tea)} .dot.bi{background:var(--bi)} .dot.ars{background:var(--ars)} .dot.hr{background:var(--hr)}
+.wrap{max-width:1100px;margin:0 auto;padding-inline:20px;padding-block:24px 120px}
+@media (max-width:520px){ .wrap{padding-inline:16px} body{font-size:15.5px} }
+
+/* ---------- hero ---------- */
+.hero{padding-block:8px 28px;border-bottom:1px solid var(--rule);display:grid;gap:18px}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.kicker{font-family:var(--f-mono);font-size:12px;letter-spacing:.14em;color:var(--ink3);text-transform:uppercase}
+.themebtn{font:inherit;font-size:12.5px;color:var(--ink2);background:var(--surf);border:1px solid var(--rule2);border-radius:999px;padding:4px 12px;cursor:pointer}
+.themebtn:hover{color:var(--ink)}
+h1{font-family:var(--f-head);font-weight:700;font-size:clamp(31px,5vw,50px);line-height:1.16;margin:4px 0 0;letter-spacing:.01em;text-wrap:balance}
+h1 .soft{color:var(--ink3);font-weight:600;font-size:.56em;display:block;margin-top:8px}
+.sub{font-size:17px;line-height:1.72;color:var(--ink2);max-width:62em;margin:0}
+.thesis{max-width:66em;margin:0;padding:14px 18px;border-left:3px solid var(--ar);background:var(--ar-soft);border-radius:0 8px 8px 0;font-size:15.5px}
+.thesis .lab{font-family:var(--f-mono);font-size:11px;letter-spacing:.13em;color:var(--ink3);display:block;margin-bottom:2px}
+.patch{border:1px solid var(--rule2);border-radius:10px;overflow:hidden;background:var(--surf);box-shadow:var(--shadow)}
+.patch .rail{height:14px;background:linear-gradient(90deg,var(--gt) 0 18%,var(--gen) 18% 36%,var(--rule2) 36% 37%,var(--gt) 37% 55%,var(--gen) 55% 73%,var(--rule2) 73% 74%,var(--hr) 74% 100%) 0 5px/100% 4px no-repeat,var(--surf2);border-bottom:1px solid var(--rule)}
+.patch dl{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));}
+.patch dl div{padding:10px 14px;border-right:1px solid var(--rule);border-top:1px solid var(--rule);min-width:0}
+.patch dt{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;color:var(--ink3);text-transform:uppercase}
+.patch dd{margin:2px 0 0;font-size:13.5px;line-height:1.55;color:var(--ink2);overflow-wrap:anywhere}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px}
+.stat{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:12px 14px;min-width:0}
+.stat .n{font-family:var(--f-mono);font-size:25px;font-weight:600;line-height:1.15;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.stat .t{font-size:12.5px;line-height:1.5;color:var(--ink2);margin-top:6px}
+.stat.warn{border-color:color-mix(in srgb,var(--risk) 40%,var(--rule))}
+
+/* ---------- nav ---------- */
+.toc{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border-bottom:1px solid var(--rule);margin-inline:-20px;padding:8px 20px}
+@media (max-width:520px){ .toc{margin-inline:-16px;padding-inline:16px} }
+.toc ol{list-style:none;margin:0;padding:0;display:flex;gap:6px;overflow-x:auto;scrollbar-width:thin}
+.toc a{display:block;white-space:nowrap;font-size:12.5px;text-decoration:none;color:var(--ink2);padding:3px 10px;border-radius:999px;border:1px solid transparent}
+.toc a .i{font-family:var(--f-mono);color:var(--ink3);margin-right:4px;font-size:11px}
+.toc a:hover{color:var(--ink);border-color:var(--rule2)}
+.toc a.on{color:var(--ink);background:var(--surf2);border-color:var(--rule2)}
+
+/* ---------- sections ---------- */
+section{padding-top:40px;scroll-margin-top:56px}
+h2{font-family:var(--f-head);font-weight:700;font-size:clamp(23px,3.2vw,30px);line-height:1.3;margin:0 0 14px;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+h2 .no{font-family:var(--f-mono);font-size:14px;color:var(--ink3);font-weight:500;letter-spacing:.06em}
+h3{font-size:17.5px;font-weight:600;margin:28px 0 8px;line-height:1.45}
+p{margin:0 0 14px;max-width:68em}
+.lead{color:var(--ink2)}
+ul.clean,ol.clean{margin:0 0 14px;padding-left:1.25em;max-width:68em}
+ul.clean li,ol.clean li{margin:4px 0}
+.eq{font-family:var(--f-math);font-size:18px;line-height:1.6;background:var(--surf);border:1px solid var(--rule);border-radius:8px;padding:12px 16px;margin:10px 0 16px;overflow-x:auto;display:flex;justify-content:space-between;gap:16px;align-items:center}
+.eq .tag{font-family:var(--f-mono);font-size:12px;color:var(--ink3);white-space:nowrap}
+.eq .body{white-space:nowrap}
+.box{border:1px solid var(--rule2);border-radius:10px;background:var(--surf);padding:14px 18px;margin:16px 0;max-width:72em}
+.box > .lab{font-family:var(--f-mono);font-size:11px;letter-spacing:.13em;color:var(--ink3);text-transform:uppercase;display:block;margin-bottom:4px}
+.box p:last-child,.box ul:last-child{margin-bottom:0}
+.box.mine{border-left:3px solid var(--tea)}
+.box.mine > .lab{color:var(--tea-ink)}
+.box.warnb{border-left:3px solid var(--risk);background:color-mix(in srgb,var(--risk-soft) 55%,var(--surf))}
+.box.warnb > .lab{color:var(--risk-ink)}
+.box.okb{border-left:3px solid var(--ok)}
+.box.okb > .lab{color:var(--ok-ink)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px;margin:12px 0 16px}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:12px 0 16px}
+.card{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:12px 15px;min-width:0}
+.card h4{margin:0 0 4px;font-size:14.5px;font-weight:600}
+.card .k{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;color:var(--ink3);text-transform:uppercase;display:block}
+.card p{font-size:14.2px;line-height:1.65;color:var(--ink2);margin:0}
+
+/* figures */
+figure{margin:18px 0 22px}
+.fig{background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:14px;box-shadow:var(--shadow)}
+.scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.scrollx > svg{display:block;min-width:760px;width:100%;height:auto}
+.swipe{display:none;font-size:12px;color:var(--ink3);text-align:center;margin-top:4px}
+@media (max-width:760px){ .swipe{display:block} }
+figcaption{font-size:13.5px;line-height:1.65;color:var(--ink2);margin-top:10px;max-width:72em}
+figcaption b{color:var(--ink)}
+svg text{font-family:var(--f-body)}
+svg .mono{font-family:var(--f-mono)}
+
+/* tables */
+.tw{overflow-x:auto;margin:10px 0 18px;border:1px solid var(--rule);border-radius:10px;background:var(--surf)}
+table{border-collapse:collapse;width:100%;font-size:13.8px;line-height:1.5}
+th,td{padding:8px 11px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+th{font-weight:600;color:var(--ink2);background:var(--surf2);font-size:12.8px;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.num,th.num{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.diff{background:var(--risk-soft)}
+td.same{color:var(--ink3)}
+
+/* controls */
+.ctrl{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin:0 0 12px}
+.seg{display:inline-flex;border:1px solid var(--rule2);border-radius:8px;overflow:hidden;flex-wrap:wrap}
+.seg button{font:inherit;font-size:12.8px;background:var(--surf);color:var(--ink2);border:0;border-right:1px solid var(--rule2);padding:5px 11px;cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--surf3);color:var(--ink);font-weight:600}
+.seg button:hover{color:var(--ink)}
+.btn{font:inherit;font-size:12.8px;background:var(--surf);color:var(--ink2);border:1px solid var(--rule2);border-radius:8px;padding:5px 12px;cursor:pointer}
+.btn:hover{color:var(--ink)}
+label.sl{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--ink2)}
+label.sl output{font-family:var(--f-mono);font-size:12.5px;color:var(--ink);min-width:3.2em;display:inline-block}
+input[type=range]{accent-color:var(--ar);width:150px}
+.ro{font-family:var(--f-mono);font-size:12.8px;color:var(--ink2);background:var(--surf2);border:1px solid var(--rule);border-radius:8px;padding:8px 12px;margin-top:10px;line-height:1.7;overflow-x:auto}
+.ro b{color:var(--ink)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--ink2);margin-top:8px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:14px;height:10px;border-radius:2px;border:1px solid var(--rule2)}
+
+/* results tables */
+.rt td.bar{position:relative;min-width:92px}
+.rt td.bar .v{position:relative;z-index:1}
+.rt td.bar .b{position:absolute;right:11px;bottom:4px;height:3px;border-radius:2px;opacity:.9}
+.rt td.best .v{font-weight:600;color:var(--ink)}
+.rt td.best .v::before{content:"▲ ";font-size:9px;color:var(--ar);vertical-align:1px}
+.rt td.name{white-space:nowrap}
+.pos{color:var(--ok-ink)} .neg{color:var(--risk-ink)}
+
+/* doubts */
+.dfilter{margin:6px 0 14px}
+.doubts{display:grid;gap:10px;counter-reset:dq}
+.dq{border:1px solid var(--rule);border-left:4px solid var(--low);border-radius:10px;background:var(--surf);padding:12px 16px}
+.dq.hi{border-left-color:var(--risk)} .dq.mid{border-left-color:var(--med)}
+.dq h4{margin:0 0 6px;font-size:15.5px;line-height:1.5;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.dq h4 .n{font-family:var(--f-mono);font-size:12px;color:var(--ink3)}
+.sev{font-family:var(--f-mono);font-size:11px;padding:1px 7px;border-radius:999px;letter-spacing:.06em}
+.sev.hi{background:var(--risk-soft);color:var(--risk-ink)} .sev.mid{background:var(--med-soft);color:var(--med-ink)} .sev.lo{background:var(--low-soft);color:var(--low-ink)}
+.dq p{font-size:14.3px;line-height:1.7;color:var(--ink2);margin:0 0 6px}
+.dq p:last-child{margin:0}
+.dq .fix{font-size:13.5px;color:var(--ink3)}
+.checks{display:grid;gap:6px;margin:10px 0 16px;padding:0;list-style:none}
+.checks li{display:grid;grid-template-columns:22px 1fr;gap:6px;font-size:14.3px;line-height:1.65;color:var(--ink2);background:var(--surf);border:1px solid var(--rule);border-radius:8px;padding:7px 12px}
+.checks li::before{content:"✓";color:var(--ok-ink);font-weight:600}
+.checks li.derived::before{content:"≈";color:var(--tea-ink)}
+.checks b{color:var(--ink)}
+.pill{display:inline-block;font-family:var(--f-mono);font-size:11px;padding:0 7px;border-radius:999px;border:1px solid var(--rule2);color:var(--ink2);vertical-align:1px}
+.pill.bi{border-color:var(--bi);color:var(--bi-ink);background:var(--bi-soft)}
+.pill.ars{border-color:var(--ars);color:var(--ars-ink);background:var(--ars-soft)}
+.srcs{font-size:13.5px;color:var(--ink2);border-top:1px solid var(--rule);margin-top:44px;padding-top:16px}
+.srcs ol{padding-left:1.3em;margin:6px 0}
+.srcs li{margin:3px 0;overflow-wrap:anywhere}
+.note{font-size:13px;color:var(--ink3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="topbar">
+    <span class="kicker">arXiv 2609.36995 · 精读 · HKUST × Vivix Group × 悉尼大学 × 西湖大学</span>
+    <button class="themebtn" id="themeBtn" type="button" aria-label="切换深浅色">◐ 主题</button>
+  </div>
+  <h1>Salt++ 精读<span class="soft">打分时看到的上下文，要和生成时看到的是同一个</span></h1>
+  <p class="sub">论文全名 <i>Salt++: Context-Aligned Post-Training for Few-Step Streaming Multimodal Generation</i>，是同组 Salt（2604.03118）的续作。它把双向的音视频基座 LTX-2 改造成<b>逐秒流式、每块只调用 4 次网络</b>的因果生成器。做法分两段：先用“因果 Self-Flow”（CSF）训练一个更会读历史的因果老师，再用“上下文对齐的 AR DMD”把老师蒸馏成 4 步学生。这一步的要点是让生成器、真分数、假分数三方看同一段前缀；前缀先用真值，再换成学生自己生成的内容。另外还有一个独立的 960p 扩展阶段。本页按“先弄懂、再挑刺”的顺序拆开讲：块因果布局、CSF、三种打分上下文、训练配方、引导校准、960p 管线、结果和指标的读法。能复算的数字都复算了，最后列出 18 条存疑。</p>
+  <p class="thesis"><span class="lab">一句话</span>块因果 DMD 的梯度等于“真分数 − 假分数”。以往的配方让因果学生按过去生成，却用<b>能看到未来块的双向模型</b>来打分。Salt++ 让三方共用同一个块因果掩码和同一段前缀，并用 CSF 训出的因果老师当真分数。结果是：在干净前缀上直接跑 DMD 就能完成 4 步蒸馏，不再需要单独的一致性蒸馏阶段；之后换成学生自己的历史，目标函数不变继续训练。<b>我的总评</b>：“干净前缀下必须用因果打分器”和“DMD 的老师引导要重新调低”这两个发现是扎实的。但论文把两条完整路线之间的差距都归功于“上下文对齐”，这一点证据不足：两条路线的老师、训练数据、引导强度、训练步数也都不同。</p>
+
+  <div class="patch" role="group" aria-label="论文信息">
+    <div class="rail"></div>
+    <dl>
+      <div><dt>论文</dt><dd>v1 2026-09-29（cs.CV）。项目页 xingtongge.github.io/Saltpp</dd></div>
+      <div><dt>作者</dt><dd>Xingtong Ge（一作，HKUST / Vivix）等 10 人；项目负责人 Yi Zhang（Vivix）；通讯作者 Jun Zhang（HKUST）</dd></div>
+      <div><dt>骨干</dt><dd>LTX-2：双流音视频 DiT，48 层；按 OmniForcing 的描述，视频流 14B + 音频流 5B</dd></div>
+      <div><dt>数据</dt><dd>内部音视频数据，832×480、24 fps；论文没有给出规模和来源</dd></div>
+      <div><dt>算力</dt><dd>CSF：32 × GB300；DMD 各阶段：12 × GB300；每卡 1 个样本；总 GPU·h 未报</dd></div>
+      <div><dt>代码</dt><dd>GitHub XingtongGe/Saltpp 目前只有一个 README（“Stay tuned”，2026-08-26）。README 里的结果表删掉了 DeSync 列</dd></div>
+    </dl>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="n c-ar">+57% / +45%</div><div class="t">VQ / MQ 相对 OmniForcing（480p，4 步）。但它们是奖励模型分数之比，零点可以任意平移，见 §09</div></div>
+    <div class="stat warn"><div class="n c-risk">0.759</div><div class="t">AR–AR 路线的 DeSync（越低越好），是 480p 表中所有行里最差的</div></div>
+    <div class="stat warn"><div class="n c-risk">−14% / −6%</div><div class="t">老师引导同为 4.0 时，AR–AR TF-DMD 相对 TF-dCM 的 VQ / MQ。见 §06</div></div>
+    <div class="stat warn"><div class="n c-med">−10% / −25%</div><div class="t">在线适配前后的 VQ / MQ 变化（3.147→2.838，1.351→1.010），论文未讨论</div></div>
+    <div class="stat"><div class="n c-hr">6 / 7</div><div class="t">960p 胜 LTX-2 的指标数，只输了 DeSync。这一阶段用的是<b>双向</b>打分</div></div>
+    <div class="stat"><div class="n">640</div><div class="t">干净前缀 DMD 阶段生成器的实际更新次数：3.2k 次迭代，假分数每步更新，生成器每 5 步更新一次</div></div>
+  </div>
+</header>
+
+<nav class="toc" aria-label="目录">
+  <ol id="tocList">
+    <li><a href="#s01"><span class="i">01</span>定位</a></li>
+    <li><a href="#s02"><span class="i">02</span>补课</a></li>
+    <li><a href="#s03"><span class="i">03</span>因果 Self-Flow</a></li>
+    <li><a href="#s04"><span class="i">04</span>打分上下文</a></li>
+    <li><a href="#s05"><span class="i">05</span>训练配方</a></li>
+    <li><a href="#s06"><span class="i">06</span>引导校准</a></li>
+    <li><a href="#s07"><span class="i">07</span>960p</a></li>
+    <li><a href="#s08"><span class="i">08</span>主结果</a></li>
+    <li><a href="#s09"><span class="i">09</span>指标怎么读</a></li>
+    <li><a href="#s10"><span class="i">10</span>消融</a></li>
+    <li><a href="#s11"><span class="i">11</span>相邻工作</a></li>
+    <li><a href="#s12"><span class="i">12</span>复算</a></li>
+    <li><a href="#s13"><span class="i">13</span>存疑</a></li>
+    <li><a href="#s14"><span class="i">14</span>结论</a></li>
+  </ol>
+</nav>
+
+<!-- ============================ 01 ============================ -->
+<section id="s01">
+<h2><span class="no">01</span>它在解决什么，站在哪条线上</h2>
+<p>要让音视频生成“边生成边播放”，需要同时做到两件事。一是<b>因果化</b>：把双向注意力改成块因果注意力，每一秒的内容只看之前的内容，才能流式输出。二是<b>少步化</b>：把 40 步采样压到 4 步。主流配方分三段走，每段换一个目标函数：先用 teacher forcing（TF）训练因果老师，再用 ODE 回归或一致性蒸馏（CD）得到少步初始化，最后在学生自己的 rollout 上用 DMD 精修。而且最后这一段的真分数、假分数都是<b>双向</b>模型（论文记作 Bi-DMD）。</p>
+<p>论文说这两件事各自卡在“上下文”上：</p>
+<ul class="clean">
+  <li><b>因果化的难点</b>：TF 训练时，历史是干净的，当前块是带噪的。模型只能通过“预测速度”间接学会从历史中提取有用信息，没有直接的学习信号教它怎么读历史。→ 用 <b>CSF</b> 补上。</li>
+  <li><b>少步化的难点</b>：块条件 DMD 要求生成和打分在同一个条件下进行。如果生成第 k 块时只看过去，打分却用能看到未来块的双向模型，梯度估计的就不是想要的那个 KL。→ 用<b>上下文对齐的 AR DMD</b> 解决。</li>
+</ul>
+
+<figure>
+  <div class="fig">
+    <div class="scrollx">
+      <svg id="figLineage" viewBox="0 0 1060 470" role="img" aria-label="各配方三阶段对照图"></svg>
+    </div>
+    <div class="swipe">← 左右滑动查看 →</div>
+  </div>
+  <figcaption><b>各配方的三段式对照</b>（我按论文图 1 重画，另补了 OmniForcing 和 CMD 两行；日期取各论文 arXiv 首版）。最右列是在线阶段的打分器：<span class="pill bi">BI–BI</span> 表示真、假分数都是双向模型，<span class="pill ars">AR–AR</span> 表示两者都是块因果模型、并且和生成器共用同一段前缀。Salt++ 的主线是 AR–AR；但它的 960p 扩展阶段（§07）又回到了 BI–BI。</figcaption>
+</figure>
+
+<div class="box mine">
+  <span class="lab">我的理解</span>
+  <p>最省力的理解方式：<b>Salt++ ≈ CMD 式的“因果老师当真分数”</b>，再加三样东西。① 在上 rollout 之前，先在<b>干净前缀</b>上跑一段 AR–AR DMD，用它顶替一致性蒸馏初始化。② 因果老师不用普通 TF 训练，而用 Self-Flow 改造出的 CSF 训练。③ 做的是 LTX-2 上的<b>音视频</b>联合生成，另外加了一个 960p 的尺度阶段。</p>
+  <p>论文里最有价值的是两个受控对比。表 3(a)：四种初始化方式都从同一个 CSF 检查点出发，干净前缀下 BI–BI 几乎训崩，AR–AR 最好。表 3(b)：DMD 的老师引导从固定 4.0 换成 U(1, 3.5) 随机抽取，VQ 几乎翻倍。</p>
+  <p>最该打问号的是表 1 的“两条路线”对比。TF-dCM 路线在线阶段的真分数是<b>没在内部数据上训过的 LTX-2 Base</b>，AR–AR 路线的真分数是<b>在内部数据上训过的 CSF 老师</b>；两条路线的引导、步数也不同。所以表 1 的差距混着“老师是谁、数据是什么”，不能全归到“上下文对齐”上（§10）。</p>
+</div>
+</section>
+
+<!-- ============================ 02 ============================ -->
+<section id="s02">
+<h2><span class="no">02</span>先补课：块因果音视频，以及 DMD 在算什么</h2>
+<h3>一秒一块：LTX-2 的时间布局</h3>
+<p>评测视频是 121 帧、24 fps（约 5 秒）、832×480。LTX-2 的视频 VAE 时间压缩 8 倍，第一帧单独编码，所以视频潜帧数是 1 + 120/8 = 16。音频潜变量每秒 25 个。Salt++ 沿用 OmniForcing 的“按物理时间对齐”：<b>每 1 秒一块</b>，一块里有 3 个视频潜帧和 25 个音频潜帧；第 1 块额外带上两路各自的首个潜变量。所以 121 帧的片段正好是 <span class="mv">K</span> = 5 块。块内视频和音频互相双向可见，块与块之间只能看过去。</p>
+<figure>
+  <div class="fig">
+    <div class="scrollx">
+      <svg id="figBlocks" viewBox="0 0 1000 262" role="img" aria-label="块因果音视频布局"></svg>
+    </div>
+    <div class="swipe">← 左右滑动查看 →</div>
+  </div>
+  <figcaption><b>块因果布局</b>（按附录 A.4 画）。上排每个方块是一个视频潜帧，下排每条竖线是一个音频潜帧。推理时每块从纯噪声出发调用生成器 4 次，得到这一秒的音视频，写进 KV 缓存，然后开始下一块。所以<b>至少要攒够一整秒的内容才能输出</b>。论文没有报告任何延迟或吞吐数字（OmniForcing 在同一骨干上报了约 25 FPS、首块 0.7 s）。</figcaption>
+</figure>
+
+<h3>DMD 用人话讲</h3>
+<p>DMD 想让学生的输出分布 <span class="mv">p<sub>θ</sub></span> 贴近老师的分布 <span class="mv">p<sub>r</sub></span>，最小化的是两者加噪后的反向 KL。这个 KL 的梯度只需要两个“分数”（对数密度的梯度）之差：老师在带噪样本上的分数（<b>真分数</b>），和学生分布在同一样本上的分数（<b>假分数</b>）。老师的分数现成可用；学生分布的分数没人知道，于是另开一个网络，<b>在线地</b>在学生的样本上做流匹配来估计它。Salt++ 的块条件版本：</p>
+<div class="eq"><span class="body">𝓛<sub>DMD,k</sub>(θ; c<sub>k</sub>) = 𝔼<sub>t</sub> [ KL( p<sub>θ,k,t</sub>(· | c<sub>k</sub>) ‖ p<sub>r,k,t</sub>(· | c<sub>k</sub>) ) ]</span><span class="tag">式 (4)</span></div>
+<p>实际实现中不直接用分数，而用两个网络对“干净块”的预测做差，再按样本归一化，然后通过一个停梯度的平方损失注入生成器（每个模态单独归一化，音频项乘 λ<sub>a</sub>）：</p>
+<div class="eq"><span class="body">g<sup>m</sup><sub>k</sub> = ( ẑ<sup>D,m</sup><sub>k</sub> − ẑ<sup>R,m</sup><sub>k</sub> ) / ( mean| ẑ<sup>G,m</sup><sub>k</sub> − ẑ<sup>R,m</sup><sub>k</sub> | + ε ),&nbsp;&nbsp; 𝓛<sup>m</sup><sub>G</sub> = ½ ‖ ẑ<sup>G,m</sup><sub>k</sub> − sg( ẑ<sup>G,m</sup><sub>k</sub> − g<sup>m</sup><sub>k</sub> ) ‖²</span><span class="tag">式 (9)</span></div>
+<p>这个损失对 <span class="mv">ẑ<sup>G</sup></span> 的梯度恰好等于 <span class="mv">g</span>。梯度下降就是把生成结果往“真分数的预测”推、从“假分数的预测”拉开。</p>
+<figure>
+  <div class="fig">
+    <div class="scrollx">
+      <svg id="figDMD" viewBox="0 0 1000 300" role="img" aria-label="上下文对齐的 DMD 数据流"></svg>
+    </div>
+    <div class="swipe">← 左右滑动查看 →</div>
+  </div>
+  <figcaption><b>一次 AR–AR DMD 更新的数据流</b>（按 §3.3 和附录 A.5 画）。三个网络都从同一个 CSF 检查点初始化：生成器 G 被训练，真分数 R 冻结并带老师引导（CFG），假分数 D 在线训练。<b>三方吃同一个上下文 c</b>，包括块因果掩码、块的拼包方式、同一段前缀；这就是论文说的“上下文对齐”。D 每步都更新，G 每 5 步才更新一次。</figcaption>
+</figure>
+
+<div class="box mine">
+  <span class="lab">我的推导 · 训练刚开始时，DMD 其实在做 CFG 蒸馏</span>
+  <p>G、R、D 三个网络都从 CSF 检查点初始化，并且在 AR–AR 下吃同一个上下文。区别在于：R 带老师引导 <span class="mv">w</span>，D 不带（标准做法；论文没明说 D 是否带引导）。线性 CFG 下，干净块预测满足 <span class="mv">ẑ<sup>R</sup> = ẑ<sub>u</sub> + w(ẑ<sub>c</sub> − ẑ<sub>u</sub>)</span>，而 <span class="mv">ẑ<sup>D</sup> = ẑ<sub>c</sub></span>。于是在第 0 步：</p>
+  <div class="eq" style="margin-bottom:10px"><span class="body">ẑ<sup>D</sup> − ẑ<sup>R</sup> = −(w − 1)·(ẑ<sub>c</sub> − ẑ<sub>u</sub>)</span><span class="tag">第 0 步</span></div>
+  <p>也就是说，DMD 最初的推力<b>完全是 CFG 方向</b>，强度正比于 <span class="mv">w − 1</span>。等 D 慢慢学会学生自己的分布后，才出现真正的“分布匹配”信号。按这个理解：固定 <span class="mv">w</span> = 4 意味着每一步都有 3 倍 CFG 方向的持续推力，容易把输出推向过曝、过饱和；U(1, 3.5) 的均值是 1.25 倍，并且有 20% 的步 <span class="mv">w</span> &lt; 1.5。这和表 3(b) 的结果、以及附录 B.2 图中“色调和纹理更自然”的描述一致（§06）。</p>
+</div>
+</section>
+
+<!-- ============================ 03 ============================ -->
+<section id="s03">
+<h2><span class="no">03</span>因果 Self-Flow（CSF）：让老师学会读历史</h2>
+<p>CSF 借用的是 BFL 的 Self-Flow（2603.06507）。Self-Flow 的做法是：同一个样本里一部分 token 加更多噪声，另一部分加较少噪声，从而制造“信息不对称”；学生看这个混合噪声的输入，EMA 老师看更干净的输入；再让学生浅层的特征经过一个投影头后，去预测老师深层的特征。CSF 把不对称<b>整个挪到了历史上</b>：</p>
+<ul class="clean">
+  <li><b>同一个目标块</b>：学生分支和 EMA 老师分支用同一个带噪目标块 <span class="mv">z<sub>k,t<sub>k</sub></sub></span>，噪声 <span class="mv">ε<sub>k</sub></span> 和噪声水平 <span class="mv">t<sub>k</sub></span> 都相同。</li>
+  <li><b>不同的历史</b>：学生看到的历史每块独立加噪，<span class="mv">z̃<sub>i</sub> = (1−γ<sub>i</sub>)z<sub>i</sub> + γ<sub>i</sub>ε<sub>i</sub></span>，其中 <span class="mv">γ<sub>i</sub></span> ~ U(0, 0.5)；同一块的视频和音频共用 <span class="mv">γ<sub>i</sub></span>，噪声各自独立。EMA 老师看干净的历史。</li>
+  <li><b>对齐目标块的特征</b>：学生第 14 层的特征经两层投影头 <span class="mv">P<sup>m</sup></span> 后，和老师第 34 层的特征（停梯度）算余弦距离。每个模态单独算，只对 <span class="mv">k</span> &gt; 1 的块算（第 1 块没有历史）。</li>
+  <li><b>总损失</b>：<span class="mv">𝓛<sub>CSF</sub> = 𝓛<sup>v</sup><sub>FM</sub> + λ<sub>a</sub>𝓛<sup>a</sup><sub>FM</sub> + λ<sub>rep</sub>(𝓛<sup>v</sup><sub>rep</sub> + λ<sub>a</sub>𝓛<sup>a</sup><sub>rep</sub>)</span>，其中流匹配项也是在加噪历史下算的。训练时 CSF 更新和普通 TF 更新<b>各占一半</b>，随机交替。训练完只保留学生，EMA 和投影头都丢掉，推理没有额外开销。</li>
+</ul>
+<div class="eq"><span class="body">𝓛<sup>m</sup><sub>rep</sub> = 𝔼<sub>k&gt;1</sub>[ 1 − cos( P<sup>m</sup>( H<sup>ℓ<sub>s</sub></sup><sub>η,m</sub>(z<sub>k,t<sub>k</sub></sub>, c̃<sub>k</sub>, t<sub>k</sub>) ), sg( H<sup>ℓ<sub>d</sub></sup><sub>η̄,m</sub>(z<sub>k,t<sub>k</sub></sub>, c<sup>⋆</sup><sub>k</sub>, t<sub>k</sub>) ) ) ]</span><span class="tag">式 (6)</span></div>
+
+<figure>
+  <div class="fig">
+    <div class="ctrl">
+      <label class="sl">历史噪声上限 γ<sub>max</sub> <input type="range" id="csfG" min="0" max="1" step="0.05" value="0.5"><output id="csfGo">0.50</output></label>
+      <label class="sl">目标块噪声 t<sub>k</sub> <input type="range" id="csfT" min="0.05" max="1" step="0.05" value="0.7"><output id="csfTo">0.70</output></label>
+      <button class="btn" id="csfResample" type="button">↻ 重抽 γ<sub>i</sub></button>
+    </div>
+    <div class="scrollx">
+      <svg id="figCSF" viewBox="0 0 1000 380" role="img" aria-label="CSF 双分支示意"></svg>
+    </div>
+    <div class="swipe">← 左右滑动查看 →</div>
+    <div class="ro" id="csfRO"></div>
+  </div>
+  <figcaption><b>CSF 的两个分支</b>（按 §3.2、附录 A.5 画；每块里的小图是我程序生成的示意画面，不是真实数据）。上排是学生：历史 4 块各自按 <span class="mv">γ<sub>i</sub></span> 加噪，目标块按 <span class="mv">t<sub>k</sub></span> 加噪。下排是 EMA 老师：历史干净，目标块<b>和学生完全相同</b>。48 格长条代表 48 层，学生在第 14 层取特征，老师在第 34 层取特征。拖动滑块可以看到：γ 越大，学生看到的历史越糊，要“脑补”老师在干净历史下的表示就越难。论文用的是 γ<sub>max</sub> = 0.5；目标噪声按 <span class="mv">t ↦ 8t/(1+7t)</span> 偏移后，从 [0.003, 1] 上抽取。</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <thead><tr><th>对照</th><th>Self-Flow（BFL，2603.06507）</th><th>CSF（Salt++）</th></tr></thead>
+  <tbody>
+    <tr><td>不对称放在哪</td><td>同一样本内随机一部分 token 用第二个噪声水平（比例 R<sub>M</sub>：图像 0.25 / 视频 0.1 / 音频 0.5）</td><td>整段<b>历史</b>块；目标块两边完全相同</td></tr>
+    <tr><td>老师看到什么</td><td>所有 token 统一取两个噪声水平中较低的那个 τ<sub>min</sub></td><td>干净历史 + 同一个带噪目标</td></tr>
+    <tr><td>对齐的层</td><td>学生 0.3D → 老师 0.7D</td><td>学生 14/48 ≈ 0.29D → 老师 34/48 ≈ 0.71D（与 Self-Flow 的比例一致）</td></tr>
+    <tr><td>损失权重</td><td>γ = 0.8</td><td>λ<sub>rep</sub> = 0.05（小 16 倍），λ<sub>a</sub> = 0.16</td></tr>
+    <tr><td>EMA 衰减</td><td>0.9999</td><td>0.99（半衰期约 69 步，老师几乎就是当前的学生）</td></tr>
+    <tr><td>投影头</td><td>REPA 式轻量 MLP</td><td>Linear–SiLU–Linear，<b>最后一层零初始化</b></td></tr>
+    <tr><td>其他更新</td><td>—</td><td>一半概率改做普通干净历史的 TF 更新</td></tr>
+    <tr><td>证据</td><td>ImageNet / T2I / T2V / 音频上的收敛曲线，另有各组件的消融</td><td>只有图 5：老师阶段 40 步推理下的 4 条对齐曲线，<b>没有逐组件消融，也没有在蒸馏后的模型上验证</b></td></tr>
+  </tbody>
+</table></div>
+
+<div class="box mine">
+  <span class="lab">我的读法 · CSF 到底贡献了什么</span>
+  <p><b>它做的事是合理的。</b>老师在干净历史下的深层特征，可以看作“当前块真正需要从历史里拿到的东西”；要求学生在浅层、而且是在糊掉的历史下把它预测出来，等于直接监督“读历史”这件事。</p>
+  <p><b>但图 5 里混了两个因素。</b>CSF 分支的流匹配损失本身就是在加噪历史下算的，也就是 Diffusion-Forcing 式的历史噪声增强，而这种增强本身就可能改善对齐。Self-Flow 自己的消融显示两个因素都有贡献：只换噪声调度、不加表示损失，就有小幅改善（其图 2b）；去掉表示损失时退化最大（其图 11a）。论文缺少 “λ<sub>rep</sub> = 0、只保留加噪历史” 这一组对照，所以没法知道图 5 的提升里有多少来自表示对齐。</p>
+  <p><b>提升有多大，读不出来。</b>图 5 只有曲线、没给数值，每个点一个种子。四张子图纵轴的整个跨度分别只有 IB-AV 0.184–0.208、AVH 0.180–0.198、Javis 0.150–0.162、CLAP 0.370–0.400，CSF 相对 TF 的差距一定小于这些跨度。</p>
+  <p><b>没有落到交付物上。</b>最终的 4 步 AR–AR 模型 IB-AV 为 0.184、Javis 为 0.146，都<b>低于</b> CSF 老师自己的 0.202 / 0.162。蒸馏损失掉的音画对齐，比 CSF 可能带来的增益还大。论文也没有做“从普通 TF 老师出发做 AR–AR DMD”的对照。</p>
+  <p class="note">一个实现细节（推测，取决于具体实现）：余弦损失对投影输出 <span class="mv">a</span> 的梯度大小是 <span class="mv">sin θ / ‖a‖</span>。投影头最后一层零初始化时 <span class="mv">‖a‖</span> = 0，所以训练起点正好落在奇点上。对残差分支来说，零初始化能带来平稳起步；可余弦损失对尺度不敏感，零初始化给不了这个好处。在全局梯度裁剪 10.0 下，头几步可能会把主干的流匹配梯度也一起压小。影响大概不大，但这个设计选择论文没有解释。</p>
+</div>
+</section>
+
+<!-- ============================ 04 ============================ -->
+<section id="s04">
+<h2><span class="no">04</span>三种打分上下文：谁看到了什么</h2>
+<p>论文图 3 列出三种配置。记号“X–Y”的前一项是<b>真分数</b>，后一项是<b>假分数</b>；生成器总是块因果的。</p>
+<ul class="clean">
+  <li><span class="pill bi">BI–BI</span> 真、假分数都是双向模型。Self-Forcing、Causal Forcing、Causal-rCM、OmniForcing 的在线阶段都这样做。</li>
+  <li><span class="pill bi">BI</span>–<span class="pill ars">AR</span> 只把假分数换成因果模型，与生成器对齐。</li>
+  <li><span class="pill ars">AR–AR</span> 真分数用 CSF 训出的因果老师，三方共用同一个掩码、拼包方式和前缀。论文称它是唯一在估计式 (4) 梯度的配置。</li>
+</ul>
+<figure>
+  <div class="fig">
+    <div class="ctrl">
+      <span class="seg" role="group" aria-label="前缀来源" id="visMode">
+        <button type="button" data-v="tf" aria-pressed="true">干净前缀（TF 阶段）</button>
+        <button type="button" data-v="op" aria-pressed="false">生成前缀（在线阶段）</button>
+      </span>
+      <span class="seg" role="group" aria-label="打分配置" id="visCfg">
+        <button type="button" data-v="bibi" aria-pressed="false">BI–BI</button>
+        <button type="button" data-v="biar" aria-pressed="false">BI–AR</button>
+        <button type="button" data-v="arar" aria-pressed="true">AR–AR</button>
+      </span>
+      <label class="sl">目标块 k <input type="range" id="visK" min="1" max="5" step="1" value="3"><output id="visKo">3</output></label>
+    </div>
+    <div class="scrollx">
+      <svg id="figVis" viewBox="0 0 1000 300" role="img" aria-label="可见性浏览器"></svg>
+    </div>
+    <div class="swipe">← 左右滑动查看 →</div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--gt)"></i>干净真值块</span>
+      <span><i class="sw" style="background:var(--gen)"></i>学生生成的块</span>
+      <span><i class="sw" style="background:repeating-linear-gradient(45deg,var(--noisy) 0 3px,transparent 3px 6px)"></i>带噪目标块</span>
+      <span><i class="sw" style="border:2px solid var(--risk)"></i>未来块也被看到</span>
+      <span><i class="sw" style="border:1px dashed var(--rule2)"></i>看不到</span>
+    </div>
+    <div class="ro" id="visRO"></div>
+  </div>
+  <figcaption><b>可见性浏览器</b>（按图 3 与 §3.3 画）。在“干净前缀 + 双向打分”这一格里，双向模型除了过去，还会看到<b>其他块</b>。这些块是什么，论文没说。如果打分序列是把“每块各自以真值为前缀生成的结果”拼在一起，那么块与块之间并不衔接：第 k+1 块接的是真值第 k 块，不是生成的第 k 块。我认为这是表 3(a) 中 BI–BI 训崩的一个可能原因，属于假说。</figcaption>
+</figure>
+
+<h3>为什么 AR–AR 在两种前缀下都“站得住”</h3>
+<p>在<b>干净前缀</b>阶段，AR–AR 最小化的是 <span class="mv">Σ<sub>k</sub> 𝔼<sub>c<sup>⋆</sup><sub>k</sub>∼数据</sub> KL(p<sub>θ</sub>(·|c<sup>⋆</sup><sub>k</sub>) ‖ p<sub>T</sub>(·|c<sup>⋆</sup><sub>k</sub>))</span>，意思是：在真实历史上，学生的每一步条件分布都要贴近老师。这是一个标准的 teacher-forcing 目标，<b>它不保证学生在自己的 rollout 上也好</b>，所以之后要接在线阶段。</p>
+<p>在<b>生成前缀</b>阶段，情况有意思一些。由 KL 的链式法则：</p>
+<div class="eq"><span class="body">Σ<sub>k</sub> 𝔼<sub>ẑ<sub>&lt;k</sub>∼p<sub>θ</sub></sub> KL( p<sub>θ</sub>(z<sub>k</sub>|ẑ<sub>&lt;k</sub>) ‖ p<sub>T</sub>(z<sub>k</sub>|ẑ<sub>&lt;k</sub>) ) = KL( p<sub>θ</sub>(z<sub>1:K</sub>) ‖ p<sub>T</sub>(z<sub>1:K</sub>) )</span><span class="tag">链式法则</span></div>
+<p>所以在线阶段的块条件 KL 之和，<b>恰好是学生整段视频对因果老师整段视频的反向 KL</b>（这里忽略扩散加噪的平滑）。这一点比论文里的表述更干净。论文说真分数代表“给定该前缀下的条件数据分布”，可是对学生生成的前缀来说，这个“数据分布”并不存在；真正的目标是因果老师在这段前缀后的外推。换句话说，<b>学生的上限就是 CSF 老师的联合分布</b>：老师 AQ 4.565、DeSync 0.746，都明显不如 LTX-2 Base。</p>
+
+<div class="box mine">
+  <span class="lab">我的推导 · “未来可见”其实是精确梯度的一部分</span>
+  <p>把联合反向 KL 对第 k 块的梯度拆开（理想化：假分数完美，忽略加噪平滑）。记 <span class="mv">φ = log p<sub>θ</sub>(z) − log p<sub>T</sub>(z)</span>，学生按 <span class="mv">z<sub>k</sub> = g<sub>θ</sub>(ε<sub>k</sub>, z<sub>&lt;k</sub>)</span> 逐块生成。那么流经 <span class="mv">z<sub>k</sub></span> 的梯度有三项：</p>
+  <div class="tw" style="margin-bottom:10px"><table>
+    <thead><tr><th>梯度项</th><th>直观含义</th><th>精确联合 KL</th><th>BI–BI + KV 截断</th><th>AR–AR + KV 截断</th></tr></thead>
+    <tbody>
+      <tr><td>局部项 <span class="mv">∇<sub>z<sub>k</sub></sub> log p(z<sub>k</sub>|z<sub>&lt;k</sub>)</span></td><td>这一块像不像“给定历史后的合理延续”</td><td class="c-ok">✓</td><td class="c-ok">✓</td><td class="c-ok">✓</td></tr>
+      <tr><td>直接前瞻项 <span class="mv">Σ<sub>j&gt;k</sub> ∇<sub>z<sub>k</sub></sub> log p<sub>T</sub>(z<sub>j</sub>|z<sub>&lt;j</sub>)</span></td><td>这一块能不能让后面已经生成的块显得合理</td><td class="c-ok">✓</td><td class="c-ok">✓（即论文说的“未来可见”）</td><td class="c-risk">✗</td></tr>
+      <tr><td>路径项 <span class="mv">Σ<sub>j&gt;k</sub> (∂φ/∂z<sub>j</sub>)(∂z<sub>j</sub>/∂z<sub>k</sub>)</span></td><td>改这一块会怎样改变后面生成出来的内容</td><td class="c-ok">✓</td><td class="c-risk">✗</td><td class="c-risk">✗</td></tr>
+    </tbody>
+  </table></div>
+  <p>假分数那一侧的直接前瞻项，期望为 0（它是 <span class="mv">p<sub>θ</sub>(z<sub>&gt;k</sub>|z<sub>≤k</sub>)</span> 的得分函数）。所以<b>在线阶段的 BI–BI 并不是在估计一个“错的目标”</b>：它和 AR–AR 都是某个联合反向 KL 的截断梯度，只是截掉的部分不同，而且各自指向不同的老师（双向 LTX-2 与因果 CSF）。“去掉未来可见”也不自动意味着“更正确”，它只是换了一种截断。</p>
+  <p>真正无可争议的情形只有<b>干净前缀 + 双向打分</b>：那时被打分的序列不是任何一次 rollout 的样本，双向打分器给出的“让整段连贯”的信号，生成器根本没法执行。这和论文自己的证据吻合：BI–BI 在干净前缀下几乎训崩（表 3a），但在在线阶段却能正常工作（TF-dCM 路线的在线阶段、960p 的预热和尺度阶段用的都是 BI–BI，见 §10）。论文没有说明在线阶段梯度是否穿过历史（KV 缓存）。</p>
+</div>
+</section>
+
+<!-- ============================ 05 ============================ -->
+<section id="s05">
+<h2><span class="no">05</span>训练配方：每一段训了什么、训了多久</h2>
+<figure>
+  <div class="fig">
+    <div class="scrollx">
+      <svg id="figRecipe" viewBox="0 0 1080 470" role="img" aria-label="训练阶段时间线"></svg>
+    </div>
+    <div class="swipe">← 左右滑动查看 →</div>
+  </div>
+  <figcaption><b>全部训练阶段</b>（数字全部取自附录 A.5 / A.6）。中间一行是论文主推的 AR–AR 路线；上面一行是作为对照的 TF-dCM 路线；下面一行是 960p 扩展。“G 更新”这一项按“假分数每步更新、生成器每 5 步更新一次”换算。<b>红色虚线框</b>是附录 B.3 对 960p 示例图出处的另一种说法，与 A.6 对不上（§07）。</figcaption>
+</figure>
+
+<h3>噪声网格：推理的 4 步是训练 8 点网格的子集</h3>
+<p>所有阶段都用同一个时间偏移 <span class="mv">t ↦ st/(1+(s−1)t)</span>，其中 <span class="mv">s</span> = 8。把 [0, 1] 均匀切 4 份，映射过去就是推理网格 [1000, 960, 889, 727, 0]；切 8 份就是训练网格 [1000, 982, 960, 930, 889, 828, 727, 533, 0]。所以前者是后者的子集。960p 阶段把同样这 4 个噪声水平拆开：低分辨率用 1.0 和 0.96，高分辨率用 0.889 和 0.727。</p>
+<figure>
+  <div class="fig">
+    <div class="ctrl">
+      <label class="sl">偏移 s <input type="range" id="gridS" min="1" max="16" step="0.5" value="8"><output id="gridSo">8.0</output></label>
+      <span class="seg" role="group" aria-label="显示" id="gridShow">
+        <button type="button" data-v="all" aria-pressed="true">训练 8 点 + 推理 4 步</button>
+        <button type="button" data-v="hr" aria-pressed="false">960p 拆分</button>
+      </span>
+    </div>
+    <div class="scrollx">
+      <svg id="figGrid" viewBox="0 0 1000 340" role="img" aria-label="噪声网格"></svg>
+    </div>
+    <div class="swipe">← 左右滑动查看 →</div>
+    <div class="ro" id="gridRO"></div>
+  </div>
+  <figcaption><b>噪声网格</b>（我按附录 A.4 的偏移公式复算）。横轴是均匀的“进度” u，纵轴是实际噪声水平 t。<span class="mv">s</span> = 8 时曲线非常“鼓”：推理的 4 步里前三步只把噪声从 1.0 降到 0.727，最后一步<b>直接从 0.727 跳到 0</b>，最终画面的大部分细节是在这一步里定下来的。可以拖动 s 看网格怎么变。</figcaption>
+</figure>
+
+<div class="box warnb">
+  <span class="lab">一个没说清的细节 · 干净前缀阶段，生成器的输入是什么？</span>
+  <p>附录 A.5 说干净前缀 DMD 阶段<b>每次迭代只调用生成器一次</b>，入口噪声从 8 点网格的 8 个非零点里均匀抽取，所有块、两个模态共用同一个入口噪声。可是 982、930、828、533 这四个点，推理时根本不会经过。从纯噪声只调一次网络，到不了这些点。<b>按字面理解，这些入口的输入只能是真值加噪</b>，也就是 DMD2 里“关掉 backward simulation”的做法；干净前缀阶段本来就要读取成对的真值数据，这一点也支持这个推断。</p>
+  <p>这带来两个后果。① 这一阶段训练用的 <span class="mv">p<sub>θ</sub></span> 是“8 个入口单次调用输出”的混合分布，其中一部分输入来自真值，并不是推理时 4 步采样出来的那个分布。论文说的“估计式 (4) 的梯度”，指的其实是这个混合分布。② 块内也有训练和推理不一致：训练时中间步的输入来自真值加噪，推理时来自学生自己的预测再加噪。论文把在线阶段只描述为弥补“历史”上的差距，其实它也弥补了这一块内的差距。另外，§3.3 正文写的是生成器在干净前缀下“做少步采样”，与附录 A.5 的“只调用一次”字面上不一致。</p>
+</div>
+</section>
+
+<!-- ============================ 06 ============================ -->
+<section id="s06">
+<h2><span class="no">06</span>老师引导（CFG）校准：这一项的影响可能最大</h2>
+<p>表 3(b) 固定 AR–AR 配置、训练步数和推理设置，只改训练时真分数的引导：固定 4.0，或者视频、音频各自每步从 U(1.0, 3.5) 中独立抽取。结果 VQ 在官方提示词上 +91.5%、改写提示词上 +82.9%，MQ 在两者上都翻了一倍多。论文的结论是：DMD 的引导要为 DMD 重新校准，不能直接照搬一致性蒸馏的设定。</p>
+<figure>
+  <div class="fig">
+    <div class="ctrl">
+      <span class="seg" role="group" aria-label="指标" id="gdMetric">
+        <button type="button" data-v="0" aria-pressed="true">VQ</button>
+        <button type="button" data-v="1" aria-pressed="false">MQ</button>
+        <button type="button" data-v="2" aria-pressed="false">AQ</button>
+        <button type="button" data-v="3" aria-pressed="false">CLIP</button>
+        <button type="button" data-v="4" aria-pressed="false">DeSync ↓</button>
+      </span>
+    </div>
+    <div class="scrollx">
+      <svg id="figGuide" viewBox="0 0 1000 250" role="img" aria-label="引导对照条形图"></svg>
+    </div>
+    <div class="swipe">← 左右滑动查看 →</div>
+    <div class="ro" id="gdRO"></div>
+  </div>
+  <figcaption><b>把表 3(a) 和表 3(b) 放到一起看</b>（官方提示词，都是在线阶段之前的初始化模型）。第一根柱是 TF-dCM，老师引导固定 4.0。第二根是 AR–AR TF-DMD，老师引导<b>同样固定 4.0</b>。第三根是论文采用的 U(1, 3.5)。在同样的 4.0 引导下，DMD 的 VQ 和 MQ 都<b>输给</b> dCM，DeSync 也更差。“DMD 可以取代一致性蒸馏”这个结论，依赖的是只给了 DMD 的那次引导调整。</figcaption>
+</figure>
+<ul class="clean">
+  <li><b>两件事被一起改了</b>：“降低引导范围”和“随机化”是同时改的，论文自己也说这是一个“组合调整”。缺少固定 2.25（U(1, 3.5) 的均值）或固定 3.0 的对照，所以说不清随机化本身有没有用。</li>
+  <li><b>dCM 没有得到同等待遇</b>：TF-dCM 的老师桥接步一直固定用 4.0。一致性蒸馏在较低引导下会不会也更好，论文没有测。</li>
+  <li><b>这不是新知识</b>：DMD 类方法普遍用比多步采样更低的引导，例如 Self-Forcing 在 Wan 上用 3.0，OmniForcing 用视频 3、音频 5。表 3(b) 真正说明的是：在“从 40 步因果老师直接做 DMD”这个设定下，引导对结果的影响有多大。按 §02 的推导，这个设定下训练初期的推力几乎全来自 CFG 方向，所以引导影响大并不意外。</li>
+</ul>
+</section>
+
+<!-- ============================ 07 ============================ -->
+<section id="s07">
+<h2><span class="no">07</span>960p 扩展：同样 4 次调用，拆到两个尺度上</h2>
+<p>在 4 步 480p 生成器的基础上，让同一个生成器既做低分辨率生成，也做高分辨率精修。每块的流程是：低分辨率调用 2 次，得到干净的音视频预测；接着用一个<b>因果潜空间上采样器</b> <span class="mv">U<sub>ω</sub></span> 把视频潜变量放大 2 倍，音频保持原分辨率；然后两路一起重新加噪到 0.889，再做 2 次高分辨率调用，这一块就完成了。低分辨率和高分辨率各有一套 KV 缓存，参数共享。</p>
+<figure>
+  <div class="fig">
+    <div class="scrollx">
+      <svg id="figHR" viewBox="0 0 1000 300" role="img" aria-label="960p 尺度管线"></svg>
+    </div>
+    <div class="swipe">← 左右滑动查看 →</div>
+  </div>
+  <figcaption><b>960p 单块流程</b>（按 §3.4、附录 A.6 画）。上采样器沿用 LTX-2 已发布的空间上采样器的结构和权重。它变成因果的方式是输入开窗：生成 [s, e) 这一块时，只把潜帧 [max(0, s−18), e) 送进网络，再从输出里裁出当前块。然后用 1.2k 步做模仿训练，让它逼近“整段一次性上采样”的结果，输入用的是冻结的 4 步 480p 生成器的在线 rollout。<b>这一阶段的真分数和假分数都是双向的</b>，在两个尺度上分别对完成的 rollout 打分，也就是 BI–BI。</figcaption>
+</figure>
+
+<div class="box warnb">
+  <span class="lab">存疑 · 960p 结果的出处前后对不上，而且它用的是论文反对的配置</span>
+  <ul class="clean">
+    <li><b>A.6 的说法</b>：尺度阶段从 AR–AR 路线出发，先做 1.6k 步 480p 在线 <b>BI–BI</b> DMD 预热，再做 2.4k 步尺度训练，老师引导视频 3.0、音频 5.0（与 OmniForcing 训练时的设置相同）。</li>
+    <li><b>B.3 的说法</b>：960p 示例图用的是 “Stage 3 SALT BI–BI 4.0k parent” 和它的 “Stage 4a 3.2k scale-wise output, without extra refiner or DPO”，并且明确说这个父检查点<b>不是</b> 480p 主图用的 AR–AR 检查点。</li>
+    <li>两处的步数（2.4k 对 3.2k）和父模型都对不上。“refiner”和“DPO”在全文其他地方都没有出现过，看起来是内部产品管线的残留。图 6 里“Salt++ 480p 双线性放大”那一列，用的也是这个 BI–BI 父模型，而不是表 1(a) 的 Salt++。<b>表 1(b) 的 960p 数字到底来自哪个检查点，论文没写。</b></li>
+    <li>无论哪种说法，960p 阶段用的都是 BI–BI 打分。所以论文的头条 960p 结果（6/7 胜 LTX-2）<b>并不能支持</b>“上下文对齐”这一论点；它反倒说明 BI–BI 在线打分可以正常工作。另外，960p 的 IB-AV（0.193）和 Javis（0.157）都<b>高于</b> 480p 的 AR–AR 路线（0.184 / 0.146），与“双向 LTX-2 当真分数更利于音画对齐”这个解释方向一致。</li>
+    <li>“4 次调用”不等于同样的算力：高分辨率调用的视频 token 数是 480p 的 4 倍，注意力开销增长得更多。附录 A.6 自己也写了“调用次数不代表墙钟时间”，但结论一节又写“在同样的预算内”达到 1664×960。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ============================ 08 ============================ -->
+<section id="s08">
+<h2><span class="no">08</span>主结果</h2>
+<p>评测用 JavisBench-mini 的 1,000 条官方提示词，另有一套用 LTX-2 提示词增强器改写一次、各模型共用的“改写轨”。每条提示词生成 1 个样本，种子为 12,345 + i。480p 下比较 LTX-2 Base（40 步）、CSF 因果老师（40 步）、OmniForcing（官方 4 步因果检查点），以及 Salt++ 的两条完整路线。两条路线的推理都是 4 步、CFG = 1。</p>
+<figure>
+  <div class="fig">
+    <div class="ctrl">
+      <span class="seg" role="group" aria-label="表" id="rtTab">
+        <button type="button" data-v="t1a" aria-pressed="true">表 1(a) 480p</button>
+        <button type="button" data-v="t2" aria-pressed="false">表 2 改写提示词</button>
+        <button type="button" data-v="t1c" aria-pressed="false">表 1(c) VBench</button>
+        <button type="button" data-v="t1b" aria-pressed="false">表 1(b) 960p</button>
+      </span>
+      <span class="seg" role="group" aria-label="显示方式" id="rtMode">
+        <button type="button" data-v="abs" aria-pressed="true">原始值</button>
+        <button type="button" data-v="omni" aria-pressed="false">减 OmniForcing</button>
+        <button type="button" data-v="ltx" aria-pressed="false">减 LTX-2</button>
+        <button type="button" data-v="dcm" aria-pressed="false">减 TF-dCM 路线</button>
+      </span>
+    </div>
+    <div class="tw" style="margin:0"><table class="rt" id="rtTable"></table></div>
+    <div class="ro" id="rtRO"></div>
+  </div>
+  <figcaption><b>结果浏览器</b>（数字逐格取自表 1、表 2）。原始值模式下，数字下方的细条按列内最差到最好归一化（越长越好），▲ 标出每列最优（DeSync 越低越好）。差值模式下显示与所选基线的差，绿色表示更好。</figcaption>
+</figure>
+<div class="grid2">
+  <div class="card"><span class="k">论文的说法</span><p>AR–AR 路线在 11 项指标中有 8 项胜过 TF-dCM 路线（4 项 VBench 全胜），在所有 4 步方法里 7 项最优；VQ、MQ 比 OmniForcing 高 57.1%、44.5%；改写轨上 7 项全部胜过 OmniForcing；960p 下 7 项里 6 项胜过 LTX-2（40+3 步）。<b>这些计数我都复算过，全部成立。</b></p></div>
+  <div class="card"><span class="k">同一张表里没被强调的</span><p>AR–AR 路线的 IB-AV、Javis、DeSync 三项全输给 TF-dCM 路线，DeSync 在 480p 所有行里最差（0.759）。CSF 老师（40 步）本身的 VQ、MQ 就已经比 OmniForcing 高 27.5%、22.6%，比 LTX-2 Base 高 22.3%、51.4%。它在内部数据上训过；而 OmniForcing 用的是 Mixkit + AudioCaps。“比 OmniForcing 高 57%”中有相当一部分来自老师和数据。</p></div>
+</div>
+</section>
+
+<!-- ============================ 09 ============================ -->
+<section id="s09">
+<h2><span class="no">09</span>指标怎么读：VQ/MQ 的百分比、DeSync、跨论文数字</h2>
+<h3>VQ / MQ / AQ 是什么？论文没写</h3>
+<p>附录 A.3 只说了“视觉质量、运动质量、音频质量”，没有给出用的是哪个评测模型。间接证据如下。前作 Salt 用的是 VideoAlign；OmniNFT 一系对 LTX-2 做强化学习时，视频质量用 VideoAlign、音频质量用 Audiobox Aesthetics；VA-Judger（2608.18607）的扩展 JavisBench 表里，LTX-2 一行是 VQ 2.248、MQ 0.697、AQ 4.767。我验证过：这个 <b>AQ 正好等于 Audiobox 四个轴（CE、CU、PC、PQ）的均值</b>，(3.957+5.904+3.041+6.166)/4 = 4.767。所以我的推断是：<b>VQ、MQ 是 VideoAlign（VideoReward）的两个维度，AQ 是 Audiobox Aesthetics 四轴均值</b>。</p>
+<p>VideoReward 是用“带平局的 Bradley–Terry”在成对偏好数据上训出来的，输出没有任何归一化。在 BT 模型里只有<b>分差</b>有意义（它决定“人更偏好 A 还是 B”的概率），分数本身的零点可以任意平移。所以“VQ 提升 57%”这样的<b>比值</b>，取决于一个任意选定的零点：</p>
+<figure>
+  <div class="fig">
+    <div class="ctrl">
+      <label class="sl">把零点平移 c <input type="range" id="ptC" min="-0.6" max="3" step="0.05" value="0"><output id="ptCo">0.00</output></label>
+      <button class="btn" id="ptReset" type="button">↺ 论文口径（c = 0）</button>
+    </div>
+    <div class="scrollx">
+      <svg id="figPct" viewBox="0 0 1000 210" role="img" aria-label="百分比陷阱"></svg>
+    </div>
+    <div class="swipe">← 左右滑动查看 →</div>
+    <div class="ro" id="ptRO"></div>
+  </div>
+  <figcaption><b>百分比陷阱</b>（我写的示意）。给所有模型的分数同时加上同一个常数 c，BT 意义下什么都没变：任何两个模型之间的偏好概率都不变，两条浅色的“分差”条也不变。但“相对 OmniForcing 提升百分之几”会随 c 大幅变化。c = 1 时 MQ 的“+45%”就只剩 +18%。按分差报告，或者直接做成对偏好评测，才有意义。</figcaption>
+</figure>
+<div class="grid3">
+  <div class="card"><span class="k">这些代理指标和人的判断有多一致？</span><p>VA-Judger 在 1,150 对音视频上测了各自动指标与人类偏好的一致率（随机猜是 50%）：VideoAlign 54.3%（域外 48.4%），Audiobox 50.4%，DeSync 56.9%，JavisScore 56.9%，ImageBind 音视频 55.9%。VideoAlign <b>根本不看音频</b>。Salt++ 没做任何人评。</p></div>
+  <div class="card"><span class="k">DeSync 的读法</span><p>附录 A.3 提醒得对：DeSync 只估计音视频的时间偏移，画面几乎静止的输出可以拿到很低的 DeSync。表 3(a) 的 BI–AR 行就是这样：DeSync 0.531 全表最好，但 VQ 只有 1.131。反过来，AR–AR 路线在 480p 和 960p 上的 DeSync 都是表内最差，这也值得读者自己去看视频判断。</p></div>
+  <div class="card"><span class="k">VBench 只报了 4 项</span><p>表 1(c) 只有美学、成像、主体一致、背景一致。后两项偏爱画面不动的视频，而动态程度、运动平滑、闪烁这几项没报。AR–AR 的 MQ 最高，说明运动质量不差，但“动得多不多”仍然看不出来。</p></div>
+</div>
+
+<h3>跨论文的同名指标对不上</h3>
+<div class="tw"><table>
+  <thead><tr><th>来源</th><th>模型</th><th class="num">CLIP</th><th class="num">AV-IB / IB-AV</th><th class="num">JavisScore</th><th class="num">DeSync ↓</th></tr></thead>
+  <tbody>
+    <tr><td rowspan="3">OmniForcing 论文表 1（JavisBench）</td><td><span class="dot ltx"></span>LTX-2</td><td class="num">0.318</td><td class="num">0.318</td><td class="num">0.253</td><td class="num">0.384</td></tr>
+    <tr><td><span class="dot omni"></span>OmniForcing</td><td class="num">0.322</td><td class="num">0.269</td><td class="num">0.208</td><td class="num">0.392</td></tr>
+    <tr><td class="dim">Omni / LTX-2</td><td class="num dim">1.01</td><td class="num dim">0.85</td><td class="num dim">0.82</td><td class="num dim">1.02</td></tr>
+    <tr><td rowspan="3">Salt++ 表 1(a)（JavisBench-mini）</td><td><span class="dot ltx"></span>LTX-2 Base</td><td class="num">0.311</td><td class="num">0.239</td><td class="num">0.200</td><td class="num">0.608</td></tr>
+    <tr><td><span class="dot omni"></span>OmniForcing</td><td class="num">0.303</td><td class="num">0.163</td><td class="num">0.124</td><td class="num">0.745</td></tr>
+    <tr><td class="dim">Omni / LTX-2</td><td class="num dim">0.97</td><td class="num dim">0.68</td><td class="num dim">0.62</td><td class="num dim">1.23</td></tr>
+  </tbody>
+</table></div>
+<p>两篇论文的评测集合可能不同（完整集或 mini），各自的管线也不同，绝对值对不上可以理解。但<b>相对比例</b>也差了很多：OmniForcing 自报它的音画对齐只比 LTX-2 低约 15–18%，DeSync 几乎持平；到了 Salt++ 的评测里，变成低 32–38%，DeSync 差 23%。Salt++ 的评测代码没有公开，JavisBench 自带的 FVD、FAD 也没有报。</p>
+</section>
+
+<!-- ============================ 10 ============================ -->
+<section id="s10">
+<h2><span class="no">10</span>消融读法：哪些是受控对比，哪些不是</h2>
+<h3>受控的：表 3(a)，干净前缀下的四种初始化</h3>
+<p>四个变体都从同一个 CSF 检查点出发，都没有经过在线阶段，评测协议也相同。这是全文最干净的一组对比。</p>
+<div class="tw"><table class="rt" id="t3aTable"></table></div>
+<p>对这组结果，我的读法有三点。① BI–BI 的 VQ 只有 0.837、MQ 只有 0.140，远低于同一篇论文里同样用 BI–BI 在线打分的 OmniForcing（1.807 / 0.699，MQ 相差 5 倍）。这更像是<b>训练失败</b>，而不是“稍差一点”。② 论文没有给出 BI–BI 与 BI–AR 的具体配置：双向打分器看到的序列怎么拼、用多大的引导、假分数从哪里初始化、训了多少步。③ 所以这组结果最稳妥的读法是：<b>在干净前缀下做 DMD，打分器必须是因果的</b>。至于“以往在线 BI–BI 的配方是错配的”这个更强的说法，这组结果并不支持（见下面的阶段效应，以及 §04 的推导）。</p>
+
+<h3>不受控的：表 1 的“两条路线”</h3>
+<p>附录 A.5 说两条路线“只在蒸馏目标上不同”，这句话只对第二段（少步初始化）成立，而且即使在第二段，引导也不一样。把两条完整路线逐项摆开：</p>
+<div class="tw"><table>
+  <thead><tr><th>因素</th><th><span class="dot dcm"></span>TF-dCM 路线</th><th><span class="dot ar"></span>AR–AR 路线</th></tr></thead>
+  <tbody>
+    <tr><td>起点</td><td class="same">CSF 检查点</td><td class="same">CSF 检查点</td></tr>
+    <tr><td>第二段目标</td><td class="diff">TF-dCM（48 点离散化，损失 ×100）</td><td class="diff">TF-DMD（AR–AR）</td></tr>
+    <tr><td>第二段老师引导</td><td class="diff">固定 4.0</td><td class="diff">U(1.0, 3.5)</td></tr>
+    <tr><td>第二段步数</td><td class="diff">4.8k（学生每步都更新）</td><td class="diff">3.2k（G 更新 640 次）</td></tr>
+    <tr><td>在线阶段打分器</td><td class="diff">BI–BI，真、假分数都从 <b>LTX-2 Base</b> 初始化</td><td class="diff">AR–AR，真分数为 <b>CSF 老师</b></td></tr>
+    <tr><td>真分数见过的数据</td><td class="diff">LTX-2 的预训练数据（没在内部数据上训过）</td><td class="diff">在内部音视频数据上做过 CSF 训练</td></tr>
+    <tr><td>在线阶段引导</td><td class="diff">固定 3.0</td><td class="diff">U(1.0, 3.5)</td></tr>
+    <tr><td>在线阶段步数</td><td class="diff">2.4k（G 更新 480 次）</td><td class="diff">1.2k（G 更新 240 次）</td></tr>
+    <tr><td>推理</td><td class="same">4 步，CFG = 1</td><td class="same">4 步，CFG = 1</td></tr>
+  </tbody>
+</table></div>
+<p>两条路线的结果模式是：TF-dCM 路线 VQ、MQ 较低，IB-AV、Javis、DeSync 较好；AR–AR 路线正相反。这个模式<b>用“最后被蒸馏向谁”就能解释</b>：TF-dCM 路线最后被推向 LTX-2 Base，它的 VQ、MQ 较低，但音画对齐较强（0.239 / 0.200 / 0.608）；AR–AR 路线被推向 CSF 老师，它的 VQ、MQ 较高，但音画对齐较弱（0.202 / 0.162 / 0.746）。要分离“上下文”和“老师与数据”这两个因素，至少需要一个在同样内部数据上继续训过的<b>双向</b>老师来做对照。</p>
+
+<h3>阶段效应：在线适配这一段，数字上是退步</h3>
+<figure>
+  <div class="fig">
+    <div class="scrollx">
+      <svg id="figSlope" viewBox="0 0 1000 300" role="img" aria-label="在线阶段前后变化"></svg>
+    </div>
+    <div class="swipe">← 左右滑动查看 →</div>
+  </div>
+  <figcaption><b>在线阶段前后</b>（左端取自表 3(a) 的初始化模型，右端取自表 1(a) 的完整路线；官方提示词，推理设置相同）。每条线是一个指标，按“越高越好”统一方向（DeSync 取负），并按指标各自的尺度归一化。<b>AR–AR</b>：VQ −9.8%、MQ −25.2%、CLIP −0.001、DeSync 变差 0.033，只有 AQ +0.241；改写轨上 VQ −10.0%、MQ −20.8%。<b>TF-dCM</b>：在线 BI–BI 之后 5 项全部改善，这也说明 BI–BI 在线打分本身是能用的。论文对 AR–AR 在线阶段的唯一证据是一句“肉眼观察到过曝减少”。</figcaption>
+</figure>
+</section>
+
+<!-- ============================ 11 ============================ -->
+<section id="s11">
+<h2><span class="no">11</span>和相邻工作的关系</h2>
+<div class="tw"><table>
+  <thead><tr><th>工作</th><th>日期</th><th>模态</th><th>因果老师</th><th>少步初始化</th><th>在线阶段打分器</th><th>与 Salt++ 的关系</th></tr></thead>
+  <tbody>
+    <tr><td>Self-Forcing</td><td class="num">2025-06</td><td>视频</td><td>—</td><td>ODE（双向老师轨迹）</td><td><span class="pill bi">BI–BI</span></td><td>自展开 + DMD 范式的源头</td></tr>
+    <tr><td>Causal Forcing</td><td class="num">2026-02</td><td>视频</td><td>TF</td><td>ODE（因果老师轨迹）</td><td><span class="pill bi">BI–BI</span></td><td>指出用双向老师的 ODE 轨迹初始化因果学生有问题（帧级单射性），改用因果老师</td></tr>
+    <tr><td>OmniForcing</td><td class="num">2026-03</td><td>音视频（LTX-2）</td><td>—</td><td>双向 DMD → 因果 ODE 回归</td><td><span class="pill bi">BI–BI</span></td><td>同一骨干和块布局的 4 步基线；报了 25 FPS、首块 0.7 s</td></tr>
+    <tr><td>Self-Flow</td><td class="num">2026-03</td><td>图 / 视频 / 音频</td><td colspan="3">非蒸馏工作：自监督流匹配（双噪声水平 + EMA 老师特征预测）</td><td>CSF 的直接来源</td></tr>
+    <tr><td>Causal-rCM / CF++</td><td class="num">2026-05/06</td><td>视频</td><td>TF</td><td>TF-dCM / TF-sCM</td><td><span class="pill bi">BI–BI</span></td><td>TF-dCM 对照路线照搬它的配方；它还报告了<b>不经 CM、直接从 TF 因果模型做 SF-DMD</b>，在分块设定下 VBench 最高，但纹理偏平滑、偏饱和</td></tr>
+    <tr><td>CMD（NVIDIA）</td><td class="num">2026-08-13</td><td>视频（含相机控制）</td><td>DF（加噪历史）</td><td><b>无</b>，学生直接从老师初始化</td><td><span class="pill ars">AR–AR</span>（前缀打分 + 前缀加噪）</td><td>核心思想相同，比 Salt++ 早约 6.5 周；Salt++ 称之为“同期”</td></tr>
+    <tr><td>Salt（同组）</td><td class="num">2026-04</td><td>视频</td><td colspan="3">SC-DMD 自洽正则 + 混合步长 rollout</td><td>前作；共享 8 点训练网格的思路，也同样用 VideoAlign 做评测</td></tr>
+    <tr style="background:var(--ar-soft)"><td><b>Salt++</b></td><td class="num">2026-09-29</td><td>音视频（LTX-2）</td><td>CSF（TF + 加噪历史 + 表示对齐）</td><td>TF-DMD（AR–AR，干净前缀）</td><td><span class="pill ars">AR–AR</span>；960p 阶段 <span class="pill bi">BI–BI</span></td><td>—</td></tr>
+  </tbody>
+</table></div>
+<div class="box">
+  <span class="lab">新颖性边界</span>
+  <p>论文的第二条贡献写的是 “We identify score–context mismatch in block-conditional DMD”。可是 CMD 已经把同一个问题命名为 teacher–student context mismatch，给出了因果老师当真分数、学生直接从老师初始化（不需要 ODE 或 CD）、按生成前缀打分这一整套方案，并在相机控制和长视频上验证过。Salt++ 自己列出的三点差异是：① 在干净前缀下做了受控的打分上下文对比；② 引导要为 DMD 重新校准；③ 用表示对齐训练音视频因果老师。这三点确实是 CMD 没有做的。<b>真正属于 Salt++ 的增量</b>还包括：先干净前缀、后生成前缀的两段式，音视频联合，以及 960p 的尺度阶段。本仓库的 <a href="2608.13391.html">CMD 精读页</a>可以对照着看。</p>
+</div>
+</section>
+
+<!-- ============================ 12 ============================ -->
+<section id="s12">
+<h2><span class="no">12</span>复算清单</h2>
+<p class="lead">✓ 表示我按论文给的数字重算过、结论一致；≈ 表示我从论文数字推出的派生量，论文本身没有给。</p>
+<ul class="checks">
+  <li><span><b>“11 项里 8 项胜 TF-dCM 路线”</b>：表 1(a) 的 7 项加表 1(c) 的 4 项。AR–AR 输在 IB-AV、Javis、DeSync，其余全胜。</span></li>
+  <li><span><b>“在 4 步方法中 7 项最优”</b>：VQ、MQ、AQ、CLIP、成像、主体一致、背景一致；美学一项 OmniForcing 最优。</span></li>
+  <li><span><b>+57.1% / +44.5%</b>：2.838/1.807、1.010/0.699。表 2 的 +59.0% / +64.6%：2.820/1.774、0.999/0.607。</span></li>
+  <li><span><b>表 2</b>：AR–AR 对 OmniForcing 7/7 全胜，对 TF-dCM 4/7（VQ、MQ、AQ、DeSync）。</span></li>
+  <li><span><b>960p 6/7 胜 LTX-2</b>：唯一的例外是 DeSync，0.768 对 0.658。</span></li>
+  <li><span><b>表 3(a)</b>：AR/AR 在三种 DMD 配置里 5/7 最优（AQ 输给 BI/BI，DeSync 输给 BI/AR）；对 TF-dCM 7/7 全胜。</span></li>
+  <li><span><b>表 3(b)</b>：VQ +91.5%（3.147/1.643）、+82.9%（3.132/1.712）；MQ ×2.36、×2.11。</span></li>
+  <li><span><b>噪声网格</b>：<span class="mv">8t/(1+7t)</span> 作用在 k/8 和 k/4 上，精确复现 [1000, 982, 960, 930, 889, 828, 727, 533, 0] 和 [1000, 960, 889, 727, 0]，后者是前者的子集。960p 的 S<sub>L</sub> ∪ S<sub>H</sub> 正好是推理用的这 4 个水平。</span></li>
+  <li><span><b>块数</b>：121 帧 → 1 + 120/8 = 16 个视频潜帧 = 1 + 5 × 3，所以 K = 5。</span></li>
+  <li><span><b>CSF 取层比例</b>：14/48 = 0.29，34/48 = 0.71，与 Self-Flow 的 0.3D / 0.7D 一致。</span></li>
+  <li class="derived"><span><b>AQ 的来源</b>：VA-Judger 表 2 中 LTX-2 的 AQ 4.767 = Audiobox 四轴均值。以此推断 Salt++ 的 AQ 口径相同（论文未写明）。</span></li>
+  <li class="derived"><span><b>生成器实际更新次数</b>：TF-DMD 3.2k 次迭代 → 640 次；AR–AR 在线 1.2k → 240 次；TF-dCM 在线 2.4k → 480 次；960p 预热 1.6k → 320 次、尺度阶段 2.4k → 480 次（按附录 A.5 的 5:1 比例，假设各阶段相同）。</span></li>
+  <li class="derived"><span><b>同为 4.0 引导</b>：AR–AR TF-DMD 相对 TF-dCM，VQ −14.2%、MQ −6.4%、DeSync +0.077（更差）；AQ +0.248、CLIP +0.008。</span></li>
+  <li class="derived"><span><b>在线阶段效应</b>：AR–AR 的 VQ −9.8%、MQ −25.2%（官方）和 −10.0%、−20.8%（改写）；TF-dCM 的 VQ +5.1%、MQ +35.2%。</span></li>
+  <li class="derived"><span><b>老师本身的优势</b>：CSF 老师对 OmniForcing，VQ +27.5%、MQ +22.6%；对 LTX-2 Base，+22.3%、+51.4%。</span></li>
+  <li class="derived"><span><b>跨论文比例</b>：Omni/LTX-2 的音画对齐比例，OmniForcing 自报 0.85 / 0.82，Salt++ 评测为 0.68 / 0.62；DeSync 比例 1.02 对 1.23。</span></li>
+  <li class="derived"><span><b>其他</b>：w(t) = exp(−2(t−0.5)²) 在两端是 0.61，所以只是“轻微”压低两端；EMA 0.99 的半衰期约 69 步；960p 的视频 token 数是 480p 的 4.0 倍。</span></li>
+</ul>
+</section>
+
+<!-- ============================ 13 ============================ -->
+<section id="s13">
+<h2><span class="no">13</span>存疑（18 条）</h2>
+<div class="ctrl dfilter">
+  <span class="seg" role="group" aria-label="按严重程度筛选" id="dqFilter">
+    <button type="button" data-v="all" aria-pressed="true">全部</button>
+    <button type="button" data-v="hi" aria-pressed="false">高（5）</button>
+    <button type="button" data-v="mid" aria-pressed="false">中（8）</button>
+    <button type="button" data-v="lo" aria-pressed="false">低（5）</button>
+  </span>
+</div>
+<div class="doubts" id="dqList">
+  <article class="dq hi" data-s="hi"><h4><span class="n">#1</span><span class="sev hi">高</span>两条路线的对比混杂了老师、数据、引导和步数</h4>
+    <p>表 1 把 AR–AR 路线相对 TF-dCM 路线的优势归因于“上下文对齐”。但两条路线在线阶段的真分数一个是 LTX-2 Base（没在内部数据上训过），一个是 CSF 老师（在内部数据上训过）；引导分别是 3.0/4.0 和 U(1, 3.5)；步数也不同（§10 的表）。结果模式（VQ/MQ 与音画对齐此消彼长）用“最后被蒸馏向哪个老师”就能完整解释。</p>
+    <p class="fix">需要的对照：用内部数据继续训练一个双向老师，然后在同样的引导和步数下做 BI–BI 与 AR–AR 的对比。</p></article>
+  <article class="dq hi" data-s="hi"><h4><span class="n">#2</span><span class="sev hi">高</span>“DMD 可以取代一致性蒸馏”依赖一次不对称的引导调整</h4>
+    <p>同样用 4.0 引导时，AR–AR TF-DMD 的 VQ（1.643 对 1.916）和 MQ（0.572 对 0.611）都输给 TF-dCM，DeSync 也更差。只有换成 U(1, 3.5) 之后 DMD 才大幅领先，而 dCM 从未试过较低的引导。另外，“不需要单独的 CD 阶段”这一点，CMD（直接从因果老师初始化）和 Causal-rCM（直接从 TF 因果模型做 SF-DMD）都已经报告过。</p>
+    <p class="fix">需要的对照：dCM 用 U(1, 3.5) 或固定 2.25；DMD 用固定 2.25 / 3.0。</p></article>
+  <article class="dq hi" data-s="hi"><h4><span class="n">#3</span><span class="sev hi">高</span>BI–BI 在干净前缀下失败，被外推成了对以往配方的批评</h4>
+    <p>表 3(a) 的 BI–BI（VQ 0.837、MQ 0.140）像是训练失败，而且配置没有交代。更关键的是，论文自己多处在<b>在线</b>阶段使用 BI–BI，且效果正常：TF-dCM 路线的在线阶段五项全改善；960p 预热和尺度阶段也都是 BI–BI。所以证据只支持“干净前缀 DMD 需要因果打分器”，不支持“以往配方的 BI–BI 在线打分错位”。按 §04 的推导，在线 BI–BI 和 AR–AR 都是联合反向 KL 的截断梯度，只是截掉的部分不同。</p></article>
+  <article class="dq hi" data-s="hi"><h4><span class="n">#4</span><span class="sev hi">高</span>960p 结果的出处对不上，而且用的是 BI–BI</h4>
+    <p>A.6 写的是 “AR–AR 路线 + 1.6k BI–BI 预热 + 2.4k 尺度训练”，B.3 写的是 “Stage 3 SALT BI–BI 4.0k 父模型 + Stage 4a 3.2k”，还提到正文从未出现过的 refiner 和 DPO。图 6 中的 480p 列不是表 1(a) 的模型。表 1(b) 用的是哪个检查点，论文没有说明。无论哪种说法，头条的 960p 结果都来自双向打分，不能用来支持论文的核心论点。</p></article>
+  <article class="dq hi" data-s="hi"><h4><span class="n">#5</span><span class="sev hi">高</span>主指标没有定义；“+57% / +45%”是任意零点上的比值</h4>
+    <p>VQ、MQ、AQ 用的是哪个评测模型，论文没有写。按间接证据，VQ、MQ 是 VideoAlign 的 BT 奖励：只有分差有意义，百分比随零点变化，c = 1 时 MQ 的 +45% 就变成 +18%（§09）。VideoAlign 不看音频，在音视频成对偏好上与人的一致率只有约 54%。全文没有人评，也没有 JavisBench 自带的 FVD、FAD。</p></article>
+
+  <article class="dq mid" data-s="mid"><h4><span class="n">#6</span><span class="sev mid">中</span>CSF 的贡献没有落到最终模型上，而且和历史加噪混在一起</h4>
+    <p>CSF 唯一的证据是图 5：老师阶段、40 步推理、单种子、没给数值，纵轴跨度只有 0.012–0.03。CSF 分支本身包含加噪历史下的流匹配（Diffusion-Forcing 式增强），缺 “λ<sub>rep</sub> = 0” 这一组对照。最终 4 步模型的 IB-AV（0.184）和 Javis（0.146）都低于 CSF 老师（0.202 / 0.162），也没有“普通 TF 老师 → AR–AR DMD”的对照。</p></article>
+  <article class="dq mid" data-s="mid"><h4><span class="n">#7</span><span class="sev mid">中</span>在线适配阶段在数字上是退步</h4>
+    <p>干净前缀 3.2k 的检查点（VQ 3.147、MQ 1.351、DeSync 0.726）经过在线阶段后，变成 2.838、1.010、0.759；改写轨上同样下降。论文只用一句“肉眼看过曝减少”来支持这一阶段，没有给前后对照表。“一个目标贯穿两个阶段”这个叙事，缺少这一段的定量证据。</p></article>
+  <article class="dq mid" data-s="mid"><h4><span class="n">#8</span><span class="sev mid">中</span>对 OmniForcing 的优势有很大一部分来自老师和数据</h4>
+    <p>CSF 老师（40 步）已经比 OmniForcing 高出 VQ 27.5%、MQ 22.6%。Salt++ 全部阶段都用内部数据，OmniForcing 用的是 Mixkit + AudioCaps。展示用的提示词大多是 “[Shot 1] … 镜头不动” 这类口播、谈话场景，来自一个内部可视化集合，风格很可能接近内部训练数据。</p></article>
+  <article class="dq mid" data-s="mid"><h4><span class="n">#9</span><span class="sev mid">中</span>音画同步与对齐的退步被轻描淡写</h4>
+    <p>对一篇音视频论文来说，模态之间的耦合是核心。AR–AR 路线在 480p 的 DeSync 是所有行里最差的，IB-AV、Javis 也明显低于 TF-dCM 路线和 LTX-2；960p 的 DeSync 同样全表最差。GitHub README 的两张 JavisBench 表<b>直接删掉了 DeSync 列</b>。</p></article>
+  <article class="dq mid" data-s="mid"><h4><span class="n">#10</span><span class="sev mid">中</span>“流式”没有被度量</h4>
+    <p>全文没有延迟、FPS、首块时间，只评了 5 秒（5 块）的片段，没有长视频或漂移评测。而在线阶段的动机恰恰是暴露偏差，这类问题在 5 块以内几乎显现不出来。1 秒的块粒度本身就是交互延迟的下限，论文也没有讨论。</p></article>
+  <article class="dq mid" data-s="mid"><h4><span class="n">#11</span><span class="sev mid">中</span>新颖性表述偏大</h4>
+    <p>“识别出分数–上下文错配”这一点，CMD（2026-08-13）已经做过，并给出了因果老师打分、学生直接从老师初始化、按前缀打分的完整方案；Causal Forcing 更早就指出了双向老师与因果学生之间的错配。Salt++ 只把 CMD 称为“同期”工作，并用一句话区分。</p></article>
+  <article class="dq mid" data-s="mid"><h4><span class="n">#12</span><span class="sev mid">中</span>基线数字与 OmniForcing 自报的对不上</h4>
+    <p>在 Salt++ 的评测里，OmniForcing 相对 LTX-2 的音画对齐比例（0.68 / 0.62）远低于 OmniForcing 自报的（0.85 / 0.82），DeSync 比例是 1.23 对 1.02。评测集合与管线不同可以解释绝对值的差异，但解释不了比例差这么多。评测代码没有公开。</p></article>
+  <article class="dq mid" data-s="mid"><h4><span class="n">#13</span><span class="sev mid">中</span>理论表述偏松</h4>
+    <p>① 干净前缀阶段“只调用一次、8 个入口”，意味着训练用的 <span class="mv">p<sub>θ</sub></span> 是一个混合分布，部分输入来自真值加噪，并不是推理时的 4 步分布；正文“少步采样”与附录“只调用一次”字面矛盾。② 在线阶段不存在“给定生成前缀的条件数据分布”，目标其实是因果老师的联合分布，所以学生的上限就是老师。③ 在线阶段梯度是否穿过 KV 缓存，没有说明。</p></article>
+
+  <article class="dq lo" data-s="lo"><h4><span class="n">#14</span><span class="sev lo">低</span>VBench 只报了 4 项</h4><p>缺动态程度、运动平滑、闪烁；报出的两项一致性指标偏爱静止画面。</p></article>
+  <article class="dq lo" data-s="lo"><h4><span class="n">#15</span><span class="sev lo">低</span>引导消融同时改了两件事</h4><p>范围和随机化是一起改的，论文自己承认这是“组合调整”；缺固定 2.25 或 3.0 的对照。</p></article>
+  <article class="dq lo" data-s="lo"><h4><span class="n">#16</span><span class="sev lo">低</span>超参和统计信息缺失</h4><p>DMD 阶段的 λ<sub>a</sub>；γ 是在偏移前还是偏移后的空间里取；BI 两种配置的细节；负向提示词；每条提示词只生成 1 个样本、无方差；每步批大小只有 12；训练数据规模和总 GPU·h。</p></article>
+  <article class="dq lo" data-s="lo"><h4><span class="n">#17</span><span class="sev lo">低</span>零初始化投影头遇上余弦损失</h4><p>训练起点落在余弦损失的奇点上（梯度 ∝ 1/‖a‖），可能和全局梯度裁剪相互作用（推测，取决于实现）。论文没有解释为什么选零初始化。</p></article>
+  <article class="dq lo" data-s="lo"><h4><span class="n">#18</span><span class="sev lo">低</span>代码未发布，还有一些小笔误</h4><p>仓库只有 README。附录里残留了 “Stage 3 SALT BI–BI” 这类内部命名；§4.1 的 “VBench Huang et al. (2024)” 引用格式不对（应为括号引用）。</p></article>
+</div>
+</section>
+
+<!-- ============================ 14 ============================ -->
+<section id="s14">
+<h2><span class="no">14</span>结论、启示与最值钱的后续实验</h2>
+<div class="grid2">
+  <div class="card"><span class="k">做对了的</span><p>① 干净前缀下的四路受控对比（表 3a）很干净：同一个起点、同一套协议。② 把 DMD 的引导问题讲清楚了，并展示了它的影响有多大。③ 三个网络从同一个因果老师初始化、共用掩码和前缀，工程上很简单。④ 960p 把同样 4 个噪声水平拆到两个尺度上，上采样器的因果化也处理得很实在。⑤ 诚实交代的地方不少：OmniForcing 在 960p 下只是外推；DeSync 该怎么读；调用次数不等于墙钟时间；dCM 损失 ×100 的数值原因。</p></div>
+  <div class="card"><span class="k">一句话结论</span><p>方法本身合理，值得参考：干净前缀阶段用 AR–AR 打分，DMD 用较低、随机的引导。但表 1 的差距更多来自“学生被蒸馏向谁、用了什么数据”，而不是“打分器能不能看到未来”。CSF 的贡献没有被证明能传到最终模型；在线阶段和 960p 阶段的证据链，一个是数字退步，一个是出处对不上。</p></div>
+</div>
+<h3>对交互式视频世界模型的启示</h3>
+<ol class="clean">
+  <li><b>在线动作条件下，因果老师当真分数是自然的选择。</b>双向老师打分时会看到未来的动作，CMD 已经在相机控制上证明了这一点。Salt++ 补上的一条是：如果先在真值前缀上做 DMD，打分器必须是因果的。</li>
+  <li><b>但学生的上限就是这个因果老师。</b>由链式法则，在线 AR–AR 的目标是因果老师的联合分布。与其在蒸馏阶段精雕细琢，不如先把因果老师训好：它的长时一致性、它在自己历史上的鲁棒性（参考 CMD 的前缀加噪、CSF 的加噪历史）。</li>
+  <li><b>从多步因果老师直接做 DMD 时，引导是最敏感的旋钮。</b>训练初期的推力几乎全来自 CFG 方向（§02 推导）。动作条件下还要分别决定“文本 CFG”和“动作 CFG”，两者可能需要不同的范围。</li>
+  <li><b>在线阶段要用长时指标来验收。</b>在 5 秒片段上，它的收益在数字上是负的。世界模型关心的是 30–60 秒的漂移和回访一致性，这些都需要单独评测。</li>
+  <li><b>块粒度决定交互延迟。</b>1 秒一块，意味着动作最快也要等下一秒的块才能生效；音频 25 帧/秒、视频 3 帧/秒的对齐方式把块长锁死在 1 秒。做交互时需要更细的块，或者块内可更新的条件。</li>
+</ol>
+<h3>最值钱的后续实验</h3>
+<ol class="clean">
+  <li>在内部数据上继续训一个双向老师，在同样的引导和步数下对比 BI–BI 与 AR–AR（分离 #1）。</li>
+  <li>dCM 用 U(1, 3.5)，DMD 用固定 2.25 / 3.0（分离 #2）。</li>
+  <li>写清干净前缀下 BI 打分器看到的序列；试一下“只遮住未来、保留双向块内”的中间配置（#3）。</li>
+  <li>CSF 的三组消融：λ<sub>rep</sub> = 0 只保留加噪历史；普通 TF 老师 → AR–AR DMD；报告蒸馏后的对齐指标（#6）。</li>
+  <li>在线阶段前后的完整表格，加 30–60 秒的漂移评测，以及梯度是否穿过历史的开关（#7、#10、#13）。</li>
+  <li>延迟和吞吐（首块时间、FPS），人评或成对偏好评测，多种子方差，FVD、FAD（#5、#10）。</li>
+  <li>说清 960p 检查点的来历；尺度阶段试一下 AR–AR 打分（#4）。</li>
+</ol>
+</section>
+
+<div class="srcs">
+  <b>来源</b>
+  <ol>
+    <li>Salt++ 论文：<a href="https://arxiv.org/abs/2609.36995">arxiv.org/abs/2609.36995</a>；项目页 <a href="https://xingtongge.github.io/Saltpp">xingtongge.github.io/Saltpp</a>；仓库 <a href="https://github.com/XingtongGe/Saltpp">github.com/XingtongGe/Saltpp</a>（2026-09-30 查看，只有 README）</li>
+    <li>OmniForcing：<a href="https://arxiv.org/abs/2603.11647">arxiv.org/abs/2603.11647</a>（表 1 的 JavisBench 数字；训练数据、引导、FPS）</li>
+    <li>CMD：<a href="https://arxiv.org/abs/2608.13391">arxiv.org/abs/2608.13391</a></li>
+    <li>Causal-rCM：<a href="https://arxiv.org/abs/2606.25473">arxiv.org/abs/2606.25473</a>（表 5：初始化方式的消融）</li>
+    <li>Self-Flow：<a href="https://arxiv.org/abs/2603.06507">arxiv.org/abs/2603.06507</a>（层比例、γ、EMA、消融）</li>
+    <li>VideoAlign / VideoReward：<a href="https://arxiv.org/abs/2501.13918">arxiv.org/abs/2501.13918</a>（BTT 训练）</li>
+    <li>VA-Judger：<a href="https://arxiv.org/abs/2608.18607">arxiv.org/abs/2608.18607</a>（表 1：自动指标与人类偏好的一致率；表 2：VQ / MQ / AQ 口径）</li>
+    <li>Salt（前作）：<a href="https://arxiv.org/abs/2604.03118">arxiv.org/abs/2604.03118</a></li>
+  </ol>
+  <p class="note">本页是读者笔记，不是作者本人的表述；与论文有出入之处，以论文为准。“我的推导”“推断”“假说”等标注的内容是我自己的分析。</p>
+</div>
+
+</div>
+
+<script>
+(function(){
+"use strict";
+var NS="http://www.w3.org/2000/svg";
+function S(tag,attrs,parent){var e=document.createElementNS(NS,tag);if(attrs){for(var k in attrs){if(attrs[k]!==null&&attrs[k]!==undefined)e.setAttribute(k,attrs[k]);}}if(parent)parent.appendChild(e);return e;}
+function T(parent,x,y,txt,attrs){var a=attrs||{};a.x=x;a.y=y;var t=S("text",a,parent);t.textContent=txt;return t;}
+function clear(el){while(el.firstChild)el.removeChild(el.firstChild);}
+function $(id){return document.getElementById(id);}
+function seg(id,cb){var g=$(id);if(!g)return;g.addEventListener("click",function(ev){var b=ev.target.closest("button");if(!b||!g.contains(b))return;g.querySelectorAll("button").forEach(function(x){x.setAttribute("aria-pressed",x===b?"true":"false");});cb(b.getAttribute("data-v"));});}
+function segVal(id){var b=$(id).querySelector('button[aria-pressed="true"]');return b?b.getAttribute("data-v"):null;}
+function fmt(v,d){return (v>=0?"":"−")+Math.abs(v).toFixed(d);}
+function fmtS(v,d){return (v>0?"+":(v<0?"−":"±"))+Math.abs(v).toFixed(d);}
+
+/* ---------- theme ---------- */
+(function(){
+  var root=document.documentElement,btn=$("themeBtn");
+  try{var saved=localStorage.getItem("saltpp-theme");if(saved==="light"||saved==="dark")root.setAttribute("data-theme",saved);}catch(e){}
+  btn.addEventListener("click",function(){
+    var cur=root.getAttribute("data-theme");
+    if(!cur){cur=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";}
+    var nx=cur==="light"?"dark":"light";root.setAttribute("data-theme",nx);
+    try{localStorage.setItem("saltpp-theme",nx);}catch(e){}
+  });
+})();
+
+/* ---------- scrollspy ---------- */
+(function(){
+  var links=[].slice.call(document.querySelectorAll("#tocList a"));
+  var map={};links.forEach(function(a){map[a.getAttribute("href").slice(1)]=a;});
+  if(!("IntersectionObserver" in window))return;
+  var io=new IntersectionObserver(function(ents){
+    ents.forEach(function(en){if(en.isIntersecting){links.forEach(function(a){a.classList.remove("on");});var a=map[en.target.id];if(a){a.classList.add("on");try{a.scrollIntoView({block:"nearest",inline:"nearest"});}catch(e){}}}});
+  },{rootMargin:"-45% 0px -50% 0px"});
+  document.querySelectorAll("section[id]").forEach(function(s){io.observe(s);});
+})();
+
+/* ---------- shared: hatch pattern defs ---------- */
+function defs(svg){
+  var d=S("defs",null,svg);
+  var p=S("pattern",{id:svg.id+"-hatch",width:6,height:6,patternUnits:"userSpaceOnUse",patternTransform:"rotate(45)"},d);
+  S("rect",{width:6,height:6,fill:"var(--surf2)"},p);
+  S("rect",{width:3,height:6,fill:"var(--noisy)",opacity:.55},p);
+  var m=S("marker",{id:svg.id+"-arr",viewBox:"0 0 10 10",refX:9,refY:5,markerWidth:7,markerHeight:7,orient:"auto-start-reverse"},d);
+  S("path",{d:"M0,0 L10,5 L0,10 z",fill:"var(--ink3)"},m);
+  return d;
+}
+function arrow(svg,x1,y1,x2,y2,opt){var o=opt||{};var root=svg.ownerSVGElement||svg;var m="url(#"+root.id+"-arr)";return S("path",{d:o.d||("M"+x1+","+y1+" L"+x2+","+y2),fill:"none",stroke:o.c||"var(--ink3)","stroke-width":o.w||1.4,"stroke-dasharray":o.dash||null,"marker-end":m,"marker-start":o.both?m:null},svg);}
+function R(parent,x,y,parts,attrs){var a=attrs||{};a.x=x;a.y=y;var t=S("text",a,parent);var off=0;parts.forEach(function(p){var ts=S("tspan",null,t);var want=p[1]==="sub"?3.5:(p[1]==="sup"?-5:0);if(want!==off){ts.setAttribute("dy",want-off);off=want;}if(p[1])ts.setAttribute("font-size","78%");ts.textContent=p[0];});return t;}
+function spread(ys,gap){var idx=ys.map(function(v,i){return i;}).sort(function(a,b){return ys[a]-ys[b];});var out=ys.slice();var last=-1e9;idx.forEach(function(i){out[i]=Math.max(ys[i],last+gap);last=out[i];});return out;}
+function box(svg,x,y,w,h,o){o=o||{};var r=S("rect",{x:x,y:y,width:w,height:h,rx:o.rx==null?8:o.rx,fill:o.fill||"var(--surf2)",stroke:o.stroke||"var(--rule2)","stroke-width":o.sw||1,"stroke-dasharray":o.dash||null},svg);return r;}
+function ctext(svg,x,y,lines,o){o=o||{};var lh=o.lh||16;var n=lines.length;var y0=y-(n-1)*lh/2;lines.forEach(function(l,i){var t=T(svg,x,y0+i*lh+4,l,{"text-anchor":"middle","font-size":o.fs||12.5,fill:(i===0&&o.c0)?o.c0:(o.c||"var(--ink)"),"font-weight":(i===0&&o.b0)?600:null});});}
+
+/* ---------- Fig: lineage ---------- */
+(function(){
+  var svg=$("figLineage");defs(svg);
+  var cols=[{x:210,w:195,t:"阶段 1 · 因果老师"},{x:415,w:215,t:"阶段 2 · 少步初始化"},{x:640,w:215,t:"阶段 3 · 自展开对齐"},{x:865,w:185,t:"在线阶段打分器"}];
+  cols.forEach(function(c){T(svg,c.x+c.w/2,28,c.t,{"text-anchor":"middle","font-size":13,fill:"var(--ink2)","font-weight":600});});
+  S("line",{x1:10,y1:42,x2:1050,y2:42,stroke:"var(--rule2)"},svg);
+  var rows=[
+    ["Self-Forcing","2025.06 · 视频",["—","（直接用双向模型）"],["ODE 初始化","双向老师轨迹"],["自展开 DMD",""],"BI"],
+    ["Causal Forcing","2026.02 · 视频",["TF 因果老师",""],["ODE 初始化","因果老师轨迹"],["自展开 DMD",""],"BI"],
+    ["Causal-rCM / CF++","2026.05–06 · 视频",["TF 因果老师",""],["TF-dCM / TF-sCM",""],["自展开 DMD",""],"BI"],
+    ["OmniForcing","2026.03 · 音视频",["—",""],["双向 DMD →","因果 ODE 回归"],["联合自展开 DMD",""],"BI"],
+    ["CMD","2026.08 · 视频",["DF 因果老师","（加噪历史）"],["无","学生直接从老师初始化"],["自展开 DMD","前缀打分 + 前缀加噪"],"AR"],
+    ["Salt++","2026.09 · 音视频",["CSF 因果老师","TF + 加噪历史 + 表示对齐"],["TF-DMD（AR–AR）","干净前缀"],["自展开 DMD（AR–AR）","生成前缀"],"AR+"]
+  ];
+  var y0=54,rh=66;
+  rows.forEach(function(r,i){
+    var y=y0+i*rh;var me=(i===rows.length-1);
+    if(me){S("rect",{x:4,y:y-4,width:1052,height:rh,rx:10,fill:"var(--ar-soft)",stroke:"var(--ar)","stroke-width":1.2},svg);}
+    T(svg,18,y+24,r[0],{"font-size":14,"font-weight":600,fill:me?"var(--ar-ink)":"var(--ink)"});
+    T(svg,18,y+43,r[1],{"font-size":11.5,fill:"var(--ink3)",class:"mono"});
+    [r[2],r[3],r[4]].forEach(function(cell,j){
+      var c=cols[j];var none=(cell[0]==="—"||cell[0]==="无");
+      box(svg,c.x,y+4,c.w,rh-16,{dash:none?"4 3":null,fill:none?"transparent":"var(--surf2)"});
+      ctext(svg,c.x+c.w/2,y+4+(rh-16)/2,cell[1]?[cell[0],cell[1]]:[cell[0]],{fs:12.5,lh:17,c:none?"var(--ink3)":"var(--ink2)",c0:none?"var(--ink3)":"var(--ink)",b0:!none});
+      if(j<2){arrow(svg,c.x+c.w+1,y+4+(rh-16)/2,cols[j+1].x-2,y+4+(rh-16)/2);}
+    });
+    var c=cols[3];var isAR=r[5]!=="BI";
+    var col=isAR?"var(--ars)":"var(--bi)",soft=isAR?"var(--ars-soft)":"var(--bi-soft)",ink=isAR?"var(--ars-ink)":"var(--bi-ink)";
+    S("rect",{x:c.x+20,y:y+14,width:c.w-40,height:r[5]==="AR+"?22:28,rx:14,fill:soft,stroke:col},svg);
+    T(svg,c.x+c.w/2,y+(r[5]==="AR+"?30:33),isAR?"AR–AR":"BI–BI",{"text-anchor":"middle","font-size":13,"font-weight":600,fill:ink,class:"mono"});
+    if(r[5]==="AR+"){T(svg,c.x+c.w/2,y+52,"960p 阶段回到 BI–BI",{"text-anchor":"middle","font-size":11.5,fill:"var(--bi-ink)"});}
+  });
+  T(svg,18,462,"灰色虚线框 = 该阶段不存在。Self-Forcing 与 OmniForcing 没有单独训练多步因果老师。",{"font-size":11.5,fill:"var(--ink3)"});
+})();
+
+/* ---------- Fig: blocks ---------- */
+(function(){
+  var svg=$("figBlocks");defs(svg);
+  var x0=118,W=172;
+  T(svg,14,78,"视频潜帧",{"font-size":13,fill:"var(--ink2)","font-weight":600});
+  T(svg,14,96,"3 / 秒",{"font-size":11.5,fill:"var(--ink3)",class:"mono"});
+  T(svg,14,150,"音频潜帧",{"font-size":13,fill:"var(--ink2)","font-weight":600});
+  T(svg,14,168,"25 / 秒",{"font-size":11.5,fill:"var(--ink3)",class:"mono"});
+  for(var b=0;b<5;b++){
+    var bx=x0+b*W;
+    S("rect",{x:bx+2,y:44,width:W-6,height:150,rx:8,fill:b===2?"var(--ar-soft)":"transparent",stroke:b===2?"var(--ar)":"var(--rule2)","stroke-dasharray":b===2?null:"4 3"},svg);
+    T(svg,bx+W/2-2,34,"块 "+(b+1),{"text-anchor":"middle","font-size":12.5,fill:b===2?"var(--ar-ink)":"var(--ink2)","font-weight":600});
+    var nV=b===0?4:3,vw=34,gap=10,tot=nV*vw+(nV-1)*gap,vx=bx+(W-4-tot)/2;
+    for(var i=0;i<nV;i++){var init=(b===0&&i===0);S("rect",{x:vx+i*(vw+gap),y:62,width:vw,height:34,rx:4,fill:init?"var(--tea-soft)":"var(--surf3)",stroke:init?"var(--tea)":"var(--rule2)"},svg);}
+    var nA=b===0?26:25,ax0=bx+12,aw=W-28;
+    for(var j=0;j<nA;j++){var init2=(b===0&&j===0);var xx=ax0+j*(aw/(nA-1));S("line",{x1:xx,y1:130,x2:xx,y2:168,stroke:init2?"var(--tea)":"var(--ink3)","stroke-width":init2?2.4:1.3},svg);}
+  }
+  for(var s=0;s<=5;s++){var tx=x0+s*W;S("line",{x1:tx,y1:200,x2:tx,y2:206,stroke:"var(--axis)"},svg);T(svg,tx,222,s+" s",{"text-anchor":"middle","font-size":11.5,fill:"var(--ink3)",class:"mono"});}
+  S("line",{x1:x0,y1:200,x2:x0+5*W,y2:200,stroke:"var(--axis)"},svg);
+  arrow(svg,x0+2*W+W/2,102,x0+2*W+W/2,126,{c:"var(--ar)",both:true});
+  T(svg,x0+2*W+W/2+8,118,"块内视频↔音频双向",{"font-size":11,fill:"var(--ar-ink)"});
+  arrow(svg,x0+8,244,x0+2*W-8,244,{c:"var(--ink3)"});
+  T(svg,x0+2*W+4,248,"KV 缓存：块 3 只能看块 1–2，看不到块 4–5",{"font-size":11.5,fill:"var(--ink3)"});
+  T(svg,x0+4,114,"首帧",{"font-size":10.5,fill:"var(--tea-ink)"});
+})();
+
+/* ---------- Fig: DMD flow ---------- */
+(function(){
+  var svg=$("figDMD");defs(svg);
+  box(svg,14,96,150,110,{fill:"var(--ars-soft)",stroke:"var(--ars)"});
+  ctext(svg,89,151,["上下文 c","块因果掩码","同一段前缀","干净 c⋆ 或生成 ĉ"],{fs:12,lh:18,c0:"var(--ars-ink)",b0:true,c:"var(--ink2)"});
+  box(svg,220,30,150,60,{stroke:"var(--ar)",sw:1.6});ctext(svg,295,60,["生成器 G","被训练"],{c0:"var(--ar-ink)",b0:true,c:"var(--ink3)",fs:12.5});
+  box(svg,420,34,110,52,{fill:"transparent",dash:"3 3"});ctext(svg,475,60,["ẑᴳ（干净块）"],{fs:12.5});
+  box(svg,568,34,136,52,{fill:"transparent",dash:"3 3"});ctext(svg,636,60,["加噪到 t","z̃ = (1−t)ẑᴳ + tε"],{fs:12,c:"var(--ink3)"});
+  box(svg,740,8,160,58,{fill:"var(--surf2)",stroke:"var(--tea)",dash:"5 3"});ctext(svg,820,37,["真分数 R（冻结）","CSF 老师 + 引导 w"],{c0:"var(--tea-ink)",b0:true,c:"var(--ink3)",fs:12});
+  box(svg,740,98,160,58,{stroke:"var(--dcm)",sw:1.4});ctext(svg,820,127,["假分数 D（在线）","每步都更新"],{c0:"var(--dcm-ink)",b0:true,c:"var(--ink3)",fs:12});
+  box(svg,560,196,300,74,{fill:"var(--surf2)"});
+  ctext(svg,710,233,["g = (ẑᴰ − ẑᴿ) / mean|ẑᴳ − ẑᴿ|","𝓛 = ½‖ẑᴳ − sg(ẑᴳ − g)‖²  ⇒  ∂𝓛/∂ẑᴳ = g"],{fs:12.5,lh:22});
+  arrow(svg,164,120,218,70,{c:"var(--ars)"});
+  arrow(svg,164,150,738,40,{d:"M164,150 C 450,150 600,110 738,40",c:"var(--ars)",dash:"5 4"});
+  arrow(svg,164,170,738,130,{d:"M164,170 C 450,175 620,150 738,132",c:"var(--ars)",dash:"5 4"});
+  arrow(svg,370,60,418,60);arrow(svg,530,60,566,60);
+  arrow(svg,704,52,738,40);arrow(svg,704,68,738,118);
+  arrow(svg,900,37,940,37,{d:"M900,37 L 950,37 L 950,215 L 862,215"});
+  arrow(svg,900,127,862,238,{d:"M900,127 L 930,127 L 930,240 L 862,240"});
+  arrow(svg,560,233,295,92,{d:"M560,233 L 295,233 L 295,92",c:"var(--ar)",w:1.6});
+  T(svg,300,252,"梯度 g 只回到 G（G 每 5 步更新一次）",{"font-size":11.5,fill:"var(--ar-ink)"});
+  T(svg,560,186,"D 的训练：在 (sg(z̃), c) 上做流匹配（式 8）",{"font-size":11.5,fill:"var(--dcm-ink)"});
+  T(svg,176,283,"蓝色虚线：三方共用同一个上下文 c（AR–AR）。BI 配置下，R 和/或 D 会换成看得到所有块的双向模型。",{"font-size":11.5,fill:"var(--ink3)"});
+})();
+
+/* ---------- Fig: CSF ---------- */
+(function(){
+  var svg=$("figCSF");defs(svg);
+  var gam=[0.31,0.12,0.44,0.27];
+  var tiles=[];
+  function scene(ctx,w,h,shift){
+    var g=ctx.createLinearGradient(0,0,0,h);g.addColorStop(0,"#5a8fc4");g.addColorStop(.62,"#c6d7e6");g.addColorStop(.63,"#6f9a5a");g.addColorStop(1,"#3e6435");
+    ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+    ctx.fillStyle="#f2c14e";ctx.beginPath();ctx.arc(w*0.22+shift*0.6,h*0.28,h*0.12,0,7);ctx.fill();
+    ctx.fillStyle="#476b3a";ctx.beginPath();ctx.moveTo(0,h*0.66);ctx.quadraticCurveTo(w*0.35,h*0.42,w*0.7,h*0.64);ctx.lineTo(w,h*0.6);ctx.lineTo(w,h);ctx.lineTo(0,h);ctx.fill();
+    ctx.fillStyle="#c9563a";var cx=w*0.15+shift*2.2;ctx.fillRect(cx,h*0.62,w*0.16,h*0.1);ctx.fillStyle="#222";ctx.beginPath();ctx.arc(cx+w*0.04,h*0.73,h*0.03,0,7);ctx.arc(cx+w*0.12,h*0.73,h*0.03,0,7);ctx.fill();
+  }
+  function noisyURL(shift,gamma,seed){
+    var w=96,h=60,c=document.createElement("canvas");c.width=w;c.height=h;var ctx=c.getContext("2d");scene(ctx,w,h,shift);
+    var im=ctx.getImageData(0,0,w,h),d=im.data,s=seed*9301+49297;
+    function rnd(){s=(s*9301+49297)%233280;return s/233280;}
+    function gauss(){var u=rnd()||1e-6,v=rnd();return Math.sqrt(-2*Math.log(u))*Math.cos(6.2832*v);}
+    for(var i=0;i<d.length;i+=4){var n=gauss()*70+128;for(var k=0;k<3;k++){d[i+k]=Math.max(0,Math.min(255,(1-gamma)*d[i+k]+gamma*(n+gauss()*20)));}}
+    ctx.putImageData(im,0,0);return c.toDataURL();
+  }
+  var gB=S("g",null,svg);
+  function draw(){
+    clear(gB);
+    var gmax=parseFloat($("csfG").value),tk=parseFloat($("csfT").value);
+    var gs=gam.map(function(v){return v*gmax/0.5;}).map(function(v){return Math.min(v,gmax);});
+    var rows=[{y:36,lab:[["学生 F",null],["η","sub"]],sub:"加噪历史",col:"var(--ar)",ink:"var(--ar-ink)",tap:14},{y:214,lab:[["EMA 老师 F",null],["η̄","sub"]],sub:"干净历史",col:"var(--tea)",ink:"var(--tea-ink)",tap:34}];
+    rows.forEach(function(r,ri){
+      R(gB,14,r.y+26,r.lab,{"font-size":13.5,"font-weight":600,fill:r.ink});
+      T(gB,14,r.y+46,r.sub,{"font-size":11.5,fill:"var(--ink3)"});
+      for(var b=0;b<5;b++){
+        var x=128+b*108,isT=(b===4);var gamma=isT?tk:(ri===0?gs[b]:0);
+        S("image",{href:noisyURL(b*3,gamma,b+1+(isT?11:0)),x:x,y:r.y+4,width:96,height:60,preserveAspectRatio:"none"},gB);
+        S("rect",{x:x,y:r.y+4,width:96,height:60,rx:3,fill:"none",stroke:isT?"var(--ink)":"var(--rule2)","stroke-width":isT?1.8:1},gB);
+        T(gB,x+48,r.y+82,isT?("目标 t="+tk.toFixed(2)):(ri===0?("γ="+gamma.toFixed(2)):"γ=0"),{"text-anchor":"middle","font-size":11,fill:isT?"var(--ink)":"var(--ink3)",class:"mono"});
+      }
+      var lx=690,ly=r.y+20,lw=6;
+      for(var L=0;L<48;L++){S("rect",{x:lx+L*lw,y:ly,width:lw-1,height:24,fill:L+1===r.tap?r.col:"var(--surf3)"},gB);}
+      T(gB,lx,ly-6,"48 层",{"font-size":11,fill:"var(--ink3)",class:"mono"});
+      T(gB,lx+(r.tap-0.5)*lw,ly+40,"第 "+r.tap+" 层",{"text-anchor":"middle","font-size":11.5,fill:r.ink,"font-weight":600});
+      arrow(gB,660,r.y+34,686,ly+12);
+    });
+    box(gB,760,138,170,52,{fill:"var(--surf2)",stroke:"var(--ar)"});
+    ctext(gB,845,164,["1 − cos( P(H¹⁴), sg(H³⁴) )","投影头 P 只在学生侧"],{fs:11.5,lh:17,c0:"var(--ink)",c:"var(--ink3)"});
+    arrow(gB,690+13.5*6,102,800,136,{c:"var(--ar)"});
+    arrow(gB,690+33.5*6,214+18,880,192,{c:"var(--tea)",dash:"4 3"});
+    T(gB,892,212,"sg",{"font-size":11,fill:"var(--tea-ink)",class:"mono"});
+    R(gB,128,184,[["两分支共用同一目标块（同一 ε",null],["k","sub"],["、同一 t",null],["k","sub"],["），差别只在历史",null]],{"font-size":11.5,fill:"var(--ink3)"});
+    T(gB,128,366,"另：学生输出端照常算视频 / 音频的流匹配损失（在加噪历史下）；每次迭代有 50% 概率改做普通 TF 更新。",{"font-size":11.5,fill:"var(--ink3)"});
+    var mean=gs.reduce(function(a,b){return a+b;},0)/4;
+    $("csfRO").innerHTML="历史每块 γ<sub>i</sub> = [ "+gs.map(function(v){return v.toFixed(2);}).join(", ")+" ]（γ<sub>max</sub> = "+gmax.toFixed(2)+"）；平均保留信号比例 1−γ̄ = <b>"+(1-mean).toFixed(2)+"</b>。目标块在两个分支里都按 t<sub>k</sub> = "+tk.toFixed(2)+" 加噪、噪声相同。论文设置：γ<sub>i</sub> ~ U(0, 0.5)，同一块的视频/音频共用 γ<sub>i</sub>、噪声独立。";
+  }
+  $("csfG").addEventListener("input",function(){$("csfGo").textContent=parseFloat(this.value).toFixed(2);draw();});
+  $("csfT").addEventListener("input",function(){$("csfTo").textContent=parseFloat(this.value).toFixed(2);draw();});
+  $("csfResample").addEventListener("click",function(){gam=gam.map(function(){return Math.random()*0.5;});draw();});
+  draw();
+})();
+
+/* ---------- Fig: visibility ---------- */
+(function(){
+  var svg=$("figVis");defs(svg);var g=S("g",null,svg);
+  function draw(){
+    clear(g);
+    var mode=segVal("visMode"),cfg=segVal("visCfg"),k=parseInt($("visK").value,10);
+    var rows=[{lab:"生成器 G",sub:"块因果",type:"AR",col:"var(--ar-ink)"},{lab:"真分数 R",sub:cfg==="arar"?"CSF 因果老师":"双向模型",type:cfg==="arar"?"AR":"BI",col:cfg==="arar"?"var(--ars-ink)":"var(--bi-ink)"},{lab:"假分数 D",sub:cfg==="bibi"?"双向模型":"块因果",type:cfg==="bibi"?"BI":"AR",col:cfg==="bibi"?"var(--bi-ink)":"var(--ars-ink)"}];
+    for(var b=1;b<=5;b++){T(g,170+(b-1)*140+60,22,"块 "+b,{"text-anchor":"middle","font-size":12.5,fill:b===k?"var(--ink)":"var(--ink3)","font-weight":b===k?600:null});}
+    var leak=0;
+    rows.forEach(function(r,ri){
+      var y=36+ri*84;
+      T(g,14,y+30,r.lab,{"font-size":13.5,"font-weight":600,fill:r.col});
+      T(g,14,y+50,r.sub,{"font-size":11.5,fill:"var(--ink3)"});
+      for(var b=1;b<=5;b++){
+        var x=170+(b-1)*140,w=120,h=62;
+        var st;
+        if(b<k){st=mode==="tf"?"gt":"gen";}
+        else if(b===k){st="noisy";}
+        else{st=r.type==="BI"?"future":"hidden";}
+        var fill="transparent",stroke="var(--rule2)",dash="4 3",sw=1;
+        if(st==="gt"){fill="var(--gt)";stroke="var(--gt)";dash=null;}
+        if(st==="gen"){fill="var(--gen)";stroke="var(--gen)";dash=null;}
+        if(st==="noisy"){fill="url(#"+svg.id+"-hatch)";stroke="var(--ink)";dash=null;sw=1.6;}
+        if(st==="future"){fill=mode==="tf"?"var(--surf3)":"var(--gen)";stroke="var(--risk)";dash=null;sw=2.2;leak++;}
+        S("rect",{x:x,y:y+8,width:w,height:h,rx:6,fill:fill,stroke:stroke,"stroke-dasharray":dash,"stroke-width":sw,opacity:st==="future"&&mode==="op"?.85:1},g);
+        var lbl={gt:"真值（干净）",gen:"已生成（干净）",noisy:"z̃ₖ（带噪）",future:mode==="tf"?"其他块 · 内容未说明":"后续生成块",hidden:"看不到"}[st];
+        T(g,x+w/2,y+44,lbl,{"text-anchor":"middle","font-size":11.5,fill:(st==="gt"||st==="gen")?"#fff":(st==="hidden"?"var(--ink3)":"var(--ink)"),"font-weight":st==="noisy"?600:null});
+      }
+    });
+    var ok=(cfg==="arar");
+    var msg="";
+    if(ok){msg="<b>三方的条件完全一致</b>：都只看块 1–"+(k-1)+"（"+(mode==="tf"?"真值":"学生自己生成的")+"）＋ 当前带噪块。这时假分数学的是“学生在这段前缀下的条件分布”，真分数给出因果老师在同一前缀下的条件分数，二者之差对应式 (4) 的梯度。";}
+    else if(cfg==="biar"){msg="<b>只有真分数多看了块 "+(k<5?(k+1)+"–5":"—")+"</b>。假分数与生成器一致，但真分数给出的是“同时知道过去和未来”的条件分数，差值不再对应同一个条件分布。表 3(a) 中，这一配置在干净前缀下只比 BI–BI 略好（VQ 1.131、MQ 0.157），DeSync 最低是因为画面几乎不动。";}
+    else{msg="<b>真、假分数都多看了块 "+(k<5?(k+1)+"–5":"—")+"</b>。"+(mode==="tf"?"在干净前缀下，被打分的序列怎么拼，论文没说明；如果是“各块各自以真值为前缀生成、再拼到一起”，这个序列本身就不衔接（这是我的假说）。表 3(a)：VQ 0.837、MQ 0.140，接近训崩。":"在线阶段，被打分的是学生完整的一次 rollout，BI–BI 等价于对双向老师联合分布的截断反向 KL（见下方推导）。论文自己的 TF-dCM 路线、960p 预热和尺度阶段用的都是这一配置，并且能正常工作。");}
+    if(k===5&&!ok){msg="<b>k = 5 是最后一块，后面没有未来块</b>，所以三种配置在这一块上看到的内容相同。差别出现在前面的块：打分时，双向模型会用到它们<b>之后</b>的块。";}
+    $("visRO").innerHTML=msg;
+  }
+  seg("visMode",draw);seg("visCfg",draw);
+  $("visK").addEventListener("input",function(){$("visKo").textContent=this.value;draw();});
+  draw();
+})();
+
+/* ---------- Fig: recipe timeline ---------- */
+(function(){
+  var svg=$("figRecipe");defs(svg);
+  function stage(x,y,w,h,title,lines,col,o){o=o||{};box(svg,x,y,w,h,{stroke:col,sw:o.sw||1.4,dash:o.dash||null,fill:o.fill||"var(--surf2)"});T(svg,x+10,y+20,title,{"font-size":12.8,"font-weight":600,fill:o.tc||"var(--ink)"});lines.forEach(function(l,i){T(svg,x+10,y+39+i*16.5,l,{"font-size":11.3,fill:"var(--ink2)"});});}
+  stage(12,176,170,120,"LTX-2 Base",["双向，48 层","视频 14B + 音频 5B","（按 OmniForcing）"],"var(--ltx)",{tc:"var(--ltx-ink)"});
+  stage(212,160,200,152,"① CSF 因果老师",["32 × GB300，每卡 1 样本","图 5 画到 19.2k 次迭代","lr 1e-4 → 5e-5 @6k","λ_rep 0.05 · λ_a 0.16","50% CSF / 50% 普通 TF","40 步 · CFG 4.0 推理"],"var(--tea)",{tc:"var(--tea-ink)"});
+  stage(444,176,200,120,"② TF-DMD（AR–AR）",["干净前缀 · 12 × GB300","3.2k 迭代 → G 更新 640 次","引导 U(1, 3.5)","lr G 2e-5 · D 5e-5"],"var(--ar)",{tc:"var(--ar-ink)"});
+  stage(676,176,190,120,"③ 在线 AR–AR",["生成前缀 · 4 步 rollout","1.2k 迭代 → G 更新 240 次","继承 G 与 D","真分数仍为 CSF 老师"],"var(--ar)",{tc:"var(--ar-ink)"});
+  stage(896,190,170,90,"Salt++ 480p",["表 1(a) AR–AR 路线","4 步 · CFG 1"],"var(--ar)",{tc:"var(--ar-ink)",fill:"var(--ar-soft)",sw:2});
+  stage(444,24,200,120,"②′ TF-dCM",["48 点 · 损失 ×100","4.8k 迭代（学生每步更新）","老师桥接引导固定 4.0","Adam β=(0, 0.999)"],"var(--dcm)",{tc:"var(--dcm-ink)"});
+  stage(676,24,190,120,"③′ 在线 BI–BI",["真/假分数从 LTX-2 Base 初始化","2.4k 迭代 → G 480 次","引导固定 3.0","（没有假分数可继承）"],"var(--dcm)",{tc:"var(--dcm-ink)"});
+  stage(896,38,170,90,"TF-dCM 路线",["表 1(a) 对照路线","4 步 · CFG 1"],"var(--dcm)",{tc:"var(--dcm-ink)",fill:"var(--dcm-soft)",sw:2});
+  stage(444,330,200,120,"④ 480p BI–BI 预热",["1.6k 迭代（G 320 次）","双向真/假分数","为尺度阶段打分配置做准备"],"var(--hr)",{tc:"var(--hr-ink)"});
+  stage(676,330,190,120,"⑤ 尺度阶段（BI–BI）",["2.4k 迭代 · 2 LR + 2 HR","引导 视频 3.0 / 音频 5.0","上采样器先模仿 1.2k 步","两尺度损失等权"],"var(--hr)",{tc:"var(--hr-ink)"});
+  stage(896,344,170,90,"Salt++ 960p",["表 1(b)？","出处见 §07"],"var(--hr)",{tc:"var(--hr-ink)",fill:"transparent",sw:2});
+  stage(12,352,400,86,"附录 B.3 的说法（与 A.6 对不上）",["父模型：“Stage 3 SALT BI–BI 4.0k parent”","960p：“Stage 4a 3.2k scale-wise output”，另提到 refiner / DPO","并注明该父模型“不是 480p 主图用的 AR–AR 检查点”"],"var(--risk)",{tc:"var(--risk-ink)",dash:"5 4",fill:"transparent"});
+  arrow(svg,182,236,210,236);arrow(svg,412,236,442,236);arrow(svg,644,236,674,236);arrow(svg,866,236,894,236);
+  arrow(svg,412,200,442,84,{d:"M412,200 C 425,200 425,84 442,84"});arrow(svg,644,84,674,84);arrow(svg,866,84,894,84);
+  arrow(svg,771,296,442,390,{d:"M771,296 L 771,314 L 420,314 L 420,390 L 442,390"});arrow(svg,644,390,674,390);arrow(svg,866,390,894,390);
+  arrow(svg,212,438,980,436,{d:"M212,438 L 212,460 L 980,460 L 980,437",c:"var(--risk)",dash:"5 4"});
+})();
+
+/* ---------- Fig: noise grid ---------- */
+(function(){
+  var svg=$("figGrid");defs(svg);var g=S("g",null,svg);
+  var X0=70,X1=640,Y0=300,Y1=44;
+  function f(u,s){return s*u/(1+(s-1)*u);}
+  function px(u){return X0+(X1-X0)*u;} function py(t){return Y0-(Y0-Y1)*t;}
+  function draw(){
+    clear(g);var s=parseFloat($("gridS").value),show=segVal("gridShow");
+    for(var i=0;i<=4;i++){var v=i/4;S("line",{x1:X0,y1:py(v),x2:X1,y2:py(v),stroke:"var(--grid)"},g);T(g,X0-10,py(v)+4,v.toFixed(2),{"text-anchor":"end","font-size":11,fill:"var(--ink3)",class:"mono"});S("line",{x1:px(v),y1:Y0,x2:px(v),y2:Y1,stroke:"var(--grid)"},g);T(g,px(v),Y0+18,v.toFixed(2),{"text-anchor":"middle","font-size":11,fill:"var(--ink3)",class:"mono"});}
+    T(g,(X0+X1)/2,Y0+36,"均匀进度 u",{"text-anchor":"middle","font-size":12,fill:"var(--ink2)"});
+    T(g,18,18,"噪声 t",{"font-size":12,fill:"var(--ink2)"});
+    S("line",{x1:X0,y1:py(0),x2:X1,y2:py(1),stroke:"var(--rule2)","stroke-dasharray":"4 4"},g);
+    var d="";for(var j=0;j<=200;j++){var u=j/200;d+=(j?"L":"M")+px(u).toFixed(1)+","+py(f(u,s)).toFixed(1);}
+    S("path",{d:d,fill:"none",stroke:"var(--ink2)","stroke-width":2},g);
+    var tr=[],inf=[];for(var k=8;k>=0;k--){tr.push(f(k/8,s));}for(var m=4;m>=0;m--){inf.push(f(m/4,s));}
+    var hx=680,hw=290;
+    S("line",{x1:hx,y1:Y0,x2:hx,y2:Y1,stroke:"var(--axis)"},g);
+    T(g,hx+8,18,"t 轴上的网格点",{"font-size":12,fill:"var(--ink2)"});
+    var trY=spread(tr.map(py),13);
+    tr.forEach(function(t,i){var u=(8-i)/8;S("circle",{cx:px(u),cy:py(t),r:3.5,fill:"var(--surf)",stroke:"var(--ink3)","stroke-width":1.5},g);S("path",{d:"M"+hx+","+py(t)+" L"+(hx+14)+","+py(t)+" L"+(hx+24)+","+trY[i],fill:"none",stroke:"var(--ink3)","stroke-width":1},g);T(g,hx+28,trY[i]+4,Math.round(t*1000),{"font-size":11,fill:"var(--ink3)",class:"mono"});});
+    T(g,hx+28,Y0+18,"训练 8 点",{"font-size":11,fill:"var(--ink3)"});
+    var infTop=inf.slice(0,4),infY=spread(infTop.map(py),16);
+    inf.forEach(function(t,i){var u=(4-i)/4;var col="var(--ar)";if(show==="hr"){col=(i<2)?"var(--ars)":(i<4?"var(--hr)":"var(--ink3)");}
+      S("circle",{cx:px(u),cy:py(t),r:6,fill:col,opacity:.9},g);if(i<4){S("path",{d:"M"+(hx+70)+","+py(t)+" L"+(hx+100)+","+py(t)+" L"+(hx+116)+","+infY[i],fill:"none",stroke:col,"stroke-width":2.5},g);T(g,hx+122,infY[i]+4,Math.round(t*1000)+(show==="hr"?(i<2?"  低分辨率调用 "+(i+1):"  高分辨率调用 "+(i-1)):"  推理第 "+(i+1)+" 步"),{"font-size":11.5,fill:col==="var(--ar)"?"var(--ar-ink)":(i<2?"var(--ars-ink)":"var(--hr-ink)")});}});
+    T(g,hx+100,Y0+18,show==="hr"?"960p：蓝 = 低分辨率，青 = 高分辨率":"推理 4 步",{"font-size":11,fill:"var(--ink3)"});
+    if(show==="hr"){T(g,hx+70,infY[3]+24,"低→高：上采样后重新加噪到 0.889",{"font-size":11,fill:"var(--ink3)"});}
+    var jump=inf[3];
+    $("gridRO").innerHTML="s = "+s.toFixed(1)+"：推理网格 ["+inf.map(function(t){return Math.round(t*1000);}).join(", ")+"]；训练 8 点 ["+tr.map(function(t){return Math.round(t*1000);}).join(", ")+"]。最后一步从 <b>"+Math.round(jump*1000)+"</b> 一步到 0"+(Math.abs(s-8)<1e-9?"（论文设置）":"")+"。"+(show==="hr"?" 960p：S<sub>L</sub> = [1.0, 0.960, 0]，S<sub>H</sub> = [0.889, 0.727, 0]，正好是同样 4 个水平的拆分。":"");
+  }
+  $("gridS").addEventListener("input",function(){$("gridSo").textContent=parseFloat(this.value).toFixed(1);draw();});
+  seg("gridShow",draw);draw();
+})();
+
+/* ---------- Fig: guidance ---------- */
+(function(){
+  var svg=$("figGuide");var g=S("g",null,svg);
+  var names=["TF-dCM · 固定 4.0","AR–AR TF-DMD · 固定 4.0","AR–AR TF-DMD · U(1, 3.5)"];
+  var cols=["var(--dcm)","var(--ar)","var(--ar)"];
+  var data=[[1.916,0.611,4.686,0.307,0.766],[1.643,0.572,4.934,0.315,0.843],[3.147,1.351,4.750,0.317,0.726]];
+  var mn=["VQ","MQ","AQ","CLIP","DeSync（越低越好）"];
+  function draw(mi){
+    clear(g);mi=parseInt(mi,10);
+    var vals=data.map(function(r){return r[mi];});var mx=Math.max.apply(null,vals)*1.12;
+    var X0=250,X1=880;
+    names.forEach(function(n,i){var y=30+i*66;var w=(X1-X0)*vals[i]/mx;
+      T(g,X0-12,y+26,n,{"text-anchor":"end","font-size":12.8,fill:"var(--ink)","font-weight":i===2?600:null});
+      S("rect",{x:X0,y:y+8,width:w,height:28,rx:4,fill:cols[i],opacity:i===1?.55:.9,stroke:i===1?"var(--ar)":null,"stroke-dasharray":i===1?"4 3":null},g);
+      T(g,X0+w+8,y+27,vals[i].toFixed(3),{"font-size":12.5,fill:"var(--ink)",class:"mono"});
+    });
+    T(g,X0,232,mn[mi]+" · 官方提示词 · 在线阶段之前",{"font-size":11.5,fill:"var(--ink3)"});
+    var low=(mi===4);var a=vals[1],b=vals[0];var better=low?(a<b):(a>b);
+    $("gdRO").innerHTML="同为 4.0：AR–AR TF-DMD 相对 TF-dCM "+mn[mi].split("（")[0]+" "+fmtS(a-b,3)+"（"+(better?"<span class='pos'>更好</span>":"<span class='neg'>更差</span>")+"）；U(1, 3.5) 相对 固定 4.0 的 AR–AR："+fmtS(vals[2]-vals[1],3)+"。";
+  }
+  seg("gdMetric",draw);draw("0");
+})();
+
+/* ---------- Fig: HR ---------- */
+(function(){
+  var svg=$("figHR");defs(svg);
+  function b(x,y,w,h,lines,col,o){o=o||{};box(svg,x,y,w,h,{stroke:col,fill:o.fill||"var(--surf2)",dash:o.dash||null,sw:1.4});ctext(svg,x+w/2,y+h/2,lines,{fs:12,lh:17,c0:o.c0||"var(--ink)",b0:true,c:"var(--ink3)"});}
+  b(14,90,90,70,["噪声","t = 1.0"],"var(--rule2)",{fill:"transparent",dash:"4 3"});
+  b(130,90,100,70,["G · LR","@ 1.0"],"var(--ars)",{c0:"var(--ars-ink)"});
+  b(256,90,100,70,["G · LR","@ 0.960"],"var(--ars)",{c0:"var(--ars-ink)"});
+  b(382,90,110,70,["ẑ（低分辨率）","480p 干净预测"],"var(--rule2)",{fill:"transparent",dash:"4 3"});
+  b(518,72,130,106,["因果上采样器","视频潜变量 ×2","窗口：前 18 个潜帧","音频不变"],"var(--tea)",{c0:"var(--tea-ink)"});
+  b(674,90,90,70,["重新加噪","→ 0.889"],"var(--rule2)",{fill:"transparent",dash:"4 3"});
+  b(790,90,90,70,["G · HR","@ 0.889"],"var(--hr)",{c0:"var(--hr-ink)"});
+  b(896,90,90,70,["G · HR","@ 0.727"],"var(--hr)",{c0:"var(--hr-ink)"});
+  [[104,130],[230,256],[356,382],[492,518],[648,674],[764,790],[880,896]].forEach(function(p){arrow(svg,p[0],125,p[1]-2,125);});
+  T(svg,130,70,"低分辨率 KV 缓存",{"font-size":11.5,fill:"var(--ars-ink)"});
+  T(svg,790,70,"高分辨率 KV 缓存",{"font-size":11.5,fill:"var(--hr-ink)"});
+  T(svg,130,50,"同一个生成器 G（参数共享），两套缓存",{"font-size":12,fill:"var(--ink2)","font-weight":600});
+  box(svg,130,206,856,62,{fill:"var(--bi-soft)",stroke:"var(--bi)"});
+  ctext(svg,558,237,["打分：冻结的双向真分数 + 在线的双向假分数（两个尺度共用），对完成的 LR / HR rollout 分别做 DMD","总损失 = 低分辨率 rollout 的 DMD 损失 + 高分辨率 rollout 的 DMD 损失（式 10，等权）；采样到“直接吃上采样输出”的那一步时，梯度也回传给上采样器"],{fs:12,lh:20,c0:"var(--bi-ink)",c:"var(--ink2)"});
+  T(svg,790,188,"→ 输出这一秒的 1664×960 音视频",{"font-size":11.5,fill:"var(--ink2)"});
+})();
+
+/* ---------- results tables ---------- */
+var RT={
+  t1a:{cols:["VQ","MQ","AQ","CLIP","IB-AV","Javis","DeSync"],low:[0,0,0,0,0,0,1],d:3,rows:[
+    ["ltx","LTX-2 Base","否 · 40",[1.884,0.566,4.986,0.311,0.239,0.200,0.608]],
+    ["tea","AR 老师（CSF）","是 · 40",[2.304,0.857,4.565,0.316,0.202,0.162,0.746]],
+    ["omni","OmniForcing","是 · 4",[1.807,0.699,4.718,0.303,0.163,0.124,0.745]],
+    ["dcm","Salt++ TF-dCM 路线","是 · 4",[2.013,0.826,4.976,0.313,0.229,0.185,0.710]],
+    ["ar","Salt++ AR–AR 路线","是 · 4",[2.838,1.010,4.991,0.316,0.184,0.146,0.759]]]},
+  t2:{cols:["VQ","MQ","AQ","IB-AV","AVH","Javis","DeSync"],low:[0,0,0,0,0,0,1],d:3,rows:[
+    ["ltx","LTX-2 Base","否 · 40",[1.981,0.640,4.959,0.256,0.245,0.211,0.573]],
+    ["omni","OmniForcing","是 · 4",[1.774,0.607,4.613,0.158,0.152,0.121,0.734]],
+    ["dcm","Salt++ TF-dCM 路线","是 · 4",[2.074,0.760,4.838,0.245,0.233,0.193,0.704]],
+    ["ar","Salt++ AR–AR 路线","是 · 4",[2.820,0.999,4.997,0.192,0.186,0.151,0.696]]]},
+  t1c:{cols:["美学","成像","主体一致","背景一致"],low:[0,0,0,0],d:2,rows:[
+    ["ltx","LTX-2 Base","否 · 40",[53.89,67.06,95.94,95.63]],
+    ["omni","OmniForcing","是 · 4",[56.74,68.41,96.62,95.32]],
+    ["dcm","Salt++ TF-dCM 路线","是 · 4",[53.65,62.87,96.58,96.05]],
+    ["ar","Salt++ AR–AR 路线","是 · 4",[55.43,69.98,97.01,96.24]]]},
+  t1b:{cols:["VQ","MQ","AQ","CLIP","IB-AV","Javis","DeSync"],low:[0,0,0,0,0,0,1],d:3,rows:[
+    ["ltx","LTX-2 Base","否 · 40+3",[2.231,0.607,4.867,0.311,0.169,0.145,0.658]],
+    ["omni","OmniForcing（外推到 960p）","是 · 4",[2.298,0.832,4.721,0.293,0.165,0.128,0.755]],
+    ["hr","Salt++ 960p","是 · 2 LR + 2 HR",[2.730,0.957,5.113,0.318,0.193,0.157,0.768]]]}
+};
+var T3A={cols:["VQ","MQ","AQ","CLIP","IB-TV","IB-TA","DeSync"],low:[0,0,0,0,0,0,1],d:3,rows:[
+  ["dcm","TF-dCM","—",[1.916,0.611,4.686,0.307,0.264,0.145,0.766]],
+  ["bi","TF-DMD · BI/BI","BI–BI",[0.837,0.140,4.796,0.301,0.266,0.144,0.811]],
+  ["bi","TF-DMD · BI/AR","BI–AR",[1.131,0.157,4.571,0.287,0.255,0.149,0.531]],
+  ["ar","TF-DMD · AR/AR","AR–AR",[3.147,1.351,4.750,0.317,0.271,0.153,0.726]]]};
+function renderRT(tbl,spec,mode,secondHead){
+  clear(tbl);
+  var thead=document.createElement("thead"),tr=document.createElement("tr");
+  var h0=document.createElement("th");h0.textContent="模型";tr.appendChild(h0);
+  var h1=document.createElement("th");h1.textContent=secondHead||"因果 · 步数";tr.appendChild(h1);
+  spec.cols.forEach(function(c,i){var th=document.createElement("th");th.className="num";th.textContent=c+(spec.low[i]?" ↓":" ↑");tr.appendChild(th);});
+  thead.appendChild(tr);tbl.appendChild(thead);
+  var tb=document.createElement("tbody");
+  var base=null;if(mode&&mode!=="abs"){spec.rows.forEach(function(r){if(r[0]===mode)base=r[3];});}
+  var colsMinMax=spec.cols.map(function(_,i){var v=spec.rows.map(function(r){return r[3][i];});return [Math.min.apply(null,v),Math.max.apply(null,v)];});
+  spec.rows.forEach(function(r){
+    var trr=document.createElement("tr");
+    var td0=document.createElement("td");td0.className="name";td0.innerHTML='<span class="dot '+r[0]+'"></span>'+r[1];trr.appendChild(td0);
+    var td1=document.createElement("td");td1.className="dim";td1.textContent=r[2];trr.appendChild(td1);
+    r[3].forEach(function(v,i){
+      var td=document.createElement("td");td.className="num bar";
+      var mm=colsMinMax[i];var isBest=spec.low[i]?(v===mm[0]):(v===mm[1]);
+      if(base){
+        if(base===r[3]){td.innerHTML='<span class="v dim">基线</span>';}
+        else{var dv=v-base[i];var good=spec.low[i]?dv<0:dv>0;td.innerHTML='<span class="v '+(Math.abs(dv)<1e-9?"dim":(good?"pos":"neg"))+'">'+fmtS(dv,spec.d)+'</span>';}
+      } else {
+        var frac=(mm[1]-mm[0])>0?(spec.low[i]?(mm[1]-v):(v-mm[0]))/(mm[1]-mm[0]):1;
+        td.innerHTML='<span class="b" style="width:calc('+(10+frac*90).toFixed(1)+'% - 22px);min-width:4px;background:var(--'+r[0]+')"></span><span class="v">'+v.toFixed(spec.d)+'</span>';
+        if(isBest)td.classList.add("best");
+      }
+      trr.appendChild(td);
+    });
+    tb.appendChild(trr);
+  });
+  tbl.appendChild(tb);
+}
+(function(){
+  var ro=$("rtRO");
+  var notes={t1a:"表 1(a)：官方 1,000 条提示词，480p、121 帧。AR–AR 在 VQ/MQ/AQ/CLIP 上领先，在 IB-AV/Javis/DeSync 上输给 TF-dCM 路线；DeSync 0.759 是全表最差。",
+    t2:"表 2：LTX-2 提示词增强器改写一次、各模型共用。依赖文本的指标（CLIP 等）没有报。AR–AR 对 OmniForcing 7 项全胜，对 TF-dCM 4/7。",
+    t1c:"表 1(c)：VBench 只报了 4 项，缺动态程度、运动平滑、闪烁。美学一项 OmniForcing 最高。",
+    t1b:"表 1(b)：960p（1664×960）。OmniForcing 是把 480p 检查点直接用在 960p 的 token 网格上，属于外推诊断，不是同分辨率训练的基线（论文自己也这么说）。这一阶段用的是 BI–BI 打分，检查点出处见 §07。"};
+  function draw(){
+    var tab=segVal("rtTab"),mode=segVal("rtMode");var spec=RT[tab];
+    var has=spec.rows.some(function(r){return r[0]===mode;});
+    if(mode!=="abs"&&!has){ro.innerHTML=notes[tab]+" <span class='c-med'>（此表中没有所选基线，已显示原始值。）</span>";renderRT($("rtTable"),spec,"abs");return;}
+    renderRT($("rtTable"),spec,mode);ro.innerHTML=notes[tab];
+  }
+  seg("rtTab",draw);seg("rtMode",draw);draw();
+  renderRT($("t3aTable"),T3A,"abs","打分配置");
+})();
+
+/* ---------- percent trap ---------- */
+(function(){
+  var svg=$("figPct");var g=S("g",null,svg);
+  var A={vq:2.838,mq:1.010},B={vq:1.807,mq:0.699};
+  function draw(){
+    clear(g);var c=parseFloat($("ptC").value);$("ptCo").textContent=(c>=0?"+":"")+c.toFixed(2);
+    var items=[["VQ",A.vq,B.vq],["MQ",A.mq,B.mq]];var X0=150,X1=700,mxPct=120;
+    T(g,X0,20,"“相对 OmniForcing 提升 %”（随零点变化）",{"font-size":12,fill:"var(--ink2)","font-weight":600});
+    T(g,760,20,"分差（不随零点变化）",{"font-size":12,fill:"var(--ink2)","font-weight":600});
+    var out=[];
+    items.forEach(function(it,i){var y=40+i*78;var a=it[1]+c,b=it[2]+c;
+      T(g,X0-14,y+30,it[0],{"text-anchor":"end","font-size":14,"font-weight":600,fill:"var(--ink)"});
+      S("rect",{x:X0,y:y+10,width:X1-X0,height:30,rx:4,fill:"var(--surf2)"},g);
+      var p0=(it[1]/it[2]-1)*100;var mark=X0+(X1-X0)*Math.min(p0,mxPct)/mxPct;
+      S("line",{x1:mark,y1:y+4,x2:mark,y2:y+46,stroke:"var(--ink3)","stroke-dasharray":"3 3"},g);
+      T(g,mark,y+60,"论文口径 "+p0.toFixed(1)+"%",{"text-anchor":"middle","font-size":10.5,fill:"var(--ink3)"});
+      if(b<=0){T(g,X0+10,y+30,"分母 ≤ 0：百分比无定义",{"font-size":12,fill:"var(--risk-ink)"});out.push(it[0]+" 无定义");}
+      else{var p=(a/b-1)*100;var w=(X1-X0)*Math.max(0,Math.min(p,mxPct))/mxPct;S("rect",{x:X0,y:y+10,width:w,height:30,rx:4,fill:"var(--ar)",opacity:.85},g);var inside=w>(X1-X0)-80;T(g,inside?X0+w-8:X0+w+8,y+30,(p>=0?"+":"−")+Math.abs(p).toFixed(1)+"%",{"text-anchor":inside?"end":"start","font-size":13,"font-weight":600,fill:inside?"#fff":"var(--ink)",class:"mono"});out.push(it[0]+" "+(p>=0?"+":"−")+Math.abs(p).toFixed(1)+"%");}
+      var d=it[1]-it[2];S("rect",{x:760,y:y+10,width:200*d/1.2,height:30,rx:4,fill:"var(--ar-soft)",stroke:"var(--ar)"},g);T(g,766+200*d/1.2,y+30,"+"+d.toFixed(3),{"font-size":13,fill:"var(--ink)",class:"mono"});
+    });
+    $("ptRO").innerHTML="零点平移 c = "+(c>=0?"+":"")+c.toFixed(2)+"：得到 "+out.join("，")+"。分差始终是 VQ +1.031、MQ +0.311。"+(Math.abs(c)<1e-9?" 这就是论文报告的 57.1% / 44.5%。":"");
+  }
+  $("ptC").addEventListener("input",draw);
+  $("ptReset").addEventListener("click",function(){$("ptC").value=0;draw();});
+  draw();
+})();
+
+/* ---------- slope ---------- */
+(function(){
+  var svg=$("figSlope");defs(svg);
+  var mets=["VQ","MQ","AQ","CLIP","DeSync ↓"],low=[0,0,0,0,1];
+  var panels=[{t:"AR–AR：干净前缀 3.2k → 在线 AR–AR 1.2k 之后",col:"var(--ar)",ink:"var(--ar-ink)",a:[3.147,1.351,4.750,0.317,0.726],b:[2.838,1.010,4.991,0.316,0.759]},
+              {t:"TF-dCM：dCM 4.8k → 在线 BI–BI 2.4k 之后",col:"var(--dcm)",ink:"var(--dcm-ink)",a:[1.916,0.611,4.686,0.307,0.766],b:[2.013,0.826,4.976,0.313,0.710]}];
+  var sc=[[0.5,3.5],[0,1.5],[4.5,5.1],[0.300,0.320],[0.68,0.80]];
+  panels.forEach(function(p,pi){
+    var x0=14+pi*500,tx0=x0+78,tx1=x0+330;
+    T(svg,x0,22,p.t,{"font-size":12.8,"font-weight":600,fill:p.ink});
+    mets.forEach(function(m,i){
+      var y=58+i*46,lo=sc[i][0],hi=sc[i][1];function X(v){return tx0+(tx1-tx0)*(v-lo)/(hi-lo);}
+      T(svg,x0,y+4,m,{"font-size":12,fill:"var(--ink2)","font-weight":600});
+      S("line",{x1:tx0,y1:y,x2:tx1,y2:y,stroke:"var(--grid)","stroke-width":6,"stroke-linecap":"round"},svg);
+      T(svg,tx0,y+17,String(lo),{"font-size":9.5,fill:"var(--ink3)",class:"mono","text-anchor":"start"});T(svg,tx1,y+17,String(hi),{"font-size":9.5,fill:"var(--ink3)",class:"mono","text-anchor":"end"});
+      var xa=X(p.a[i]),xb=X(p.b[i]);var dv=p.b[i]-p.a[i];var good=low[i]?dv<0:dv>0;var c=good?"var(--ok)":"var(--risk)";
+      S("line",{x1:xa,y1:y,x2:xb,y2:y,stroke:c,"stroke-width":2.6},svg);
+      S("circle",{cx:xa,cy:y,r:5,fill:"var(--surf)",stroke:p.col,"stroke-width":2},svg);
+      S("circle",{cx:xb,cy:y,r:5.5,fill:c},svg);
+      var pct=Math.abs(p.a[i])>0?(dv/p.a[i]*100):0;
+      T(svg,tx1+24,y+4,p.a[i].toFixed(3)+" → "+p.b[i].toFixed(3),{"font-size":11,fill:"var(--ink2)",class:"mono"});
+      T(svg,tx1+24,y+19,(i<2?fmtS(pct,1)+"%":fmtS(dv,3)),{"font-size":11,fill:good?"var(--ok-ink)":"var(--risk-ink)",class:"mono","font-weight":600});
+    });
+  });
+  T(svg,14,292,"空心点 = 在线阶段之前，实心点 = 之后；绿色 = 变好，红色 = 变差。每行的横轴区间单独设定（两端标注）。",{"font-size":11,fill:"var(--ink3)"});
+})();
+
+/* ---------- doubts filter ---------- */
+seg("dqFilter",function(v){document.querySelectorAll("#dqList .dq").forEach(function(a){a.hidden=!(v==="all"||a.getAttribute("data-s")===v);});});
+
+})();
+</script>
+</body>
+</html>

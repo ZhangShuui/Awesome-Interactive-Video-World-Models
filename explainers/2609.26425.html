@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>QuantWM 精读</title>
+<meta name="description" content="QuantWM（arXiv 2609.26425）精读：视频世界模型 2-bit KV cache 量化的 QSAC 质心选择与 PSAC 查询主子空间补偿，附 bit 账单、玩具沙盒、表格复算、项目页视频复测与 19 条存疑。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+/* ============================================================
+   QuantWM 精读 — design tokens (dark-first, same house style as the other explainers)
+   角色色：q = Query / 查询主子空间（PSAC）   k = Key   v = Value
+           qvg = 基线 QVG      ours = QuantWM      kivi = KIVI
+           qsac = QSAC（选质心）  risk = 存疑
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0c0f15; --surf:#12161e; --surf2:#181e28; --surf3:#212835;
+  --rule:#232a36; --rule2:#364050;
+  --ink:#e6eaf1; --ink2:#a4adbb; --ink3:#77828f;
+  --q:#9d8cf2; --q-ink:#baaeff; --q-soft:rgba(157,140,242,.16);
+  --k:#e3a13b; --k-ink:#f3bf66; --k-soft:rgba(227,161,59,.15);
+  --v:#2fb3a7; --v-ink:#5fd3c7; --v-soft:rgba(47,179,167,.14);
+  --qvg:#e2685e; --qvg-ink:#f38e85; --qvg-soft:rgba(226,104,94,.15);
+  --ours:#4f93ea; --ours-ink:#80b4f6; --ours-soft:rgba(79,147,234,.16);
+  --kivi:#b3a06c; --kivi-ink:#cfbd8a; --kivi-soft:rgba(179,160,108,.15);
+  --qsac:#46b27a; --qsac-ink:#6dd29c; --qsac-soft:rgba(70,178,122,.15);
+  --bf:#aab3c0;
+  --risk:#ea6791; --risk-ink:#ff8db1; --risk-soft:rgba(234,103,145,.14);
+  --warn:#e3b341; --warn-ink:#f1c969; --warn-soft:rgba(227,179,65,.14);
+  --ok:#3fb27a; --ok-ink:#63d098; --ok-soft:rgba(63,178,122,.14);
+  --low:#7d8ea6; --low-ink:#a4b3c8; --low-soft:rgba(125,142,166,.16);
+  --grid:#1b212b; --axis:#3a4452;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 30px rgba(0,0,0,.34);
+  --font-display:"Familjen Grotesk","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"Source Serif 4",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f3f4f7; --surf:#ffffff; --surf2:#eef0f4; --surf3:#e2e6ec;
+    --rule:#dce0e7; --rule2:#bdc5cf;
+    --ink:#10141b; --ink2:#434c58; --ink3:#6b7582;
+    --q:#6a55d8; --q-ink:#5140b8; --q-soft:rgba(106,85,216,.11);
+    --k:#b9740f; --k-ink:#8f5806; --k-soft:rgba(185,116,15,.12);
+    --v:#12877d; --v-ink:#0b6860; --v-soft:rgba(18,135,125,.11);
+    --qvg:#c9443a; --qvg-ink:#a2322a; --qvg-soft:rgba(201,68,58,.10);
+    --ours:#2a72d0; --ours-ink:#1b58a8; --ours-soft:rgba(42,114,208,.11);
+    --kivi:#8f7a3e; --kivi-ink:#6f5d2a; --kivi-soft:rgba(143,122,62,.12);
+    --qsac:#1d8a52; --qsac-ink:#136b3e; --qsac-soft:rgba(29,138,82,.11);
+    --bf:#5f6977;
+    --risk:#c73a6f; --risk-ink:#a42c5b; --risk-soft:rgba(199,58,111,.10);
+    --warn:#b58312; --warn-ink:#8c6408; --warn-soft:rgba(181,131,18,.13);
+    --ok:#138752; --ok-ink:#0d6c41; --ok-soft:rgba(19,135,82,.11);
+    --low:#5b6b82; --low-ink:#465569; --low-soft:rgba(91,107,130,.12);
+    --grid:#e7eaef; --axis:#bcc4ce;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f3f4f7; --surf:#ffffff; --surf2:#eef0f4; --surf3:#e2e6ec;
+  --rule:#dce0e7; --rule2:#bdc5cf;
+  --ink:#10141b; --ink2:#434c58; --ink3:#6b7582;
+  --q:#6a55d8; --q-ink:#5140b8; --q-soft:rgba(106,85,216,.11);
+  --k:#b9740f; --k-ink:#8f5806; --k-soft:rgba(185,116,15,.12);
+  --v:#12877d; --v-ink:#0b6860; --v-soft:rgba(18,135,125,.11);
+  --qvg:#c9443a; --qvg-ink:#a2322a; --qvg-soft:rgba(201,68,58,.10);
+  --ours:#2a72d0; --ours-ink:#1b58a8; --ours-soft:rgba(42,114,208,.11);
+  --kivi:#8f7a3e; --kivi-ink:#6f5d2a; --kivi-soft:rgba(143,122,62,.12);
+  --qsac:#1d8a52; --qsac-ink:#136b3e; --qsac-soft:rgba(29,138,82,.11);
+  --bf:#5f6977;
+  --risk:#c73a6f; --risk-ink:#a42c5b; --risk-soft:rgba(199,58,111,.10);
+  --warn:#b58312; --warn-ink:#8c6408; --warn-soft:rgba(181,131,18,.13);
+  --ok:#138752; --ok-ink:#0d6c41; --ok-soft:rgba(19,135,82,.11);
+  --low:#5b6b82; --low-ink:#465569; --low-soft:rgba(91,107,130,.12);
+  --grid:#e7eaef; --axis:#bcc4ce;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth; -webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important; animation:none!important} }
+body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:16.5px; line-height:1.74; -webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px; margin:0 auto; padding-inline:20px; padding-block:0 140px}
+@media(max-width:640px){ .wrap{padding-inline:16px; padding-block:0 120px} body{font-size:16px} }
+a{color:var(--ours-ink)}
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--ours); outline-offset:2px; border-radius:4px}
+
+/* ---------- header ---------- */
+header.hero{padding-block:58px 26px; border-bottom:1px solid var(--rule)}
+.kicker{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink3); margin-bottom:16px; display:flex; flex-wrap:wrap; gap:6px 14px}
+.kicker a{color:var(--k-ink); text-decoration:none; border-bottom:1px solid transparent}
+.kicker a:hover{border-bottom-color:currentColor}
+h1{font-family:var(--font-display); font-weight:700; font-size:clamp(32px,5.6vw,52px); line-height:1.08; letter-spacing:-.022em; margin:0 0 8px; text-wrap:balance}
+h1 .soft{color:var(--k-ink)}
+.sub{font-family:var(--font-display); font-weight:500; font-size:clamp(16px,2.5vw,20.5px); color:var(--ink2); line-height:1.5; margin:0 0 22px; max-width:62ch; text-wrap:balance}
+.thesis{font-family:var(--font-math); font-size:clamp(16.5px,2.3vw,19px); line-height:1.66; color:var(--ink); border-left:3px solid var(--k); padding:2px 0 2px 18px; margin:0 0 24px; max-width:68ch}
+.thesis b{color:var(--k-ink); font-weight:600}
+.statstrip{display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:10px; overflow:hidden}
+.statstrip div{background:var(--surf); padding:12px 14px}
+.statstrip b{display:block; font-family:var(--font-display); font-size:21px; font-weight:700; letter-spacing:-.01em; line-height:1.2}
+.statstrip span{display:block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.05em; color:var(--ink3); margin-top:4px; line-height:1.45}
+
+/* ---------- nav ---------- */
+nav.toc{position:sticky; top:env(safe-area-inset-top,0px); z-index:40; background:color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border-bottom:1px solid var(--rule); margin-inline:-20px; margin-block:0 40px; padding:9px 20px; overflow-x:auto; white-space:nowrap; scrollbar-width:none}
+@media(max-width:640px){ nav.toc{margin-inline:-16px; padding-inline:16px} }
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{display:inline-block; font-family:var(--font-mono); font-size:12px; color:var(--ink2); text-decoration:none; padding:5px 10px; border-radius:6px; margin-right:2px}
+nav.toc a:hover{background:var(--surf2); color:var(--ink)}
+nav.toc a.on{background:var(--k-soft); color:var(--k-ink)}
+
+/* ---------- sections ---------- */
+section{margin:0 0 76px; scroll-margin-top:64px}
+h2{font-family:var(--font-display); font-weight:700; font-size:clamp(24px,3.6vw,32px); letter-spacing:-.015em; line-height:1.2; margin:0 0 6px; text-wrap:balance}
+h2 .no{font-family:var(--font-mono); font-size:.5em; font-weight:500; color:var(--ink3); vertical-align:.45em; margin-right:10px; letter-spacing:.04em}
+.lede{color:var(--ink2); font-size:17px; margin:0 0 26px; max-width:68ch}
+h3{font-family:var(--font-display); font-weight:600; font-size:20px; letter-spacing:-.005em; margin:36px 0 10px; text-wrap:balance}
+h4{font-family:var(--font-display); font-weight:600; font-size:16.5px; margin:22px 0 6px}
+p{margin:0 0 14px; max-width:70ch}
+ul,ol{margin:0 0 16px; padding-left:1.25em; max-width:70ch}
+li{margin:0 0 6px}
+b,strong{font-weight:600}
+code,.mono{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); padding:1px 5px; border-radius:4px; border:1px solid var(--rule)}
+.m{font-family:var(--font-math); font-style:italic; white-space:nowrap}
+sub,sup{font-size:.72em; line-height:0}
+.dim{color:var(--ink3)}
+.small{font-size:14px}
+.tnum{font-variant-numeric:tabular-nums}
+.c-q{color:var(--q-ink)} .c-k{color:var(--k-ink)} .c-v{color:var(--v-ink)} .c-qvg{color:var(--qvg-ink)} .c-ours{color:var(--ours-ink)} .c-qsac{color:var(--qsac-ink)} .c-risk{color:var(--risk-ink)} .c-kivi{color:var(--kivi-ink)}
+
+.tag{display:inline-block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.05em; padding:1px 7px; border-radius:99px; vertical-align:.12em; font-weight:500; white-space:nowrap}
+.tag.q{background:var(--q-soft); color:var(--q-ink)}
+.tag.k{background:var(--k-soft); color:var(--k-ink)}
+.tag.v{background:var(--v-soft); color:var(--v-ink)}
+.tag.qvg{background:var(--qvg-soft); color:var(--qvg-ink)}
+.tag.ours{background:var(--ours-soft); color:var(--ours-ink)}
+.tag.qsac{background:var(--qsac-soft); color:var(--qsac-ink)}
+.tag.risk{background:var(--risk-soft); color:var(--risk-ink)}
+.tag.warn{background:var(--warn-soft); color:var(--warn-ink)}
+.tag.low{background:var(--low-soft); color:var(--low-ink)}
+.tag.ok{background:var(--ok-soft); color:var(--ok-ink)}
+.sw{display:inline-block; width:10px; height:10px; border-radius:3px; vertical-align:-.05em; margin-right:5px}
+
+/* ---------- callouts ---------- */
+.call{border:1px solid var(--rule); background:var(--surf); border-radius:10px; padding:16px 18px 6px; margin:22px 0}
+.call > .hd{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:8px}
+.call.risk{border-color:color-mix(in srgb,var(--risk) 40%,var(--rule)); background:linear-gradient(0deg,var(--risk-soft),var(--risk-soft)),var(--surf)}
+.call.risk > .hd{color:var(--risk-ink)}
+.call.ok{border-color:color-mix(in srgb,var(--ok) 40%,var(--rule))}
+.call.ok > .hd{color:var(--ok-ink)}
+.call.me{border-color:color-mix(in srgb,var(--k) 40%,var(--rule)); background:linear-gradient(0deg,var(--k-soft),var(--k-soft)),var(--surf)}
+.call.me > .hd{color:var(--k-ink)}
+.call.plain > .hd{color:var(--ink3)}
+.call p, .call ul, .call ol{max-width:none}
+
+/* ---------- figures / panels ---------- */
+.fig{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:18px 18px 14px; margin:22px 0; box-shadow:var(--shadow)}
+figure.fig{margin-inline:0}
+.fig .cap, figcaption.cap{font-size:13.5px; color:var(--ink3); margin-top:10px; line-height:1.6}
+.fig .cap b{color:var(--ink2)}
+.fig .ttl{font-family:var(--font-display); font-weight:600; font-size:15.5px; margin:0 0 4px}
+.fig .sub2{font-size:13px; color:var(--ink3); margin:0 0 12px}
+.svgbox{overflow-x:auto}
+.svgbox svg{display:block; width:100%; height:auto}
+.svgbox.wide svg{min-width:680px}
+svg text{font-family:var(--font-mono)}
+.controls{display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; margin:0 0 14px}
+.ctl{display:flex; align-items:center; gap:8px; font-size:13.5px; color:var(--ink2)}
+.ctl label{font-family:var(--font-mono); font-size:12px; color:var(--ink3); letter-spacing:.03em}
+.ctl output{font-family:var(--font-mono); font-size:12.5px; color:var(--ink); min-width:4em; font-variant-numeric:tabular-nums}
+input[type=range]{accent-color:var(--k); width:160px; max-width:44vw}
+select{font:inherit; font-family:var(--font-mono); font-size:12px; background:var(--surf2); color:var(--ink); border:1px solid var(--rule2); border-radius:7px; padding:5px 8px}
+.seg{display:inline-flex; border:1px solid var(--rule2); border-radius:8px; overflow:hidden; flex-wrap:wrap}
+.seg button{font:inherit; font-family:var(--font-mono); font-size:12px; background:transparent; color:var(--ink2); border:0; padding:6px 11px; cursor:pointer; border-right:1px solid var(--rule2)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--k-soft); color:var(--k-ink)}
+.seg button:hover{color:var(--ink)}
+.btn{font:inherit; font-family:var(--font-mono); font-size:12px; background:var(--surf2); color:var(--ink); border:1px solid var(--rule2); border-radius:7px; padding:6px 12px; cursor:pointer}
+.btn:hover{background:var(--surf3)}
+.readout{font-family:var(--font-mono); font-size:12.5px; color:var(--ink2); background:var(--surf2); border:1px solid var(--rule); border-radius:8px; padding:10px 12px; line-height:1.7; margin-top:12px; overflow-x:auto}
+.readout b{color:var(--ink)}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+.grid2 > *, .twocol > *{min-width:0}
+.nw td{white-space:nowrap}
+@media(max-width:760px){ .grid2{grid-template-columns:1fr} }
+
+/* ---------- tables ---------- */
+.tblwrap{overflow-x:auto; margin:16px 0 20px; border:1px solid var(--rule); border-radius:10px; background:var(--surf)}
+table{border-collapse:collapse; width:100%; font-size:14px}
+th,td{padding:7px 10px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:top}
+th{font-family:var(--font-mono); font-size:11px; font-weight:500; letter-spacing:.05em; color:var(--ink3); background:var(--surf2); white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.num, th.num{text-align:right; font-variant-numeric:tabular-nums; font-family:var(--font-mono); font-size:12.5px; white-space:nowrap}
+td.hot{background:var(--risk-soft); color:var(--risk-ink); font-weight:600}
+td.good{color:var(--ok-ink); font-weight:600}
+td .note{display:block; font-size:12px; color:var(--ink3); font-family:var(--font-body)}
+tr.grp td{font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; color:var(--ink3); background:var(--surf2); padding-block:5px}
+tr.me td{background:var(--ours-soft)}
+
+/* ---------- formula block ---------- */
+.eq{font-family:var(--font-math); font-size:18px; background:var(--surf); border:1px solid var(--rule); border-radius:10px; padding:12px 18px; margin:14px 0 18px; overflow-x:auto; line-height:1.95; white-space:nowrap}
+.eq .lbl{float:right; font-family:var(--font-mono); font-size:11px; color:var(--ink3); font-style:normal; margin-left:14px}
+.eq .note{display:block; white-space:normal; font-family:var(--font-body); font-size:13.5px; color:var(--ink3); line-height:1.6; margin-top:4px}
+.eq i{font-style:italic}
+.hl-q{color:var(--q-ink)} .hl-k{color:var(--k-ink)} .hl-risk{color:var(--risk-ink)} .hl-qsac{color:var(--qsac-ink)}
+
+/* ---------- steps ---------- */
+.steps{counter-reset:st; display:grid; gap:10px; margin:18px 0 22px; padding:0; list-style:none; max-width:none}
+.steps > li{counter-increment:st; position:relative; background:var(--surf); border:1px solid var(--rule); border-radius:10px; padding:12px 14px 10px 50px; margin:0}
+.steps > li::before{content:counter(st); position:absolute; left:14px; top:12px; width:24px; height:24px; border-radius:50%; background:var(--qsac-soft); color:var(--qsac-ink); font-family:var(--font-mono); font-size:12.5px; font-weight:700; display:grid; place-items:center}
+.steps.psac > li::before{background:var(--q-soft); color:var(--q-ink)}
+.steps > li b.t{font-family:var(--font-display); font-size:15.5px}
+.steps > li p{margin:4px 0 4px; max-width:none; font-size:15px}
+
+/* ---------- risk list ---------- */
+.filters{display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 16px}
+.risklist{list-style:none; padding:0; margin:0; display:grid; gap:10px; max-width:none}
+.risklist > li{background:var(--surf); border:1px solid var(--rule); border-left:4px solid var(--low); border-radius:10px; padding:12px 16px 8px; margin:0}
+.risklist > li.hi{border-left-color:var(--risk)}
+.risklist > li.mid{border-left-color:var(--warn)}
+.risklist > li.lo{border-left-color:var(--low)}
+.risklist .rh{display:flex; flex-wrap:wrap; gap:6px 10px; align-items:baseline; margin-bottom:4px}
+.risklist .rh b{font-family:var(--font-display); font-size:16px}
+.risklist .rn{font-family:var(--font-mono); font-size:12px; color:var(--ink3)}
+.risklist p{margin:0 0 8px; max-width:none; font-size:15px}
+.risklist .ev{font-size:13.5px; color:var(--ink3)}
+
+/* ---------- misc ---------- */
+.legend{display:flex; flex-wrap:wrap; gap:6px 16px; font-family:var(--font-mono); font-size:12px; color:var(--ink2); margin:0 0 8px}
+.kv{display:grid; grid-template-columns:auto 1fr; gap:4px 14px; font-size:14.5px; margin:10px 0 14px}
+.kv dt{font-family:var(--font-mono); font-size:12px; color:var(--ink3); padding-top:3px}
+.kv dd{margin:0}
+.twocol{display:grid; grid-template-columns:1fr 1fr; gap:18px}
+@media(max-width:760px){ .twocol{grid-template-columns:1fr} }
+.pill{display:inline-block; font-family:var(--font-mono); font-size:11.5px; padding:2px 9px; border-radius:99px; border:1px solid var(--rule2); color:var(--ink2)}
+footer.foot{border-top:1px solid var(--rule); padding-top:22px; color:var(--ink3); font-size:13.5px}
+footer.foot p{max-width:none}
+.srcs{font-size:13.5px}
+.srcs li{margin-bottom:4px}
+
+/* ---------- svg roles ---------- */
+svg .bx{fill:var(--surf2); stroke:var(--rule2); stroke-width:1.2}
+svg .bx-k{fill:var(--k-soft); stroke:var(--k); stroke-width:1.3}
+svg .bx-q{fill:var(--q-soft); stroke:var(--q); stroke-width:1.3}
+svg .bx-qsac{fill:var(--qsac-soft); stroke:var(--qsac); stroke-width:1.3}
+svg .bx-ours{fill:var(--ours-soft); stroke:var(--ours); stroke-width:1.3}
+svg .grpbox{fill:none; stroke:var(--rule2); stroke-width:1.2; stroke-dasharray:5 4}
+svg .t{fill:var(--ink); font-size:12.5px}
+svg .tb{fill:var(--ink); font-size:13px; font-weight:700}
+svg .t2{fill:var(--ink3); font-size:11px}
+svg .tq{fill:var(--q-ink); font-size:11.5px}
+svg .tk{fill:var(--k-ink); font-size:11.5px}
+svg .tqs{fill:var(--qsac-ink); font-size:11.5px}
+svg .ln{stroke:var(--ink3); fill:none; stroke-width:1.4}
+svg .ln-q{stroke:var(--q); fill:none; stroke-width:1.4}
+svg .gridl{stroke:var(--grid); stroke-width:1}
+svg .axis{stroke:var(--axis); stroke-width:1}
+svg .ah{fill:var(--ink3)}
+svg .ahq{fill:var(--q)}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">
+    <span>arXiv <a href="https://arxiv.org/abs/2609.26425">2609.26425</a> v1</span>
+    <span>2026-09-22</span>
+    <span>哈工大（深圳）× NUS</span>
+    <span>免训练 · 2-bit KV cache</span>
+    <span>代码：未公开（<a href="https://quantwm-project.github.io/QuantWM/">项目页</a>只有对比视频）</span>
+  </div>
+  <h1>QuantWM <span class="soft">精读</span></h1>
+  <p class="sub">把视频世界模型的 KV cache 压到 2 bit 时，不只要求 Key "存得准"，还要求 Query 看 Key 时"看得准"。具体做两件事：先挑一个对查询最友好的质心，再在 Query 最常看的几个方向上把剩下的误差补回来。</p>
+  <p class="thesis">方法本身很干净：QSAC 和 PSAC 都在压同一个量，也就是<b>查询看到的 logit 误差 E[(qᵀe)²]</b>，一个在"选质心"时下手，一个在"存完之后补"。问题出在证据链上。第一，<b>基线 QVG 的复现结果比 QVG 原论文自报的低 8–13 dB</b>；评测协议不同只能解释其中一部分（同一对比里 KIVI 只低 6.6 dB），论文没有解释。第二，<b>没有同 bit 数的对比</b>：QuantWM 实际约 2.6 bit/元素，比 QVG 自报的约 2.3 bit 多。第三，标题主打的"闪烁"<b>从头到尾没有被直接测量</b>。另外，PSAC 的思路和 SQuat、GEAR 高度重合，两篇都没有引用。我用项目页的 54 段视频补测了 warping error（一种无参考的帧间一致性指标）。在 17 个有效展示样例上，QVG 平均比 BF16 高约 22%，QuantWM 只高约 2%，这一点支持 QuantWM。</p>
+  <div class="statstrip">
+    <div><b class="c-ours">6.20×</b><span>HY-World 1.5 KV cache<br>12.09 → 1.95 GB ≈ 2.58 bit/元素</span></div>
+    <div><b>+2.33 dB</b><span>HY-World 1.5 PSNR vs QVG<br>16.12 → 18.45（480p）</span></div>
+    <div><b>61% → 14%</b><span>top-1 token 漂移率<br>HY-World 1.5（Table 4/5）</span></div>
+    <div><b>+5.4 / +5.9 / −17.8%</b><span>端到端时延<br>LingBot / HY / LongCat</span></div>
+    <div><b class="c-qvg">−13 dB</b><span>HY 上 QVG：本文复现 16.12<br>vs QVG 原论文 29.17</span></div>
+  </div>
+</header>
+
+<nav class="toc" aria-label="目录">
+  <a href="#s1">一页读懂</a><a href="#s2">背景</a><a href="#s3">动机</a><a href="#s4">QSAC</a><a href="#s5">PSAC</a><a href="#s6">bit 账单</a><a href="#s7">沙盒</a><a href="#s8">实验</a><a href="#s9">视频复测</a><a href="#s10">存疑</a><a href="#s11">公道话</a>
+</nav>
+
+<!-- ===================================================== 1 -->
+<section id="s1">
+  <h2><span class="no">§1</span>一页读懂</h2>
+  <p class="lede">一句话：它是 QVG（"质心 + INT2 残差"）的升级版，只改了 Key 的存法，而且改动全部围绕"让 <span class="m">qᵀk</span> 算得准"展开。</p>
+
+  <figure class="fig">
+    <div class="ttl">Key 在 QuantWM 里的一生</div>
+    <div class="sub2">一个 chunk 生成完就压缩一次，之后每次注意力调用都临时解码回 BF16。紫色的"历史 Query 统计"是全文的核心：两个模块都靠它知道"哪些方向的误差最伤 logit"。</div>
+    <div class="svgbox wide">
+    <svg viewBox="0 0 980 372" role="img" aria-label="QuantWM 的 Key 压缩与解码流程：当前 chunk 完成后经 QSAC 选质心、INT2 量化残差、PSAC 计算低秩补偿系数，打包存储；每次注意力调用由融合内核重建为 BF16 后交给原生 FlashAttention。历史 Query 二阶统计同时驱动 QSAC 和 PSAC。">
+      <defs>
+        <marker id="ah1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+        <marker id="ah1q" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahq"/></marker>
+      </defs>
+      <!-- current chunk -->
+      <rect x="10" y="62" width="150" height="92" rx="9" class="bx-k"/>
+      <text x="85" y="88" text-anchor="middle" class="tb">当前 chunk</text>
+      <text x="85" y="108" text-anchor="middle" class="t">BF16 K, V</text>
+      <text x="85" y="126" text-anchor="middle" class="t2">去噪期间常驻</text>
+      <text x="85" y="142" text-anchor="middle" class="t2">不量化</text>
+      <line x1="160" y1="108" x2="222" y2="108" class="ln" marker-end="url(#ah1)"/>
+      <text x="191" y="98" text-anchor="middle" class="t2">完成</text>
+      <!-- compression group -->
+      <rect x="226" y="22" width="372" height="208" rx="12" class="grpbox"/>
+      <text x="240" y="42" class="t2">压缩（每个 chunk 只做一次，Key 路径）</text>
+      <rect x="242" y="60" width="160" height="72" rx="9" class="bx-qsac"/>
+      <text x="322" y="84" text-anchor="middle" class="tb">QSAC 选质心</text>
+      <text x="322" y="103" text-anchor="middle" class="t2">加权距离取 top-4</text>
+      <text x="322" y="119" text-anchor="middle" class="t2">再按组极差打分</text>
+      <line x1="402" y1="96" x2="424" y2="96" class="ln" marker-end="url(#ah1)"/>
+      <rect x="426" y="60" width="158" height="72" rx="9" class="bx"/>
+      <text x="505" y="84" text-anchor="middle" class="tb">INT2 残差</text>
+      <text x="505" y="103" text-anchor="middle" class="t2">r = k − μ_z</text>
+      <text x="505" y="119" text-anchor="middle" class="t2">每 64 通道一组</text>
+      <line x1="505" y1="132" x2="505" y2="148" class="ln" marker-end="url(#ah1)"/>
+      <text x="516" y="144" class="t2">K̂₀</text>
+      <rect x="426" y="150" width="158" height="68" rx="9" class="bx-q"/>
+      <text x="505" y="174" text-anchor="middle" class="tb">PSAC 系数</text>
+      <text x="505" y="193" text-anchor="middle" class="t2">C = (K − K̂₀)·U_r</text>
+      <text x="505" y="209" text-anchor="middle" class="t2">r = 8，存 INT8</text>
+      <text x="242" y="160" class="t2">Value 走同一条"质心 + INT2"</text>
+      <text x="242" y="176" class="t2">路径，但不做 PSAC</text>
+      <!-- packed cache -->
+      <line x1="598" y1="126" x2="636" y2="126" class="ln" marker-end="url(#ah1)"/>
+      <text x="617" y="116" text-anchor="middle" class="t2">打包</text>
+      <rect x="640" y="30" width="160" height="196" rx="10" class="bx"/>
+      <text x="720" y="54" text-anchor="middle" class="tb">压缩后的 cache</text>
+      <text x="654" y="80" class="t2">质心 BF16 · ID uint8</text>
+      <text x="654" y="102" class="t2">残差 INT2，4 个/字节</text>
+      <text x="654" y="124" class="t2">scale INT8 · zp INT2</text>
+      <text x="654" y="146" class="t2">C INT8 · U_r BF16</text>
+      <text x="654" y="176" class="t2">原 BF16 块释放</text>
+      <text x="654" y="198" class="t2">跨 chunk 常驻</text>
+      <!-- decode -->
+      <line x1="800" y1="126" x2="836" y2="126" class="ln" marker-end="url(#ah1)"/>
+      <rect x="838" y="56" width="134" height="140" rx="10" class="bx-ours"/>
+      <text x="905" y="80" text-anchor="middle" class="tb">融合解码</text>
+      <text x="905" y="100" text-anchor="middle" class="t2">Triton 内核</text>
+      <text x="905" y="122" text-anchor="middle" class="t">K̂ = μ + Q(r)</text>
+      <text x="905" y="140" text-anchor="middle" class="t">+ C·U_rᵀ</text>
+      <text x="905" y="162" text-anchor="middle" class="t2">临时 BF16 →</text>
+      <text x="905" y="178" text-anchor="middle" class="t2">原生 FlashAttn</text>
+      <text x="818" y="214" text-anchor="middle" class="t2">每次注意力调用</text>
+      <!-- stats -->
+      <rect x="242" y="290" width="342" height="62" rx="10" class="bx-q"/>
+      <text x="413" y="315" text-anchor="middle" class="tb">历史 Query 统计 M_h = E[q qᵀ]</text>
+      <text x="413" y="336" text-anchor="middle" class="t2">每层每头 d×d，只用已生成 chunk 的 Query</text>
+      <line x1="322" y1="290" x2="322" y2="134" class="ln-q" marker-end="url(#ah1q)"/>
+      <text x="330" y="256" class="tq">对角线 → w_c</text>
+      <line x1="540" y1="290" x2="540" y2="220" class="ln-q" marker-end="url(#ah1q)"/>
+      <text x="548" y="262" class="tq">前 r 个特征向量 U_r</text>
+      <path d="M85,154 L85,321 L240,321" class="ln-q" marker-end="url(#ah1q)"/>
+      <text x="94" y="244" class="tq">本块 Query</text>
+      <text x="94" y="260" class="tq">（压缩后才并入）</text>
+    </svg>
+    </div>
+    <figcaption class="cap">论文图 9 的重画版，补上了图里没画的统计量流向。<b>要点</b>：解码是"整段历史重建成 BF16，再调用原生注意力"，所以省的是常驻内存，不省带宽或算力（§6）。</figcaption>
+  </figure>
+
+  <div class="twocol">
+    <div class="call ok">
+      <div class="hd">它做对的</div>
+      <ul>
+        <li>目标选得对：不再追求 ‖k − k̂‖ 小，而是追求 <span class="m">E<sub>q</sub>[(qᵀe)²]</span> 小。</li>
+        <li>统计量在线累积，只用已经生成的 Query，不需要校准集，也不用训练。</li>
+        <li>覆盖 5 个开源自回归模型（3 个交互式世界模型 + 2 个视频生成模型），测了 480p 和 720p。实现是真实的打包格式加 Triton 内核，内存和端到端时延都有实测。</li>
+        <li>项目页视频的复测（§9）支持"比 QVG 更少帧间抖动"。</li>
+      </ul>
+    </div>
+    <div class="call risk">
+      <div class="hd">最该打折的地方</div>
+      <ul>
+        <li>QVG 复现值比原论文低 8–13 dB，全文最重要的对比都建立在这个复现上。</li>
+        <li>没有同 bit 数的对比；"2-bit"实际约 2.6 bit，PSAC 自己就占 0.13–0.26 bit。</li>
+        <li>"闪烁"没有直接指标；PSNR 对 BF16 衡量的是"轨迹偏离了多少"。</li>
+        <li>和 SQuat / GEAR / Tuncer 2026 的关系没有讲清楚（§4、§5）。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== 2 -->
+<section id="s2">
+  <h2><span class="no">§2</span>背景：视频 KV cache，以及 QVG 的"质心 + 残差"存法</h2>
+  <p class="lede">先把地基打牢：QuantWM 的一切改动都建立在 QVG 的存储格式上，而 2 bit 下误差从哪来，决定了后面两个模块为什么要这样设计。</p>
+
+  <h3>为什么视频模型的 KV cache 这么大</h3>
+  <p>自回归（chunk-wise）视频模型一次生成一小段帧（一个 chunk）。生成新 chunk 时，要通过注意力回看所有历史 chunk 的 Key/Value。为了不重算，历史 K/V 被缓存下来，这就是 KV cache。视频的 token 数远比文本多，480p 一个潜帧约 1,560 个 token（Wan 系 832×480：VAE 8× 下采样，再 2×2 patch，合计 16×），每层、每个头都要各存一份 K 和 V。论文给的例子：LingBot-World-v2 生成 5 秒（93 帧）需要 <b>21 GB 以上</b>的 KV cache；LongCat-Video 为 21.709 GB，HY-World 1.5 为 12.09 GB。</p>
+  <p>流式设置下有一个关键约定：<b>正在去噪的当前 chunk 始终保持 BF16</b>；chunk 一旦完成，就被压缩一次，之后不再重新压缩。所以"被量化的"永远是历史，Query 永远来自当前 chunk。</p>
+
+  <h3>QVG 怎么存一个 Key</h3>
+  <p>QVG（Quant VideoGen, <a href="https://arxiv.org/abs/2602.02958">2602.02958</a>）的观察是：视频 token 冗余很大，相邻帧、相邻像素块的 Key 很像。于是对一个 chunk 内的所有 Key 做 k-means（256 个质心），每个 token 只存<b>它属于哪个质心</b>（uint8 编号）和<b>它与质心的差</b>（残差）。质心用 BF16 存，残差用 INT2 存：</p>
+  <div class="eq"><span class="lbl">Eq. 3–4</span><i>r<sub>i</sub></i> = <i>k<sub>i</sub></i> − <i>μ</i><sub><i>z<sub>i</sub></i></sub>,&nbsp;&nbsp;&nbsp; <i>k̂<sub>i</sub></i> = <i>μ</i><sub><i>z<sub>i</sub></i></sub> + Q<sub>b</sub>(<i>r<sub>i</sub></i>)
+    <span class="note">Q<sub>b</sub> 是逐组的非对称均匀量化：每 64 个通道一组，取组内 min/max，分成 2<sup>b</sup> − 1 = 3 个台阶，也就是只有 4 个可表示的值。</span></div>
+  <p>2 bit 只有 4 个台阶，台阶宽 <span class="m">Δ<sub>g</sub> = R<sub>g</sub>/3</span>，其中 <span class="m">R<sub>g</sub></span> 是该组残差的极差（max − min）。按经典的"均匀噪声"近似（Widrow），每个通道的量化误差方差约为 <span class="m">Δ<sub>g</sub>²/12 = R<sub>g</sub>²/108</span>。这个式子对后面理解 QSAC 非常关键：<b>误差大小由整组的极差决定</b>，同一组里只要有一个通道残差特别大，其余 63 个通道的误差也会一起变大。</p>
+
+  <figure class="fig" id="quantfig">
+    <div class="ttl">INT2 组量化：一个大残差拖累整组</div>
+    <div class="sub2">16 个通道分成 A、B 两组，每组 8 个（真实是 128 维分两组、每组 64 个，缩小是为了看得清）。拖动滑块放大 A 组第 3 个通道的残差，观察 A 组的台阶和误差怎么变，B 组为什么不受影响。</div>
+    <div class="controls">
+      <div class="ctl"><label for="qz-out">A 组 c3 残差放大</label><input id="qz-out" type="range" min="1" max="5" step="0.1" value="1"><output id="qz-out-v">1.0×</output></div>
+    </div>
+    <div class="svgbox"><svg id="qz-svg" viewBox="0 0 760 250" role="img" aria-label="16 个通道的残差条形图及其 INT2 重建，A 组的一个通道被放大后，A 组台阶变宽，整组误差变大"></svg></div>
+    <div class="readout" id="qz-read"></div>
+    <figcaption class="cap"><span class="sw" style="background:var(--k)"></span>原始残差 <span class="sw" style="background:var(--ink3)"></span>INT2 重建 <span class="sw" style="background:var(--qvg)"></span>误差；虚线是该组的 4 个可表示值。</figcaption>
+  </figure>
+</section>
+
+<!-- ===================================================== 3 -->
+<section id="s3">
+  <h2><span class="no">§3</span>动机：为什么 Key 比 Value 更"娇气"</h2>
+  <p class="lede">论文的出发点有三条观察：VBench 几乎不掉分，但视频在闪；只量化 K 比只量化 V 糟得多；K 的重建误差反而更小。我逐条核对了一遍。结论是方向没问题，但"意外"这个说法言过其实，表 1 本身也有反例。</p>
+
+  <h3>论文的证据</h3>
+  <div class="twocol">
+    <div>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Table 2</th><th>设置</th><th class="num">PSNR↑</th><th class="num">SSIM↑</th><th class="num">LPIPS↓</th></tr></thead>
+        <tbody>
+          <tr><td rowspan="3">MG-2</td><td>K2V16</td><td class="num">18.47</td><td class="num">0.547</td><td class="num">0.219</td></tr>
+          <tr><td>K16V2</td><td class="num good">21.58</td><td class="num good">0.708</td><td class="num good">0.126</td></tr>
+          <tr><td>K2V2</td><td class="num">18.32</td><td class="num">0.500</td><td class="num">0.261</td></tr>
+          <tr><td rowspan="3">LB-2</td><td>K2V16</td><td class="num">15.38</td><td class="num">0.355</td><td class="num">0.263</td></tr>
+          <tr><td>K16V2</td><td class="num good">17.70</td><td class="num good">0.476</td><td class="num good">0.157</td></tr>
+          <tr><td>K2V2</td><td class="num hot">15.79</td><td class="num">0.376</td><td class="num">0.264</td></tr>
+        </tbody></table></div>
+      <p class="small dim">K2V16 表示 K 用 2 bit、V 保持 16 bit，其余同理，都用 QVG 量化。论文原话是"on these samples"，也就是只算了图 2 那几个样例。LB-2 上 K2V2 的 PSNR 反而高于 K2V16，说明样本少、方差大。</p>
+    </div>
+    <div>
+      <div class="tblwrap nw"><table>
+        <thead><tr><th>Table 1</th><th>模型</th><th class="num">K MSE</th><th class="num">V MSE</th><th class="num">K-only 输出</th><th class="num">V-only 输出</th></tr></thead>
+        <tbody>
+          <tr class="grp"><td colspan="6">中间层</td></tr>
+          <tr><td></td><td>Matrix-Game-2</td><td class="num">0.1460</td><td class="num">0.2335</td><td class="num">0.0853</td><td class="num">0.0560</td></tr>
+          <tr><td></td><td>LingBot-v2</td><td class="num">0.2717</td><td class="num">0.3557</td><td class="num hot">0.1868</td><td class="num hot">0.1946</td></tr>
+          <tr><td></td><td>HY-World 1.5</td><td class="num">0.1340</td><td class="num">0.2973</td><td class="num">0.0821</td><td class="num">0.0536</td></tr>
+          <tr class="grp"><td colspan="6">最后一层</td></tr>
+          <tr><td></td><td>Matrix-Game-2</td><td class="num">0.0514</td><td class="num">0.3005</td><td class="num">0.3107</td><td class="num">0.1860</td></tr>
+          <tr><td></td><td>LingBot-v2</td><td class="num">0.1608</td><td class="num">0.3008</td><td class="num">0.2256</td><td class="num">0.1039</td></tr>
+          <tr><td></td><td>HY-World 1.5</td><td class="num">0.0090</td><td class="num">0.2939</td><td class="num">0.5884</td><td class="num">0.1679</td></tr>
+        </tbody></table></div>
+      <p class="small dim">红格：LingBot-v2 中间层 K-only 的输出误差（0.1868）<b>小于</b> V-only（0.1946），与表题"K 误差小但输出误差大"的总结相反。"Output"指什么（注意力输出还是整个 block 的输出）论文没有定义。</p>
+    </div>
+  </div>
+
+  <h3>用人话讲：同样大小的噪声，放在 K 上和放在 V 上，后果不一样</h3>
+  <p>注意力输出是 <span class="m">o = Σ<sub>j</sub> a<sub>j</sub> v<sub>j</sub></span>，权重 <span class="m">a = softmax(qᵀk<sub>j</sub>/√d)</span>。</p>
+  <ul>
+    <li><b class="c-v">V 的误差</b>是<b>线性、被平均</b>的：<span class="m">Δo = Σ a<sub>j</sub>Δv<sub>j</sub></span>。如果各 token 的误差互相独立，注意力越分散，误差就越被平均掉（方差 ≈ σ²·Σa<sub>j</sub>²）。</li>
+    <li><b class="c-k">K 的误差</b>先被 Query 放大，再进指数：<span class="m">Δℓ<sub>j</sub> = qᵀΔk<sub>j</sub>/√d</span>，其方差和 <span class="m">‖q‖²</span> 成正比，并集中在 Query 能量大的方向上。logit 变了，softmax 就会把权重<b>挪到别的 token 上</b>，也就是论文说的"换了个参考帧、换了个位置去抄"。</li>
+    <li>还有一个系统性偏差：零均值的 logit 噪声经过 exp 之后，期望变成 <span class="m">e<sup>σ²/2</sup> &gt; 1</span>，于是被量化的历史 token 整体"偷"走了当前 chunk 的注意力。这正是 Tuncer et al. 2026（<a href="https://arxiv.org/abs/2605.26266">2605.26266</a>，论文引用了）所说的 <b>Jensen bias</b>。</li>
+  </ul>
+  <p>所以"K 的 MSE 更小、输出误差却更大"并不矛盾：K 的敏感度取决于 <span class="m">‖q‖²·σ<sub>k</sub>²</span>，而不是 <span class="m">σ<sub>k</sub>²</span> 本身。下面这个小实验把这件事做成了可以拖动的形式。</p>
+
+  <figure class="fig" id="kvfig">
+    <div class="ttl">同样的噪声，加在 K 上还是加在 V 上</div>
+    <div class="sub2">48 个历史 token、维度 16。灰色是无噪声的注意力权重，彩色是加噪后的。噪声的标准差对 K 和 V 完全相同。把 Query 调"尖"一些（‖q‖ 变大），看 K 噪声的破坏力怎么随之增长，而 V 噪声基本不变。</div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="噪声加在哪"><button type="button" id="kv-k" aria-pressed="true">只扰动 K</button><button type="button" id="kv-v" aria-pressed="false">只扰动 V</button></div>
+      <div class="ctl"><label for="kv-q">‖q‖ 尖锐度</label><input id="kv-q" type="range" min="0.5" max="4" step="0.1" value="2"><output id="kv-q-v">2.0</output></div>
+      <div class="ctl"><label for="kv-s">噪声 σ</label><input id="kv-s" type="range" min="0.05" max="0.8" step="0.05" value="0.3"><output id="kv-s-v">0.30</output></div>
+      <button class="btn" type="button" id="kv-re">换一组噪声</button>
+    </div>
+    <div class="svgbox"><svg id="kv-svg" viewBox="0 0 760 200" role="img" aria-label="48 个 token 的注意力权重，无噪声为灰色，加噪后为彩色"></svg></div>
+    <div class="readout" id="kv-read"></div>
+    <figcaption class="cap">底部数字是 400 次随机噪声的平均：输出相对误差 ‖Δo‖/RMS(v)、top-1 换人的比例，以及注意力分布的 JS 散度。这是合成数据，只用来说明机制，不代表任何真实模型的数值。</figcaption>
+  </figure>
+
+  <div class="call me">
+    <div class="hd">我的判断</div>
+    <p>动机的方向是对的，而且 QuantWM 后面的设计正好对准了"<span class="m">‖q‖²</span> 加权"这件事。但有三点要打折：（1）"Key 比 Value 敏感"在 LLM 的 KV 量化里早有结论（KIVI 发现 Key 有通道离群值，需要按通道量化；AsymKV 发现 loss 对 Key 量化更敏感），在视频扩散里 Tuncer 2026 也已专门分析过，谈不上"surprisingly"。（2）K 和 V 的绝对 MSE 不能直接比：QVG 论文报告 max|K| 约 1e2、max|V| 约 1e3，量级本来就不同，应该报相对误差。（3）表 1 本身就有反例（LingBot 中间层），表 2 只基于少数样例。</p>
+  </div>
+</section>
+
+<!-- ===================================================== 4 -->
+<section id="s4">
+  <h2><span class="no">§4</span>QSAC：挑一个"对查询最友好"的质心</h2>
+  <p class="lede">QVG 给每个 Key 分配<b>欧氏距离最近</b>的质心。QSAC 改成：先按"Query 在意的通道"加权距离挑 4 个候选，再在候选里挑<b>量化后 logit 误差最小</b>的那个。质心本身不变，变的是"谁归哪个质心"。</p>
+
+  <ol class="steps">
+    <li><b class="t">攒历史 Query 的二阶矩</b>
+      <p>对每个注意力头 h，把所有已完成 chunk 的 Query 累积成 <span class="m">M<sub>h</sub> = (1/N)Σ q qᵀ</span>（Eq. 6，d×d）。用"过去的 Query"去近似"将来会来看这些 Key 的 Query"。</p></li>
+    <li><b class="t">把 logit 误差写成二次型</b>
+      <p>Key 误差 e 造成的 logit 误差平方，对 Query 取期望：<span class="m">E<sub>q</sub>[(qᵀe)²] = eᵀM<sub>h</sub>e</span>（Eq. 7）。这一步是精确的，是全文最干净的一个式子。</p></li>
+    <li><b class="t">只保留对角线，得到通道敏感度</b>
+      <p><span class="m">eᵀMe ≈ Σ<sub>c</sub> M<sub>cc</sub> e<sub>c</sub>²</span>（Eq. 8），归一化成 <span class="m">w<sub>c</sub> = M<sub>cc</sub> / mean(M<sub>cc</sub>)</span>（Eq. 9）。<span class="m">M<sub>cc</sub> = E[q<sub>c</sub>²]</span>，也就是说，Query 在哪个通道上能量大，哪个通道就"敏感"。</p></li>
+    <li><b class="t">第一阶段：加权距离挑 top-M 候选</b>
+      <p><span class="m">d<sub>Q</sub>(k, μ<sub>j</sub>) = Σ<sub>c</sub> w<sub>c</sub>(k<sub>c</sub> − μ<sub>j,c</sub>)²</span>（Eq. 10），取最小的 M = 4 个。</p></li>
+    <li><b class="t">第二阶段：估计每个候选量化后的误差</b>
+      <p>候选残差 <span class="m">r<sub>ij</sub> = k<sub>i</sub> − μ<sub>j</sub></span>，每组极差 <span class="m">R<sub>g</sub></span>（Eq. 11）。按均匀噪声近似，<span class="m">E[e<sub>c</sub>²] ≈ R<sub>g</sub>²/(12·(2<sup>b</sup>−1)²)</span>（Eq. 12），b = 2 时就是 <span class="m">R<sub>g</sub>²/108</span>。代回第 3 步，得到期望 logit 误差（Eq. 13）。</p></li>
+    <li><b class="t">取打分最小的候选</b>
+      <p><span class="m">S(k<sub>i</sub>, μ<sub>j</sub>) = Σ<sub>g</sub> (Σ<sub>c∈G<sub>g</sub></sub> w<sub>c</sub>) · R<sub>g</sub>(r<sub>ij</sub>)²</span>，<span class="m">z<sub>i</sub> = argmin<sub>j∈C<sub>i</sub></sub> S</span>（Eq. 14）。第一个 chunk 没有统计量，就令 w<sub>c</sub> = 1（附录 C.3）。</p></li>
+  </ol>
+
+  <figure class="fig" id="qsfig">
+    <div class="ttl">QSAC 选质心台：一个 Key、六个候选质心</div>
+    <div class="sub2">16 个通道分 A、B 两组。每行是一个候选质心留下的残差（小条形图）。滑块决定 Query 的能量有多集中在 A 组。表中标出 K-means（欧氏最近）的选择、第一阶段的 top-M、QSAC 的最终选择，以及"理想选择"：真的把残差做 INT2 量化后，加权误差 Σw<sub>c</sub>e<sub>c</sub>² 最小的那一个。</div>
+    <div class="controls">
+      <div class="ctl"><label for="qs-conc">敏感度集中在 A 组</label><input id="qs-conc" type="range" min="0" max="1" step="0.05" value="0.7"><output id="qs-conc-v">0.70</output></div>
+      <div class="ctl"><label>候选数 M</label><div class="seg" role="group" aria-label="候选数 M" id="qs-m"><button type="button" data-m="1" aria-pressed="false">1</button><button type="button" data-m="2" aria-pressed="false">2</button><button type="button" data-m="4" aria-pressed="true">4</button><button type="button" data-m="6" aria-pressed="false">6（穷举）</button></div></div>
+      <button class="btn" type="button" id="qs-new">换一个 Key</button>
+    </div>
+    <div class="tblwrap"><table id="qs-tbl"></table></div>
+    <div class="readout" id="qs-read"></div>
+    <figcaption class="cap">"真实加权误差"用的是和 QSAC 相同的对角近似，但误差是真做了 INT2 量化得到的，没有用 R²/108 这个近似。多点几次"换一个 Key"可以看到：S 的选择经常和理想选择一致，但并不总是一致。我在这个生成器里（敏感度 0.70、M = 4）随机抽了 999 个 Key：QSAC 有 67% 与 K-means 选得一样，25% 比 K-means 好，9% 反而更差；命中理想候选的比例是 74%。第一阶段只看残差大小，而组量化的误差由整组极差决定，所以一个"加权距离小、但某个通道有离群残差"的候选，可能被第一阶段选中，第二阶段再把它淘汰。</figcaption>
+  </figure>
+
+  <h3>三个值得注意的细节</h3>
+  <h4>① S 和 Tuncer 的"Jensen bias"是同一个量</h4>
+  <p>Tuncer 2026 给出的单个 logit 的量化噪声方差是 <span class="m">σ<sub>i</sub>² = (1/12d)Σ<sub>c</sub> q<sub>c</sub>²Δ<sub>i,c</sub>²</span>，偏置校正项 <span class="m">b<sub>i</sub> ≈ σ<sub>i</sub>²/2</span>。对 Query 取期望，并代入组内共享的 <span class="m">Δ<sub>g</sub> = R<sub>g</sub>/3</span>：</p>
+  <div class="eq"><span class="lbl">我的推导</span>E<sub>q</sub>[σ<sub>i</sub>²] = <span class="hl-q">1/(12d)</span> · Σ<sub>g</sub> (Σ<sub>c∈G<sub>g</sub></sub> M<sub>cc</sub>) · R<sub>g</sub>²/9 &nbsp;∝&nbsp; <span class="hl-qsac">Σ<sub>g</sub> W<sub>g</sub> R<sub>g</sub>² = S</span>
+    <span class="note">也就是说，QSAC 挑的正是"期望分数噪声最小"的质心，而分数噪声越小，Jensen bias 也越小。QSAC 同时在减轻"top-1 换人"和"注意力被历史偷走"这两种现象，但论文只讲了前者，没有测注意力质量偏移 ΔP<sub>S</sub>，也没有和 Tuncer 的零内存校正做比较或叠加。Tuncer 已经在 MAGI-1 上演示过，他们的校正可以直接叠加在 QVG 上。</span></div>
+
+  <h4>② 第二阶段其实只看两个数</h4>
+  <p>这几个模型的注意力头维度基本都是 128（例如 Wan 系：1536/12、5120/40），组大小 64，于是每个 token 每个头只有两组，<span class="m">S = W<sub>1</sub>R<sub>1</sub>² + W<sub>2</sub>R<sub>2</sub>²</span>。通道级的敏感度差异在第二阶段被"组内求和"抹平了，只剩下"前 64 维和后 64 维谁更重要"这一点信息。真正细到通道的加权，只发生在第一阶段。</p>
+
+  <h4>③ 代理目标不太可靠的迹象</h4>
+  <div class="twocol">
+    <div class="tblwrap"><table>
+      <thead><tr><th>Table 11</th><th class="num">M</th><th class="num">PSNR</th><th class="num">LPIPS</th><th class="num">时延 s</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="5">HY-World 1.5</td></tr>
+        <tr><td></td><td class="num">1</td><td class="num">18.244</td><td class="num">0.1132</td><td class="num">116.06</td></tr>
+        <tr><td></td><td class="num">4</td><td class="num">18.449</td><td class="num">0.1082</td><td class="num">118.75</td></tr>
+        <tr><td></td><td class="num">16</td><td class="num good">18.488</td><td class="num">0.1086</td><td class="num">120.65</td></tr>
+        <tr><td></td><td class="num">256</td><td class="num">18.445</td><td class="num">0.1094</td><td class="num">240.66</td></tr>
+        <tr class="grp"><td colspan="5">Causal-Forcing</td></tr>
+        <tr><td></td><td class="num">1</td><td class="num">16.177</td><td class="num">0.1567</td><td class="num">135.07</td></tr>
+        <tr><td></td><td class="num">4</td><td class="num">16.283</td><td class="num">0.1554</td><td class="num">135.08</td></tr>
+        <tr><td></td><td class="num">16</td><td class="num good">16.283</td><td class="num good">0.1529</td><td class="num">148.43</td></tr>
+        <tr><td></td><td class="num">256</td><td class="num hot">16.207</td><td class="num">0.1559</td><td class="num">1386.38</td></tr>
+      </tbody></table></div>
+    <div>
+      <p>如果 S 真能准确近似 logit 误差，那么在全部 256 个质心里取 S 最小（M = 256）应该<b>至少不比 M = 4 差</b>。实际上 Causal-Forcing 从 16.283 掉到 16.207，HY 持平。这说明第一阶段的"只在近处找"反而起了正则作用，而 S（极差平方加 Widrow 近似）在 2 bit 这么粗的量化下只是一个粗略代理。</p>
+      <p>另一个能读出来的信息：M = 1 就是"只用第一阶段"。把它和表 5 的"只开 PSAC"（17.849）对比可知，在 HY 上<b>第一阶段贡献约 +0.40 dB</b>（17.85 → 18.24），<b>第二阶段再贡献约 +0.21 dB</b>（→ 18.45）。</p>
+      <p class="small dim">另外，论文没有说清质心的<b>位置</b>是否随新的分配更新（例如再做一轮 Lloyd 迭代）。摘要说的是"select INT2-friendly centroids"，但 Eq. 14 只定义了分配。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== 5 -->
+<section id="s5">
+  <h2><span class="no">§5</span>PSAC：在 Query 最常看的方向上把误差补回来</h2>
+  <p class="lede">2 bit 再怎么挑质心，误差也消不掉。PSAC 的想法是：logit 只关心误差在 Query 方向上的投影，而 Query 的能量集中在少数几个方向上，那就只把这几个方向上的误差单独记下来，用的时候加回去。</p>
+
+  <ol class="steps psac">
+    <li><b class="t">算出 QSAC 之后剩下的误差</b><p><span class="m">E = K − K̂<sub>0</sub></span>（Eq. 15），在压缩时原始 K 还在手上，所以可以算出来。</p></li>
+    <li><b class="t">期望 logit 误差按特征方向拆开</b><p><span class="m">D(E) = E<sub>Q</sub>‖QEᵀ‖<sub>F</sub>² = Tr(EMEᵀ)</span>（Eq. 16）。把 <span class="m">M = UΛUᵀ</span> 代进去（Eq. 17），就得到 <span class="m">D = Σ<sub>j</sub> λ<sub>j</sub>‖Eu<sub>j</sub>‖²</span>：误差在第 j 个 Query 主方向上的分量，按该方向的 Query 能量 λ<sub>j</sub> 计价。</p></li>
+    <li><b class="t">只存前 r 个方向上的分量</b><p><span class="m">C = EU<sub>r</sub></span>（Eq. 18），每个 token 存 r = 8 个数，量化成 INT8，每行再带一个 FP16 scale；U<sub>r</sub> 用 BF16 存。如果某一行量化后反而让加权误差变大，就把这一行置零；每个 chunk 在稠密和稀疏两种布局里取更省的那种（附录 D.1）。</p></li>
+    <li><b class="t">解码时加回去</b><p><span class="m">K̂ = K̂<sub>0</sub> + CU<sub>r</sub>ᵀ</span>（Eq. 19）。补完之后剩下的期望 logit 误差正好是 <span class="m">Σ<sub>j&gt;r</sub> λ<sub>j</sub>‖Eu<sub>j</sub>‖²</span>（我的推导，忽略 INT8 误差）。换句话说，<b>前 r 个方向上的误差被清零，其余方向一点不动</b>。</p></li>
+  </ol>
+
+  <div class="grid2">
+    <figure class="fig" id="psfig" style="margin:0">
+      <div class="ttl">二维直觉：只补 Query 主方向上的那一截</div>
+      <div class="sub2">椭圆是 Query 的分布，长轴是主方向 u₁。红箭头是 Key 的量化误差 e，紫线是它在 u₁ 上的投影，也就是 PSAC 存下来的 C。补完后只剩下灰色的那一截。</div>
+      <div class="controls">
+        <div class="ctl"><label for="ps-ani">λ₁/λ₂</label><input id="ps-ani" type="range" min="1" max="20" step="0.5" value="8"><output id="ps-ani-v">8.0</output></div>
+        <div class="ctl"><label for="ps-th">误差方向</label><input id="ps-th" type="range" min="0" max="180" step="1" value="70"><output id="ps-th-v">70°</output></div>
+      </div>
+      <div class="svgbox"><svg id="ps-svg" viewBox="0 0 400 300" role="img" aria-label="二维 Query 分布椭圆、误差向量及其在主方向上的投影"></svg></div>
+      <div class="readout" id="ps-read"></div>
+    </figure>
+    <figure class="fig" id="rkfig" style="margin:0">
+      <div class="ttl">真实数据：秩 r 换来多少 PSNR、花掉多少 bit（Table 9）</div>
+      <div class="sub2">实线是 PSNR，柱是相对 r = 8 多出或省下的 bit/元素。HY 的 r = 0 点取自 Table 5 的"QSAC ✓ PSAC ×"。</div>
+      <div class="controls"><div class="seg" role="group" aria-label="模型" id="rk-model"><button type="button" data-m="hy" aria-pressed="true">HY-World 1.5</button><button type="button" data-m="cf" aria-pressed="false">Causal-Forcing</button></div></div>
+      <div class="svgbox"><svg id="rk-svg" viewBox="0 0 400 290" role="img" aria-label="PSAC 秩与 PSNR、额外 bit 的关系"></svg></div>
+      <div class="readout" id="rk-read"></div>
+    </figure>
+  </div>
+
+  <h3>几点观察</h3>
+  <ul>
+    <li><b>r 从 0 到 2 是大头。</b>在 HY 上，r = 0 → 2 带来 +0.40 dB（17.99 → 18.39），r = 2 → 32 总共只再加 +0.12 dB。这和"Query 能量高度集中"一致：图 4 中 LingBot-v2 第 38 层前 8 个方向占 71.14%（正文写的是"超过 60%"）。我的猜测是，最前面一两个方向里有一个"所有 Query 共享的均值方向"。误差在这个方向上的分量，会让某个历史 token 对<b>所有</b> Query 都一起变亮或变暗，这恰好也是 Jensen bias 式"整体偷注意力"的来源。</li>
+    <li><b>ΔBit 与 r 严格成正比。</b>HY 每个秩 0.01676 bit，CF 每个秩 0.03211 bit，精确到小数点后 4 位都对得上，所以 r = 8 在 HY 上约花 0.13 bit/元素，在 CF 上约 0.26 bit。CF 的斜率正好等于"每个 token 存 r 个 INT8、只存 Key、按 K+V 平均"的 8/256 = 0.03125，再加上 U<sub>r</sub> 的摊销。HY 只有一半，可能是约一半的系数行被置零了，但论文没说。另外，严格线性也暗示这一列是按公式算的，而不是在附录 D.1 那种"自适应稀疏布局"下实测的。</li>
+    <li><b>Eq. 19 右半边只是代数写法。</b><span class="m">QK̂ᵀ = QK̂<sub>0</sub>ᵀ + QU<sub>r</sub>Cᵀ</span> 看起来像一条低秩快速通道，但实现里是先把 <span class="m">K̂</span> 整个重建成 BF16，再交给原生 FlashAttention，并不节省注意力计算。</li>
+  </ul>
+
+  <div class="call risk">
+    <div class="hd">相关工作：PSAC 的两个"近亲"都没有被引用</div>
+    <ul>
+      <li><b>SQuat</b>（Subspace-orthogonal KV Cache Quantization，COLM 2025，<a href="https://arxiv.org/abs/2503.24358">2503.24358</a>）：对 prompt 阶段的 Query 做 SVD 得到子空间，量化 Key 时逐块更新剩余元素，<b>让误差尽量正交于这个 Query 子空间</b>。它的两个出发点（"要保内积而不是保 Key"、"Query 落在低维子空间里"）和本文 §3、§4.2 几乎一字不差。区别在于 SQuat 不额外存东西，PSAC 则多存了 0.13–0.26 bit 的投影系数。</li>
+      <li><b>GEAR</b>（<a href="https://arxiv.org/abs/2403.05527">2403.05527</a>）：量化之后，用低秩矩阵逼近量化残差，再加一个稀疏矩阵收拾离群值。PSAC 可以看成"把 GEAR 的 SVD 基换成 Query 主方向"。</li>
+    </ul>
+    <p>两者都是 LLM 上的免训练方法，迁移到视频 KV 上并不难。最起码，SQuat 这种"零额外存储"的版本应该作为消融出现。</p>
+  </div>
+</section>
+
+<!-- ===================================================== 6 -->
+<section id="s6">
+  <h2><span class="no">§6</span>系统与"2-bit"的真实账单</h2>
+  <p class="lede">论文说"2-bit"，是指残差用 2 bit。可 KV cache 里除了残差，还有质心、编号、scale、zero-point 和 PSAC 系数。按论文自己报的压缩比倒推：HY 的 6.20× 相当于 <b>2.58 bit/元素</b>，LongCat 的 5.99× 相当于 <b>2.67 bit/元素</b>。</p>
+
+  <figure class="fig" id="bitfig">
+    <div class="ttl">bit 账单计算器</div>
+    <div class="sub2">按附录 D.1 描述的存储格式，把"每个 KV 元素平均占多少 bit"拆成 7 项（K 和 V 一起平均；PSAC 只作用在 K 上）。论文没有给出各模型每个 chunk 的 token 数，所以这里让你自己调，看看账单对 chunk 大小有多敏感。</div>
+    <div class="controls">
+      <div class="ctl"><label for="bt-n">每 chunk token 数 N</label><select id="bt-n"><option value="4680">4,680（3 潜帧 × 1,560）</option><option value="9360" selected>9,360</option><option value="18720">18,720</option><option value="37440">37,440</option></select></div>
+      <div class="ctl"><label for="bt-c">质心数</label><select id="bt-c"><option>64</option><option>128</option><option selected>256</option></select></div>
+      <div class="ctl"><label for="bt-g">组大小</label><select id="bt-g"><option>32</option><option selected>64</option><option>128</option></select></div>
+      <div class="ctl"><label for="bt-r">PSAC 秩 r</label><input id="bt-r" type="range" min="0" max="32" step="1" value="8"><output id="bt-r-v">8</output></div>
+      <div class="ctl"><label for="bt-p">系数行保留比例</label><input id="bt-p" type="range" min="0" max="1" step="0.05" value="1"><output id="bt-p-v">100%</output></div>
+    </div>
+    <div class="svgbox"><svg id="bt-svg" viewBox="0 0 760 150" role="img" aria-label="每元素 bit 数的堆叠条形图，并标出论文报告的 2.58 与 2.67 bit 以及 QVG 自报的 2.3 bit"></svg></div>
+    <div class="readout" id="bt-read"></div>
+    <figcaption class="cap">公式（每元素 bit，head 维 d = 128）：残差 2；zero-point 2/g；scale 8/g（FP16 二级 scale 可忽略）；质心编号 8/d；质心 16·C/N；PSAC 系数 p·(8r + 16)/d ÷ 2；U<sub>r</sub> 16·r/N ÷ 2。用同一套公式算 QVG 原论文附录表 4 的配置（对称量化，无 zero-point；FP8 scale；每 chunk 37,440 token），得到 2.30 bit，也就是 6.97×，与它自报的 7.0× 吻合；18,720 token 时算得 6.65×，自报 6.7×。<b>结论</b>：chunk 越小，质心的摊销越贵；QuantWM 比 QVG 自报的配置多出约 0.3 bit，其中 PSAC 占了 0.13–0.26 bit。</figcaption>
+  </figure>
+
+  <h3>运行时：省的是常驻内存，不是带宽</h3>
+  <p>生命周期（附录 D.1）：当前 chunk 保持 BF16；chunk 完成时做 QSAC + INT2 打包、算 PSAC 系数，然后释放原 BF16。每次注意力调用，Triton 内核把<b>整段历史</b>解包、加质心、加 PSAC，写出一份临时的 BF16 K/V，交给模型原生的 FlashAttention 或 SDPA 使用，用完即丢。对 pre-RoPE 缓存的模型，重建后再补上位置编码。</p>
+  <p>这意味着在 GPU 常驻的场景里，每一步的内存流量是"读压缩数据 + 写一份 BF16 + 注意力再读一遍 BF16"，比原本的 BF16 cache 还多，所以时延会上升（LingBot +5.44%，HY +5.87%）。LongCat 反而快了 17.78%，原因是它的原生管线会把 KV cache offload 到 CPU 内存，压缩后主机与 GPU 之间要搬的数据变少了（附录 D.2）。这是 offload 带来的红利，不是量化本身带来的加速。</p>
+
+  <div class="tblwrap"><table>
+    <thead><tr><th>模型</th><th class="num">BF16 KV</th><th class="num">QuantWM KV</th><th class="num">压缩比</th><th class="num">≈ bit/元素</th><th class="num">BF16 时延</th><th class="num">QuantWM 时延</th><th>备注</th></tr></thead>
+    <tbody>
+      <tr><td>HY-World 1.5</td><td class="num">12.09 GB</td><td class="num">1.95 GB</td><td class="num">6.20×</td><td class="num">2.58</td><td class="num">112.17 s</td><td class="num">118.75 s</td><td>+5.87%</td></tr>
+      <tr><td>LongCat-Video</td><td class="num">21.709 GB</td><td class="num">3.625 GB</td><td class="num">5.99×</td><td class="num">2.67</td><td class="num">255.35 s</td><td class="num">209.94 s</td><td>−17.78%（offload）</td></tr>
+      <tr><td>LingBot-World-v2</td><td class="num">&gt;21 GB</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">193.56 s</td><td class="num">204.09 s</td><td>+5.44%；内存只在图 6 里</td></tr>
+      <tr><td>Matrix-Game-2 · Causal-Forcing</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td>表 6 没有给</td></tr>
+    </tbody></table></div>
+  <p class="small dim">图 6 的柱状图数字没有进入文本层，无法提取，这里只列了正文里出现过的数字。QVG 和 KIVI 在本文设置下的内存和时延<b>全文都没有报告</b>。</p>
+</section>
+
+<!-- ===================================================== 7 -->
+<section id="s7">
+  <h2><span class="no">§7</span>玩具沙盒：把 QVG、QSAC、PSAC 放到同一组合成数据上</h2>
+  <p class="lede">论文没有公开代码，所以我用 JavaScript 实现了一个"缩小版"：32 维、两组（每组 16 通道）、640 个 Key、24 个 k-means 质心、INT2 组量化，Query 的协方差谱可调。所有数字都在你的浏览器里实时算出来。</p>
+  <figure class="fig" id="sbfig">
+    <div class="ttl">合成数据上的五种存法</div>
+    <div class="sub2">α 越大，Query 的能量越集中在少数方向上（α = 1.4 时前 8 个方向约占 70%，接近论文图 4）。柱子越短越好。</div>
+    <div class="controls">
+      <div class="ctl"><label for="sb-a">谱集中度 α</label><input id="sb-a" type="range" min="0.6" max="2.4" step="0.1" value="1.4"><output id="sb-a-v">1.4</output></div>
+      <div class="ctl"><label for="sb-r">PSAC 秩 r</label><input id="sb-r" type="range" min="0" max="16" step="1" value="4"><output id="sb-r-v">4</output></div>
+      <div class="ctl"><label for="sb-m">QSAC 候选 M</label><select id="sb-m"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="24">24（穷举）</option></select></div>
+      <div class="ctl"><label for="sb-g">敏感度落在</label><select id="sb-g"><option value="0">不分组对齐</option><option value="1">集中在第 1 组</option></select></div>
+      <button class="btn" type="button" id="sb-seed">换随机种子</button>
+    </div>
+    <div class="svgbox"><svg id="sb-svg" viewBox="0 0 760 250" role="img" aria-label="五种 Key 存法在 logit 误差、top-1 漂移率、注意力输出误差上的比较"></svg></div>
+    <div class="readout" id="sb-read">计算中…</div>
+    <figcaption class="cap">五种存法：<span class="sw" style="background:var(--qvg)"></span>QVG（欧氏最近质心）、<span class="sw" style="background:var(--kivi)"></span>QSAC 只用第一阶段（M = 1）、<span class="sw" style="background:var(--qsac)"></span>QSAC（两阶段）、<span class="sw" style="background:var(--q)"></span>只开 PSAC、<span class="sw" style="background:var(--ours)"></span>QSAC + PSAC。三个指标都以 QVG 为 100% 归一化。</figcaption>
+  </figure>
+  <div class="call me">
+    <div class="hd">沙盒里看到的（不代表真实模型）</div>
+    <ul>
+      <li><b>PSAC 很稳：</b>α 越大（Query 越集中），PSAC 砍掉的 logit 误差越多，这与机制推导完全一致。</li>
+      <li><b>QSAC 不稳：</b>在这组通用假设下，两阶段 QSAC 大多和 QVG 打平，偶尔变差；只用第一阶段（M = 1）的版本经常明显变差。原因就是 §2 的滑块演示的那件事：第一阶段只奖励"敏感通道残差小"，却看不见同组里某个不敏感通道的大残差会把整组台阶一起拉宽。</li>
+      <li><b>二者叠加不是 1 + 1：</b>在沙盒里，QSAC + PSAC 通常只和"只开 PSAC"持平。原因之一是 QSAC 用完整的 diag(M) 加权，其中包括 PSAC 随后会清零的那 r 个方向。论文表 5 也显示出强烈的次可加性：单独开 +1.87 dB 和 +1.73 dB，一起开只有 +2.33 dB。</li>
+      <li>论文在真实模型上报告 QSAC 单独就有 +1.87 dB。这说明真实数据里存在沙盒没有的结构，比如 Query 与 Key 共享的离群通道，或者大量"几乎等距"的质心。可惜论文没有刻画这些结构，也就无法判断 QSAC 在别的模型上会不会同样有效。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================================================== 8 -->
+<section id="s8">
+  <h2><span class="no">§8</span>实验：逐表复核</h2>
+  <p class="lede">我把表 3、7、8 的 VBench 均值逐格重算了一遍（4 项平均），全部对得上；时延百分比、压缩比也都对得上。问题不在算术，而在比较的口径。</p>
+
+  <dl class="kv">
+    <dt>模型</dt><dd>LongCat-Video、HY-World 1.5、LingBot-World-v2、Matrix-Game-2、Causal-Forcing；480p 与 720p，93 帧；另有 1 分钟长视频（表 8）</dd>
+    <dt>数据</dt><dd>MovieGen Bench 的 prompt（沿用 QVG 的设置）；Matrix-Game-2 用官方 29 张首帧，每张配 7–8 条动作序列。每个模型生成了多少条视频、用了哪些种子，没有交代</dd>
+    <dt>指标</dt><dd>PSNR / SSIM / LPIPS（与 BF16 逐帧比较，取全部帧）；VBench 的 Subject、Background、Aesthetic、Imaging 四项；top-1 token 漂移率</dd>
+    <dt>基线</dt><dd>QVG（组 64）、KIVI（组 32，<b>最近窗口保持 BF16</b>）；"用官方仓库复现，并作用在同一份缓存张量上"</dd>
+    <dt>硬件</dt><dd>A800 80GB；256 质心、组 64、M = 4、r = 8</dd>
+  </dl>
+
+  <figure class="fig" id="t3fig">
+    <div class="ttl">主表浏览器（Table 3 / Table 7）</div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="分辨率" id="t3-res"><button type="button" data-r="480" aria-pressed="true">480p · 表 3</button><button type="button" data-r="720" aria-pressed="false">720p · 表 7</button></div>
+      <div class="seg" role="group" aria-label="指标" id="t3-met"><button type="button" data-k="psnr" aria-pressed="true">PSNR ↑</button><button type="button" data-k="ssim" aria-pressed="false">SSIM ↑</button><button type="button" data-k="lpips" aria-pressed="false">LPIPS ↓</button></div>
+    </div>
+    <div class="legend"><span><span class="sw" style="background:var(--kivi)"></span>KIVI</span><span><span class="sw" style="background:var(--qvg)"></span>QVG</span><span><span class="sw" style="background:var(--ours)"></span>QuantWM</span></div>
+    <div class="svgbox"><svg id="t3-svg" viewBox="0 0 760 250" role="img" aria-label="五个模型上 KIVI、QVG、QuantWM 的帧级指标"></svg></div>
+    <div class="tblwrap" id="t3-vb"></div>
+    <figcaption class="cap">下方小表是 VBench 4 项平均<b>相对 BF16 的差</b>（×100）。红格表示量化后反而高于 BF16：10 个"模型 × 分辨率"组合里，QuantWM 有 9 个 ≥ BF16。VBench 的差异基本落在 ±0.5 分的噪声区间里。QuantWM 相对 QVG 的"一致更高"最小只高 0.08 分（LongCat 480p：81.30 vs 81.22）。</figcaption>
+  </figure>
+
+  <h3>最关键的一张图：QVG 的复现与它原论文差多少</h3>
+  <figure class="fig" id="qvgfig">
+    <div class="ttl">同一方法、同一模型，两篇论文里的 PSNR</div>
+    <div class="svgbox"><svg id="qvg-svg" viewBox="0 0 760 260" role="img" aria-label="QVG 与 KIVI 在 QVG 原论文和本文中的 PSNR 对比"></svg></div>
+    <figcaption class="cap">"QVG 原论文"数字来自 2602.02958 表 1（INT2，480p）：LongCat-Video 为 6.94×、PSNR 28.72（该文 LongCat 的保真度<b>只在第一个生成块上</b>计算）；HY-WorldPlay-8B（即 HY-World 1.5）为 7.05×、PSNR 29.17（长视频设置）。KIVI 在该文中是 6.40×、块大小 16。协议不同，所以不能直接相减。协议差异确实能解释一部分：HY 上 KIVI 在本文里也低了 6.6 dB。但 QVG 低了 13.1 dB，是 KIVI 的两倍，两者排名因此颠倒。再加上 QVG 原文提到的实现细节（缓存 pre-RoPE 的 Key、FP8 scale）可能与本文"遵循各模型原生缓存约定"的做法不一致，这些都需要作者正面解释。</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <figure class="fig" id="t4fig" style="margin:0">
+      <div class="ttl">top-1 token 漂移率（Table 4）</div>
+      <div class="svgbox"><svg id="t4-svg" viewBox="0 0 400 230" role="img" aria-label="五个模型上 QVG 与 QuantWM 的 top-1 漂移率"></svg></div>
+      <figcaption class="cap">QVG 50–61%，QuantWM 10–22%。但哪些层、头、去噪步参与统计，Query 是否来自同一次 BF16 前向（teacher-forced），论文都没交代。top-1 对"几乎平局"极其敏感：QVG 有 61% 的 Query 换了 top-1，VBench 却几乎不动，这本身就说明 top-1 只是弱代理。另外，PSAC 直接压 logit 误差，再拿 top-1 来评它，有一点自证的味道。</figcaption>
+    </figure>
+    <figure class="fig" id="t5fig" style="margin:0">
+      <div class="ttl">消融（Table 5，HY-World 1.5）</div>
+      <div class="svgbox"><svg id="t5-svg" viewBox="0 0 400 230" role="img" aria-label="QSAC 与 PSAC 的 2×2 消融"></svg></div>
+      <figcaption class="cap">单开 QSAC：+1.87 dB；单开 PSAC：+1.73 dB；两个都开：+2.33 dB，只相当于两者之和（3.60）的 65%，说明它们修的是同一部分误差。按漂移率看，PSAC 的作用更大（61% → 23%，QSAC 只到 38%）。</figcaption>
+    </figure>
+  </div>
+
+  <h3>长视频（Table 8）：论文说 VBench 看不出问题，这里却只用 VBench</h3>
+  <div class="tblwrap"><table id="t8-tbl"></table></div>
+  <p>1 分钟设置下，论文只报了 VBench，理由是"误差会累积"。可全文的核心论点恰恰是"VBench 看不出量化带来的退化"。更关键的是，表里量化版<b>多处超过 BF16</b>（红格）：Causal-Forcing 上 QVG 比 BF16 高 1.78 分，QuantWM 高 3.46 分。量化不可能让模型变好，所以这只能说明，在长视频上 VBench 的差异主要反映的是"生成了一段不同的视频"，拿它当"对累积误差更鲁棒"的证据并不成立。这里本应报帧级指标，或者更好的是报 BF16 自身在不同种子间的波动。</p>
+
+  <h3>效率数字里的一处矛盾</h3>
+  <div class="tblwrap"><table>
+    <thead><tr><th>来源</th><th>配置</th><th class="num">HY-World 1.5</th><th class="num">Causal-Forcing</th></tr></thead>
+    <tbody>
+      <tr><td>Table 6</td><td>QuantWM 默认</td><td class="num">118.75 s</td><td class="num">—</td></tr>
+      <tr><td>Table 10</td><td>对角近似（= 默认）</td><td class="num">118.75 s</td><td class="num hot">101.21 s</td></tr>
+      <tr><td>Table 11</td><td>M = 4（= 默认）</td><td class="num">118.75 s</td><td class="num hot">135.08 s</td></tr>
+      <tr><td>Table 10</td><td>完整矩阵</td><td class="num">123.10 s</td><td class="num">104.07 s</td></tr>
+      <tr><td>Table 11</td><td>M = 256</td><td class="num">240.66 s</td><td class="num">1386.38 s</td></tr>
+    </tbody></table></div>
+  <p class="small">同一个默认配置，Causal-Forcing 在两张表里差了 34 秒；HY 在三张表里完全一致。此外，"完整矩阵太贵"这个理由也偏弱：<span class="m">(k−μ)ᵀM(k−μ)</span> 等于先用 <span class="m">M<sup>1/2</sup></span> 把 k 和 μ 各变换一次，再算欧氏距离，额外开销只是每个 token 一次 d×d 的矩阵乘。</p>
+</section>
+
+<!-- ===================================================== 9 -->
+<section id="s9">
+  <h2><span class="no">§9</span>我用项目页视频做的独立复测</h2>
+  <p class="lede">论文没有任何直接衡量闪烁的指标，但项目页的 GitHub 仓库公开了 18 组对比视频（每组 BF16 / QVG / QuantWM 三段，共 54 段）。我把它们全部下载下来，补测了一个无参考的帧间一致性指标。</p>
+
+  <dl class="kv">
+    <dt>warping error</dt><dd>用 DIS 光流把第 t−1 帧对齐到第 t 帧，再算平均绝对误差（0–255）。<b>画面越闪、越抖，这个值越大</b>；正常的运动因为已经被光流补偿，影响较小。这是视频时序一致性的常用指标。</dd>
+    <dt>PSNR vs BF16</dt><dd>逐帧和 BF16 比较（与论文口径相同），用来看"偏离轨迹"随时间怎么变。</dd>
+    <dt>局限</dt><dd>这些都是作者挑出来的展示样例，而且经过 h264 压缩；光流本身也有误差。结论只能说明方向，不能替代正式评测。</dd>
+  </dl>
+
+  <figure class="fig" id="vdfig">
+    <div class="ttl">每个样例的 warping error，相对 BF16 的倍数</div>
+    <div class="sub2">横线 1.0 表示和 BF16 一样稳。点越往右，帧间不一致越多。Causal-Forcing 例 2 不在图里，原因见下方说明。</div>
+    <div class="legend"><span><span class="sw" style="background:var(--qvg)"></span>QVG</span><span><span class="sw" style="background:var(--ours)"></span>QuantWM</span></div>
+    <div class="svgbox"><svg id="vd-svg" viewBox="0 0 760 470" role="img" aria-label="17 个样例中 QVG 与 QuantWM 的 warping error 相对 BF16 的倍数"></svg></div>
+    <div class="readout" id="vd-sum"></div>
+  </figure>
+
+  <figure class="fig" id="vcfig">
+    <div class="ttl">逐帧曲线：挑一个样例看</div>
+    <div class="controls"><div class="ctl"><label for="vc-sel">样例</label><select id="vc-sel"></select></div></div>
+    <div class="grid2">
+      <div><div class="small dim">PSNR vs BF16（dB）</div><div class="svgbox"><svg id="vc-psnr" viewBox="0 0 380 210" role="img" aria-label="逐帧 PSNR 曲线"></svg></div></div>
+      <div><div class="small dim">warping error（0–255，越低越稳）</div><div class="svgbox"><svg id="vc-warp" viewBox="0 0 380 210" role="img" aria-label="逐帧 warping error 曲线"></svg></div></div>
+    </div>
+    <figcaption class="cap">两个规律在所有样例中都成立。（1）PSNR 都是开头很高（条件首帧几乎相同，约 33–45 dB），然后一路下滑，最后四分之一段只剩 10–20 dB。QuantWM 下滑得慢一些，但也会偏离。所以论文表里 15–25 dB 的 PSNR，主要衡量的是"轨迹分叉了多少"，而不是"画面坏了多少"。（2）QVG 的 warping error 曲线上常有 BF16 没有的尖刺，这就是肉眼看到的闪烁。</figcaption>
+  </figure>
+
+  <div class="call risk">
+    <div class="hd">顺带发现：一段"QVG"视频其实就是 BF16</div>
+    <p>项目页仓库里的 <code>causal-forcing-2-qvg.mp4</code> 和 <code>causal-forcing-2-bf16.mp4</code> <b>逐字节相同</b>（大小都是 1,561,879 字节，md5 都是 <code>283e0c5e…</code>）。逐帧 PSNR 是无穷大，warping error 也完全一样。这应该是上传时放错了文件，不影响论文的表格，但项目页上这个例子的"QVG"列并不是 QVG 的输出。其余 53 个文件两两不同。</p>
+  </div>
+</section>
+
+<!-- ===================================================== 10 -->
+<section id="s10">
+  <h2><span class="no">§10</span>存疑清单</h2>
+  <p class="lede">按严重度排序。"高"表示会动摇主结论，"中"表示影响解读或方法设计，"低"是笔误或信息缺失。每条都附了能自己核对的证据。</p>
+  <div class="filters" role="group" aria-label="按严重度筛选">
+    <div class="seg" id="rf"><button type="button" data-f="all" aria-pressed="true">全部 19</button><button type="button" data-f="hi" aria-pressed="false">高 4</button><button type="button" data-f="mid" aria-pressed="false">中 10</button><button type="button" data-f="lo" aria-pressed="false">低 5</button></div>
+  </div>
+  <ol class="risklist" id="risklist">
+    <li class="hi"><div class="rh"><span class="rn">01</span><span class="tag risk">高</span><b>基线 QVG 比它原论文低 8–13 dB，没有解释</b></div>
+      <p>LongCat-Video 480p INT2：QVG 自报 PSNR 28.72（6.94×），本文复现 20.68。HY-World 1.5（= HY-WorldPlay-8B）：自报 29.17（7.05×），本文复现 16.12。评测协议不同能解释一部分：HY 上 KIVI 也从 24.27 掉到了 17.68（−6.6 dB）。但 QVG 掉得多一倍（−13.1 dB），结果从"远好于 KIVI"变成了"不如 KIVI"；LongCat 上也是同样的排名颠倒（QVG 论文：KIVI 20.32 &lt; QVG 28.72；本文：KIVI 24.45 &gt; QVG 20.68）。QVG 原文的实现细节（缓存 pre-RoPE 的 Key、FP8 scale）与本文"遵循各模型原生缓存约定"的做法是否一致，本文没有交代。"QVG 会严重闪烁"这一核心论断完全建立在这个复现上。</p>
+      <p class="ev">证据：本文表 3；QVG 2602.02958 表 1、§5.1。</p></li>
+    <li class="hi"><div class="rh"><span class="rn">02</span><span class="tag risk">高</span><b>没有同 bit 数的对比</b></div>
+      <p>QuantWM 的 6.20× 和 5.99× 相当于 2.58 和 2.67 bit/元素；QVG 自报的 INT2 配置约为 2.27–2.31 bit。本文没有报告 QVG 和 KIVI 在其复现下的内存，而 KIVI 还保留了 BF16 的最近窗口、用 32 的组大小。PSAC 本身就占 0.13–0.26 bit（表 9 的线性斜率）。QVG 论文显示，QVG-Pro（约 5×）比 QVG 高 1.7–2.4 dB。零点几个 bit 就能换来几个 dB，所以必须画同一横轴（bit/元素）的 Pareto 曲线才能比较。</p>
+      <p class="ev">证据：§6 计算器；本文表 9；QVG 表 1。</p></li>
+    <li class="hi"><div class="rh"><span class="rn">03</span><span class="tag risk">高</span><b>标题说"时间一致"，但没有一个直接测闪烁的指标</b></div>
+      <p>PSNR、SSIM、LPIPS 都是和 BF16 比的保真度，衡量的是"轨迹偏了多少"（§9 的曲线显示，它们在视频后段主要由分叉主导）。VBench 只报了 4 项，恰好没报它自带的 Temporal Flickering 和 Motion Smoothness。也没有 warping error、FVD 或用户研究。我在项目页视频上补测的 warping error 支持论文的方向（QVG 平均 +22%，QuantWM +2%），但那是精选样例。</p>
+      <p class="ev">证据：本文 §5.1 Metrics；§9 复测。</p></li>
+    <li class="hi"><div class="rh"><span class="rn">04</span><span class="tag risk">高</span><b>长视频实验和论文自己的论点冲突</b></div>
+      <p>全文的论点是"VBench 看不出退化"，1 分钟实验却只用 VBench；而且量化版多处高于 BF16（Causal-Forcing：QVG +1.78 分，QuantWM +3.46 分；HY +0.60；LongCat +0.32；LingBot +0.21）。这说明该设置下 VBench 的差异不能当作"对累积误差更鲁棒"的证据。</p>
+      <p class="ev">证据：本文表 8、附录 B.2。</p></li>
+
+    <li class="mid"><div class="rh"><span class="rn">05</span><span class="tag warn">中</span><b>动机表 1 有反例，比较方式也不成立</b></div>
+      <p>LingBot-v2 中间层 K-only 的输出误差（0.1868）小于 V-only（0.1946）。K 和 V 的绝对 MSE 不可直接比（QVG 报告 max|K| 约 1e2、max|V| 约 1e3），应该报相对误差。"Output MSE"是哪一层的输出，没有定义。表 2 只在图 2 的样例上算，LB-2 的 K2V2 甚至高于 K2V16。</p>
+      <p class="ev">证据：本文表 1、表 2；§3。</p></li>
+    <li class="mid"><div class="rh"><span class="rn">06</span><span class="tag warn">中</span><b>"Key 更敏感"并不是新发现</b></div>
+      <p>KIVI（Key 有通道离群值，需要按通道量化）、KVQuant、AsymKV（loss 对 Key 量化更敏感）早有结论；Tuncer 2026 已在视频扩散里专门分析过"量化 Key 偷注意力"。摘要里的"surprisingly"言过其实。</p>
+      <p class="ev">证据：Tuncer 2605.26266 §2 相关工作。</p></li>
+    <li class="mid"><div class="rh"><span class="rn">07</span><span class="tag warn">中</span><b>PSAC 的近亲 SQuat、GEAR 没有被引用</b></div>
+      <p>SQuat（COLM 2025）用 Query 子空间约束 Key 量化误差，让误差与子空间正交，而且不需要额外存储；GEAR 用低秩矩阵补量化残差。PSAC 相当于"把 GEAR 的低秩基换成 SQuat 的 Query 子空间，再额外存下投影系数"。两者都应该出现在相关工作和消融里。</p>
+      <p class="ev">证据：SQuat 2503.24358 §3.1–3.3；GEAR 2403.05527 §3。</p></li>
+    <li class="mid"><div class="rh"><span class="rn">08</span><span class="tag warn">中</span><b>QSAC 的打分就是 Tuncer 的分数噪声方差，却没有和 Tuncer 比</b></div>
+      <p>对 Query 取期望后，S = Σ<sub>g</sub>W<sub>g</sub>R<sub>g</sub>² 与 Tuncer 的 σ<sub>i</sub>² 成正比（§4 ①），所以 QSAC 同时也在减轻 Jensen bias。论文只用"top-1 换人"来解释收益，没有测注意力质量偏移，也没有和 Tuncer 这种零内存、可以叠加在 QVG 上的校正做比较或组合。</p>
+      <p class="ev">证据：本文 Eq. 13–14；Tuncer Eq. 7、13，表 1（QVG + 校正）。</p></li>
+    <li class="mid"><div class="rh"><span class="rn">09</span><span class="tag warn">中</span><b>top-1 漂移率既不透明，又是弱代理</b></div>
+      <p>统计口径没有交代：哪些层、头、去噪步参与统计，是否用同一份 Query 做 teacher-forced 比较。top-1 对近似平局极其敏感，QVG 61% 的漂移率下 VBench 几乎不变。而 PSAC 直接最小化 logit 误差，用它来评 PSAC 有自证之嫌。应该补注意力输出误差或 JSD。</p>
+      <p class="ev">证据：本文表 4、表 5、§5.3。</p></li>
+    <li class="mid"><div class="rh"><span class="rn">10</span><span class="tag warn">中</span><b>QSAC 的代理目标可疑</b></div>
+      <p>如果 S 真能近似 logit 误差，穷举（M = 256）应该不差于 M = 4；实际 Causal-Forcing 从 16.283 掉到 16.207。第一阶段只看残差大小，看不到组量化的"一个离群值拖累整组"（§2 的演示）。在我的沙盒里，只用第一阶段会变差。另外，每个头只有两组，第二阶段只剩两个数；质心位置是否随新分配更新，论文也没说。</p>
+      <p class="ev">证据：本文表 11；§4、§7。</p></li>
+    <li class="mid"><div class="rh"><span class="rn">11</span><span class="tag warn">中</span><b>QSAC 和 PSAC 各做各的，没有联合设计</b></div>
+      <p>QSAC 用完整的 diag(M) 加权，其中包括 PSAC 随后会清零的前 r 个方向。更自然的做法是按"PSAC 修不到的剩余敏感度" M − U<sub>r</sub>Λ<sub>r</sub>U<sub>r</sub>ᵀ 来加权。表 5 显示两者高度重叠：单开 +1.87 dB 和 +1.73 dB，一起开只有 +2.33 dB。</p>
+      <p class="ev">证据：本文表 5；§7 沙盒。</p></li>
+    <li class="mid"><div class="rh"><span class="rn">12</span><span class="tag warn">中</span><b>冷启动恰好伤在最要紧的第一块</b></div>
+      <p>第一个 chunk 没有统计量，只能令 w = 1、关闭 PSAC。可这一块往往是 attention sink 或条件首帧：图 3 中 Matrix-Game-2 的 BF16 top-1 正好选中 Frame 0。而且第一块刚生成完时，它自己的 Query 已经可用，拿来用并不违反因果，"严格因果"的限制是自己加的。论文没有分析首块的误差。</p>
+      <p class="ev">证据：附录 C.3；图 3。</p></li>
+    <li class="mid"><div class="rh"><span class="rn">13</span><span class="tag warn">中</span><b>RoPE 约定下的统计量没说清</b></div>
+      <p>M 是用 pre-RoPE 还是 post-RoPE 的 Query 统计的？对于缓存 pre-RoPE Key 的模型，logit 误差是 <span class="m">q<sub>post</sub>ᵀR<sub>n</sub>e</span>，相关的二阶矩应当是旋转之后的。旋转会把每对 rotary 通道的敏感度混在一起，直接影响 w 和 U<sub>r</sub> 是否对准。</p>
+      <p class="ev">证据：附录 D.1 最后一句只说了重建之后怎么补 RoPE。</p></li>
+    <li class="mid"><div class="rh"><span class="rn">14</span><span class="tag warn">中</span><b>效率数字不完整，还有矛盾</b></div>
+      <p>同为默认配置，Causal-Forcing 的时延在表 10 是 101.21 s，在表 11 是 135.08 s。QVG 和 KIVI 的时延没有报告；表 6 缺了 Matrix-Game-2 和 Causal-Forcing。LongCat 的 −17.8% 来自 KV offload，不是量化本身的加速。GPU 常驻时，每步都把整段历史重建成 BF16，内存流量反而比 BF16 更大。</p>
+      <p class="ev">证据：本文表 6、10、11；附录 D.2。</p></li>
+
+    <li class="lo"><div class="rh"><span class="rn">15</span><span class="tag low">低</span><b>VBench 的差异落在噪声里</b></div>
+      <p>10 个"模型 × 分辨率"格子中，QuantWM 有 9 个 ≥ BF16；"一致高于 QVG"的最小差距只有 0.08 分。全文没有种子数，也没有方差。</p>
+      <p class="ev">证据：本文表 3、表 7（我已逐格复算，均值都对）。</p></li>
+    <li class="lo"><div class="rh"><span class="rn">16</span><span class="tag low">低</span><b>项目页有一个视频放错了，代码未公开</b></div>
+      <p>Causal-Forcing 例 2 的"QVG"视频与 BF16 逐字节相同。论文说实现了定制 Triton 内核，但仓库里只有静态网页。</p>
+      <p class="ev">证据：§9；github.com/quantwm-project/QuantWM。</p></li>
+    <li class="lo"><div class="rh"><span class="rn">17</span><span class="tag low">低</span><b>引用和交叉引用错误</b></div>
+      <p>引言把 Causal-Forcing 引成 Huang et al. 2026（那是 Self Forcing）；图 7(d) 图内写的是"Self-forcing"；LongCat-Video 被引成了 LongCat-Flash-Omni 技术报告（2511.00279）。附录 C.4 说"M in Eq. 9"、"Query-aware distance in Eq. 13"，应为 Eq. 6 和 Eq. 10；同一段里 top-m 和 top-M 混用。正文说"top-8 超过 60%"，图 4 标的是 71.14%。表 4 和表 5 的同一个数分别写成 0.6136 和 0.6137。"reduces the shift ratio up to 10.19%"里的 10.19% 其实是最小值。</p>
+      <p class="ev">证据：本文 §1、§5.1、附录 C.4、图 4、图 7、表 4–5。</p></li>
+    <li class="lo"><div class="rh"><span class="rn">18</span><span class="tag low">低</span><b>评测细节缺失</b></div>
+      <p>每个模型生成了多少条视频、用了哪些种子、PSNR 是否包含条件首帧，都没有交代。项目页样例有 144–221 帧的，与正文"93 帧"的设置不同。表 9 的 ΔBit 与 r 严格线性，更像按公式算的，而不是在 D.1 的自适应稀疏布局下实测的。</p>
+      <p class="ev">证据：本文 §5.1；§9；表 9。</p></li>
+    <li class="lo"><div class="rh"><span class="rn">19</span><span class="tag low">低</span><b>目标函数层面的两处简化</b></div>
+      <p>E[(qᵀe)²] 对所有 Key 等权，并且会惩罚"对所有 Key 相同的 logit 平移"，而 softmax 对这种平移并不敏感。它也没有利用注意力权重或 Value 的信息。另外，M 对全部历史等权累积，世界模型场景切换之后可能已经过时，论文没有 EMA 或窗口的消融。</p>
+      <p class="ev">证据：本文 Eq. 6–7、16。</p></li>
+  </ol>
+</section>
+
+<!-- ===================================================== 11 -->
+<section id="s11">
+  <h2><span class="no">§11</span>公道话、定位与最值得补的实验</h2>
+
+  <h3>公道话</h3>
+  <p>QuantWM 抓住了一个真问题：在 2 bit 下，"Key 存得准"和"注意力算得准"是两回事。它用了一个很朴素的工具，把历史 Query 的二阶矩 M 当作"误差计价表"，同时指导"选质心"和"补误差"。这个工具免训练、严格在线、实现成本低，而且在 5 个模型、两种分辨率上的方向一致。我在项目页视频上的复测也表明，相比它所复现的 QVG，QuantWM 的帧间一致性确实好得多。如果作者能补上同 bit 对比、澄清 QVG 的复现问题，它会是一篇扎实的工程论文。</p>
+
+  <h3>定位</h3>
+  <div class="tblwrap"><table>
+    <thead><tr><th>工作</th><th>针对的误差</th><th>手段</th><th>额外存储</th></tr></thead>
+    <tbody>
+      <tr><td>KIVI / KVQuant（LLM）</td><td>Key 的通道离群值</td><td>Key 按通道量化，pre-RoPE</td><td>无</td></tr>
+      <tr><td>GEAR（LLM）</td><td>量化残差</td><td>低秩 + 稀疏补偿</td><td>有</td></tr>
+      <tr><td>SQuat（LLM）</td><td>Query 子空间内的 logit 误差</td><td>让量化误差与子空间正交</td><td>无</td></tr>
+      <tr><td>QVG（视频）</td><td>Key/Value 的动态范围</td><td>k-means 质心 + 多级残差</td><td>质心</td></tr>
+      <tr><td>Tuncer 2026（视频）</td><td>Jensen bias（历史偷注意力）</td><td>对每个 logit 减去 σ²/2</td><td>无</td></tr>
+      <tr class="me"><td><b>QuantWM（视频）</b></td><td>Query 加权的 logit 误差</td><td>Query 感知的质心分配 + Query 主子空间补偿</td><td>约 0.13–0.26 bit</td></tr>
+    </tbody></table></div>
+
+  <h3>最值得补的五个实验</h3>
+  <ol>
+    <li><b>同 bit 的 Pareto 曲线：</b>QVG（1–4 级，组 16/32/64）、QVG-Pro、KIVI、QuantWM（r = 0…16）画在同一横轴"实测 bit/元素（含全部元数据）"上。</li>
+    <li><b>对齐 QVG 的复现：</b>用 QVG 原文的配置（pre-RoPE Key、FP8 scale、同样的评测协议）重跑一遍，两种结果都报。</li>
+    <li><b>直接测闪烁：</b>VBench 的 Temporal Flickering 和 Motion Smoothness、光流 warping error、FVD，再加一个小规模用户研究；同时报 BF16 在不同种子间的波动作为噪声底。</li>
+    <li><b>与 Tuncer 比较并叠加：</b>报告注意力质量偏移 ΔP<sub>S</sub>，测"QVG + 偏置校正"和"QuantWM + 偏置校正"。</li>
+    <li><b>QSAC 的解剖：</b>不开 PSAC 时分别测第一、第二阶段；按剩余敏感度 M − U<sub>r</sub>Λ<sub>r</sub>U<sub>r</sub>ᵀ 加权；解释 M = 256 为什么变差；第一块改用它自身的 Query 统计。</li>
+  </ol>
+
+  <h3>来源</h3>
+  <ul class="srcs">
+    <li><a href="https://arxiv.org/abs/2609.26425">QuantWM: Temporally Consistent 2-Bit KV Cache Quantization for World Models and Video Generation（arXiv 2609.26425）</a></li>
+    <li><a href="https://quantwm-project.github.io/QuantWM/">QuantWM 项目页</a> · <a href="https://github.com/quantwm-project/QuantWM">项目页仓库（视频文件）</a></li>
+    <li><a href="https://arxiv.org/abs/2602.02958">Quant VideoGen（QVG），arXiv 2602.02958</a></li>
+    <li><a href="https://arxiv.org/abs/2605.26266">Quantized Keys Steal Attention: Bias Correction for KV-Cache Compression in Video Diffusion，arXiv 2605.26266</a></li>
+    <li><a href="https://arxiv.org/abs/2503.24358">SQuat: Subspace-orthogonal KV Cache Quantization，arXiv 2503.24358</a></li>
+    <li><a href="https://arxiv.org/abs/2403.05527">GEAR: An Efficient KV Cache Compression Recipe，arXiv 2403.05527</a></li>
+  </ul>
+</section>
+
+<footer class="foot">
+  <p>本页是读者笔记，不是作者的说法；与论文冲突时以论文为准。§7 的沙盒与 §3 的噪声演示均为合成数据；§9 的复测基于作者公开的展示视频（h264），只能说明方向。</p>
+</footer>
+
+</div>
+
+
+<script>
+(function(){
+"use strict";
+var NS="http://www.w3.org/2000/svg";
+function $(id){return document.getElementById(id);}
+function el(tag,attrs,parent,text){var e=document.createElementNS(NS,tag);if(attrs)for(var k in attrs){if(attrs[k]!==undefined&&attrs[k]!==null)e.setAttribute(k,attrs[k]);}if(text!==undefined)e.textContent=text;if(parent)parent.appendChild(e);return e;}
+function clear(s){while(s.firstChild)s.removeChild(s.firstChild);}
+function fx(v,n){return (Math.round(v*Math.pow(10,n))/Math.pow(10,n)).toFixed(n);}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function makeRng(seed){var u=mulberry32(seed),spare=null;return{u:u,n:function(){if(spare!==null){var s=spare;spare=null;return s;}var a,b,r;do{a=u()*2-1;b=u()*2-1;r=a*a+b*b;}while(r>=1||r===0);var m=Math.sqrt(-2*Math.log(r)/r);spare=b*m;return a*m;}};}
+function pressSeg(container,btn){Array.prototype.forEach.call(container.querySelectorAll('button'),function(b){b.setAttribute('aria-pressed',b===btn?'true':'false');});}
+function qdq(r,g,bits){var L=(1<<bits)-1,d=r.length,out=new Float64Array(d);for(var s=0;s<d;s+=g){var mn=Infinity,mx=-Infinity;for(var c=s;c<s+g;c++){if(r[c]<mn)mn=r[c];if(r[c]>mx)mx=r[c];}var sc=(mx-mn)/L||1e-12;for(c=s;c<s+g;c++){var q=Math.min(L,Math.max(0,Math.round((r[c]-mn)/sc)));out[c]=mn+q*sc;}}return out;}
+
+/* ---------------- TOC highlight ---------------- */
+(function(){var links=document.querySelectorAll('nav.toc a');var map={};Array.prototype.forEach.call(links,function(a){map[a.getAttribute('href').slice(1)]=a;});
+ if(!('IntersectionObserver' in window))return;
+ var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){Array.prototype.forEach.call(links,function(a){a.classList.remove('on');});var a=map[e.target.id];if(a){a.classList.add('on');}}});},{rootMargin:'-30% 0px -60% 0px'});
+ Object.keys(map).forEach(function(id){var s=$(id);if(s)io.observe(s);});})();
+
+/* ---------------- §2 quantizer ---------------- */
+(function(){
+ var svg=$('qz-svg'),sl=$('qz-out'),out=$('qz-out-v'),rd=$('qz-read');if(!svg)return;
+ var base=[0.35,-0.2,0.5,0.15,-0.45,0.1,-0.3,0.25, 0.2,-0.1,0.05,-0.25,0.3,-0.15,0.1,-0.05];
+ var W=760,H=250,x0=46,top=16,bot=206,ymin=-0.9,ymax=2.7;
+ function Y(v){return bot-(v-ymin)/(ymax-ymin)*(bot-top);}
+ function X(c){return x0+c*40+(c>=8?40:0);}
+ function draw(){
+  var f=+sl.value;out.textContent=fx(f,1)+'×';
+  var r=base.slice();r[2]=base[2]*f;
+  var rh=qdq(r,8,2);clear(svg);
+  // axes
+  [-0.5,0,0.5,1,1.5,2,2.5].forEach(function(v){el('line',{x1:x0-6,x2:W-10,y1:Y(v),y2:Y(v),class:v===0?'axis':'gridl'},svg);el('text',{x:x0-10,y:Y(v)+4,'text-anchor':'end',class:'t2'},svg,fx(v,1));});
+  [[0,'A 组（Query 敏感）'],[8,'B 组']].forEach(function(g){el('text',{x:X(g[0])+140,y:H-10,'text-anchor':'middle',class:'t2'},svg,g[1]);});
+  var st=[];
+  [0,8].forEach(function(s){var mn=Infinity,mx=-Infinity;for(var c=s;c<s+8;c++){mn=Math.min(mn,r[c]);mx=Math.max(mx,r[c]);}var sc=(mx-mn)/3;
+   for(var l=0;l<4;l++){var v=mn+l*sc;el('line',{x1:X(s)-8,x2:X(s+7)+28,y1:Y(v),y2:Y(v),style:'stroke:var(--ink3);stroke-dasharray:3 4;stroke-width:1'},svg);}
+   var se=0,se7=0;for(c=s;c<s+8;c++){var e=r[c]-rh[c];se+=e*e;if(c!==2)se7+=e*e;}
+   st.push({R:mx-mn,D:sc,th:sc*sc/12,mse:se/8,mse7:(s===0?se7/7:se/8)});});
+  for(var c=0;c<16;c++){var x=X(c);
+   el('rect',{x:x,y:Math.min(Y(r[c]),Y(0)),width:14,height:Math.max(1,Math.abs(Y(r[c])-Y(0))),rx:2,style:'fill:var(--k)'},svg);
+   el('rect',{x:x+15,y:Math.min(Y(rh[c]),Y(0)),width:9,height:Math.max(1,Math.abs(Y(rh[c])-Y(0))),rx:2,style:'fill:var(--ink3)'},svg);
+   var e=r[c]-rh[c];if(Math.abs(e)>0.003)el('line',{x1:x+26,x2:x+26,y1:Y(rh[c]),y2:Y(r[c]),style:'stroke:var(--qvg);stroke-width:3'},svg);
+   el('text',{x:x+12,y:bot+14,'text-anchor':'middle',class:'t2'},svg,'c'+(c%8+1));}
+  rd.innerHTML='A 组：极差 R = <b>'+fx(st[0].R,2)+'</b>，台阶 Δ = R/3 = '+fx(st[0].D,3)+'，理论 Δ²/12 = '+fx(st[0].th,4)+'，实测每通道误差² = <b>'+fx(st[0].mse,4)+'</b>（除 c3 外其余 7 个通道：<b>'+fx(st[0].mse7,4)+'</b>）<br>B 组：极差 R = '+fx(st[1].R,2)+'，Δ = '+fx(st[1].D,3)+'，理论 '+fx(st[1].th,4)+'，实测 '+fx(st[1].mse,4)+'　<span class="dim">← 与 A 组无关，不受影响</span>';
+ }
+ sl.addEventListener('input',draw);draw();
+})();
+
+/* ---------------- §3 K vs V noise ---------------- */
+(function(){
+ var svg=$('kv-svg');if(!svg)return;var bK=$('kv-k'),bV=$('kv-v'),sq=$('kv-q'),ss=$('kv-s'),rd=$('kv-read'),bre=$('kv-re');
+ var N=48,d=16,dv=16,mode='k',seed=11;
+ var R=makeRng(5);var K=[],V=[],qh=new Float64Array(d);
+ for(var i=0;i<N;i++){var k=new Float64Array(d),v=new Float64Array(dv);for(var c=0;c<d;c++)k[c]=R.n();for(c=0;c<dv;c++)v[c]=R.n();K.push(k);V.push(v);}
+ var nn=0;for(c=0;c<d;c++){qh[c]=R.n();nn+=qh[c]*qh[c];}nn=Math.sqrt(nn);for(c=0;c<d;c++)qh[c]/=nn;
+ var vr=0;for(i=0;i<N;i++)for(c=0;c<dv;c++)vr+=V[i][c]*V[i][c];var vrms=Math.sqrt(vr/N);
+ function attn(s,Kx){var L=new Float64Array(N),mx=-Infinity;for(var i=0;i<N;i++){var a=0;for(var c=0;c<d;c++)a+=qh[c]*Kx[i][c];L[i]=s*a;if(L[i]>mx)mx=L[i];}var z=0;for(i=0;i<N;i++){L[i]=Math.exp(L[i]-mx);z+=L[i];}for(i=0;i<N;i++)L[i]/=z;return L;}
+ function outp(a,Vx){var o=new Float64Array(dv);for(var i=0;i<N;i++)for(var c=0;c<dv;c++)o[c]+=a[i]*Vx[i][c];return o;}
+ function argmax(a){var b=0;for(var i=1;i<a.length;i++)if(a[i]>a[b])b=i;return b;}
+ function jsd(p,q){var s=0;for(var i=0;i<p.length;i++){var m=(p[i]+q[i])/2;if(p[i]>0)s+=0.5*p[i]*Math.log(p[i]/m);if(q[i]>0)s+=0.5*q[i]*Math.log(q[i]/m);}return s;}
+ function noisy(X,sig,rng,dd){return X.map(function(x){var y=new Float64Array(dd);for(var c=0;c<dd;c++)y[c]=x[c]+sig*rng.n();return y;});}
+ function draw(){
+  var s=+sq.value,sig=+ss.value;$('kv-q-v').textContent=fx(s,1);$('kv-s-v').textContent=fx(sig,2);
+  var a0=attn(s,K),o0=outp(a0,V),t0=argmax(a0);
+  var rng=makeRng(seed);var Kn=mode==='k'?noisy(K,sig,rng,d):K,Vn=mode==='v'?noisy(V,sig,rng,dv):V;
+  var a1=attn(s,Kn);
+  clear(svg);var W=760,H=200,x0=20,bw=(W-40)/N,top=12,bot=172;var mx=0;for(var i=0;i<N;i++)mx=Math.max(mx,a0[i],a1[i]);mx=Math.max(mx,0.05);
+  el('line',{x1:x0,x2:W-20,y1:bot,y2:bot,class:'axis'},svg);
+  var col=mode==='k'?'var(--k)':'var(--v)';
+  for(i=0;i<N;i++){var x=x0+i*bw,h0=a0[i]/mx*(bot-top),h1=a1[i]/mx*(bot-top);
+   el('rect',{x:x+1,y:bot-h0,width:bw*0.45,height:Math.max(0.5,h0),style:'fill:var(--bf);opacity:.55'},svg);
+   el('rect',{x:x+1+bw*0.45,y:bot-h1,width:bw*0.45,height:Math.max(0.5,h1),style:'fill:'+col},svg);}
+  var t1=argmax(a1);
+  el('text',{x:x0+t0*bw+bw*0.25,y:bot+14,'text-anchor':'middle',class:'t2'},svg,'▲BF16');
+  if(t1!==t0)el('text',{x:x0+t1*bw+bw*0.7,y:bot+26,'text-anchor':'middle',style:'fill:'+col+';font-size:11px'},svg,'▲加噪后 top-1');
+  el('text',{x:W-20,y:top+10,'text-anchor':'end',class:'t2'},svg,'最大权重 '+fx(mx,3));
+  // Monte Carlo
+  var T=400,eo=0,flip=0,js=0,r2=makeRng(1234);
+  for(var t=0;t<T;t++){var Kt=mode==='k'?noisy(K,sig,r2,d):K,Vt=mode==='v'?noisy(V,sig,r2,dv):V;var at=mode==='k'?attn(s,Kt):a0;var ot=outp(at,Vt);var e2=0;for(var c=0;c<dv;c++)e2+=(ot[c]-o0[c])*(ot[c]-o0[c]);eo+=Math.sqrt(e2)/vrms;if(argmax(at)!==t0)flip++;js+=jsd(a0,at);}
+  var ent=0;for(i=0;i<N;i++)if(a0[i]>0)ent-=a0[i]*Math.log(a0[i]);
+  rd.innerHTML='噪声加在 <b>'+(mode==='k'?'K':'V')+'</b>，σ = '+fx(sig,2)+'，‖q‖ 尖锐度 = '+fx(s,1)+'（BF16 注意力的有效 token 数 e<sup>H</sup> ≈ '+fx(Math.exp(ent),1)+'）<br>输出相对误差 ‖Δo‖/RMS(v)：<b>'+fx(eo/T*100,1)+'%</b>　·　top-1 换人：<b>'+fx(flip/T*100,1)+'%</b>　·　注意力 JSD：<b>'+fx(js/T,4)+'</b>';
+ }
+ function setMode(m,b){mode=m;pressSeg(b.parentNode,b);draw();}
+ bK.addEventListener('click',function(){setMode('k',bK);});bV.addEventListener('click',function(){setMode('v',bV);});
+ sq.addEventListener('input',draw);ss.addEventListener('input',draw);bre.addEventListener('click',function(){seed=(seed*7+13)%9973;draw();});
+ draw();
+})();
+
+/* ---------------- §4 QSAC picker ---------------- */
+(function(){
+ var tbl=$('qs-tbl');if(!tbl)return;var sl=$('qs-conc'),seg=$('qs-m'),rd=$('qs-read'),bn=$('qs-new');
+ var d=16,g=8,J=6,M=4,seed=17;var wjit;
+ function gen(){var R=makeRng(seed*101+7);var res=[];wjit=new Float64Array(d);for(var c=0;c<d;c++)wjit[c]=0.55+0.9*R.u();
+  for(var j=0;j<J;j++){var sc=0.25+0.35*R.u(),ga=0.5+1.0*R.u(),gb=0.5+1.0*R.u();var r=new Float64Array(d);for(c=0;c<d;c++)r[c]=sc*(c<g?ga:gb)*R.n();
+   if(R.u()<0.55){var oc=Math.floor(R.u()*d);r[oc]+= (R.u()<0.5?-1:1)*(0.9+0.9*R.u());}res.push(r);}return res;}
+ var RES=gen();
+ function weights(t){var w=new Float64Array(d),s=0;for(var c=0;c<d;c++){w[c]=wjit[c]*(c<g?1+6*t:1);s+=w[c];}for(c=0;c<d;c++)w[c]/=(s/d);return w;}
+ function bars(r){var s='<svg viewBox="0 0 100 28" width="100" height="28" aria-hidden="true" style="display:block">';var mx=0;for(var c=0;c<d;c++)mx=Math.max(mx,Math.abs(r[c]));mx=Math.max(mx,0.8);
+  s+='<line x1="0" x2="100" y1="14" y2="14" style="stroke:var(--axis);stroke-width:1"/><line x1="50" x2="50" y1="1" y2="27" style="stroke:var(--rule2);stroke-width:1;stroke-dasharray:2 2"/>';
+  for(c=0;c<d;c++){var h=r[c]/mx*13,x=c*6.1+(c>=g?2:0);s+='<rect x="'+x.toFixed(1)+'" y="'+(h>0?14-h:14).toFixed(1)+'" width="4.6" height="'+Math.max(0.6,Math.abs(h)).toFixed(1)+'" style="fill:'+(c<g?'var(--k)':'var(--kivi)')+'"/>';}
+  return s+'</svg>';}
+ function draw(){
+  var t=+sl.value;$('qs-conc-v').textContent=fx(t,2);var w=weights(t);var WA=0,WB=0;for(var c=0;c<d;c++){if(c<g)WA+=w[c];else WB+=w[c];}
+  var rows=RES.map(function(r,j){var eu=0,dq=0,mnA=Infinity,mxA=-Infinity,mnB=Infinity,mxB=-Infinity;for(var c=0;c<d;c++){eu+=r[c]*r[c];dq+=w[c]*r[c]*r[c];if(c<g){mnA=Math.min(mnA,r[c]);mxA=Math.max(mxA,r[c]);}else{mnB=Math.min(mnB,r[c]);mxB=Math.max(mxB,r[c]);}}
+   var RA=mxA-mnA,RB=mxB-mnB,S=WA*RA*RA+WB*RB*RB;var rh=qdq(r,g,2),tr=0;for(c=0;c<d;c++){var e=r[c]-rh[c];tr+=w[c]*e*e;}return{j:j,r:r,eu:eu,dq:dq,RA:RA,RB:RB,S:S,tr:tr};});
+  var km=rows.slice().sort(function(a,b){return a.eu-b.eu;})[0].j;
+  var cand=rows.slice().sort(function(a,b){return a.dq-b.dq;}).slice(0,M).map(function(x){return x.j;});
+  var qs=cand.map(function(j){return rows[j];}).sort(function(a,b){return a.S-b.S;})[0].j;
+  var ideal=rows.slice().sort(function(a,b){return a.tr-b.tr;})[0].j;
+  var h='<thead><tr><th>候选</th><th>残差（A｜B）</th><th class="num">‖r‖²</th><th class="num">d<sub>Q</sub></th><th class="num">R<sub>A</sub></th><th class="num">R<sub>B</sub></th><th class="num">预测 S/108</th><th class="num">真实加权误差</th><th>标记</th></tr></thead><tbody>';
+  rows.forEach(function(x){var tags='';if(x.j===km)tags+='<span class="tag qvg">K-means</span> ';if(cand.indexOf(x.j)>=0)tags+='<span class="tag low">top-'+M+'</span> ';if(x.j===qs)tags+='<span class="tag qsac">QSAC</span> ';if(x.j===ideal)tags+='<span class="tag ok">理想</span>';
+   h+='<tr'+(x.j===qs?' class="me"':'')+'><td class="num">#'+(x.j+1)+'</td><td>'+bars(x.r)+'</td><td class="num">'+fx(x.eu,2)+'</td><td class="num">'+fx(x.dq,2)+'</td><td class="num">'+fx(x.RA,2)+'</td><td class="num">'+fx(x.RB,2)+'</td><td class="num">'+fx(x.S/108,4)+'</td><td class="num">'+fx(x.tr,4)+'</td><td>'+tags+'</td></tr>';});
+  tbl.innerHTML=h+'</tbody>';
+  var tk=rows[km].tr,tq=rows[qs].tr,ti=rows[ideal].tr;
+  rd.innerHTML='通道权重：A 组合计 W<sub>A</sub> = <b>'+fx(WA,2)+'</b>，B 组 W<sub>B</sub> = <b>'+fx(WB,2)+'</b>（均值归一化到 1，共 16）<br>K-means 选 #'+(km+1)+'，真实加权误差 '+fx(tk,4)+'；QSAC 选 #'+(qs+1)+'，'+fx(tq,4)+(tq<=tk?'（比 K-means <b class="c-qsac">低 '+fx((1-tq/tk)*100,0)+'%</b>）':'（比 K-means <b class="c-risk">高 '+fx((tq/tk-1)*100,0)+'%</b>）')+'；理想是 #'+(ideal+1)+'，'+fx(ti,4)+(qs===ideal?'，<b>QSAC 选中了理想候选</b>':'，<b>QSAC 没选中</b>');
+ }
+ Array.prototype.forEach.call(seg.querySelectorAll('button'),function(b){b.addEventListener('click',function(){M=+b.getAttribute('data-m');pressSeg(seg,b);draw();});});
+ sl.addEventListener('input',draw);bn.addEventListener('click',function(){seed++;RES=gen();draw();});
+ draw();
+})();
+
+/* ---------------- §5 PSAC 2D ---------------- */
+(function(){
+ var svg=$('ps-svg');if(!svg)return;var sa=$('ps-ani'),st=$('ps-th'),rd=$('ps-read');
+ var R=makeRng(21),Z=[];for(var i=0;i<160;i++)Z.push([R.n(),R.n()]);
+ var ang=20*Math.PI/180,u1=[Math.cos(ang),-Math.sin(ang)],u2=[Math.sin(ang),Math.cos(ang)];/* screen coords: y down */
+ function draw(){
+  var a=+sa.value,th=+st.value;$('ps-ani-v').textContent=fx(a,1);$('ps-th-v').textContent=th+'°';
+  var l1=2*a/(a+1),l2=2/(a+1),cx=200,cy=150,S=62;clear(svg);
+  el('defs',null,svg).innerHTML='<marker id="psa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--qvg)"/></marker><marker id="psb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--q)"/></marker>';
+  Z.forEach(function(z){var x=cx+S*(Math.sqrt(l1)*z[0]*u1[0]+Math.sqrt(l2)*z[1]*u2[0]),y=cy+S*(Math.sqrt(l1)*z[0]*u1[1]+Math.sqrt(l2)*z[1]*u2[1]);if(x>4&&x<396&&y>4&&y<296)el('circle',{cx:x,cy:y,r:2,style:'fill:var(--q);opacity:.35'},svg);});
+  el('ellipse',{cx:cx,cy:cy,rx:S*1.6*Math.sqrt(l1),ry:S*1.6*Math.sqrt(l2),transform:'rotate('+(-20)+' '+cx+' '+cy+')',style:'fill:none;stroke:var(--q);stroke-width:1.3;opacity:.8'},svg);
+  el('line',{x1:cx-150*u1[0],y1:cy-150*u1[1],x2:cx+150*u1[0],y2:cy+150*u1[1],style:'stroke:var(--q);stroke-dasharray:4 4;opacity:.7'},svg);
+  el('text',{x:cx-150*u1[0]+2,y:cy-150*u1[1]+18,'text-anchor':'start',class:'tq'},svg,'u₁（Query 主方向）');
+  var t=th*Math.PI/180,E=95,e=[Math.cos(t),-Math.sin(t)];
+  var p1=e[0]*u1[0]+e[1]*u1[1],p2=e[0]*u2[0]+e[1]*u2[1];
+  var P=[cx+E*p1*u1[0],cy+E*p1*u1[1]],Q=[cx+E*e[0],cy+E*e[1]];
+  el('line',{x1:cx,y1:cy,x2:P[0],y2:P[1],style:'stroke:var(--q);stroke-width:5;opacity:.85'},svg);
+  el('line',{x1:P[0],y1:P[1],x2:Q[0],y2:Q[1],style:'stroke:var(--ink3);stroke-width:2;stroke-dasharray:5 3'},svg);
+  el('line',{x1:cx,y1:cy,x2:Q[0],y2:Q[1],style:'stroke:var(--qvg);stroke-width:2.2','marker-end':'url(#psa)'},svg);
+  el('text',{x:Q[0]+(Q[0]>=cx?6:-6),y:Q[1]-6,'text-anchor':Q[0]>=cx?'start':'end',style:'fill:var(--qvg-ink);font-size:12px'},svg,'e');
+  el('text',{x:(cx+P[0])/2,y:(cy+P[1])/2+16,'text-anchor':'middle',class:'tq'},svg,'C = e·u₁');
+  el('circle',{cx:cx,cy:cy,r:3,style:'fill:var(--ink)'},svg);
+  var before=l1*p1*p1+l2*p2*p2,after=l2*p2*p2;
+  rd.innerHTML='补偿前 E[(qᵀe)²] = λ₁(e·u₁)² + λ₂(e·u₂)² = '+fx(l1,2)+'×'+fx(p1*p1,2)+' + '+fx(l2,2)+'×'+fx(p2*p2,2)+' = <b>'+fx(before,3)+'</b><br>补偿后只剩 λ₂(e·u₂)² = <b>'+fx(after,3)+'</b>，减少 <b class="c-q">'+fx(before>0?(1-after/before)*100:0,0)+'%</b>；Key 的欧氏误差只从 1 降到 '+fx(Math.abs(p2),2)+'。';
+ }
+ sa.addEventListener('input',draw);st.addEventListener('input',draw);draw();
+})();
+
+/* ---------------- §5 rank chart (Table 9) ---------------- */
+(function(){
+ var svg=$('rk-svg');if(!svg)return;var seg=$('rk-model'),rd=$('rk-read');
+ var D={hy:{name:'HY-World 1.5',r:[0,2,4,8,16,32],p:[17.990,18.3949,18.3973,18.4485,18.5368,18.5157],b:[-0.1341,-0.1006,-0.0671,0,0.1341,0.4023],est:[true,false,false,false,false,false]},
+        cf:{name:'Causal-Forcing',r:[2,4,8,16,32],p:[16.2259,16.2409,16.2828,16.3495,16.3462],b:[-0.1926,-0.1284,0,0.2569,0.7706],est:[false,false,false,false,false]}};
+ var cur='hy';
+ function draw(){var m=D[cur];clear(svg);var x0=52,x1=380,W=x1-x0,n=m.r.length;function X(i){return x0+W*(i+0.5)/n;}
+  var pmin=Math.floor(Math.min.apply(null,m.p)*10-1)/10,pmax=Math.ceil(Math.max.apply(null,m.p)*10+0.5)/10;var t0=14,t1=140;function Y(v){return t1-(v-pmin)/(pmax-pmin)*(t1-t0);}
+  for(var k=0;k<=4;k++){var v=pmin+(pmax-pmin)*k/4;el('line',{x1:x0,x2:x1,y1:Y(v),y2:Y(v),class:'gridl'},svg);el('text',{x:x0-6,y:Y(v)+4,'text-anchor':'end',class:'t2'},svg,fx(v,2));}
+  el('text',{x:x0,y:10,class:'t2'},svg,'PSNR (dB)');
+  var pts=m.p.map(function(p,i){return X(i)+','+Y(p);}).join(' ');el('polyline',{points:pts,style:'fill:none;stroke:var(--ours);stroke-width:2'},svg);
+  m.p.forEach(function(p,i){el('circle',{cx:X(i),cy:Y(p),r:m.r[i]===8?5:3.5,style:'fill:'+(m.r[i]===8?'var(--ours)':'var(--surf)')+';stroke:var(--ours);stroke-width:2'},svg);el('text',{x:X(i)+(i===0?14:0),y:i===0?Y(p)+16:Y(p)-9,'text-anchor':'middle',class:'t2'},svg,fx(p,2));});
+  var b0=158,b1=262;var bmax=Math.max.apply(null,m.b.map(Math.abs));function B(v){return (b0+b1)/2-v/bmax*((b1-b0)/2);}
+  el('line',{x1:x0,x2:x1,y1:B(0),y2:B(0),class:'axis'},svg);el('text',{x:x0,y:b0-2,class:'t2'},svg,'ΔBit vs r=8（bit/元素）');
+  m.b.forEach(function(v,i){var y=Math.min(B(v),B(0)),h=Math.abs(B(v)-B(0));el('rect',{x:X(i)-12,y:y,width:24,height:Math.max(1,h),rx:2,style:'fill:var(--q);opacity:'+(m.est[i]?.35:.85)},svg);el('text',{x:X(i),y:v>=0?y-4:y+h+11,'text-anchor':'middle',class:'t2'},svg,(v>0?'+':'')+fx(v,3)+(m.est[i]?'*':''));});
+  m.r.forEach(function(r,i){el('text',{x:X(i),y:282,'text-anchor':'middle',class:'t'},svg,'r='+r);});
+  var slope=cur==='hy'?0.0167625:0.0321125;
+  rd.innerHTML=m.name+'：每增加 1 个秩多花 <b>'+fx(slope,4)+'</b> bit/元素（严格线性）；r = 8 的 PSAC 总开销 ≈ <b>'+fx(slope*8,3)+'</b> bit/元素。'+(cur==='hy'?'<br>* r = 0 取自表 5（QSAC ✓ PSAC ×），ΔBit 按斜率外推。':'<br>该模型没有报 r = 0。');}
+ Array.prototype.forEach.call(seg.querySelectorAll('button'),function(b){b.addEventListener('click',function(){cur=b.getAttribute('data-m');pressSeg(seg,b);draw();});});
+ draw();
+})();
+
+/* ---------------- §6 bit calculator ---------------- */
+(function(){
+ var svg=$('bt-svg');if(!svg)return;var sN=$('bt-n'),sC=$('bt-c'),sG=$('bt-g'),sR=$('bt-r'),sP=$('bt-p'),rd=$('bt-read');var d=128;
+ function draw(){var N=+sN.value,C=+sC.value,g=+sG.value,r=+sR.value,p=+sP.value;$('bt-r-v').textContent=r;$('bt-p-v').textContent=Math.round(p*100)+'%';
+  var parts=[['INT2 残差',2,'var(--k)'],['zero-point',2/g,'var(--kivi)'],['scale',8/g,'var(--v)'],['质心编号',8/d,'var(--bf)'],['质心 BF16',16*C/N,'var(--qsac)'],['PSAC 系数',r>0?p*(8*r+16)/d/2:0,'var(--q)'],['U_r',16*r/N/2,'var(--ours)']];
+  var tot=parts.reduce(function(s,x){return s+x[1];},0);clear(svg);var x0=20,x1=740,max=4;function X(v){return x0+(x1-x0)*v/max;}
+  for(var v=0;v<=4;v+=0.5){el('line',{x1:X(v),x2:X(v),y1:30,y2:96,class:'gridl'},svg);el('text',{x:X(v),y:112,'text-anchor':'middle',class:'t2'},svg,fx(v,1));}
+  var acc=0;parts.forEach(function(pt){if(pt[1]<=0)return;el('rect',{x:X(acc),y:44,width:Math.max(0.5,X(acc+pt[1])-X(acc)),height:36,style:'fill:'+pt[2]},svg);acc+=pt[1];});
+  [[2.30,'QVG 自报 ≈2.30','var(--qvg)',22],[2.58,'HY 6.20× → 2.58','var(--ours)',128],[2.67,'LongCat 5.99× → 2.67','var(--ours)',142]].forEach(function(m){el('line',{x1:X(m[0]),x2:X(m[0]),y1:34,y2:92,style:'stroke:'+m[2]+';stroke-width:2;stroke-dasharray:4 3'},svg);el('text',{x:X(m[0])+(m[3]>100?4:-4),y:m[3],'text-anchor':m[3]>100?'start':'end',style:'fill:'+m[2]+';font-size:11px'},svg,m[1]);});
+  el('text',{x:X(tot)+6,y:67,style:'fill:var(--ink);font-size:13px;font-weight:700'},svg,fx(tot,2)+' bit');
+  rd.innerHTML=parts.map(function(pt){return '<span class="sw" style="background:'+pt[2]+'"></span>'+pt[0]+' '+fx(pt[1],3);}).join('　')+'<br>合计 <b>'+fx(tot,3)+'</b> bit/元素 → 压缩比 <b>'+fx(16/tot,2)+'×</b>　（质心占 '+fx(16*C/N/tot*100,0)+'%，PSAC 占 '+fx((parts[5][1]+parts[6][1])/tot*100,0)+'%）';}
+ [sN,sC,sG].forEach(function(s){s.addEventListener('change',draw);});[sR,sP].forEach(function(s){s.addEventListener('input',draw);});draw();
+})();
+
+/* ---------------- §7 sandbox ---------------- */
+var SB=(function(){
+ function eigSym(Ain,d){var A=Ain.map(function(r){return r.slice();});var V=[];for(var i=0;i<d;i++){V.push(new Float64Array(d));V[i][i]=1;}
+  for(var sw=0;sw<50;sw++){var off=0;for(var p=0;p<d;p++)for(var q=p+1;q<d;q++)off+=A[p][q]*A[p][q];if(off<1e-16)break;
+   for(p=0;p<d;p++)for(q=p+1;q<d;q++){if(Math.abs(A[p][q])<1e-14)continue;var th=(A[q][q]-A[p][p])/(2*A[p][q]);var t=(th>=0?1:-1)/(Math.abs(th)+Math.sqrt(th*th+1));var c=1/Math.sqrt(t*t+1),s=t*c;
+    for(var k=0;k<d;k++){var akp=A[k][p],akq=A[k][q];A[k][p]=c*akp-s*akq;A[k][q]=s*akp+c*akq;}
+    for(k=0;k<d;k++){var apk=A[p][k],aqk=A[q][k];A[p][k]=c*apk-s*aqk;A[q][k]=s*apk+c*aqk;}
+    for(k=0;k<d;k++){var vkp=V[k][p],vkq=V[k][q];V[k][p]=c*vkp-s*vkq;V[k][q]=s*vkp+c*vkq;}}}
+  var idx=[];for(i=0;i<d;i++)idx.push(i);idx.sort(function(a,b){return A[b][b]-A[a][a];});
+  return{vals:idx.map(function(i){return A[i][i];}),vecs:idx.map(function(i){var v=new Float64Array(d);for(var k=0;k<d;k++)v[k]=V[k][i];return v;})};}
+ function run(opt){
+  var d=32,N=640,Ct=36,Nq=160,C=24,g=16,alpha=opt.alpha,seed=opt.seed,r=opt.r,Mc=opt.M,align=0.8;var rng=makeRng(seed);
+  var sk=new Float64Array(d);for(var c=0;c<d;c++)sk[c]=Math.exp(0.45*rng.n());[3,11,20,27].forEach(function(c){sk[c]*=3.2;});
+  var cen=[];for(var j=0;j<Ct;j++){var v=new Float64Array(d);for(c=0;c<d;c++)v[c]=sk[c]*rng.n();cen.push(v);}
+  var K=[];for(var i=0;i<N;i++){var z=cen[Math.floor(rng.u()*Ct)];v=new Float64Array(d);for(c=0;c<d;c++)v[c]=z[c]+0.45*sk[c]*rng.n();K.push(v);}
+  var Rr=[];for(j=0;j<d;j++){v=new Float64Array(d);for(var k=0;k<d;k++)v[k]=rng.n();Rr.push(v);}
+  var order=[];for(c=0;c<d;c++)order.push(c);order.sort(function(a,b){return sk[b]-sk[a];});if(opt.grp1){order=order.filter(function(c){return c<d/2;}).concat(order.filter(function(c){return c>=d/2;}));}
+  var U=[];for(j=0;j<d;j++){v=new Float64Array(d);for(k=0;k<d;k++)v[k]=(1-align)*Rr[j][k];v[order[j]]+=align;U.push(v);}
+  for(j=0;j<d;j++){v=U[j];for(i=0;i<j;i++){var dot=0;for(k=0;k<d;k++)dot+=v[k]*U[i][k];for(k=0;k<d;k++)v[k]-=dot*U[i][k];}var nn=0;for(k=0;k<d;k++)nn+=v[k]*v[k];nn=Math.sqrt(nn);for(k=0;k<d;k++)v[k]/=nn;}
+  var lam=new Float64Array(d),tot=0;for(j=0;j<d;j++){lam[j]=Math.pow(j+1,-alpha);tot+=lam[j];}for(j=0;j<d;j++)lam[j]*=d*4/tot;
+  function mkQ(n){var Q=[];for(var i=0;i<n;i++){var v=new Float64Array(d);for(var j=0;j<d;j++){var z=Math.sqrt(lam[j])*rng.n();for(var k=0;k<d;k++)v[k]+=z*U[j][k];}Q.push(v);}return Q;}
+  var Qh=mkQ(Nq),Qt=mkQ(Nq);
+  // kmeans
+  var r2=makeRng(seed+101),cent=[],used={};while(cent.length<C){i=Math.floor(r2.u()*N);if(used[i])continue;used[i]=1;cent.push(Float64Array.from(K[i]));}
+  var asg=new Int32Array(N);for(var it=0;it<8;it++){for(i=0;i<N;i++){var best=Infinity,bj=0;for(j=0;j<C;j++){var s=0;for(c=0;c<d;c++){var t=K[i][c]-cent[j][c];s+=t*t;}if(s<best){best=s;bj=j;}}asg[i]=bj;}
+   var sum=cent.map(function(){return new Float64Array(d);}),cnt=new Int32Array(C);for(i=0;i<N;i++){cnt[asg[i]]++;for(c=0;c<d;c++)sum[asg[i]][c]+=K[i][c];}for(j=0;j<C;j++)if(cnt[j]>0)for(c=0;c<d;c++)cent[j][c]=sum[j][c]/cnt[j];}
+  var M=[];for(i=0;i<d;i++)M.push(new Float64Array(d));Qh.forEach(function(q){for(var i=0;i<d;i++)for(var j=0;j<d;j++)M[i][j]+=q[i]*q[j];});for(i=0;i<d;i++)for(j=0;j<d;j++)M[i][j]/=Nq;
+  var tr=0;for(c=0;c<d;c++)tr+=M[c][c];var w=new Float64Array(d);for(c=0;c<d;c++)w[c]=M[c][c]/(tr/d);var Wg=[0,0];for(c=0;c<d;c++)Wg[c<g?0:1]+=w[c];
+  var eig=eigSym(M.map(function(r){return Array.from(r);}),d);var en=0,et=0;eig.vals.forEach(function(v,j){et+=v;if(j<r)en+=v;});
+  function assign(rule,MM){return K.map(function(k){var ds=cent.map(function(m,j){var e=0,wq=0;for(var c=0;c<d;c++){var t=k[c]-m[c];e+=t*t;wq+=w[c]*t*t;}return{j:j,e:e,wq:wq};});
+   if(rule==='km'){ds.sort(function(a,b){return a.e-b.e;});return ds[0].j;}ds.sort(function(a,b){return a.wq-b.wq;});var cd=ds.slice(0,MM),b=Infinity,bj=cd[0].j;
+   cd.forEach(function(x){var m=cent[x.j],S=0;for(var s=0,gi=0;s<d;s+=g,gi++){var mn=Infinity,mx=-Infinity;for(var c=s;c<s+g;c++){var t=k[c]-m[c];if(t<mn)mn=t;if(t>mx)mx=t;}S+=Wg[gi]*(mx-mn)*(mx-mn);}if(S<b){b=S;bj=x.j;}});return bj;});}
+  function recon(a){return K.map(function(k,i){var m=cent[a[i]],res=new Float64Array(d);for(var c=0;c<d;c++)res[c]=k[c]-m[c];var q=qdq(res,g,2),o=new Float64Array(d);for(c=0;c<d;c++)o[c]=m[c]+q[c];return o;});}
+  function psac(Kh){if(r===0)return Kh;return Kh.map(function(kh,i){var e=new Float64Array(d);for(var c=0;c<d;c++)e[c]=K[i][c]-kh[c];var o=Float64Array.from(kh);for(var j=0;j<r;j++){var u=eig.vecs[j],cj=0;for(c=0;c<d;c++)cj+=e[c]*u[c];for(c=0;c<d;c++)o[c]+=cj*u[c];}return o;});}
+  var Vv=K.map(function(){var v=new Float64Array(8);for(var c=0;c<8;c++)v[c]=r2.n();return v;});var sq=Math.sqrt(d)*0.5;
+  function ev(Kh){var le=0,sh=0,oe=0,on=0;Qt.forEach(function(q){var b1=-Infinity,bi=0,h1=-Infinity,hi=0,L=new Float64Array(N),Lh=new Float64Array(N);
+    for(var i=0;i<N;i++){var a=0,b=0;for(var c=0;c<d;c++){a+=q[c]*K[i][c];b+=q[c]*Kh[i][c];}a/=sq;b/=sq;L[i]=a;Lh[i]=b;le+=(a-b)*(a-b);if(a>b1){b1=a;bi=i;}if(b>h1){h1=b;hi=i;}}
+    if(bi!==hi)sh++;var z=0,zh=0,o=new Float64Array(8),oh=new Float64Array(8);for(i=0;i<N;i++){var p=Math.exp(L[i]-b1),ph=Math.exp(Lh[i]-h1);z+=p;zh+=ph;for(c=0;c<8;c++){o[c]+=p*Vv[i][c];oh[c]+=ph*Vv[i][c];}}
+    for(c=0;c<8;c++){var x=o[c]/z,y=oh[c]/zh;oe+=(x-y)*(x-y);on+=x*x;}});return{le:le/(Nq*N),sh:sh/Nq,oe:Math.sqrt(oe/on)};}
+  var A0=assign('km'),A1=assign('q',1),AM=assign('q',Mc);var K0=recon(A0),KM=recon(AM);
+  return{energy:en/et,res:[ev(K0),ev(recon(A1)),ev(KM),ev(psac(K0)),ev(psac(KM))]};}
+ return{run:run};})();
+
+(function(){
+ var svg=$('sb-svg');if(!svg)return;var sa=$('sb-a'),sr=$('sb-r'),sm=$('sb-m'),sg=$('sb-g'),rd=$('sb-read'),bs=$('sb-seed');var seed=7,tm=null;
+ var names=['QVG','QSAC M=1','QSAC','PSAC','QSAC+PSAC'],cols=['var(--qvg)','var(--kivi)','var(--qsac)','var(--q)','var(--ours)'];
+ function draw(){$('sb-a-v').textContent=fx(+sa.value,1);$('sb-r-v').textContent=sr.value;
+  var t0=performance.now();var R=SB.run({alpha:+sa.value,r:+sr.value,M:+sm.value,seed:seed,grp1:sg.value==='1'});var dt=performance.now()-t0;
+  clear(svg);var mets=[['le','logit 均方误差'],['sh','top-1 漂移率'],['oe','注意力输出相对误差']];var gw=240,x0=24,top=24,bot=200;var mx=0;
+  mets.forEach(function(m){R.res.forEach(function(x){mx=Math.max(mx,x[m[0]]/R.res[0][m[0]]);});});mx=Math.max(1.2,Math.ceil(mx*10)/10);
+  function Y(v){return bot-v/mx*(bot-top);}
+  [0,0.5,1].concat(mx>1.5?[1.5]:[]).concat(mx>2?[2]:[]).forEach(function(v){if(v>mx)return;el('line',{x1:x0,x2:750,y1:Y(v),y2:Y(v),class:v===1?'axis':'gridl'},svg);el('text',{x:x0-4,y:Y(v)+4,'text-anchor':'end',class:'t2'},svg,Math.round(v*100)+'%');});
+  mets.forEach(function(m,mi){var gx=x0+10+mi*gw;el('text',{x:gx+gw/2-14,y:bot+18,'text-anchor':'middle',class:'t'},svg,m[1]);
+   R.res.forEach(function(x,k){var v=x[m[0]]/R.res[0][m[0]],bx=gx+k*42;el('rect',{x:bx,y:Y(v),width:34,height:Math.max(1,bot-Y(v)),rx:3,style:'fill:'+cols[k]},svg);el('text',{x:bx+17,y:Y(v)-4,'text-anchor':'middle',class:'t2'},svg,Math.round(v*100)+'%');});});
+  var A=R.res;rd.innerHTML='前 r 个方向的 Query 能量占比 <b>'+fx(R.energy*100,1)+'%</b>　·　计算 '+fx(dt,0)+' ms<br>'+names.map(function(n,k){return '<span class="sw" style="background:'+cols[k]+'"></span>'+n+'：logit MSE '+fx(A[k].le,3)+'，top-1 漂移 '+fx(A[k].sh*100,1)+'%，输出误差 '+fx(A[k].oe*100,1)+'%';}).join('<br>');}
+ function sched(){if(tm)clearTimeout(tm);tm=setTimeout(draw,60);}
+ [sa,sr].forEach(function(s){s.addEventListener('input',function(){$('sb-a-v').textContent=fx(+sa.value,1);$('sb-r-v').textContent=sr.value;sched();});});[sm,sg].forEach(function(s){s.addEventListener('change',sched);});bs.addEventListener('click',function(){seed=seed*13%997+3;sched();});
+ setTimeout(draw,50);
+})();
+
+/* ---------------- §8 data ---------------- */
+var MODELS=['Matrix-Game-2','LingBot-v2','HY-World 1.5','LongCat-Video','Causal-Forcing'];
+var T3={480:{
+ psnr:{KIVI:[19.298,14.799,17.677,24.448,15.585],QVG:[17.749,14.414,16.118,20.683,14.887],Ours:[20.615,16.138,18.449,25.508,16.283]},
+ ssim:{KIVI:[.6557,.5950,.7165,.9180,.7201],QVG:[.5651,.5726,.6559,.8556,.6773],Ours:[.7212,.6688,.7661,.9286,.7464]},
+ lpips:{KIVI:[.1797,.2508,.1540,.0399,.1775],QVG:[.2851,.2779,.2114,.0784,.2185],Ours:[.1443,.1893,.1082,.0332,.1554]},
+ vb:{BF16:[.7831,.7728,.8174,.8123,.8031],KIVI:[.7817,.7695,.8106,.8050,.8034],QVG:[.7662,.7707,.8127,.8122,.8008],Ours:[.7836,.7732,.8173,.8130,.8042]}},
+720:{
+ psnr:{KIVI:[19.200,15.134,17.643,22.896,15.394],QVG:[17.721,13.927,16.085,20.988,14.771],Ours:[20.568,15.564,18.423,25.127,16.231]},
+ ssim:{KIVI:[.6659,.6317,.7338,.8805,.7349],QVG:[.5871,.5958,.6810,.8246,.6996],Ours:[.7234,.6540,.7779,.9094,.7628]},
+ lpips:{KIVI:[.2048,.2520,.1747,.0708,.2013],QVG:[.3047,.3220,.2358,.1098,.2390],Ours:[.1651,.2267,.1257,.0503,.1716]},
+ vb:{BF16:[.7875,.7905,.8253,.8174,.8059],KIVI:[.7863,.7883,.8188,.8172,.8056],QVG:[.7694,.7864,.8211,.8168,.8031],Ours:[.7880,.7907,.8254,.8177,.8065]}}};
+
+(function(){
+ var svg=$('t3-svg');if(!svg)return;var sres=$('t3-res'),smet=$('t3-met'),vbw=$('t3-vb');var res='480',met='psnr';
+ var cols={KIVI:'var(--kivi)',QVG:'var(--qvg)',Ours:'var(--ours)'};
+ function draw(){var D=T3[res][met];clear(svg);var x0=52,x1=750,top=18,bot=206;var rng={psnr:[10,27],ssim:[0.5,1.0],lpips:[0,0.35]}[met];var ticks={psnr:[10,15,20,25],ssim:[0.5,0.6,0.7,0.8,0.9,1.0],lpips:[0,0.1,0.2,0.3]}[met];function Y(v){return bot-(v-rng[0])/(rng[1]-rng[0])*(bot-top);}
+  ticks.forEach(function(v){el('line',{x1:x0,x2:x1,y1:Y(v),y2:Y(v),class:'gridl'},svg);el('text',{x:x0-6,y:Y(v)+4,'text-anchor':'end',class:'t2'},svg,met==='psnr'?fx(v,0):fx(v,1));});
+  var gw=(x1-x0)/5;MODELS.forEach(function(m,i){var gx=x0+i*gw+16;['KIVI','QVG','Ours'].forEach(function(meth,j){var val=D[meth][i],y=Y(val);el('rect',{x:gx+j*36,y:y,width:30,height:Math.max(1,bot-y),rx:3,style:'fill:'+cols[meth]},svg);el('text',{x:gx+j*36+15,y:y-4,'text-anchor':'middle',class:'t2'},svg,met==='psnr'?fx(val,1):fx(val,3));});
+   el('text',{x:gx+51,y:bot+18,'text-anchor':'middle',class:'t'},svg,m);});
+  el('text',{x:x0,y:12,class:'t2'},svg,{psnr:'PSNR（dB，vs BF16）↑',ssim:'SSIM ↑',lpips:'LPIPS ↓（越低越好）'}[met]);
+  var vb=T3[res].vb;var h='<table><thead><tr><th>VBench 均值 Δ vs BF16（×100）</th>'+MODELS.map(function(m){return '<th class="num">'+m+'</th>';}).join('')+'</tr></thead><tbody>';
+  ['KIVI','QVG','Ours'].forEach(function(meth){h+='<tr><td>'+(meth==='Ours'?'QuantWM':meth)+'</td>'+vb[meth].map(function(v,i){var dd=(v-vb.BF16[i])*100;return '<td class="num'+(dd>0?' hot':'')+'">'+(dd>0?'+':'')+fx(dd,2)+'</td>';}).join('')+'</tr>';});
+  vbw.innerHTML=h+'</tbody></table>';}
+ Array.prototype.forEach.call(sres.querySelectorAll('button'),function(b){b.addEventListener('click',function(){res=b.getAttribute('data-r');pressSeg(sres,b);draw();});});
+ Array.prototype.forEach.call(smet.querySelectorAll('button'),function(b){b.addEventListener('click',function(){met=b.getAttribute('data-k');pressSeg(smet,b);draw();});});
+ draw();
+})();
+
+/* QVG self vs repro */
+(function(){var svg=$('qvg-svg');if(!svg)return;
+ var G=[{m:'LongCat-Video 480p INT2',rows:[['QVG · 原论文（6.94×，首个生成块）',28.716,'qvg',true],['QVG · 本文复现',20.683,'qvg',false],['KIVI · QVG 论文（6.40×）',20.317,'kivi',true],['KIVI · 本文（组 32 + BF16 近窗）',24.448,'kivi',false],['QuantWM · 本文',25.508,'ours',false]]},
+        {m:'HY-World 1.5 / HY-WorldPlay-8B 480p INT2',rows:[['QVG · 原论文（7.05×，长视频）',29.174,'qvg',true],['QVG · 本文复现',16.118,'qvg',false],['KIVI · QVG 论文（6.40×）',24.272,'kivi',true],['KIVI · 本文',17.677,'kivi',false],['QuantWM · 本文',18.449,'ours',false]]}];
+ var x0=250,x1=730;function X(v){return x0+(x1-x0)*v/32;}var y=18;
+ for(var v=0;v<=32;v+=4){el('line',{x1:X(v),x2:X(v),y1:10,y2:252,class:'gridl'},svg);el('text',{x:X(v),y:258,'text-anchor':'middle',class:'t2'},svg,v);}
+ G.forEach(function(gp){el('text',{x:10,y:y+4,class:'tb'},svg,gp.m);y+=12;gp.rows.forEach(function(r){el('text',{x:x0-8,y:y+13,'text-anchor':'end',class:'t2'},svg,r[0]);el('rect',{x:X(0),y:y+2,width:X(r[1])-X(0),height:15,rx:3,style:'fill:var(--'+r[2]+');opacity:'+(r[3]?.4:.95)+(r[3]?';stroke:var(--'+r[2]+');stroke-dasharray:3 2':'')},svg);el('text',{x:X(r[1])+5,y:y+14,class:'t'},svg,fx(r[1],2));y+=20;});y+=10;});
+})();
+
+/* Table 4 */
+(function(){var svg=$('t4-svg');if(!svg)return;var q=[.5388,.5491,.6136,.5034,.3728],o=[.1019,.1600,.1392,.2225,.1420];var short=['MG-2','LB-2','HY','LongCat','CF'];
+ var x0=40,x1=390,top=14,bot=190;function Y(v){return bot-v/0.7*(bot-top);}
+ [0,0.2,0.4,0.6].forEach(function(v){el('line',{x1:x0,x2:x1,y1:Y(v),y2:Y(v),class:'gridl'},svg);el('text',{x:x0-5,y:Y(v)+4,'text-anchor':'end',class:'t2'},svg,Math.round(v*100)+'%');});
+ var gw=(x1-x0)/5;short.forEach(function(m,i){var gx=x0+i*gw+10;[[q[i],'qvg'],[o[i],'ours']].forEach(function(p,j){el('rect',{x:gx+j*26,y:Y(p[0]),width:22,height:bot-Y(p[0]),rx:3,style:'fill:var(--'+p[1]+')'},svg);el('text',{x:gx+j*26+11,y:Y(p[0])-4,'text-anchor':'middle',class:'t2'},svg,Math.round(p[0]*100));});el('text',{x:gx+24,y:bot+16,'text-anchor':'middle',class:'t'},svg,m);});
+})();
+
+/* Table 5 */
+(function(){var svg=$('t5-svg');if(!svg)return;
+ var cells=[[0,0,16.118,.6137,'都不开 = QVG'],[1,0,17.990,.3817,'只开 QSAC'],[0,1,17.849,.2290,'只开 PSAC'],[1,1,18.449,.1392,'两个都开']];
+ var cw=150,ch=86,x0=90,y0=30;el('text',{x:x0+cw/2,y:y0-10,'text-anchor':'middle',class:'t2'},svg,'PSAC ×');el('text',{x:x0+cw*1.5+8,y:y0-10,'text-anchor':'middle',class:'t2'},svg,'PSAC ✓');
+ el('text',{x:x0-10,y:y0+ch/2+4,'text-anchor':'end',class:'t2'},svg,'QSAC ×');el('text',{x:x0-10,y:y0+ch*1.5+12,'text-anchor':'end',class:'t2'},svg,'QSAC ✓');
+ cells.forEach(function(c){var x=x0+c[1]*(cw+8),y=y0+c[0]*(ch+8);var a=(c[2]-16.118)/(18.449-16.118);el('rect',{x:x,y:y,width:cw,height:ch,rx:8,style:'fill:var(--ours);fill-opacity:'+(0.08+0.5*a)+';stroke:var(--rule2)'},svg);
+  el('text',{x:x+cw/2,y:y+22,'text-anchor':'middle',class:'t2'},svg,c[4]);el('text',{x:x+cw/2,y:y+46,'text-anchor':'middle',style:'fill:var(--ink);font-size:17px;font-weight:700'},svg,fx(c[2],2)+' dB');
+  el('text',{x:x+cw/2,y:y+68,'text-anchor':'middle',class:'t2'},svg,'漂移 '+fx(c[3]*100,1)+'%'+(c[2]>16.2?'（+'+fx(c[2]-16.118,2)+' dB）':''));});
+})();
+
+/* Table 8 */
+(function(){var t=$('t8-tbl');if(!t)return;
+ var D=[['Matrix-Game-2',[.7287,.8659,.4475,.6767,.6797],[.7280,.8675,.4439,.5275,.6417],[.7328,.8693,.4523,.6639,.6796]],
+        ['LingBot-v2',[.9063,.9318,.6614,.7593,.8147],[.8946,.9280,.6404,.7620,.8063],[.9121,.9353,.6567,.7633,.8168]],
+        ['HY-World 1.5',[.7051,.8242,.4730,.6247,.6567],[.6591,.8025,.4423,.4756,.5949],[.7100,.8269,.4895,.6242,.6627]],
+        ['LongCat-Video',[.8340,.8939,.6334,.7396,.7752],[.8253,.8920,.6222,.7323,.7680],[.8378,.8957,.6443,.7359,.7784]],
+        ['Causal-Forcing',[.6903,.8445,.4596,.5647,.6398],[.7052,.8213,.5032,.6005,.6576],[.7184,.8155,.5070,.6566,.6744]]];
+ var h='<thead><tr><th>Table 8 · 1 分钟</th><th>方法</th><th class="num">Subject</th><th class="num">Background</th><th class="num">Aesthetic</th><th class="num">Imaging</th><th class="num">Avg</th><th class="num">Avg − BF16</th></tr></thead><tbody>';
+ D.forEach(function(r){[['BF16',r[1]],['QVG',r[2]],['QuantWM',r[3]]].forEach(function(m,k){h+='<tr'+(k===2?' class="me"':'')+'>'+(k===0?'<td rowspan="3">'+r[0]+'</td>':'')+'<td>'+m[0]+'</td>'+m[1].map(function(v,i){var hot=k>0&&v>r[1][i]&&i===4;return '<td class="num'+(k>0&&v>r[1][i]?(i===4?' hot':' '):'')+'"'+(k>0&&v>r[1][i]&&i<4?' style="color:var(--risk-ink)"':'')+'>'+fx(v*100,2)+'</td>';}).join('')+'<td class="num'+(k>0&&m[1][4]>r[1][4]?' hot':'')+'">'+(k===0?'—':((m[1][4]-r[1][4])*100>0?'+':'')+fx((m[1][4]-r[1][4])*100,2))+'</td></tr>';});});
+ t.innerHTML=h+'</tbody>';})();
+
+/* ---------------- §9 video ---------------- */
+var VID={"hy-world-1":{"T":221,"hw":[704,1280],"pq":[38.5,37.1,36.5,36.1,36.4,35.7,35.5,35.5,35.7,35.1,34.9,34.9,35.0,34.4,34.1,34.5,34.7,34.0,33.8,33.8,34.1,33.8,33.6,33.8,33.9,33.8,33.4,33.0,33.0,22.2,19.7,19.4,19.0,19.0,19.2,19.2,19.2,19.0,19.1,18.9,18.9,18.5,18.6,18.2,18.1,17.6,17.3,17.0,16.9,16.6,16.6,16.4,16.3,16.0,15.9,15.8,15.7,15.4,15.3,15.1,15.1,15.0,14.8,14.7,14.7,14.6,14.6,14.6,14.5,14.4,14.5,14.5,14.5,14.4,14.4,14.4,14.4,14.4,14.4,14.4,14.3,14.3,14.3,14.3,14.3,14.3,14.4,14.4,14.3,14.4,14.3,14.3,14.3,14.3,13.9,13.9,13.8,13.9,14.0,14.2,14.2,14.2,14.2,14.2,14.2,14.1,14.1,14.1,14.1,14.1,14.0,14.0,14.1,14.1,14.1,14.1,14.2,14.1,14.1,14.2,14.3,14.3,14.3,14.4,14.7,14.5,14.4,14.5,14.5,14.6,14.7,14.8,14.9,14.9,14.9,14.9,15.0,15.0,15.0,15.2,15.3,15.3,15.2,15.2,15.2,15.2,15.2,15.2,15.2,15.2,15.1,15.2,15.2,15.2,15.0,15.1,15.1,15.3,15.1,15.2,15.1,15.2,15.2,15.4,15.3,15.3,15.5,15.4,15.4,15.4,15.3,15.3,15.4,15.3,15.2,15.1,15.1,15.1,15.1,15.2,15.2,15.2,15.2,15.2,15.2,15.1,14.9,14.8,14.7,14.8,14.6,14.4,14.3,14.2,14.2,14.2,14.2,14.2,14.1,14.2,14.1,14.2,14.1,14.1,14.1,14.0,13.8,13.8,13.8,13.7,13.8,13.8,13.8,13.8,13.8,13.8,13.7,13.7,13.7,13.7,13.7],"po":[36.2,35.1,34.6,34.0,34.3,34.0,33.8,33.8,33.9,33.5,33.4,33.4,33.5,33.1,32.6,32.9,32.7,32.7,32.4,32.4,32.4,32.4,32.1,32.4,32.3,32.4,32.2,32.2,32.2,28.4,24.7,24.5,24.1,24.0,24.4,24.3,24.4,24.1,24.7,24.6,24.7,24.5,24.9,24.1,23.4,22.5,22.3,22.0,22.0,21.8,22.1,21.8,21.8,21.5,21.6,21.5,21.5,21.1,21.2,20.9,20.9,20.3,19.6,19.3,19.3,19.0,18.9,18.4,18.4,18.1,18.0,17.8,17.8,17.6,17.6,17.6,17.6,17.5,17.3,17.3,17.2,17.1,17.4,17.3,17.2,17.2,17.2,17.1,17.0,16.9,16.9,16.8,16.8,16.7,16.5,16.4,16.4,16.3,16.4,16.3,16.0,15.7,15.5,15.4,15.5,15.4,15.5,15.5,15.6,15.5,15.3,15.4,15.5,15.4,15.5,15.5,15.7,15.6,15.8,15.9,16.0,15.9,15.9,16.0,16.3,16.1,16.0,16.1,16.2,16.3,16.6,16.6,16.7,16.7,16.9,16.9,17.0,16.8,16.8,16.8,16.9,16.6,16.6,16.4,16.4,16.3,16.3,16.3,16.3,16.1,16.1,16.1,16.0,15.8,15.8,15.8,15.7,15.6,15.6,15.6,15.6,15.6,15.6,15.7,15.8,15.7,15.8,16.1,16.1,16.1,16.3,16.1,16.2,16.1,15.9,15.8,15.8,15.8,15.7,15.9,15.9,15.9,15.8,16.0,16.0,16.0,15.9,16.0,16.1,16.1,15.8,15.8,15.7,15.7,15.7,15.8,15.7,15.7,15.5,15.6,15.5,15.4,15.4,15.5,15.4,15.4,15.0,15.1,14.9,14.9,14.9,15.1,14.9,14.9,15.0,15.0,15.0,15.0,14.9,15.1,15.0],"wb":[2.98,3.44,4.1,2.63,3.62,4.33,3.18,3.1,3.72,4.16,3.75,3.29,3.86,5.8,3.28,3.45,3.85,4.38,4.68,3.31,3.78,5.34,3.33,3.38,3.46,4.28,4.81,3.0,3.73,5.41,3.28,3.05,4.57,2.6,2.51,1.96,3.29,3.75,2.77,2.18,3.15,2.59,3.07,2.21,2.99,4.21,3.06,2.55,3.39,3.26,5.37,3.11,4.19,5.59,3.74,3.0,4.31,3.66,5.92,3.11,4.85,6.92,3.09,2.58,3.87,3.37,5.2,2.66,3.92,5.94,3.86,2.92,4.11,3.56,6.05,3.19,3.75,7.22,3.74,3.57,3.84,5.14,6.13,3.43,3.88,6.93,3.8,3.48,3.97,4.34,6.1,2.88,4.57,7.89,3.58,3.07,4.5,3.01,4.49,3.25,4.03,5.67,4.02,3.11,3.97,4.6,6.58,3.85,4.78,7.74,4.93,3.9,4.84,5.77,7.48,5.69,5.28,8.02,4.76,2.81,4.75,5.83,6.73,4.23,5.13,8.48,3.36,2.14,4.64,5.75,6.87,4.06,5.03,6.68,4.5,3.64,4.76,4.6,5.89,3.91,4.85,6.0,4.52,3.44,4.83,5.29,4.85,3.51,4.14,5.69,5.56,2.94,3.99,5.14,5.84,3.42,4.75,6.33,3.9,1.95,3.33,4.49,5.89,3.44,3.86,6.92,4.66,3.34,3.85,7.03,4.65,2.69,3.3,5.27,4.7,3.46,3.74,5.22,6.03,3.14,3.62,5.48,5.79,3.22,3.83,5.12,6.2,2.76,3.46,7.31,5.44,3.33,3.41,7.7,4.67,3.29,3.55,6.42,5.02,3.14,3.5,4.89,6.49,3.03,3.69,7.95,5.01,3.33,3.55,7.35,5.05,3.25,3.63,5.2,6.58,3.07,3.47,6.74,4.72,3.11],"wq":[2.96,3.46,4.1,2.62,3.6,4.32,3.21,3.09,3.74,4.17,3.76,3.26,3.85,5.76,3.25,3.46,3.85,4.31,4.67,3.29,3.75,5.29,3.35,3.36,3.46,4.22,4.71,3.08,6.81,8.97,4.06,3.23,5.59,3.19,2.7,2.18,3.8,4.93,3.42,2.53,3.89,3.68,5.04,2.97,4.22,6.16,4.28,3.21,4.53,4.48,6.63,3.77,5.2,6.71,4.88,3.74,5.3,4.89,7.12,3.7,7.92,11.22,3.67,2.81,5.11,4.43,5.84,3.16,4.31,6.72,4.69,3.47,4.48,4.66,7.33,3.83,4.52,7.73,5.22,3.93,4.81,6.06,7.83,3.92,4.74,8.54,5.55,3.79,4.8,5.87,7.8,3.7,7.97,15.07,5.74,4.28,5.17,4.55,8.32,6.36,5.93,9.47,6.9,4.3,5.65,7.42,9.36,4.55,5.73,10.18,7.17,4.49,5.96,8.43,10.18,6.58,6.44,10.4,6.88,3.1,5.64,7.34,8.09,5.29,7.54,14.11,5.8,3.47,6.02,8.9,10.34,4.79,6.39,10.32,7.0,4.64,5.82,7.76,10.17,5.04,6.2,8.61,7.48,4.89,6.0,9.86,6.71,4.55,5.41,8.59,8.32,3.85,5.88,7.89,8.53,4.0,10.28,8.67,5.21,2.88,5.38,7.48,10.01,4.3,4.83,7.51,10.14,4.25,5.13,11.02,5.53,3.14,5.01,7.74,7.8,4.66,5.62,7.2,9.76,4.53,5.48,7.31,9.08,4.28,5.83,7.52,8.84,3.54,7.07,9.19,8.94,4.42,5.06,11.26,7.05,4.43,5.1,7.52,9.84,4.26,4.94,7.36,10.73,3.6,5.85,10.96,9.22,4.27,5.61,10.84,8.58,4.06,5.73,8.93,10.03,3.88,5.64,10.22,8.63,4.27],"wo":[3.0,3.44,4.08,2.67,3.58,4.36,3.19,3.1,3.69,4.16,3.76,3.27,3.82,5.76,3.26,3.42,3.84,4.36,4.69,3.27,3.78,5.32,3.35,3.37,3.47,4.26,4.81,3.04,3.95,6.45,3.45,3.09,5.0,2.76,2.42,1.98,3.47,4.16,2.96,2.25,3.46,2.83,2.81,1.92,2.83,4.01,3.2,2.58,3.62,3.55,5.61,3.17,4.44,5.97,3.93,3.14,4.68,4.02,6.05,3.28,5.05,7.63,3.02,2.61,4.06,3.46,5.2,2.62,4.17,5.87,3.83,2.93,4.33,3.79,6.21,3.3,4.48,7.13,4.22,3.29,4.45,6.15,6.46,3.32,4.74,6.99,4.2,3.24,4.53,4.39,6.54,2.96,5.52,8.65,3.76,3.24,4.76,2.94,6.29,4.72,5.21,7.53,5.03,3.59,4.91,5.16,7.35,3.5,5.5,8.39,5.4,4.04,5.56,6.1,8.19,5.01,5.79,8.1,5.08,3.16,5.06,5.39,7.03,3.83,5.28,8.77,3.99,2.63,5.97,6.56,7.01,4.12,5.99,7.58,4.98,3.87,5.69,5.08,6.9,4.11,5.65,6.93,4.98,3.84,5.86,5.96,6.0,3.92,5.16,6.23,5.99,2.91,5.39,5.58,6.5,3.6,6.43,7.7,4.18,1.9,4.71,5.16,7.89,3.58,4.77,8.53,4.58,3.43,4.02,7.02,6.23,2.54,3.57,6.79,6.25,3.52,3.92,6.28,6.9,3.41,3.86,7.26,6.24,3.54,4.27,6.06,7.08,2.81,3.97,8.14,5.64,3.44,3.65,8.42,5.52,3.22,3.6,6.95,6.13,3.2,3.64,5.63,7.79,2.94,3.87,9.45,5.71,3.33,3.85,8.54,5.8,3.09,3.96,7.44,7.29,3.08,3.91,7.97,5.56,3.12],"mpq":17.66,"mpo":19.46,"mwb":4.362,"mwq":5.952,"mwo":4.761,"dq":20.98,"do":19.43},"hy-world-2":{"T":93,"hw":[480,832],"pq":[40.0,40.0,39.7,39.5,39.6,39.5,39.4,39.6,39.6,39.9,39.7,39.2,39.3,38.8,38.6,38.8,38.3,37.3,36.6,35.0,33.9,33.7,32.6,32.5,32.3,32.0,31.9,31.1,31.0,25.9,21.2,21.3,21.0,20.2,19.4,18.3,17.9,17.5,16.8,16.6,16.4,16.2,16.0,15.8,15.8,15.7,15.6,15.6,15.6,15.6,15.6,15.6,15.6,15.7,15.8,15.9,15.9,15.8,15.8,15.7,15.7,15.9,15.8,15.9,16.0,16.0,16.0,16.1,16.1,16.1,16.1,16.1,16.0,16.0,16.0,15.8,15.7,15.6,15.5,15.4,15.3,15.3,15.2,15.1,15.0,15.0,14.9,14.8,14.8,14.8,14.8,14.8,14.8],"po":[40.0,40.0,39.7,39.5,39.6,39.5,39.4,39.6,39.6,39.9,39.7,39.3,39.2,38.8,38.5,38.7,38.4,37.3,36.7,35.0,34.0,33.7,32.7,32.5,32.3,32.1,31.9,31.2,31.1,31.2,29.8,29.5,29.2,27.3,26.3,25.7,25.8,25.7,25.5,25.1,24.4,23.2,22.6,21.3,21.2,20.8,20.3,20.2,20.1,19.9,19.8,19.7,19.6,19.5,19.3,19.2,19.0,18.8,18.7,18.5,18.5,18.5,18.2,18.1,18.0,18.2,18.4,18.7,18.8,18.8,18.9,18.9,18.9,18.9,18.9,18.9,18.8,18.7,18.3,18.2,18.2,18.1,18.1,18.1,18.0,18.1,18.2,18.2,18.3,18.2,18.1,18.0,17.9],"wb":[1.63,1.32,1.62,1.25,1.4,1.93,1.08,1.31,1.49,1.27,1.63,1.11,1.63,1.82,1.35,1.25,1.67,1.44,1.92,1.35,1.34,2.01,1.41,1.26,1.42,1.57,2.22,1.25,1.55,2.93,1.43,1.23,1.79,1.46,1.62,1.21,1.29,1.91,1.41,1.27,1.48,1.45,1.84,0.77,1.42,2.4,1.54,1.59,1.6,1.76,2.92,1.53,1.51,3.01,1.74,1.7,1.8,1.9,3.01,1.59,1.87,4.02,1.45,1.2,1.56,1.29,2.58,1.21,1.3,2.79,1.35,1.33,1.53,1.48,2.5,1.32,1.59,3.11,1.37,1.01,1.6,1.66,2.47,1.38,1.62,2.91,1.52,1.24,1.63,1.34,2.12,1.39],"wq":[1.62,1.33,1.62,1.27,1.39,1.92,1.08,1.3,1.5,1.28,1.62,1.13,1.61,1.83,1.37,1.25,1.63,1.44,1.93,1.34,1.31,2.03,1.43,1.25,1.38,1.57,2.03,1.32,3.44,6.63,1.33,1.34,1.83,2.03,2.66,1.44,1.34,3.24,1.47,1.33,1.54,1.57,2.72,0.97,1.34,3.56,1.39,1.5,1.68,1.85,3.41,1.4,1.48,3.4,1.75,1.57,1.69,1.9,3.02,1.46,3.36,7.38,1.38,0.9,1.73,1.76,3.09,1.18,1.11,3.19,1.66,1.36,1.58,1.75,3.26,1.25,1.32,3.23,1.71,0.95,1.68,1.84,2.97,1.41,1.37,3.05,1.73,1.12,1.39,1.57,2.31,1.18],"wo":[1.64,1.31,1.62,1.26,1.4,1.92,1.07,1.31,1.51,1.24,1.63,1.11,1.61,1.82,1.36,1.25,1.62,1.47,1.94,1.33,1.34,2.0,1.4,1.28,1.4,1.56,2.19,1.24,1.66,3.35,1.28,1.09,1.64,1.65,1.66,1.15,1.34,1.84,1.46,1.23,1.67,1.12,1.77,0.71,1.31,2.72,1.63,1.42,1.64,1.65,2.97,1.5,1.62,3.2,1.65,1.57,1.74,1.89,3.19,1.62,1.98,4.6,1.45,1.11,1.75,1.57,3.03,1.24,0.92,2.85,1.47,1.29,1.39,1.59,2.78,1.26,1.3,3.0,1.54,1.06,1.55,1.78,2.69,1.34,1.29,2.73,1.6,1.17,1.22,1.43,2.19,1.48],"mpq":22.73,"mpo":25.64,"mwb":1.677,"mwq":1.889,"mwo":1.69,"dq":8.71,"do":7.42},"hy-world-3":{"T":93,"hw":[704,1280],"pq":[42.2,40.1,39.1,38.2,37.4,35.6,34.1,34.2,34.8,35.5,36.4,36.4,36.6,35.5,33.6,32.9,33.0,32.5,32.7,32.7,32.5,31.1,30.3,30.0,29.1,28.5,28.3,28.2,29.4,23.4,21.1,21.0,20.4,19.2,18.4,19.4,19.3,19.1,17.9,17.3,17.4,17.9,18.2,18.6,18.1,16.8,15.4,15.2,15.2,15.8,16.1,16.7,16.9,17.1,17.1,16.9,16.7,16.4,16.1,16.0,16.1,16.5,16.5,16.5,16.6,16.7,16.8,16.7,16.6,16.4,15.7,15.5,15.4,15.5,15.7,16.0,16.2,16.4,16.6,16.6,16.6,16.3,16.0,16.1,16.2,16.2,16.2,16.2,16.1,16.0,16.0,15.9,16.0],"po":[42.1,40.0,39.1,38.2,37.3,35.6,34.1,34.2,34.8,35.5,36.4,36.4,36.6,35.6,33.6,32.9,33.0,32.5,32.7,32.7,32.5,31.1,30.4,29.9,29.1,28.4,28.3,28.2,29.4,27.9,26.7,26.7,25.5,24.1,23.7,22.8,23.7,24.1,24.2,24.5,24.4,24.8,24.6,23.2,22.6,21.1,19.0,18.1,17.7,17.1,16.6,16.2,16.1,16.1,16.0,15.7,15.7,15.7,16.0,16.3,16.5,16.1,15.4,15.4,15.6,15.2,14.7,13.9,13.9,13.9,14.1,14.6,14.6,14.6,14.9,15.6,15.3,14.9,14.0,13.7,13.6,13.5,13.7,14.3,14.6,14.7,14.2,14.1,14.1,13.7,13.6,13.5,13.6],"wb":[1.81,1.34,1.5,0.87,1.16,1.75,0.79,0.98,1.17,1.17,1.75,1.06,1.83,2.56,1.19,0.72,1.4,1.03,1.39,1.03,1.26,1.9,0.9,1.02,1.27,1.48,2.3,1.57,1.69,2.61,1.03,0.86,1.92,1.85,2.95,1.5,1.29,1.09,1.04,1.07,1.84,1.46,1.88,0.98,1.14,2.54,1.57,1.3,2.06,1.54,1.69,0.79,1.03,1.76,1.36,1.33,1.39,1.57,1.85,1.33,2.01,3.47,0.95,0.89,1.39,1.51,2.07,1.26,1.11,2.42,1.57,1.36,1.42,1.23,2.17,1.25,1.5,2.62,1.11,1.12,1.48,1.68,3.59,1.79,1.62,1.84,1.24,1.13,2.06,1.67,2.15,0.94],"wq":[1.71,1.29,1.5,0.85,1.19,1.74,0.78,0.99,1.15,1.15,1.74,1.06,1.8,2.61,1.17,0.75,1.42,1.03,1.43,1.05,1.29,1.99,0.92,0.99,1.24,1.48,2.38,1.73,5.43,5.05,2.51,1.58,3.14,2.6,2.33,1.79,1.45,2.24,1.57,1.18,2.02,1.45,1.65,1.52,2.65,3.33,1.56,1.34,1.81,1.41,1.6,1.14,1.45,2.43,1.76,1.47,1.55,1.9,2.18,1.5,3.18,5.83,1.46,1.11,1.81,1.94,2.63,1.0,1.23,2.71,1.76,1.24,1.11,1.39,2.59,1.54,1.67,2.94,1.48,1.01,1.97,1.87,2.73,1.66,1.47,2.0,1.7,1.07,2.08,2.05,2.51,1.23],"wo":[1.71,1.32,1.48,0.86,1.18,1.76,0.76,0.98,1.16,1.15,1.75,1.05,1.82,2.61,1.18,0.75,1.44,1.0,1.44,1.08,1.3,1.99,0.91,0.97,1.27,1.52,2.39,1.7,1.74,3.15,1.21,0.86,2.02,1.92,2.65,1.33,1.26,1.25,1.03,0.99,1.89,1.56,1.91,0.97,1.01,2.83,1.48,1.02,2.11,1.59,1.55,0.78,0.96,1.78,1.2,1.06,1.28,1.45,1.51,1.01,1.44,2.75,1.22,0.99,1.85,1.27,1.35,1.23,1.12,2.21,1.19,0.8,1.38,1.25,2.19,1.06,1.49,2.57,1.22,1.13,1.54,1.28,1.59,1.14,1.26,2.13,1.01,0.89,1.27,1.23,1.4,1.36],"mpq":22.22,"mpo":22.64,"mwb":1.534,"mwq":1.815,"mwo":1.442,"dq":8.19,"do":7.42},"hy-world-4":{"T":93,"hw":[704,1280],"pq":[41.5,40.9,40.5,40.3,40.4,40.1,39.6,39.6,39.4,39.3,38.9,37.8,37.6,36.4,35.7,35.6,35.5,35.2,35.0,34.2,34.0,33.8,33.2,33.0,32.1,31.1,30.4,29.1,29.1,23.6,21.4,21.0,20.6,20.3,19.7,18.6,18.3,17.9,17.3,17.1,17.0,16.6,16.4,16.0,15.8,15.7,15.5,15.5,15.4,15.4,15.3,15.4,15.4,15.4,15.4,15.4,15.4,15.4,15.5,15.5,15.5,15.3,15.2,15.1,15.2,15.2,15.2,15.2,15.2,15.3,15.3,15.4,15.4,15.4,15.5,15.4,15.4,15.4,15.4,15.4,15.4,15.3,15.3,15.2,15.2,15.2,15.3,15.3,15.3,15.3,15.4,15.3,15.4],"po":[41.7,41.0,40.6,40.3,40.5,40.2,39.7,39.6,39.4,39.4,39.0,37.7,37.7,36.4,35.8,35.6,35.6,35.3,35.0,34.2,34.0,33.8,33.2,33.0,32.1,31.1,30.4,29.2,29.1,27.6,25.2,24.3,23.4,22.5,21.5,20.8,20.8,21.2,22.4,23.3,24.1,25.0,25.0,23.6,22.9,22.1,20.2,19.7,19.4,19.2,19.1,19.3,19.4,19.5,20.1,20.3,20.4,20.2,20.1,19.4,19.3,18.9,18.5,18.4,18.4,18.4,18.4,18.4,18.4,18.4,18.3,18.3,18.2,18.2,18.3,18.6,18.7,18.9,19.1,19.1,19.0,18.8,18.7,18.5,18.4,18.4,18.5,18.6,18.6,18.8,19.0,19.2,19.4],"wb":[1.32,0.81,1.17,0.34,0.97,1.51,0.55,0.87,1.06,0.72,1.56,0.62,1.58,1.47,1.11,0.78,1.53,1.03,1.6,1.01,1.11,1.58,1.21,1.13,1.37,1.18,1.88,0.45,1.66,1.8,1.05,0.82,1.24,1.29,1.62,0.95,1.27,1.61,0.87,0.59,1.21,0.96,1.35,0.73,1.22,1.95,1.47,1.38,1.51,1.37,2.19,1.0,1.27,2.03,1.08,1.12,1.28,1.28,1.88,1.07,1.62,2.56,1.15,0.88,1.39,1.36,1.79,0.96,1.14,1.66,1.17,1.07,1.3,1.25,1.76,1.05,1.4,2.21,1.21,1.05,1.46,1.57,1.89,1.12,1.24,1.85,1.13,0.99,1.47,1.28,1.62,1.19],"wq":[1.3,0.83,1.13,0.32,0.94,1.52,0.52,0.87,1.04,0.71,1.57,0.6,1.58,1.43,1.13,0.75,1.53,0.97,1.6,0.99,1.09,1.53,1.22,1.11,1.35,1.19,1.67,0.51,5.15,4.04,1.61,1.19,1.99,1.53,2.04,1.22,1.46,2.2,1.32,1.01,1.49,1.37,1.71,0.98,1.78,2.57,1.63,1.26,1.62,1.48,2.44,0.9,1.28,2.14,1.17,1.1,1.42,1.51,2.03,0.96,6.29,5.09,1.32,1.11,1.77,1.6,2.26,1.24,1.16,2.23,1.52,1.03,1.39,1.33,2.2,0.97,1.4,2.46,1.38,1.12,1.63,1.65,2.16,1.12,1.34,2.2,1.45,0.94,1.42,1.43,1.79,1.4],"wo":[1.29,0.83,1.15,0.33,0.95,1.52,0.52,0.84,1.05,0.71,1.57,0.6,1.61,1.43,1.15,0.74,1.52,1.0,1.58,1.0,1.09,1.54,1.21,1.1,1.34,1.2,1.83,0.49,1.73,2.25,0.94,0.73,1.25,1.14,1.57,1.03,1.38,1.71,1.1,0.89,1.18,0.87,1.35,0.89,1.22,2.29,1.47,1.24,1.53,1.49,2.31,1.0,1.36,2.1,1.07,1.05,1.27,1.21,1.92,0.91,1.74,2.88,1.43,1.07,1.54,1.3,2.05,0.88,1.15,1.67,1.35,1.18,1.36,1.29,1.46,0.83,1.31,1.95,1.42,1.03,1.55,1.4,1.89,1.09,1.15,1.9,1.12,0.91,1.44,1.26,1.49,1.15],"mpq":22.41,"mpo":25.14,"mwb":1.288,"mwq":1.565,"mwo":1.303,"dq":6.38,"do":5.41},"hy-world-5":{"T":93,"hw":[704,1280],"pq":[43.3,41.3,41.0,40.3,39.9,39.2,38.4,38.4,37.8,37.1,35.9,33.8,33.6,32.9,32.9,31.9,31.6,30.1,29.0,25.6,24.9,23.9,23.0,22.7,22.5,21.7,21.7,21.6,21.4,19.3,15.6,14.3,13.7,13.4,13.5,14.2,14.5,14.7,14.8,14.8,14.8,14.9,15.0,14.7,14.5,14.0,13.4,13.1,13.0,12.9,13.0,13.1,13.1,13.1,13.1,13.1,13.2,13.2,13.3,13.4,13.4,14.3,14.0,13.8,13.9,13.9,14.0,13.9,13.9,13.8,13.9,13.7,13.7,13.7,13.8,13.9,14.1,14.2,14.6,14.6,14.6,14.7,14.8,14.8,14.8,14.8,14.8,14.7,14.7,14.7,15.1,15.1,15.2],"po":[43.4,41.4,41.1,40.3,39.9,39.3,38.5,38.4,37.8,37.1,36.0,33.8,33.6,32.9,32.9,32.0,31.6,30.1,29.0,25.6,24.9,23.9,23.0,22.7,22.5,21.8,21.7,21.6,21.4,20.4,15.6,14.1,13.4,13.4,13.7,13.9,13.9,13.8,14.3,14.4,14.4,14.6,14.8,15.3,15.2,15.0,14.6,14.6,14.6,14.3,14.1,14.1,14.1,14.1,13.8,13.8,13.8,13.8,13.6,13.5,13.5,13.5,13.6,13.6,13.6,13.6,13.6,13.5,13.4,13.4,13.5,13.5,13.4,13.3,13.2,13.2,13.2,13.2,13.3,13.3,13.4,13.7,13.9,13.8,13.8,13.7,13.7,13.6,13.6,13.6,13.7,13.8,13.8],"wb":[1.36,0.45,0.87,0.74,0.72,1.2,0.66,0.77,0.92,0.96,1.41,0.47,1.0,2.13,0.93,0.7,1.16,0.69,1.92,0.83,1.02,1.46,0.89,0.78,1.35,1.19,1.49,0.77,1.8,2.69,1.11,1.02,1.42,1.03,1.3,0.93,0.87,1.23,0.82,0.8,1.13,0.93,1.36,0.85,1.13,1.97,0.78,1.04,1.22,1.01,1.21,0.9,1.05,1.34,0.74,1.07,1.0,1.04,1.53,0.86,1.37,1.63,0.72,0.7,1.1,0.85,1.12,0.94,0.91,1.47,0.82,0.85,1.02,0.9,1.33,0.92,1.09,1.98,0.89,0.88,1.25,1.19,1.4,1.08,1.03,1.47,1.15,0.65,1.13,1.19,1.33,0.75],"wq":[1.34,0.47,0.85,0.77,0.74,1.21,0.68,0.76,0.9,1.0,1.41,0.46,1.04,2.14,0.92,0.69,1.19,0.73,1.92,0.91,1.04,1.47,0.92,0.79,1.42,1.07,1.54,0.82,8.01,7.31,2.56,1.45,2.13,1.55,2.15,0.93,1.41,2.66,1.48,0.91,1.43,1.2,1.81,0.92,1.5,2.73,1.4,1.18,1.69,1.23,1.89,1.04,1.26,2.11,0.98,0.97,1.18,1.04,2.19,0.88,7.14,6.61,2.5,0.82,1.65,1.8,2.63,1.24,1.3,2.66,2.0,1.27,1.47,1.55,2.19,1.02,1.73,2.76,2.06,1.39,1.83,1.81,2.26,1.27,1.42,2.42,2.13,0.91,1.38,2.12,2.44,1.11],"wo":[1.33,0.47,0.86,0.76,0.74,1.21,0.64,0.77,0.92,0.95,1.43,0.47,1.02,2.15,0.94,0.69,1.18,0.71,1.94,0.89,1.0,1.5,0.89,0.77,1.41,1.24,1.46,0.77,1.77,2.89,1.42,1.21,1.36,1.16,1.32,1.01,1.04,2.04,1.18,0.88,1.21,0.86,1.25,0.57,1.1,2.14,0.74,1.1,1.06,0.89,1.25,0.91,1.06,1.84,0.78,1.07,0.95,1.12,1.85,0.76,1.77,2.72,0.71,0.77,1.17,0.96,1.31,0.94,0.92,1.47,0.89,0.85,1.07,1.12,1.7,0.78,1.06,2.12,0.88,0.79,1.49,1.29,1.46,1.04,1.05,1.85,1.14,0.78,1.17,1.34,1.63,0.8],"mpq":19.62,"mpo":19.48,"mwb":1.099,"mwq":1.709,"mwo":1.173,"dq":10.7,"do":11.05},"lingbot-1":{"T":93,"hw":[480,832],"pq":[37.3,35.7,35.3,36.4,35.3,35.6,35.1,35.7,35.1,35.5,35.1,35.9,35.2,20.7,20.6,20.0,19.1,17.8,16.2,15.8,14.6,14.0,13.0,13.0,13.2,13.4,13.4,13.6,13.6,13.8,13.4,13.4,13.5,13.6,13.6,13.5,13.3,13.4,13.6,13.6,13.2,13.2,13.3,13.3,13.2,13.2,12.8,13.0,13.0,12.8,12.9,13.2,13.0,13.0,13.1,13.2,13.3,13.3,13.2,13.2,13.1,13.1,13.2,13.5,14.0,14.3,14.4,14.3,14.0,14.0,13.5,13.3,13.1,13.3,13.3,13.2,13.6,13.4,13.8,14.0,14.1,14.3,14.5,14.5,14.6,14.6,14.5,14.5,14.5,14.3,14.1,14.3,14.7],"po":[37.7,36.0,35.4,36.5,35.4,35.7,35.1,35.8,35.1,35.5,35.1,36.0,35.5,27.9,24.9,24.1,23.9,21.8,19.4,18.8,17.3,16.8,15.8,15.7,15.8,16.0,15.9,16.0,15.8,15.5,14.5,14.5,15.0,14.9,14.9,14.6,14.4,14.3,14.2,14.2,14.4,14.5,14.6,14.6,14.5,14.1,13.5,13.4,13.1,13.0,12.8,12.7,12.5,12.4,12.3,12.2,12.2,12.1,12.1,12.1,12.0,11.8,11.5,11.5,11.8,11.9,12.4,12.6,13.2,13.4,13.8,13.7,13.7,13.7,13.8,13.8,13.8,13.8,13.8,13.8,13.9,14.0,14.5,14.6,14.7,14.8,15.1,15.2,15.5,15.6,15.5,15.5,15.8],"wb":[5.71,6.38,4.86,6.1,4.92,5.94,4.74,5.54,5.27,5.85,4.68,6.74,4.93,5.58,3.71,5.07,4.88,5.68,4.25,5.42,5.09,6.26,4.63,6.3,5.13,5.95,4.67,6.77,5.47,6.88,4.08,3.07,3.84,2.77,1.53,2.08,1.99,2.47,1.59,2.67,1.89,2.58,1.72,2.36,2.62,3.54,1.85,2.37,2.15,2.38,1.71,2.27,2.08,2.15,1.57,2.21,1.67,2.57,1.27,1.52,1.93,3.65,2.74,6.11,4.42,5.4,3.44,4.89,4.31,4.9,3.38,5.08,4.31,5.03,3.3,4.74,4.62,4.74,3.52,5.02,3.96,4.86,3.57,5.92,4.08,5.41,3.89,5.78,4.49,5.6,4.02,5.19],"wq":[5.74,6.4,4.79,6.09,4.93,5.92,4.74,5.49,5.29,5.84,4.7,6.8,8.32,9.28,5.89,7.74,5.64,6.35,4.74,6.39,5.27,6.87,5.13,6.07,5.64,7.38,5.16,8.05,8.58,9.26,6.12,4.62,4.79,2.27,1.99,2.49,2.83,2.63,1.95,2.98,2.36,3.25,2.02,2.68,4.14,3.99,2.73,3.05,3.08,3.16,1.9,2.4,2.48,2.94,1.88,2.46,2.22,3.05,1.48,2.04,3.91,3.81,3.94,6.23,5.24,5.89,3.8,6.19,5.09,5.91,3.86,5.82,5.3,5.89,3.85,5.97,7.68,8.38,5.23,6.15,5.55,6.16,4.21,7.57,5.59,6.28,4.27,6.31,5.6,6.94,4.34,6.3],"wo":[5.75,6.38,4.85,6.15,4.91,5.87,4.75,5.53,5.26,5.8,4.67,6.71,5.16,5.78,3.65,5.16,4.21,5.98,4.27,5.77,5.47,7.02,4.93,6.25,5.02,6.9,5.17,7.49,5.99,8.13,4.5,4.26,4.71,2.41,1.61,2.29,2.2,2.72,1.81,3.09,2.34,3.15,2.05,3.0,3.08,3.71,2.09,2.92,2.78,3.16,1.95,2.44,2.56,2.66,1.99,2.54,2.23,2.37,1.6,2.24,2.52,4.18,2.81,6.26,4.7,5.73,3.79,6.0,4.86,5.91,3.69,6.16,4.63,5.44,3.52,5.26,5.31,5.41,3.88,5.65,4.36,4.73,3.76,6.66,4.45,5.6,3.92,6.43,4.6,5.66,4.27,5.61],"mpq":17.06,"mpo":17.73,"mwb":4.068,"mwq":4.91,"mwo":4.404,"dq":22.04,"do":19.24},"lingbot-2":{"T":93,"hw":[480,832],"pq":[43.7,42.4,42.3,42.0,42.3,41.4,41.5,41.5,41.9,41.3,41.3,41.2,41.4,28.9,27.4,27.4,26.4,26.1,25.1,24.9,24.1,23.8,23.3,23.3,23.3,23.3,22.8,22.0,21.4,21.5,21.4,20.9,20.8,20.6,20.6,20.4,20.6,20.8,20.9,21.0,21.1,21.0,20.9,20.7,20.7,20.8,20.6,20.6,20.1,20.0,19.7,19.4,19.2,18.8,18.8,18.9,18.8,18.9,18.9,18.9,19.1,19.8,19.9,19.5,19.4,19.3,19.2,19.3,19.4,19.4,19.7,19.8,19.8,19.7,19.6,19.4,19.5,19.4,19.5,19.4,19.4,19.4,19.4,19.5,19.5,19.6,19.6,19.6,19.4,19.6,19.6,19.7,19.7],"po":[43.7,42.2,42.2,42.1,42.5,41.5,41.7,41.6,42.1,41.4,41.4,41.1,41.5,35.7,33.6,33.0,31.1,30.1,28.5,28.6,30.2,30.6,30.5,30.0,28.7,28.1,27.0,26.7,26.4,23.4,22.2,21.4,22.2,22.9,23.5,23.4,23.3,23.2,23.1,23.6,23.9,23.8,23.5,23.1,23.3,23.0,22.4,21.8,21.2,21.1,21.0,21.2,21.3,21.0,20.9,21.1,21.1,20.8,21.2,22.0,22.5,22.4,22.0,21.5,21.1,21.1,21.0,21.2,21.3,21.8,21.6,21.8,21.6,21.1,21.0,21.0,20.8,20.6,20.7,21.5,21.1,20.6,20.4,20.2,20.0,20.0,20.0,20.1,20.1,20.1,20.1,20.0,19.9],"wb":[1.37,1.45,1.22,1.47,1.55,1.38,1.24,1.58,1.51,1.55,1.35,1.52,2.0,1.56,1.33,1.75,1.62,1.95,1.43,1.94,1.7,1.77,1.44,1.64,1.85,1.57,1.6,1.32,2.15,1.76,1.46,1.44,1.42,0.93,0.83,0.97,1.13,0.77,0.75,0.82,1.01,0.82,0.89,0.74,1.28,1.23,0.74,0.78,1.2,0.91,0.87,0.73,0.96,0.63,0.64,0.74,0.94,0.64,0.79,0.67,1.19,1.59,1.62,1.3,2.08,1.61,2.13,1.47,2.1,1.66,1.62,1.77,2.2,1.65,2.13,1.58,2.62,1.76,1.93,1.59,2.2,1.51,1.89,1.61,2.06,1.36,1.62,1.53,1.84,1.38,1.57,1.29],"wq":[1.36,1.43,1.21,1.5,1.5,1.4,1.25,1.57,1.52,1.59,1.35,1.51,2.79,1.9,1.93,1.95,1.81,1.92,1.72,1.83,1.73,1.8,1.57,1.7,2.08,1.61,1.77,1.36,3.52,1.9,2.31,0.96,1.82,0.98,1.09,0.89,1.24,0.86,0.84,0.82,1.29,0.71,0.87,0.7,2.02,0.97,1.23,0.96,1.43,0.97,1.22,1.02,1.75,0.95,0.99,0.77,1.25,0.62,0.69,0.59,2.1,1.89,2.15,1.31,2.29,1.7,2.14,1.42,2.35,1.55,1.93,1.79,2.4,1.71,1.91,1.55,3.71,1.92,2.56,1.74,2.44,1.52,1.84,1.49,2.09,1.34,1.66,1.46,2.03,1.46,1.68,1.24],"wo":[1.36,1.46,1.2,1.49,1.53,1.39,1.25,1.56,1.54,1.55,1.35,1.53,1.9,1.51,1.34,1.72,1.52,2.0,1.46,1.85,1.65,1.79,1.44,1.74,1.83,1.62,1.64,1.28,2.17,1.59,1.66,1.1,1.49,1.01,1.11,0.93,1.07,0.81,0.8,0.68,0.97,0.65,0.85,0.54,1.25,0.67,0.82,0.57,0.97,0.68,0.83,0.65,1.0,0.67,0.77,0.5,0.83,0.49,0.56,0.41,1.21,1.62,1.98,1.18,1.99,1.53,2.0,1.28,1.98,1.56,1.93,1.49,2.15,1.63,1.86,1.4,2.61,1.75,2.08,1.38,2.11,1.51,1.85,1.37,1.82,1.32,1.59,1.24,1.65,1.25,1.49,1.13],"mpq":23.74,"mpo":25.86,"mwb":1.421,"mwq":1.579,"mwo":1.365,"dq":5.63,"do":4.28},"lingbot-3":{"T":93,"hw":[720,1280],"pq":[45.4,41.6,40.3,41.8,40.1,40.4,39.8,40.6,39.9,39.5,40.0,39.2,39.0,23.5,21.8,21.5,20.5,19.5,18.8,18.4,18.0,18.1,18.0,17.6,17.4,17.5,17.6,18.0,17.7,17.6,17.3,17.3,17.4,17.8,17.8,17.8,17.8,17.8,17.6,17.2,17.1,16.9,16.8,16.7,16.7,16.7,16.7,16.8,16.8,17.1,17.1,17.4,17.6,17.6,17.5,17.3,17.2,17.2,17.2,17.1,17.1,17.1,17.0,17.1,17.3,17.7,17.8,18.2,17.9,17.7,17.5,17.3,17.2,17.5,17.6,17.8,17.7,17.2,16.7,15.8,15.4,15.3,15.2,15.1,14.9,14.9,14.8,14.9,14.9,15.2,15.2,15.4,14.9],"po":[45.3,41.4,40.3,41.7,40.1,40.4,39.8,40.6,39.8,39.4,39.8,39.1,39.2,28.7,26.8,26.3,25.2,24.7,23.7,23.0,22.3,21.9,21.8,20.9,20.4,20.5,20.5,21.1,20.6,20.2,19.0,19.6,20.1,20.6,20.9,20.8,20.4,19.7,19.2,18.8,18.6,18.3,18.1,17.7,17.3,16.8,16.6,16.1,15.9,15.9,15.9,15.9,16.1,16.2,16.3,16.4,16.5,16.5,16.6,16.9,17.1,17.4,17.6,17.7,17.9,18.4,18.4,18.5,18.6,18.8,18.8,18.7,18.6,18.6,18.6,18.7,18.5,18.6,18.3,18.2,18.1,17.9,17.7,17.6,17.4,17.6,17.6,17.8,17.9,18.3,18.2,18.4,18.2],"wb":[2.27,2.73,2.24,3.01,2.56,2.93,2.8,3.23,2.86,3.69,3.63,4.69,4.63,5.02,3.67,4.3,3.11,4.11,3.06,3.67,2.81,3.43,2.88,3.55,2.89,3.52,3.17,3.63,4.29,2.72,3.12,1.79,2.19,1.33,1.59,1.48,1.89,1.1,1.3,1.08,1.51,0.98,1.11,0.95,1.59,1.03,1.25,1.14,1.45,1.13,1.38,1.24,1.59,1.07,1.25,1.06,1.25,0.79,0.98,0.74,1.73,1.64,2.33,2.17,3.03,2.12,3.36,2.42,2.99,2.02,3.08,2.5,2.99,1.91,3.16,2.21,3.2,2.28,3.56,3.02,3.52,2.57,4.32,3.46,3.34,2.51,3.59,2.75,2.96,2.23,3.15,2.78],"wq":[2.28,2.73,2.23,3.04,2.57,2.92,2.81,3.27,2.86,3.71,3.67,4.69,7.53,6.54,5.12,5.54,4.29,4.5,3.93,3.98,3.36,3.54,2.9,3.48,3.03,3.65,3.54,4.01,6.34,5.07,4.83,2.29,3.08,1.53,1.83,1.46,2.28,1.36,1.66,1.25,1.82,1.08,1.2,0.85,2.8,1.71,2.24,1.34,2.25,1.5,1.7,1.28,1.87,1.26,1.41,1.02,1.66,1.0,1.21,0.84,3.12,2.71,3.97,3.11,4.07,2.6,3.75,2.99,3.63,2.31,3.33,2.63,3.89,2.36,3.14,2.54,5.88,4.34,5.69,3.85,5.29,3.3,4.43,4.1,5.32,3.36,4.26,3.5,4.72,2.78,3.55,3.15],"wo":[2.27,2.69,2.24,3.01,2.56,2.9,2.78,3.29,2.85,3.77,3.63,4.66,5.32,5.47,4.15,4.71,3.31,4.04,3.31,3.58,2.86,3.25,3.01,3.61,2.82,3.41,3.22,3.56,4.58,3.43,3.52,1.9,2.37,1.46,1.61,1.75,2.06,1.34,1.47,1.15,1.66,1.18,1.13,1.04,2.04,1.38,1.35,1.11,1.58,1.3,1.55,1.34,1.94,1.4,1.79,1.34,1.78,1.15,1.32,0.99,2.2,1.81,2.45,2.38,3.22,2.27,3.31,2.76,3.21,2.02,3.17,2.37,3.32,1.93,2.86,2.41,4.01,2.88,4.08,3.07,4.11,2.62,4.28,3.69,3.96,2.64,3.53,2.9,2.99,2.29,3.31,2.98],"mpq":20.53,"mpo":22.02,"mwb":2.504,"mwq":3.113,"mwo":2.678,"dq":13.5,"do":11.05},"lingbot-4":{"T":93,"hw":[720,1280],"pq":[39.0,36.7,36.9,36.6,37.2,36.4,36.4,36.3,36.8,36.5,36.3,36.2,36.4,21.0,22.1,22.8,22.4,22.6,21.8,20.8,20.2,19.6,19.3,18.6,18.3,17.9,17.8,17.7,17.7,18.1,17.9,17.5,16.9,16.9,16.6,16.4,16.1,16.1,16.0,15.9,15.9,15.9,15.8,15.7,15.7,15.5,15.4,15.4,15.3,15.4,15.3,15.3,15.3,15.2,15.2,15.2,15.1,15.1,15.1,15.0,15.0,14.6,14.6,14.6,14.6,14.7,14.5,14.3,14.2,14.1,13.8,13.7,13.6,13.6,13.4,13.4,13.4,13.1,13.0,13.1,13.1,13.1,13.0,13.0,13.0,13.0,12.9,13.0,13.0,13.2,13.1,13.1,13.2],"po":[39.0,36.8,36.9,36.5,37.3,36.6,36.8,36.5,37.1,36.7,36.7,36.3,36.5,24.9,23.8,22.6,21.9,21.5,20.9,20.3,19.9,19.6,19.0,18.7,18.5,18.4,18.3,18.3,18.2,18.6,18.3,18.2,18.1,18.0,17.9,18.0,18.1,18.2,18.2,18.1,18.1,18.1,18.0,18.0,17.8,17.7,17.6,17.5,17.4,17.5,17.4,17.4,17.4,17.3,17.3,17.3,17.2,17.2,17.2,17.1,17.1,16.9,16.8,16.6,16.6,16.6,16.4,16.2,16.1,15.9,15.7,15.5,15.5,15.4,15.2,15.1,15.0,14.9,14.7,14.6,14.5,14.4,14.3,14.0,13.9,13.7,13.4,13.2,13.1,13.1,12.9,12.9,12.8],"wb":[3.72,3.97,3.74,3.61,3.93,3.89,4.08,3.86,3.6,4.14,4.34,4.31,5.49,4.86,4.75,4.95,4.09,4.52,4.36,4.57,4.3,4.18,4.2,4.17,3.78,3.99,4.02,4.0,4.23,4.11,3.69,2.1,2.96,1.52,1.4,1.54,2.05,1.65,1.52,1.5,1.58,1.51,1.41,1.47,2.08,1.51,1.27,1.27,1.42,1.39,1.22,1.32,1.68,1.28,1.21,1.29,1.35,1.24,1.19,1.23,2.12,2.57,2.67,3.0,3.33,3.77,3.82,3.79,3.97,3.81,3.8,3.69,3.47,3.99,4.02,3.88,4.53,4.23,4.18,4.05,3.82,4.32,4.22,4.3,4.19,4.34,4.13,4.19,3.75,4.02,3.93,3.68],"wq":[3.75,3.96,3.73,3.59,3.92,3.93,4.07,3.84,3.61,4.18,4.35,4.25,8.91,7.8,6.5,6.09,5.37,5.21,4.99,5.17,4.86,4.6,4.59,4.49,4.31,4.49,4.45,4.58,6.64,6.2,4.94,3.5,3.99,2.06,1.58,1.64,2.58,1.77,1.66,1.33,1.99,1.75,1.59,1.24,3.92,1.97,2.04,1.45,2.09,1.84,1.57,1.2,2.19,1.54,1.46,1.21,1.74,1.6,1.47,1.04,3.72,3.25,3.42,3.25,4.12,4.12,4.2,3.83,4.2,4.17,4.11,4.12,3.98,4.47,4.26,4.37,6.72,5.97,5.53,5.0,4.99,5.29,4.82,4.64,5.27,5.3,4.91,4.86,5.07,5.21,4.67,4.62],"wo":[3.73,3.94,3.73,3.58,3.93,3.87,4.06,3.86,3.61,4.15,4.31,4.26,6.34,5.46,5.01,5.11,4.22,4.54,4.35,4.54,4.19,4.16,4.15,4.1,3.71,3.93,3.93,3.89,4.87,4.73,3.79,2.18,3.01,1.81,1.64,1.55,2.27,1.76,1.62,1.47,1.77,1.72,1.54,1.46,2.42,1.63,1.75,1.42,1.56,1.61,1.59,1.4,1.93,1.53,1.52,1.29,1.49,1.6,1.45,1.22,2.22,2.71,2.8,3.11,3.3,3.71,3.72,3.65,3.71,3.8,3.67,3.4,3.46,3.98,3.88,3.66,5.06,5.02,4.29,4.04,3.86,4.35,4.02,3.88,4.25,4.04,3.68,3.68,3.67,3.9,3.55,3.54],"mpq":18.7,"mpo":19.87,"mwb":3.209,"mwq":3.835,"mwo":3.27,"dq":12.72,"do":12.57},"lingbot-5":{"T":93,"hw":[720,1280],"pq":[38.7,36.9,37.0,36.6,37.4,36.4,36.7,36.2,37.0,36.2,36.5,36.1,36.6,21.5,20.6,21.5,21.1,20.4,20.2,19.1,19.2,18.5,18.3,18.0,17.7,17.5,17.2,16.9,16.6,18.0,16.6,16.0,15.9,16.0,16.1,16.2,16.2,16.1,16.1,16.1,16.0,15.9,15.9,15.9,15.8,15.8,15.8,15.8,15.7,15.7,15.7,15.7,15.7,15.6,15.6,15.6,15.6,15.5,15.5,15.4,15.4,15.0,15.2,14.9,15.2,15.5,15.8,15.4,15.5,15.4,15.6,15.5,15.3,15.4,15.3,15.3,15.2,15.0,15.2,14.8,14.8,14.8,14.8,14.8,14.8,14.7,14.8,14.7,14.7,14.7,14.7,14.5,14.6],"po":[39.6,37.1,37.2,37.0,37.8,36.6,36.9,36.5,37.3,36.4,36.7,36.3,37.0,24.6,25.3,24.7,23.6,22.7,21.4,20.9,20.6,21.0,18.3,18.6,18.3,18.7,18.5,18.2,17.6,17.8,16.5,17.1,17.3,17.3,17.4,17.4,17.4,17.4,17.4,17.3,17.2,17.2,17.1,17.1,17.1,16.9,16.9,16.9,16.8,16.8,16.8,16.7,16.7,16.6,16.6,16.5,16.5,16.4,16.4,16.3,16.2,16.5,16.5,17.0,16.7,16.7,17.3,16.4,16.5,16.3,16.4,16.6,16.3,16.3,16.4,16.3,16.0,15.9,16.0,15.6,15.6,15.5,15.5,15.4,15.4,15.2,15.5,15.3,15.4,15.2,15.4,15.3,15.3],"wb":[3.3,3.83,3.82,3.22,4.09,3.32,3.84,3.75,3.95,3.85,3.98,3.68,4.53,4.06,4.17,4.09,3.81,4.09,4.09,4.27,4.31,3.91,4.34,4.07,4.01,4.26,4.23,4.15,4.66,4.52,3.4,1.49,3.45,0.97,1.06,1.11,2.12,0.97,1.17,0.94,1.59,1.33,1.06,0.97,1.92,1.01,1.12,0.91,1.3,1.34,1.0,0.91,1.41,0.96,1.08,0.97,1.38,0.94,0.96,0.85,3.08,3.56,2.99,2.88,4.52,4.08,3.67,3.85,4.5,4.08,4.57,3.15,4.23,4.18,4.43,2.92,4.34,4.04,4.46,3.87,4.47,3.7,4.43,3.33,4.16,4.12,4.23,3.2,4.14,3.9,3.94,3.28],"wq":[3.34,3.82,3.79,3.24,4.13,3.35,3.79,3.75,4.0,3.85,3.91,3.72,8.03,6.45,6.64,5.78,5.59,4.92,4.54,4.95,4.92,4.3,4.65,4.44,4.45,4.58,4.42,4.45,7.28,4.94,4.0,1.77,3.9,1.78,1.45,1.09,2.62,1.08,1.23,0.85,1.63,1.15,1.1,0.81,3.89,1.52,1.83,1.23,2.27,1.5,1.26,0.9,1.96,1.0,1.03,0.84,1.51,0.99,0.96,0.57,6.16,4.68,5.48,3.36,6.21,4.81,5.22,4.2,5.44,4.17,5.23,4.08,5.25,4.71,4.81,3.75,7.98,6.45,7.35,5.29,6.9,4.84,5.57,4.29,5.78,4.5,4.98,3.72,5.45,4.77,4.93,3.69],"wo":[3.29,3.82,3.83,3.21,4.09,3.33,3.83,3.75,3.96,3.85,4.01,3.63,5.5,4.9,4.63,4.53,4.16,4.27,4.34,4.43,4.48,3.56,4.43,4.14,4.04,4.26,4.27,3.96,5.42,4.92,4.34,1.63,3.75,1.28,1.12,1.12,2.34,1.09,1.27,0.97,1.59,1.39,1.15,1.04,2.45,1.07,1.32,1.03,1.47,1.45,1.07,0.91,1.77,1.01,1.14,0.87,1.32,0.97,0.89,0.86,2.49,3.81,2.79,3.92,4.78,4.06,4.58,3.85,4.6,3.91,4.55,3.55,4.41,4.14,4.33,3.47,5.45,4.72,5.34,4.3,5.0,3.98,4.44,3.65,4.56,3.79,4.41,3.28,4.4,3.78,4.26,3.27],"mpq":19.07,"mpo":20.1,"mwb":3.089,"mwq":3.824,"mwo":3.265,"dq":14.73,"do":14.09},"matrix-game-1":{"T":93,"hw":[480,832],"pq":[33.2,29.9,30.7,31.1,31.1,30.1,30.6,31.0,30.7,20.5,19.9,19.3,19.2,19.9,19.8,19.5,19.5,19.9,19.6,19.5,19.5,18.7,18.1,17.6,17.5,17.2,17.1,17.0,16.9,17.3,17.2,17.1,17.0,16.5,16.3,16.1,16.1,16.3,16.3,16.3,16.3,16.5,16.4,16.3,16.2,15.5,15.9,15.9,16.0,16.0,16.0,16.0,15.9,15.8,15.8,15.7,15.7,15.7,15.8,15.7,15.7,15.6,15.6,15.6,15.6,15.6,15.6,15.6,15.6,15.5,15.4,15.3,15.3,15.3,15.4,15.4,15.4,15.4,15.5,15.4,15.4,15.3,15.3,15.2,15.2,15.1,15.1,15.0,15.0,15.0,15.1,15.1,15.1],"po":[34.7,30.1,31.2,31.6,32.2,30.3,30.9,31.1,31.2,27.2,26.9,26.8,26.4,26.3,26.3,25.8,25.4,25.1,24.9,24.9,24.9,23.3,22.7,22.2,22.0,21.9,21.6,21.5,21.4,21.5,21.2,21.1,20.8,20.4,20.1,20.1,20.0,20.1,19.8,19.8,19.7,19.9,19.6,19.6,19.4,18.5,18.8,19.0,19.0,18.9,18.9,18.9,18.8,18.7,18.7,18.7,18.7,18.6,18.7,18.7,18.7,18.6,18.6,18.6,18.6,18.6,18.6,18.6,18.6,18.5,18.4,18.4,18.4,18.4,18.4,18.4,18.4,18.4,18.4,18.4,18.4,18.3,18.2,18.2,18.2,18.0,18.0,18.0,18.0,17.9,18.0,18.0,18.0],"wb":[12.31,9.9,6.02,5.99,11.45,9.28,6.2,6.13,11.75,9.5,5.81,5.74,11.09,8.55,5.57,5.83,11.35,9.2,5.88,5.62,11.18,9.26,6.31,5.96,11.51,9.46,6.08,5.99,11.73,9.51,6.2,6.3,12.23,9.79,6.22,6.47,12.05,9.9,6.24,6.4,12.23,10.1,6.67,6.19,13.95,2.75,2.84,2.03,9.23,2.36,1.94,1.98,6.36,2.63,1.97,0.79,6.74,2.88,2.63,1.34,4.99,2.37,1.51,1.21,4.71,2.37,2.17,0.85,5.8,2.48,2.09,1.35,4.23,2.17,2.02,1.75,3.57,1.94,1.23,1.06,5.43,4.11,1.16,1.52,3.13,1.84,1.5,1.27,2.98,1.47,1.09,0.89],"wq":[12.27,9.94,6.04,6.16,11.55,9.33,6.12,6.32,13.77,10.28,6.2,6.67,13.1,9.36,6.24,6.42,13.45,10.15,6.46,6.65,14.31,11.47,7.13,7.53,14.68,11.19,6.74,7.35,14.73,10.76,7.02,7.69,16.23,12.82,8.19,8.0,15.71,12.77,8.19,7.86,15.55,12.69,8.4,7.88,18.96,4.52,4.95,2.82,12.1,2.54,3.03,2.0,7.55,2.51,2.53,2.1,10.17,4.31,4.18,2.37,7.81,3.19,2.95,2.18,8.32,3.02,3.06,1.7,9.26,3.71,3.58,2.11,7.67,3.35,3.54,2.79,6.57,3.28,3.57,3.04,9.42,4.4,4.27,2.35,6.66,2.88,2.89,2.78,6.67,2.83,2.88,3.04],"wo":[12.29,9.85,6.05,5.99,11.42,9.28,6.2,6.07,12.02,9.7,5.86,5.82,11.44,8.66,5.65,5.79,11.66,9.28,5.91,5.84,11.81,9.53,6.57,6.25,12.18,9.84,6.39,6.1,12.61,9.77,6.35,6.49,13.13,10.46,6.7,6.91,12.87,10.45,6.56,6.81,13.07,10.5,7.01,6.62,15.27,3.25,3.19,2.66,10.18,2.24,2.03,2.17,6.99,1.8,2.22,1.58,7.08,3.02,3.06,1.65,5.62,2.63,1.82,1.26,5.49,2.49,2.03,0.94,6.7,2.56,2.52,1.48,4.91,2.28,2.43,1.88,4.19,2.03,1.7,1.09,6.35,4.4,1.46,1.41,3.79,2.07,1.68,1.48,3.54,1.66,1.32,1.11],"mpq":17.88,"mpo":21.3,"mwb":5.498,"mwq":7.106,"mwo":5.81,"dq":16.0,"do":10.31},"matrix-game-2":{"T":93,"hw":[480,832],"pq":[36.0,35.2,34.4,34.7,34.6,34.5,33.9,34.1,33.7,25.6,23.5,22.6,22.3,22.2,22.2,21.9,22.0,22.3,22.7,22.7,22.8,22.1,21.5,21.0,20.8,20.5,20.5,20.3,20.2,20.0,20.0,19.8,19.7,19.2,18.9,18.7,18.6,18.4,18.5,18.4,18.3,18.1,18.1,17.9,17.9,17.5,17.3,17.0,16.9,16.8,16.8,16.6,16.6,16.4,16.4,16.3,16.2,16.0,16.0,15.8,15.8,15.6,15.6,15.5,15.5,15.3,15.3,15.2,15.2,15.1,15.0,14.9,14.9,14.8,14.9,14.8,14.8,14.7,14.7,14.7,14.7,14.7,14.8,14.7,14.7,14.6,14.6,14.6,14.6,14.5,14.6,14.6,14.6],"po":[37.3,35.6,34.9,35.2,35.3,34.8,34.2,34.5,34.4,30.3,29.2,28.3,28.1,27.9,27.8,27.4,27.6,28.2,29.0,28.7,28.7,27.9,27.4,26.8,26.7,26.8,27.0,26.7,26.8,26.6,26.8,26.3,26.2,25.6,25.3,24.7,24.7,24.6,24.8,24.5,24.5,24.2,24.3,24.0,23.9,23.4,23.2,22.7,22.7,22.4,22.6,22.2,22.2,22.0,22.2,21.8,21.7,21.1,21.0,20.7,20.7,20.4,20.5,20.3,20.3,20.1,20.1,19.9,20.0,19.5,19.4,19.1,19.1,18.9,18.9,18.7,18.8,18.5,18.5,18.3,18.4,18.2,18.2,18.0,18.1,17.9,17.9,17.7,17.8,17.6,17.7,17.7,17.6],"wb":[4.08,3.76,2.7,2.65,4.5,3.54,2.65,2.83,4.64,3.54,2.76,2.28,4.13,3.17,2.7,2.28,3.89,3.0,2.57,2.12,4.09,3.23,2.6,2.16,3.91,3.1,2.47,2.08,3.91,3.17,2.57,2.13,4.41,3.67,2.73,2.21,4.37,3.2,2.65,2.16,4.42,3.28,2.71,2.11,5.18,3.92,3.23,2.29,4.69,3.55,2.86,2.33,4.82,3.58,2.98,2.26,5.88,4.28,3.33,2.54,5.18,3.98,3.15,2.43,5.33,3.99,3.19,2.46,6.13,4.41,3.48,2.53,5.47,4.0,3.17,2.39,5.54,4.06,3.24,2.44,6.24,4.42,3.34,2.46,5.25,3.87,2.83,2.15,5.08,3.53,2.94,2.82],"wq":[4.12,3.69,2.67,2.69,4.49,3.45,2.65,2.95,5.87,4.44,3.11,2.54,5.18,4.04,2.76,2.22,4.73,3.49,2.44,1.86,5.92,4.37,3.0,2.1,5.32,4.37,2.33,1.84,5.02,4.09,2.32,1.76,6.18,4.65,3.21,2.2,5.88,4.44,2.6,1.98,5.72,4.18,2.64,1.91,6.9,5.39,3.03,2.22,6.24,4.72,2.86,2.1,6.21,4.42,3.03,2.11,7.95,5.61,3.46,2.44,6.75,4.66,3.12,2.36,6.72,4.73,3.19,2.33,8.13,4.95,3.74,2.61,7.21,4.93,3.22,2.32,7.1,4.8,3.21,2.26,8.2,5.06,3.75,2.49,6.93,4.74,2.98,2.06,6.56,4.03,3.19,2.69],"wo":[4.11,3.68,2.78,2.61,4.53,3.48,2.69,2.87,4.88,3.78,2.8,2.33,4.43,3.36,2.76,2.31,4.2,3.15,2.58,2.17,4.32,3.55,2.62,2.14,4.36,3.37,2.53,2.06,4.33,3.48,2.54,2.08,4.93,4.08,2.85,2.23,4.81,3.62,2.77,2.15,4.94,3.71,2.78,2.14,5.74,4.28,3.24,2.39,5.26,3.86,2.95,2.32,5.44,3.8,3.15,2.32,6.61,4.78,3.47,2.55,5.95,4.36,3.19,2.48,6.1,4.38,3.36,2.56,6.8,4.81,3.6,2.67,6.25,4.44,3.25,2.45,6.31,4.45,3.35,2.4,6.76,4.75,3.43,2.44,6.03,4.26,3.12,2.37,5.89,3.88,3.2,2.98],"mpq":19.28,"mpo":23.97,"mwb":3.439,"mwq":3.991,"mwo":3.677,"dq":15.27,"do":11.8},"matrix-game-3":{"T":93,"hw":[480,832],"pq":[32.9,30.2,30.6,31.0,31.2,30.1,30.6,30.8,30.5,21.4,20.6,20.4,20.3,20.8,20.4,20.3,19.8,20.2,20.1,20.1,19.7,18.5,17.7,17.6,17.4,17.7,17.5,17.4,17.2,17.5,17.2,16.9,16.5,16.8,16.2,16.1,16.0,16.3,16.2,16.1,16.1,16.2,16.1,16.1,16.0,15.5,15.7,15.7,15.6,15.6,15.6,15.6,15.6,15.4,15.4,15.4,15.4,15.4,15.3,15.3,15.3,15.2,15.2,15.2,15.2,15.3,15.3,15.3,15.3,15.1,14.9,14.8,14.8,14.8,14.9,14.9,14.9,14.9,14.9,14.9,14.9,14.8,14.7,14.6,14.6,14.5,14.5,14.5,14.5,14.5,14.5,14.5,14.5],"po":[34.4,30.4,31.2,31.4,32.2,30.2,30.9,31.1,31.1,26.4,25.7,25.8,25.5,25.6,25.4,25.4,25.1,25.2,25.0,24.9,24.5,23.3,22.6,22.5,22.2,22.4,22.2,22.2,21.9,21.8,21.4,21.4,21.2,20.2,19.5,19.3,19.1,19.1,18.9,18.8,18.7,18.9,18.7,18.8,18.7,17.8,17.9,17.9,17.8,17.7,17.7,17.7,17.7,17.5,17.5,17.5,17.5,17.4,17.5,17.4,17.5,17.4,17.4,17.4,17.5,17.4,17.5,17.5,17.5,17.3,17.2,17.1,17.1,17.1,17.2,17.2,17.2,17.2,17.2,17.2,17.2,17.1,17.1,17.0,17.0,16.9,16.9,16.9,16.9,16.9,17.0,17.0,17.0],"wb":[11.42,8.71,5.77,5.72,10.87,7.64,5.32,5.63,10.93,7.95,5.45,5.6,10.74,7.74,5.36,5.73,10.88,7.55,5.56,5.83,11.62,7.66,5.8,5.93,11.08,7.42,5.5,5.63,11.22,7.86,5.74,6.05,12.2,8.5,6.37,6.64,11.99,8.82,6.14,6.52,12.19,8.62,6.09,6.3,15.13,2.85,2.23,3.23,8.78,2.25,1.87,0.78,6.36,2.53,1.87,0.72,6.43,3.0,2.6,1.62,4.22,2.15,2.0,1.5,4.38,2.37,2.15,0.69,6.76,2.47,2.46,1.59,3.99,2.23,2.08,1.92,3.6,2.02,1.14,1.08,5.63,4.51,1.18,1.22,3.2,1.93,1.45,1.49,2.72,1.35,1.03,0.8],"wq":[11.47,8.69,5.71,5.8,10.78,7.65,5.35,5.86,13.46,10.19,6.43,6.61,13.67,8.84,6.2,6.48,13.7,8.57,6.15,6.57,15.59,10.73,7.68,7.96,15.68,9.89,6.96,7.39,15.46,10.17,7.34,7.89,16.64,12.44,8.83,9.17,17.19,12.23,8.49,9.08,17.18,11.47,8.13,8.84,22.03,4.32,4.39,3.76,12.83,3.15,3.19,1.63,8.71,3.01,2.97,1.4,10.79,4.73,5.16,2.56,7.6,3.3,3.12,2.23,7.83,3.14,3.21,1.64,10.25,3.79,3.93,2.2,7.95,3.5,3.73,2.96,6.33,3.29,3.62,3.1,9.07,4.74,4.51,3.09,6.48,3.25,3.18,3.15,6.55,3.1,3.14,3.51],"wo":[11.46,8.69,5.7,5.78,10.87,7.6,5.31,5.69,11.22,8.43,5.57,5.79,11.49,8.05,5.61,5.95,11.59,7.75,5.74,5.97,12.06,8.13,6.09,6.36,12.14,7.96,5.96,6.14,12.43,8.47,6.1,6.59,13.24,9.03,6.79,6.98,13.06,9.27,6.53,6.84,13.33,9.24,6.39,6.72,16.55,3.15,2.48,3.66,9.78,2.18,2.1,0.84,7.06,2.72,2.07,0.62,7.33,3.08,3.1,1.67,5.08,2.45,2.28,1.71,5.1,2.53,1.88,0.8,7.79,2.85,2.84,1.59,5.09,2.49,2.59,2.26,4.31,2.28,1.83,1.04,7.01,3.81,2.88,1.89,4.08,2.29,1.74,1.65,3.29,1.67,1.45,1.31],"mpq":17.73,"mpo":20.57,"mwb":5.237,"mwq":7.236,"mwo":5.656,"dq":16.56,"do":10.45},"matrix-game-4":{"T":93,"hw":[480,832],"pq":[38.8,38.0,37.2,37.6,37.6,37.8,37.0,36.8,36.5,30.3,27.7,26.9,26.5,26.2,26.0,25.8,25.5,25.4,25.2,24.9,24.8,24.1,23.6,23.2,23.0,22.9,23.0,22.9,22.8,22.8,22.9,22.7,22.7,22.4,21.9,21.6,21.4,21.2,21.2,21.0,21.0,20.9,20.9,20.8,20.7,20.4,20.1,19.8,19.6,19.4,19.5,19.4,19.3,19.2,19.2,19.1,19.0,18.8,18.6,18.4,18.3,18.2,18.2,18.1,18.1,18.0,18.0,18.0,18.0,17.8,17.7,17.6,17.5,17.4,17.4,17.3,17.2,17.2,17.1,17.0,16.9,16.9,16.8,16.7,16.6,16.6,16.6,16.6,16.5,16.5,16.5,16.5,16.4],"po":[39.3,38.3,37.4,37.8,37.9,38.0,37.3,37.4,37.0,34.4,32.7,31.9,31.5,31.2,31.1,30.8,30.7,30.7,30.7,30.4,30.1,29.2,28.4,27.9,27.7,27.4,27.4,27.0,26.9,26.8,26.8,26.5,26.5,26.0,25.6,25.2,25.1,24.9,25.0,24.8,24.7,24.5,24.6,24.3,24.3,23.7,23.4,22.9,22.7,22.5,22.5,22.2,22.1,21.8,21.7,21.4,21.3,21.2,21.1,20.9,20.8,20.6,20.7,20.6,20.6,20.5,20.6,20.4,20.4,20.2,20.1,19.8,19.7,19.5,19.4,19.2,19.2,19.1,19.1,18.9,18.8,18.6,18.5,18.3,18.2,18.1,18.1,17.9,17.8,17.7,17.6,17.5,17.4],"wb":[2.32,1.62,1.35,1.0,2.13,1.69,1.28,0.98,2.45,2.03,1.64,1.23,2.51,1.44,1.56,1.2,2.71,1.62,1.52,1.21,3.83,1.93,1.91,1.37,2.52,2.05,1.62,1.33,2.54,1.9,1.7,1.26,3.3,2.53,1.85,1.41,2.46,1.83,1.74,1.34,2.64,1.97,1.74,1.33,3.42,2.52,2.1,1.51,2.56,2.04,1.67,1.37,2.78,2.18,1.84,1.44,3.45,2.76,2.04,1.61,2.71,2.13,1.8,1.58,2.88,2.21,1.99,1.64,3.61,2.72,2.26,1.74,2.81,2.34,2.01,1.65,2.99,2.19,1.96,1.62,3.58,2.68,2.23,1.68,2.81,2.15,2.01,1.69,2.88,2.16,2.1,1.85],"wq":[2.32,1.64,1.32,0.96,2.07,1.66,1.24,0.94,3.2,2.45,1.59,1.36,2.9,2.23,1.54,1.2,2.76,2.09,1.48,1.18,3.93,2.62,1.95,1.5,3.37,2.32,1.59,1.21,3.05,2.0,1.53,1.16,4.02,2.91,1.98,1.48,3.35,2.37,1.66,1.39,3.29,2.15,1.67,1.22,4.28,2.77,2.02,1.32,3.62,2.32,1.75,1.29,3.38,2.24,1.71,1.3,4.53,3.11,2.17,1.55,3.69,2.42,1.87,1.46,3.81,2.38,1.86,1.34,4.53,3.01,2.33,1.7,3.97,2.54,2.0,1.52,3.63,2.27,1.9,1.43,4.59,3.17,2.37,1.77,3.82,2.43,2.02,1.58,3.66,2.25,2.15,1.83],"wo":[2.35,1.65,1.31,0.98,2.1,1.7,1.28,1.0,2.48,2.06,1.57,1.34,2.37,1.83,1.49,1.16,2.44,1.95,1.51,1.21,3.3,2.79,1.68,1.37,2.9,2.22,1.59,1.3,2.66,2.0,1.69,1.29,3.46,2.58,1.82,1.38,2.63,1.9,1.71,1.32,2.83,2.01,1.73,1.27,3.57,2.69,2.16,1.52,2.86,2.21,1.79,1.44,2.97,2.29,1.85,1.5,3.68,2.81,2.12,1.58,3.01,2.23,1.87,1.59,3.19,2.38,1.97,1.58,4.03,2.96,2.35,1.74,3.1,2.29,2.04,1.69,3.3,2.26,2.06,1.66,3.99,2.91,2.48,1.82,3.13,2.3,2.1,1.74,3.16,2.24,2.14,1.85],"mpq":21.98,"mpo":24.83,"mwb":2.061,"mwq":2.288,"mwo":2.146,"dq":6.94,"do":6.28},"causal-forcing-1":{"T":186,"hw":[480,832],"pq":[43.9,38.8,38.8,38.9,39.4,37.7,37.8,37.9,38.1,37.4,37.9,37.9,38.2,37.6,37.9,37.9,38.1,37.6,37.9,37.8,38.0,32.5,29.2,28.4,26.6,26.1,25.1,24.6,23.0,22.2,21.9,21.0,20.5,19.5,19.0,18.6,18.2,17.9,17.6,17.3,17.2,16.9,16.9,16.6,16.5,16.1,15.8,15.6,15.4,15.2,15.2,15.0,15.0,14.9,15.0,14.8,14.8,14.6,14.6,14.4,14.5,14.3,14.3,14.3,14.3,14.1,14.2,14.1,14.1,14.0,14.0,13.8,13.9,13.7,13.7,13.6,13.6,13.5,13.5,13.5,13.4,13.2,13.2,13.1,13.1,13.1,13.0,13.0,12.9,12.8,12.8,12.7,12.7,12.8,12.8,12.8,12.8,12.8,12.9,12.8,12.9,12.8,12.8,12.7,12.7,12.8,12.8,12.8,12.8,12.7,12.7,12.6,12.6,12.5,12.5,12.5,12.4,12.3,12.3,12.2,12.2,12.2,12.2,12.1,12.1,12.1,12.1,12.0,11.9,11.8,11.8,11.7,11.6,11.6,11.7,11.6,11.6,11.5,11.6,11.5,11.5,11.3,11.4,11.3,11.3,11.2,11.3,11.3,11.3,11.2,11.3,11.3,11.2,11.1,11.1,11.1,11.1,11.2,11.2,11.2,11.2,11.2,11.2,11.2,11.2,11.1,10.8,10.9,10.8,10.9,10.8,10.8,10.7,10.7,10.5,10.5,10.4,10.4,10.3,10.3,10.2,10.2,10.2,10.2,10.2,10.1],"po":[45.4,39.6,39.6,39.7,40.5,38.4,38.4,38.5,38.8,37.6,38.3,38.2,38.7,37.9,38.2,38.3,38.5,37.8,38.3,38.2,38.5,36.3,35.4,34.8,34.3,34.0,33.1,32.9,31.9,31.4,31.0,30.4,30.1,29.5,28.8,28.2,27.5,27.6,27.0,26.6,25.9,25.0,24.8,24.2,23.8,22.9,22.5,22.1,22.1,21.8,21.6,21.3,20.9,20.3,20.1,19.5,19.5,19.0,18.7,18.3,18.2,17.9,17.7,17.4,17.3,17.1,17.1,16.7,16.7,16.3,16.2,15.8,15.7,15.5,15.4,15.3,15.3,15.2,15.2,15.0,15.1,14.9,14.9,14.6,14.6,14.5,14.5,14.4,14.3,14.3,14.3,14.1,14.1,14.0,14.0,13.9,13.8,13.7,13.9,13.8,13.8,13.7,13.9,13.8,13.9,13.7,13.8,13.7,13.7,13.5,13.6,13.5,13.5,13.4,13.6,13.5,13.5,13.3,13.4,13.3,13.3,13.1,13.2,13.2,13.2,13.1,13.2,13.2,13.2,13.1,13.2,13.0,13.0,12.9,13.0,12.8,12.9,12.8,12.9,12.9,12.9,12.7,12.8,12.7,12.7,12.6,12.7,12.6,12.6,12.4,12.6,12.5,12.6,12.4,12.4,12.2,12.3,12.2,12.2,12.1,12.1,12.0,12.1,12.1,12.0,11.7,11.8,11.6,11.7,11.6,11.5,11.2,11.1,11.0,11.0,11.0,11.0,10.8,10.8,10.7,10.7,10.8,11.0,11.0,11.0,10.9],"wb":[2.14,1.88,1.32,1.54,2.31,1.48,1.66,1.33,2.74,1.82,1.48,1.7,2.05,2.0,1.52,1.89,2.64,1.62,1.87,1.49,2.52,2.22,1.68,2.14,2.16,2.28,1.7,2.07,2.49,2.04,2.08,1.9,3.05,2.41,2.2,2.07,2.82,2.44,2.5,2.28,3.08,2.55,2.82,2.46,3.37,2.73,2.71,2.28,3.02,2.38,2.6,2.22,3.62,2.86,3.17,2.56,3.8,2.91,3.05,2.79,3.61,3.32,3.21,3.04,4.4,3.33,3.52,3.08,4.89,3.5,3.79,3.13,4.44,3.68,3.64,3.13,5.02,3.64,3.51,3.24,4.84,3.64,3.79,3.23,4.66,4.24,3.83,3.52,4.99,4.7,3.98,3.43,6.59,4.33,4.27,3.85,5.7,4.84,4.11,3.69,5.59,4.69,3.3,3.37,6.04,3.63,4.77,3.63,6.0,5.24,4.42,3.95,5.67,5.29,4.05,4.14,6.42,4.53,4.93,3.95,6.73,5.95,4.44,4.53,6.01,5.51,3.44,3.68,6.47,4.69,5.15,3.34,7.38,6.37,5.17,4.97,7.0,6.37,4.42,4.68,8.19,5.92,6.05,4.36,9.1,7.37,6.46,5.78,8.64,7.44,4.81,5.38,9.28,6.78,6.35,4.92,10.47,7.61,6.63,5.57,8.97,7.71,5.23,5.08,10.77,7.33,6.67,5.78,12.46,9.61,9.49,8.03,11.69,10.33,5.83,6.15,10.25,8.93,7.26,8.9,17.41,9.3,8.59,5.58,12.48],"wq":[2.11,1.81,1.34,1.54,2.32,1.51,1.6,1.33,2.72,1.81,1.45,1.68,2.05,1.98,1.52,1.89,2.59,1.64,1.85,1.52,2.69,2.66,1.9,2.28,2.71,2.52,1.96,1.97,2.65,2.21,2.08,2.07,2.88,2.5,2.37,1.9,3.1,2.56,2.48,2.04,3.61,2.75,2.81,2.51,4.49,4.02,3.12,3.14,4.7,4.19,3.08,3.07,5.49,3.59,3.81,2.68,4.93,4.14,3.12,3.03,4.62,4.24,3.2,3.21,5.74,3.78,3.84,2.67,7.12,4.23,4.62,4.04,5.96,5.51,3.43,3.79,7.33,3.71,4.18,3.03,6.68,3.79,4.29,3.76,5.81,5.7,3.63,4.23,6.31,5.96,3.63,4.21,10.68,6.61,4.7,5.17,9.89,7.11,4.45,4.42,9.73,6.45,4.17,3.57,9.6,7.76,4.28,4.6,8.85,7.72,4.5,4.89,9.05,6.44,4.25,4.59,12.74,6.87,7.11,5.38,11.34,9.31,5.54,5.8,11.21,7.83,5.04,5.41,13.2,7.04,7.64,5.69,13.45,8.43,6.27,7.29,12.44,8.54,5.89,6.85,17.52,11.12,7.04,8.88,14.15,10.37,8.02,7.88,12.91,10.04,5.24,7.32,14.45,10.02,6.7,7.82,12.97,7.24,8.0,7.19,11.33,7.86,4.61,6.34,12.3,11.6,5.73,8.44,14.38,7.85,8.16,8.7,12.4,7.72,4.88,5.93,11.25,10.52,4.84,7.65,13.04,8.87,5.38,6.41,12.94],"wo":[2.19,1.84,1.32,1.57,2.26,1.55,1.6,1.32,2.71,1.85,1.47,1.69,2.04,1.99,1.53,1.87,2.59,1.63,1.88,1.5,2.57,2.28,1.67,2.16,2.19,2.38,1.7,2.13,2.62,2.06,2.1,1.91,2.91,2.58,2.04,2.32,2.77,2.63,2.27,2.45,3.07,2.59,2.64,2.58,3.48,2.79,2.67,2.18,3.19,2.58,2.54,2.01,3.57,2.69,2.96,2.33,3.81,2.69,2.76,2.48,3.47,2.82,2.94,2.31,3.87,2.84,3.15,2.54,4.42,2.92,2.96,2.42,3.87,3.15,2.97,2.67,4.61,3.1,3.64,2.62,4.55,2.97,3.51,2.61,3.93,3.55,3.2,2.81,4.27,4.08,3.72,3.58,5.91,3.44,4.11,2.51,4.97,4.16,3.54,3.38,4.79,4.19,2.73,2.82,5.54,3.19,3.88,2.99,4.56,4.1,3.51,3.54,4.4,3.93,2.92,2.9,5.45,3.69,3.9,3.01,5.24,4.52,3.45,3.52,5.37,4.99,3.11,3.34,5.94,4.11,4.47,3.27,5.94,5.25,3.79,3.83,5.71,5.47,3.11,3.56,7.05,4.71,4.59,3.78,6.96,5.34,4.33,4.42,7.07,5.78,3.78,3.93,7.92,4.42,4.7,3.74,7.57,4.72,4.68,4.46,6.63,6.33,3.91,4.37,6.43,7.21,4.91,4.19,7.79,5.7,5.81,4.27,7.47,5.65,4.54,4.13,7.43,6.89,4.86,4.75,8.64,5.9,5.35,4.28,7.17],"mpq":16.53,"mpo":18.99,"mwb":4.62,"mwq":5.763,"mwo":3.721,"dq":21.48,"do":17.48},"causal-forcing-2":{"T":186,"hw":[480,832],"pq":[60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0,60.0],"po":[56.9,36.8,39.9,37.1,44.4,34.0,33.7,32.8,35.2,31.4,31.1,32.4,31.2,31.0,31.3,31.8,31.0,30.8,30.9,31.3,30.6,28.4,27.4,27.1,26.9,26.7,26.1,25.8,25.5,25.0,24.3,23.7,22.3,21.4,21.2,20.2,19.9,19.6,19.2,18.8,18.6,18.2,17.7,17.1,17.1,16.1,15.1,14.5,14.3,13.4,12.9,12.6,12.6,12.1,11.8,11.5,11.7,11.2,11.2,10.8,10.4,10.1,10.2,10.1,10.1,10.1,10.3,10.3,10.3,10.0,9.8,9.8,9.9,9.9,9.7,9.7,9.7,9.7,9.6,9.5,9.3,9.2,9.1,9.1,9.3,9.5,9.6,9.8,9.7,9.7,9.7,9.8,9.8,9.8,9.7,9.7,9.6,9.5,9.5,9.4,9.6,9.6,9.8,10.0,10.2,10.4,10.5,10.6,10.6,10.6,10.5,10.6,10.7,10.8,11.0,11.1,11.1,11.1,11.1,11.1,11.2,11.1,11.1,11.2,11.2,11.2,11.3,11.4,11.6,11.5,11.3,11.3,11.3,11.2,11.1,11.1,11.2,11.3,11.4,11.4,11.6,11.6,11.3,10.9,10.7,10.5,10.3,10.1,10.1,10.1,10.1,10.1,10.2,10.4,10.5,10.4,10.4,10.3,10.3,10.2,10.2,10.2,10.3,10.3,10.3,10.5,10.5,10.6,10.6,10.8,10.8,10.9,10.9,11.1,11.2,11.3,11.4,11.6,11.4,11.5,11.5,11.7,11.5,11.7,11.7,11.5],"wb":[5.61,5.55,4.01,5.19,4.96,5.9,4.33,5.09,5.93,6.22,5.02,4.22,5.71,5.22,3.46,4.55,5.85,5.13,4.38,4.57,6.63,5.65,4.64,4.29,4.48,4.8,4.48,4.46,5.83,5.05,4.49,3.5,5.76,3.77,4.72,4.09,5.56,4.59,4.54,4.13,6.27,6.15,5.26,3.56,6.78,5.82,5.83,5.26,6.72,5.77,6.82,5.97,7.74,4.52,5.96,5.59,8.94,9.17,7.13,6.71,6.61,7.5,4.8,5.66,7.21,6.54,6.15,5.38,7.6,6.48,5.45,5.11,5.15,5.85,5.2,4.62,5.65,5.21,4.97,4.32,5.47,5.41,4.92,4.3,5.07,4.37,3.48,3.81,5.0,4.01,3.56,3.01,5.53,4.45,3.95,3.86,5.06,3.83,3.45,3.34,4.58,3.65,3.52,3.15,5.83,5.04,3.84,4.05,5.92,5.01,4.11,3.62,5.89,4.41,3.64,3.17,6.42,6.17,4.39,3.74,6.91,5.69,4.28,4.01,6.19,4.87,3.84,3.52,7.16,6.45,4.4,4.48,7.32,6.58,4.41,4.0,6.53,5.4,3.76,3.48,7.33,6.91,4.91,4.43,6.96,6.35,4.46,4.18,6.39,5.54,4.01,3.75,7.42,6.31,4.47,4.19,7.01,6.01,4.36,3.99,6.57,5.42,3.76,3.52,7.48,6.71,4.78,4.45,7.49,6.88,4.93,4.25,6.8,5.67,3.86,3.83,7.46,5.46,4.88,4.76,7.49,6.16,4.61,4.32,7.29],"wq":[5.61,5.55,4.01,5.19,4.96,5.9,4.33,5.09,5.93,6.22,5.02,4.22,5.71,5.22,3.46,4.55,5.85,5.13,4.38,4.57,6.63,5.65,4.64,4.29,4.48,4.8,4.48,4.46,5.83,5.05,4.49,3.5,5.76,3.77,4.72,4.09,5.56,4.59,4.54,4.13,6.27,6.15,5.26,3.56,6.78,5.82,5.83,5.26,6.72,5.77,6.82,5.97,7.74,4.52,5.96,5.59,8.94,9.17,7.13,6.71,6.61,7.5,4.8,5.66,7.21,6.54,6.15,5.38,7.6,6.48,5.45,5.11,5.15,5.85,5.2,4.62,5.65,5.21,4.97,4.32,5.47,5.41,4.92,4.3,5.07,4.37,3.48,3.81,5.0,4.01,3.56,3.01,5.53,4.45,3.95,3.86,5.06,3.83,3.45,3.34,4.58,3.65,3.52,3.15,5.83,5.04,3.84,4.05,5.92,5.01,4.11,3.62,5.89,4.41,3.64,3.17,6.42,6.17,4.39,3.74,6.91,5.69,4.28,4.01,6.19,4.87,3.84,3.52,7.16,6.45,4.4,4.48,7.32,6.58,4.41,4.0,6.53,5.4,3.76,3.48,7.33,6.91,4.91,4.43,6.96,6.35,4.46,4.18,6.39,5.54,4.01,3.75,7.42,6.31,4.47,4.19,7.01,6.01,4.36,3.99,6.57,5.42,3.76,3.52,7.48,6.71,4.78,4.45,7.49,6.88,4.93,4.25,6.8,5.67,3.86,3.83,7.46,5.46,4.88,4.76,7.49,6.16,4.61,4.32,7.29],"wo":[5.65,5.57,4.03,5.2,4.93,5.79,4.39,5.09,6.03,6.25,5.06,4.2,5.7,5.17,3.51,4.57,5.91,5.16,4.43,4.59,6.52,5.91,4.71,4.31,4.42,5.0,4.42,4.26,5.73,4.98,4.26,3.56,5.92,3.63,4.58,3.99,5.37,4.56,4.73,3.87,5.89,5.89,5.4,3.36,6.8,5.77,5.2,4.64,6.31,5.88,5.54,5.22,6.39,4.91,5.71,4.16,7.96,6.64,6.51,6.73,6.48,6.7,5.05,5.54,7.24,6.26,6.07,5.35,7.54,6.56,5.83,5.63,5.35,5.9,5.51,5.12,5.77,5.33,5.04,4.73,6.17,5.59,4.93,4.81,6.01,6.09,4.16,4.36,6.17,5.8,4.27,3.6,6.43,6.3,4.44,3.95,5.68,5.55,4.29,3.95,5.89,5.77,3.91,3.62,7.35,6.22,4.33,3.95,6.93,5.73,4.6,3.94,6.52,5.12,4.32,3.56,8.05,6.59,5.36,3.73,7.68,5.52,4.91,4.32,7.31,5.12,4.46,4.53,9.03,6.61,5.15,4.66,7.82,6.77,5.03,4.66,7.41,6.1,4.44,4.23,8.7,8.5,5.59,4.96,8.24,7.57,5.56,5.11,7.93,6.75,4.83,4.82,9.63,8.21,5.41,5.09,8.38,7.43,5.3,4.84,7.96,6.75,4.62,4.48,9.47,8.3,6.24,5.68,8.48,6.79,5.66,5.28,7.74,5.62,5.03,4.66,9.14,6.84,5.72,5.41,8.07,6.61,5.28,4.9,8.59],"mpq":60.0,"mpo":14.94,"mwb":5.216,"mwq":5.216,"mwo":5.664,"dq":0.0,"do":32.53},"causal-forcing-3":{"T":160,"hw":[480,832],"pq":[44.7,38.9,38.6,38.6,39.5,37.6,37.4,37.5,37.9,37.5,37.6,37.8,38.1,38.0,37.8,37.9,38.2,37.8,37.5,37.8,38.2,31.6,28.3,28.5,27.5,27.8,26.7,26.7,26.2,26.1,25.8,25.3,24.9,24.6,23.5,24.1,23.4,23.5,22.9,22.8,22.3,22.4,22.2,22.2,22.1,22.0,21.9,21.6,21.2,21.4,20.9,20.8,20.3,20.2,19.9,19.7,19.4,19.0,19.3,18.5,18.2,18.2,17.9,17.8,17.5,17.4,17.2,17.1,16.9,16.8,16.6,16.5,16.2,16.2,16.0,16.0,15.7,15.5,15.4,15.3,15.2,15.0,14.9,14.8,14.8,14.8,14.7,14.7,14.7,14.6,14.6,14.6,14.5,14.5,14.5,14.4,14.3,14.2,14.0,14.0,13.9,13.8,13.8,13.8,13.7,13.8,13.8,13.8,13.8,13.8,13.8,13.8,13.8,13.8,13.8,13.8,13.9,14.0,14.1,14.1,14.1,14.1,14.1,14.1,14.0,13.9,13.9,13.9,13.9,13.9,13.4,13.1,12.7,13.4,13.6,13.6,13.5,14.1,14.2,14.2,14.2,14.2,14.2,14.2,14.2,14.1,14.1,14.1,14.0,13.9,13.9,13.9,13.9,13.9,13.9,13.9,13.9,13.9,13.9,13.9],"po":[46.2,39.7,39.3,39.2,40.0,37.9,37.6,38.0,38.3,37.6,37.9,38.0,38.4,38.1,37.9,38.1,38.4,37.9,38.0,38.1,38.5,35.5,33.3,33.4,32.4,32.8,31.5,31.5,30.9,30.9,30.4,30.3,29.9,29.7,29.0,29.1,28.6,28.7,27.8,27.9,27.3,27.3,26.9,26.7,26.3,25.6,24.5,24.4,23.5,23.5,22.7,22.5,21.8,21.6,21.2,20.9,20.5,20.2,19.9,19.9,19.8,19.9,19.7,19.6,19.3,19.3,19.1,19.0,18.8,18.9,18.8,18.8,18.7,18.8,18.7,18.7,18.6,18.6,18.4,18.4,18.2,18.1,17.9,17.7,17.4,17.4,17.1,17.1,16.9,16.9,16.7,16.6,16.4,16.3,16.2,16.0,15.9,15.8,15.6,15.6,15.3,15.3,15.2,15.2,15.1,15.2,15.3,15.4,15.4,15.5,15.6,15.7,15.9,16.2,16.4,16.5,16.7,16.9,17.0,17.2,17.1,17.3,17.2,17.1,17.0,17.1,17.1,17.2,17.1,17.3,17.4,17.5,17.4,17.4,17.3,17.2,17.0,17.0,16.9,16.9,16.8,16.9,16.8,16.8,16.7,16.7,16.6,16.7,16.7,16.8,16.8,16.8,16.8,16.9,16.8,16.9,16.9,16.9,16.8,16.7],"wb":[1.81,1.85,1.46,1.6,1.99,1.54,1.68,1.23,2.37,2.06,1.5,1.59,1.76,1.92,1.55,1.77,2.29,1.69,1.96,1.52,2.35,2.21,1.68,1.89,2.0,2.09,1.74,1.96,2.22,1.72,1.99,1.62,2.51,2.25,1.67,1.92,1.97,2.01,1.74,1.88,2.3,1.85,2.0,1.75,2.51,2.31,1.8,1.98,2.08,2.11,1.72,1.92,2.26,1.8,1.97,1.69,2.47,2.3,1.8,1.99,2.13,2.13,1.8,1.89,2.25,1.85,1.86,1.67,2.4,2.01,1.96,1.89,2.02,2.06,1.66,1.84,2.21,1.73,1.85,1.66,2.3,1.92,1.94,1.85,1.95,1.94,1.6,1.82,1.82,1.93,1.53,1.81,2.77,2.14,2.2,1.88,2.28,2.26,1.63,1.75,1.8,1.63,1.18,1.38,2.53,1.73,1.95,1.5,2.54,1.81,1.24,1.28,1.5,1.0,0.91,0.91,2.5,2.0,2.03,1.39,3.04,2.63,1.57,1.49,1.61,1.02,0.81,0.91,2.0,1.3,1.62,1.44,2.18,1.73,1.29,1.35,1.5,1.27,0.81,0.9,2.11,1.44,1.44,1.44,2.22,1.68,1.54,1.59,1.58,1.08,1.0,1.31,1.85,1.17,1.0,0.93,1.74,1.25,1.44],"wq":[1.85,1.81,1.46,1.6,2.02,1.52,1.75,1.19,2.43,1.99,1.5,1.64,1.77,1.88,1.54,1.75,2.31,1.66,1.96,1.52,2.58,2.39,1.83,1.9,2.19,2.28,1.71,1.89,2.45,1.8,2.04,1.6,2.78,1.81,1.93,1.75,2.06,1.94,1.64,1.8,2.42,1.89,1.95,1.82,2.82,2.2,2.09,1.98,2.59,2.4,1.68,1.76,2.79,2.01,1.95,1.78,2.95,2.08,2.02,1.84,2.41,2.11,1.77,1.81,2.57,1.89,1.72,1.76,2.99,2.23,2.06,1.87,2.66,2.38,1.77,1.79,2.97,2.01,2.01,1.61,2.56,1.94,2.05,1.65,2.27,2.17,1.89,1.68,2.27,2.05,1.77,1.71,3.56,2.18,2.63,1.77,3.16,2.3,1.72,1.56,2.46,1.97,1.43,1.36,2.79,2.05,2.23,1.59,2.58,1.22,1.02,0.96,1.57,0.96,0.9,0.93,2.77,2.92,2.19,1.47,2.62,2.83,1.43,1.45,3.4,1.21,1.01,1.14,5.36,15.37,4.18,5.82,7.95,3.94,0.98,2.19,13.05,3.76,3.1,2.21,3.1,1.85,1.79,1.66,2.73,1.73,1.86,1.77,2.52,2.08,1.58,1.06,2.24,1.1,1.27,1.22,2.35,1.17,1.46],"wo":[1.85,1.84,1.46,1.58,2.02,1.49,1.69,1.2,2.39,2.0,1.51,1.65,1.77,1.84,1.57,1.77,2.33,1.62,1.96,1.5,2.42,2.23,1.75,1.95,2.02,2.13,1.73,1.98,2.28,1.74,2.06,1.62,2.61,2.27,1.77,1.93,2.01,2.1,1.77,1.95,2.41,1.9,2.08,1.8,2.68,2.37,1.93,2.1,2.26,2.27,1.82,1.99,2.42,1.91,2.01,1.8,2.67,2.44,1.89,2.02,2.14,2.23,1.84,2.03,2.37,1.92,1.84,1.77,2.48,1.98,2.0,1.9,2.06,2.14,1.7,1.89,2.28,1.72,1.78,1.6,2.28,1.83,1.83,1.74,2.01,1.94,1.67,1.84,1.92,2.06,1.64,1.84,2.93,2.27,2.33,1.93,2.53,2.35,1.66,1.8,2.09,1.65,1.28,1.34,2.5,1.71,1.81,1.48,2.46,2.08,1.54,1.64,1.96,1.59,1.41,1.47,2.73,2.32,1.98,1.57,2.38,2.08,1.25,1.52,1.66,1.11,1.0,1.16,2.16,1.55,1.63,1.49,2.22,1.63,1.46,1.37,1.51,1.3,0.78,0.82,2.35,1.68,1.44,1.34,2.31,1.66,1.4,1.72,2.1,1.3,0.92,1.17,2.14,1.25,1.43,1.37,2.12,1.68,1.65],"mpq":19.82,"mpo":22.35,"mwb":1.789,"mwq":2.244,"mwo":1.861,"dq":5.58,"do":4.69},"causal-forcing-4":{"T":144,"hw":[480,832],"pq":[44.0,35.1,34.2,33.8,35.4,32.6,31.8,31.6,31.7,30.9,30.7,30.7,31.2,30.5,30.3,30.3,30.7,30.3,30.2,30.4,30.3,25.4,21.5,20.9,19.9,19.6,18.6,18.4,17.6,17.2,16.7,16.2,15.8,15.2,14.9,14.6,14.4,14.3,14.1,14.1,14.0,13.8,13.4,13.4,13.2,12.6,12.1,11.6,11.3,11.5,11.3,11.2,11.0,11.0,10.9,11.0,11.0,10.8,10.8,10.9,10.8,10.8,10.4,10.4,10.2,10.2,10.2,10.2,10.0,10.0,9.9,9.8,9.6,9.6,9.4,9.5,9.6,9.7,9.8,9.8,9.8,9.8,9.8,9.8,9.8,9.9,10.0,10.0,9.9,9.8,9.8,9.8,9.7,9.9,9.9,9.9,10.0,10.1,10.1,10.1,10.2,10.2,10.2,10.2,10.3,10.4,10.4,10.4,10.4,10.5,10.5,10.4,10.4,10.7,10.8,10.9,10.9,11.0,11.2,11.2,11.2,11.1,11.1,11.1,11.1,11.1,11.2,11.2,11.2,11.1,11.1,10.8,10.7,10.7,10.8,10.8,10.9,10.9,11.1,11.1,11.2,11.1,11.1,11.1],"po":[43.3,35.0,33.9,33.6,34.6,32.5,31.8,31.7,31.7,31.0,30.8,30.8,31.4,30.6,30.4,30.5,30.9,30.4,30.4,30.5,30.5,28.1,25.9,25.4,23.9,23.1,21.6,21.3,20.2,20.2,19.9,19.8,19.4,19.0,18.6,18.1,17.7,17.4,17.1,17.1,17.1,17.7,17.4,17.1,16.8,15.2,14.4,13.7,13.4,13.4,13.2,13.0,12.8,12.7,12.5,12.4,12.3,11.9,11.8,11.7,11.5,11.5,10.6,10.6,10.3,10.4,10.3,10.3,10.0,9.9,9.9,9.8,9.5,9.4,9.5,9.5,9.4,9.4,9.3,9.3,9.4,9.4,9.5,9.6,9.7,9.8,9.8,9.8,9.8,9.8,9.6,9.5,9.4,9.6,9.7,9.7,9.7,9.9,9.8,9.9,9.9,10.2,10.2,10.2,10.2,10.3,10.3,10.3,10.3,10.3,10.3,10.3,10.2,10.3,10.4,10.3,10.3,10.3,10.3,10.3,10.3,10.2,10.2,10.1,10.1,10.0,10.0,10.0,10.0,10.0,10.0,10.0,10.0,10.0,10.0,10.1,10.2,10.2,10.3,10.3,10.4,10.3,10.3,10.3],"wb":[4.16,5.14,2.99,4.48,4.87,5.29,3.11,4.51,5.12,7.35,3.91,5.58,5.85,6.24,3.64,5.12,5.51,5.34,3.48,5.05,5.66,6.14,3.65,5.13,5.19,5.66,3.28,5.04,6.68,3.96,5.26,3.43,7.0,3.85,4.69,3.5,7.15,4.17,5.59,3.65,26.43,13.87,9.38,4.95,10.75,6.14,7.48,5.3,10.28,6.22,7.34,5.25,9.65,6.0,7.78,5.17,10.44,5.61,6.92,7.49,7.0,15.02,4.8,7.81,6.95,8.41,4.52,6.89,6.22,7.4,4.36,7.15,6.9,14.69,4.86,6.95,6.54,7.44,4.88,6.79,6.6,8.65,4.71,7.05,6.75,7.84,4.69,7.49,7.0,8.0,4.51,6.99,7.47,7.75,4.78,5.09,9.2,4.35,5.34,4.06,8.52,4.01,4.43,3.15,7.5,4.33,4.79,4.0,8.22,4.25,4.96,3.6,7.16,3.48,3.89,2.72,6.68,5.3,5.23,3.76,8.39,5.67,5.79,3.74,8.28,4.84,5.03,3.29,8.11,5.8,6.2,5.23,7.99,5.22,6.14,5.85,7.0,7.27,3.27,4.04,6.1,7.26,3.33],"wq":[4.14,5.25,3.02,4.45,4.87,5.26,3.08,4.51,5.14,7.31,3.92,5.71,5.94,6.3,3.63,5.13,5.37,5.31,3.45,5.14,6.05,7.09,3.77,5.51,5.68,6.08,3.34,4.34,6.73,4.06,5.41,3.64,7.48,4.01,5.24,3.7,6.94,4.02,5.04,3.86,27.65,11.88,9.07,4.24,10.47,6.77,9.6,5.63,10.43,5.37,5.88,4.29,9.08,4.89,5.96,4.09,8.96,4.98,6.74,6.75,7.41,6.67,3.49,5.67,6.61,5.92,3.28,5.36,6.86,7.65,3.38,5.37,7.06,6.52,3.5,5.62,6.86,5.7,3.3,4.9,5.61,5.61,3.32,5.42,5.6,5.5,3.35,5.29,5.43,5.46,3.08,5.16,9.07,5.9,4.54,3.75,7.55,4.45,4.55,2.95,6.24,3.49,3.47,2.27,6.05,4.18,4.77,3.09,7.22,4.9,5.17,3.22,8.43,6.54,2.73,2.74,7.65,5.89,4.68,2.63,7.42,4.78,4.45,2.5,6.72,4.8,3.38,3.29,6.74,5.63,4.84,2.94,7.84,4.99,5.9,5.05,6.77,7.02,3.37,4.73,7.67,11.42,4.59],"wo":[4.17,5.12,3.01,4.43,4.86,5.27,3.07,4.57,5.14,7.29,3.94,5.76,5.85,6.29,3.68,5.15,5.56,5.33,3.44,5.05,5.62,6.13,3.56,5.0,5.13,5.7,3.35,4.93,6.52,3.89,5.06,3.33,6.99,3.73,4.76,3.33,6.51,3.83,5.06,3.51,27.61,14.52,11.04,5.51,10.78,6.44,7.7,5.6,10.08,5.86,6.74,4.71,9.2,6.46,7.89,5.15,10.68,6.38,7.71,7.94,8.04,8.26,5.01,7.66,7.43,6.82,4.38,6.39,7.36,7.5,4.5,6.71,6.91,6.83,4.33,6.17,6.73,6.31,3.94,5.58,6.01,6.8,4.1,6.16,5.94,6.33,4.0,6.54,6.46,9.46,5.3,8.37,8.57,9.97,5.62,7.17,9.96,5.71,10.56,5.55,9.23,2.58,3.34,2.22,6.45,3.43,4.94,3.78,6.18,4.17,4.64,3.15,6.11,4.06,4.72,2.46,6.43,5.2,4.7,3.35,7.5,3.83,5.03,3.06,7.37,3.56,4.72,3.26,7.56,4.5,5.8,5.38,7.01,4.99,5.95,6.07,6.93,6.88,4.2,5.96,7.4,8.67,4.55],"mpq":14.7,"mpo":15.23,"mwb":6.123,"mwq":5.571,"mwo":5.997,"dq":22.59,"do":22.58}};
+(function(){if(!VID)return;var svg=$('vd-svg'),sum=$('vd-sum');
+ var order=['hy-world-1','hy-world-2','hy-world-3','hy-world-4','hy-world-5','lingbot-1','lingbot-2','lingbot-3','lingbot-4','lingbot-5','matrix-game-1','matrix-game-2','matrix-game-3','matrix-game-4','causal-forcing-1','causal-forcing-3','causal-forcing-4'];
+ var nm={'hy-world':'HY-World','lingbot':'LingBot','matrix-game':'Matrix-Game','causal-forcing':'Causal-Forcing'};
+ function label(k){var p=k.lastIndexOf('-');return nm[k.slice(0,p)]+' #'+k.slice(p+1);}
+ var x0=150,x1=560;function X(v){return x0+(x1-x0)*(v-0.7)/(1.0);}var y0=26,dy=25;
+ [0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7].forEach(function(v){el('line',{x1:X(v),x2:X(v),y1:14,y2:y0+order.length*dy-8,class:v===1?'axis':'gridl'},svg);el('text',{x:X(v),y:y0+order.length*dy+8,'text-anchor':'middle',class:'t2'},svg,fx(v,1)+'×');});
+ el('text',{x:590,y:14,class:'t2'},svg,'PSNR QVG → QuantWM');
+ var sq=0,so=0,nq=0,pq=0,po=0,spq=0,spo=0;
+ order.forEach(function(k,i){var v=VID[k],y=y0+i*dy,rq=v.mwq/v.mwb,ro=v.mwo/v.mwb;sq+=rq;so+=ro;if(rq>ro)nq++;pq+=v.mpq;po+=v.mpo;
+  for(var t=0;t<v.wb.length;t++){if(v.wq[t]>1.5*v.wb[t])spq++;if(v.wo[t]>1.5*v.wb[t])spo++;}
+  el('text',{x:x0-10,y:y+4,'text-anchor':'end',class:'t'},svg,label(k));
+  el('line',{x1:X(Math.min(rq,ro)),x2:X(Math.max(rq,ro)),y1:y,y2:y,style:'stroke:var(--rule2);stroke-width:2'},svg);
+  el('circle',{cx:X(rq),cy:y,r:6,style:'fill:var(--qvg)'},svg);el('circle',{cx:X(ro),cy:y,r:6,style:'fill:var(--ours)'},svg);
+  el('text',{x:590,y:y+4,class:'t2'},svg,fx(v.mpq,1)+' → ');el('text',{x:640,y:y+4,style:'fill:'+(v.mpo>v.mpq?'var(--ours-ink)':'var(--risk-ink)')+';font-size:11px'},svg,fx(v.mpo,1)+' dB');});
+ var n=order.length;
+ sum.innerHTML='17 个样例：warping error 相对 BF16 的平均倍数 QVG <b class="c-qvg">'+fx(sq/n,3)+'×</b>，QuantWM <b class="c-ours">'+fx(so/n,3)+'×</b>；QVG 比 QuantWM 更不稳的样例 <b>'+nq+'/'+n+'</b>。<br>逐帧 warping error 超过 BF16 1.5 倍的"尖刺帧"合计：QVG <b>'+spq+'</b> 帧，QuantWM <b>'+spo+'</b> 帧。平均 PSNR vs BF16：QVG '+fx(pq/n,2)+' dB，QuantWM '+fx(po/n,2)+' dB（QuantWM 更高的样例 16/17）。';
+ // per-example curves
+ var sel=$('vc-sel');Object.keys(VID).forEach(function(k){var o=document.createElement('option');o.value=k;o.textContent=label(k)+(k==='causal-forcing-2'?'（QVG 文件 = BF16）':'')+' · '+VID[k].T+' 帧';sel.appendChild(o);});sel.value='matrix-game-3';
+ function line(s,arr,X,Y,col,dash){var p=arr.map(function(v,i){return fx(X(i),1)+','+fx(Y(v),1);}).join(' ');el('polyline',{points:p,style:'fill:none;stroke:'+col+';stroke-width:1.6'+(dash?';stroke-dasharray:4 3':'')},s);}
+ function drawC(){var v=VID[sel.value];var sp=$('vc-psnr'),sw=$('vc-warp');clear(sp);clear(sw);var x0=40,x1=370,top=10,bot=180;
+  var T=v.pq.length;function X(i){return x0+(x1-x0)*i/(T-1);}var pmax=50,pmin=5;function Y(val){return bot-(Math.min(val,pmax)-pmin)/(pmax-pmin)*(bot-top);}
+  [10,20,30,40,50].forEach(function(t){el('line',{x1:x0,x2:x1,y1:Y(t),y2:Y(t),class:'gridl'},sp);el('text',{x:x0-5,y:Y(t)+4,'text-anchor':'end',class:'t2'},sp,t);});
+  el('text',{x:x1,y:bot+18,'text-anchor':'end',class:'t2'},sp,'帧 →');
+  line(sp,v.pq,X,Y,'var(--qvg)');line(sp,v.po,X,Y,'var(--ours)');
+  var W=v.wb.length;function X2(i){return x0+(x1-x0)*i/(W-1);}var wm=0;v.wb.concat(v.wq,v.wo).forEach(function(a){wm=Math.max(wm,a);});wm=Math.ceil(wm);function Y2(val){return bot-val/wm*(bot-top);}
+  for(var k=0;k<=4;k++){var t=wm*k/4;el('line',{x1:x0,x2:x1,y1:Y2(t),y2:Y2(t),class:'gridl'},sw);el('text',{x:x0-5,y:Y2(t)+4,'text-anchor':'end',class:'t2'},sw,fx(t,1));}
+  line(sw,v.wb,X2,Y2,'var(--bf)',true);line(sw,v.wq,X2,Y2,'var(--qvg)');line(sw,v.wo,X2,Y2,'var(--ours)');
+  el('text',{x:x1,y:bot+18,'text-anchor':'end',class:'t2'},sw,'虚线 BF16 · 红 QVG · 蓝 QuantWM');}
+ sel.addEventListener('change',drawC);drawC();
+})();
+
+/* ---------------- §10 filter ---------------- */
+(function(){var seg=$('rf'),list=$('risklist');if(!seg)return;Array.prototype.forEach.call(seg.querySelectorAll('button'),function(b){b.addEventListener('click',function(){var f=b.getAttribute('data-f');pressSeg(seg,b);Array.prototype.forEach.call(list.children,function(li){li.hidden=!(f==='all'||li.classList.contains(f));});});});})();
+})();
+</script>
+
+</body>
+</html>

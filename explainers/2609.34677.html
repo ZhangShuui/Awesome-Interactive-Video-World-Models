@@ -1,0 +1,1627 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FAR 精读</title>
+<meta name="description" content="FAR（arXiv 2609.34677，Future-Aware Recall）精读：把 RAG 的 EMDR² 检索器训练搬进视频世界模型的情景记忆。内容包括：底座世界模型与 rollout 协议、检索前向与分块 Top-K、后验教师与效用温度、训练循环与算力账、线索门控的真实容量、四组实验逐项复核、对照组公平性审计，以及存疑清单。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=Noto+Serif+SC:wght@600;700&family=STIX+Two+Text:ital@0;1&display=swap">
+<style>
+/* ============================================================
+   FAR 精读 — tokens（深色优先；浅色为纸面）
+   角色色：far  = FAR / 本文方法（暖橙）     wm  = WorldMem 规则（蓝）
+           tmp  = Temporal 最近帧（石板灰）    llr = LongLive-RAG 嵌入相似（兰紫）
+           meta = 时间+位姿线索（青）          vis = 视觉线索（紫）
+           aud  = 音频线索（绿）               fut = 只在训练时可用的“未来”信号（粉）
+           risk / med / low = 存疑·高 / 中 / 低     ok = 已复算通过
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0f1114; --surf:#15191e; --surf2:#1b2026; --surf3:#242b33;
+  --rule:#262e37; --rule2:#3a4450;
+  --ink:#e7eaee; --ink2:#aab2bb; --ink3:#7d8690;
+  --far:#ec8b3e; --far-ink:#f6b077; --far-soft:rgba(236,139,62,.16);
+  --wm:#4f9be8; --wm-ink:#8fc0f5; --wm-soft:rgba(79,155,232,.16);
+  --tmp:#7f8a97; --tmp-ink:#b3bcc6; --tmp-soft:rgba(127,138,151,.18);
+  --llr:#c77dd6; --llr-ink:#dfaae8; --llr-soft:rgba(199,125,214,.16);
+  --meta:#2fb5a8; --meta-ink:#6fd6cb; --meta-soft:rgba(47,181,168,.16);
+  --vis:#9d86ec; --vis-ink:#c3b4f7; --vis-soft:rgba(157,134,236,.17);
+  --aud:#7cc36b; --aud-ink:#a9dd9c; --aud-soft:rgba(124,195,107,.16);
+  --fut:#e8739f; --fut-ink:#f4a3c2; --fut-soft:rgba(232,115,159,.15);
+  --risk:#e5544c; --risk-ink:#f68a83; --risk-soft:rgba(229,84,76,.15);
+  --med:#d4b144; --med-ink:#ecd07a; --med-soft:rgba(212,177,68,.15);
+  --low:#7f8a97; --low-ink:#b3bcc6; --low-soft:rgba(127,138,151,.15);
+  --ok:#3dba80; --ok-ink:#72d8a7; --ok-soft:rgba(61,186,128,.14);
+  --wall:#56606c; --floor:#1d242c; --grid:#1f262e; --axis:#3d4753;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 32px rgba(0,0,0,.30);
+  --f-head:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --f-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --f-math:"STIX Two Text","Times New Roman",Georgia,serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f0f1f3; --surf:#ffffff; --surf2:#eaedf0; --surf3:#dde2e7;
+    --rule:#d7dce2; --rule2:#b8c0ca;
+    --ink:#131820; --ink2:#3f4853; --ink3:#66707b;
+    --far:#c8641a; --far-ink:#9c4c0f; --far-soft:rgba(200,100,26,.11);
+    --wm:#1f6fc4; --wm-ink:#17579c; --wm-soft:rgba(31,111,196,.10);
+    --tmp:#6b7683; --tmp-ink:#4f5965; --tmp-soft:rgba(107,118,131,.13);
+    --llr:#9d4bb0; --llr-ink:#7c3590; --llr-soft:rgba(157,75,176,.10);
+    --meta:#138a7f; --meta-ink:#0c6a61; --meta-soft:rgba(19,138,127,.11);
+    --vis:#6b52cf; --vis-ink:#533ca8; --vis-soft:rgba(107,82,207,.11);
+    --aud:#3f8f2f; --aud-ink:#2f6f22; --aud-soft:rgba(63,143,47,.11);
+    --fut:#c2416f; --fut-ink:#9c2f56; --fut-soft:rgba(194,65,111,.10);
+    --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+    --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+    --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.12);
+    --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.10);
+    --wall:#8b95a1; --floor:#eef1f4; --grid:#e5e9ed; --axis:#b8c0ca;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f0f1f3; --surf:#ffffff; --surf2:#eaedf0; --surf3:#dde2e7;
+  --rule:#d7dce2; --rule2:#b8c0ca;
+  --ink:#131820; --ink2:#3f4853; --ink3:#66707b;
+  --far:#c8641a; --far-ink:#9c4c0f; --far-soft:rgba(200,100,26,.11);
+  --wm:#1f6fc4; --wm-ink:#17579c; --wm-soft:rgba(31,111,196,.10);
+  --tmp:#6b7683; --tmp-ink:#4f5965; --tmp-soft:rgba(107,118,131,.13);
+  --llr:#9d4bb0; --llr-ink:#7c3590; --llr-soft:rgba(157,75,176,.10);
+  --meta:#138a7f; --meta-ink:#0c6a61; --meta-soft:rgba(19,138,127,.11);
+  --vis:#6b52cf; --vis-ink:#533ca8; --vis-soft:rgba(107,82,207,.11);
+  --aud:#3f8f2f; --aud-ink:#2f6f22; --aud-soft:rgba(63,143,47,.11);
+  --fut:#c2416f; --fut-ink:#9c2f56; --fut-soft:rgba(194,65,111,.10);
+  --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+  --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+  --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.12);
+  --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.10);
+  --wall:#8b95a1; --floor:#eef1f4; --grid:#e5e9ed; --axis:#b8c0ca;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.75;}
+a{color:var(--wm-ink);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:2px solid var(--far);outline-offset:2px;border-radius:4px}
+b,strong{font-weight:600;color:var(--ink)}
+sub,sup{font-size:.72em;line-height:0}
+.tnum{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono);font-size:.9em}
+.mv{font-family:var(--f-math);font-style:italic;font-size:1.07em;white-space:nowrap}
+.dim{color:var(--ink3)}
+.c-far{color:var(--far-ink)} .c-wm{color:var(--wm-ink)} .c-tmp{color:var(--tmp-ink)} .c-llr{color:var(--llr-ink)}
+.c-meta{color:var(--meta-ink)} .c-vis{color:var(--vis-ink)} .c-aud{color:var(--aud-ink)} .c-fut{color:var(--fut-ink)}
+.c-risk{color:var(--risk-ink)} .c-ok{color:var(--ok-ink)} .c-med{color:var(--med-ink)}
+.wrap{max-width:1080px;margin:0 auto;padding-inline:20px;padding-block:24px 110px}
+@media (max-width:520px){ .wrap{padding-inline:16px} }
+
+/* ---------- hero ---------- */
+.hero{padding-block:8px 28px;border-bottom:1px solid var(--rule);display:grid;gap:18px}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.kicker{font-family:var(--f-mono);font-size:12px;letter-spacing:.14em;color:var(--ink3);text-transform:uppercase}
+.themebtn{font:inherit;font-size:12.5px;color:var(--ink2);background:var(--surf);border:1px solid var(--rule2);border-radius:999px;padding:4px 12px;cursor:pointer}
+.themebtn:hover{color:var(--ink)}
+h1{font-family:var(--f-head);font-weight:700;font-size:clamp(32px,5.2vw,52px);line-height:1.14;margin:4px 0 0;letter-spacing:.01em;text-wrap:balance}
+h1 .soft{color:var(--ink3);font-weight:600}
+.sub{font-size:17.5px;line-height:1.72;color:var(--ink2);max-width:62em;margin:0}
+.thesis{max-width:64em;margin:0;padding:14px 18px;border-left:3px solid var(--far);background:var(--far-soft);border-radius:0 8px 8px 0;font-size:15.5px}
+.patch{border:1px solid var(--rule2);border-radius:10px;overflow:hidden;background:var(--surf);box-shadow:var(--shadow)}
+.patch .jacks{height:14px;background:repeating-linear-gradient(90deg,var(--rule2) 0 2px,transparent 2px 9px) 0 5px/100% 4px no-repeat, var(--surf2);border-bottom:1px solid var(--rule)}
+.patch dl{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));}
+.patch dl div{padding:10px 14px;border-right:1px solid var(--rule);border-top:1px solid var(--rule);min-width:0}
+.patch dt{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;color:var(--ink3);text-transform:uppercase}
+.patch dd{margin:2px 0 0;font-size:13.5px;line-height:1.55;color:var(--ink);overflow-wrap:anywhere}
+.patch dd .no{color:var(--risk-ink);font-weight:600}
+.statstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+.statstrip div{background:var(--surf);padding:12px 14px;display:grid;gap:2px;align-content:start}
+.statstrip b{font-family:var(--f-mono);font-weight:500;font-size:18px;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.statstrip span{font-size:12.5px;line-height:1.45;color:var(--ink3)}
+.statstrip .warn b{color:var(--risk-ink)}
+
+/* ---------- TOC ---------- */
+nav.toc{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--rule);margin-inline:-20px;padding:8px 20px;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{flex:none;font-size:13px;color:var(--ink2);text-decoration:none;padding:5px 10px;border-radius:999px;white-space:nowrap}
+nav.toc a .n{font-family:var(--f-mono);font-size:11px;color:var(--ink3);margin-right:4px}
+nav.toc a:hover,nav.toc a.on{background:var(--surf3);color:var(--ink)}
+@media (max-width:520px){ nav.toc{margin-inline:-16px;padding-inline:16px} }
+
+/* ---------- sections ---------- */
+section{padding-block:46px 8px;scroll-margin-top:56px}
+h2{font-family:var(--f-head);font-weight:700;font-size:clamp(24px,3.2vw,31px);line-height:1.3;margin:0 0 8px;text-wrap:balance;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+h2 .no{font-family:var(--f-mono);font-weight:600;font-size:.56em;color:var(--ink3);letter-spacing:.06em}
+h3{font-family:var(--f-head);font-weight:600;font-size:20px;line-height:1.4;margin:32px 0 8px;text-wrap:balance}
+h4{font-size:14px;font-weight:600;margin:0 0 6px;letter-spacing:.02em}
+p{margin:0 0 14px}
+.lede{color:var(--ink2);font-size:16.5px;max-width:62em}
+.prose{max-width:50em}
+ul.tight,ol.tight{margin:0 0 14px;padding-left:1.25em}
+ul.tight li,ol.tight li{margin:5px 0}
+
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:18px 0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:18px 0}
+.grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:18px 0}
+.card{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;min-width:0}
+.card p:last-child,.card ul:last-child{margin-bottom:0}
+.card h4{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink3);font-weight:600}
+.card.far{border-top:3px solid var(--far)} .card.wm{border-top:3px solid var(--wm)} .card.tmp{border-top:3px solid var(--tmp)} .card.llr{border-top:3px solid var(--llr)}
+.card.meta{border-top:3px solid var(--meta)} .card.vis{border-top:3px solid var(--vis)} .card.aud{border-top:3px solid var(--aud)} .card.fut{border-top:3px solid var(--fut)}
+.card.ok{border-top:3px solid var(--ok)} .card.risk{border-top:3px solid var(--risk)}
+
+.tag{display:inline-block;font-size:12px;line-height:1.55;padding:0 7px;border-radius:5px;font-weight:600;white-space:nowrap;vertical-align:1px}
+.tag.far{background:var(--far-soft);color:var(--far-ink)}
+.tag.wm{background:var(--wm-soft);color:var(--wm-ink)}
+.tag.tmp{background:var(--tmp-soft);color:var(--tmp-ink)}
+.tag.llr{background:var(--llr-soft);color:var(--llr-ink)}
+.tag.meta{background:var(--meta-soft);color:var(--meta-ink)}
+.tag.vis{background:var(--vis-soft);color:var(--vis-ink)}
+.tag.aud{background:var(--aud-soft);color:var(--aud-ink)}
+.tag.fut{background:var(--fut-soft);color:var(--fut-ink)}
+.tag.risk{background:var(--risk-soft);color:var(--risk-ink)}
+.tag.med{background:var(--med-soft);color:var(--med-ink)}
+.tag.low{background:var(--low-soft);color:var(--low-ink)}
+.tag.ok{background:var(--ok-soft);color:var(--ok-ink)}
+.tag.mine{background:var(--surf3);color:var(--ink2)}
+
+.callout{border:1px solid var(--rule);border-left:3px solid var(--wm);background:var(--surf);border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0;font-size:15px}
+.callout.warn{border-left-color:var(--risk)}
+.callout.mine{border-left-color:var(--ok)}
+.callout.far{border-left-color:var(--far)}
+.callout.fut{border-left-color:var(--fut)}
+.callout p:last-child,.callout ul:last-child{margin-bottom:0}
+.callout .lab{font-family:var(--f-mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink3);display:block;margin-bottom:2px}
+
+/* equations */
+.eq{font-family:var(--f-math);font-size:18px;line-height:1.7;background:var(--surf);border:1px solid var(--rule);border-radius:8px;padding:12px 16px;margin:12px 0;overflow-x:auto;white-space:nowrap}
+.eq .no{float:right;font-family:var(--f-mono);font-size:12px;color:var(--ink3);margin-left:18px;font-style:normal}
+.eq i{font-style:italic}
+.eq .hl-far{color:var(--far-ink)} .eq .hl-fut{color:var(--fut-ink)} .eq .hl-meta{color:var(--meta-ink)} .eq .hl-vis{color:var(--vis-ink)} .eq .hl-wm{color:var(--wm-ink)}
+.eqnote{font-size:14px;color:var(--ink2);margin:-4px 0 14px}
+@media (max-width:520px){ .eq{font-size:16px;padding:10px 12px} .eq .no{float:none;display:block;margin:0 0 2px} }
+
+/* figures */
+figure{margin:20px 0;background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:16px;min-width:0}
+figure svg{display:block;width:100%;height:auto;max-width:100%}
+figcaption{font-size:13.5px;line-height:1.6;color:var(--ink2);margin-top:10px}
+figcaption b{color:var(--ink)}
+.svgtxt{font-family:var(--f-body);font-size:12px;fill:currentColor}
+.svgmono{font-family:var(--f-mono);font-size:11px;fill:currentColor}
+.fig-hd{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.fig-hd h4{margin:0;font-family:var(--f-mono);font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink3)}
+
+/* controls */
+.ctrls{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin:4px 0 12px}
+.seg{display:inline-flex;border:1px solid var(--rule2);border-radius:8px;overflow:hidden;flex-wrap:wrap}
+.seg button{font:inherit;font-size:13px;padding:5px 11px;background:var(--surf);color:var(--ink2);border:0;border-right:1px solid var(--rule);cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--surf3);color:var(--ink);font-weight:600}
+.seg button:hover{color:var(--ink)}
+label.sl{display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--ink2);flex:1 1 260px;min-width:0}
+label.sl input[type=range]{flex:1;min-width:120px;accent-color:var(--far)}
+label.sl output{font-family:var(--f-mono);font-size:12.5px;color:var(--ink);min-width:4.8em;text-align:right}
+label.ck{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;color:var(--ink2);cursor:pointer}
+label.ck input{accent-color:var(--far)}
+.readout{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:8px;overflow:hidden;margin:10px 0}
+.readout div{background:var(--surf2);padding:8px 11px}
+.readout span{display:block;font-size:11.5px;color:var(--ink3);line-height:1.35}
+.readout b{font-family:var(--f-mono);font-weight:500;font-size:15px;font-variant-numeric:tabular-nums}
+.btn{font:inherit;font-size:13px;padding:5px 12px;background:var(--surf2);color:var(--ink);border:1px solid var(--rule2);border-radius:8px;cursor:pointer}
+.btn:hover{background:var(--surf3)}
+
+/* tables */
+.tbl-wrap{overflow-x:auto;margin:14px 0;border:1px solid var(--rule);border-radius:10px;background:var(--surf)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;border-bottom:1px solid var(--rule);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td.l,th.l{text-align:left;white-space:normal}
+thead th{font-weight:600;color:var(--ink2);background:var(--surf2);font-size:12.5px}
+tbody tr:last-child td{border-bottom:0}
+td.best{font-weight:600;color:var(--ink)}
+td .d{display:block;font-size:11px;color:var(--ink3)}
+td.up{background:var(--ok-soft)} td.dn{background:var(--risk-soft)} td.q{background:var(--med-soft)}
+tr.ours td{background:color-mix(in srgb,var(--far-soft) 60%,transparent)}
+tr.sep td{border-top:2px solid var(--rule2)}
+tr.grp td{background:var(--surf2);color:var(--ink3);font-family:var(--f-mono);font-size:11.5px;letter-spacing:.1em}
+.mono-num{font-family:var(--f-mono);font-size:12.5px}
+
+/* doubts */
+.doubts{display:grid;gap:10px;margin:14px 0}
+details.dbt{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:0}
+details.dbt[open]{border-color:var(--rule2)}
+details.dbt summary{list-style:none;cursor:pointer;padding:12px 16px;display:flex;gap:10px;align-items:baseline}
+details.dbt summary::-webkit-details-marker{display:none}
+details.dbt summary .id{font-family:var(--f-mono);font-size:12px;color:var(--ink3);flex:none}
+details.dbt summary .t{flex:1;font-weight:600;line-height:1.55}
+details.dbt summary::after{content:"+";font-family:var(--f-mono);color:var(--ink3);flex:none}
+details.dbt[open] summary::after{content:"−"}
+details.dbt .body{padding:0 16px 14px 16px;font-size:15px;color:var(--ink2)}
+details.dbt .body p:last-child{margin-bottom:0}
+details.dbt.h{border-left:3px solid var(--risk)} details.dbt.m{border-left:3px solid var(--med)} details.dbt.l{border-left:3px solid var(--low)}
+.dbt-ctrl{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+
+/* legend chips */
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--ink2);margin:6px 0}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:14px;height:10px;border-radius:2px}
+
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--rule);font-size:13px;color:var(--ink3)}
+.foot a{color:var(--ink2)}
+.two-col{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:18px;align-items:start}
+.two-col>*{min-width:0}
+@media (max-width:820px){ .two-col{grid-template-columns:minmax(0,1fr)} }
+.small{font-size:13.5px;color:var(--ink2)}
+.hs{overflow-x:auto;-webkit-overflow-scrolling:touch}
+@media (max-width:760px){ .hs svg.wide{min-width:720px} .hs{margin-inline:-6px;padding-bottom:4px} .hs::after{content:"← 可左右滑动 →";display:block;text-align:center;font-size:11px;color:var(--ink3);font-family:var(--f-mono);position:sticky;left:0;width:100%} }
+.tip{position:fixed;pointer-events:none;z-index:50;background:var(--surf3);border:1px solid var(--rule2);color:var(--ink);font-size:12.5px;line-height:1.5;padding:6px 9px;border-radius:7px;box-shadow:var(--shadow);max-width:300px;opacity:0;transition:opacity .12s}
+.tip.on{opacity:1}
+.pill{display:inline-block;font-family:var(--f-mono);font-size:11.5px;border:1px solid var(--rule2);border-radius:999px;padding:0 8px;color:var(--ink2);white-space:nowrap}
+.gloss{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:10px;overflow:hidden;margin:16px 0}
+.gloss div{background:var(--surf);padding:10px 13px;font-size:13.5px;line-height:1.55;color:var(--ink2)}
+.gloss div b{font-family:var(--f-math);font-style:italic;font-weight:400;font-size:16px;color:var(--ink);margin-right:6px}
+.toy{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.1em;color:var(--med-ink);border:1px solid var(--med);border-radius:4px;padding:0 5px;text-transform:uppercase;white-space:nowrap}
+.mx td,.mx th{text-align:center;white-space:normal;min-width:84px}
+.mx th:first-child{text-align:left}
+.mx td:first-child{text-align:left;white-space:nowrap}
+.mx .y{color:var(--ok-ink);font-weight:600} .mx .n{color:var(--ink3)} .mx .w{color:var(--risk-ink);font-weight:600} .mx .u{color:var(--med-ink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="topbar">
+    <span class="kicker">arXiv 2609.34677v1 · 2026-09-28 · cs.LG · 精读于 2026-09-30</span>
+    <button class="themebtn" id="themeBtn" type="button" aria-label="切换浅色/深色">◐ 主题</button>
+  </div>
+  <h1>FAR <span class="soft">— Future-Aware Recall：让世界模型学会“该想起哪一帧” · 精读</span></h1>
+  <p class="sub">带情景记忆的世界模型会把看过的帧都存起来，但每次预测只能塞进去几帧。选哪几帧？以前靠手写规则：取最近的、取和目标视角重叠最多的、或者取长得最像的。FAR 的做法是：训练时真实的未来是已知的，所以可以逐帧试，<span class="c-fut">“把这帧给世界模型，它能把真实未来去噪得多好”</span>，以此给每帧记功，再训练一个<b>看不到未来</b>的检索器去模仿这份功劳簿。同时学一个小门控，决定这一次该更信<span class="c-meta">时间/位姿</span>、<span class="c-vis">视觉</span>还是<span class="c-aud">音频</span>线索。</p>
+
+  <div class="patch">
+    <div class="jacks" aria-hidden="true"></div>
+    <dl>
+      <div><dt>全称</dt><dd>Learning What to Recall: Adaptive Multi-Cue Episodic Memory for World Models</dd></div>
+      <div><dt>单位</dt><dd>KAIST（Jong Chul Ye）· Sony Group（Yuki Mitsufuji）· Imperial College London（Amir Bar，NWM 作者之一）。一作 Beomsu Kim，工作在 Sony 实习期间完成，共 6 位作者</dd></div>
+      <div><dt>代码 / 权重 / 数据</dt><dd>github.com/sony/far 标注 coming soon，<span class="no">我查询时仓库无法访问</span>。HF 上有 24 个推理用 bundle（每个 0.49–0.56 GB，含所有基线臂）；数据集卡目前只列出 AI2-THOR v3 和 AI2-THOR-dyn 的潜变量（107 GB）。均为 CC BY-NC 4.0</dd></div>
+      <div><dt>世界模型</dt><dd>DiT 12 层 / 768 维 / 12 头，patch 2，帧内与全局注意力交替（VGGT 式）。ε 预测，线性 1000 步，方差可学；评测用 EMA 权重 + DDIM-20。任务形式同 NWM：给定位姿位移，预测目标帧</dd></div>
+      <div><dt>检索器</dt><dd>时间+位姿：小 MLP 打分；视觉/音频：冻结的 ViT 编码器，记忆侧 key 预先算好缓存，查询侧只训练一个 MLP 适配器。各线索分数做 z-score 标准化，经线性门控加权融合，最后分块 Top-K（块长 10）</dd></div>
+      <div><dt>训练信号</dt><dd>对每个候选帧单独算扩散损失（4 个噪声级，各候选共用同一组噪声），得到效用 û；后验 q ∝ r·e<sup>û</sup>，再用 KL(sg[q]‖r) 蒸馏给检索器，即 EMDR² 的做法。检索器每 20 步更新一次</dd></div>
+      <div><dt>数据</dt><dd>LoopNav（Minecraft）· SoundSpaces v1/v2（Matterport3D + 双耳音频）· AI2-THOR（搬动物体）· AI2-THOR-dyn（第二个 agent 在走廊巡逻）</dd></div>
+      <div><dt>评测口径</dt><dd>沿 GT 相机路径做自回归 rollout，记忆池始终是真实的探索段帧。上下文：训练 4 帧，评测 12 帧。记忆池：训练 200/400 帧，评测最多 1000 帧</dd></div>
+    </dl>
+  </div>
+
+  <p class="thesis"><b>一句话：</b>FAR 把 RAG 里训练检索器的 EMDR² 方法搬进了视频世界模型。世界模型充当“阅读器”，过去的帧是“文档”，真实的未来帧是“答案”。机制本身是对的，推导也没有错。但论文里<b>最大的几个领先幅度，至少有一部分可能来自评测配置和编码器预训练，而不只是论文主打的“效用后验蒸馏”</b>：一是 WorldMem 的记忆池上限是 200 帧，FAR 却能用整段去程（上限 1000 帧）；二是冻结的对比预训练视觉编码器，它也是 FAR 方案的一部分，但不涉及效用蒸馏，单这一行就占了相对 WorldMem 的 DreamSim 总提升的 62.5%。另外，AI2-THOR-dyn 的高分建立在记忆里的 GT 第二 agent 标注和一个辅助分类器之上。</p>
+
+  <div class="statstrip">
+    <div><b>0.130 → 0.082</b><span>LoopNav 回到起点处的 DreamSim，最强基线 WorldMem → FAR 多线索，降 37%（Table 1 / 项目页）</span></div>
+    <div><b>0.423 → 0.150</b><span>SoundSpaces 返程最后 1/4 段的 DreamSim。这组数字只在项目页，正文没有，也没说是 v1 还是 v2、哪个 FAR 变体</span></div>
+    <div><b>42.1 → 80.2%</b><span>AI2-THOR 表面变化的状态正确率；容器揭示 12.5 → 75.7%（项目页）</span></div>
+    <div><b>41.9 → 94.6%</b><span>双 agent 走廊，Temporal → FAR Multi-Cue（多一路“A₂ 观测线索”）。只用时间+位姿是 67.1%</span></div>
+    <div class="warn"><b>62.5%</b><span>LoopNav 上相对 WorldMem 的 DreamSim 总提升中，“冻结的预训练编码器，尚未做任何效用蒸馏”这一行所占的份额（我按 Table 1 算的）</span></div>
+    <div class="warn"><b>1000 vs 200</b><span>评测时的记忆池上限：FAR 最多 1000 帧，实际就是整段去程；WorldMem 在 LoopNav / SoundSpaces 上保留 200 帧上限（附录 C.4）</span></div>
+  </div>
+</header>
+
+<nav class="toc" aria-label="目录">
+  <a href="#s1"><span class="n">01</span>定位</a>
+  <a href="#s2"><span class="n">02</span>底座世界模型</a>
+  <a href="#s3"><span class="n">03</span>检索前向</a>
+  <a href="#s4"><span class="n">04</span>后验教师</a>
+  <a href="#s5"><span class="n">05</span>训练循环与算力</a>
+  <a href="#s6"><span class="n">06</span>线索门控</a>
+  <a href="#s7"><span class="n">07</span>实验逐项</a>
+  <a href="#s8"><span class="n">08</span>公平性审计</a>
+  <a href="#s9"><span class="n">09</span>存疑</a>
+  <a href="#s10"><span class="n">10</span>结论与启示</a>
+</nav>
+
+<!-- ============================ 01 ============================ -->
+<section id="s1">
+  <h2><span class="no">01</span>它在解决什么：情景记忆的“回忆问题”</h2>
+  <p class="lede">世界模型每一刻只能看到环境的一部分。要预测“回到老地方会看见什么”，就得把以前的信息留下来。留法有两类。<b>持续状态</b>是把观测不断揉进一个会演化的表示里，比如 RSSM 的隐状态或一个 3D 场景。<b>情景记忆</b>是把过去的帧原样存着，要用时再调出来。后者的问题是记忆越攒越多，而生成器的上下文就那么几格：这篇的训练时是 3 格，评测时是 11 格。所以核心问题只有一个：<b>这一次该调哪几帧？</b></p>
+
+  <figure>
+    <div class="fig-hd"><h4>图 1 · 同一次预测，四种规则各会挑哪帧</h4><span class="toy">示意</span></div>
+    <div class="hs"><svg class="wide" viewBox="0 0 960 380" role="img" aria-label="俯视图：两条被薄墙隔开的走廊。返程中的 agent 在下走廊 T 处，要预测朝右看到的画面，目标区域 G 在下走廊右端。候选记忆：m1 是最近拍的帧但朝左；m2 在墙另一侧的上走廊，位姿离 T 最近、几何视锥重叠最大，但被墙挡住；m3 在下走廊更远处，视线畅通能看到 G；m4 在别处一段长得很像的走廊。Temporal 选 m1，WorldMem 选 m2，LongLive-RAG 选 m4，FAR 选 m3。">
+      <defs>
+        <pattern id="hatchWall" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" style="fill:var(--surf3)"/><line x1="0" y1="0" x2="0" y2="6" style="stroke:var(--wall);stroke-width:2"/></pattern>
+        <marker id="arF" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink3)"/></marker>
+      </defs>
+      <g class="svgtxt">
+        <!-- floor -->
+        <rect x="40" y="92" width="530" height="96" rx="4" style="fill:var(--floor);stroke:var(--rule2)"/>
+        <rect x="40" y="214" width="530" height="112" rx="4" style="fill:var(--floor);stroke:var(--rule2)"/>
+        <rect x="40" y="188" width="530" height="26" style="fill:url(#hatchWall);stroke:var(--wall)"/>
+        <text x="48" y="84" style="fill:var(--ink3)">上走廊</text>
+        <text x="48" y="344" style="fill:var(--ink3)">下走廊（返程所在）</text>
+        <text x="410" y="205" style="fill:var(--ink2);font-size:11px">薄墙</text>
+        <!-- look-alike deco -->
+        <g style="stroke:var(--rule2)"><line x1="60" y1="102" x2="60" y2="178"/><line x1="100" y1="102" x2="100" y2="178"/><line x1="140" y1="102" x2="140" y2="178"/><line x1="180" y1="102" x2="180" y2="178"/></g>
+        <g style="stroke:var(--rule2)"><line x1="330" y1="224" x2="330" y2="316"/><line x1="370" y1="224" x2="370" y2="316"/><line x1="410" y1="224" x2="410" y2="316"/><line x1="450" y1="224" x2="450" y2="316"/></g>
+        <text x="72" y="118" style="fill:var(--ink3);font-size:10.5px">柱廊（长得像）</text>
+        <!-- target frustum -->
+        <polygon points="300,262 566,222 566,320" style="fill:var(--fut-soft);stroke:var(--fut);stroke-dasharray:5 4"/>
+        <!-- m2 frustum visible part + phantom -->
+        <polygon points="300,142 566,96 566,188" style="fill:var(--wm-soft);stroke:var(--wm)"/>
+        <polygon points="566,188 566,262 470,188" style="fill:none;stroke:var(--wm);stroke-dasharray:3 4"/>
+        <polygon points="470,214 566,214 566,262 520,231" style="fill:var(--wm-soft);stroke:none;opacity:.8"/>
+        <text x="468" y="258" text-anchor="end" style="fill:var(--wm-ink);font-size:10.5px">几何 FOV 重叠</text>
+        <text x="468" y="270" text-anchor="end" style="fill:var(--wm-ink);font-size:10.5px">（没算墙）</text>
+        <!-- m3 frustum -->
+        <polygon points="120,272 566,232 566,316" style="fill:var(--far-soft);stroke:var(--far)"/>
+        <!-- m1 frustum -->
+        <polygon points="396,276 214,232 214,318" style="fill:var(--tmp-soft);stroke:var(--tmp)"/>
+        <!-- m4 frustum -->
+        <polygon points="70,146 250,108 250,180" style="fill:var(--llr-soft);stroke:var(--llr)"/>
+        <!-- G -->
+        <polygon points="530,258 535,270 548,270 538,278 542,291 530,283 518,291 522,278 512,270 525,270" style="fill:var(--fut);stroke:var(--bg)"/>
+        <text x="528" y="309" text-anchor="middle" style="fill:var(--fut-ink);font-weight:600">G</text>
+        <!-- cameras -->
+        <g>
+          <circle cx="300" cy="262" r="8" style="fill:var(--fut);stroke:var(--bg);stroke-width:2"/><text x="300" y="266" text-anchor="middle" style="fill:var(--bg);font-weight:700;font-size:10px">T</text>
+          <circle cx="300" cy="142" r="8" style="fill:var(--wm);stroke:var(--bg);stroke-width:2"/><text x="300" y="130" text-anchor="middle" style="fill:var(--wm-ink);font-weight:600">m2</text>
+          <circle cx="120" cy="272" r="8" style="fill:var(--far);stroke:var(--bg);stroke-width:2"/><text x="120" y="296" text-anchor="middle" style="fill:var(--far-ink);font-weight:600">m3</text>
+          <circle cx="396" cy="276" r="8" style="fill:var(--tmp);stroke:var(--bg);stroke-width:2"/><text x="396" y="300" text-anchor="middle" style="fill:var(--tmp-ink);font-weight:600">m1</text>
+          <circle cx="70" cy="146" r="8" style="fill:var(--llr);stroke:var(--bg);stroke-width:2"/><text x="70" y="170" text-anchor="middle" style="fill:var(--llr-ink);font-weight:600">m4</text>
+        </g>
+        <text x="300" y="286" text-anchor="middle" style="fill:var(--fut-ink);font-size:10.5px">返程查询：朝右看</text>
+        <line x1="300" y1="152" x2="300" y2="252" style="stroke:var(--ink3);stroke-dasharray:2 3"/>
+        <text x="306" y="232" style="fill:var(--ink3);font-size:10.5px">距离最近</text>
+        <!-- right legend panel -->
+        <g transform="translate(610,24)">
+          <text x="0" y="12" style="fill:var(--ink3);font-family:var(--f-mono);font-size:11px;letter-spacing:.12em">谁挑哪一帧</text>
+          <g transform="translate(0,30)">
+            <rect x="0" y="0" width="330" height="62" rx="8" style="fill:var(--tmp-soft);stroke:var(--tmp)"/>
+            <text x="12" y="22" style="fill:var(--ink);font-weight:600">Temporal（NWM）→ m1</text>
+            <text x="12" y="42" style="fill:var(--ink2)">取最近几帧。离得近，但刚走过来时</text>
+            <text x="12" y="56" style="fill:var(--ink2)">朝的是反方向，画面里没有 G</text>
+          </g>
+          <g transform="translate(0,100)">
+            <rect x="0" y="0" width="330" height="62" rx="8" style="fill:var(--wm-soft);stroke:var(--wm)"/>
+            <text x="12" y="22" style="fill:var(--ink);font-weight:600">WorldMem 规则 → m2</text>
+            <text x="12" y="42" style="fill:var(--ink2)">按位姿算视锥重叠：m2 最高，但</text>
+            <text x="12" y="56" style="fill:var(--ink2)">隔着墙，实际拍到的是上走廊</text>
+          </g>
+          <g transform="translate(0,170)">
+            <rect x="0" y="0" width="330" height="62" rx="8" style="fill:var(--llr-soft);stroke:var(--llr)"/>
+            <text x="12" y="22" style="fill:var(--ink);font-weight:600">LongLive-RAG → m4</text>
+            <text x="12" y="42" style="fill:var(--ink2)">按嵌入相似：柱廊看起来像，</text>
+            <text x="12" y="56" style="fill:var(--ink2)">但那是别处</text>
+          </g>
+          <g transform="translate(0,240)">
+            <rect x="0" y="0" width="330" height="62" rx="8" style="fill:var(--far-soft);stroke:var(--far)"/>
+            <text x="12" y="22" style="fill:var(--ink);font-weight:600">FAR → m3</text>
+            <text x="12" y="42" style="fill:var(--ink2)">远一点，但视线直达 G。训练时它让</text>
+            <text x="12" y="56" style="fill:var(--ink2)">真实未来的扩散损失最低，于是被记功</text>
+          </g>
+          <text x="0" y="330" style="fill:var(--ink3);font-size:11px">对应论文 Fig 1 上 / Fig 6 的叙事，几何为示意</text>
+        </g>
+      </g>
+    </svg></div>
+    <figcaption><b>要点：</b>每条手写规则都在拿某一种“相似”（时间近、位姿近、长得像）去代替“有用”，而遮挡、外观歧义、状态过期都会让两者脱钩。FAR 不再手写“相似”，直接用<span class="c-fut">对真实未来的预测效果</span>当监督来学。不过这张图里 m2 → m3 的纠正，<b>对只看时间和位姿的 FAR-Meta 来说原则上做不到</b>：它的输入里没有墙。它只能学到统计上的偏好，比如“别太近、要再往后退一点”。见 §9 M8。</figcaption>
+  </figure>
+
+  <div class="two-col">
+    <div>
+      <h3 style="margin-top:6px">FAR 的两个主张</h3>
+      <ol class="tight">
+        <li><b>学“该回忆哪些”</b>：训练时用真实未来 o<sub>t+1</sub> 给候选记忆打“预测效用”，得到一个看过未来的后验；再让看不到未来的检索器去贴合这个后验。推理时不需要未来。</li>
+        <li><b>学“该信哪条线索”</b>：每条线索（时间+位姿、视觉、音频……）单独打分、单独标准化，再用一个随查询变化的权重 λ 融合。</li>
+      </ol>
+      <p class="small">论文把这套形式化连到了检索增强语言模型：RAG（Lewis 2020）和 EMDR²（Sachan 2021）都用阅读器的似然去监督离散的文档检索。FAR 自认的新意有三点：一是“文档”换成了 agent 自己不断增长的交互历史；二是“答案”换成了未来观测；三是多了一层随查询变化的线索融合。</p>
+    </div>
+    <div class="gloss" style="margin-top:6px">
+      <div><b>M<sub>t−1</sub></b>记忆池：探索段的真实帧 o<sub>1</sub>, …, o<sub>t−1</sub></div>
+      <div><b>z<sub>i</sub></b>第 i 帧的检索线索：时间、位姿、视觉、音频（dyn 里还有第二 agent 状态）</div>
+      <div><b>Q<sub>t</sub>=(o<sub>t</sub>,a<sub>t</sub>)</b>预测查询：当前帧 + 动作（到目标帧的位姿位移 + 步长）</div>
+      <div><b>R<sub>t</sub>=(z<sub>t</sub>,a<sub>t</sub>)</b>检索查询：当前线索 + 动作</div>
+      <div><b>C<sub>t</sub></b>召回上下文，|C|=K。训练时 K=3，评测时 K=11</div>
+      <div><b>r<sub>ϕ</sub></b>检索分布 ∝ exp s<sub>ϕ</sub>，看不到未来</div>
+      <div><b>u<sub>θ</sub></b>预测效用 = log p<sub>θ</sub>(o<sub>t+1</sub>|C,Q)；实际用负扩散损失代替</div>
+      <div><b>q<sub>θ,ϕ</sub></b>看过未来的后验 ∝ r·e<sup>u</sup>，是检索器的老师</div>
+      <div><b>λ<sup>m</sup></b>线索 m 的融合权重，由线性门控给出</div>
+    </div>
+  </div>
+
+  <figure>
+    <div class="fig-hd"><h4>图 2 · 作者自己在 Table 2 里的定位</h4><span class="pill">按论文分类重画</span></div>
+    <div class="hs"><svg class="wide" viewBox="0 0 960 310" role="img" aria-label="二维定位图。横轴从固定检索规则到用下游预测目标学习；纵轴上方是生成器外部检索，下方是生成器内部。外部加固定规则：WorldMem、Context-as-Memory、VRAG、SPMem、I3DM、Matrix-Game 3.0、LongLive-RAG、FramePack。内部加学习：Mixture of Contexts、MemLearner、Compression-and-Retrieval。外部加学习只有 FAR，而且只有它做自适应线索融合。">
+      <g class="svgtxt">
+        <text x="940" y="14" text-anchor="end" style="fill:var(--ink3);font-size:11px">* Table 2 标为非动作条件的“世界模型”</text>
+        <rect x="150" y="24" width="385" height="120" rx="8" style="fill:var(--wm-soft);stroke:var(--rule2)"/>
+        <rect x="550" y="24" width="390" height="120" rx="8" style="fill:var(--far-soft);stroke:var(--far)"/>
+        <rect x="150" y="154" width="385" height="120" rx="8" style="fill:var(--surf2);stroke:var(--rule2)"/>
+        <rect x="550" y="154" width="390" height="120" rx="8" style="fill:var(--vis-soft);stroke:var(--rule2)"/>
+        <text x="342" y="296" text-anchor="middle" style="fill:var(--ink3)">检索规则固定</text>
+        <text x="745" y="296" text-anchor="middle" style="fill:var(--ink3)">检索由下游预测目标监督</text>
+        <text x="138" y="80" text-anchor="end" style="fill:var(--ink3)">生成器外部</text>
+        <text x="138" y="97" text-anchor="end" style="fill:var(--ink3)">（逐帧可寻址）</text>
+        <text x="138" y="210" text-anchor="end" style="fill:var(--ink3)">生成器内部</text>
+        <text x="138" y="227" text-anchor="end" style="fill:var(--ink3)">（路由 / 压缩）</text>
+        <text x="164" y="48" style="fill:var(--wm-ink);font-weight:600">WorldMem · Context-as-Memory · VRAG</text>
+        <text x="164" y="70" style="fill:var(--wm-ink);font-weight:600">SPMem · I3DM · Matrix-Game 3.0</text>
+        <text x="164" y="94" style="fill:var(--ink2)">LongLive-RAG* · FramePack*</text>
+        <text x="164" y="126" style="fill:var(--ink3);font-size:11px">线索：位姿 / FOV 重叠、时间、视觉嵌入；规则写死</text>
+        <text x="566" y="54" style="fill:var(--far-ink);font-weight:700;font-size:16px">FAR（本文）</text>
+        <text x="566" y="78" style="fill:var(--ink2)">外部检索器 + 预测监督 + 自适应线索融合</text>
+        <text x="566" y="100" style="fill:var(--ink2)">线索：时间、位姿、视觉、音频</text>
+        <text x="566" y="126" style="fill:var(--ink3);font-size:11px">注：每个实验实际只融合 2 路线索（见 §6）</text>
+        <text x="566" y="180" style="fill:var(--vis-ink);font-weight:600">Mixture of Contexts* · MemLearner</text>
+        <text x="566" y="202" style="fill:var(--vis-ink);font-weight:600">Compression-and-Retrieval</text>
+        <text x="566" y="230" style="fill:var(--ink3);font-size:11px">端到端随生成损失学路由；帧不单独寻址</text>
+        <text x="164" y="204" style="fill:var(--ink3)">滑窗 KV、固定压缩</text>
+        <text x="164" y="226" style="fill:var(--ink3);font-size:11px">（本文 Table 2 未列）</text>
+      </g>
+    </svg></div>
+    <figcaption>这张表是作者自己划分的：右上角只有 FAR 一个，是分类方式决定的。它确实点出了一个空白，即<b>外部、逐帧可寻址、又由预测目标监督</b>的检索器。但实验里没有和任何“学出来的检索”基线比较，比如 MemLearner 式的内部查询，或者简单的“用效用 argmax 当硬标签”。能比的只有三条手写规则。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================ 02 ============================ -->
+<section id="s2">
+  <h2><span class="no">02</span>底座：这个世界模型到底在预测什么</h2>
+  <p class="lede">先把“阅读器”弄清楚，后面的效用才有意义。FAR 的世界模型不是逐帧、按键盘动作生成视频的因果模型，而是 <b>NWM（Navigation World Models）式的“目标帧预测器”</b>。输入是当前帧、到目标帧的相对位姿位移、若干张召回帧，输出是目标位置应该看到的那一帧。所以在静态场景里，它做的事很接近<b>带参考图的新视角合成</b>：挑记忆，就是在挑参考视角。</p>
+
+  <figure>
+    <div class="fig-hd"><h4>图 3 · DiT 的输入排布与两种注意力</h4></div>
+    <div class="hs"><svg class="wide" viewBox="0 0 960 270" role="img" aria-label="DiT 输入：当前帧 o_t、K 张召回帧 c_1 到 c_K、噪声目标帧 x_tau 并排。每帧带相对位姿和轨迹时间；动作 a_t 是到目标的位姿位移加步长，与扩散时间 tau 一起作为条件（注入方式论文未写）。12 层中帧内注意力与全局注意力交替。LoopNav 每帧 144 个 token，其余数据集每帧 256 个。训练时 K=3，评测时 K=11。">
+      <defs><marker id="arD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink3)"/></marker></defs>
+      <g class="svgtxt">
+        <!-- frames -->
+        <g>
+          <rect x="30" y="92" width="110" height="78" rx="7" style="fill:var(--surf2);stroke:var(--ink3)"/>
+          <text x="85" y="122" text-anchor="middle" style="fill:var(--ink);font-weight:600">o<tspan baseline-shift="sub" font-size="9">t</tspan> 当前帧</text>
+          <text x="85" y="142" text-anchor="middle" style="fill:var(--ink3);font-size:11px">位姿·时间（重新</text>
+          <text x="85" y="156" text-anchor="middle" style="fill:var(--ink3);font-size:11px">以当前帧为原点）</text>
+        </g>
+        <g>
+          <rect x="160" y="92" width="96" height="78" rx="7" style="fill:var(--far-soft);stroke:var(--far)"/>
+          <text x="208" y="122" text-anchor="middle" style="fill:var(--ink);font-weight:600">c<tspan baseline-shift="sub" font-size="9">1</tspan></text>
+          <rect x="266" y="92" width="96" height="78" rx="7" style="fill:var(--far-soft);stroke:var(--far)"/>
+          <text x="314" y="122" text-anchor="middle" style="fill:var(--ink);font-weight:600">c<tspan baseline-shift="sub" font-size="9">2</tspan></text>
+          <rect x="372" y="92" width="96" height="78" rx="7" style="fill:var(--far-soft);stroke:var(--far)"/>
+          <text x="420" y="122" text-anchor="middle" style="fill:var(--ink);font-weight:600">c<tspan baseline-shift="sub" font-size="9">3</tspan></text>
+          <text x="492" y="136" text-anchor="middle" style="fill:var(--ink3);font-size:18px">⋯</text>
+          <rect x="516" y="92" width="96" height="78" rx="7" style="fill:var(--far-soft);stroke:var(--far);stroke-dasharray:4 3"/>
+          <text x="564" y="122" text-anchor="middle" style="fill:var(--ink);font-weight:600">c<tspan baseline-shift="sub" font-size="9">K</tspan></text>
+          <text x="208" y="146" text-anchor="middle" style="fill:var(--far-ink);font-size:10.5px">相对位姿·时间</text><text x="314" y="146" text-anchor="middle" style="fill:var(--far-ink);font-size:10.5px">相对位姿·时间</text><text x="420" y="146" text-anchor="middle" style="fill:var(--far-ink);font-size:10.5px">相对位姿·时间</text><text x="564" y="146" text-anchor="middle" style="fill:var(--far-ink);font-size:10.5px">相对位姿·时间</text><text x="386" y="86" text-anchor="middle" style="fill:var(--far-ink);font-size:11px">召回帧 c₁…c_K（检索器选出）</text>
+        </g>
+        <g>
+          <rect x="650" y="92" width="130" height="78" rx="7" style="fill:var(--fut-soft);stroke:var(--fut)"/>
+          <text x="715" y="122" text-anchor="middle" style="fill:var(--ink);font-weight:600">x<tspan baseline-shift="sub" font-size="9">τ</tspan> 噪声目标帧</text>
+          <text x="715" y="142" text-anchor="middle" style="fill:var(--ink3);font-size:11px">= α<tspan baseline-shift="sub" font-size="8">τ</tspan>x<tspan baseline-shift="sub" font-size="8">0</tspan> + σ<tspan baseline-shift="sub" font-size="8">τ</tspan>ε</text>
+          <text x="715" y="158" text-anchor="middle" style="fill:var(--ink3);font-size:11px">x<tspan baseline-shift="sub" font-size="8">0</tspan> = 目标 o<tspan baseline-shift="sub" font-size="8">t+1</tspan> 的潜变量</text>
+        </g>
+        <!-- AdaLN -->
+        <rect x="650" y="20" width="130" height="44" rx="7" style="fill:var(--surf2);stroke:var(--rule2)"/>
+        <text x="715" y="38" text-anchor="middle" style="fill:var(--ink)">a<tspan baseline-shift="sub" font-size="9">t</tspan> = Δ位姿 + 步长</text>
+        <text x="715" y="55" text-anchor="middle" style="fill:var(--ink3);font-size:11px">和 τ 一起作条件（方式未写）</text>
+        <line x1="715" y1="64" x2="715" y2="90" style="stroke:var(--ink3)" marker-end="url(#arD)"/>
+        <!-- intra-frame attention loops -->
+        <g style="fill:none;stroke:var(--meta);stroke-width:1.5">
+          <path d="M60,176 q25,22 50,0"/><path d="M190,176 q18,22 36,0"/><path d="M296,176 q18,22 36,0"/><path d="M402,176 q18,22 36,0"/><path d="M546,176 q18,22 36,0"/><path d="M690,176 q25,22 50,0"/>
+        </g>
+        <text x="30" y="214" style="fill:var(--meta-ink)">帧内注意力：每帧自己的 token 之间</text>
+        <!-- global attention bracket -->
+        <path d="M30,232 L30,244 L780,244 L780,232" style="fill:none;stroke:var(--vis);stroke-width:1.5"/>
+        <text x="405" y="262" text-anchor="middle" style="fill:var(--vis-ink)">全局注意力：所有帧的全部 token 一起（与帧内注意力逐层交替，共 12 层）</text>
+        <!-- output -->
+        <line x1="782" y1="131" x2="820" y2="131" style="stroke:var(--ink3)" marker-end="url(#arD)"/>
+        <rect x="824" y="100" width="116" height="62" rx="7" style="fill:var(--surf2);stroke:var(--rule2)"/>
+        <text x="882" y="126" text-anchor="middle" style="fill:var(--ink);font-weight:600">ε̂ + 方差</text>
+        <text x="882" y="146" text-anchor="middle" style="fill:var(--ink3);font-size:11px">评测：DDIM-20</text>
+        <!-- sizes -->
+        <text x="30" y="36" style="fill:var(--ink2)">每帧 token：LoopNav 144 个（Oasis ViT-VAE 16×18×32，patch 2）</text>
+        <text x="30" y="54" style="fill:var(--ink2)">其余数据集 256 个（SDXL-VAE 4×32×32，patch 2）</text>
+        <text x="30" y="72" style="fill:var(--far-ink)">K：训练 3 张 → 评测 11 张（总上下文 4 → 12）</text>
+      </g>
+    </svg></div>
+    <figcaption>召回帧的<b>位姿和时间</b>作为上下文表示的一部分送进生成器；视觉、音频这些检索线索<b>只用来挑帧</b>，不作为生成条件。所以换线索不用改生成器的接口，这是论文强调的一点。例外是 AI2-THOR：生成器还会拿到 GT 的交互标签和目标处的门开合比例。</figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card fut">
+      <h4>“下一帧”其实是“目标帧”</h4>
+      <p>训练时每个当前帧配 4 个目标，目标在预测视界内采样：LoopNav / SoundSpaces 为 128 帧，也就是 6.4 s @20fps 或 12.8 s @10fps；AI2-THOR 为 32 帧。评测 rollout 的步长：LoopNav 4 帧（0.2 s），SoundSpaces 16 帧（1.6 s），AI2-THOR 4 帧（0.4 s）。</p>
+    </div>
+    <div class="card">
+      <h4>规模</h4>
+      <p>12 层 / 768 维大致是 DiT-B/2 的量级。HF 上每个 bundle 0.49–0.56 GB（fp32 EMA 生成器加检索状态），与约 1.3 亿参数吻合，这是我的推算。训练 fp32、AdamW、lr 1e-4、EMA 0.9999，主实验取 700k 步的检查点。</p>
+    </div>
+    <div class="card risk">
+      <h4>训练 / 评测配置不一致</h4>
+      <p>上下文从 4 帧变成 12 帧，记忆池从 200/400 帧变成最多 1000 帧，<b>生成器没有在 12 帧上下文下训练过</b>。作者说所有方法同样放大，但“放大”对不同检索规则的影响未必一样。另外 WorldMem 保留了 200 帧上限（见 §8）。</p>
+    </div>
+  </div>
+
+  <figure>
+    <div class="fig-hd"><h4>图 4 · 一条评测轨迹与 replace-tail rollout</h4></div>
+    <div class="hs"><svg class="wide" viewBox="0 0 960 250" role="img" aria-label="时间线：先是探索段（outbound），全是真实帧，组成记忆池；然后是返程段，由世界模型逐步生成。每一步用当前帧（上一步的生成结果）加动作做检索查询，从记忆池召回 K=11 帧，生成下一帧；生成帧只替换当前的尾帧，不写回记忆池。">
+      <defs><marker id="arE" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink3)"/></marker></defs>
+      <g class="svgtxt" id="tlG">
+        <text x="30" y="26" style="fill:var(--ink2);font-weight:600">探索段（outbound）：真实帧 → 记忆池 M</text>
+        <text x="620" y="26" style="fill:var(--ink2);font-weight:600">返程段：世界模型生成</text>
+        <!-- ticks built by JS -->
+        <g id="tlTicks"></g>
+        <path d="M30,88 L30,98 L590,98 L590,88" style="fill:none;stroke:var(--ink3)"/>
+        <text x="310" y="116" text-anchor="middle" style="fill:var(--ink3);font-size:11px">评测时池子最多 1000 帧（训练 200/400）；LoopNav 每集平均约 657 帧，去程加返程（我按 Table 3 算的）</text>
+        <!-- one step detail -->
+        <rect x="620" y="130" width="150" height="46" rx="7" style="fill:var(--surf2);stroke:var(--ink3)"/>
+        <text x="695" y="150" text-anchor="middle" style="fill:var(--ink)">当前 = 上一步生成</text>
+        <text x="695" y="167" text-anchor="middle" style="fill:var(--ink3);font-size:11px">+ 动作 a<tspan baseline-shift="sub" font-size="8">t</tspan>（GT 路径）</text>
+        <line x1="695" y1="130" x2="695" y2="92" style="stroke:var(--ink3)" marker-end="url(#arE)"/>
+        <path d="M620,153 C520,153 470,180 380,180" style="fill:none;stroke:var(--far);stroke-width:1.5" marker-end="url(#arE)"/>
+        <text x="460" y="198" text-anchor="middle" style="fill:var(--far-ink)">每步都检索一次：召回 K=11 帧</text>
+        <rect x="800" y="130" width="140" height="46" rx="7" style="fill:var(--fut-soft);stroke:var(--fut)"/>
+        <text x="870" y="150" text-anchor="middle" style="fill:var(--ink)">生成下一帧</text>
+        <text x="870" y="167" text-anchor="middle" style="fill:var(--ink3);font-size:11px">DDIM-20</text>
+        <line x1="770" y1="153" x2="798" y2="153" style="stroke:var(--ink3)" marker-end="url(#arE)"/>
+        <path d="M870,176 C870,222 700,222 700,180" style="fill:none;stroke:var(--ink3);stroke-dasharray:4 3" marker-end="url(#arE)"/>
+        <text x="786" y="236" text-anchor="middle" style="fill:var(--ink3);font-size:11px">只替换尾帧，不写回记忆池</text>
+      </g>
+    </svg></div>
+    <figcaption><b>这个协议对记忆方法相当友好</b>。记忆池永远是干净的真实帧，生成误差不会污染它。动作沿 GT 相机路径给出，每一步重新检索。所有方法在同一段 clip 上共用扩散噪声 seed 和目标轨迹，这一点做得规范。代价是，“记忆写入”和“模型自己生成的帧如何入库”都没有被测到，作者在局限里也承认了。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================ 03 ============================ -->
+<section id="s3">
+  <h2><span class="no">03</span>检索前向：一次回忆是怎么选出来的</h2>
+  <p class="lede">推理时的检索器完全不看未来，只做五件事：各线索分别打分 → 每条线索在整个记忆池上做 z-score → 门控给出 λ → 加权求和 → 分块 Top-K。下图把哪些部件冻结、哪些可训练、哪一路只在训练时存在都标了出来。</p>
+
+  <figure>
+    <div class="fig-hd"><h4>图 5 · 检索流水线（推理路径 + 训练专用支路）</h4></div>
+    <div class="hs"><svg class="wide" viewBox="0 0 960 360" role="img" aria-label="检索流水线。左侧每帧记忆的线索：时间+位姿、视觉帧、双耳音频、第二 agent 状态（仅 dyn）。时间+位姿进可训练的 MLP 加 tanh；视觉和音频经冻结的 ViT 编码成缓存的 key，查询侧用冻结编码器加可训练 MLP 适配器，与 key 算余弦相似度。各线索在记忆池上做 z-score，门控用每条线索分数的最大值、均值、标准差、线索类型和步长算出 lambda，加权融合后做分块 Top-K，送进世界模型。下方粉色虚线是训练专用支路：真实未来、单候选扩散损失、后验、KL，梯度回到可训练部件。">
+      <defs><marker id="arP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink3)"/></marker>
+      <marker id="arPf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--fut)"/></marker></defs>
+      <g class="svgtxt">
+        <!-- cues -->
+        <text x="20" y="22" style="fill:var(--ink3);font-family:var(--f-mono);font-size:11px;letter-spacing:.1em">每帧记忆 i 的线索 z<tspan baseline-shift="sub" font-size="8">i</tspan></text>
+        <rect x="20" y="34" width="150" height="40" rx="6" style="fill:var(--meta-soft);stroke:var(--meta)"/><text x="95" y="58" text-anchor="middle" style="fill:var(--ink)">时间 + 位姿</text>
+        <rect x="20" y="84" width="150" height="40" rx="6" style="fill:var(--vis-soft);stroke:var(--vis)"/><text x="95" y="108" text-anchor="middle" style="fill:var(--ink)">视觉（该帧 RGB）</text>
+        <rect x="20" y="134" width="150" height="40" rx="6" style="fill:var(--aud-soft);stroke:var(--aud)"/><text x="95" y="158" text-anchor="middle" style="fill:var(--ink)">双耳音频（16 kHz）</text>
+        <rect x="20" y="184" width="150" height="40" rx="6" style="fill:var(--surf2);stroke:var(--rule2);stroke-dasharray:4 3"/><text x="95" y="203" text-anchor="middle" style="fill:var(--ink2)">第二 agent 状态</text><text x="95" y="218" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">仅 dyn，GT 标注</text>
+        <!-- scorers -->
+        <rect x="200" y="34" width="190" height="40" rx="6" style="fill:var(--surf2);stroke:var(--ok)"/><text x="295" y="52" text-anchor="middle" style="fill:var(--ink)">MLP([z<tspan baseline-shift="sub" font-size="8">i</tspan>, z<tspan baseline-shift="sub" font-size="8">t</tspan>, a<tspan baseline-shift="sub" font-size="8">t</tspan>]) → tanh</text><text x="295" y="67" text-anchor="middle" style="fill:var(--ok-ink);font-size:10.5px">可训练 · 2–3 层</text>
+        <rect x="200" y="84" width="190" height="90" rx="6" style="fill:var(--surf2);stroke:var(--rule2)"/>
+        <text x="295" y="102" text-anchor="middle" style="fill:var(--ink)">key：k<tspan baseline-shift="sub" font-size="8">i</tspan> = enc(z<tspan baseline-shift="sub" font-size="8">i</tspan>, ∅)</text>
+        <text x="295" y="118" text-anchor="middle" style="fill:var(--wm-ink);font-size:10.5px">❄ 冻结 · 预先算好缓存</text>
+        <text x="295" y="138" text-anchor="middle" style="fill:var(--ink)">query：MLP(enc(z<tspan baseline-shift="sub" font-size="8">t</tspan>, a<tspan baseline-shift="sub" font-size="8">t</tspan>))</text>
+        <text x="295" y="154" text-anchor="middle" style="fill:var(--ok-ink);font-size:10.5px">编码器 ❄ ＋ 适配器（可训练）</text>
+        <text x="295" y="168" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">分数 = cos(k<tspan baseline-shift="sub" font-size="7">i</tspan>, q<tspan baseline-shift="sub" font-size="7">t</tspan>)</text>
+        <line x1="170" y1="54" x2="198" y2="54" style="stroke:var(--ink3)" marker-end="url(#arP)"/>
+        <line x1="170" y1="104" x2="198" y2="112" style="stroke:var(--ink3)" marker-end="url(#arP)"/>
+        <line x1="170" y1="154" x2="198" y2="146" style="stroke:var(--ink3)" marker-end="url(#arP)"/>
+        <text x="295" y="198" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">ViT 6 层 / 384 维 / 12 头，key 256 维，</text>
+        <text x="295" y="212" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">动作经 AdaLN 注入，取 [CLS]</text>
+        <!-- standardize -->
+        <rect x="420" y="60" width="110" height="90" rx="6" style="fill:var(--surf2);stroke:var(--rule2)"/>
+        <text x="475" y="86" text-anchor="middle" style="fill:var(--ink)">逐线索</text>
+        <text x="475" y="104" text-anchor="middle" style="fill:var(--ink)">z-score</text>
+        <text x="475" y="124" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">在整个记忆池上</text>
+        <text x="475" y="138" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">算 μ、σ</text>
+        <line x1="390" y1="54" x2="418" y2="86" style="stroke:var(--ink3)" marker-end="url(#arP)"/>
+        <line x1="390" y1="130" x2="418" y2="118" style="stroke:var(--ink3)" marker-end="url(#arP)"/>
+        <!-- gate -->
+        <rect x="420" y="170" width="110" height="64" rx="6" style="fill:var(--surf2);stroke:var(--ok)"/>
+        <text x="475" y="192" text-anchor="middle" style="fill:var(--ink)">门控 λ<tspan baseline-shift="super" font-size="8">m</tspan></text>
+        <text x="475" y="209" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">线性 + softmax</text>
+        <text x="475" y="224" text-anchor="middle" style="fill:var(--ok-ink);font-size:10.5px">可训练（§6）</text>
+        <path d="M400,100 C405,190 410,200 418,202" style="fill:none;stroke:var(--ink3);stroke-dasharray:3 3" marker-end="url(#arP)"/>
+        <text x="402" y="246" style="fill:var(--ink3);font-size:10.5px">原始分数的 max/μ/σ</text>
+        <!-- fuse -->
+        <rect x="560" y="90" width="110" height="60" rx="6" style="fill:var(--far-soft);stroke:var(--far)"/>
+        <text x="615" y="114" text-anchor="middle" style="fill:var(--ink)">s<tspan baseline-shift="sub" font-size="8">i</tspan> = Σ λ<tspan baseline-shift="super" font-size="8">m</tspan> z̃<tspan baseline-shift="super" font-size="8">m</tspan><tspan baseline-shift="sub" font-size="8">i</tspan></text>
+        <text x="615" y="134" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">凸组合 → 分数有界</text>
+        <line x1="530" y1="105" x2="558" y2="112" style="stroke:var(--ink3)" marker-end="url(#arP)"/>
+        <line x1="530" y1="200" x2="580" y2="152" style="stroke:var(--ink3)" marker-end="url(#arP)"/>
+        <!-- chunk topk -->
+        <rect x="690" y="80" width="146" height="80" rx="6" style="fill:var(--surf2);stroke:var(--rule2)"/>
+        <text x="763" y="104" text-anchor="middle" style="fill:var(--ink)">分块 Top-K</text>
+        <text x="763" y="122" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">每 10 帧一块，只留最高者</text>
+        <text x="763" y="138" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">再取前 K 个代表</text>
+        <text x="763" y="152" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">（dyn 块长 30）</text>
+        <line x1="670" y1="120" x2="688" y2="120" style="stroke:var(--ink3)" marker-end="url(#arP)"/>
+        <rect x="856" y="90" width="88" height="60" rx="6" style="fill:var(--surf2);stroke:var(--ink3)"/>
+        <text x="900" y="115" text-anchor="middle" style="fill:var(--ink)">世界模型</text>
+        <text x="900" y="133" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">C<tspan baseline-shift="sub" font-size="8">t</tspan>, Q<tspan baseline-shift="sub" font-size="8">t</tspan></text>
+        <line x1="836" y1="120" x2="854" y2="120" style="stroke:var(--ink3)" marker-end="url(#arP)"/>
+        <!-- training branch -->
+        <rect x="20" y="276" width="920" height="72" rx="10" style="fill:var(--fut-soft);stroke:var(--fut);stroke-dasharray:6 4"/>
+        <text x="36" y="298" style="fill:var(--fut-ink);font-weight:600">只在训练时（每 20 步一次）</text>
+        <text x="36" y="320" style="fill:var(--ink2)">真实未来 o<tspan baseline-shift="sub" font-size="8">t+1</tspan> → 对池中每个候选 o<tspan baseline-shift="sub" font-size="8">i</tspan> 单独算扩散损失（上下文只放它一张，4 个噪声级、共享噪声）→ û<tspan baseline-shift="sub" font-size="8">i</tspan></text>
+        <text x="36" y="338" style="fill:var(--ink2)">→ q = softmax(s<tspan baseline-shift="sub" font-size="8">i</tspan> + û<tspan baseline-shift="sub" font-size="8">i</tspan>)，r = softmax(s<tspan baseline-shift="sub" font-size="8">i</tspan>) → KL(sg[q] ‖ r) → 梯度只流到三个可训练件：meta MLP、查询适配器、门控</text>
+        <path d="M900,150 C900,230 900,250 900,274" style="fill:none;stroke:var(--fut);stroke-dasharray:4 3" marker-end="url(#arPf)"/>
+      </g>
+    </svg></div>
+    <figcaption><b>细节一：</b>meta 打分器的输入里包含 a<sub>t</sub>，也就是到目标的位姿位移，所以它<b>知道目标位姿在哪</b>，和 WorldMem 算 FOV 重叠用的信息量相同。<b>细节二：</b>视觉 / 音频编码器先做过 40 万步的“预测式对比学习”：让“当前帧 + 动作”的嵌入去对准<b>目标帧</b>的 key，每个查询配 8 个正样本、24 个负样本。所以在 FAR 训练开始之前，它就已经是一个“找长得像目的地的帧”的检索器了，这一点在 §7 很关键。SoundSpaces 的音频正样本按<b>GT 空间距离</b>挑，不限朝向。</figcaption>
+  </figure>
+
+  <figure id="sandbox">
+    <div class="fig-hd"><h4>交互 1 · 检索沙盒：线索、融合、分块 Top-K、以及“谁拿得到学分”</h4><span class="toy">示意数据 · 非论文数据</span></div>
+    <p class="small" style="margin:0 0 8px">设定：一条 330 帧的探索段，大约对应 LoopNav 一集的去程（我的估算）。返程查询的进度用 r 表示，r=1 就是回到起点。真正有用的帧大致在“镜像位置” i* = (1−r)·N 附近。但其中有几段帧被墙挡住，位姿线索看不出来；另外有两段外观相似的走廊，会骗过视觉线索。<span class="c-fut">粉色“真效用”</span>只在训练时可知，推理时不可用。</p>
+    <div class="ctrls">
+      <label class="sl">返程进度 r<input type="range" id="sbR" min="0" max="1" step="0.01" value="0.86"><output id="sbRo">0.86</output></label>
+      <label class="sl">融合权重 λ<sub>meta</sub><input type="range" id="sbL" min="0" max="1" step="0.01" value="0.55"><output id="sbLo">0.55</output></label>
+    </div>
+    <div class="ctrls">
+      <span class="small">K：</span><div class="seg" id="sbK"><button type="button" aria-pressed="true" data-k="3">3（训练）</button><button type="button" aria-pressed="false" data-k="11">11（评测）</button></div>
+      <label class="ck"><input type="checkbox" id="sbCap"> WorldMem 200 帧上限（假设保留最近 200 帧）</label>
+      <label class="ck"><input type="checkbox" id="sbCredit"> 标出训练时能拿到学分的候选</label>
+    </div>
+    <div class="hs"><svg class="wide" id="sbSvg" viewBox="0 0 960 450" role="img" aria-label="检索沙盒：横轴为探索段帧序号，纵向依次是真效用、位姿线索分数、视觉线索分数、融合分数，以及四种方法选中的帧。"></svg></div>
+    <div class="readout" id="sbRead"></div>
+    <figcaption>建议试三件事。<b>① r 拉到 0.9 以上并勾选“200 帧上限”</b>：起点附近的帧全落在 WorldMem 看不见的区域，它只能从剩下的帧里挑。<b>② 把 λ 拉到两端</b>：只用位姿会掉进被挡住的帧，只用视觉会被外观相似的走廊骗走，融合之后两边的错误互相抵掉。<b>③ 勾选“学分”</b>：训练时只有 3 个已选代表（global 池）和其中一个代表所在的 10 帧块（local 池）会被评估效用，其余帧拿不到任何直接学分（§5）。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================ 04 ============================ -->
+<section id="s4">
+  <h2><span class="no">04</span>训练信号：拿真实发生的未来给记忆记功</h2>
+  <p class="lede">FAR 把“召回哪段上下文”当作一个隐变量。检索器 r<sub>ϕ</sub> 负责按线索给上下文打分，世界模型 p<sub>θ</sub> 负责在给定上下文时预测未来，两者合起来就是一个隐变量预测模型。所谓学会回忆，就是学好打分函数 s<sub>ϕ</sub>。</p>
+
+  <div class="eq">p<sub>θ,ϕ</sub>(o<sub>t+1</sub> | M, Z, R, Q) = <span style="font-size:1.25em">Σ</span><sub>C</sub> p<sub>θ</sub>(o<sub>t+1</sub> | C, Q) · <span class="hl-far">r<sub>ϕ</sub>(C | Z, R)</span>,&nbsp;&nbsp; <span class="hl-far">r<sub>ϕ</sub> ∝ exp s<sub>ϕ</sub></span><span class="no">(1)(2)</span></div>
+
+  <div class="grid2">
+    <div class="card fut">
+      <h4>第 1 步 · 预测效用</h4>
+      <div class="eq" style="font-size:16px">I<sub>ϕ</sub>(o<sub>t+1</sub>; C | Q) ≥ E[ <span class="hl-fut">log p<sub>θ</sub>(o<sub>t+1</sub>|C,Q)</span> − log p<sub>data</sub>(o<sub>t+1</sub>|Q) ]<span class="no">(3)</span></div>
+      <p><b>人话：</b>随便拿一个世界模型，只要它给出的“在这段回忆下真实未来的对数似然”高，就说明这段回忆关于未来的信息量有个高下界。减号后面那项只和数据有关，对所有候选都一样，比较候选时可以直接丢掉。剩下的就是效用 <span class="mv">u<sub>θ</sub>(C) = log p<sub>θ</sub>(o<sub>t+1</sub>|C,Q)</span>（4）。</p>
+      <p class="small">这是标准的 Barber–Agakov 变分下界，证明（B.1）我逐行核过，没有问题。下界的缺口是 E KL(p<sub>ϕ</sub>(o|C,Q) ‖ p<sub>θ</sub>(o|C,Q))，也就是世界模型在这种上下文下拟合得有多差。</p>
+    </div>
+    <div class="card far">
+      <h4>第 2 步 · 看过未来的后验老师</h4>
+      <div class="eq" style="font-size:16px">q<sub>θ,ϕ</sub>(C) ∝ exp[ <span class="hl-far">s<sub>ϕ</sub>(C)</span> + <span class="hl-fut">u<sub>θ</sub>(C)</span> ]<span class="no">(5)</span></div>
+      <p><b>人话：</b>这就是一次贝叶斯更新。<span class="c-far">先验</span>是检索器只看线索时的判断，<span class="c-fut">似然</span>是这段回忆对“真正发生了什么”的解释力，<b>后验</b>是看过答案之后修正的判断。</p>
+      <div class="eq" style="font-size:16px">L<sub>Ret</sub>(ϕ) = E[ KL( sg[q<sub>θ,ϕ</sub>] ‖ r<sub>ϕ</sub> ) ]<span class="no">(6)</span></div>
+      <p class="small">这相当于 EM 里的 M 步：固定后验，让检索器去贴它。用精确后验时，它的梯度正好等于边际似然 log Σ r·e<sup>u</sup> 对 ϕ 的梯度（式 12），这就是 EMDR² 的检索器目标。</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <span class="lab">为什么老师不能只看效用</span>
+    <p>若目标取 <span class="mv">q̄ ∝ e<sup>u</sup></span>，它等价于把先验换成均匀分布（B.2）。例如所有候选效用完全相同时，正确的后验 q 就等于 r，检索器不该有任何改动；而 q̄ 会变成均匀分布，反倒把检索器已经学到的偏好抹平。这个论证是对的，<b>但论文只给了理论，没有做“q̄ 对 q”的对照实验</b>，也没有和“拿效用最高的那帧当硬标签”比较。在下面交互 2 里切到“效用全相等”，可以看到两者的差别。</p>
+  </div>
+
+  <h3>第 3 步 · 能算的版本：单候选、自家候选池、四个噪声级</h3>
+  <p class="prose">在所有 K 元子集上做精确后验要穷举组合，算不了。FAR 照搬 EMDR² 的做法，把粒度降到<b>单个候选</b>：对候选池 A<sub>t</sub> 里的每一帧，<b>只把它一张放进上下文</b>，算真实未来的扩散损失。</p>
+  <div class="eq">û<sub>i</sub> = −<span style="font-size:1.1em">(1/S)</span> Σ<sub>s=1..S</sub> ℓ<sub>diff</sub>(θ; o<sub>t+1</sub>, <span class="hl-far">{o<sub>i</sub>}</span>, Q<sub>t</sub>, τ<sub>s</sub>, ε<sub>s</sub>),&nbsp;&nbsp; S = 4，各候选共用同一组 (τ<sub>s</sub>, ε<sub>s</sub>)<span class="no">(18)</span></div>
+  <div class="eq">r<sup>A</sup>(o<sub>i</sub>) = softmax<sub>i∈A</sub> s<sub>i</sub>,&nbsp;&nbsp; q<sup>A</sup>(o<sub>i</sub>) = softmax<sub>i∈A</sub> [ s<sub>i</sub> + <span class="hl-fut">û<sub>i</sub></span> ],&nbsp;&nbsp; L̂ = E KL( sg[q<sup>A</sup>] ‖ r<sup>A</sup> )<span class="no">(13)(15)(16)</span></div>
+  <div class="eq">∇<sub>ϕ</sub>L̂ = <span class="hl-meta">Σ<sub>m</sub> λ<sup>m</sup> ( E<sub>r</sub>[∇z̃<sup>m</sup><sub>i</sub>] − E<sub>q</sub>[∇z̃<sup>m</sup><sub>i</sub>] )</span> + <span class="hl-far">Σ<sub>m</sub> ( E<sub>r</sub>[z̃<sup>m</sup><sub>i</sub>] − E<sub>q</sub>[z̃<sup>m</sup><sub>i</sub>] ) ∇λ<sup>m</sup></span></div>
+  <p class="eqnote"><b>人话：</b>后验比检索器更偏爱的候选（q<sub>i</sub> &gt; r<sub>i</sub>），分数往上推；被检索器高估的，往下压。梯度走两条路。<span class="c-meta">第一条</span>改的是每条线索怎么给帧打分。<span class="c-far">第二条</span>改的是门控：哪条线索给后验偏爱的帧打分更高，哪条线索的权重就变大。只有一条线索时，第二项为零，退化成 EMDR²。</p>
+
+  <div class="grid3">
+    <div class="card ok"><h4>做得对</h4><p><b>共享噪声</b>：所有候选用同一组 (τ, ε)，比较时扩散采样的随机性被消掉，差异更多来自记忆本身。这是标准的“共同随机数”降方差技巧。</p></div>
+    <div class="card"><h4>作者自己承认</h4><p>单候选效用不考虑“两帧合在一起才有用”这种高阶交互。实际用的近似下，式 (12) 那个“等于边际似然梯度”的恒等式不一定全局成立（B.2 末尾：“need not hold globally”）。</p></div>
+    <div class="card risk"><h4>没说的</h4><p>生成器训练时总是看到 3 张召回帧，算效用时却只放 1 张。这等于在一个<b>没训练过的配置</b>下给候选打分，除非训练时有随机丢帧，而论文没提。</p></div>
+  </div>
+
+  <figure id="post">
+    <div class="fig-hd"><h4>交互 2 · 后验老师：效用的“尺度”决定一切</h4><span class="toy">示意数值</span></div>
+    <p class="small" style="margin:0 0 8px">六个候选的 s（检索器融合分数，z-score 的凸组合）与“逐维平均的扩散 MSE” ℓ 由预设给出，û = −β·ℓ。关键在 β：若 ℓ 是<b>逐维平均</b>（β=1），候选间的差异只有千分之几，q≈r，检索器几乎学不到东西；若按公式里的 ‖·‖²<sub>2</sub> 对所有潜变量维度<b>求和</b>（SDXL-VAE 4×32×32 = 4096 维，LoopNav 16×18×32 = 9216 维），差异会放大到几十 nat，q 基本就是 one-hot。论文<b>没有报告这个尺度，也没说有没有温度系数</b>，而 w(τ) 也未给出。</p>
+    <div class="ctrls">
+      <span class="small">预设：</span><div class="seg" id="poPre"><button type="button" aria-pressed="true" data-p="0">典型</button><button type="button" aria-pressed="false" data-p="1">差距极小</button><button type="button" aria-pressed="false" data-p="2">先验自信但错</button><button type="button" aria-pressed="false" data-p="3">效用全相等</button></div>
+    </div>
+    <div class="ctrls">
+      <span class="small">尺度：</span><div class="seg" id="poScale"><button type="button" aria-pressed="false" data-b="1">逐维平均 ×1</button><button type="button" aria-pressed="false" data-b="100">×100</button><button type="button" aria-pressed="true" data-b="1000">×1000</button><button type="button" aria-pressed="false" data-b="4096">求和 ×4096</button><button type="button" aria-pressed="false" data-b="9216">求和 ×9216</button></div>
+      <label class="sl">β（对数）<input type="range" id="poB" min="0" max="4.2" step="0.01" value="3"><output id="poBo">1000</output></label>
+    </div>
+    <div class="ctrls">
+      <button class="btn" type="button" id="poStep">连做 10 次 M 步</button>
+      <button class="btn" type="button" id="poReset">重置</button>
+      <label class="ck"><input type="checkbox" id="poClamp" checked> 分数有界（|s| ≤ 3，模拟 z-score 凸组合）</label>
+    </div>
+    <div class="hs"><svg class="wide" id="poSvg" viewBox="0 0 960 300" role="img" aria-label="六个候选的检索分布 r、后验 q、只看效用的 q-bar 三组柱状图，以及每个候选的分数更新方向。"></svg></div>
+    <div class="readout" id="poRead"></div>
+    <figcaption><b>读法：</b>灰柱是检索器当前的 r，橙柱是后验老师 q，虚线框是只看效用的 q̄，底部箭头是这一步的更新方向 ∝ q−r。<b>β 小</b>时 q 和 r 几乎重合，梯度接近零，“future-aware”的信号被先验淹没。<b>β 大</b>时 q 集中到损失最低的那个候选，式 (5) 的“贝叶斯后验”实际上退化成“模仿扩散损失的 argmin”，先验项不再起作用。两种情况都能跑通，但它们是<b>不同的算法</b>，论文没说自己处在哪一端。“连做 M 步”模拟 EM 反复迭代：分数有界时 r 会饱和，达不到 q，于是梯度一直不为零，检索器实际学到的只是“把效用最高的候选排到最前”。</figcaption>
+  </figure>
+
+  <div class="callout">
+    <span class="lab">理论链条上的四处近似（论文统称为 principled）</span>
+    <ol class="tight">
+      <li><b>似然 → 扩散损失</b>：4 个噪声级的 ε-MSE 并不是校准过的 log-likelihood，尺度也未知（见上）。</li>
+      <li><b>集合 → 单候选</b>：记功对象是单帧，而生成器实际拿到的是 3 帧或 11 帧的组合。</li>
+      <li><b>全体记忆 → 自家候选池</b>：只评估检索器已经选中的 3 个代表，加其中一个代表所在的块（§5）。</li>
+      <li><b>边际似然 → 确定性 Top-11</b>：命题 1 说的是 E<sub>r</sub>[u]（减去一个与候选无关的常数）是互信息的下界，照它自然该优化 E<sub>r</sub>[u]；训练优化的是 log E<sub>r</sub>[e<sup>u</sup>]（按 Jensen 不等式 ≥ E<sub>r</sub>[u]）；推理时既不采样也不求期望，直接取前 11。这三者是不同的量。</li>
+    </ol>
+    <p>这些近似单独看都说得过去，但“principled”这个词只适用于理想化的目标，实际跑的算法已经离它很远。</p>
+  </div>
+</section>
+
+<!-- ============================ 05 ============================ -->
+<section id="s5">
+  <h2><span class="no">05</span>训练循环与算力账</h2>
+  <p class="lede">世界模型每一步都更新；检索器很“懒”，每 N<sub>lazy</sub>=20 步才更新一次（dyn 是 7 步），因为每次更新都要对每个候选额外跑几次 DiT 前向。</p>
+
+  <figure>
+    <div class="fig-hd"><h4>图 6 · Algorithm 1 拆开看</h4></div>
+    <div class="hs"><svg class="wide" viewBox="0 0 960 330" role="img" aria-label="两条泳道。上：每一步采样训练样本，融合分数，分块 Top-K 选出 3 帧，更新世界模型。下：每 20 步，global 池取已选的 3 个代表，local 池取其中一个代表所在的 10 帧块，共 13 个候选；用 4 组共享噪声算单候选效用，共 52 次前向；分别构造后验与 KL，两项相加更新检索器。右下灰色区域：其余记忆本次拿不到直接学分。">
+      <defs><marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink3)"/></marker></defs>
+      <g class="svgtxt">
+        <rect x="16" y="14" width="928" height="96" rx="10" style="fill:var(--surf2);stroke:var(--rule)"/>
+        <text x="30" y="36" style="fill:var(--ink3);font-family:var(--f-mono);font-size:11px;letter-spacing:.1em">每一步 n = 1, 2, …</text>
+        <rect x="30" y="48" width="170" height="48" rx="7" style="fill:var(--surf);stroke:var(--rule2)"/><text x="115" y="68" text-anchor="middle" style="fill:var(--ink)">采样 (o<tspan baseline-shift="sub" font-size="8">t+1</tspan>, M, Z, R, Q)</text><text x="115" y="86" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">每个观测配 4 个目标</text>
+        <rect x="236" y="48" width="170" height="48" rx="7" style="fill:var(--surf);stroke:var(--rule2)"/><text x="321" y="68" text-anchor="middle" style="fill:var(--ink)">融合线索分数（式 8）</text><text x="321" y="86" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">z-score + λ</text>
+        <rect x="442" y="48" width="170" height="48" rx="7" style="fill:var(--far-soft);stroke:var(--far)"/><text x="527" y="68" text-anchor="middle" style="fill:var(--ink)">分块 Top-K，K = 3</text><text x="527" y="86" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">C<tspan baseline-shift="sub" font-size="8">t,ChunkTopK</tspan></text>
+        <rect x="648" y="48" width="280" height="48" rx="7" style="fill:var(--surf);stroke:var(--ink3)"/><text x="788" y="68" text-anchor="middle" style="fill:var(--ink)">用 ℓ<tspan baseline-shift="sub" font-size="8">diff</tspan>(θ; o<tspan baseline-shift="sub" font-size="8">t+1</tspan>, C, Q, τ, ε) 更新世界模型</text><text x="788" y="86" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">前向 + 反向，上下文 5 帧（当前 + 3 + 目标）</text>
+        <line x1="200" y1="72" x2="234" y2="72" style="stroke:var(--ink3)" marker-end="url(#arA)"/>
+        <line x1="406" y1="72" x2="440" y2="72" style="stroke:var(--ink3)" marker-end="url(#arA)"/>
+        <line x1="612" y1="72" x2="646" y2="72" style="stroke:var(--ink3)" marker-end="url(#arA)"/>
+
+        <rect x="16" y="128" width="928" height="188" rx="10" style="fill:var(--fut-soft);stroke:var(--fut);stroke-dasharray:6 4"/>
+        <text x="30" y="150" style="fill:var(--fut-ink);font-family:var(--f-mono);font-size:11px;letter-spacing:.1em">当 n mod N_lazy = 0（N_lazy = 20；dyn 为 7，且只对锚定样本）</text>
+        <path d="M527,96 C527,170 420,199 284,199" style="fill:none;stroke:var(--far)" marker-end="url(#arA)"/>
+        <rect x="30" y="170" width="250" height="58" rx="7" style="fill:var(--surf);stroke:var(--far)"/><text x="155" y="192" text-anchor="middle" style="fill:var(--ink);font-weight:600">A_global = 已选的 3 个代表</text><text x="155" y="212" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">跨时间区域分配学分</text>
+        <rect x="30" y="238" width="250" height="58" rx="7" style="fill:var(--surf);stroke:var(--far)"/><text x="155" y="260" text-anchor="middle" style="fill:var(--ink);font-weight:600">A_local = 某个代表所在的整块</text><text x="155" y="280" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">10 帧（dyn 30 帧）：块内再细分</text>
+        <rect x="318" y="190" width="220" height="84" rx="7" style="fill:var(--surf);stroke:var(--fut)"/><text x="428" y="214" text-anchor="middle" style="fill:var(--ink)">每个候选：上下文只放它一张</text><text x="428" y="234" text-anchor="middle" style="fill:var(--ink)">4 组共享 (τ<tspan baseline-shift="sub" font-size="8">s</tspan>, ε<tspan baseline-shift="sub" font-size="8">s</tspan>) → û<tspan baseline-shift="sub" font-size="8">i</tspan></text><text x="428" y="256" text-anchor="middle" style="fill:var(--fut-ink);font-size:11px">(3+10) × 4 = 52 次前向</text>
+        <line x1="280" y1="199" x2="316" y2="220" style="stroke:var(--ink3)" marker-end="url(#arA)"/>
+        <line x1="280" y1="267" x2="316" y2="246" style="stroke:var(--ink3)" marker-end="url(#arA)"/>
+        <rect x="576" y="190" width="170" height="84" rx="7" style="fill:var(--surf);stroke:var(--rule2)"/><text x="661" y="214" text-anchor="middle" style="fill:var(--ink)">两个池各自：</text><text x="661" y="234" text-anchor="middle" style="fill:var(--ink)">q = softmax(s + û)</text><text x="661" y="254" text-anchor="middle" style="fill:var(--ink)">KL(sg[q] ‖ r)</text>
+        <line x1="538" y1="232" x2="574" y2="232" style="stroke:var(--ink3)" marker-end="url(#arA)"/>
+        <rect x="784" y="190" width="144" height="84" rx="7" style="fill:var(--surf);stroke:var(--ok)"/><text x="856" y="222" text-anchor="middle" style="fill:var(--ink)">两项等权相加</text><text x="856" y="244" text-anchor="middle" style="fill:var(--ok-ink)">更新 ϕ</text>
+        <line x1="746" y1="232" x2="782" y2="232" style="stroke:var(--ink3)" marker-end="url(#arA)"/>
+        <text x="930" y="306" text-anchor="end" style="fill:var(--ink3);font-size:11px">池里另外约 190 帧（训练池 200）本次拿不到任何直接学分</text>
+      </g>
+    </svg></div>
+    <figcaption><b>一个结构性的局限：</b>学分只在检索器<b>自己挑中的</b>候选之间重新分配，global 池只有 3 个，local 池只是其中一个代表的邻域。一段从没进过 Top-3 的有用记忆，只能等打分函数“泛化”到它身上。EMDR² 在 QA 里通常用几十篇文档当候选，这里只有 3 + 10 个。所以初始化很重要：视觉编码器是预训练好的，meta MLP 论文没说怎么初始化。这可能也解释了 §7 里“预训练编码器贡献最大”的现象。</figcaption>
+  </figure>
+
+  <figure id="cost">
+    <div class="fig-hd"><h4>交互 3 · 训练额外算力（我的估算，论文未报告）</h4><span class="pill">估算模型</span></div>
+    <div class="ctrls">
+      <span class="small">预设：</span><div class="seg" id="coPre"><button type="button" aria-pressed="true" data-p="0">LoopNav / SS / THOR</button><button type="button" aria-pressed="false" data-p="1">AI2-THOR-dyn</button></div>
+    </div>
+    <div class="ctrls">
+      <label class="sl">K（global 池）<input type="range" id="coK" min="1" max="12" step="1" value="3"><output id="coKo">3</output></label>
+      <label class="sl">块长（local 池）<input type="range" id="coC" min="0" max="40" step="1" value="10"><output id="coCo">10</output></label>
+    </div>
+    <div class="ctrls">
+      <label class="sl">噪声级 S<input type="range" id="coS" min="1" max="8" step="1" value="4"><output id="coSo">4</output></label>
+      <label class="sl">N<sub>lazy</sub><input type="range" id="coN" min="1" max="50" step="1" value="20"><output id="coNo">20</output></label>
+      <label class="sl">参与更新的样本比例<input type="range" id="coF" min="0.05" max="1" step="0.05" value="1"><output id="coFo">1.00</output></label>
+    </div>
+    <div class="readout" id="coRead"></div>
+    <p class="small" style="margin:0">假设：①DiT 前向代价约与帧数成正比（每帧 ≤256 token、总长 ≤1.3k token，MLP 与投影占大头，全局注意力约占两成多）；②反向约为前向的 2 倍；③效用前向的上下文是“当前帧 + 候选 + 目标” = 3 帧，世界模型一步是“当前帧 + K + 目标”；④检索器自身的前向和反向忽略不计。按论文默认值，额外开销约为<b>世界模型训练的 +50%</b>；dyn 的设置更重，约 +130%（只算 35% 的锚定样本时）。<b>推理几乎不变</b>：每步只多一次 6 层小 ViT 的查询前向，再对 ≤1000 个缓存 key 算余弦、对 ≤1000 帧跑一次 MLP，和 DDIM-20 的 20 次 DiT 前向比可以忽略。</p>
+  </figure>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>设置（Table 4–6）</th><th>LoopNav</th><th>SoundSpaces v1</th><th>SoundSpaces v2</th><th>AI2-THOR</th><th>AI2-THOR-dyn</th></tr></thead>
+      <tbody>
+        <tr><td>环境 / 分辨率</td><td>Minecraft 360×640 @20</td><td>MP3D 256² @10</td><td>MP3D 256² @10</td><td>iTHOR 256² @10</td><td>iTHOR 256² @10</td></tr>
+        <tr><td>集数 / 场景</td><td>19,200 / 120</td><td>14,425 / 81</td><td>14,425 / 81</td><td>8,125 / 119</td><td>1,202 / 7</td></tr>
+        <tr><td>划分</td><td class="q">按集，场景全重合</td><td>场景不相交 57/24</td><td>场景不相交 57/24</td><td>场景不相交 95/24</td><td class="q">按集，7 个房间全重合</td></tr>
+        <tr><td>每集平均帧数<span class="d">我算的，总帧数/集数</span></td><td>657（32.9 s）</td><td>643（64.3 s）</td><td>759（75.9 s）</td><td>1,136（114 s）</td><td>1,539（154 s）</td></tr>
+        <tr><td>检索线索</td><td>Meta + Vision</td><td>Meta + Audio</td><td>Meta + Audio</td><td>Meta + Vision</td><td>Meta / Meta + Agent</td></tr>
+        <tr><td>训练池 → 评测池</td><td>200 → 1000</td><td>200 → 1000</td><td>200 → 1000</td><td>400 → 1000</td><td>400 → 反转前历史</td></tr>
+        <tr><td>上下文 训练 → 评测</td><td>4 → 12</td><td>4 → 12</td><td>4 → 12</td><td>4 → 12</td><td>4 → 4（成对帧）</td></tr>
+        <tr><td>预测视界（帧）</td><td>128</td><td>128</td><td>128</td><td>32</td><td>32 / 135</td></tr>
+        <tr><td>块长 / N<sub>lazy</sub></td><td>10 / 20</td><td>10 / 20</td><td>10 / 20</td><td>10 / 20</td><td>30 / 7</td></tr>
+        <tr><td>特殊训练信号</td><td>—</td><td>—</td><td>—</td><td class="q">变化掩码 0.3 · 事件锚定 0.30</td><td class="q">剪影掩码 5.0 · 锚定 0.35 · agent 状态损失</td></tr>
+        <tr><td>batch（FAR）</td><td>128</td><td>64</td><td>64</td><td>64</td><td>64</td></tr>
+        <tr><td>评测检查点</td><td>700k</td><td>700k</td><td>700k</td><td>700k</td><td>100k<span class="d">HF 模型卡摘要写 500k，待核</span></td></tr>
+        <tr><td>评测步长</td><td>4 帧 / 0.2 s</td><td>16 / 1.6 s</td><td>16 / 1.6 s</td><td>4 / 0.4 s</td><td>一步两端探针</td></tr>
+        <tr><td>评测规模</td><td>3,796 clip</td><td>1,167 clip</td><td>1,167 clip</td><td>1,309 clip</td><td>202 条动作集（?）</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================ 06 ============================ -->
+<section id="s6">
+  <h2><span class="no">06</span>线索门控：到底有多“自适应”</h2>
+  <p class="lede">论文标题里的 “Adaptive Multi-Cue” 全靠这一个公式（附录 C.1）：</p>
+  <div class="eq">λ<sup>m</sup><sub>ϕ,t</sub> ∝ exp( w<sub>ϕ</sub><sup>⊤</sup> [ max<sub>i</sub> s<sup>m</sup><sub>ϕ,i</sub>,&nbsp; μ<sup>m</sup><sub>t</sub>,&nbsp; σ<sup>m</sup><sub>t</sub>,&nbsp; e<sub>m</sub>,&nbsp; <span class="hl-fut">Δt</span> ] ),&nbsp;&nbsp; Σ<sub>m</sub> λ<sup>m</sup> = 1</div>
+  <p class="prose"><b>人话：</b>对每条线索，看它在整个记忆池上<b>原始分数</b>的三个统计量：最高分、均值、标准差。再加上这条线索是哪一类的独热码，以及仿真步长 Δt。所有线索<b>共用同一个线性权重向量</b> w，最后在线索之间做 softmax。直觉是：哪条线索这次的分数分布更“尖”（有一帧明显更好），就更信哪条。</p>
+
+  <div class="grid3">
+    <div class="card risk">
+      <h4>Δt 这一项按公式会被消掉</h4>
+      <p>Δt 对同一次查询的所有线索取值相同，和共享的 w 相乘后在 softmax 里分子分母同乘一个 e<sup>w<sub>Δ</sub>Δt</sup>，于是约掉。<b>照论文的写法，它对 λ 没有任何影响。</b>要么实际代码并非这个线性形式，比如是 MLP 或逐线索权重，要么这一项是多余的。代码未公开，无法核对。</p>
+    </div>
+    <div class="card">
+      <h4>两条线索时只剩 4 个自由度</h4>
+      <p>λ<sub>meta</sub> = σ( w<sub>max</sub>·Δmax + w<sub>μ</sub>·Δμ + w<sub>σ</sub>·Δσ + Δb )，Δ 表示 meta 减去另一条线索。就是一个 4 参数的逻辑回归，用来衡量两条线索“哪个更尖”。</p>
+    </div>
+    <div class="card">
+      <h4>线索各自能“操纵”门控</h4>
+      <p>门控看的是<b>未标准化的</b>原始分数。meta 分数是 tanh(MLP) 的输出，MLP 可以自由拉伸自己分数的离散度，从而间接改变自己的权重。打分器和门控在同一个 KL 里联合训练，这种耦合可能带来奇怪的动力学。论文没有给 λ 的任何统计。</p>
+    </div>
+  </div>
+
+  <figure id="gate">
+    <div class="fig-hd"><h4>交互 4 · 门控计算器</h4><span class="toy">示意权重 · 论文未报告学到的 w</span></div>
+    <div class="ctrls">
+      <span class="small">查询情形：</span><div class="seg" id="gaPre"><button type="button" aria-pressed="true" data-p="0">视野开阔、视觉很确定</button><button type="button" aria-pressed="false" data-p="1">走廊相似、视觉很平</button><button type="button" aria-pressed="false" data-p="2">两者都模糊</button></div>
+    </div>
+    <div class="ctrls">
+      <label class="sl">仿真步长 Δt<input type="range" id="gaDt" min="0" max="3.2" step="0.1" value="0.2"><output id="gaDto">0.2 s</output></label>
+    </div>
+    <div class="hs"><svg class="wide" id="gaSvg" viewBox="0 0 960 230" role="img" aria-label="两条线索在记忆池上的原始分数分布示意，以及门控给出的权重条。"></svg></div>
+    <figcaption>示意权重取 w<sub>max</sub>=+4、w<sub>μ</sub>=−4、w<sub>σ</sub>=−2、b<sub>meta</sub>−b<sub>vis</sub>=+0.2、w<sub>Δ</sub>=+1.5。拖动 Δt 时权重条纹丝不动，这就是上面说的“被约掉”。换预设可以看到，这个门控能表达的其实只是“峰值高出均值多少”这一类置信度启发式。</figcaption>
+  </figure>
+
+  <div class="two-col">
+    <div>
+      <h3 style="margin-top:6px">支撑“自适应”的定量证据只有一行</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>LoopNav 回环处</th><th>PSNR↑</th><th>LPIPS↓</th><th>DreamSim↓</th></tr></thead>
+        <tbody>
+          <tr><td>+ Meta，λ = 0.5（固定）</td><td>16.912</td><td>0.353</td><td>0.088</td></tr>
+          <tr class="ours"><td>+ Meta，λ 学习</td><td class="best">17.267</td><td class="best">0.337</td><td class="best">0.082</td></tr>
+          <tr><td>差值 · 非配对 z</td><td>+0.355 · 2.2</td><td>−0.016 · 2.3</td><td>−0.006 · 2.1</td></tr>
+        </tbody>
+      </table></div>
+      <p class="small">z 是我按表中 ± 当作单 clip 标准误、在不配对假设下算的；论文没说 ± 是什么，若它是 95% 置信半宽，z 约翻倍。同一批 clip、同一组噪声做配对检验会更显著，但每个臂只训练了一次。更要紧的是，<b>“学到一个更好的常数 λ”也能得到这个差值</b>。缺一个对照：常数 λ 可学、但不随查询变化。缺一组诊断：λ 在不同查询上的分布，以及它和遮挡、外观歧义这些标注的相关性。</p>
+    </div>
+    <div>
+      <h3 style="margin-top:6px">每个实验实际融合了几路</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>数据集</th><th class="l">被门控的线索</th></tr></thead>
+        <tbody>
+          <tr><td>LoopNav</td><td class="l"><span class="tag meta">Meta</span> + <span class="tag vis">Vision</span></td></tr>
+          <tr><td>SoundSpaces v1 / v2</td><td class="l"><span class="tag meta">Meta</span> + <span class="tag aud">Audio</span>（没有视觉变体）</td></tr>
+          <tr><td>AI2-THOR</td><td class="l"><span class="tag meta">Meta</span> + <span class="tag vis">Vision</span>（没有单线索变体）</td></tr>
+          <tr><td>AI2-THOR-dyn</td><td class="l"><span class="tag meta">Meta</span>，或 <span class="tag meta">Meta</span> + <span class="tag fut">A₂ 观测（形式未说明）</span></td></tr>
+        </tbody>
+      </table></div>
+      <p class="small">摘要里写的是“time, pose, vision, audio”，但<b>从来没有四路同时融合过</b>，每个实验都只有两路。“时间”和“位姿”装在同一个 MLP 里，并没有分开门控。所谓“多线索”，在实验层面是<b>二选一加权</b>。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 07 ============================ -->
+<section id="s7">
+  <h2><span class="no">07</span>实验逐项</h2>
+  <p class="lede">四个设定各对应一个卖点：LoopNav 证明“同样的线索，学出来的比手写的好”；SoundSpaces 证明“会自己决定信音频”；AI2-THOR 证明“世界变了也能召回对的状态”；AI2-THOR-dyn 证明“能预测画面外的动态”。下面逐一核数字，并把能算的都算一遍。</p>
+  <div class="callout warn"><span class="lab">数据来源说明</span><p>arXiv HTML 版本这次取不到（被限流）。所以 Fig 3 / 5 / 8 的曲线我<b>没有读出数值</b>，只转述论文文字。下面出现的数字来自三处：正文与 Table 1；项目页上的汇总数字（与 Table 1 一致的部分已核对）；我自己的复算，都标了出来。</p></div>
+
+  <h3>7.1 LoopNav：同一线索下，学出来的 vs 手写的</h3>
+  <div class="grid3">
+    <div class="card"><h4>设定</h4><p>公开的 LoopNav 数据：19,200 集，分布在 120 个程序生成的 Minecraft 村庄里，路线是 ABA 或 ABCA，按距离分 4 档。去程作为记忆，返程用来评测。按集 80/20 划分，<b>120 个场景在训练和测试里都出现</b>。评测 3,796 个 clip。</p></div>
+    <div class="card"><h4>基线</h4><p><span class="tag tmp">Temporal</span> 取最近帧（NWM）；<span class="tag wm">WorldMem</span> 取与目标 FOV 重叠最高的帧；<span class="tag llr">LongLive-RAG</span> 按重建式嵌入的相似度取帧。都挂在<b>同一个 DiT</b> 上，只换检索规则。</p></div>
+    <div class="card far"><h4>FAR 三个变体</h4><p>FAR-Meta（时间+位姿）、FAR-Visual（视觉）、FAR-Multi-Cue（两者 + 门控）。Fig 3 显示返程中段误差最高，因为那里需要的记忆离得最远、覆盖最稀。Multi-Cue 的曲线大体贴着两个单线索里较好的那条。</p></div>
+  </div>
+
+  <figure id="abl">
+    <div class="fig-hd"><h4>交互 5 · Table 1 逐行拆账</h4><span class="pill">数值为 Table 1 原值；占比为我算</span></div>
+    <div class="ctrls">
+      <span class="small">指标：</span><div class="seg" id="abM"><button type="button" aria-pressed="false" data-m="0">PSNR ↑</button><button type="button" aria-pressed="false" data-m="1">LPIPS ↓</button><button type="button" aria-pressed="true" data-m="2">DreamSim ↓</button></div>
+      <span class="small">以谁为基准：</span><div class="seg" id="abB"><button type="button" aria-pressed="true" data-b="2">WorldMem（最强基线）</button><button type="button" aria-pressed="false" data-b="1">LongLive-RAG（同为视觉线索）</button></div>
+    </div>
+    <div class="hs"><svg class="wide" id="abSvg" viewBox="0 0 960 360" role="img" aria-label="Table 1 各行的绝对值柱状图（带标准误），以及从基准到完整 FAR 的逐步增量占比条。"></svg></div>
+    <figcaption><b>结论：</b>以 WorldMem 为基准，DreamSim 从 0.130 降到 0.082，共 −0.048。其中<b>“Enc. Pretrained”一行就占 62.5%</b>。这一行是冻结的、经过预测式对比预训练的编码器直接拿余弦相似度检索，还<b>没用上任何后验蒸馏</b>。由 FAR 训练出来的三个部件合计约占 37.5%：适配器 18.8%，加入 meta 6.3%，学习 λ 12.5%。PSNR 口径下编码器占 46%，LPIPS 口径下占 52%。所以说“同为视觉线索，FAR 胜过 LongLive-RAG”，胜出的主要是 FAR 自带的<b>预测式对比预训练编码器</b>，而不是论文主打的<b>效用后验蒸馏</b>。公平地说，这个编码器的目标（当前帧 + 动作 → 目标帧 key）本身也是“面向未来”的，只是不用效用、不用后验。LongLive-RAG 的嵌入用什么数据训练、是否也在 LoopNav 上训练过，论文没有交代。</figcaption>
+  </figure>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Table 1（LoopNav 回环处）</th><th>PSNR↑</th><th>LPIPS↓</th><th>DreamSim↓</th><th>相对 LongLive-RAG 的 DreamSim<span class="d">我算</span></th></tr></thead>
+      <tbody>
+        <tr><td>Temporal (NWM)</td><td>13.229 ±0.114</td><td>0.582 ±0.007</td><td>0.200 ±0.004</td><td>+50.4%</td></tr>
+        <tr><td>LongLive-RAG</td><td>14.847 ±0.121</td><td>0.463 ±0.006</td><td>0.133 ±0.003</td><td>—</td></tr>
+        <tr><td>WorldMem</td><td>15.372 ±0.112</td><td>0.448 ±0.006</td><td>0.130 ±0.003</td><td>−2.3%</td></tr>
+        <tr class="grp"><td colspan="5">FAR with Vision Cue</td></tr>
+        <tr><td>Enc. Pretrained</td><td>16.248 ±0.112</td><td>0.390 ±0.006</td><td>0.100 ±0.003</td><td class="up">−24.8%</td></tr>
+        <tr><td>+ MLP Adapter</td><td>16.480 ±0.108</td><td>0.374 ±0.006</td><td>0.091 ±0.002</td><td class="up">−31.6%</td></tr>
+        <tr><td>+ Meta, λ = 0.5</td><td>16.912 ±0.117</td><td>0.353 ±0.005</td><td>0.088 ±0.002</td><td>−33.8%</td></tr>
+        <tr class="ours"><td>+ Meta, λ learned</td><td class="best">17.267 ±0.116</td><td class="best">0.337 ±0.005</td><td class="best">0.082 ±0.002</td><td>−38.3%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="lab">正文数字对不上 Table 1</span>
+    <p>正文说：“at loop closure，学到的视觉检索器比 LongLive-RAG 的 DreamSim <b>低 17%</b>；学到的 metadata 检索器比 WorldMem <b>低 19%</b>。”项目页确认 Table 1 就是“回到起点时”的数值（0.200 / 0.133 / 0.130 / 0.082）。按 Table 1，视觉变体如果是 “+MLP Adapter” 一行，是 −31.6%；即便只算冻结编码器一行，也是 −24.8%。要得到 −17%，FAR-Visual 得是 0.110 左右，<b>比冻结编码器那一行（0.100）还差</b>，和消融表矛盾。19% 对应 FAR-Meta ≈ 0.105，而这一行不在表里。可能是 Fig 3 的“回环处”取点方式和 Table 1 不同，但论文没说明。</p>
+  </div>
+
+  <p class="small">显著性：论文没说 ± 是什么。若当作逐 clip 标准误（对应单 clip PSNR 标准差约 7 dB），按非配对算：编码器一步三项都远超 3；“+MLP Adapter”PSNR z≈1.5、DreamSim z≈2.5；“加入 meta”PSNR 和 LPIPS z≈2.7，但 DreamSim 只有 z≈1.1；“λ 学习”三项 z≈2.1–2.3。若 ± 是 95% 置信半宽，所有 z 约翻倍，除“加入 meta”的 DreamSim 外都算显著。同一批 clip、同一组噪声做配对检验会更显著。每个臂只训练了一次，没有跨 seed 的方差。</p>
+
+  <h3>7.2 SoundSpaces：学会在该信音频的时候信音频</h3>
+  <div class="grid2">
+    <div class="card aud">
+      <h4>设定</h4>
+      <ul class="tight">
+        <li>81 个 Matterport3D 场景，按场景划分，训练 57 个、测试 24 个，场景不相交。环境里有 2–4 个静态声源持续发声，渲染成 16 kHz 双耳音频。</li>
+        <li>去程是 ABA / ABCA 回路，作为记忆；返程是重新规划的最短路径。</li>
+        <li><b>v1</b> 只在回路两端做 360° 扫视；<b>v2</b> 另外在掉头、换区域、换高度或长时间没扫视时加扫。两者共用同一份清单、seed、路点和声源，所以两者的差异只来自记忆密度。</li>
+        <li>按返程长度（5 / 10 / 20 / 40 m）分组，误差在整条返程上取平均。横轴是“轨迹长度”，不是 rollout 步数。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>结果（Fig 5 文字 + 项目页）</h4>
+      <p>两个语料上 FAR 都胜过 Temporal 和 WorldMem。周期扫视（v2）时，只用 meta 已经很强，加音频只有小幅提升。只扫两端（v1）时，Multi-Cue 的优势随返程变长而扩大，LPIPS 和 DreamSim 上更明显。</p>
+      <div class="tbl-wrap" style="margin:8px 0"><table>
+        <thead><tr><th>返程最后 1/4 · DreamSim↓</th><th>值</th><th>相对 Temporal</th></tr></thead>
+        <tbody>
+          <tr><td>Temporal</td><td>0.452</td><td>—</td></tr>
+          <tr><td>WorldMem</td><td>0.423</td><td class="dn">−6.4%</td></tr>
+          <tr class="ours"><td>FAR（变体未注明）</td><td class="best">0.150</td><td>−66.8%</td></tr>
+        </tbody>
+      </table></div>
+      <p class="small">这组数字仅见于项目页，没说是 v1 还是 v2。</p>
+    </div>
+  </div>
+  <div class="grid3">
+    <div class="card risk"><h4>WorldMem 在返程末段只比 Temporal 好 6%</h4><p>在 LoopNav 上，WorldMem 比 Temporal 的 DreamSim 低 35%；在 SoundSpaces 的返程末段只低 6%。回到起点附近时，需要的是去程<b>最早</b>的那些帧，而 WorldMem 在这两个数据集上有 200 帧池子上限（§8）。这个现象和“上限切掉了起点帧”的假设吻合，但仅凭这些数字<b>不能证明</b>。</p></div>
+    <div class="card"><h4>“音频”线索里有位姿监督</h4><p>音频编码器做对比预训练时，正样本是按 <b>GT 空间距离</b>挑的，不限朝向；负样本取自同一集。所以它学到的在相当程度上是“位置嵌入”，另外再加上房间声学（墙对直达声的遮挡）带来的几何信息。“音频胜过位姿”应理解为“用位姿监督过的音频嵌入补上了遮挡信息”。</p></div>
+    <div class="card"><h4>缺的变体</h4><p>RGB 本来就有，却<b>没有视觉线索变体</b>，没有 Meta+Vision+Audio，也没有只用音频的 FAR。“学会在位姿模糊时依赖音频”这个结论，缺少“视觉也在场时它还选不选音频”这一对照。LongLive-RAG 只在 LoopNav 上出现过。</p></div>
+  </div>
+
+  <h3>7.3 AI2-THOR：世界变了，召回的是哪个版本</h3>
+  <div class="grid2">
+    <div class="card">
+      <h4>设定</h4>
+      <ul class="tight">
+        <li>8,125 个单房间 iTHOR 集，分布在 119 个场景里，按场景划分，训练 95 个、测试 24 个，场景不相交。评测 1,309 个 clip。</li>
+        <li>探索段会访问物体站点，打开容器，把物体在台面和容器之间搬来搬去。每个站点用可复现的<b>标准视角</b>检查，于是会有“同一位姿、不同状态”的记忆。物体在搬运途中隐藏，不能靠视觉追踪。</li>
+        <li>生成器额外拿到<b>GT 交互标签</b>（当前到目标之间发生了什么）和目标处的门开合比例。</li>
+        <li>训练时有两个特殊处理：用<b>变化掩码</b>给扩散损失重加权（系数 0.3，最大面积 0.15，归一化到平均权重为 1），所有臂都用；另外以 0.30 的概率把样本换成以开/关事件为中心的锚定样本。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>状态正确率（项目页汇总）</h4>
+      <div class="tbl-wrap" style="margin:6px 0"><table>
+        <thead><tr><th></th><th>Temporal</th><th>WorldMem</th><th>FAR Multi-Cue</th></tr></thead>
+        <tbody>
+          <tr><td>表面变化</td><td>5.7%</td><td>42.1%</td><td class="best">80.2%</td></tr>
+          <tr><td>容器揭示</td><td>0.6%</td><td>12.5%</td><td class="best">75.7%</td></tr>
+        </tbody>
+      </table></div>
+      <p class="small">指标：对每个“变过的状态”，判定 <span class="mv">d(o<sup>GT</sup>, o<sup>Pred</sup>) &lt; d(o<sup>GT</sup>, o<sup>Stale</sup>)</span> 是否成立。d 是变化区域裁剪块上的 LPIPS，o<sup>Stale</sup> 是同位姿、变化之前的真实帧。Fig 8 按变化幅度 d(GT, Stale) 分档，横轴刻度 0.1–0.2。</p>
+      <p class="small">另外只有 Multi-Cue 这一个 FAR 变体，HF 上也只有这一个；没有 FAR-Meta、FAR-Visual。</p>
+    </div>
+  </div>
+
+  <figure id="thor">
+    <div class="fig-hd"><h4>交互 6 · 这个“状态正确率”在量什么</h4><span class="toy">玩具模型 · 我的构造</span></div>
+    <p class="small" style="margin:0 0 8px">设定：生成器以概率 p 画出正确状态，否则画出过期状态。无论哪种，都附带一个渲染误差 E（对数正态，中位数 m）。在高维近似下，误差方向与“GT–Stale 方向”几乎正交，所以 d(GT, Pred) ≈ E，d(GT, Stale) = Δ。<b>论文的判据</b>是 d(GT, Pred) &lt; Δ，等于在问“渲染误差是否小于状态变化幅度”。<b>对照判据</b>用最近状态分类：d(Pred, GT) &lt; d(Pred, Stale)。</p>
+    <div class="ctrls">
+      <label class="sl">画对状态的概率 p<input type="range" id="thP" min="0" max="1" step="0.01" value="1"><output id="thPo">1.00</output></label>
+      <label class="sl">渲染误差中位数 m<input type="range" id="thM" min="0.02" max="0.25" step="0.005" value="0.12"><output id="thMo">0.120</output></label>
+      <label class="sl">误差离散度<input type="range" id="thS" min="0.1" max="1" step="0.05" value="0.4"><output id="thSo">0.40</output></label>
+    </div>
+    <div class="hs"><svg class="wide" id="thSvg" viewBox="0 0 960 300" role="img" aria-label="横轴为变化幅度，纵轴为正确率。实线为论文判据，虚线为最近状态判据，点线为真实的画对状态概率 p。"></svg></div>
+    <figcaption><b>结论：</b>即便 p=1（状态永远画对），论文判据在变化幅度小于渲染误差时也会趋近 0。所以“变化越小正确率越低”是这个判据<b>本身</b>就会产生的形状，并不一定来自作者说的“扩散目标对小变化不敏感”。它还意味着<b>画得更清楚的方法会自动得分更高</b>：Temporal 的 5.7% / 0.6% 有一部分可能是整体画质差，而不全是状态错。改用最近状态分类，或用一个物体/状态检测器，能把“状态对不对”和“画得清不清楚”分开。</figcaption>
+  </figure>
+
+  <div class="callout">
+    <span class="lab">反事实番茄（Fig 7）</span>
+    <p>同一个关着的冰箱、同一个“开门”动作，只改变历史里有没有“把番茄放进冰箱”，FAR 就会分别渲染出有番茄和没番茄的冰箱；WorldMem 则在旧位置的桌上也画出了番茄。这个例子<b>构造得很好</b>，因为它直接证明预测依赖召回的历史而不只是当前画面。但它只有一对样本，没有统计量。</p>
+  </div>
+
+  <h3>7.4 AI2-THOR-dyn：画面外的动态</h3>
+  <figure>
+    <div class="fig-hd"><h4>图 7 · dyn 的推理管线：“世界模型预测”里有多少是分类器做的</h4></div>
+    <div class="hs"><svg class="wide" viewBox="0 0 960 250" role="img" aria-label="dyn 管线：记忆帧成对召回（相隔 1.5 秒），每帧附带 GT 的第二 agent 可见性与地面位置；注意力池化预测器读召回槽位，输出第二 agent 是否在场及位置；二值化后作为条件送入生成器；生成的目标帧由三层潜空间检测器判定是否出现第二 agent（至少 10 个潜格点亮），据此计算两端准确率。">
+      <defs><marker id="arY" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink3)"/></marker></defs>
+      <g class="svgtxt">
+        <rect x="20" y="40" width="190" height="120" rx="8" style="fill:var(--surf2);stroke:var(--rule2)"/>
+        <text x="115" y="62" text-anchor="middle" style="fill:var(--ink);font-weight:600">召回槽位（上下文 4）</text>
+        <text x="115" y="82" text-anchor="middle" style="fill:var(--ink2)">每槽 = 两帧（相隔 1.5 s）</text>
+        <text x="115" y="104" text-anchor="middle" style="fill:var(--fut-ink)">+ GT：A₂ 可见性、地面位置</text>
+        <text x="115" y="120" text-anchor="middle" style="fill:var(--fut-ink)">（及 1.5 s 前的同一量）</text>
+        <text x="115" y="144" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">附录未区分臂；Multi-Cue 另有 A₂ 观测线索</text>
+        <rect x="250" y="40" width="190" height="120" rx="8" style="fill:var(--surf2);stroke:var(--ok)"/>
+        <text x="345" y="66" text-anchor="middle" style="fill:var(--ink);font-weight:600">注意力池化预测器</text>
+        <text x="345" y="88" text-anchor="middle" style="fill:var(--ink2)">A₂ 在不在（BCE）</text>
+        <text x="345" y="106" text-anchor="middle" style="fill:var(--ink2)">A₂ 在哪（权重 0.05）</text>
+        <text x="345" y="130" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">辅助损失权重 1.0；同一项</text>
+        <text x="345" y="146" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">也计入检索器的候选奖励</text>
+        <rect x="480" y="40" width="190" height="120" rx="8" style="fill:var(--far-soft);stroke:var(--far)"/>
+        <text x="575" y="66" text-anchor="middle" style="fill:var(--ink);font-weight:600">生成器（DiT）</text>
+        <text x="575" y="88" text-anchor="middle" style="fill:var(--ink2)">条件：预测器的</text>
+        <text x="575" y="106" text-anchor="middle" style="fill:var(--ink2)">二值化输出</text>
+        <text x="575" y="130" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">训练时喂 GT（teacher forcing）；</text>
+        <text x="575" y="146" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">剪影掩码 ×5 重加权损失</text>
+        <rect x="710" y="40" width="230" height="120" rx="8" style="fill:var(--surf2);stroke:var(--rule2)"/>
+        <text x="825" y="66" text-anchor="middle" style="fill:var(--ink);font-weight:600">潜空间检测器（3 层）</text>
+        <text x="825" y="88" text-anchor="middle" style="fill:var(--ink2)">≥10 个潜格点亮即“有 A₂”</text>
+        <text x="825" y="110" text-anchor="middle" style="fill:var(--ink2)">真实测试帧：召回率 0.906</text>
+        <text x="825" y="128" text-anchor="middle" style="fill:var(--ink2)">误报率 0.070</text>
+        <text x="825" y="148" text-anchor="middle" style="fill:var(--ink3);font-size:10.5px">两端各生成一次，同一噪声 seed</text>
+        <line x1="210" y1="100" x2="248" y2="100" style="stroke:var(--ink3)" marker-end="url(#arY)"/>
+        <line x1="440" y1="100" x2="478" y2="100" style="stroke:var(--ink3)" marker-end="url(#arY)"/>
+        <line x1="670" y1="100" x2="708" y2="100" style="stroke:var(--ink3)" marker-end="url(#arY)"/>
+        <text x="480" y="196" text-anchor="middle" style="fill:var(--ink2)">真正“推理”A₂ 在哪的是左边两格：<tspan style="fill:var(--fut-ink)">召回对的槽位</tspan> + <tspan style="fill:var(--ok-ink)">分类器读 GT 标注</tspan>；DiT 负责按结论把人画出来</text>
+        <text x="480" y="222" text-anchor="middle" style="fill:var(--ink3);font-size:11px">7 个房间在训练与测试中全部重合；训练 800 集、测试 202 集</text>
+      </g>
+    </svg></div>
+  </figure>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>数字</h4>
+      <div class="tbl-wrap" style="margin:6px 0"><table>
+        <thead><tr><th>两端准确率</th><th>正文 / 项目页</th><th>Fig 9 标注</th></tr></thead>
+        <tbody>
+          <tr><td>Temporal</td><td>41.9%</td><td>41.8</td></tr>
+          <tr><td>WorldMem</td><td>32.4%</td><td>32.5</td></tr>
+          <tr><td>FAR-Meta（时间+位姿）</td><td>67.1%</td><td>66.7</td></tr>
+          <tr class="ours"><td>FAR-Multi-Cue（+ GT agent 线索）</td><td class="best">94.6%</td><td>94.5</td></tr>
+        </tbody>
+      </table></div>
+      <p class="small">正文和图对不上，差 0.1–0.4 个百分点，原因未说明。四个值里有三个<b>不可能是 k/202</b>：202 集下 41.9 夹在 84/202 = 41.6% 与 85/202 = 42.1% 之间，32.4 与 67.1 同样凑不出来（94.6 倒可以是 191/202）。能同时凑出四个值的最小分母是 222，大于 202，所以连“202 集中的 memory-dependent 子集”也解释不了。评测单位和分母论文没有交代。Fig 9 里还有一条 “Constant Guess” 参考线，数值正文没给。</p>
+    </div>
+    <div class="card risk">
+      <h4>三个要打折扣的地方</h4>
+      <ol class="tight">
+        <li><b>特权信息</b>：按附录描述，记忆里每一帧都带 GT 的 A₂ 可见性和地面位置（含 1.5 s 前的值），由注意力池化分类器读出，二值化后去控制生成器，而且附录没有区分是哪个臂。Multi-Cue 另外多一路“A₂ 观测线索”，论文没说明它具体是什么。附录提到 dyn 的检索编码器做过 12.5k 步“以物体为中心”的微调，可能就是它。所以这个实验主要测的是“能不能召回有信息量的槽位”，不宜直接读成“世界模型从像素推断画面外动态”。</li>
+        <li><b>检测器上限</b>：真实帧上召回 0.906、误报 0.070。如果判分规则是“一端有、一端无”，两端各判一次且误差独立，那么 GT 帧本身能通过的概率约为 0.906 × 0.930 ≈ <b>84%</b>，低于 FAR 的 94.6%。论文没写判分规则。可能是揭示帧比平均帧更容易检测，也可能是生成帧“更好认”。<b>应报告 GT 帧在同一探针下的得分</b>，作为上限参照。</li>
+        <li><b>样本量</b>：测试只有 202 集。按二项分布，95% 置信区间的半宽在 94.6% 处约 ±3 个百分点，在 30–70% 区间约 ±6.5 个百分点。7 个房间在训练和测试里都出现，FAR-Meta 能学到巡逻的时间规律。</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 08 ============================ -->
+<section id="s8">
+  <h2><span class="no">08</span>对照组公平性审计：每个“臂”到底拿到了什么</h2>
+  <p class="lede">论文用的是“检索臂”设计：同一个 DiT、同一份数据、同一组噪声 seed 和目标轨迹，只换检索规则。HF 上也放出了每个臂的权重，这一点做得规范。但逐项对照附录，各臂之间仍有几处条件不对等。需要注意，这里的 “WorldMem” 只代表<b>它的 FOV 重叠检索规则</b>，并不包含 WorldMem 系统原有的记忆注意力和状态嵌入。</p>
+  <div class="tbl-wrap">
+    <table class="mx">
+      <thead><tr><th>条目</th><th>Temporal</th><th>WorldMem</th><th>LongLive-RAG</th><th>FAR-Meta</th><th>FAR-Visual</th><th>FAR-Multi</th></tr></thead>
+      <tbody>
+        <tr><td>同一 DiT / 数据 / 噪声 seed</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td></tr>
+        <tr><td>评测记忆池</td><td class="n">同一池，取最近帧</td><td class="w">LoopNav / SS：200 帧上限<br>THOR：全池</td><td>≤1000<span class="d">C.4：各方法统一放大</span></td><td>≤1000</td><td>≤1000</td><td>≤1000</td></tr>
+        <tr><td>训练 batch（LoopNav / SoundSpaces）</td><td class="u">112 / 63</td><td>128 / 64</td><td>128</td><td>128 / 64</td><td>128</td><td>128 / 64</td></tr>
+        <tr><td>可学的检索参数</td><td class="n">无</td><td class="n">无</td><td class="u">嵌入来源未说明</td><td>meta MLP</td><td>查询适配器</td><td>MLP + 适配器 + 门控</td></tr>
+        <tr><td>域内预测式对比预训练（40 万步）</td><td class="n">—</td><td class="n">—</td><td class="u">?</td><td class="n">—</td><td class="y">✓</td><td class="y">✓</td></tr>
+        <tr><td>分块 Top-K 去冗余约束</td><td class="u">?</td><td class="u">?</td><td class="u">?</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td></tr>
+        <tr><td>训练时用到未来（效用）</td><td class="n">✗</td><td class="n">✗</td><td class="n">✗</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td></tr>
+        <tr><td>THOR 变化掩码进入检索信号</td><td class="n">仅生成器损失</td><td class="n">仅生成器损失</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="u">很可能也进效用<span class="d">û = −ℓ<sub>diff</sub>；论文只对 dyn 明说</span></td></tr>
+        <tr><td>dyn：额外的“A₂ 观测”检索线索</td><td class="n">✗</td><td class="n">✗</td><td class="n">—</td><td class="n">✗</td><td class="n">—</td><td class="w">✓<span class="d">具体形式未说明</span></td></tr>
+        <tr><td>出现在哪些实验</td><td>全部</td><td>全部</td><td class="u">仅 LoopNav</td><td>LoopNav / SS / dyn</td><td class="u">仅 LoopNav</td><td>全部</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout warn">
+    <span class="lab">最要紧的一行：记忆池</span>
+    <p>附录 C.4 原话：“WorldMem retains a 200-frame pool cap on LoopNav and SoundSpaces to match its training configuration.”问题在于 FAR 的<b>训练</b>池同样是 200 帧（Table 5），评测时却放宽到 1000 帧。两者训练条件一样，评测时只有 WorldMem 被要求“与训练一致”。论文没说这 200 帧怎么取：如果是<b>最近的 200 帧</b>，那么越接近回到起点，WorldMem 越<b>物理上看不到</b>它最需要的起点帧。按 Table 3 估算，LoopNav 每集约 657 帧，去程约 330 帧；SoundSpaces 每集 643–759 帧，含扫视。如果是均匀下采样，影响会小得多。无论哪种，回环处的“−37%”和“−65%”都需要一个等池对照才能下结论：WorldMem 用 1000 帧，或者 FAR 也限 200 帧。</p>
+  </div>
+</section>
+
+<!-- ============================ 09 ============================ -->
+<section id="s9">
+  <h2><span class="no">09</span>存疑清单</h2>
+  <p class="lede">一共 17 条，按严重程度排列。<span class="tag risk">高</span> 表示可能改变结论，<span class="tag med">中</span> 表示削弱某条主张，<span class="tag low">低</span> 表示报告或复现层面的缺口。每条都写了依据，以及怎么验证。标注“我算”的数字可以对照 §5–§8 复核。</p>
+  <div class="dbt-ctrl">
+    <div class="seg" id="dbF"><button type="button" aria-pressed="true" data-f="all">全部</button><button type="button" aria-pressed="false" data-f="h">高</button><button type="button" aria-pressed="false" data-f="m">中</button><button type="button" aria-pressed="false" data-f="l">低</button></div>
+    <button class="btn" type="button" id="dbOpen">全部展开</button>
+  </div>
+  <div class="doubts" id="dbList">
+
+    <details class="dbt h"><summary><span class="id">H1</span><span class="t">评测记忆池不对等：WorldMem 限 200 帧，FAR 最多 1000 帧，而回环处恰恰需要最早的那些帧</span></summary><div class="body">
+      <p><b>依据：</b>附录 C.4 说 WorldMem 在 LoopNav 和 SoundSpaces 上“保留 200 帧上限以匹配其训练配置”，但 FAR 的训练池同样是 200 帧（Table 5），评测时却放宽到 1000 帧。论文没说 200 帧怎么取。按 Table 3 估算，LoopNav 每集约 657 帧（去程约 330 帧），SoundSpaces 每集 643–759 帧，所以上限在两个数据集上都会生效。项目页上，SoundSpaces 返程末段 WorldMem 相对 Temporal 只好 6.4%，LoopNav 上却好 35%，这与“起点帧被截掉”的假设吻合。</p>
+      <p><b>影响：</b>最醒目的两个数字都是在“回到起点”附近取的：LoopNav −37% 可以由 Table 1 算出；SoundSpaces −65% 只在项目页出现。对去程短于 200 帧的集，上限不生效，所以这里是平均意义上的影响。</p>
+      <p><b>验证：</b>给 WorldMem 1000 帧池，或把 FAR 也限到 200 帧；同时写明截断是“最近 N 帧”还是“均匀下采样”。HF 上有 WorldMem 臂的权重，代码放出后可以直接复现。</p>
+    </div></details>
+
+    <details class="dbt h"><summary><span class="id">H2</span><span class="t">“同样线索，学的胜过手写的”：视觉线索上，领先主要来自域内的预测式对比预训练编码器，而不是效用后验蒸馏</span></summary><div class="body">
+      <p><b>依据（Table 1，我算）：</b>相对 WorldMem，DreamSim 共降 0.048。其中“Enc. Pretrained”一行，也就是冻结编码器加余弦、没有任何后验蒸馏，就降了 0.030，占 62.5%；PSNR 口径占 46%，LPIPS 口径占 52%。相对 LongLive-RAG，冻结编码器一行已经是 −24.8%。这个编码器在同一数据集上用“当前帧 + 动作 → 目标帧 key”的对比目标预训练了 40 万步，而且 LoopNav 的训练和测试场景是同一批。LongLive-RAG 的嵌入训练自什么数据，论文没说。</p>
+      <p><b>影响：</b>对比预训练是 FAR 方案自己的一部分（§3.3），而且目标本身也是“预测式”的，所以不能说这部分不属于 FAR。但论文主打的是“用效用构造后验、再蒸馏”，这一机制在视觉通路上的净贡献只有 0.100 → 0.091。有贡献，但远没有标题暗示的那么大。</p>
+      <p><b>验证：</b>做编码器交叉实验。LongLive-RAG 换用 FAR 的对比编码器，看它能到多少；FAR 换用 LongLive-RAG 的嵌入再做后验蒸馏，看能提升多少。</p>
+    </div></details>
+
+    <details class="dbt h"><summary><span class="id">H3</span><span class="t">效用的尺度（温度）没有报告，而它决定了算法实际是哪一种</span></summary><div class="body">
+      <p><b>依据：</b>q = softmax(s + û)。s 是 z-score 的凸组合，量级大约是 ±3。û 是 4 个噪声级扩散损失的负均值：公式写的是 ‖·‖²<sub>2</sub>，也就是对所有潜变量维度求和；w(τ) 没有给出，也没有温度系数。若按求和算（4096 或 9216 维），候选之间差出几十 nat，q 基本是 one-hot，“贝叶斯后验”退化成“模仿损失最小的那一帧”。若按逐维平均算，差异在千分之几，q ≈ r，几乎没有学习信号。</p>
+      <p><b>影响：</b>§4 里“为什么要用 r·e<sup>u</sup> 而不是 e<sup>u</sup>”这一整套论证，只在两者尺度相当时才有实际意义。复现者不知道该设成多少。</p>
+      <p><b>验证：</b>报告 û 在候选之间的典型差值，以及 q 的熵；扫一遍温度。交互 2 可以直观看到这个影响。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">M1</span><span class="t">dyn 的结果建立在记忆里的 GT 第二 agent 标注和一个辅助分类器之上；Multi-Cue 的额外线索没说明是什么；检测器上限和样本分母都不清楚</span></summary><div class="body">
+      <p><b>依据：</b>按附录 C.3/C.4 的描述，记忆里每一帧都带 GT 的 A₂ 可见性和地面位置（含 1.5 s 前的值），由注意力池化分类器读出，二值化后作为条件去控制生成器；附录没有区分是哪个臂。Multi-Cue 另外融合一路“A₂ 观测线索”，形式没有说明，只知道 dyn 的检索编码器做过 12.5k 步“以物体为中心”的微调。效用里另有剪影掩码 ×5 和 agent 状态损失。检测器在真实帧上召回 0.906、误报 0.070；若判分规则是“一端有、一端无”且两端独立判定，GT 帧的通过率约为 84%，低于报告的 94.6%。正文数字（41.9 / 32.4 / 67.1 / 94.6）和 Fig 9 标注（41.8 / 32.5 / 66.7 / 94.5）不一致，而且其中三个不可能是 k/202，能同时凑出四个值的最小分母是 222。7 个房间训练和测试共用。</p>
+      <p><b>影响：</b>这个实验能说明“召回对的槽位很重要，而 FAR 学得会”。它不宜直接读成“世界模型从像素里预测画面外动态”，因为推断主要由分类器读 GT 标注完成。和基线最可比的是 FAR-Meta 那一档：67.1% 对 41.9%，两者用的线索相同。</p>
+      <p><b>验证：</b>报告 GT 帧在同一探针下的得分；把记忆里的 GT A₂ 标注换成像素级检测器的输出后重做；说明“A₂ 观测线索”是什么；写清楚评测单位和分母。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">M2</span><span class="t">“自适应多线索”的证据很薄：每次只融合两路，门控只有约 4 个自由度，Δt 项按公式会被约掉</span></summary><div class="body">
+      <p><b>依据：</b>四个实验都只融合两路线索，时间和位姿在同一个 MLP 里。门控是一个共享线性权重对 (max, μ, σ, 线索类型, Δt) 做 softmax。Δt 对所有线索相同，在 softmax 里约掉；两路时整个门控就是 4 参数的逻辑回归。唯一的定量证据是 λ=0.5 对比 λ 可学：PSNR +0.355，非配对 z≈2.2。这个差值也可以由“学到一个更好的常数 λ”得到。全文没有给出任何 λ 的分布，也没有 λ 与遮挡等标注的相关分析。</p>
+      <p><b>验证：</b>补一个“常数 λ 可学”的对照；画出 λ 在不同查询上的直方图，以及它和遮挡、外观歧义标注的关系；做一次三路或四路同时融合。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">M3</span><span class="t">SoundSpaces 的“音频”线索带着位姿监督；缺视觉线索和只用音频的变体</span></summary><div class="body">
+      <p><b>依据：</b>音频编码器做对比预训练时，正样本按 GT 空间距离挑选，不限朝向；负样本取自同一集。所以它有相当一部分是“位置嵌入”，另外再加上房间声学里的遮挡信息。实验只有 Meta 和 Meta+Audio 两个 FAR 变体，没有 Vision、Meta+Vision、Meta+Vision+Audio，也没有只用音频的变体。声源是 2–4 个静态、持续发声的源，这在真实环境里并不常见。</p>
+      <p><b>影响：</b>“位姿模糊时学会依赖音频”这个结论，缺少“视觉也在场时它是否仍然选音频”这一对照。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">M4</span><span class="t">AI2-THOR 的“状态正确率”把画质和状态对错混在一起；变化掩码还进了 FAR 的效用</span></summary><div class="body">
+      <p><b>依据：</b>判据是 d(GT, Pred) &lt; d(GT, Stale)，即“渲染误差是否小于状态变化幅度”。交互 6 的玩具模型显示，状态永远画对（p=1）时，这个判据在小变化处也会跌到 0。所以 Fig 8 的形状不能单独归因于“扩散目标对小变化不敏感”。另外，训练用了 GT 变化掩码给损失重加权，并有 30% 的事件锚定样本。对基线来说，掩码只进生成器损失。对 FAR 来说，由于 û 就是 ℓ<sub>diff</sub> 的负值，它很可能也进了检索器的效用，于是检索信号正好对准了评测时裁剪的那块区域。论文只对 dyn 明说了这一点（“applies this weighting to both the diffusion reader loss and FAR’s predictive-utility reward”），对 THOR 是我的推断。</p>
+      <p><b>验证：</b>用最近状态判据 d(Pred, GT) &lt; d(Pred, Stale) 或者物体状态检测器重新计算；去掉掩码后再测一次 FAR；补上 FAR-Meta 和 FAR-Visual 两个变体。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">M5</span><span class="t">候选池只取检索器自己的 Top-3 和一个块，没有探索，结果高度依赖初始化</span></summary><div class="body">
+      <p><b>依据：</b>A_global 就是当前已选的 3 个代表，A_local 是其中一个代表所在的 10 帧块。训练池 200 帧里约 190 帧每次拿不到直接学分。EMDR² 在 QA 里通常用几十篇文档当候选。论文没有报告“效用最优的帧有多大比例落在候选池之外”。</p>
+      <p><b>影响：</b>这可能正是 H2 的成因：学习只能在预训练编码器已经挑出来的区域里做局部修正。</p>
+      <p><b>验证：</b>在候选池里加入随机帧或困难负样本，比较学到的召回质量。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">M6</span><span class="t">训练和评测的配置不一致，而且效用是在一个没训练过的配置下算出来的</span></summary><div class="body">
+      <p><b>依据：</b>上下文从 4 帧变成 12 帧；记忆池从 200 或 400 帧变成最多 1000 帧；单候选效用只放 1 张召回帧，而生成器训练时总是 3 张，没提到随机丢帧。z-score 和门控用到的统计量（max、μ、σ）都随池子大小漂移：高斯情形下，最大 z 的期望从 n=200 时的约 2.75 升到 n=1000 时的约 3.24。</p>
+      <p><b>验证：</b>在 K=3、池 200 的训练配置下直接评测一次；对比“生成器训练时随机丢帧”的版本。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">M7</span><span class="t">核心目标本身没有做消融</span></summary><div class="body">
+      <p>缺少以下对照：后验 q 与只看效用的 q̄；用效用 argmax 当硬标签的交叉熵；去掉分块约束的 FAR；给基线也加上分块约束（论文没说基线有没有加）；任何一个“学出来的检索”基线，比如 MemLearner 式的内部查询，或一个简单的 Gumbel-TopK 端到端检索。现有消融（Table 1）只拆了编码器、适配器和门控，没有拆训练目标。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">M8</span><span class="t">基准结构有利于学到“路线先验”；FAR-Meta 看不到墙，所谓“避开遮挡”只能是统计偏好</span></summary><div class="body">
+      <p><b>依据：</b>所有数据都是“探索→返程”结构。LoopNav 是 ABA / ABCA，ABA 的返程大体沿原路回来，ABCA 的 C→A 则是一段新路；SoundSpaces 返程是最短路径。LoopNav 和 dyn 的场景训练、测试共用。记忆池永远是真实帧，也不测试记忆写入。时间和位姿 MLP 完全可以学到“按时间镜像找帧”或“稍微往回退一点”这类数据集特有的规律。Fig 1 上图说 FAR-Meta 选到了“视野更清楚”的帧，但它的输入里没有任何几何或遮挡信息。</p>
+      <p><b>验证：</b>在自由轨迹、非回路的返程上评测；让记忆池里混入模型自己生成的帧。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">M9</span><span class="t">正文、图、表、发布物之间有多处数字对不上</span></summary><div class="body">
+      <ul class="tight">
+        <li>“视觉变体比 LongLive-RAG 低 17%”：按 Table 1 是 −24.8%（冻结编码器）或 −31.6%（加适配器）。要得到 −17%，这一行得比冻结编码器还差。</li>
+        <li>“Meta 变体比 WorldMem 低 19%”：对应约 0.105，这一行不在 Table 1 里。</li>
+        <li>dyn：正文 41.9 / 32.4 / 67.1 / 94.6，Fig 9 标 41.8 / 32.5 / 66.7 / 94.5；分母也不是 202。</li>
+        <li>dyn 评测检查点：论文 Table 6 写 100k；我读到的 HF 模型卡摘要写 500k（待直接核对）。</li>
+        <li>SoundSpaces 的项目页数字（0.452 / 0.423 / 0.150）在正文里没有出处，也没说是哪个语料、哪个变体。</li>
+      </ul>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">L1</span><span class="t">命题 1 给的下界和实际优化的目标不是同一个量</span></summary><div class="body">
+      <p>命题 1 给出的是 E<sub>r</sub>[u] 的互信息下界；训练优化的是 log E<sub>r</sub>[e<sup>u</sup>]（Jensen：≥ E<sub>r</sub>[u]），边际似然只要池里<b>有一个</b>好候选就满意；推理用的却是确定性的 Top-11。推导都对，但“principled”只对理想化的版本成立。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">L2</span><span class="t">统计报告偏弱：每个臂只训一次，小台阶的显著性一般</span></summary><div class="body">
+      <p>论文没说 ± 是什么。若当作逐 clip 标准误（对应单 clip PSNR 标准差约 7 dB），按非配对算，相邻小台阶的 z 值在 1.1 到 2.7 之间，最弱的是“加入 meta”在 DreamSim 上的 0.091 → 0.088（z≈1.1）。若 ± 是 95% 置信半宽，z 约翻倍，结论会更稳。无论哪种，都没有跨训练 seed 的方差：每个臂只训练了一次。Fig 3 的 bootstrap 置信区间同样只反映 clip 之间的差异。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">L3</span><span class="t">训练额外算力没有量化</span></summary><div class="body">
+      <p>Limitations 里只写了“additional training-time computation”。按我的估算（交互 3），默认设置下约为世界模型训练的 +50%，dyn 约 +130%。换到 1–14B 参数的视频 DiT 上，这会成为主要成本。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">L4</span><span class="t">生成器和检索器会互相迁就，论文没有给训练动力学的诊断</span></summary><div class="body">
+      <p>生成器学的是怎么用检索器给它的帧，检索器学的是给生成器它爱用的帧，两者可能停在一个自洽但次优的平衡点上。可以报告的诊断包括：训练过程中效用排序和检索排序的一致率，以及把检索器冻结在不同阶段后的对照。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">L5</span><span class="t">可复现性：代码未发布，数据集只放出一部分</span></summary><div class="body">
+      <p>github.com/sony/far 标注 coming soon，我查询时无法访问。HF 数据集卡目前只列出 AI2-THOR v3（8,125 集）和 AI2-THOR-dyn（1,002 集）的潜变量；LoopNav 本身是公开数据，SoundSpaces 的两个语料没看到。24 个推理 bundle（包括所有基线臂）已经放出，这一点值得肯定。</p>
+    </div></details>
+  </div>
+
+  <h3>做对的地方</h3>
+  <div class="grid3">
+    <div class="card ok"><h4>对照设计</h4><p>同一个 DiT、同一份数据、同一组噪声 seed 和目标轨迹，只换检索规则。每个臂的权重都发布了，事后审计有据可查。</p></div>
+    <div class="card ok"><h4>理论表述干净</h4><p>隐变量、EM、EMDR² 之间的对应写得清楚，推导我逐行核过没有错误。作者也主动说明了实际近似下梯度恒等式不再成立。</p></div>
+    <div class="card ok"><h4>工程上的巧思</h4><p>记忆侧 key 预先缓存；检索器懒更新；效用计算用共享噪声降方差。推理开销几乎为零，可以直接接到现有的帧检索记忆系统上。</p></div>
+    <div class="card ok"><h4>设定覆盖面</h4><p>静态场景、多模态线索、会变的世界、画面外的动态，四类都覆盖了。SoundSpaces 和 THOR 用场景不相交划分；v1/v2 共用清单，只让记忆密度这一个因素变化。</p></div>
+    <div class="card ok"><h4>反事实例子</h4><p>番茄冰箱那组配对样本固定当前观测，只改变历史，直接证明了预测依赖召回的内容。</p></div>
+    <div class="card ok"><h4>如实交代</h4><p>论文明确说了 LoopNav 和 dyn 按集划分、场景重合；也说了扩散损失对局部小变化不敏感、只在仿真里做了实验。</p></div>
+  </div>
+</section>
+
+<!-- ============================ 10 ============================ -->
+<section id="s10">
+  <h2><span class="no">10</span>结论与启示</h2>
+  <p class="lede">FAR 的核心想法站得住：训练时未来是已知的，“哪帧记忆有用”这个问题就有了监督，而且可以用 EMDR² 那套成熟的后验蒸馏，变成一个推理时不看未来的检索器。它补上了“外部、逐帧可寻址、又由预测目标监督”这一格空白。但论文里最大的几个数字，要先扣掉三样东西才能归到这条原则上：评测池不对等、域内预训练编码器、GT 特权信号。扣完之后还剩多少，目前没有实验能回答。</p>
+
+  <div class="grid2">
+    <div class="card far">
+      <h4>对交互式视频世界模型的启示</h4>
+      <ul class="tight">
+        <li><b>可以直接移植</b>：WorldMem、Context-as-Memory 这类“帧检索 + 上下文注入”的系统，只要能对未来块算“单候选去噪损失”，就能把手写规则换成学出来的打分，推理几乎不增加开销。</li>
+        <li><b>大模型上的主要成本是效用计算</b>：每个候选要额外跑几次 DiT 前向。在 1–14B 的模型上，需要更便宜的效用代理，比如更少的噪声级、低分辨率、共享 KV，或者直接从训练前向的注意力权重里读出贡献。</li>
+        <li><b>温度要显式设定并报告</b>：它决定了学到的是“后验”还是“argmin 模仿”。</li>
+        <li><b>门控要能处理三路以上的线索</b>，并输出 λ 诊断。真实系统里现成的线索有：位姿（SLAM / VGGT）、时间、DINO 或 SigLIP 嵌入、动作历史。</li>
+        <li><b>比检索排序更难的是记忆写入</b>：自回归世界模型会把自己生成的帧写进记忆，漂移会污染记忆池。这篇的协议刻意避开了这个问题。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>最值得补的实验（按性价比）</h4>
+      <ol class="tight">
+        <li>等池对照：WorldMem 用 1000 帧，或 FAR 限 200 帧，并写明截断方式。（H1）</li>
+        <li>编码器交叉：分开“编码器”和“学习原则”各自的贡献。（H2）</li>
+        <li>效用温度扫描，报告 q 的熵。（H3）</li>
+        <li>训练目标对照：q、q̄、硬 argmax、加随机候选。（M5、M7）</li>
+        <li>“常数 λ 可学”对照，加上 λ 的分布诊断。（M2）</li>
+        <li>SoundSpaces 补视觉线索、只用音频、三路融合。（M3）</li>
+        <li>THOR 换最近状态判据重算，并报告 GT 帧的上限。（M4）</li>
+        <li>dyn 报告 GT 帧探针得分，并把记忆里的 GT A₂ 标注换成检测器输出后重做。（M1）</li>
+        <li>自由轨迹，加上生成帧写入记忆。（M8）</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="foot">
+    <p><b>来源：</b><a href="https://arxiv.org/abs/2609.34677">arXiv 2609.34677v1</a>（全文与附录 A–C，经 alphaXiv 全文提取阅读）· <a href="https://1202kbs.github.io/FAR-Project-Page/">项目页</a>（汇总数字与视频说明）· <a href="https://huggingface.co/1202kbs/FAR-Checkpoints">HF 权重</a> · <a href="https://huggingface.co/datasets/1202kbs/FAR-Datasets">HF 数据集</a> · <a href="https://github.com/sony/far">github.com/sony/far</a>（我查询时不可访问）。相关工作：EMDR²（Sachan et al., NeurIPS 2021）、NWM（Bar et al., CVPR 2025）、WorldMem（Xiao et al., NeurIPS 2025）、LongLive-RAG（Hu et al., arXiv 2606.02553）。</p>
+    <p><b>没能核对的：</b>arXiv HTML 版本这次取不到（被限流），所以 Fig 3 / 5 / 8 的曲线数值没有读出；代码未公开，所以门控的实际形式、池截断方式、效用尺度都无法核对。</p>
+    <p>本页是解读，不是论文本身，也不代表作者的说法；与论文冲突之处，以论文为准。标注“示意”或“玩具模型”的交互图，数据是我构造的，只用来说明机制；标注“我算”的数字，由论文表格复算得出。</p>
+  </div>
+</section>
+
+</div>
+<div class="tip" id="tip" role="tooltip"></div>
+
+<script>
+(function(){
+"use strict";
+var NS="http://www.w3.org/2000/svg";
+function S(tag,attrs,parent,text){var e=document.createElementNS(NS,tag);if(attrs){for(var k in attrs){if(attrs[k]!==undefined&&attrs[k]!==null)e.setAttribute(k,attrs[k]);}}if(text!==undefined)e.textContent=text;if(parent)parent.appendChild(e);return e;}
+function $(id){return document.getElementById(id);}
+function clear(el){while(el.firstChild)el.removeChild(el.firstChild);}
+function fmt(x,d){return (Math.round(x*Math.pow(10,d))/Math.pow(10,d)).toFixed(d);}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function gauss(rng){var u=0,v=0;while(u===0)u=rng();while(v===0)v=rng();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function segBind(id,cb){var el=$(id);if(!el)return;el.addEventListener("click",function(ev){var b=ev.target.closest("button");if(!b||!el.contains(b))return;Array.prototype.forEach.call(el.querySelectorAll("button"),function(x){x.setAttribute("aria-pressed",x===b?"true":"false");});cb(b);});}
+
+/* ---------------- theme ---------------- */
+(function(){
+  var root=document.documentElement, btn=$("themeBtn"), key="far-explainer-theme";
+  try{var saved=localStorage.getItem(key);if(saved==="light"||saved==="dark")root.setAttribute("data-theme",saved);}catch(e){}
+  function effective(){var t=root.getAttribute("data-theme");if(t)return t;return (window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches)?"light":"dark";}
+  if(btn)btn.addEventListener("click",function(){var n=effective()==="dark"?"light":"dark";root.setAttribute("data-theme",n);try{localStorage.setItem(key,n);}catch(e){}});
+})();
+
+/* ---------------- TOC highlight ---------------- */
+(function(){
+  var links=Array.prototype.slice.call(document.querySelectorAll("nav.toc a"));
+  if(!("IntersectionObserver" in window))return;
+  var map={};links.forEach(function(a){map[a.getAttribute("href").slice(1)]=a;});
+  var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){links.forEach(function(a){a.classList.remove("on");});var a=map[e.target.id];if(a){a.classList.add("on");}}});},{rootMargin:"-40% 0px -55% 0px"});
+  Array.prototype.forEach.call(document.querySelectorAll("section[id]"),function(s){io.observe(s);});
+})();
+
+/* ---------------- tooltip ---------------- */
+var tip=$("tip");
+function showTip(ev,html){if(!tip)return;tip.innerHTML=html;tip.classList.add("on");var x=ev.clientX+14,y=ev.clientY+14;var w=tip.offsetWidth,h=tip.offsetHeight;if(x+w>window.innerWidth-8)x=ev.clientX-w-14;if(y+h>window.innerHeight-8)y=ev.clientY-h-14;tip.style.left=x+"px";tip.style.top=y+"px";}
+function hideTip(){if(tip)tip.classList.remove("on");}
+
+/* ---------------- fig 4 timeline ticks ---------------- */
+(function(){
+  var g=$("tlTicks");if(!g)return;
+  var picks={6:1,14:1,23:1,31:1,44:1};
+  for(var i=0;i<56;i++){var x=30+i*10;S("rect",{x:x,y:44,width:6,height:40,rx:1.5,style:"fill:"+(picks[i]?"var(--far)":"var(--surf3)")+";stroke:"+(picks[i]?"var(--far)":"var(--rule2)")},g);}
+  for(var j=0;j<32;j++){var x2=620+j*10;S("rect",{x:x2,y:44,width:6,height:40,rx:1.5,style:"fill:var(--fut-soft);stroke:var(--fut);opacity:"+(j<12?1:0.45)},g);}
+  S("text",{x:940,y:26,"text-anchor":"end",style:"fill:var(--fut-ink);font-size:11px"},g,"生成帧（实色 = 已生成）");
+  S("text",{x:590,y:26,"text-anchor":"end",style:"fill:var(--far-ink);font-size:10.5px"},g,"橙色 = 某一步被召回的帧");
+})();
+
+/* =====================================================================
+   Widget 1 · retrieval sandbox (toy data)
+   ===================================================================== */
+(function(){
+  var svg=$("sbSvg");if(!svg)return;
+  var N=330, CH=10, CAP=200;
+  var OCC=[[40,58],[128,146],[205,222],[262,280]], LA=[[88,104],[168,182],[300,314]];
+  var rng=mulberry32(20260930), n1=[],n2=[],n3=[];
+  for(var i=0;i<N;i++){n1.push(gauss(rng));n2.push(gauss(rng));n3.push(gauss(rng));}
+  function smooth(a){var b=[];for(var i=0;i<a.length;i++){var s=0,c=0;for(var k=-2;k<=2;k++){var j=i+k;if(j>=0&&j<a.length){s+=a[j];c++;}}b.push(s/c);}return b;}
+  n1=smooth(n1);n2=smooth(n2);n3=smooth(n3);
+  function inSeg(i,segs){for(var k=0;k<segs.length;k++){if(i>=segs[k][0]&&i<=segs[k][1])return true;}return false;}
+  function laBump(i){var v=0;for(var k=0;k<LA.length;k++){var c=(LA[k][0]+LA[k][1])/2,w=(LA[k][1]-LA[k][0])/2+2;v=Math.max(v,Math.exp(-Math.pow((i-c)/w,2)*1.6));}return v;}
+  var st={r:0.86,lam:0.55,K:3,cap:false,credit:false};
+  function zs(a){var m=0;a.forEach(function(x){m+=x;});m/=a.length;var v=0;a.forEach(function(x){v+=(x-m)*(x-m);});var sd=Math.sqrt(v/a.length)+1e-6;return a.map(function(x){return (x-m)/sd;});}
+  function chunkTop(score,K,avail){var best={};for(var i=0;i<N;i++){if(avail&&!avail(i))continue;var c=Math.floor(i/CH);if(best[c]===undefined||score[i]>score[best[c]])best[c]=i;}var reps=Object.keys(best).map(function(c){return best[c];});reps.sort(function(a,b){return score[b]-score[a];});return reps.slice(0,K);}
+  function compute(){
+    var is=(1-st.r)*(N-1), u=[],m=[],v=[],f=[];
+    for(var i=0;i<N;i++){
+      var g=Math.exp(-Math.pow((i-is)/22,2)), occ=inSeg(i,OCC);
+      u.push(Math.max(0,g*(occ?0.18:1)+0.12*Math.exp(-Math.pow((i-is)/60,2))+0.035*n1[i]));
+      m.push(Math.exp(-Math.pow((i-is)/26,2))+0.10*Math.exp(-Math.pow((i-is)/70,2))+0.05*n2[i]);
+      v.push(0.15+0.78*Math.exp(-Math.pow((i-is)/30,2))*(occ?0.3:1)+0.84*laBump(i)+0.07*n3[i]);
+      f.push(Math.exp(-Math.pow((i-is)/14,2))+0.02*(i/N));
+    }
+    var zm=zs(m), zv=zs(v), s=[];for(var j=0;j<N;j++)s.push(st.lam*zm[j]+(1-st.lam)*zv[j]);
+    var K=st.K;
+    var picks={
+      tmp:(function(){var a=[];for(var k=0;k<K;k++)a.push(N-1-k);return a;})(),
+      wm:chunkTop(f,K,st.cap?function(i){return i>=N-CAP;}:null),
+      llr:chunkTop(v,K,null),
+      far:chunkTop(s,K,null),
+      oracle:chunkTop(u,K,null)
+    };
+    var train=chunkTop(s,3,null);
+    return {is:is,u:u,m:m,v:v,f:f,s:s,picks:picks,train:train};
+  }
+  var X0=150,X1=940,W=X1-X0;
+  function xi(i){return X0+(i+0.5)*W/N;}
+  function draw(){
+    clear(svg);var d=compute();
+    var rows=[{k:"u",lab:"真效用",sub:"仅训练时可知",col:"--fut",y:22,h:58},{k:"m",lab:"位姿线索",sub:"FAR-Meta 打分",col:"--meta",y:98,h:58},{k:"v",lab:"视觉线索",sub:"编码器余弦",col:"--vis",y:174,h:58},{k:"s",lab:"融合分数 s",sub:"λ·z̃meta+(1−λ)·z̃vis",col:"--far",y:250,h:58}];
+    // chunk bands
+    var gb=S("g",null,svg);
+    for(var c=0;c<N/CH;c++){if(c%2===0)continue;S("rect",{x:xi(c*CH)-W/N/2,y:18,width:W/N*CH,height:296,style:"fill:var(--surf2);opacity:.55"},gb);}
+    // occluded & look-alike marks
+    OCC.forEach(function(sg){S("rect",{x:xi(sg[0])-1,y:98,width:xi(sg[1])-xi(sg[0])+2,height:58,style:"fill:var(--risk-soft)"},gb);S("text",{x:(xi(sg[0])+xi(sg[1]))/2,y:95,"text-anchor":"middle",class:"svgtxt",style:"fill:var(--risk-ink);font-size:9.5px"},gb,"墙后");});
+    LA.forEach(function(sg){S("rect",{x:xi(sg[0])-1,y:174,width:xi(sg[1])-xi(sg[0])+2,height:58,style:"fill:var(--med-soft)"},gb);S("text",{x:(xi(sg[0])+xi(sg[1]))/2,y:171,"text-anchor":"middle",class:"svgtxt",style:"fill:var(--med-ink);font-size:9.5px"},gb,"相似走廊");});
+    if(st.cap){S("rect",{x:X0,y:18,width:xi(N-CAP)-X0-W/N/2,height:382,style:"fill:var(--wm-soft);opacity:.7"},gb);S("text",{x:X0+4,y:354,class:"svgtxt",style:"fill:var(--wm-ink);font-size:11px;font-weight:600"},gb,"蓝色阴影 = WorldMem 看不到的 "+(N-CAP)+" 帧（假设只保留最近 200 帧）");}
+    // rows
+    rows.forEach(function(rw){
+      var a=d[rw.k],mn=Infinity,mx=-Infinity;a.forEach(function(x){if(x<mn)mn=x;if(x>mx)mx=x;});
+      var p="M"+xi(0)+","+(rw.y+rw.h);
+      for(var i=0;i<N;i++){p+=" L"+xi(i).toFixed(1)+","+(rw.y+rw.h-(a[i]-mn)/(mx-mn+1e-9)*rw.h).toFixed(1);}
+      p+=" L"+xi(N-1)+","+(rw.y+rw.h)+" Z";
+      S("path",{d:p,style:"fill:var("+rw.col+"-soft);stroke:var("+rw.col+");stroke-width:1.3"},svg);
+      S("line",{x1:X0,x2:X1,y1:rw.y+rw.h,y2:rw.y+rw.h,style:"stroke:var(--axis)"},svg);
+      S("text",{x:12,y:rw.y+24,class:"svgtxt",style:"fill:var(--ink);font-weight:600"},svg,rw.lab);
+      S("text",{x:12,y:rw.y+40,class:"svgtxt",style:"fill:var(--ink3);font-size:10.5px"},svg,rw.sub);
+    });
+    // credit overlay
+    if(st.credit){
+      var loc=Math.floor(d.train[0]/CH)*CH;
+      S("rect",{x:xi(loc)-W/N/2,y:246,width:W/N*CH,height:66,style:"fill:none;stroke:var(--ok);stroke-width:1.6;stroke-dasharray:4 3"},svg);
+      d.train.forEach(function(i){S("rect",{x:xi(i)-3,y:246,width:6,height:66,style:"fill:var(--ok-soft);stroke:var(--ok)"},svg);});
+      S("text",{x:X1,y:244,"text-anchor":"end",class:"svgtxt",style:"fill:var(--ok-ink);font-size:10.5px"},svg,"训练时能拿到学分：3 个代表（实框）+ 1 个块（虚框），其余 "+(N-3-CH+1)+" 帧没有");
+    }
+    // i* line
+    S("line",{x1:xi(d.is),x2:xi(d.is),y1:16,y2:318,style:"stroke:var(--ink2);stroke-dasharray:3 3"},svg);
+    S("text",{x:Math.min(Math.max(xi(d.is),X0+40),X1-40),y:13,"text-anchor":"middle",class:"svgtxt",style:"fill:var(--ink2);font-size:10.5px"},svg,"镜像位置 i*="+Math.round(d.is));
+    // x axis ticks
+    [0,50,100,150,200,250,300].forEach(function(t){S("text",{x:xi(t),y:330,"text-anchor":"middle",class:"svgmono",style:"fill:var(--ink3)"},svg,String(t));});
+    S("text",{x:X1,y:346,"text-anchor":"end",class:"svgtxt",style:"fill:var(--ink3);font-size:10.5px"},svg,"去程帧序号（越靠右越新）→");
+    // method rows
+    var ms=[{k:"tmp",lab:"Temporal",col:"--tmp"},{k:"wm",lab:"WorldMem",col:"--wm"},{k:"llr",lab:"LongLive-RAG",col:"--llr"},{k:"far",lab:"FAR",col:"--far"}];
+    var oracleU=d.picks.oracle.reduce(function(a,i){return a+d.u[i];},0);
+    var read=$("sbRead");clear(read);
+    ms.forEach(function(me,idx){
+      var y=366+idx*20;
+      S("text",{x:12,y:y+4,class:"svgtxt",style:"fill:var("+me.col+"-ink);font-weight:600"},svg,me.lab);
+      S("line",{x1:X0,x2:X1,y1:y,y2:y,style:"stroke:var(--rule)"},svg);
+      var tot=0,occN=0,laN=0;
+      d.picks[me.k].forEach(function(i){tot+=d.u[i];if(inSeg(i,OCC))occN++;if(inSeg(i,LA))laN++;
+        var c=S("circle",{cx:xi(i),cy:y,r:4.2,style:"fill:var("+me.col+");stroke:var(--bg);stroke-width:1"},svg);
+        S("title",null,c,me.lab+" 选中帧 "+i+" · 真效用 "+fmt(d.u[i],2)+(inSeg(i,OCC)?" · 墙后":"")+(inSeg(i,LA)?" · 相似走廊":""));
+      });
+      var pct=Math.round(100*tot/oracleU);
+      var div=document.createElement("div");
+      div.innerHTML="<span>"+me.lab+" · 选中帧的真效用</span><b style=\"color:var("+me.col+"-ink)\">"+pct+"%</b><span>占 oracle 的比例 · 墙后 "+occN+" · 相似走廊 "+laN+"</span>";
+      read.appendChild(div);
+    });
+    var dv=document.createElement("div");dv.innerHTML="<span>说明</span><b style=\"font-size:12.5px\">玩具数据</b><span>为公平起见，除 Temporal 外全都用分块约束（论文没说基线有没有用）</span>";read.appendChild(dv);
+  }
+  var rIn=$("sbR"),lIn=$("sbL");
+  rIn.addEventListener("input",function(){st.r=+rIn.value;$("sbRo").textContent=fmt(st.r,2);draw();});
+  lIn.addEventListener("input",function(){st.lam=+lIn.value;$("sbLo").textContent=fmt(st.lam,2);draw();});
+  segBind("sbK",function(b){st.K=+b.getAttribute("data-k");draw();});
+  $("sbCap").addEventListener("change",function(e){st.cap=e.target.checked;draw();});
+  $("sbCredit").addEventListener("change",function(e){st.credit=e.target.checked;draw();});
+  draw();
+})();
+
+/* =====================================================================
+   Widget 2 · posterior teacher
+   ===================================================================== */
+(function(){
+  var svg=$("poSvg");if(!svg)return;
+  var NAMES=["m1 最近帧","m2 隔墙近邻","m3 视野清晰","m4 相似走廊","m5 远处侧视","m6 无关"];
+  var P=[
+    {s:[1.2,1.6,0.5,0.9,-0.3,-1.1],l:[0.1102,0.1088,0.1041,0.1095,0.1070,0.1120]},
+    {s:[1.2,1.6,0.5,0.9,-0.3,-1.1],l:[0.10812,0.10806,0.10790,0.10809,0.10801,0.10818]},
+    {s:[2.6,0.4,0.1,-0.2,-0.6,-1.3],l:[0.1100,0.1085,0.1043,0.1090,0.1075,0.1110]},
+    {s:[1.2,1.6,0.5,0.9,-0.3,-1.1],l:[0.1080,0.1080,0.1080,0.1080,0.1080,0.1080]}
+  ];
+  var st={p:0,beta:1000,s:P[0].s.slice(),clamp:true,iters:0};
+  function softmax(a){var m=Math.max.apply(null,a),e=a.map(function(x){return Math.exp(x-m);}),z=e.reduce(function(p,c){return p+c;},0);return e.map(function(x){return x/z;});}
+  function calc(){
+    var l=P[st.p].l, u=l.map(function(x){return -st.beta*x;});
+    var r=softmax(st.s), q=softmax(st.s.map(function(x,i){return x+u[i];})), qb=softmax(u);
+    return {u:u,r:r,q:q,qb:qb,l:l};
+  }
+  function draw(){
+    clear(svg);var d=calc();
+    var X0=60,GW=148,H=170,Y0=200;
+    S("line",{x1:40,x2:940,y1:Y0,y2:Y0,style:"stroke:var(--axis)"},svg);
+    [0,0.5,1].forEach(function(t){var y=Y0-t*H;S("line",{x1:40,x2:940,y1:y,y2:y,style:"stroke:var(--grid)"},svg);S("text",{x:34,y:y+4,"text-anchor":"end",class:"svgmono",style:"fill:var(--ink3)"},svg,String(t));});
+    var best=0;d.l.forEach(function(x,i){if(x<d.l[best])best=i;});
+    for(var i=0;i<6;i++){
+      var gx=X0+i*GW;
+      var bars=[{v:d.r[i],st:"fill:var(--tmp);opacity:.75",lab:"r"},{v:d.q[i],st:"fill:var(--far)",lab:"q"}];
+      bars.forEach(function(b,j){var h=b.v*H;S("rect",{x:gx+12+j*38,y:Y0-h,width:32,height:Math.max(h,0.5),rx:2,style:b.st},svg);S("text",{x:gx+28+j*38,y:Y0-h-5,"text-anchor":"middle",class:"svgmono",style:"fill:var(--ink2);font-size:10px"},svg,fmt(b.v,2));});
+      var hb=d.qb[i]*H;S("rect",{x:gx+88,y:Y0-hb,width:32,height:Math.max(hb,0.5),rx:2,style:"fill:none;stroke:var(--fut);stroke-dasharray:3 3;stroke-width:1.4"},svg);
+      S("text",{x:gx+104,y:Y0-hb-5,"text-anchor":"middle",class:"svgmono",style:"fill:var(--fut-ink);font-size:10px"},svg,fmt(d.qb[i],2));
+      S("text",{x:gx+66,y:Y0+18,"text-anchor":"middle",class:"svgtxt",style:"fill:"+(i===best?"var(--far-ink)":"var(--ink)")+";font-weight:600"},svg,NAMES[i]+(i===best?" ★":""));
+      S("text",{x:gx+66,y:Y0+34,"text-anchor":"middle",class:"svgmono",style:"fill:var(--ink3);font-size:10px"},svg,"s="+fmt(st.s[i],2)+" · ℓ="+d.l[i].toFixed(5));
+      var dq=d.q[i]-d.r[i], len=Math.max(-26,Math.min(26,dq*90));
+      var ay=Y0+62;
+      if(Math.abs(len)>0.6){S("line",{x1:gx+66,x2:gx+66,y1:ay,y2:ay-len,style:"stroke:"+(len>0?"var(--ok)":"var(--risk)")+";stroke-width:3"},svg);
+        S("path",{d:len>0?("M"+(gx+60)+","+(ay-len+6)+" L"+(gx+66)+","+(ay-len-2)+" L"+(gx+72)+","+(ay-len+6)+" Z"):("M"+(gx+60)+","+(ay-len-6)+" L"+(gx+66)+","+(ay-len+2)+" L"+(gx+72)+","+(ay-len-6)+" Z"),style:"fill:"+(len>0?"var(--ok)":"var(--risk)")},svg);}
+      else{S("circle",{cx:gx+66,cy:ay,r:2.5,style:"fill:var(--ink3)"},svg);}
+    }
+    S("text",{x:40,y:18,class:"svgtxt",style:"fill:var(--ink3);font-size:11px"},svg,"灰 = 检索器 r   橙 = 后验老师 q ∝ r·e^û   粉虚框 = 只看效用 q̄ ∝ e^û   ★ = 扩散损失最低   底部箭头 = 这一步分数更新方向 ∝ q − r");
+    // readout
+    var H2=function(p){return -p.reduce(function(a,x){return a+(x>0?x*Math.log2(x):0);},0);};
+    var kl=d.q.reduce(function(a,x,i){return a+(x>0?x*Math.log(x/d.r[i]):0);},0);
+    var um=d.u.reduce(function(a,x){return a+x;},0)/6, uu=d.u.map(function(x){return x-um;});
+    var Eu=uu.reduce(function(a,x,i){return a+d.r[i]*x;},0);
+    var mxu=Math.max.apply(null,uu), lse=mxu+Math.log(uu.reduce(function(a,x,i){return a+d.r[i]*Math.exp(x-mxu);},0));
+    var qi=0;d.q.forEach(function(x,i){if(x>d.q[qi])qi=i;});
+    var spread=(Math.max.apply(null,d.u)-Math.min.apply(null,d.u));
+    var rd=$("poRead");rd.innerHTML=
+      "<div><span>候选间 û 的极差</span><b>"+fmt(spread,spread<1?4:1)+" nat</b></div>"+
+      "<div><span>q 的熵（6 选 1 最大 2.58 bit）</span><b>"+fmt(H2(d.q),2)+" bit</b></div>"+
+      "<div><span>q 的最大概率 / 归属</span><b>"+fmt(d.q[qi],2)+" · "+NAMES[qi].split(" ")[0]+"</b></div>"+
+      "<div><span>KL(q‖r)：这一步的学习信号</span><b>"+fmt(kl,kl<0.01?4:3)+"</b></div>"+
+      "<div><span>Jensen 缺口 log E<sub>r</sub>e<sup>û</sup> − E<sub>r</sub>û</span><b>"+fmt(lse-Eu,3)+"</b></div>"+
+      "<div><span>已做 M 步</span><b>"+st.iters+"</b></div>";
+  }
+  function setBeta(b){st.beta=b;$("poB").value=Math.log10(b);$("poBo").textContent=b>=100?String(Math.round(b)):fmt(b,1);}
+  $("poB").addEventListener("input",function(e){st.beta=Math.pow(10,+e.target.value);$("poBo").textContent=st.beta>=100?String(Math.round(st.beta)):fmt(st.beta,1);Array.prototype.forEach.call($("poScale").querySelectorAll("button"),function(x){x.setAttribute("aria-pressed","false");});draw();});
+  segBind("poScale",function(b){setBeta(+b.getAttribute("data-b"));draw();});
+  segBind("poPre",function(b){st.p=+b.getAttribute("data-p");st.s=P[st.p].s.slice();st.iters=0;draw();});
+  $("poClamp").addEventListener("change",function(e){st.clamp=e.target.checked;});
+  $("poReset").addEventListener("click",function(){st.s=P[st.p].s.slice();st.iters=0;draw();});
+  $("poStep").addEventListener("click",function(){
+    for(var t=0;t<10;t++){var d=calc();st.s=st.s.map(function(x,i){var y=x+2.0*(d.q[i]-d.r[i]);if(st.clamp)y=Math.max(-3,Math.min(3,y));return y;});st.iters++;}
+    draw();
+  });
+  setBeta(1000);draw();
+})();
+
+/* =====================================================================
+   Widget 3 · compute ledger
+   ===================================================================== */
+(function(){
+  var ids=["coK","coC","coS","coN","coF"];if(!$("coK"))return;
+  var pres=[{K:3,C:10,S:4,N:20,F:1},{K:3,C:30,S:4,N:7,F:0.35}];
+  function val(id){return +$(id).value;}
+  function upd(){
+    var K=val("coK"),C=val("coC"),Sn=val("coS"),N=val("coN"),F=val("coF");
+    $("coKo").textContent=K;$("coCo").textContent=C;$("coSo").textContent=Sn;$("coNo").textContent=N;$("coFo").textContent=fmt(F,2);
+    var cand=K+C, fw=cand*Sn, perStep=fw*F/N, util=perStep*3, wm=3*(K+2), ov=util/wm;
+    $("coRead").innerHTML=
+      "<div><span>每次检索器更新的候选数</span><b>"+cand+"</b></div>"+
+      "<div><span>每个样本的额外 DiT 前向</span><b>"+fw+"</b></div>"+
+      "<div><span>折算到每个世界模型步</span><b>"+fmt(perStep,2)+" 次</b></div>"+
+      "<div><span>世界模型一步的代价（帧·前向当量）</span><b>"+wm+"</b></div>"+
+      "<div><span>额外开销 / 世界模型训练</span><b style=\"color:var(--risk-ink)\">+"+Math.round(ov*100)+"%</b></div>";
+  }
+  ids.forEach(function(id){$(id).addEventListener("input",upd);});
+  segBind("coPre",function(b){var p=pres[+b.getAttribute("data-p")];$("coK").value=p.K;$("coC").value=p.C;$("coS").value=p.S;$("coN").value=p.N;$("coF").value=p.F;upd();});
+  upd();
+})();
+
+/* =====================================================================
+   Widget 4 · gate
+   ===================================================================== */
+(function(){
+  var svg=$("gaSvg");if(!svg)return;
+  var W={max:4,mu:-4,sig:-2,bm:0.2,dt:1.5};
+  var P=[
+    {name:"视野开阔、视觉很确定",meta:{max:0.55,mu:0.05,sig:0.20},vis:{max:0.95,mu:0.20,sig:0.10}},
+    {name:"走廊相似、视觉很平",meta:{max:0.90,mu:0.00,sig:0.30},vis:{max:0.62,mu:0.48,sig:0.05}},
+    {name:"两者都模糊",meta:{max:0.35,mu:0.05,sig:0.12},vis:{max:0.55,mu:0.45,sig:0.04}}
+  ];
+  var st={p:0,dt:0.2};
+  function draw(){
+    clear(svg);var p=P[st.p];
+    var zm=W.max*p.meta.max+W.mu*p.meta.mu+W.sig*p.meta.sig+W.bm+W.dt*st.dt;
+    var zv=W.max*p.vis.max+W.mu*p.vis.mu+W.sig*p.vis.sig+0+W.dt*st.dt;
+    var lm=1/(1+Math.exp(zv-zm)), lv=1-lm;
+    // distributions
+    var X0=40,X1=520,Y0=170,H=120;
+    S("line",{x1:X0,x2:X1,y1:Y0,y2:Y0,style:"stroke:var(--axis)"},svg);
+    [-1,-0.5,0,0.5,1].forEach(function(t){var x=X0+(t+1)/2*(X1-X0);S("text",{x:x,y:Y0+15,"text-anchor":"middle",class:"svgmono",style:"fill:var(--ink3)"},svg,String(t));});
+    S("text",{x:X1,y:Y0+30,"text-anchor":"end",class:"svgtxt",style:"fill:var(--ink3);font-size:10.5px"},svg,"原始分数（tanh / cos，未标准化）在整个记忆池上的分布");
+    [["meta","--meta","位姿（meta）"],["vis","--vis","视觉"]].forEach(function(c){
+      var q=p[c[0]],pts="";var peak=0;var dens=[];
+      for(var k=0;k<=160;k++){var s=-1+2*k/160;var y=Math.exp(-0.5*Math.pow((s-q.mu)/q.sig,2));dens.push([s,y]);}
+      var path="M"+X0+","+Y0;dens.forEach(function(d){var x=X0+(d[0]+1)/2*(X1-X0);path+=" L"+x.toFixed(1)+","+(Y0-d[1]*H*0.8).toFixed(1);});path+=" L"+X1+","+Y0+" Z";
+      S("path",{d:path,style:"fill:var("+c[1]+"-soft);stroke:var("+c[1]+");stroke-width:1.3"},svg);
+      var mx=X0+(q.max+1)/2*(X1-X0);S("line",{x1:mx,x2:mx,y1:Y0,y2:Y0-H,style:"stroke:var("+c[1]+");stroke-width:2;stroke-dasharray:3 2"},svg);
+      S("text",{x:X0,y:c[0]==="meta"?18:36,class:"svgtxt",style:"fill:var("+c[1]+"-ink);font-size:11px"},svg,"┆ "+c[2]+"：max="+q.max+"，μ="+q.mu+"，σ="+q.sig+"（虚线 = max）");
+    });
+    // lambda bars
+    var BX=580,BW=330;
+    S("text",{x:BX,y:30,class:"svgtxt",style:"fill:var(--ink);font-weight:600"},svg,"门控输出 λ");
+    S("rect",{x:BX,y:44,width:BW*lm,height:26,rx:3,style:"fill:var(--meta)"},svg);
+    S("rect",{x:BX+BW*lm,y:44,width:BW*lv,height:26,rx:3,style:"fill:var(--vis)"},svg);
+    S("text",{x:BX+6,y:62,class:"svgmono",style:"fill:var(--bg);font-weight:600"},svg,"meta "+fmt(lm,3));
+    S("text",{x:BX+BW-6,y:62,"text-anchor":"end",class:"svgmono",style:"fill:var(--bg);font-weight:600"},svg,"vis "+fmt(lv,3));
+    S("text",{x:BX,y:98,class:"svgmono",style:"fill:var(--meta-ink)"},svg,"z_meta = "+fmt(zm-W.dt*st.dt,2)+"  + w_Δ·Δt ("+fmt(W.dt*st.dt,2)+")");
+    S("text",{x:BX,y:118,class:"svgmono",style:"fill:var(--vis-ink)"},svg,"z_vis  = "+fmt(zv-W.dt*st.dt,2)+"  + w_Δ·Δt ("+fmt(W.dt*st.dt,2)+")");
+    S("text",{x:BX,y:146,class:"svgtxt",style:"fill:var(--ink2)"},svg,"λ_meta = σ(z_meta − z_vis)：Δt 那一项两边相同，");
+    S("text",{x:BX,y:164,class:"svgtxt",style:"fill:var(--ink2)"},svg,"相减后为 0，所以拖动 Δt 时 λ 不会变。");
+    S("text",{x:BX,y:192,class:"svgtxt",style:"fill:var(--ink3);font-size:11px"},svg,"情形："+p.name);
+  }
+  segBind("gaPre",function(b){st.p=+b.getAttribute("data-p");draw();});
+  $("gaDt").addEventListener("input",function(e){st.dt=+e.target.value;$("gaDto").textContent=fmt(st.dt,1)+" s";draw();});
+  draw();
+})();
+
+/* =====================================================================
+   Widget 5 · Table 1 ablation
+   ===================================================================== */
+(function(){
+  var svg=$("abSvg");if(!svg)return;
+  var T=[["Temporal",13.229,.114,.582,.007,.200,.004,"--tmp"],["LongLive-RAG",14.847,.121,.463,.006,.133,.003,"--llr"],["WorldMem",15.372,.112,.448,.006,.130,.003,"--wm"],["Enc. Pretrained",16.248,.112,.390,.006,.100,.003,"--vis"],["+ MLP Adapter",16.480,.108,.374,.006,.091,.002,"--far"],["+ Meta, λ=0.5",16.912,.117,.353,.005,.088,.002,"--meta"],["+ Meta, λ learned",17.267,.116,.337,.005,.082,.002,"--med"]];
+  var MET=[{n:"PSNR ↑",i:1,lo:12,hi:17.8,d:2},{n:"LPIPS ↓",i:3,lo:0,hi:0.62,d:3},{n:"DreamSim ↓",i:5,lo:0,hi:0.21,d:3}];
+  var st={m:2,b:2};
+  function draw(){
+    clear(svg);var M=MET[st.m];
+    var X0=60,GW=122,Y0=210,H=180;
+    S("line",{x1:40,x2:940,y1:Y0,y2:Y0,style:"stroke:var(--axis)"},svg);
+    for(var k=0;k<=4;k++){var v=M.lo+(M.hi-M.lo)*k/4,y=Y0-H*k/4;S("line",{x1:40,x2:940,y1:y,y2:y,style:"stroke:var(--grid)"},svg);S("text",{x:36,y:y+4,"text-anchor":"end",class:"svgmono",style:"fill:var(--ink3)"},svg,fmt(v,M.d===2?1:2));}
+    T.forEach(function(r,j){
+      var v=r[M.i],se=r[M.i+1],h=(v-M.lo)/(M.hi-M.lo)*H,x=X0+j*GW;
+      var isB=(j===st.b);
+      S("rect",{x:x+20,y:Y0-h,width:70,height:h,rx:3,style:"fill:var("+r[7]+");opacity:"+(j<3?0.8:1)+(isB?";stroke:var(--ink);stroke-width:2":"")},svg);
+      var e1=Y0-(v+1.96*se-M.lo)/(M.hi-M.lo)*H,e2=Y0-(v-1.96*se-M.lo)/(M.hi-M.lo)*H;
+      S("line",{x1:x+55,x2:x+55,y1:e1,y2:e2,style:"stroke:var(--ink);stroke-width:1.3"},svg);
+      S("text",{x:x+55,y:Math.min(e1,Y0-h)-6,"text-anchor":"middle",class:"svgmono",style:"fill:var(--ink)"},svg,v.toFixed(3));
+      S("text",{x:x+55,y:Y0+16,"text-anchor":"middle",class:"svgtxt",style:"fill:var(--ink2);font-size:11px"},svg,r[0]);
+    });
+    S("text",{x:40,y:18,class:"svgtxt",style:"fill:var(--ink3);font-size:11px"},svg,M.n+" · 误差线 = ±1.96×表中 ±（假设 ± 是标准误；论文未说明）· 黑框 = 当前基准");
+    // stacked attribution
+    var base=T[st.b][M.i], full=T[6][M.i], tot=full-base;
+    var steps=[];var prev=base;
+    var labels=["编码器（未经 FAR 训练）","适配器（FAR）","+meta（FAR）","学习 λ（FAR）"];
+    for(var j=3;j<7;j++){steps.push({v:T[j][M.i]-prev,col:T[j][7],lab:labels[j-3]});prev=T[j][M.i];}
+    var BX=60,BW=880,BY=262,BH=30,cx=BX;
+    S("text",{x:BX,y:BY-10,class:"svgtxt",style:"fill:var(--ink);font-weight:600"},svg,"从 "+T[st.b][0]+" 到完整 FAR 的增量（"+(tot>0?"+":"")+fmt(tot,M.d)+"）按步拆分");
+    steps.forEach(function(s){var w=Math.max(0,s.v/tot)*BW;S("rect",{x:cx,y:BY,width:Math.max(w,0),height:BH,style:"fill:var("+s.col+")"},svg);
+      if(w>54){S("text",{x:cx+w/2,y:BY+19,"text-anchor":"middle",class:"svgmono",style:"fill:var(--bg);font-weight:600"},svg,fmt(100*s.v/tot,1)+"%");}
+      cx+=w;});
+    var lx=BX;steps.forEach(function(s){S("rect",{x:lx,y:BY+42,width:12,height:10,rx:2,style:"fill:var("+s.col+")"},svg);var t=S("text",{x:lx+17,y:BY+51,class:"svgtxt",style:"fill:var(--ink2);font-size:11px"},svg,s.lab+" "+fmt(100*s.v/tot,1)+"%");lx+=Math.max(170,t.getComputedTextLength?t.getComputedTextLength()+34:190);});
+    var fr=(tot-steps[0].v)/tot;
+    S("text",{x:BX,y:BY+80,class:"svgtxt",style:"fill:var(--risk-ink);font-weight:600"},svg,"未经 FAR 训练的冻结编码器占 "+fmt(100*steps[0].v/tot,1)+"%；由后验蒸馏训练出来的三个部件合计 "+fmt(100*fr,1)+"%");
+  }
+  segBind("abM",function(b){st.m=+b.getAttribute("data-m");draw();});
+  segBind("abB",function(b){st.b=+b.getAttribute("data-b");draw();});
+  draw();
+})();
+
+/* =====================================================================
+   Widget 6 · THOR metric toy
+   ===================================================================== */
+(function(){
+  var svg=$("thSvg");if(!svg)return;
+  var st={p:1,m:0.12,s:0.4};
+  function sim(){
+    var rng=mulberry32(7), out=[];
+    for(var D=0.02;D<=0.3001;D+=0.01){
+      var n=2500,okP=0,okN=0;
+      for(var k=0;k<n;k++){
+        var E=Math.exp(Math.log(st.m)+st.s*gauss(rng)), ex=E*gauss(rng)/Math.sqrt(20), correct=rng()<st.p, dgt, dst;
+        if(correct){dgt=E;dst=Math.sqrt(Math.max(D*D+E*E-2*D*ex,0));}else{dgt=Math.sqrt(Math.max(D*D+E*E+2*D*ex,0));dst=E;}
+        if(dgt<D)okP++; if(dgt<dst)okN++;
+      }
+      out.push([D,okP/n,okN/n]);
+    }
+    return out;
+  }
+  function draw(){
+    clear(svg);var d=sim();
+    var X0=70,X1=900,Y0=250,H=210;
+    function xx(D){return X0+(D-0.02)/(0.28)*(X1-X0);} function yy(v){return Y0-v*H;}
+    S("rect",{x:xx(0.1),y:Y0-H,width:xx(0.2)-xx(0.1),height:H,style:"fill:var(--surf2)"},svg);
+    S("text",{x:(xx(0.1)+xx(0.2))/2,y:Y0-22,"text-anchor":"middle",class:"svgtxt",style:"fill:var(--ink3);font-size:10.5px"},svg,"Fig 8 横轴刻度所在区间");
+    for(var k=0;k<=4;k++){var y=yy(k/4);S("line",{x1:X0,x2:X1,y1:y,y2:y,style:"stroke:var(--grid)"},svg);S("text",{x:X0-6,y:y+4,"text-anchor":"end",class:"svgmono",style:"fill:var(--ink3)"},svg,(k*25)+"%");}
+    [0.05,0.1,0.15,0.2,0.25,0.3].forEach(function(t){S("text",{x:xx(t),y:Y0+16,"text-anchor":"middle",class:"svgmono",style:"fill:var(--ink3)"},svg,String(t));});
+    S("text",{x:X1,y:Y0+32,"text-anchor":"end",class:"svgtxt",style:"fill:var(--ink3);font-size:10.5px"},svg,"变化幅度 Δ = d(GT, Stale)");
+    S("line",{x1:X0,x2:X1,y1:yy(st.p),y2:yy(st.p),style:"stroke:var(--ink2);stroke-dasharray:1 4;stroke-width:2"},svg);
+    S("text",{x:X1,y:yy(st.p)-6,"text-anchor":"end",class:"svgtxt",style:"fill:var(--ink2);font-size:11px"},svg,"真实的“画对状态”概率 p = "+fmt(st.p,2));
+    var pP="",pN="";d.forEach(function(r,i){pP+=(i?" L":"M")+xx(r[0]).toFixed(1)+","+yy(r[1]).toFixed(1);pN+=(i?" L":"M")+xx(r[0]).toFixed(1)+","+yy(r[2]).toFixed(1);});
+    S("path",{d:pN,style:"fill:none;stroke:var(--ok);stroke-width:2;stroke-dasharray:6 4"},svg);
+    S("path",{d:pP,style:"fill:none;stroke:var(--far);stroke-width:2.6"},svg);
+    var mx=xx(Math.min(0.3,Math.max(0.02,st.m)));S("line",{x1:mx,x2:mx,y1:Y0,y2:Y0-H,style:"stroke:var(--risk);stroke-dasharray:2 3"},svg);
+    S("text",{x:mx+4,y:Y0-8,class:"svgtxt",style:"fill:var(--risk-ink);font-size:10.5px"},svg,"渲染误差中位数 m");
+    S("rect",{x:X0+10,y:14,width:14,height:4,style:"fill:var(--far)"},svg);S("text",{x:X0+30,y:20,class:"svgtxt",style:"fill:var(--ink2);font-size:11.5px"},svg,"论文判据 d(GT,Pred) < d(GT,Stale)");
+    S("rect",{x:X0+270,y:14,width:14,height:4,style:"fill:var(--ok)"},svg);S("text",{x:X0+290,y:20,class:"svgtxt",style:"fill:var(--ink2);font-size:11.5px"},svg,"最近状态判据 d(Pred,GT) < d(Pred,Stale)");
+  }
+  function bind(id,key,dg){var el=$(id);el.addEventListener("input",function(){st[key]=+el.value;$(id+"o").textContent=fmt(st[key],dg);draw();});}
+  bind("thP","p",2);bind("thM","m",3);bind("thS","s",2);
+  draw();
+})();
+
+/* ---------------- doubts filter ---------------- */
+(function(){
+  var list=$("dbList");if(!list)return;
+  segBind("dbF",function(b){var f=b.getAttribute("data-f");Array.prototype.forEach.call(list.querySelectorAll("details.dbt"),function(d){d.hidden=!(f==="all"||d.classList.contains(f));});});
+  var open=false;$("dbOpen").addEventListener("click",function(){open=!open;Array.prototype.forEach.call(list.querySelectorAll("details.dbt"),function(d){if(!d.hidden)d.open=open;});$("dbOpen").textContent=open?"全部收起":"全部展开";});
+})();
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1183 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sol-H3 精读</title>
+<meta name="description" content="Sol-H3（arXiv 2609.35110）精读：MiniMax-H3 的两阶段跨分辨率生成、跨 VAE 潜变量适配器、RSI 系统栈（通信量化、MXFP8、Sol-Attn、融合与 LoRA 精度）、DGX Spark 边缘部署与参考 KV 缓存。附复算、与代码/项目页的逐项核对、交互式实验室与存疑清单。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=Noto+Serif+SC:wght@600;700&family=STIX+Two+Text:ital@0;1&display=swap">
+<style>
+/* ============================================================
+   Sol-H3 精读 — tokens（深色优先；浅色为纸面）
+   数据角色色（已用 dataviz 校验器验证，按堆叠相邻顺序：txt→s1→ad→s2→dec）
+     txt = 文本编码（黄）   s1 = Stage 1 / MiniMax-H3（青绿）   ad = 潜变量桥 / 适配器（紫）
+     s2  = Stage 2 / LTX-2.5（橙）   dec = VAE 解码 / 小自编码器（蓝）   sys = RSI 系统栈（洋红）
+     oth = 其他 / 未拆分（中性灰）
+   状态色：risk / med / low = 存疑·高 / 中 / 低；ok = 复算通过
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0f1318; --surf:#161b22; --surf2:#1c222b; --surf3:#252d38;
+  --rule:#27303b; --rule2:#3a4553;
+  --ink:#e8ecf1; --ink2:#aab4bf; --ink3:#7d8894;
+  --txt:#c98500; --s1:#199e70; --ad:#9085e9; --s2:#d95926; --dec:#3987e5; --sys:#d55181; --oth:#5d6773;
+  --s1-soft:rgba(25,158,112,.16); --s2-soft:rgba(217,89,38,.15); --ad-soft:rgba(144,133,233,.16); --sys-soft:rgba(213,81,129,.15); --dec-soft:rgba(57,135,229,.15); --txt-soft:rgba(201,133,0,.16);
+  --accent:#6fb7ff; --accent-soft:rgba(111,183,255,.14);
+  --risk:#e5544c; --risk-ink:#f68a83; --risk-soft:rgba(229,84,76,.14);
+  --med:#d4b144; --med-ink:#ecd07a; --med-soft:rgba(212,177,68,.14);
+  --low:#7f8a97; --low-ink:#b3bcc6; --low-soft:rgba(127,138,151,.14);
+  --ok:#3dba80; --ok-ink:#72d8a7; --ok-soft:rgba(61,186,128,.13);
+  --grid:#212933; --axis:#3d4856;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 32px rgba(0,0,0,.28);
+  --f-head:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --f-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --f-math:"STIX Two Text","Times New Roman",Georgia,serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#eef1f4; --surf:#ffffff; --surf2:#eaeef2; --surf3:#dde3e9;
+    --rule:#d6dce3; --rule2:#b8c1cc;
+    --ink:#121821; --ink2:#3e4854; --ink3:#65707c;
+    --txt:#eda100; --s1:#1baf7a; --ad:#4a3aa7; --s2:#eb6834; --dec:#2a78d6; --sys:#e87ba4; --oth:#a3acb6;
+    --s1-soft:rgba(27,175,122,.11); --s2-soft:rgba(235,104,52,.10); --ad-soft:rgba(74,58,167,.09); --sys-soft:rgba(232,123,164,.12); --dec-soft:rgba(42,120,214,.10); --txt-soft:rgba(237,161,0,.12);
+    --accent:#1f6fc4; --accent-soft:rgba(31,111,196,.10);
+    --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.09);
+    --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.11);
+    --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.11);
+    --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.09);
+    --grid:#e5e9ee; --axis:#b8c1cc;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#eef1f4; --surf:#ffffff; --surf2:#eaeef2; --surf3:#dde3e9;
+  --rule:#d6dce3; --rule2:#b8c1cc;
+  --ink:#121821; --ink2:#3e4854; --ink3:#65707c;
+  --txt:#eda100; --s1:#1baf7a; --ad:#4a3aa7; --s2:#eb6834; --dec:#2a78d6; --sys:#e87ba4; --oth:#a3acb6;
+  --s1-soft:rgba(27,175,122,.11); --s2-soft:rgba(235,104,52,.10); --ad-soft:rgba(74,58,167,.09); --sys-soft:rgba(232,123,164,.12); --dec-soft:rgba(42,120,214,.10); --txt-soft:rgba(237,161,0,.12);
+  --accent:#1f6fc4; --accent-soft:rgba(31,111,196,.10);
+  --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.09);
+  --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.11);
+  --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.11);
+  --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.09);
+  --grid:#e5e9ee; --axis:#b8c1cc;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.78}
+a{color:var(--accent);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+b,strong{font-weight:600;color:var(--ink)}
+sub,sup{font-size:.72em;line-height:0}
+code,.mono{font-family:var(--f-mono);font-size:.88em}
+code{background:var(--surf2);border:1px solid var(--rule);border-radius:4px;padding:0 4px;overflow-wrap:anywhere}
+.tnum{font-variant-numeric:tabular-nums}
+.mv{font-family:var(--f-math);font-style:italic;font-size:1.07em;white-space:nowrap}
+.dim{color:var(--ink3)}
+.sw{display:inline-block;width:.8em;height:.8em;border-radius:3px;vertical-align:-.05em;margin-right:.3em}
+.sw.txt{background:var(--txt)} .sw.s1{background:var(--s1)} .sw.ad{background:var(--ad)} .sw.s2{background:var(--s2)} .sw.dec{background:var(--dec)} .sw.sys{background:var(--sys)} .sw.oth{background:var(--oth)}
+.wrap{max-width:1100px;margin:0 auto;padding-inline:20px;padding-block:24px 120px}
+@media (max-width:520px){ .wrap{padding-inline:16px} }
+
+/* ---------- hero ---------- */
+.hero{padding-block:6px 28px;border-bottom:1px solid var(--rule);display:grid;gap:18px}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.kicker{font-family:var(--f-mono);font-size:12px;letter-spacing:.14em;color:var(--ink3);text-transform:uppercase}
+.themebtn{font:inherit;font-size:12.5px;color:var(--ink2);background:var(--surf);border:1px solid var(--rule2);border-radius:999px;padding:4px 12px;cursor:pointer}
+.themebtn:hover{color:var(--ink)}
+h1{font-family:var(--f-head);font-weight:700;font-size:clamp(30px,5vw,50px);line-height:1.16;margin:4px 0 0;letter-spacing:.01em;text-wrap:balance}
+h1 .soft{color:var(--ink3);font-weight:600}
+.sub{font-size:17px;line-height:1.72;color:var(--ink2);max-width:62em;margin:0}
+.thesis{max-width:66em;margin:0;padding:14px 18px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 8px 8px 0;font-size:15.5px}
+.thesis p{margin:.3em 0}
+.meta{border:1px solid var(--rule2);border-radius:10px;overflow:hidden;background:var(--surf);box-shadow:var(--shadow)}
+.meta dl{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+.meta dl div{padding:10px 14px;border-right:1px solid var(--rule);border-top:1px solid var(--rule);min-width:0}
+.meta dt{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;color:var(--ink3);text-transform:uppercase}
+.meta dd{margin:2px 0 0;font-size:13.5px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.statstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+.statstrip div{background:var(--surf);padding:12px 14px;display:grid;gap:2px;align-content:start}
+.statstrip b{font-family:var(--f-mono);font-weight:500;font-size:18px;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.statstrip span{font-size:12.5px;line-height:1.45;color:var(--ink3)}
+.statstrip .warn b{color:var(--risk-ink)}
+
+/* ---------- TOC ---------- */
+nav.toc{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--rule);margin-inline:-20px;padding:8px 20px;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{flex:none;font-size:13px;color:var(--ink2);text-decoration:none;padding:4px 10px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+nav.toc a:hover{color:var(--ink);border-color:var(--rule2)}
+nav.toc a.on{color:var(--ink);background:var(--surf2);border-color:var(--rule2)}
+@media (max-width:520px){ nav.toc{margin-inline:-16px;padding-inline:16px} }
+
+/* ---------- sections ---------- */
+section{padding-block:40px 8px;border-bottom:1px solid var(--rule);scroll-margin-top:52px}
+section:last-of-type{border-bottom:0}
+h2{font-family:var(--f-head);font-weight:700;font-size:clamp(23px,3.2vw,31px);line-height:1.3;margin:0 0 6px;text-wrap:balance}
+h2 .no{font-family:var(--f-mono);font-weight:500;font-size:.62em;color:var(--ink3);margin-right:.5em;letter-spacing:.06em;vertical-align:.12em}
+h3{font-family:var(--f-head);font-weight:600;font-size:19.5px;line-height:1.4;margin:30px 0 6px}
+h4{font-size:15px;margin:18px 0 4px}
+p{margin:.65em 0}
+.lede{font-size:16.5px;color:var(--ink2);max-width:62em}
+.prose{max-width:70em}
+ul.tight{margin:.4em 0;padding-left:1.25em} ul.tight li{margin:.2em 0}
+ol.tight{margin:.4em 0;padding-left:1.4em} ol.tight li{margin:.25em 0}
+
+.note{border:1px solid var(--rule);background:var(--surf);border-radius:8px;padding:12px 16px;margin:14px 0;font-size:14.8px}
+.note.plain{border-left:3px solid var(--accent)}
+.note.risk{border-left:3px solid var(--risk);background:linear-gradient(90deg,var(--risk-soft),transparent 60%),var(--surf)}
+.note.med{border-left:3px solid var(--med);background:linear-gradient(90deg,var(--med-soft),transparent 60%),var(--surf)}
+.note.ok{border-left:3px solid var(--ok);background:linear-gradient(90deg,var(--ok-soft),transparent 60%),var(--surf)}
+.note h5{margin:0 0 4px;font-size:13px;font-family:var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);font-weight:500}
+.note p:first-of-type{margin-top:0} .note p:last-child{margin-bottom:0}
+.quote{font-size:13.6px;border-left:2px solid var(--rule2);padding:4px 0 4px 12px;margin:8px 0;color:var(--ink2)}
+.quote .src{display:block;font-family:var(--f-mono);font-size:11.5px;color:var(--ink3);margin-top:3px}
+
+.card{border:1px solid var(--rule);background:var(--surf);border-radius:10px;box-shadow:var(--shadow);margin:18px 0;overflow:hidden}
+.card>header{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;padding:12px 16px 8px;border-bottom:1px solid var(--rule)}
+.card>header .t{font-weight:600;font-size:15px}
+.card>header .k{font-family:var(--f-mono);font-size:11.5px;color:var(--ink3);letter-spacing:.06em}
+.card .body{padding:14px 16px}
+.card .cap{padding:0 16px 14px;font-size:13.2px;color:var(--ink3);line-height:1.6}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+
+/* controls */
+.ctrls{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin:0 0 12px}
+.seg{display:inline-flex;border:1px solid var(--rule2);border-radius:8px;overflow:hidden;background:var(--surf2)}
+.seg button{font:inherit;font-size:13px;padding:5px 11px;border:0;background:transparent;color:var(--ink2);cursor:pointer;border-right:1px solid var(--rule2)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--surf3);color:var(--ink);font-weight:600}
+.seg button:hover{color:var(--ink)}
+label.rng{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--ink2)}
+label.rng input[type=range]{width:180px;accent-color:var(--accent)}
+label.chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink2);cursor:pointer}
+.btn{font:inherit;font-size:13px;padding:5px 12px;border:1px solid var(--rule2);border-radius:8px;background:var(--surf2);color:var(--ink);cursor:pointer}
+.btn:hover{background:var(--surf3)}
+.readout{font-family:var(--f-mono);font-size:12.5px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:8px;overflow:hidden;margin:10px 0}
+.kv div{background:var(--surf2);padding:8px 12px}
+.kv b{display:block;font-family:var(--f-mono);font-weight:500;font-size:17px;font-variant-numeric:tabular-nums}
+.kv span{font-size:12px;color:var(--ink3);line-height:1.4;display:block}
+.kv .bad b{color:var(--risk-ink)} .kv .good b{color:var(--ok-ink)}
+
+/* svg */
+svg{display:block;max-width:100%;height:auto;overflow:visible}
+svg text{font-family:var(--f-body);fill:var(--ink2);font-size:12px}
+svg .mono{font-family:var(--f-mono)}
+svg .ink{fill:var(--ink)} svg .ink3{fill:var(--ink3)}
+svg .gridl{stroke:var(--grid);stroke-width:1}
+svg .axis{stroke:var(--axis);stroke-width:1}
+.scroller{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.scroller>svg{min-width:640px}
+
+/* tables */
+.tbl{overflow-x:auto;margin:12px 0}
+table{border-collapse:collapse;width:100%;font-size:13.6px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+th{font-weight:600;color:var(--ink2);font-size:12.5px;background:var(--surf2)}
+td.num,th.num{text-align:right;font-family:var(--f-mono);font-size:12.8px}
+tr.hl td{background:var(--risk-soft)}
+td .flag{color:var(--risk-ink);font-weight:600}
+td .okf{color:var(--ok-ink);font-weight:600}
+
+/* diff rows (paper vs code) */
+.diff{display:grid;grid-template-columns:minmax(120px,.8fr) 1fr 1fr;border:1px solid var(--rule);border-radius:8px;overflow:hidden;font-size:13.6px;margin:12px 0}
+.diff>div{padding:8px 12px;border-bottom:1px solid var(--rule);min-width:0;overflow-wrap:anywhere}
+.diff>.h{background:var(--surf2);font-weight:600;color:var(--ink2);font-size:12.5px}
+.diff>.k{color:var(--ink3);font-family:var(--f-mono);font-size:12.3px}
+.diff>.x{background:var(--risk-soft)}
+@media (max-width:640px){ .diff{grid-template-columns:1fr} .diff>.h{display:none} .diff>.k{background:var(--surf2);border-bottom:0;padding-bottom:2px} }
+#t1Tbl td,#t1Tbl th{white-space:nowrap}
+
+/* tooltip */
+#tip{position:fixed;z-index:50;pointer-events:none;background:var(--surf);border:1px solid var(--rule2);border-radius:8px;box-shadow:var(--shadow);padding:8px 10px;font-size:12.5px;line-height:1.5;max-width:300px;opacity:0;transition:opacity .08s;color:var(--ink)}
+#tip.on{opacity:1}
+#tip .tt{font-weight:600;margin-bottom:2px}
+#tip .mono{color:var(--ink2)}
+
+/* issues */
+.sevbar{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 14px}
+.issue{border:1px solid var(--rule);border-radius:10px;background:var(--surf);margin:10px 0;overflow:hidden}
+.issue summary{list-style:none;cursor:pointer;padding:12px 14px;display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:start}
+.issue summary::-webkit-details-marker{display:none}
+.issue summary .n{font-family:var(--f-mono);font-size:12px;color:var(--ink3);padding-top:3px}
+.issue summary .ti{font-weight:600;line-height:1.55}
+.issue summary .tag{font-family:var(--f-mono);font-size:11px;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.tag.high{background:var(--risk-soft);color:var(--risk-ink);border:1px solid var(--risk)}
+.tag.med{background:var(--med-soft);color:var(--med-ink);border:1px solid var(--med)}
+.tag.low{background:var(--low-soft);color:var(--low-ink);border:1px solid var(--low)}
+.issue[open] summary{border-bottom:1px solid var(--rule)}
+.issue .ib{padding:10px 16px 14px;font-size:14.4px}
+.issue .ib p{margin:.45em 0}
+.issue.high{border-left:3px solid var(--risk)} .issue.med{border-left:3px solid var(--med)} .issue.low{border-left:3px solid var(--low)}
+
+/* footer */
+footer{padding-top:30px;font-size:13px;color:var(--ink3)}
+footer p{margin:.4em 0}
+.pill{display:inline-block;font-family:var(--f-mono);font-size:11.5px;padding:1px 8px;border-radius:999px;border:1px solid var(--rule2);color:var(--ink2);background:var(--surf2);white-space:nowrap}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--ink2);margin:6px 0 2px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+canvas{display:block;max-width:100%;image-rendering:pixelated;border-radius:6px;border:1px solid var(--rule)}
+</style>
+</head>
+<body>
+<div id="tip" role="tooltip"></div>
+<div class="wrap">
+
+<header class="hero">
+  <div class="topbar">
+    <span class="kicker">arXiv 2609.35110 · 2026-09-28 · NVIDIA Research · 精读</span>
+    <button class="themebtn" id="themeBtn" type="button" aria-label="切换深浅色">◐ 深 / 浅</button>
+  </div>
+  <h1>Sol-H3 <span class="soft">精读</span>：33B 的 MiniMax-H3 从两分半压到几秒，这笔账怎么算</h1>
+  <p class="sub">全称 <i>Sol-H3: Recursive Self-Improvement for MiniMax-H3 Inference Acceleration on Sol-Engine across Cloud and Edge</i>。这是一份推理加速的技术报告。算法上，先用 H3 以 4 步生成低分辨率草稿，再交给 LTX-2.5 在高分辨率上做 3 步精修，两者之间用一个学出来的「跨 VAE 潜变量翻译器」衔接。系统上，由 agent 驱动的 RSI 循环去搜通信量化、MXFP8、稀疏注意力和算子融合。另外还有 DGX Spark 的边缘部署，以及 Ref2VA 的参考 KV 缓存。</p>
+  <div class="thesis">
+    <p><b>一句话结论。</b>几个工程件是真的，也可以直接复用：AdaLN 预计算（结果精确，省 24 GB）、跨 VAE 潜变量适配器（比「解码再编码」快 202×）、「LoRA 合并进 BF16 会把 86–94% 的更新舍入掉」这条诊断、VAE tile 的全局批处理、QKV 打包通信。</p>
+    <p>标题里的两件事站不稳。第一，<b>「RSI」在正文里没有被描述</b>，也没有任何消融能把它的贡献从头条数字里分出来。第二，22–31× 这几个头条倍数<b>主要来自换了生成合同</b>：49→4 步的第三方蒸馏 LoRA、把低分辨率草稿交给另一个模型精修、用小自编码器做近似解码。论文在 §2.2 自己说过，这两类加速不应混在一起报。</p>
+    <p>更要紧的是三处核对结果：<b>GB200 上两阶段的 6.852 s 不是 §3.1 描述的那条管线测出来的</b>；表 1 的基线列与作者仓库里 <b>B300 上 SGLang 的数字逐位相同</b>；全文<b>没有任何量化质量评估</b>。</p>
+  </div>
+  <div class="meta"><dl>
+    <div><dt>论文</dt><dd>arXiv 2609.35110v1 · cs.AI · 2026-09-28 · 23 页</dd></div>
+    <div><dt>作者</dt><dd>Yitong Li、Jincheng Yu、Junsong Chen、Haopeng Li（共同一作）、Shuchen Xue、Haozhe Liu、Ping Luo、Song Han、Enze Xie · NVIDIA Research</dd></div>
+    <div><dt>被加速的对象</dt><dd>MiniMax-H3（33.1B，音视频联合生成，单流 packed 序列），另引入 LTX-2.5 作为精修器</dd></div>
+    <div><dt>代码</dt><dd><a href="https://github.com/NVlabs/Sana/pull/503">NVlabs/Sana PR #503</a> · commit <code>51b14fd</code>（论文脚注引用的版本）</dd></div>
+    <div><dt>核对范围</dt><dd>论文全文；该 commit 下 <code>Sol-H3/</code>、<code>Sol-H3-Spark/</code>、<code>super_acceleration/</code>、<code>ltx2.5-refiner/</code>；<code>page</code> 分支里 3 个项目页的源码</dd></div>
+    <div><dt>与交互式世界模型</dt><dd>非交互、非流式，一次生成 5–15 s。可借鉴的主要是工程件，见 §10</dd></div>
+  </dl></div>
+  <div class="statstrip">
+    <div><b>1.434 s</b><span>8 卡生成 5 s 视频（单阶段 4 步；表 1 标注为 GB200）</span></div>
+    <div><b>6.852 s</b><span>两阶段、「单张 GB200」。实为两段分开测量后相加，所测配置 ≠ §3.1</span></div>
+    <div><b>56.17 s</b><span>DGX Spark 上 5 s 768p，所有模型常驻显存</span></div>
+    <div><b>12.25×</b><span>49→4 次前向本身带来的倍数。表 1 头条为 12.7–17.0×</span></div>
+    <div class="warn"><b>0</b><span>全文给出的量化质量指标数</span></div>
+    <div class="warn"><b>18</b><span>存疑条目：高 5 · 中 8 · 低 5（§9）</span></div>
+  </div>
+</header>
+
+<nav class="toc" id="toc" aria-label="目录">
+  <a href="#s1">1 全景</a><a href="#s2">2 H3 为何贵</a><a href="#s3">3 两阶段</a><a href="#s4">4 潜变量适配器</a><a href="#s5">5 RSI 系统栈</a><a href="#s6">6 边缘 Spark</a><a href="#s7">7 参考 KV 缓存</a><a href="#s8">8 数字核对</a><a href="#s9">9 存疑清单</a><a href="#s10">10 可取之处与启示</a><a href="#s11">11 来源</a>
+</nav>
+
+<!-- ============================ §1 ============================ -->
+<section id="s1">
+<h2><span class="no">01</span>全景：这篇报告到底堆了哪些东西</h2>
+<p class="lede">把全文拆开，可以得到 14 个组件。看懂这篇论文的关键，是分清两件事：每个组件<b>会不会改变生成结果</b>，以及它<b>进了哪一个头条数字</b>。论文在 §2.2 立了一条规矩：「保持生成合同」的加速（融合、精确注意力后端、无损通信布局）和「改变调度或步数」的加速产出的是不同东西，报告时不能混在一起。下表按这条规矩给全部组件归类。</p>
+
+<div class="legend"><span><i class="sw s1"></i>Stage 1 / MiniMax-H3</span><span><i class="sw s2"></i>Stage 2 / LTX-2.5</span><span><i class="sw ad"></i>跨模型潜变量桥</span><span><i class="sw sys"></i>RSI 系统栈</span><span><i class="sw dec"></i>VAE 解码</span><span><i class="sw txt"></i>文本编码</span></div>
+<div class="tbl"><table id="compTable">
+<thead><tr><th>组件</th><th>谁设计的</th><th>输出会变吗</th><th>论文给的证据</th><th>用在哪个头条数字</th></tr></thead>
+<tbody>
+<tr><td><i class="sw s1"></i>49→4 步少步 LoRA（FastH3 / LightX2V，第三方）</td><td>外部</td><td><span class="flag">变（换了合同）</span></td><td>无质量数字</td><td>表 1、两阶段、Spark：全部</td></tr>
+<tr><td><i class="sw s1"></i><i class="sw s2"></i>低分辨率草稿 + LTX 高分辨率精修</td><td>人</td><td><span class="flag">变</span></td><td>3 个定性例子（图 6）</td><td>GB200 两阶段、Spark、5090</td></tr>
+<tr><td><i class="sw ad"></i>跨 VAE 潜变量适配器</td><td>人</td><td><span class="flag">近似</span></td><td>对 LTX 自身重建的 PSNR 30.6 dB</td><td>只用于 Spark / 5090；<b>GB200 的数字没用它</b></td></tr>
+<tr><td><i class="sw dec"></i>TAEH3 / TAEHV 小自编码器解码</td><td>—</td><td><span class="flag">近似</span></td><td><b>论文未提及</b></td><td>GB200 两阶段（见项目页与仓库）</td></tr>
+<tr><td><i class="sw txt"></i>Stage 2 通用 prompt 缓存</td><td>人</td><td><span class="flag">变</span></td><td>无</td><td>Spark</td></tr>
+<tr><td><i class="sw sys"></i>Sol-Attn 块稀疏注意力</td><td>人 + RSI 实现</td><td><span class="flag">近似</span></td><td>无数字，只有一条「对白崩坏」的轶事</td><td>表 1（4/8 卡）、所有 Stage 2</td></tr>
+<tr><td><i class="sw sys"></i>INT8 QKV / FP8 输出的通信</td><td>RSI</td><td><span class="flag">近似</span></td><td>无</td><td>表 1（4/8 卡）</td></tr>
+<tr><td><i class="sw sys"></i>MXFP8 GEMM（第 2–46 块）</td><td>RSI</td><td><span class="flag">近似</span></td><td>无。仓库 README：与 BF16 输出比 <b>13.82 dB PSNR</b></td><td>表 1（按论文说法）</td></tr>
+<tr><td><i class="sw sys"></i>纯布局融合（stride-aware 打包 / 头合并）</td><td>RSI</td><td><span class="okf">不变</span>（bit-identical）</td><td>声称按位一致</td><td>表 1</td></tr>
+<tr><td><i class="sw sys"></i>算术融合（RMSNorm/调制、QKNorm+RoPE、SwiGLU）</td><td>RSI</td><td>舍入可能变</td><td>无数字</td><td>表 1</td></tr>
+<tr><td><i class="sw sys"></i>LoRA consumer fusion</td><td>RSI</td><td><span class="okf">不变</span>（相对原生分支）</td><td>3 个样本逐字节一致；−2.64% 延迟</td><td><b>没有任何头条配置用它</b>（全都用 merged）</td></tr>
+<tr><td><i class="sw s1"></i>AdaLN 调制表预计算</td><td>人</td><td><span class="okf">不变</span>（bit-exact）</td><td>内存与带宽估算</td><td>Spark；也在单阶段运行时里</td></tr>
+<tr><td><i class="sw dec"></i>VAE tile 分片 + 批处理 + compile</td><td>RSI</td><td>近似（compile 最大绝对误差 0.021）</td><td>解码层面的计时</td><td>表 1</td></tr>
+<tr><td><i class="sw s1"></i>Ref2VA 参考 KV 缓存</td><td>人</td><td><span class="flag">近似</span></td><td>3 个定性例子</td><td>表 2</td></tr>
+</tbody></table></div>
+<p class="prose">「谁设计的」一列来自论文 §7 的自述：宏观框架（两阶段、适配器）是人设计的，微观实现（通信、融合、稀疏注意力实现、LoRA 融合）由 RSI 完成。从这张表可以看出三件事。第一，<b>凡是进了头条数字的组件，几乎都会改变输出</b>，而论文对这些改变没有任何量化。第二，唯一被严格证明「不改变输出」的新贡献（LoRA consumer fusion）<b>没有用在任何头条配置里</b>。第三，GB200 两阶段结果里起决定作用的 TAE 近似解码，<b>在论文中根本没有出现</b>。</p>
+</section>
+
+<!-- ============================ §2 ============================ -->
+<section id="s2">
+<h2><span class="no">02</span>背景：MiniMax-H3 为什么这么贵</h2>
+<p class="lede">H3 是一个 33.1B 的稠密单流 Transformer。它把文本、条件视频、音频和目标视频拼成<b>一条序列</b>：<code>[ text | conditioning video | audio | target video ]</code>，然后在 50 个块里对整条序列做全注意力。贵在三个地方。</p>
+<div class="grid3">
+  <div class="note plain"><h5>① 序列长</h5><p>5 s、1344×768 时整条序列是 <b class="tnum">38,247</b> 个 token，其中目标视频 37,296 个，文本 537 个，音频 414 个。这个数我从论文里「4 卡上下文并行、每卡 9562 行」反推过一遍，也和代码注释、作者的 H3 DataCenter 页一致。</p></div>
+  <div class="note plain"><h5>② 步数多</h5><p>官方采样是 50 个调度点，也就是 <b>49 次 DiT 前向</b>。论文里 49 和 50 混用，仓库 README 解释了两者是一回事。</p></div>
+  <div class="note plain"><h5>③ AdaLN 大得离谱</h5><p>每个块都有一个 <code>adaln_proj = Linear(2688 → 96,768)</code>，约 2.6 亿参数，50 块合计 <b>13.0B</b>，占全模型的 39%。它的输入只有时间步嵌入，所以完全可以提前算好（见 §6）。</p></div>
+</div>
+
+<div class="card" id="tokCard">
+  <header><span class="t">交互：H3 的 token 预算计算器</span><span class="k">VAE f16·t4（17 帧一块）· patch 1×2×2</span></header>
+  <div class="body">
+    <div class="ctrls">
+      <span class="dim" style="font-size:13px">分辨率</span>
+      <div class="seg" id="tokRes"><button data-v="1344x768" aria-pressed="true">1344×768</button><button data-v="896x512" aria-pressed="false">896×512</button><button data-v="672x384" aria-pressed="false">672×384</button></div>
+      <span class="dim" style="font-size:13px">时长</span>
+      <div class="seg" id="tokDur"><button data-v="5" aria-pressed="true">5 s</button><button data-v="10" aria-pressed="false">10 s</button><button data-v="15" aria-pressed="false">15 s</button></div>
+    </div>
+    <div class="kv" id="tokKV"></div>
+    <div class="scroller"><svg id="tokSvg" viewBox="0 0 960 150" role="img" aria-label="token 组成示意"></svg></div>
+  </div>
+  <p class="cap">算法：帧数取 124 / 243 / 362（仓库 README 的 5 / 10 / 15 s 设置）。潜变量帧数 = ⌈帧数/17⌉×5 − 3；每帧 token 数 = (W/32)×(H/32)。文本 537 为代码注释中那条基准 prompt 的长度；音频按 5 s 时 414 个线性外推（标「估」）。单次前向 FLOPs ≈ 2·P·N + 4·L·N²·d，其中 P = 20.1B（去掉 AdaLN 的 13B），L = 50，d = 5376。这是量级估算，不是实测。</p>
+</div>
+</section>
+
+<!-- ============================ §3 ============================ -->
+<section id="s3">
+<h2><span class="no">03</span>两阶段跨分辨率：论文说的、Spark 跑的、GB200 测的，是三条不同的管线</h2>
+<p class="lede">思路很朴素：扩散的早期步决定布局和运动，后期步补高频细节。于是早期步放在低分辨率上跑（便宜），后期步交给一个高分辨率精修器。论文 §2.1 自己承认「低分辨率草稿 + 高分辨率精修」是已有做法，贡献在于服务端的落地。问题在于落地：<b>论文 §3.1 写的配方和 GB200 上测速用的配方不是同一个</b>。切换下面三个视图可以逐格对比，红框标出的是与论文不一致的地方。</p>
+
+<div class="card">
+  <header><span class="t">交互：三条管线逐格对比</span><span class="k">来源：论文 §3.1 / Sol-H3-Spark/configs/default.json / super_acceleration v2 + 项目页</span></header>
+  <div class="body">
+    <div class="ctrls"><div class="seg" id="pipeMode"><button data-v="paper" aria-pressed="true">论文 §3.1 的描述</button><button data-v="spark" aria-pressed="false">DGX Spark 实际配置</button><button data-v="gb200" aria-pressed="false">GB200 实测（6.85 s 那条）</button></div></div>
+    <div id="pipe" class="pipe"></div>
+    <div class="note" id="pipeNote" style="margin-bottom:0"></div>
+  </div>
+</div>
+<style>
+.pipe{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:860px){ .pipe{grid-template-columns:repeat(2,minmax(0,1fr))} }
+@media (max-width:520px){ .pipe{grid-template-columns:1fr} }
+.pbox{border:1px solid var(--rule);border-radius:8px;background:var(--surf2);padding:9px 11px 10px;position:relative;min-width:0;font-size:13.2px;line-height:1.55}
+.pbox .bar{position:absolute;left:0;top:0;right:0;height:4px;border-radius:8px 8px 0 0}
+.pbox .lab{font-family:var(--f-mono);font-size:11px;letter-spacing:.08em;color:var(--ink3);text-transform:uppercase;margin-top:2px}
+.pbox .v{color:var(--ink);overflow-wrap:anywhere}
+.pbox.x{outline:2px solid var(--risk);outline-offset:-1px;background:linear-gradient(0deg,var(--risk-soft),var(--risk-soft)),var(--surf2)}
+.pbox.x::after{content:"≠ 论文";position:absolute;right:8px;top:6px;font-family:var(--f-mono);font-size:10.5px;color:var(--risk-ink)}
+</style>
+
+<h3>Stage 2 真的只是「补细节」吗：σ = 0.909 意味着什么</h3>
+<p class="prose">三条管线的 Stage 2 都用 LTX 官方的蒸馏精修调度：<span class="mv">σ</span> = 0.909 → 0.725 → 0.422 → 0。在 rectified flow 里，<span class="mv">x<sub>σ</sub> = (1−σ)·x<sub>0</sub> + σ·ε</span>。σ = 0.909 时信号的幅度只剩 <b>9.1%</b>，逐元素的信噪比是 ((1−σ)/σ)² ≈ <b>0.010</b>。换句话说，精修器拿到的输入里 99% 的能量是噪声。</p>
+<p class="prose">布局为什么还能保住？因为噪声逐像素独立，而布局是低频信号。把 k×k 个像素平均一下，信号基本不变，噪声方差却降为 1/k²。所以<b>分辨率越高、看得越粗，信噪比越高</b>。这正是 SD3 以来「高分辨率要把时间步往高噪声偏移」的原因。下面的示意用一张合成图演示：左图是干净图，中图是加噪后的原分辨率，右图是 k×k 平均之后的样子（k 可选）。</p>
+<div class="card">
+  <header><span class="t">交互：高噪声下还剩什么（示意，像素空间）</span><span class="k">x<sub>σ</sub> = (1−σ)x<sub>0</sub> + σε</span></header>
+  <div class="body">
+    <div class="ctrls">
+      <label class="rng">σ <input type="range" id="sigR" min="0" max="1" step="0.001" value="0.909"><span class="readout" id="sigV">0.909</span></label>
+      <div class="seg" id="sigPreset"><button data-v="0.8">S1 末步输入 0.80</button><button data-v="0.909" aria-pressed="true">S2 起点 0.909</button><button data-v="0.725">0.725</button><button data-v="0.422">0.422</button></div>
+      <span class="dim" style="font-size:13px">平均窗口</span><div class="seg" id="sigPool"><button data-v="4">4×4</button><button data-v="8" aria-pressed="true">8×8</button><button data-v="16">16×16</button></div>
+      <button class="btn" id="sigReseed" type="button">换一组噪声</button>
+    </div>
+    <div class="grid3" style="gap:10px">
+      <figure style="margin:0"><canvas id="cv0" width="192" height="108" style="width:100%"></canvas><figcaption class="dim" style="font-size:12.5px">x<sub>0</sub>（干净，示意场景）</figcaption></figure>
+      <figure style="margin:0"><canvas id="cv1" width="192" height="108" style="width:100%"></canvas><figcaption class="dim" style="font-size:12.5px" id="cv1cap">x<sub>σ</sub>，原分辨率</figcaption></figure>
+      <figure style="margin:0"><canvas id="cv2" width="192" height="108" style="width:100%"></canvas><figcaption class="dim" style="font-size:12.5px" id="cv2cap">x<sub>σ</sub> 的 k×k 平均（相当于只看低频）</figcaption></figure>
+    </div>
+    <div class="kv" id="sigKV"></div>
+  </div>
+  <p class="cap">说明：这是像素空间里的直觉演示，不是 LTX 潜空间里的真实数值。Spark 配置里 Stage 1 的视频 σ 为 1 → 0.973 → 0.923 → 0.8 → 0：前三步都在 σ ≥ 0.8 的高噪声区，最后一步直接从 0.8 跳到 0。Stage 2 再在另一个潜空间里把噪声加回 0.909。所以说 Stage 2 在<b>重新生成</b>，它保住的只是低频布局。H3 的身份、纹理和嘴型会被 LTX 重画。</p>
+</div>
+
+<div class="note med">
+  <h5>音频：LTX 算了，但算完就丢</h5>
+  <p>论文只写了「三次联合音视频更新」和「Stage-1 的音频不经过适配器」。仓库的 Stage-2 合约写得更清楚：H3 生成的 PCM 先用 LTX 的音频 VAE 编码，和视频一起联合去噪，然后 <b>丢弃 Stage 2 的音频输出</b>，最终混入的是 H3 的原始 PCM。所以 LTX 音频分支的算力只起一个作用：通过音视频交叉注意力给视频（尤其是嘴型）提供上下文。最终成片是「H3 的声音 + LTX 重画的画面」。全文没有任何 A/V 同步或口型指标，而 H3 最大的卖点恰恰是对白。</p>
+  <p class="quote">"Encode the direct H3 PCM with the original LTX-2.5 Audio VAE and jointly denoise video and audio latents … Discard the jointly denoised Stage-2 audio output and mux the original H3 PCM into the final MP4."<span class="src">super_acceleration/STAGE2_CONTRACT.md</span></p>
+</div>
+</section>
+
+<!-- ============================ §4 ============================ -->
+<section id="s4">
+<h2><span class="no">04</span>跨 VAE 潜变量适配器：本文最扎实的一块</h2>
+<p class="lede">H3 和 LTX 的 VAE 是各自独立训练的，潜空间互不相通。最直接的接法是把 H3 潜变量解码成像素，再用 LTX 的 VAE 编码回去，但这要多跑两个大网络。作者训练了一个 1.95 亿参数的卷积网络，直接做「H3 潜变量 → LTX 潜变量」的翻译。空间放大交给另一个现成的 H3 ×2 上采样器（第三方 LBH-123-AI），适配器只负责「同一像素分辨率下换坐标系」。</p>
+
+<div class="grid2">
+  <div class="note plain"><h5>H3 视频 VAE</h5><p><b>24 通道</b>，空间压缩 16×。时间上按 <b>17 帧一块独立编码</b>，每块 5 个 token，锚点在块内第 0/4/8/12/16 帧，所以名义上是 4× 压缩，但块与块交界处的时间间隔不均匀。192 帧的片段得到 24×<b>57</b>×48×84（末尾按配置删掉 3 个 token）。</p></div>
+  <div class="note plain"><h5>LTX-2.5 Conv 视频 VAE</h5><p><b>128 通道</b>，空间压缩 32×，时间上是<b>因果的 8×</b> 网格：第 0 个潜变量对应第 0 帧，第 k 个对应第 8k−7 到 8k 帧。输入补到 193 帧，得到 128×<b>25</b>×24×42。</p></div>
+</div>
+
+<h3>第一步：按物理时间对齐，而不是按张量下标</h3>
+<p class="prose">难点在时间轴：57 个 H3 token 要落进 25 个 LTX 时间格。作者的做法是固定、无参数的打包 <span class="mv">G</span>。在每个 LTX 时间位置上，放 <b>1 个线性插值的 H3 特征</b>，再加 <b>3 个槽位</b>装「落在这个格里的最近 H3 token」，每个源 token 恰好保留一次。我按锚点规则把 192 帧的情况算了一遍：25 个格里有 1 个格装 1 个、16 个格各装 2 个、8 个格各装 3 个，最多正好 3 个。「3 个槽」是刚好够用的设计。把鼠标移到下图的格子上，可以看到哪些 H3 token 被装了进去。</p>
+<div class="card">
+  <header><span class="t">交互：57 个 H3 token → 25 个 LTX 时间格（192 帧）</span><span class="k">锚点 c·17 + {0,4,8,12,16}；格 k 覆盖帧 8k−7…8k</span></header>
+  <div class="body"><div class="scroller"><svg id="alignSvg" viewBox="0 0 1000 230" role="img" aria-label="时间对齐示意"></svg></div>
+  <div class="readout" id="alignRead" style="min-height:1.6em">移到某个 LTX 格上查看它装了哪些 token</div></div>
+  <p class="cap">淡色点表示按配置删掉的 3 个尾部 token（帧 195/199/203 超出 192 帧）。之后再做 2×2 pixel-unshuffle，把空间邻域搬进通道：24 ×（1 插值 + 3 槽）× 4 = <b>384 通道</b>，落在 LTX 的 24×42 空间网格上。这一步完全无参数，目的是「先不求平均，把源特征原样留给后面的网络去学」。</p>
+</div>
+
+<h3>第二步：冻结的仿射跳连 + 学出来的残差网络</h3>
+<div class="card">
+  <header><span class="t">适配器结构与参数分布</span><span class="k">按 stage2_ops/h3_ltx_adapter/model.py 复算：194.76M ✓</span></header>
+  <div class="body">
+    <div class="scroller"><svg id="adSvg" viewBox="0 0 960 276" role="img" aria-label="适配器结构"></svg></div>
+    <div class="scroller" style="margin-top:6px"><svg id="adParam" viewBox="0 0 960 70" role="img" aria-label="参数分布"></svg></div>
+  </div>
+  <p class="cap">跳连是一个 1×1×1 的 384→128 仿射层，用岭回归初始化后冻结。残差主干是 3×3×3 的 stem，接 22 个宽度 752 的「因子化残差块」：GroupNorm → 空间卷积 1×3×3 → 深度可分时间卷积 3×1×1 → 门控通道 MLP（扩张 2×），最后接 GroupNorm 和 1×1 头。我按代码逐项累加得到 194,759,504 个参数，与论文的 194.76M 一致。其中 57% 在空间卷积上。</p>
+</div>
+
+<h3>第三步：训练目标同时看潜变量和解码后的像素</h3>
+<p class="prose"><span class="mv">ℒ = MSE(ẑ<sub>L</sub>, z<sub>L</sub>) + α·MSE(D<sub>L</sub>(ẑ<sub>L</sub>), D<sub>L</sub>(z<sub>L</sub>))</span>，α = 160。梯度会穿过冻结的 LTX 解码器回传给适配器，用人话说就是「潜空间里不同方向的误差对画面的影响不一样，让解码器告诉你哪些方向更要紧」。训练对是同一段真实视频（缩放后）分别经两个冻结 VAE 编码得到的<b>后验众数</b>。</p>
+<div class="tbl"><table>
+<thead><tr><th>项目</th><th>数值</th><th>核对</th></tr></thead>
+<tbody>
+<tr><td>语料 / 切分</td><td>80,000 段视频，按稳定哈希 98/1/1 切分；最终两阶段用 65,536 对缓存样本</td><td>—</td></tr>
+<tr><td>优化</td><td>2,500 + 5,000 步，全局 batch 32，AdamW，峰值 LR 8e-5，β=(0.9,0.95)，cosine 衰减到 5%</td><td class="num"><span class="okf">7,500×32 = 240,000 ✓</span></td></tr>
+<tr><td>Held-out 质量（表 3）</td><td>最终：latent MSE 0.09783 · PSNR 30.618 dB · SSIM 0.8962；更早的 checkpoint 为 29.413 dB</td><td class="num"><span class="okf">+1.205 dB ✓</span></td></tr>
+<tr><td>转换开销（表 4，H100，192 帧）</td><td>完整 VAE 往返 12,748.6 ms / 13.79 GiB；Tiny AE 往返 201.9 ms / 23.85 GiB；适配器 63.1 ms / 0.785 GiB</td><td class="num"><span class="okf">202.0× · 63.1× ✓</span></td></tr>
+</tbody></table></div>
+
+<div class="note med">
+  <h5>这块最该补的三个洞</h5>
+  <ol class="tight">
+    <li><b>训练分布和推理分布不一致。</b>训练输入是真实视频在 1344×768 下的编码；推理时的输入却是生成出来的 672×384 草稿，再经第三方 ×2 上采样器放大后的潜变量。上采样器的输出通常更平滑、缺高频，适配器在这个分布上的误差没有测过。</li>
+    <li><b>质量只测到半路。</b>30.6 dB 衡量的是「与 LTX 对同一源视频的重建是否一致」，发生在 Stage 2 之前。适配器接进管线以后，最终视频的质量没有测，也没有和它替代的两种方案（完整 VAE 往返、TAE 往返）比较过。论文自己也写了「not a quality-equivalent replacement」。</li>
+    <li><b>测速的形状和硬件都不是部署时的。</b>表 4 用的是更早的 checkpoint，在 H100 上跑 192 帧；部署是 124→121 帧，跑在 Spark 或 5090 上。结构相同所以速度大体可信，但「202×」不是部署现场的数字。项目页给的现场数字是 Spark 上「省 24 s」。</li>
+  </ol>
+  <p><b>最关键的一点</b>：GB200 上那组 22.2× / 27.7× 的结果根本没有用这个适配器。那条管线走的是 TAEH3 解码 → 缩放 → <b>LTX 原版 VAE 编码</b>，项目页解释说「精修器是在原版 VAE 的潜分布上训练的」。论文摘要里的「completely eliminating the VAE decode-reencode cycle」对它的云端头条数字并不成立。</p>
+</div>
+</section>
+
+<!-- ============================ §5 ============================ -->
+<section id="s5">
+<h2><span class="no">05</span>RSI 系统栈：通信、MXFP8、稀疏注意力、融合与 LoRA 精度、VAE 分片</h2>
+<div class="note risk">
+  <h5>先说「RSI」本身</h5>
+  <p>标题叫 Recursive Self-Improvement，但正文对这个循环只写了一句：「搜索核融合、内存布局、集合通信布局和传输精度，测延迟，并检查数值一致性」。用的哪个 agent、迭代了多少轮、搜索空间多大、接受阈值是多少、拒绝了多少候选、人工介入了多少，一概没有。前作 Sol Engine（arXiv 2606.23743）的流程是「并行技能 agent + 集成 agent + 人工验收」，作者栏里写着 <i>NVIDIA SANA Team, Codex, GPT-Image2</i>。此外，被改进的是 H3 的运行时，不是 agent 自己，「递归自我改进」这个名字并不贴切。</p>
+  <p>论文 §2.3 还说，这个循环是 fail-closed 的：「被接受的改动保证是同基线、同硬件下 like-for-like 的缩减」。可实际被接受的改动里就有 MXFP8、INT8/FP8 传输、稀疏注意力，这些都会改变输出。仓库 README 自己测过：只开 MXFP8，输出与 BF16 相比 PSNR 就只剩 13.82 dB。</p>
+</div>
+
+<h3>5.1 注意力通信：把三次 all-to-all 合成一次，再压成 8 bit</h3>
+<p class="prose">多卡时用的是 Ulysses 序列并行。注意力之前，要把「按序列切分、每卡持有全部头」换成「按头切分、每卡持有全部序列」，算完再换回来。基线每层要做 4 次集合通信（Q、K、V 各一次，输出一次）。在一个全分辨率的代表性 profile 里，每个去噪步有 94 ms 花在布局拷贝（42 ms）和通信（52 ms）上，而注意力计算本身是 341 ms。改动分三层：</p>
+<ul class="tight">
+  <li><b>打包 QKV</b>：三次输入交换合成一次，每层总共 2 次集合通信，总的 payload 不变。</li>
+  <li><b>stride-aware 内核</b>：朴素的 PyTorch 写法（先 <code>stack</code> 再 <code>permute().contiguous()</code>）会把激活复制两遍，吞吐只有参考实现的 <b>0.953×</b>，反而变慢。新内核按原有 stride 直接读 Q/K/V，一遍写进交换缓冲区，结果与参考 permute 按位一致。</li>
+  <li><b>量化传输</b>（近似）：每个「token × 头」的记录按下图压缩。</li>
+</ul>
+<div class="card">
+  <header><span class="t">交互：一条「token × 头」记录的字节布局</span><span class="k">head_dim = 128</span></header>
+  <div class="body">
+    <div class="ctrls"><span class="dim" style="font-size:13px">输出格式</span><div class="seg" id="byteOut"><button data-v="fp8" aria-pressed="true">FP8 E4M3（128 B）</button><button data-v="int8" aria-pressed="false">block-INT8（144 B）</button></div></div>
+    <div class="scroller"><svg id="byteSvg" viewBox="0 0 960 200" role="img" aria-label="字节布局"></svg></div>
+    <div class="kv" id="byteKV"></div>
+  </div>
+  <p class="cap">QKV 记录：384 个 INT8 值、12 个 group-32 的 UE5M3 尺度码、4 字节填充，共 400 B，恰好 16 B 对齐。INT8 输出是 128 值 + 4 尺度 = 132 B，再填充到 144 B；作者说这样对齐后 GB200 上 NCCL 反而更快。FP8 输出是 128 B 的裸 E4M3，不带尺度。项目页写的「BF16 负载的 51.6%」就是 (400+128)/(768+256)，我复算一致。</p>
+</div>
+
+<h3>5.2 MXFP8 GEMM：第 2–46 块的注意力和 FFN 线性层</h3>
+<p class="prose">权重和激活都用 E4M3，沿归约维每 32 个值共享一个 E8M0 尺度，尺度按 cuBLASLt 的 <code>SWIZZLE_32_4_4</code> 布局存放。融合后的 RMSNorm/调制和 SwiGLU 生产者直接写出 E4M3 激活和尺度，省掉中间的 BF16 张量和单独的量化 pass。首尾块、AdaLN、精修器、VAE 和文本/音频编码器保持 BF16。</p>
+<p class="prose">有一个细节值得留意：注意力输出若走 FP8 传输，接收端会<b>直接把裸 E4M3 值当作 MXFP8 输入，尺度一律取 1</b>。E4M3 的最小正规数是 2<sup>−6</sup> ≈ 0.0156，再往下是步长 2<sup>−9</sup> 的次正规数。幅值在 0.01 附近的注意力输出，相对精度会明显变差。论文对这一点没有任何误差分析。</p>
+<div class="kv">
+  <div><b>1.655 → 1.472 s</b><span>8×B300、5 s T2V，只开 MXFP8：−11.1%（仓库 README）</span></div>
+  <div><b>32.30 → 16.65 GiB</b><span>被选中的线性层权重，每卡</span></div>
+  <div class="bad"><b>13.82 dB / 0.540</b><span>同 prompt、同种子下，与 BF16 输出比的 PSNR / SSIM（仓库 README）。论文未报</span></div>
+</div>
+
+<h3>5.3 Sol-Attn：用「均值 + τ 倍标准差」选块</h3>
+<p class="prose">对每个 64 token 的查询块，先拿池化后的 Q、K 算出它和每个 KV 块的代理分数 <span class="mv">ŝ<sub>ij</sub> = Q̄<sub>i</sub>K̄<sub>j</sub><sup>⊤</sup></span>。阈值取这一行的 <span class="mv">μ<sub>i</sub> + τσ<sub>i</sub></span>，超过阈值的块做精确注意力。论文漏讲了一半：Sol-Attn 原论文（2607.24027）里，<b>没被选中的块并不直接丢掉</b>，而是用池化后的 K̄ 和求和后的 V̂ 做零阶泰勒近似，并入同一个 online softmax。μ 和 σ 可以直接由池化键的一、二阶矩算出，不必把整行代理分数写到显存。如果代理分数近似高斯，τ 对应的平均精确密度约为 1−Φ(τ)：τ = 1.0、1.25、1.5 时分别约为 15.9%、10.6%、6.7%。</p>
+<div class="card">
+  <header><span class="t">交互：Sol-Attn 小实验室（浏览器里实时计算的合成注意力）</span><span class="k">48 个 KV 块 × 16 token · d = 32 · 一个查询块</span></header>
+  <div class="body">
+    <div class="ctrls">
+      <label class="rng">τ <input type="range" id="solTau" min="0" max="2.5" step="0.05" value="1.0"><span class="readout" id="solTauV">1.00</span></label>
+      <label class="chk"><input type="checkbox" id="solCorr" checked> 对未选块做零阶近似修正</label>
+      <button class="btn" id="solReseed" type="button">重新采样</button>
+    </div>
+    <div class="scroller"><svg id="solSvg" viewBox="0 0 960 230" role="img" aria-label="代理分数与阈值"></svg></div>
+    <div class="kv" id="solKV"></div>
+  </div>
+  <p class="cap">柱高是代理分数 ŝ<sub>j</sub>，横线是阈值 μ + τσ。蓝色块做精确注意力，灰色块要么丢弃，要么做近似修正。误差指的是这个查询块输出相对于稠密注意力的 ℓ2 相对误差。合成数据的块中心服从高斯分布，其中少数块与查询对齐，这不是 H3 的真实激活，只用来演示机制。</p>
+</div>
+
+<div class="note med">
+  <h5>§3.4 把两套实现写成了一套</h5>
+  <div class="diff">
+    <div class="h">论文 §3.4 的说法</div><div class="h">实际出处</div><div class="h">说明</div>
+    <div class="k">「三个精修步 τ = 1.0 / 1.25 / 1.5」</div><div>LTX Stage-2 精修器的配置（<code>LTX25_REFINER_TAUS</code>）</div><div>单阶段 H3 运行时是 <b>τ 恒为 1.0</b>，外加若干稠密热身步</div>
+    <div class="k x">「前两层保持稠密」</div><div class="x">H3 运行时（<code>dense_layers=2</code>）</div><div class="x">LTX 精修器<b>只有第 0 层稠密</b>，1–47 层都用 Sol</div>
+    <div class="k x">「整段前缀 [text | cond video | audio] 作为精确 sink」</div><div class="x">H3 运行时（<code>sink_mode=prefix</code>，951 个前缀 token）</div><div class="x">LTX 没有 packed 前缀：文本走交叉注意力，音频是另一条流。Spark 的 Ref2VA Stage-1 Sol 明确写着「参考图 token 不作为 sink」</div>
+    <div class="k">「只算超过阈值的块」</div><div>Sol-Attn 原论文</div><div>漏掉了未选块的近似修正，而这是 Sol-Attn 的核心卖点</div>
+  </div>
+  <p>正文还提到验证中见过「视觉分最高、但对白彻底崩坏」的情况。代码注释说那是 H100 交接时<b>一条 prompt</b> 上的观察。这条轶事支持了「把音频放进 sink」的设计，但整篇论文里<b>找不到一个稀疏注意力的质量或速度数字</b>。能找到的只有作者别处的数据：项目页说内核比 FA4 快 3.1×；H3 页在 8×GB200、50 步设置下，加 Sol-Attn 带来的端到端提速是 19.514→17.744 s，约 1.10×。</p>
+</div>
+
+<h3>5.4 算子融合，以及本文最有用的一个发现：LoRA 合并会「悄悄丢更新」</h3>
+<p class="prose">RSI 找到三组可融合的算子：① 残差加法 + 按索引的门控 + RMSNorm + 按索引的 scale/shift 调制；② QK 归一化 + 部分 RoPE；③ SwiGLU 的切分、SiLU 与乘法。项目页估计每张卡每次 DiT 前向能省下约 178 GB 的访存。纯布局变换按位一致，算术融合则可能因为中间精度和舍入不同而不再按位一致。</p>
+<p class="prose">LoRA 部分值得细看。把 <span class="mv">W + BA</span> 合并进 BF16 权重，可以省掉 LoRA 的额外 GEMM。但少步蒸馏 LoRA 的更新量往往很小，<b>小到加上去之后在 BF16 里又舍入回原值</b>。作者在 8 步适配器的 6 个投影里统计到，<b>86.1–94.4%</b> 的非零更新合并后回到了原值。受控诊断（同一输入、第一步）的结果：</p>
+<div class="kv">
+  <div class="bad"><b>35.26%</b><span>合并进 BF16 权重（FP32 计算）vs 原生分支的相对 RMSE</span></div>
+  <div><b>6.24%</b><span>合并但权重保留 FP32</span></div>
+  <div><b>6.08%</b><span>分支本身改为 FP32 计算（说明原生 BF16 分支本身也有约 6% 的误差）</span></div>
+</div>
+<p class="prose">作者的解法叫 consumer fusion：保留 base 和 LoRA 两条分支（同样的 3 个 GEMM、同样的归约顺序），只把 <span class="mv">base + δ</span> 的加法融合进下一个消费者内核，并在原来的位置显式舍入到 BF16。结果与原生分支<b>逐字节一致</b>（3 个 15 s 样本，4 卡上的每次评估），延迟比原生分支低 0.694 s（2.64%），但仍比合并权重慢 0.804 s（3.24%）。图 8 的例子很直观：同种子、同噪声，仅仅是合并方式不同，恐龙长相、女孩发型、蝴蝶爆发的时机就全变了，蝴蝶周围还出现网格状色块。</p>
+<div class="card">
+  <header><span class="t">交互：合并后有多少 LoRA 更新会「舍入回原值」</span><span class="k">W ~ N(0, 0.02²)，δ ~ N(0, (r·0.02)²) 与 W 独立；逐元素检查 round(W+δ) == round(W)</span></header>
+  <div class="body">
+    <div class="ctrls">
+      <label class="rng">更新相对幅度 r <input type="range" id="loraR" min="-4" max="-0.5" step="0.05" value="-3.5"><span class="readout" id="loraRV"></span></label>
+      <div class="seg" id="loraFmt"><button data-v="bf16" aria-pressed="true">突出：合并进 BF16</button><button data-v="mx" aria-pressed="false">突出：BF16 合并后再 MXFP8</button></div>
+    </div>
+    <div class="scroller"><svg id="loraSvg" viewBox="0 0 960 336" role="img" aria-label="舍入回原值比例曲线"></svg></div>
+    <div class="kv" id="loraKV"></div>
+  </div>
+  <p class="cap">横轴为 r（对数），即 LoRA 更新的标准差与权重标准差之比。上图是舍入回原值的元素比例，灰带是论文在 6 个投影上报告的 86.1–94.4%。下图是合并后实际生效的更新 Δ<sub>eff</sub> = round(W+δ) − round(W) 与本意 δ 之间的相对误差（对数轴），超过 100% 说明实际更新主要由舍入噪声构成。BF16 有 8 位有效精度，|δ| 小于 |W| 的约 2<sup>−9</sup>～2<sup>−8</sup> 时就会被吃掉；E4M3 只有 4 位，而且每 32 个值共享一个尺度，吃掉得更多。<b>本文的头条配置正处在这种情况下</b>：表 1 用 merged；GB200 的 Stage 1 在启动时合并 LightX2V LoRA；Spark 是「BF16 合并后再 W8A8 FP8」；而 fused 模式要求 <code>compute-quant=none</code>，与 MXFP8 互斥。</p>
+</div>
+
+<h3>5.5 VAE 解码：196 个 tile 怎么分给 8 张卡</h3>
+<p class="prose">上下文并行只切了 Transformer，VAE 解码默认每张卡都完整解一遍。5 s、1344×768、124 帧时，H3 解码器要处理 7 个时间片段，每片 28 个空间 tile，共 196 个。三步优化：① 把 tile 分到 8 卡，7.55 → 1.16 s；② 每卡同一片段的 4 个 tile 合成一个 batch，→ 0.602 s（1.93×）；③ 编译，→ 0.359 s（对分片基线 3.23×），峰值显存 18.8 → 15.6 GB，但与 eager 结果不再按位一致（最大绝对误差 0.021）。第四步「全局 tile 批处理」把 7 个片段的 tile 放在一起分配，填充槽从 28 个降到 4 个，只调用一次解码与 gather。<b>这一步论文没有给延迟</b>，只给了数值偏差：最大绝对误差 0.0137，PSNR 75.75 dB。</p>
+<div class="card">
+  <header><span class="t">交互：按片段分配 vs 全局分配</span><span class="k">7 片段 × 28 tile = 196 · 8 卡</span></header>
+  <div class="body">
+    <div class="ctrls"><div class="seg" id="tileMode"><button data-v="clip" aria-pressed="true">按片段：7 轮 × 每卡 4 槽</button><button data-v="global" aria-pressed="false">全局：1 轮 × 每卡 25 槽</button></div></div>
+    <div class="scroller"><svg id="tileSvg" viewBox="0 0 960 250" role="img" aria-label="tile 调度"></svg></div>
+    <div class="kv" id="tileKV"></div>
+  </div>
+  <p class="cap">格子里的数字是片段编号，斜线格表示为了凑满 batch 复制的填充 tile。按片段分配时，每片 28 个 tile 分给 8 卡，每卡 4 槽，共 32 槽，其中 4 个是填充，7 个片段合计 28 个；全局分配时 196 个 tile 分给 8 卡，每卡 25 槽，共 200 槽，只有 4 个填充。</p>
+</div>
+</section>
+
+<!-- ============================ §6 ============================ -->
+<section id="s6">
+<h2><span class="no">06</span>边缘：一台 DGX Spark 上 56 秒出片</h2>
+<p class="lede">Spark 的 CPU 和 GPU 共享 <b>119.68 GiB</b> 统一内存。约束不在算力，而在于能不能让所有模型常驻：一旦放不下就得 offload，每个请求都要来回搬权重。作者的估算是，朴素的两阶段部署要 142.4 GiB，超出 22.7 GiB；优化后是 116.9 GiB，留出 2.8 GiB 余量。</p>
+<div class="card">
+  <header><span class="t">内存账本（GiB）：哪些是论文给的，哪些是我推算的</span><span class="k">容量线 119.68 GiB</span></header>
+  <div class="body"><div class="scroller"><svg id="memSvg" viewBox="0 0 960 190" role="img" aria-label="Spark 内存账本"></svg></div></div>
+  <p class="cap">实色段是论文或项目页直接给出的数（NVFP4 Qwen 14.6、FP8 H3 DiT 23.4、Gemma + connector 16.2；适配器取表 4 在 H100 上的峰值 0.785）。斜线段是我用差值推出来的：「H3 VAE 解码器 + LTX VAE 编码器」≈ 142.4 − 116.9 − 16.2 + 0.785 ≈ 10.1 GiB；其余（LTX 精修器、LTX 解码器、上采样器、运行时开销）≈ 78.1 GiB，两根柱子相同。项目页的图例证实了两根柱子里都已经是 FP8 H3 和 NVFP4 Qwen。所以 <b>25.5 GiB 的节省（17.9%）来自拿掉层间 VAE 和 Gemma/connector</b>，与 AdaLN 预计算无关，后者两边都已包含。</p>
+</div>
+
+<h3>6.1 AdaLN 预计算：精确、省内存，但「带宽瓶颈」被说重了</h3>
+<p class="prose">每个块的 <code>adaln_proj</code> 只吃时间步嵌入，而采样调度在循环开始前就固定了，所以整张调制表可以一次算完，按 (block, step) 查表即可。代码刻意逐 (block, step) 各跑一次 GEMM，保证与原模型<b>按位一致</b>，因此这一项不需要任何质量验证。收益有两项：</p>
+<div class="card">
+  <header><span class="t">交互：AdaLN 表的大小与省下的访存</span><span class="k">50 块 × 步数 × 9 行 × 32,256 值（BF16）</span></header>
+  <div class="body">
+    <div class="ctrls"><label class="rng">去噪步数 <input type="range" id="adaSteps" min="1" max="50" step="1" value="4"><span class="readout" id="adaStepsV">4</span></label></div>
+    <div class="kv" id="adaKV"></div>
+  </div>
+  <p class="cap">每块 2688×96,768 ≈ 2.6 亿参数，50 块共 13.0B，BF16 下 26 GB。50 步的表是 1.45 GB，与论文的「≈1.5 GB」一致；4 步只有 116 MB。「每步省 26 GB 读取」换算成时间：在约 8 TB/s 的 HBM3e 上是 3.3 ms/步，在 Spark 的 273 GB/s 上是 95 ms/步。所以真正的收益是<b>省下的 24 GB 内存</b>，带宽只在 Spark 这类设备上才看得出来（4 步 ≈ 0.4 s，占 56 s 的 0.7%）。论文说它「消除了两个严重瓶颈」，带宽这一个说重了。</p>
+</div>
+
+<h3>6.2 Stage 2 的 prompt 缓存</h3>
+<p class="prose">Spark 上的 Stage 2 不再编码用户 prompt，而是离线把一句通用 prompt 过一遍 INT8 Gemma 和 connector，只留下编码后的视频/音频上下文张量：<i>"4K, refined, high quality, cinematic detail, clean textures, natural motion."</i> 这样 Gemma 和 connector 从不上线，腾出 16.2 GiB。论证是「Stage 1 的潜变量已经带了样本特定信息」。这个假设和 §3 的 σ = 0.909 放在一起看就有张力了：精修器要在信号只剩 9% 的输入上重画细节，文本条件却换成了与内容无关的一句话。仓库 README 也承认「缓存的通用条件是质量与性能的取舍，不保证每个场景的身份不变」。论文没有做这项的消融。云端 GB200 版本里 Stage 2 仍然每个请求跑 Gemma（0.644 s）。</p>
+
+<h3>6.3 三个平台的时间都花在哪</h3>
+<div class="card">
+  <header><span class="t">图 5 复原：同一个 5 s、1344×768 请求</span><span class="k">GB200 按项目页逐项；Spark / 5090 按论文百分比</span></header>
+  <div class="body"><div class="legend" id="profLegend"></div><div class="scroller"><svg id="profSvg" viewBox="0 0 960 210" role="img" aria-label="三平台时间剖面"></svg></div></div>
+  <p class="cap">GB200 的 6.226 s 按项目页逐项相加：H3 DiT 3.772 + TAEH3 0.028 + Stage-1 文本/图像编码 0.3728 + Gemma 0.644 + LTX VAE 编码 0.143 + Sol-Attn 精修器 1.079 + TAEHV 0.187 = 6.2258 s。各项占比与论文图 5 的 60.6% / 17.3% 吻合。论文把「LTX VAE 编码」标成了 Latent Transfer。Spark 各项只加到 97.9%，剩下的 2.1% 是项目页列出的 MP4 封装 + 混音（1.3%）和请求开销（0.9%），而表 1 的计时是<b>不含</b> MP4 的。5090 各项只加到 89.9%，剩余 10.1% 论文没有说明。5090 上最大的一块（34.1%）是每个请求都要重建 Qwen 编码器：13.568 s 里真正的前向只有 0.518 s，因为 32 GB 显存放不下全部模型。</p>
+</div>
+</section>
+
+<!-- ============================ §7 ============================ -->
+<section id="s7">
+<h2><span class="no">07</span>Ref2VA 的参考 KV 缓存</h2>
+<p class="lede">H3 最多支持 9 张参考图或 3 段参考视频。参考 token 一多，数量就可能超过生成 token 本身。作者的办法是：第一步完整计算，并缓存参考 token 在每层的 K、V；之后各步<b>跳过参考 token 的查询行</b>，生成 token 直接去注意缓存的参考 K/V。</p>
+<div class="card">
+  <header><span class="t">图 4 复原：注意力矩阵里哪些格子还在算</span><span class="k">行 = 查询，列 = 键</span></header>
+  <div class="body">
+    <div class="ctrls"><div class="seg" id="refStep"><button data-v="1" aria-pressed="true">第 1 步（全算并缓存）</button><button data-v="2" aria-pressed="false">第 2 步及以后</button></div></div>
+    <div class="scroller"><svg id="refSvg" viewBox="0 0 960 300" role="img" aria-label="参考 KV 缓存注意力矩阵"></svg></div>
+  </div>
+</div>
+
+<div class="card">
+  <header><span class="t">交互：参考 token 的代价与缓存的加速上限（我拟合的二次代价模型）</span><span class="k">N₀ = 38,247（无参考时的序列长）</span></header>
+  <div class="body">
+    <div class="ctrls"><label class="rng">去噪步数 N <input type="range" id="refN" min="2" max="50" step="1" value="4"><span class="readout" id="refNV">4</span></label></div>
+    <div class="grid2">
+      <div><div class="dim" style="font-size:12.5px;margin-bottom:4px">左：DiT 时间 ÷ 无参考时，对参考 token 数</div><svg id="refCost" viewBox="0 0 460 260" role="img" aria-label="参考 token 代价"></svg></div>
+      <div><div class="dim" style="font-size:12.5px;margin-bottom:4px">右：表 2 报告的缓存加速 vs 模型给出的理论上限</div><svg id="refSpeed" viewBox="0 0 460 260" role="img" aria-label="缓存加速"></svg></div>
+    </div>
+  </div>
+  <p class="cap">模型：相对代价 T(n) = a·(1+n/N₀) + (1−a)·(1+n/N₀)²，其中线性部分占比 a 由表 2 左图的三个点拟合，得 a = 0.347，均方根残差 0.004。换句话说，表 2 的数字与「注意力是二次代价、在 38k token 时约占 65% 时间」的解释高度吻合。缓存后每步代价约为 a + (1−a)(1+n/N₀)，N 步的加速上限为 N·T / (T + (N−1)·T<sub>cached</sub>)。取 N = 4 时，报告值都在上限的 90–102% 之间，数字本身可信。</p>
+</div>
+<div class="note med">
+  <h5>论证上的一个缺口</h5>
+  <p>论文的理由是「参考潜变量是干净的，只随时间步嵌入弱变化」。但在全自注意力里，参考 token 的查询也会去注意<b>带噪的生成 token</b>，所以从第二层起，参考 token 的 K/V 就依赖当前的 x<sub>t</sub>。第一步缓存，等于把参考表示冻结在「生成部分还是纯噪声」时的状态。后续各步的生成 token 看到的，是一份「见过噪声」的参考特征。论文的依据只有 3 个 V2V 编辑的定性例子（1.416–1.512×）。在因果/自回归的世界模型里，上下文帧本来就不注意正在去噪的块，这个问题不存在；双向模型则需要单独验证。</p>
+</div>
+</section>
+
+<!-- ============================ §8 ============================ -->
+<section id="s8">
+<h2><span class="no">08</span>数字核对：表 1、两阶段账本、头条倍数拆账</h2>
+
+<h3>8.1 表 1：标着 GB200，基线列却与仓库里 B300 上的 SGLang 数字逐位相同</h3>
+<p class="prose">论文表 1 的标题是「Sol-H3 latency on GB200s」，列名是「Base H3」。论文脚注引用的那个 commit 里，<code>Sol-H3/README.md</code> 有一张同样 3×3 的表，写明「measured on NVIDIA B300 SXM6 AC GPUs」，其中 <b>SGLang 那一行的 9 个数与论文的 Base H3 列完全相同</b>。项目页的标题也是「on an 8× NVIDIA B300 Blackwell System」，而论文参考文献 [79] 把它写成了「on an 8× NVIDIA GB200 blackwell system」。同一团队的 H3 项目页在 8×GB200 上实测的 SGLang 基线是 <b>19.300 s</b>，不是 18.250 s。</p>
+<div class="card">
+  <header><span class="t">交互：论文表 1 vs 仓库 README（B300）</span><span class="k">加速比 ÷ 12.25 = 扣掉「49→4 次前向」之后剩下的部分</span></header>
+  <div class="body">
+    <div class="ctrls"><div class="seg" id="t1Mode"><button data-v="paper" aria-pressed="true">论文表 1（标 GB200）</button><button data-v="readme" aria-pressed="false">仓库 README（B300，BF16）</button></div></div>
+    <div class="tbl" id="t1Tbl"></div>
+    <div class="scroller"><svg id="t1Svg" viewBox="0 0 960 230" role="img" aria-label="扣除步数后的剩余加速"></svg></div>
+  </div>
+  <p class="cap">两种可能：要么 Sol-H3 列是在 GB200 上测的，而基线来自 B300，属于跨硬件比较；要么表题写错了。README 还写着「本 PR 的内核验证仅限 SM103 B300」，GB200 是 SM100。计时口径也不同：论文说 Sol-H3 取两次热身后 5 次的中位数，没说基线怎么测；README 是一次热身后 3 次的中位数。不论哪种情况，<b>12.25× 来自换用第三方 4 步 LoRA</b>，扣掉之后，1 卡 5 s 只剩 1.12×，8 卡 5 s 只剩 1.04×。README 自己也写了：「与 49 次前向的基线之差不是纯运行时的加速」。</p>
+</div>
+
+<h3>8.2 两阶段 GB200：一个工作负载，三个基线，两个「端到端」</h3>
+<div class="tbl"><table>
+<thead><tr><th>出处</th><th>Sol-H3 两阶段</th><th>基线</th><th class="num">倍数</th><th>备注</th></tr></thead>
+<tbody>
+<tr><td>论文 §6.1</td><td>6.852 s（4.173 + 2.679）</td><td>SGLang 152.3 s</td><td class="num">22.2×</td><td>「measured on a single NVIDIA GB200」</td></tr>
+<tr><td>论文图 5</td><td>6.226 s</td><td>167.8 s（项目页标为 <b>Diffusers</b>）</td><td class="num">27.0×</td><td>不含 mux 与清理</td></tr>
+<tr class="hl"><td>论文引言</td><td>6.23 s</td><td>「serving baseline」</td><td class="num">22.2×</td><td><span class="flag">错配</span>：152.3/6.23 = 24.4×，167.8/6.23 = 26.9×</td></tr>
+<tr><td>（对照）表 1 的单卡基线</td><td>6.852 / 6.226 s</td><td>129.898 s</td><td class="num">19.0× / 20.9×</td><td>若拿论文自己的表 1 基线</td></tr>
+<tr class="hl"><td>项目页 H3 Super Acceleration</td><td>6.852 s</td><td>SGLang 152.3 s</td><td class="num">22.2×</td><td><span class="flag">「combines separately measured Stage 1 blocks … with the latest Stage 2 means」</span></td></tr>
+<tr class="hl"><td>仓库 super_acceleration（正式 job 6304303）</td><td>6.7605 s（20 次热请求中位数）</td><td>—</td><td class="num">不声明</td><td><span class="flag">每个请求占 2 张 GB200</span>；「no matched baseline… makes no speedup claim」「perceptual quality gate was not run」</td></tr>
+<tr><td>（对照）单阶段 4 步全分辨率，表 1</td><td>9.475 s</td><td>—</td><td class="num">—</td><td>两阶段对它只快 1.38–1.52×，这才是两阶段的「边际贡献」</td></tr>
+</tbody></table></div>
+<div class="card">
+  <header><span class="t">同一条两阶段管线，优化前后各花在哪（项目页逐项数字）</span><span class="k">16.320 s → 6.226 s，2.62×</span></header>
+  <div class="body"><div class="legend" id="ledLegend"></div><div class="scroller"><svg id="ledSvg" viewBox="0 0 960 200" role="img" aria-label="优化前后账本"></svg></div><div class="kv" id="ledKV"></div></div>
+  <p class="cap">这是全文唯一一处「算法不变、只换实现」的前后对比，数字来自项目页，论文里没有。省下的 10.09 s 里，<b>9.62 s（95%）来自把完整 VAE 换成小自编码器</b>：H3 VAE 解码 3.427 → TAEH3 0.028 s，LTX VAE 解码 6.404 → TAEHV 0.187 s。Sol-Attn 精修器省 0.85 s（8%）。另有 0.37 s 的 Stage-1 文本/图像编码只出现在「当前」这一侧，是记账口径不一致（−4%）。H3 DiT 那 3.772 s 在两侧完全相同。TAE 是近似解码器，其 README 写着「detail and contrast are not expected to be perceptually identical」。<b>论文正文完全没提 TAE。</b></p>
+</div>
+
+<h3>8.3 头条倍数拆账：光是算法层面，FLOPs 就少了多少</h3>
+<p class="prose">如果不做任何系统优化，只改算法（49 步全分辨率 H3 → 4 步低分辨率 H3 + 3 步 LTX 精修），DiT 的计算量会少多少？下面用「2·P·N + 4·L·N²·d」这个粗估，把 LTX 的参数量和 Stage 1 分辨率做成可调项。LTX-2.5 的具体规模论文没给，默认按 15B 视频流估算，可以自己拖动。</p>
+<div class="card">
+  <header><span class="t">交互：算法层 FLOPs 缩减 vs 实测倍数</span><span class="k">只算 DiT；不含 VAE / 文本编码</span></header>
+  <div class="body">
+    <div class="ctrls">
+      <span class="dim" style="font-size:13px">Stage 1 分辨率</span>
+      <div class="seg" id="flRes"><button data-v="896" aria-pressed="true">896×512（GB200 实测）</button><button data-v="672" aria-pressed="false">672×384（论文 / Spark）</button></div>
+      <label class="rng">LTX 视频流参数 <input type="range" id="flP" min="8" max="22" step="1" value="15"><span class="readout" id="flPV">15B</span></label>
+      <label class="chk"><input type="checkbox" id="flSparse"> Stage 2 注意力按 Sol-Attn 密度约 12% 计</label>
+    </div>
+    <div class="scroller"><svg id="flSvg" viewBox="0 0 960 200" role="img" aria-label="FLOPs 拆账"></svg></div>
+    <div class="kv" id="flKV"></div>
+  </div>
+  <p class="cap">token 数：基线为 38,247；Stage 1 在 896×512 时 16,576 + 951 = 17,527，在 672×384 时 9,324 + 951 = 10,275；Stage 2 的 LTX 是 16 个潜变量帧 × 42×24 = 16,128 个视频 token。LTX 同分辨率下 token 少，是因为它的 VAE 时间压缩 8×，H3 只有 4×。结论与参数取值关系不大：<b>仅换算法，DiT 计算量就少了约 23–26×（GB200 那条）或 34–39×（Spark 那条）</b>。实测倍数（22.2× / 27.0× / 31×）落在同一量级，说明头条倍数基本是算法换来的。系统优化的作用是让小形状下的 GPU 效率不至于塌掉，但论文没有任何实验能把它单独量出来。</p>
+</div>
+
+<h3>8.4 其他逐项复算（全部通过的放在这里）</h3>
+<div class="tbl"><table>
+<thead><tr><th>项目</th><th>论文数字</th><th>复算</th><th>结论</th></tr></thead>
+<tbody>
+<tr><td>表 1 九个加速比</td><td>13.71× … 16.99×</td><td>逐一 Base/Sol</td><td><span class="okf">✓</span></td></tr>
+<tr><td>「3.5× 快于实时」</td><td>5 s / 1.434 s</td><td>3.487×</td><td><span class="okf">✓</span>（单阶段 8 卡；10 s、15 s 分别为 2.99×、2.47×）</td></tr>
+<tr><td>Spark 内存</td><td>142.4 超出 22.7；116.9 余 2.8</td><td>142.4−119.68 = 22.72；119.68−116.9 = 2.78</td><td><span class="okf">✓</span>；节省 17.9%，「近 20%」</td></tr>
+<tr><td>Spark / 5090 倍数</td><td>31× / 26.3×</td><td>1740.81/56.17 = 30.99；1045.4/39.80 = 26.27</td><td><span class="okf">✓</span>（但 1740.81 s 的出处见 §9）</td></tr>
+<tr><td>表 5 LoRA 融合</td><td>−0.694 s（2.64%）；回收 46.3%；比合并慢 3.24%</td><td>0.694/26.283；0.694/1.498；0.804/24.785</td><td><span class="okf">✓</span></td></tr>
+<tr><td>表 2 参考 token</td><td>1.71× / 2.83× / 3.94×</td><td>二次代价模型拟合残差 0.004</td><td><span class="okf">✓</span></td></tr>
+<tr><td>§6.4 成对比较数</td><td>3,000 = 720 + 1,800 + 120 + 360</td><td>C(4,2)·120, C(6,2)·120, C(2,2)·120, C(3,2)·120</td><td><span class="okf">✓</span>（但结果一个数都没报）</td></tr>
+<tr><td>AdaLN 参数与表大小</td><td>≈13B；≈1.5 GB</td><td>50×2688×96,768 = 13.006B；50×50×9×32,256×2 B = 1.45 GB</td><td><span class="okf">✓</span></td></tr>
+<tr><td>通信 payload</td><td>QKV 400 B；输出 144 / 128 B</td><td>(400+128)/(768+256) = 51.6%</td><td><span class="okf">✓</span></td></tr>
+<tr><td>适配器参数</td><td>194.76M</td><td>按代码逐层累加 194,759,504</td><td><span class="okf">✓</span></td></tr>
+<tr><td>VAE 解码</td><td>7.55→1.16→0.602→0.359 s</td><td>6.51× · 1.93× · 3.23×（对分片基线）；合计 21.0×</td><td><span class="okf">✓</span></td></tr>
+</tbody></table></div>
+</section>
+
+<!-- ============================ §9 ============================ -->
+<section id="s9">
+<h2><span class="no">09</span>存疑清单（18 条）</h2>
+<p class="lede">排序按「对结论的影响」而不是「错误的大小」。每条都附了论文原文和对照证据的出处。凡是涉及仓库和项目页的，核对的都是<b>论文脚注引用的那个 commit</b>（51b14fd）和 <code>page</code> 分支里的页面源码。</p>
+<div class="sevbar"><div class="seg" id="sevFilter"><button data-v="all" aria-pressed="true">全部 18</button><button data-v="high" aria-pressed="false">高 5</button><button data-v="med" aria-pressed="false">中 8</button><button data-v="low" aria-pressed="false">低 5</button></div>
+<button class="btn" id="openAll" type="button">全部展开</button></div>
+
+<div id="issues">
+
+<details class="issue high" data-sev="high"><summary><span class="n">H1</span><span class="ti">GB200 上 22.2× / 27.7× 的两阶段结果，不是 §3.1 描述的那条管线测出来的</span><span class="tag high">高</span></summary><div class="ib">
+<p>§3.1 描述的是：672×384、FastH3 VSA DataFree LoRA、H3 ×2 上采样器 + 学习型适配器，并声称「完全消除 VAE 解码再编码」。这与 Spark 的配置一致。§6.1 的 GB200 数字（6.852 s / 14.931 s）实际对应项目页和仓库 <code>super_acceleration/</code> 的那条管线，差别有六处：</p>
+<ul class="tight"><li>Stage 1 在 <b>896×512</b> 下运行，任务是 <b>FL2VA 首帧条件</b>，而非纯文本；</li><li>LoRA 是 <b>LightX2V 4step_v0.1_544p</b>，启动时合并，scale 0.0625；</li><li>交接走<b>像素</b>：TAEH3 解码 → 缩到 672×384 → <b>LTX 原版视频 VAE 编码</b> → 官方 ×2 潜变量上采样；</li><li>Stage 2 额外拿到 1344×768 首帧，作为硬条件；</li><li>最终用 <b>TAEHV</b> 近似解码；</li><li>适配器<b>没有参与</b>。</li></ul>
+<p class="quote">"Stage 1 obtains 124 decoded 896x512 frames from TAEH3, retains the first 121, resizes them on CUDA to 672x384 … Encode the direct 672x384/121-frame video with the original LTX-2.5 Video VAE input encoder."<span class="src">super_acceleration/STAGE2_CONTRACT.md</span></p>
+<p class="quote">"Stage 2 retains the original LTX-2.5 Video VAE encoder because the Refiner was trained on its latent distribution."<span class="src">项目页 H3-Super-Acceleration</span></p>
+<p><b>影响</b>：论文把两套配方的「设计」和「数字」拼在了一起。读者会以为 22.2× 里包含了适配器的功劳，而实际起作用的是 TAE。</p>
+</div></details>
+
+<details class="issue high" data-sev="high"><summary><span class="n">H2</span><span class="ti">「单张 GB200 端到端 6.852 s」是两段分别测量后相加；仓库的正式测量每请求用 2 张卡，并明确不声明加速比</span><span class="tag high">高</span></summary><div class="ib">
+<p>论文原文是「measured on a single NVIDIA GB200 … end-to-end latency of 6.852 s, comprising 4.173 s for Stage 1 and 2.679 s for Stage 2」。项目页的计时说明是「Sol-Super combines separately measured Stage 1 blocks of 4.1728 and 9.8204 seconds … with the latest Stage 2 means from 10 hot complete-service requests」。仓库的正式测量（job 6304303）是 Stage 1 一张 GB200、Stage 2 另一张 GB200，20 次热请求的中位数为 6.7605 s，结论写的是：</p>
+<p class="quote">"There is no matched same-profile end-to-end baseline, so this directory makes no speedup claim. A perceptual quality gate was not run, so successful media/telemetry validation must not be described as a quality pass."<span class="src">super_acceleration/README.md</span></p>
+<p>引言里的「6.23 s，22.2×」也错配了：6.23 s 是图 5 不含 mux 的口径，对应 Diffusers 167.8 s 的 27.0×；22.2× 对应的是 6.852 s 与 SGLang 152.3 s。项目页上那组「每卡每天 12.6K 条、毛利 97.4%」的吞吐估算，同样是按一卡一请求算的。</p>
+</div></details>
+
+<details class="issue high" data-sev="high"><summary><span class="n">H3</span><span class="ti">表 1 标 GB200，但 Base H3 的 9 个数与仓库 README 里 B300 上 SGLang 的数字逐位相同</span><span class="tag high">高</span></summary><div class="ib">
+<p>129.898 / 376.942 / 746.885、35.328 / 100.440 / 194.930、18.250 / 50.660 / 99.513：九个数完全一致。README 写明「measured on NVIDIA B300 SXM6 AC GPUs」。项目页标题是「8× NVIDIA B300」，而论文参考文献 [79] 写成了「8× NVIDIA GB200」。作者的 H3 项目页在 8×GB200 上测的 SGLang 是 19.300 s。README 还写着「Kernel validation for this PR is limited to SM103 B300」（GB200 是 SM100，BENCHMARK_REFERENCE 里记为 compute capability 10.0）。</p>
+<p><b>影响</b>：要么是跨硬件比较（GB200 上的 Sol-H3 对 B300 上的基线），要么是表题写错。无论哪种，表 1 都不是「同硬件、同协议」的比较。论文 §2.3 自己要求的恰恰是「same baseline on the same hardware」。</p>
+</div></details>
+
+<details class="issue high" data-sev="high"><summary><span class="n">H4</span><span class="ti">头条倍数主要来自「换了生成合同」，这违反了论文 §2.2 自己立的规矩；RSI 的贡献无法从中分离</span><span class="tag high">高</span></summary><div class="ib">
+<p class="quote">"evaluating a different generation contract is not equivalent to accelerating a fixed one."<span class="src">论文 §2.2</span></p>
+<ul class="tight"><li>表 1 的 12.7–17.0× 里，49→4 次前向（第三方 FastH3 LoRA）就占了 12.25×，剩下的只有 1.04–1.39×（§8.1）。</li><li>两阶段：只看算法，DiT 的 FLOPs 就少了约 23–26×（我的估算，§8.3），与实测 22.2× 同量级。</li><li>全文唯一「算法不变、只换实现」的对比在项目页上（16.32 → 6.226 s，2.62×），其中 95% 的节省来自把完整 VAE 换成 TAE，属于近似解码，而且论文里没有出现。</li></ul>
+<p>没有一张「同 LoRA、同分辨率、逐项加上 RSI 组件」的消融表。标题叫「Recursive Self-Improvement for … Inference Acceleration」，但 RSI 对头条数字贡献了多少，读者无从知道。</p>
+</div></details>
+
+<details class="issue high" data-sev="high"><summary><span class="n">H5</span><span class="ti">没有任何量化质量评估；仅有的定性例子是首帧条件任务；仓库自测的 MXFP8 偏差未报</span><span class="tag high">高</span></summary><div class="ib">
+<ul class="tight"><li>表 1 配置、两阶段、Spark、5090：没有 VBench、FVD、人评，也没有音频或口型同步指标。</li><li>§6.4 做了 3,000 次成对比较（人评子集 + VLM「Astra」），<b>却一个胜率都没报</b>，只列了「我们偏好」的适配器名字。</li><li>图 6 的三个例子在仓库资产里是 <b>FL2VA 首帧条件</b>的对白任务（prompt 开头就是「Use the supplied image as the exact opening frame」）。其首帧元数据写着 <code>"derivation": "first_decoded_frame_of_existing_…_benchmark_video"</code>、<code>"source_setting": "minimax-h3-bf16-50step-5s"</code>。如果字段含义如其名，那么加速版与 50 步基线共享首帧，「保持场景结构与身份」几乎是自动成立的。</li><li>仓库 README：只开 MXFP8，输出与 BF16 相比 PSNR <b>13.82 dB</b>、SSIM 0.540。作者的 H3 页：即便是 50 步的 Sol-Engine「保质量」配置，LPIPS 也有 0.21。</li></ul>
+<p>图 8 本身就说明，任何数值改动都会让同种子下的样本面目全非，所以只能做分布层面的质量评估。这恰恰是本文缺的。</p>
+</div></details>
+
+<details class="issue med" data-sev="med"><summary><span class="n">M6</span><span class="ti">「精度保持的 LoRA 融合」没有进入任何头条配置，而头条配置正是论文诊断出有问题的「合并」</span><span class="tag med">中</span></summary><div class="ib">
+<p>表 1 写的是「merged four-step LoRA」。GB200 Stage 1 是「LightX2V four-step LoRA merged at startup」。Spark 是 <code>"W8A8_FP8_after_BF16_LoRA_merge"</code>。运行时默认 <code>--lora-mode merged</code>，而 fused 模式要求 <code>--compute-quant none</code>（「Quantized linear compute is not supported in branch modes」），与 MXFP8 互斥。论文自己的诊断是「BF16 合并吃掉 86–94% 的更新、首步相对 RMSE 35%」，这正好落在它的所有头条配置上。「合并后再量化到 FP8/MXFP8」的误差更大（见 §5.4 实验室），却完全没有量化。</p>
+</div></details>
+
+<details class="issue med" data-sev="med"><summary><span class="n">M7</span><span class="ti">§3.4 的稀疏注意力把 LTX 精修器和单阶段 H3 两套策略写成了一套，并漏掉了近似修正；没有给出任何数字</span><span class="tag med">中</span></summary><div class="ib">
+<p>「三个精修步 τ = 1/1.25/1.5」来自 LTX 精修器，该精修器只有第 0 层稠密。「前两层稠密」和「整段前缀当 sink」来自 H3 运行时，那里 τ 恒为 1.0。LTX 没有 packed 前缀。Spark 的 Ref2VA Stage-1 Sol 写着「neither H3 reference-image tokens nor Qwen visual tokens are sinks」，与论文「protection covers the entire prefix」相反。Sol-Attn 的核心是对未选块做零阶近似，论文只写了「只算超过阈值的块」。另外，没有稀疏率、速度或质量的数字。</p>
+</div></details>
+
+<details class="issue med" data-sev="med"><summary><span class="n">M8</span><span class="ti">Stage 2 从 σ = 0.909 开始（信号只剩 9%），远不止「补细节」；音画来自两个模型，没有同步指标；通用 prompt 没有消融</span><span class="tag med">中</span></summary><div class="ib">
+<p>论文没写 Stage 2 的 σ 调度。代码里是 0.909 → 0.725 → 0.422 → 0。最终音轨是 H3 原音，LTX 联合去噪出来的音频被丢弃，而画面（含嘴型）由 LTX 重画。在 Spark 上，这一步的文本条件还是一句与内容无关的通用 prompt。论文说「Stage 2 does not require per-sample text conditioning」，却没有做一个「用户 prompt vs 通用 prompt」的对比。云端版本其实仍然每个请求都跑 Gemma。</p>
+</div></details>
+
+<details class="issue med" data-sev="med"><summary><span class="n">M9</span><span class="ti">适配器：训练用真实视频的编码，部署时输入的却是放大后的生成草稿；质量只测到 Stage 2 之前；测速形状和硬件都不是部署时的</span><span class="tag med">中</span></summary><div class="ib">
+<p>训练对是「同一段真实视频在 1344×768 下分别用两个 VAE 编码」。推理时输入的是 672×384 生成草稿，经第三方 ×2 上采样器放大后的潜变量，两者分布不同。30.6 dB 衡量的是「与 LTX 自身重建是否一致」，接入管线后的最终视频没有评估，也没和完整 VAE 往返、TAE 往返比过质量。表 4 用的是早期 checkpoint、H100、192 帧。</p>
+</div></details>
+
+<details class="issue med" data-sev="med"><summary><span class="n">M10</span><span class="ti">Spark 的「31×」基线（≈1740.81 s）无处可查；项目页自己的对比是 6.7×</span><span class="tag med">中</span></summary><div class="ib">
+<p>仓库和三个项目页里都找不到 1740.81 这个数，论文也只写了「roughly」。Spark 项目页的对比是：4 步 LoRA 基线 374 s → 56 s，<b>6.7×</b>；4 步 LoRA + 量化 153 s → <b>2.7×</b>。所以 31× 里大部分来自蒸馏 LoRA，以及避免了 49 步全分辨率下的 CPU offload。摘要里的「up to 30×」就来自这里。</p>
+</div></details>
+
+<details class="issue med" data-sev="med"><summary><span class="n">M11</span><span class="ti">RSI 循环没有被描述；「fail-closed：接受的改动保证 like-for-like」与实际被接受的有损模式矛盾</span><span class="tag med">中</span></summary><div class="ib">
+<p>缺的信息包括：agent 是谁、迭代多少轮、搜索空间多大、数值一致性阈值是多少、拒绝了多少候选、人工介入了多少。前作 Sol Engine 的作者栏里有 Codex，作者的 H3 页写着「3.95× in 4.5 hours of optimization」（50 步设置），这些都没有在本文出现。§2.3 说被接受的改动「guaranteed to be a like-for-like reduction」，可 MXFP8、INT8/FP8 传输、稀疏注意力都被接受了，而且都会改变输出。「递归自我改进」一词也不准确，agent 改进的不是它自己。</p>
+</div></details>
+
+<details class="issue med" data-sev="med"><summary><span class="n">M12</span><span class="ti">参考 KV 缓存的理由不完整：在全自注意力下，参考 token 的深层 K/V 依赖带噪的目标 token</span><span class="tag med">中</span></summary><div class="ib">
+<p>论文只讨论了时间步嵌入带来的漂移。在第一步缓存，等于把参考表示冻结在「目标还是纯噪声」时的上下文里。证据只有 3 个 V2V 编辑的定性例子。加速比本身与二次代价模型吻合（§7），问题在于「近似到底有多大」没有被量化。</p>
+</div></details>
+
+<details class="issue med" data-sev="med"><summary><span class="n">M13</span><span class="ti">基线与计时口径五花八门</span><span class="tag med">中</span></summary><div class="ib">
+<p>同一个「5 s、1344×768、单卡」工作负载，出现了 129.898 s（表 1，实为 B300 上的 SGLang）、152.3 s（SGLang）、167.8 s（Diffusers）三个基线，且都没有说明测量协议。计时口径也不同：表 1 不含 MP4 编码；Spark 的 56.17 s 含 MP4 封装与混音（1.3%）和请求开销（0.9%）；GB200 的 6.852 s 含 Stage-2 服务里的 mux，6.226 s 则不含。项目页说基线是「author-supplied warm end-to-end measurements」。</p>
+</div></details>
+
+<details class="issue low" data-sev="low"><summary><span class="n">L14</span><span class="ti">AdaLN 预计算「消除了严重的带宽瓶颈」说重了；它也不在 Spark 那 17.9% 的内存节省里</span><span class="tag low">低</span></summary><div class="ib">
+<p>每步 26 GB 在约 8 TB/s 的 HBM 上约 3.3 ms，占 49 步基线不到 0.2%。在 Spark 上约 95 ms/步，4 步约 0.4 s。真正的收益是 24 GB 内存。Spark 的 142.4 → 116.9 GiB 两根柱子都已是 FP8 H3，节省来自拿掉层间 VAE 和 Gemma/connector。</p>
+</div></details>
+
+<details class="issue low" data-sev="low"><summary><span class="n">L15</span><span class="ti">零散的数字 / 标注问题</span><span class="tag low">低</span></summary><div class="ib">
+<ul class="tight"><li>表 2 中「2 images」为 28,432 ≠ 2×14,344 = 28,688，其余组合都严格可加（2 videos = 2×31,792；video + image = 31,792 + 14,344），3 images 比 2 images 又正好多 14,344。</li><li>图 5 里 Spark、5090 的分项分别只加到 97.9%、89.9%。</li><li>49 步与 50 步混用（仓库解释为 50 个调度点 = 49 次前向，不算错）。</li><li>表 4 里 Tiny AE 往返的峰值内存（23.85 GiB）反而高于完整 VAE（13.79 GiB），作者归因于其并行执行模式。</li><li>图 6 的「1080p，42.6×」全文没有对应的计时。</li></ul>
+</div></details>
+
+<details class="issue low" data-sev="low"><summary><span class="n">L16</span><span class="ti">FP8 注意力输出以单位尺度直接当作 MXFP8 输入，精度影响没有分析</span><span class="tag low">低</span></summary><div class="ib">
+<p>E4M3 的最小正规数是 2<sup>−6</sup>，其下是步长 2<sup>−9</sup> 的次正规数。幅值在 10<sup>−2</sup> 附近的注意力输出，量化相对误差可达约 10%。论文只写了「approximate」。</p>
+</div></details>
+
+<details class="issue low" data-sev="low"><summary><span class="n">L17</span><span class="ti">§6.4 的 VLM 评审「Astra」身份不明，只看画面不听声音；Stage 1 实际用的适配器不在它「偏好」的名单里</span><span class="tag low">低</span></summary><div class="ib">
+<p>一个音视频模型的少步适配器比较，自动评审却只看 16 帧画面。Spark Stage 1 用的是 FastH3 VSA DataFree，GB200 Stage 1 用的是 LightX2V 4step_v0.1_544p，都不在 §6.4 点名推荐的 T2VA 4-NFE 名单（Larry's Turbo v4、LightX2V FL2VA Turbo v1.2）里。</p>
+</div></details>
+
+<details class="issue low" data-sev="low"><summary><span class="n">L18</span><span class="ti">「两阶段」的正确对照应该是单阶段 4 步全分辨率，而不是 49 步基线</span><span class="tag low">低</span></summary><div class="ib">
+<p>作者手上就有单阶段 4 步全分辨率的数字：表 1 单卡 5 s 为 9.475 s。两阶段相对它只快 1.38–1.52×，代价是分辨率换手、换了一个模型、画面被 LTX 重画。这个「边际收益 vs 质量代价」才是两阶段设计真正需要回答的问题，论文没有做这个对比。</p>
+</div></details>
+</div>
+</section>
+
+<!-- ============================ §10 ============================ -->
+<section id="s10">
+<h2><span class="no">10</span>可取之处、对世界模型的启示、最值钱的补充实验</h2>
+<div class="grid2">
+<div class="note ok"><h5>做对了的</h5>
+<ul class="tight">
+<li><b>LoRA 合并的舍入诊断</b>：先统计每个投影的 round-back 比例，再把「权重存储精度」和「GEMM 精度」分开测（35.26% / 6.24% / 6.08%），配上图 8 那种「同种子、仅合并方式不同」的受控演示。所有部署蒸馏 LoRA 的人都应该照做一遍。</li>
+<li><b>AdaLN 预计算</b>：刻意逐 (block, step) 跑 GEMM 以保证按位一致，省 24 GB，不需要任何质量门槛。</li>
+<li><b>适配器的工程细节</b>：按物理时间对齐、无参数打包（每个源 token 恰好保留一次）、岭回归初始化的冻结跳连、解码器感知损失、held-out 256 段加配对 bootstrap 置信区间。参数量我按代码复算完全吻合。</li>
+<li><b>通信与 VAE 的小工程</b>：QKV 打包后一遍写入，并记下了朴素写法反而慢 4.7% 的负结果；196 个 tile 做全局批处理，填充从 28 个降到 4 个。</li>
+<li><b>仓库文档比论文诚实</b>：「no speedup claim」「quality gate was not run」「not a runtime-only speedup」「13.82 dB」这些话都写在仓库里，可惜没进论文。</li>
+</ul></div>
+<div class="note plain"><h5>对交互式视频世界模型的启示</h5>
+<ul class="tight">
+<li><b>草稿 + 精修</b>：精修器从 σ ≈ 0.9 开始时是在重新生成，逐块流式场景下的跨块一致性和动作响应都要单独评估。流式还需要因果的精修器，LTX 是双向的。</li>
+<li><b>跨 VAE 翻译器</b>：想把世界模型的潜变量接到另一个解码器或精修器（参见本仓库的 renderer 候选文档），可以照搬「物理时间对齐 + 打包 + 解码器感知损失」这一套。但要在<b>生成分布</b>上训练和评估，不能只用真实视频的编码。</li>
+<li><b>LoRA 合并</b>：Self-Forcing / DMD 类的少步 LoRA 合并进 BF16 前，先统计一下 round-back 比例；上了 FP8 更要统计。</li>
+<li><b>AdaLN 预计算</b>：只对每块都带大 AdaLN 的架构才值（H3 占 39%）。Wan 系用的是共享的小投影，收益很小。</li>
+<li><b>上下文 KV 缓存</b>：因果世界模型里天然成立；双向模型里缓存条件 token 是一种近似。</li>
+<li><b>测速体检清单</b>：分段分别测完再相加、跨硬件的基线、换了合同的倍数、把 TAE 当作解码器，在世界模型的 FPS 报告里同样常见。</li>
+</ul></div>
+</div>
+<div class="note med"><h5>最值钱的补充实验（按性价比排）</h5>
+<ol class="tight">
+<li><b>同合同消融</b>：固定同一个 4 步 LoRA、同一分辨率、同一台 GB200，逐项加上布局融合 → 算术融合 → 通信量化 → MXFP8 → Sol-Attn → VAE 优化，报告每一步的端到端延迟和质量。这张表能直接回答「RSI 值多少」。</li>
+<li><b>两阶段 vs 单阶段 4 步全分辨率</b>：比较质量（VBench + 人评 + 口型同步 LSE-C/D + 音质），并把 §6.4 已经跑完的 3,000 次比较的胜率报出来。</li>
+<li><b>在同一台 GB200 上、用同一协议重测基线</b>（SGLang 与 Diffusers 都测），替换表 1 的基线列。</li>
+<li><b>适配器</b>：在「上采样后的生成草稿」上评估；比较三种交接（适配器 / TAE 往返 / 完整 VAE 往返）在 Stage 2 之后的最终质量；扫描 Stage 2 的起始 σ（0.909 / 0.8 / 0.7），看身份保持与细节之间的取舍。</li>
+<li><b>merged vs fused</b>：在头条配置下对比质量，并统计「BF16 合并 → MXFP8」之后的 round-back 比例。</li>
+<li><b>参考 KV 缓存</b>：量化近似误差，比如每隔 k 步刷新一次缓存，或让参考 token 只注意参考 token 的变体。</li>
+</ol></div>
+</section>
+
+<!-- ============================ §11 ============================ -->
+<section id="s11">
+<h2><span class="no">11</span>来源与核对说明</h2>
+<ul class="tight" style="font-size:14.5px">
+<li>论文：<a href="https://arxiv.org/abs/2609.35110">arXiv 2609.35110v1</a>（全文逐页读过，含附录 A/B）。</li>
+<li>代码：<a href="https://github.com/NVlabs/Sana/pull/503">NVlabs/Sana PR #503</a>，commit <code>51b14fd6f262</code>。重点核对了 <code>models/minimax_h3/Sol-H3/README.md</code>、<code>LORA_FUSION.md</code>、<code>h3_runtime/{adaln,sparse_attention,ulysses}.py</code>；<code>Sol-H3-Spark/{README.md,configs/default.json,docs/validation.md,runtime/stage2*.py,runtime/stage2_ops/h3_ltx_adapter/*}</code>；<code>super_acceleration/{README.md,STAGE2_CONTRACT.md,BENCHMARK_REFERENCE.json,assets/*.json}</code>；<code>ltx2.5-refiner/README.md</code> 与配置。</li>
+<li>项目页（<code>page</code> 分支源码）：<a href="https://nvlabs.github.io/Sana/Sol-Engine/H3-Super-Acceleration/">H3 Super Acceleration</a>、<a href="https://nvlabs.github.io/Sana/Sol-Engine/Sol-H3/">Sol-H3</a>、<a href="https://nvlabs.github.io/Sana/Sol-Engine/Sol-H3-Spark/">Sol-H3 Spark</a>，以及 H3 / H3-DataCenter / H3-OnDevice 三页。</li>
+<li>相关论文：<a href="https://arxiv.org/abs/2606.23743">Sol Video Inference Engine（2606.23743）</a>、<a href="https://arxiv.org/abs/2607.24027">Sol-Attn（2607.24027）</a>。</li>
+<li>本页所有「我复算」「我推算」「我的估算」都在浏览器里用内嵌 JS 实时计算。估算项已注明假设。凡与论文不一致之处，都给出了论文原文与对照出处，便于逐条复查。</li>
+</ul>
+<footer>
+<p>本页是读者的解读，不代表作者观点；有分歧时以论文原文为准。项目页与仓库属于作者自己发布的材料，此处用作对照证据。</p>
+<p class="dim">Explainer · 2609.35110 · 生成于 2026-09-30</p>
+</footer>
+</section>
+
+</div>
+
+<script>
+(function(){
+"use strict";
+/* ---------------- helpers ---------------- */
+const $=s=>document.querySelector(s);
+const NS="http://www.w3.org/2000/svg";
+function E(tag,attrs,parent){const e=document.createElementNS(NS,tag);if(attrs)for(const k in attrs){if(k==="text")e.textContent=attrs[k];else e.setAttribute(k,attrs[k]);}if(parent)parent.appendChild(e);return e;}
+function clear(n){while(n.firstChild)n.removeChild(n.firstChild);}
+function seg(id,cb){const g=document.getElementById(id);if(!g)return;g.addEventListener("click",ev=>{const b=ev.target.closest("button");if(!b||!g.contains(b))return;g.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x===b?"true":"false"));cb(b.dataset.v);});}
+function segVal(id){const b=document.querySelector("#"+id+' [aria-pressed="true"]');return b?b.dataset.v:null;}
+const f=(x,d=2)=>Number(x).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
+const fi=x=>Math.round(x).toLocaleString("en-US");
+function kv(el,items){el.innerHTML=items.map(it=>`<div class="${it.c||""}"><b>${it.v}</b><span>${it.l}</span></div>`).join("");}
+function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function gauss(r){let u=0,v=0;while(u===0)u=r();while(v===0)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function erf(x){const t=1/(1+0.3275911*Math.abs(x));const y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x);return x>=0?y:-y;}
+const Phi=x=>0.5*(1+erf(x/Math.SQRT2));
+const col=v=>`var(--${v})`;
+function tw(str,fs){let w=0;for(const ch of String(str)){const c=ch.codePointAt(0);w+=c>0x2E80?fs*1.0:fs*0.58;}return w;}
+function fitLabel(cands,w,fs){for(const c of cands){if(tw(c,fs)+10<=w)return c;}return null;}
+function sLegend(s,x,y,items,fs){fs=fs||11.5;items.forEach(([c,l,kind])=>{if(kind==="line")E("rect",{x,y:y-5,width:14,height:3,rx:1,style:`fill:var(--${c})`},s);else E("rect",{x,y:y-9,width:10,height:10,rx:2,style:`fill:var(--${c})`},s);E("text",{x:x+16,y,text:l,class:"ink3",style:`font-size:${fs}px`},s);x+=16+tw(l,fs)+14;});}
+
+/* ---------------- tooltip ---------------- */
+const tip=$("#tip");
+function tipShow(ev,html){tip.innerHTML=html;tip.classList.add("on");tipMove(ev);}
+function tipMove(ev){const pad=14;let x=(ev.clientX||0)+pad,y=(ev.clientY||0)+pad;const r=tip.getBoundingClientRect();if(x+r.width>window.innerWidth-8)x=(ev.clientX||0)-r.width-pad;if(y+r.height>window.innerHeight-8)y=(ev.clientY||0)-r.height-pad;tip.style.left=Math.max(6,x)+"px";tip.style.top=Math.max(6,y)+"px";}
+function tipHide(){tip.classList.remove("on");}
+function hover(el,htmlFn){el.style.cursor="default";el.addEventListener("mouseenter",e=>tipShow(e,htmlFn()));el.addEventListener("mousemove",tipMove);el.addEventListener("mouseleave",tipHide);el.addEventListener("click",e=>{tipShow(e,htmlFn());e.stopPropagation();});}
+document.addEventListener("click",tipHide);window.addEventListener("scroll",tipHide,{passive:true});
+
+/* ---------------- theme ---------------- */
+const root=document.documentElement;
+$("#themeBtn").addEventListener("click",()=>{const cur=root.getAttribute("data-theme");const sysDark=window.matchMedia("(prefers-color-scheme: dark)").matches;const isDark=cur?cur==="dark":sysDark;root.setAttribute("data-theme",isDark?"light":"dark");try{localStorage.setItem("solh3-theme",isDark?"light":"dark");}catch(e){}});
+try{const t=localStorage.getItem("solh3-theme");if(t)root.setAttribute("data-theme",t);}catch(e){}
+
+/* ---------------- TOC highlight ---------------- */
+(function(){const links=[...document.querySelectorAll("#toc a")];const map=new Map(links.map(a=>[a.getAttribute("href").slice(1),a]));
+if(!("IntersectionObserver" in window))return;const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.remove("on"));const a=map.get(e.target.id);if(a){a.classList.add("on");a.scrollIntoView({block:"nearest",inline:"nearest"});}}});},{rootMargin:"-45% 0px -50% 0px"});
+document.querySelectorAll("section[id]").forEach(s=>io.observe(s));})();
+
+/* ============ §2 token calculator ============ */
+const FR={5:124,10:243,15:362};
+const h3T=fr=>Math.ceil(fr/17)*5-3;
+function h3tok(W,H,dur){const fr=FR[dur],T=h3T(fr),per=(W/32)*(H/32),vid=T*per,text=537,audio=Math.round(414*fr/124);return{fr,T,per,vid,text,audio,N:vid+text+audio};}
+function fwdF(P,N,L,d,rho){rho=rho==null?1:rho;return{lin:2*P*N,att:4*L*N*N*d*rho};}
+const P_H3=20.1e9,L_H3=50,D_H3=5376;
+function drawTok(){
+  const [W,H]=segVal("tokRes").split("x").map(Number),dur=Number(segVal("tokDur"));
+  const t=h3tok(W,H,dur),F=fwdF(P_H3,t.N,L_H3,D_H3),tot=F.lin+F.att;
+  const ref=h3tok(1344,768,5),Fr=fwdF(P_H3,ref.N,L_H3,D_H3),totr=Fr.lin+Fr.att;
+  kv($("#tokKV"),[
+    {v:t.fr+" 帧",l:`像素帧（${dur} s @ 24 fps）`},
+    {v:t.T,l:"H3 潜变量帧 = ⌈帧/17⌉×5 − 3"},
+    {v:fi(t.per),l:`每潜变量帧 token（${W/32}×${H/32}）`},
+    {v:fi(t.N),l:`序列总长 = 视频 ${fi(t.vid)} + 文本 537 + 音频 ${fi(t.audio)}${dur===5?"":"（估）"}`},
+    {v:f(tot/1e15,2)+" PF",l:"单次前向 FLOPs（估）"},
+    {v:f(F.att/tot*100,1)+"%",l:"其中注意力占比（估）"},
+    {v:f(tot*49/1e15,0)+" PF",l:"49 次前向合计（估）"},
+    {v:f(tot/totr,2)+"×",l:"相对 5 s·1344×768 的单步代价"}
+  ]);
+  const s=$("#tokSvg");clear(s);
+  const maxN=h3tok(1344,768,15).N,x0=150,wMax=780,sc=wMax/maxN;
+  E("text",{x:0,y:30,text:"序列组成",class:"ink"},s);
+  let x=x0;[["txt","文本",t.text],["oth","音频",t.audio],["s1","目标视频",t.vid]].forEach(([c,l,n])=>{const w=Math.max(1.5,n*sc-2);const r=E("rect",{x,y:14,width:w,height:24,rx:3,style:`fill:${col(c)}`},s);hover(r,()=>`<div class="tt">${l}</div><span class="mono">${fi(n)} token · ${f(n/t.N*100,1)}%</span>`);x+=n*sc;});
+  E("text",{x:x+6,y:31,text:fi(t.N),class:"mono ink"},s);
+  E("text",{x:0,y:80,text:"单步 FLOPs 构成",class:"ink"},s);
+  const maxF=(()=>{const q=h3tok(1344,768,15);const g=fwdF(P_H3,q.N,L_H3,D_H3);return g.lin+g.att;})(),scF=wMax/maxF;
+  const wl=F.lin*scF,wa=F.att*scF;
+  const r1=E("rect",{x:x0,y:64,width:Math.max(1.5,wl-2),height:24,rx:3,style:"fill:var(--dec)"},s);hover(r1,()=>`<div class="tt">线性层 2·P·N</div><span class="mono">${f(F.lin/1e15,2)} PFLOP</span>`);
+  const r2=E("rect",{x:x0+wl,y:64,width:Math.max(1.5,wa),height:24,rx:3,style:"fill:var(--s2)"},s);hover(r2,()=>`<div class="tt">注意力 4·L·N²·d</div><span class="mono">${f(F.att/1e15,2)} PFLOP</span>`);
+  E("text",{x:x0+wl+wa+6,y:81,text:f(tot/1e15,2)+" PF",class:"mono ink"},s);
+  E("text",{x:x0,y:112,text:"■ 线性",style:"fill:var(--dec);font-size:12px"},s);E("text",{x:x0+56,y:112,text:"■ 注意力",style:"fill:var(--s2);font-size:12px"},s);
+  E("text",{x:x0+140,y:112,text:"条长按 15 s·1344×768 的最大值归一；注意力随 N² 增长，15 s 时占到 "+f((()=>{const q=h3tok(1344,768,15);const g=fwdF(P_H3,q.N,L_H3,D_H3);return g.att/(g.lin+g.att)*100;})(),0)+"%",class:"ink3"},s);
+}
+seg("tokRes",drawTok);seg("tokDur",drawTok);drawTok();
+
+/* ============ §3 pipeline comparison ============ */
+const PIPE_KEYS=[["cond","条件输入","oth"],["text","文本编码","txt"],["s1","Stage 1 草稿","s1"],["hand","阶段交接","ad"],["s2","Stage 2 精修","s2"],["dec","最终解码","dec"],["aud","音频","oth"],["hw","硬件 / 计时","sys"]];
+const PIPE={
+ paper:{cond:"文本（T2VA 语境）。§3.1 没有提到任何首帧或参考条件",text:"Stage 1：Qwen 编码用户 prompt。Stage 2：离线缓存的通用 prompt（§4.2，写在边缘一节）",s1:"MiniMax-H3 + FastH3 VSA DataFree LoRA · 4 次更新 · 672×384×124 帧",hand:"H3 ×2 潜变量上采样器 → 学习型跨 VAE 适配器（194.76M）。声称「完全消除解码再编码」",s2:"LTX-2.5 dev（BF16）+ distilled LoRA 450 @0.8 · 3 次联合音视频更新 · 1344×768 · Sol-Attn τ = 1 / 1.25 / 1.5",dec:"没有明说（§3.6 的解码优化只针对单阶段 H3）",aud:"「适配器只处理视频，Stage-1 音频保持不变」",hw:"§6.1：「单张 GB200」5 s 6.852 s（22.2×）/ 10 s 14.931 s（27.7×）",x:[],
+  note:"<b>论文 §3.1 的描述。</b>整篇论文只在这一处讲两阶段的具体配置，而它与右侧「DGX Spark 实际配置」几乎逐项相同。换句话说，§3.1 描述的其实是 Spark 的配方。"},
+ spark:{cond:"T2VA（另支持 FL2VA / Ref2VA）",text:"NVFP4 AWQ Qwen 每个请求重新编码。Stage 2 用离线 INT8 Gemma 生成的通用 prompt 上下文，Gemma 不上线",s1:"FastH3 VSA DataFree LoRA，<b>BF16 合并后 W8A8 FP8</b> · VSA 90% 稀疏 · σ 1→.973→.923→.8→0 · 672×384×124",hand:"H3 ×2 上采样器 → 适配器 → [1,128,16,24,42]，取 17 个 LTX 潜变量帧中的前 16 个",s2:"同论文 · σ .909→.725→.422→0 · Triton Sol-Attn · 只有第 0 层稠密",dec:"官方 Conv 视频 VAE（完整）",aud:"LTX 联合去噪出的音频被丢弃；输出 H3 原始 PCM → AAC",hw:"1× DGX Spark · 56.17 s（含 MP4 封装与混音）",x:[],
+  note:"<b>DGX Spark 实际配置</b>（<code>Sol-H3-Spark/configs/default.json</code>）。与论文 §3.1 一致，还补全了论文没写的 σ 调度、解码器和音频去向。注意 Stage 1 的 LoRA 是先合并进 BF16、再量化成 FP8，正是论文附录 B 诊断出会丢更新的那种做法。"},
+ gb200:{cond:"<b>FL2VA 首帧条件</b>。对白类基准，prompt 以「Use the supplied image as the exact opening frame」开头",text:"Stage 1：H3 文本/图像编码 0.373 s。Stage 2：用户 prompt 经 Gemma 编码 0.644 s（没有 prompt 缓存）",s1:"H3 FL2VA + <b>LightX2V 4step_v0.1_544p</b>（启动时合并，scale 0.0625）· 4 次前向 · <b>896×512</b>×124 · compile · <b>TAEH3 解码</b>",hand:"<b>像素交接</b>：BF16 视频 [1,3,121,384,672]（先缩到 672×384）+ FP32 PCM，经回环 TCP → <b>LTX 原版视频 VAE 编码</b> → 官方 ×2 潜变量上采样。1344×768 首帧另作硬条件。<b>适配器没有使用</b>",s2:"LTX-2.5 · σ .909→.725→.422→0 · 层 0 稠密，1–47 Sol · 交叉与音频注意力稠密 · 只编译 48 个块",dec:"<b>LTX TAEHV（wide）近似解码</b> 0.187 s（完整 LTX VAE 解码需 6.404 s）",aud:"H3 PCM 经 LTX 音频 VAE 参与联合去噪，输出被丢弃；最终混入 H3 原始 PCM",hw:"项目页：6.852 s = Stage 1、Stage 2 <b>分别测量后相加</b>。仓库正式测量：<b>每请求 2 张 GB200</b>，中位 6.7605 s，不声明加速比",x:["cond","text","s1","hand","dec","hw"],
+  note:"<b>GB200 实测，也就是论文 22.2× / 27.7× 所用的那条管线</b>（<code>super_acceleration/</code> v2 与项目页）。红框处都与 §3.1 不同。最关键的两处：交接走的是「TAE 解码 → 缩放 → LTX 原版 VAE 编码」，最终解码用的是 TAEHV 小自编码器。论文正文对这两点只字未提。"}
+};
+function drawPipe(){const m=segVal("pipeMode"),d=PIPE[m],el=$("#pipe");
+  el.innerHTML=PIPE_KEYS.map(([k,l,c])=>`<div class="pbox${d.x.includes(k)?" x":""}"><div class="bar" style="background:var(--${c})"></div><div class="lab">${l}</div><div class="v">${d[k]}</div></div>`).join("");
+  const n=$("#pipeNote");n.className="note "+(m==="gb200"?"risk":m==="spark"?"ok":"plain");n.innerHTML=d.note;}
+seg("pipeMode",drawPipe);drawPipe();
+
+/* ============ §3 sigma demo ============ */
+const CW=192,CH=108;let sigSeed=7;let X0=null,EPS=null;
+function makeScene(){const a=new Float32Array(CW*CH);
+  for(let y=0;y<CH;y++)for(let x=0;x<CW;x++){let v=0.9-1.4*(y/CH);
+    const dx=x-140,dy=y-26;if(dx*dx+dy*dy<13*13)v=1.6;
+    const ridge=55+10*Math.sin(x*0.045)+6*Math.sin(x*0.13+1);if(y>ridge)v=-0.2+0.15*Math.sin(x*0.02);
+    [[18,62,20,40],[44,48,16,54],[66,70,24,32],[96,58,14,44]].forEach(([bx,by,bw,bh])=>{if(x>=bx&&x<bx+bw&&y>=by&&y<by+bh){v=-1.0;if(((x-bx)%5<2)&&((y-by)%6<3))v=0.9;}});
+    if(y>84)v=-0.6+0.8*((Math.floor(x/3)+Math.floor(y/3))%2);
+    a[y*CW+x]=v;}
+  let m=0;for(const v of a)m+=v;m/=a.length;let s=0;for(const v of a)s+=(v-m)*(v-m);s=Math.sqrt(s/a.length);for(let i=0;i<a.length;i++)a[i]=(a[i]-m)/s;return a;}
+function makeNoise(seed){const r=mulberry(seed),a=new Float32Array(CW*CH);for(let i=0;i<a.length;i++)a[i]=gauss(r);return a;}
+function pool(a,k){const o=new Float32Array(a.length);for(let by=0;by<CH;by+=k)for(let bx=0;bx<CW;bx+=k){let s=0,n=0;for(let y=by;y<Math.min(CH,by+k);y++)for(let x=bx;x<Math.min(CW,bx+k);x++){s+=a[y*CW+x];n++;}const m=s/n;for(let y=by;y<Math.min(CH,by+k);y++)for(let x=bx;x<Math.min(CW,bx+k);x++)o[y*CW+x]=m;}return o;}
+function paint(cv,a){const ctx=cv.getContext("2d"),img=ctx.createImageData(CW,CH);let m=0;for(const v of a)m+=v;m/=a.length;let s=0;for(const v of a)s+=(v-m)*(v-m);s=Math.sqrt(s/a.length)||1;
+  for(let i=0;i<a.length;i++){const g=Math.max(0,Math.min(255,128+60*(a[i]-m)/s));img.data[4*i]=g;img.data[4*i+1]=g;img.data[4*i+2]=g;img.data[4*i+3]=255;}ctx.putImageData(img,0,0);}
+function corr(a,b){let ma=0,mb=0;for(let i=0;i<a.length;i++){ma+=a[i];mb+=b[i];}ma/=a.length;mb/=b.length;let sab=0,saa=0,sbb=0;for(let i=0;i<a.length;i++){const x=a[i]-ma,y=b[i]-mb;sab+=x*y;saa+=x*x;sbb+=y*y;}return sab/Math.sqrt(saa*sbb);}
+function drawSig(){const sg=Number($("#sigR").value);$("#sigV").textContent=sg.toFixed(3);
+  if(!X0)X0=makeScene();if(!EPS)EPS=makeNoise(sigSeed);
+  const xs=new Float32Array(X0.length);for(let i=0;i<xs.length;i++)xs[i]=(1-sg)*X0[i]+sg*EPS[i];
+  const K=Number(segVal("sigPool")||8);const p=pool(xs,K),p0=pool(X0,K);$("#cv2cap").innerHTML=`x<sub>σ</sub> 的 ${K}×${K} 平均（相当于只看低频）`;paint($("#cv0"),X0);paint($("#cv1"),xs);paint($("#cv2"),p);
+  const snr=sg>=1?0:((1-sg)/sg)**2;
+  kv($("#sigKV"),[{v:f((1-sg)*100,1)+"%",l:"信号幅度 1−σ"},{v:snr<0.1?snr.toFixed(4):f(snr,2),l:"逐元素 SNR = ((1−σ)/σ)²"},{v:f(corr(xs,X0),3),l:"原分辨率下 x_σ 与 x₀ 的相关系数（实测）"},{v:f(corr(p,p0),3),l:`${K}×${K} 平均后与 x₀ 低频的相关系数（实测）`},{v:f(snr*K*K,2),l:`${K}×${K} 平均后平滑区域的 SNR ≈ 逐元素 × ${K*K}`}]);
+  document.querySelectorAll("#sigPreset button").forEach(b=>b.setAttribute("aria-pressed",Math.abs(Number(b.dataset.v)-sg)<1e-6?"true":"false"));}
+$("#sigR").addEventListener("input",drawSig);seg("sigPool",drawSig);
+seg("sigPreset",v=>{$("#sigR").value=v;drawSig();});
+$("#sigReseed").addEventListener("click",()=>{sigSeed++;EPS=makeNoise(sigSeed);drawSig();});
+drawSig();
+
+/* ============ §4 temporal alignment ============ */
+(function(){const s=$("#alignSvg");const X=fr=>96+fr*(890/204);
+  const anchors=[];for(let c=0;c<12;c++)for(const o of [0,4,8,12,16])anchors.push(c*17+o);
+  const kept=anchors.slice(0,57),dropped=anchors.slice(57);
+  const bin=fr=>fr===0?0:Math.ceil(fr/8);
+  const bins={};kept.forEach((fr,i)=>{const b=bin(fr);(bins[b]=bins[b]||[]).push([i,fr]);});
+  E("text",{x:0,y:24,text:"H3 17 帧块",class:"ink3",style:"font-size:11.5px"},s);
+  for(let c=0;c<12;c++){E("rect",{x:X(c*17-0.5),y:12,width:X(17)-X(0)-1,height:16,rx:3,style:`fill:var(--s1-soft);stroke:var(--s1);stroke-width:1`},s);E("text",{x:X(c*17+8.5),y:24,"text-anchor":"middle",text:"块 "+c,class:"mono",style:"font-size:10.5px;fill:var(--ink2)"},s);}
+  E("line",{x1:X(192),x2:X(192),y1:6,y2:205,style:"stroke:var(--risk);stroke-width:1"},s);E("text",{x:X(192)+4,y:44,text:"192 帧末尾",style:"font-size:11px;fill:var(--risk-ink)"},s);
+  const lines=[],dots=[];
+  kept.forEach((fr,i)=>{const b=bin(fr);const bx=b===0?X(0):X(8*b-3.5);
+    lines.push(E("line",{x1:X(fr),y1:62,x2:bx,y2:150,style:"stroke:var(--ink3);stroke-width:1;opacity:.35"},s));});
+  E("text",{x:0,y:62,text:"H3 token",class:"ink3",style:"font-size:11.5px"},s);
+  kept.forEach((fr,i)=>{dots.push(E("circle",{cx:X(fr),cy:58,r:4.2,style:"fill:var(--s1)"},s));});
+  dropped.forEach(fr=>{E("circle",{cx:X(fr),cy:58,r:4.2,style:"fill:none;stroke:var(--ink3);stroke-dasharray:0"},s);});
+  E("text",{x:0,y:165,text:"LTX 时间格",class:"ink3",style:"font-size:11.5px"},s);
+  const read=$("#alignRead");const rects=[];
+  for(let k=0;k<25;k++){const a=k===0?-0.5:8*k-7.5,b=k===0?0.5:8*k+0.5;const n=(bins[k]||[]).length;
+    const r=E("rect",{x:X(a)+0.5,y:150,width:Math.max(3,X(b)-X(a)-1),height:22,rx:3,style:`fill:var(--ad);opacity:${0.35+0.2*n}`},s);rects.push(r);
+    E("text",{x:(X(a)+X(b))/2,y:190,"text-anchor":"middle",text:n,class:"mono",style:"font-size:10.5px;fill:var(--ink2)"},s);
+    const on=()=>{lines.forEach(l=>l.style.opacity=.12);dots.forEach(d=>d.style.opacity=.3);(bins[k]||[]).forEach(([i])=>{lines[i].style.opacity=1;lines[i].style.stroke="var(--ad)";lines[i].style.strokeWidth=2;dots[i].style.opacity=1;});r.style.opacity=1;
+      read.innerHTML=`LTX 格 <b>${k}</b>（帧 ${k===0?"0":(8*k-7)+"–"+(8*k)}）：1 个插值特征 + 槽位 ${(bins[k]||[]).map(([i,fr],j)=>`[${j+1}] token #${i}（帧 ${fr}）`).join("、")}${n<3?"，其余槽位为空":""}`;};
+    const off=()=>{lines.forEach(l=>{l.style.opacity=.35;l.style.stroke="var(--ink3)";l.style.strokeWidth=1;});dots.forEach(d=>d.style.opacity=1);rects.forEach((q,j)=>q.style.opacity=0.35+0.2*((bins[j]||[]).length));};
+    r.addEventListener("mouseenter",on);r.addEventListener("mouseleave",off);r.addEventListener("click",e=>{off();on();e.stopPropagation();});}
+  E("text",{x:0,y:190,text:"装入 token 数",class:"ink3",style:"font-size:11px"},s);E("text",{x:0,y:228,text:"帧",class:"ink3",style:"font-size:11px"},s);
+  [0,32,64,96,128,160,192].forEach(fr=>{E("text",{x:X(fr),y:228,"text-anchor":"middle",text:fr,class:"mono ink3",style:"font-size:10.5px"},s);});
+})();
+
+/* ============ §4 adapter diagram ============ */
+(function(){const s=$("#adSvg");
+  function box(x,y,w,h,c,t1,t2){E("rect",{x,y,width:w,height:h,rx:8,style:`fill:var(--surf2);stroke:var(--${c});stroke-width:1.5`},s);E("text",{x:x+w/2,y:y+h/2-(t2?4:-4),"text-anchor":"middle",text:t1,class:"ink",style:"font-size:12.5px;font-weight:600"},s);if(t2)E("text",{x:x+w/2,y:y+h/2+13,"text-anchor":"middle",text:t2,class:"mono ink3",style:"font-size:10.5px"},s);}
+  function arr(x1,y1,x2,y2){E("line",{x1,y1,x2,y2,style:"stroke:var(--ink3);stroke-width:1.4"},s);const a=Math.atan2(y2-y1,x2-x1);E("path",{d:`M${x2},${y2} L${x2-7*Math.cos(a-0.4)},${y2-7*Math.sin(a-0.4)} L${x2-7*Math.cos(a+0.4)},${y2-7*Math.sin(a+0.4)} Z`,style:"fill:var(--ink3)"},s);}
+  box(0,86,130,56,"s1","打包特征 G(z_H)","384 × 25 × 24 × 42");
+  box(170,12,250,46,"oth","冻结仿射跳连 1×1×1","384→128 · 岭回归初始化");
+  box(170,150,110,56,"ad","stem 3×3×3","384→752");
+  E("rect",{x:300,y:112,width:300,height:130,rx:10,style:"fill:var(--ad-soft);stroke:var(--ad);stroke-width:1.5"},s);
+  E("text",{x:450,y:130,"text-anchor":"middle",text:"× 22  因子化残差块（宽 752）",class:"ink",style:"font-size:12.5px;font-weight:600"},s);
+  ["GroupNorm + 激活","空间卷积 1×3×3","深度时间卷积 3×1×1（groups=752）","门控 MLP：1×1 → 2·1504，value⊙σ(gate) → 1×1"].forEach((t,i)=>{E("text",{x:318,y:152+i*21,text:"· "+t,class:"ink",style:"font-size:11.5px"},s);});
+  box(640,150,130,56,"ad","GN + 头 1×1","752→128");
+  E("circle",{cx:812,cy:100,r:12,style:"fill:var(--surf2);stroke:var(--ink2);stroke-width:1.5"},s);E("text",{x:812,y:105,"text-anchor":"middle",text:"+",class:"ink",style:"font-size:16px"},s);
+  box(840,74,120,56,"s2","ẑ_L（LTX 归一化）","128 × 25 × 24 × 42");
+  arr(130,105,168,40);arr(130,125,168,175);arr(280,178,298,178);arr(600,178,638,178);arr(420,35,806,92);arr(770,170,806,108);arr(824,100,838,100);
+  E("text",{x:0,y:266,text:"损失 = MSE(ẑ_L, z_L) + 160 · MSE(D_L(ẑ_L), D_L(z_L))；梯度穿过冻结的 LTX 解码器，只更新残差路径",class:"ink3",style:"font-size:11.5px"},s);
+  // params
+  const w=752,e=2,blkSp=w*w*9+w,blkT=w*3+w,blkIn=w*2*w*e+2*w*e,blkOut=w*e*w+w,blkGN=2*w;
+  const parts=[["空间卷积 ×22",22*blkSp,"ad"],["门控 MLP 输入投影 ×22",22*blkIn,"s2"],["MLP 输出投影 ×22",22*blkOut,"dec"],["stem",384*w*27+w,"s1"],["其余（时间卷积、GN、跳连、头）",22*(blkT+blkGN)+384*128+128+w*128+128+2*w,"oth"]];
+  const tot=parts.reduce((a,p)=>a+p[1],0);const p=$("#adParam");let x=0;const W=940;
+  parts.forEach(([l,n,c])=>{const wd=n/tot*W;const r=E("rect",{x,y:8,width:Math.max(1.5,wd-2),height:22,rx:3,style:`fill:var(--${c})`},p);hover(r,()=>`<div class="tt">${l}</div><span class="mono">${f(n/1e6,2)} M · ${f(n/tot*100,1)}%</span>`);{const lab=fitLabel([`${l.replace(" ×22","")} ${f(n/tot*100,0)}%`,`${f(n/tot*100,0)}%`],wd,11);if(lab)E("text",{x:x+6,y:23,text:lab,style:"font-size:11px;fill:#fff"},p);}x+=wd;});
+  E("text",{x:0,y:52,text:`合计 ${fi(tot)} 参数（论文：194.76M）· 悬停查看各段`,class:"ink3",style:"font-size:11.5px"},p);
+})();
+
+/* ============ §5.1 byte layout ============ */
+function drawBytes(){const m=segVal("byteOut"),s=$("#byteSvg");clear(s);const x0=150,sc=0.98;
+  function row(y,label,parts){E("text",{x:0,y:y+15,text:label,class:"ink"},s);let x=x0;parts.forEach(([n,c,l])=>{const w=n*sc;const r=E("rect",{x,y,width:Math.max(1.5,w-2),height:22,rx:3,style:`fill:var(--${c})`},s);hover(r,()=>`<div class="tt">${l}</div><span class="mono">${n} B</span>`);{const lab=fitLabel([`${l} ${n} B`,l,`${n} B`],w,11);if(lab)E("text",{x:x+6,y:y+15,text:lab,style:"font-size:11px;fill:#fff"},s);}x+=w;});const tot=parts.reduce((a,p)=>a+p[0],0);E("text",{x:x+6,y:y+15,text:tot+" B",class:"mono ink"},s);}
+  row(10,"BF16 QKV",[[768,"oth","Q/K/V 各 128 × 2 B"]]);
+  row(44,"INT8 QKV 记录",[[384,"dec","INT8 值"],[12,"txt","UE5M3 尺度"],[4,"oth","填充"]]);
+  row(104,"BF16 输出",[[256,"oth","128 × 2 B"]]);
+  if(m==="fp8")row(138,"FP8 输出",[[128,"dec","E4M3 值（无尺度）"]]);else row(138,"INT8 输出",[[128,"dec","INT8 值"],[4,"txt","尺度"],[12,"oth","填充"]]);
+  sLegend(s,x0,190,[["dec","量化值"],["txt","尺度码"],["oth","填充 / 未压缩 BF16"]]);
+  const out=m==="fp8"?128:144;
+  kv($("#byteKV"),[{v:f(400/768*100,1)+"%",l:"QKV：400 / 768 B"},{v:f(out/256*100,1)+"%",l:`输出：${out} / 256 B`},{v:f((400+out)/1024*100,1)+"%",l:"每层两次 all-to-all 合计（相对 BF16）"},{v:"4 → 2",l:"每层集合通信次数（打包 QKV）"}]);}
+seg("byteOut",drawBytes);drawBytes();
+
+/* ============ §5.3 Sol-Attn lab ============ */
+const NB=48,BS=16,DD=32;let solSeed=3,SOL=null;
+const dot=(a,b)=>{let s=0;for(let i=0;i<a.length;i++)s+=a[i]*b[i];return s;};
+function solGen(seed){const r=mulberry(seed),C=[],K=[],V=[];
+  for(let j=0;j<NB;j++){const c=[];for(let t=0;t<DD;t++)c.push(gauss(r));C.push(c);for(let u=0;u<BS;u++){const k=[],v=[];for(let t=0;t<DD;t++){k.push(c[t]+0.7*gauss(r));v.push(gauss(r));}K.push(k);V.push(v);}}
+  const pick=[];while(pick.length<4){const j=Math.floor(r()*NB);if(!pick.includes(j))pick.push(j);}
+  const q0=new Array(DD).fill(0);pick.forEach((j,i)=>{const w=i===0?0.85:0.45;for(let t=0;t<DD;t++)q0[t]+=w*C[j][t];});
+  const Q=[];for(let u=0;u<BS;u++){const q=[];for(let t=0;t<DD;t++)q.push(q0[t]+0.35*gauss(r));Q.push(q);}
+  const Kb=[],Vs=[];for(let j=0;j<NB;j++){const kb=new Array(DD).fill(0),vs=new Array(DD).fill(0);for(let u=0;u<BS;u++){const k=K[j*BS+u],v=V[j*BS+u];for(let t=0;t<DD;t++){kb[t]+=k[t]/BS;vs[t]+=v[t];}}Kb.push(kb);Vs.push(vs);}
+  const Qb=new Array(DD).fill(0);Q.forEach(q=>{for(let t=0;t<DD;t++)Qb[t]+=q[t]/BS;});
+  const scale=1/Math.sqrt(DD),prox=Kb.map(kb=>dot(Qb,kb)*scale);
+  const S={K,V,Q,Kb,Vs,prox,scale};S.exact=Q.map(q=>solAttn(q,new Array(NB).fill(true),false,S));S.curve=null;return S;}
+function solAttn(q,sel,corr,S){let m=-Infinity;const L=[];
+  for(let j=0;j<NB;j++){if(sel[j]){for(let u=0;u<BS;u++){const l=dot(q,S.K[j*BS+u])*S.scale;L.push([l,0,j*BS+u]);if(l>m)m=l;}}else if(corr){const l=dot(q,S.Kb[j])*S.scale;L.push([l,1,j]);if(l>m)m=l;}}
+  let den=0;const num=new Array(DD).fill(0);
+  for(const it of L){const w=Math.exp(it[0]-m);if(it[1]===0){den+=w;const v=S.V[it[2]];for(let t=0;t<DD;t++)num[t]+=w*v[t];}else{den+=BS*w;const v=S.Vs[it[2]];for(let t=0;t<DD;t++)num[t]+=w*v[t];}}
+  return num.map(x=>x/den);}
+function solSel(S,tau){const p=S.prox,mu=p.reduce((a,b)=>a+b,0)/NB,sd=Math.sqrt(p.reduce((a,b)=>a+(b-mu)*(b-mu),0)/NB),thr=mu+tau*sd;let sel=p.map(x=>x>thr);if(!sel.some(Boolean)){const j=p.indexOf(Math.max(...p));sel[j]=true;}return{sel,thr,mu,sd};}
+function solErr(S,sel,corr){let e=0;S.Q.forEach((q,i)=>{const o=solAttn(q,sel,corr,S),x=S.exact[i];let a=0,b=0;for(let t=0;t<DD;t++){a+=(o[t]-x[t])**2;b+=x[t]**2;}e+=Math.sqrt(a/b);});return e/S.Q.length;}
+function drawSol(){if(!SOL)SOL=solGen(solSeed);const S=SOL,tau=Number($("#solTau").value),corr=$("#solCorr").checked;$("#solTauV").textContent=tau.toFixed(2);
+  if(!S.curve){S.curve=[];for(let t=0;t<=2.5001;t+=0.1){const {sel}=solSel(S,t);S.curve.push([t,solErr(S,sel,false),solErr(S,sel,true)]);}}
+  const {sel,thr,mu}=solSel(S,tau),eD=solErr(S,sel,false),eC=solErr(S,sel,true),k=sel.filter(Boolean).length;
+  const s=$("#solSvg");clear(s);const p=S.prox,lo=Math.min(...p),hi=Math.max(...p),y0=200,yh=170,Y=v=>y0-(v-lo)/(hi-lo)*yh*0.95-4,bw=560/NB;
+  E("line",{x1:30,x2:600,y1:y0,y2:y0,class:"axis"},s);
+  p.forEach((v,j)=>{const x=34+j*bw,on=sel[j];const r=E("rect",{x,y:Y(v),width:Math.max(2,bw-2),height:Math.max(1,y0-Y(v)),rx:2,style:`fill:var(--${on?"dec":"oth"});opacity:${on?1:(corr?0.75:0.3)}`},s);hover(r,()=>`<div class="tt">KV 块 ${j}</div><span class="mono">ŝ = ${f(v,3)}<br>${on?"精确注意力":(corr?"零阶近似修正":"丢弃")}</span>`);});
+  E("line",{x1:30,x2:600,y1:Y(thr),y2:Y(thr),style:"stroke:var(--risk);stroke-width:1.5"},s);E("text",{x:602,y:Y(thr)+4,text:"μ+τσ",style:"font-size:11px;fill:var(--risk-ink)"},s);
+  E("line",{x1:30,x2:600,y1:Y(mu),y2:Y(mu),style:"stroke:var(--ink3);stroke-width:1;opacity:.6"},s);E("text",{x:602,y:Y(mu)+4,text:"μ",style:"font-size:11px;fill:var(--ink3)"},s);
+  E("text",{x:30,y:222,text:"代理分数 ŝⱼ（48 个 KV 块）",class:"ink3",style:"font-size:11.5px"},s);sLegend(s,250,222,[["dec","精确"],["oth",corr?"近似修正":"丢弃"]],11);
+  const gx=660,gw=280,gy=20,gh=170,maxE=Math.max(...S.curve.map(c=>c[1]))*1.05,GX=t=>gx+t/2.5*gw,GY=e=>gy+gh-e/maxE*gh;
+  E("line",{x1:gx,x2:gx+gw,y1:gy+gh,y2:gy+gh,class:"axis"},s);E("line",{x1:gx,x2:gx,y1:gy,y2:gy+gh,class:"axis"},s);
+  [0,0.5,1,1.5,2,2.5].forEach(t=>E("text",{x:GX(t),y:gy+gh+14,"text-anchor":"middle",text:t,class:"mono ink3",style:"font-size:10.5px"},s));
+  [0,maxE/2,maxE].forEach(e=>E("text",{x:gx-4,y:GY(e)+4,"text-anchor":"end",text:f(e*100,0)+"%",class:"mono ink3",style:"font-size:10.5px"},s));
+  const pathD=i=>S.curve.map((c,n)=>(n?"L":"M")+GX(c[0])+","+GY(c[i])).join(" ");
+  E("path",{d:pathD(1),style:"fill:none;stroke:var(--s2);stroke-width:2"},s);E("path",{d:pathD(2),style:"fill:none;stroke:var(--dec);stroke-width:2"},s);
+  E("line",{x1:GX(tau),x2:GX(tau),y1:gy,y2:gy+gh,style:"stroke:var(--ink3);stroke-width:1"},s);
+  E("circle",{cx:GX(tau),cy:GY(eD),r:4.5,style:"fill:var(--s2);stroke:var(--surf);stroke-width:2"},s);E("circle",{cx:GX(tau),cy:GY(eC),r:4.5,style:"fill:var(--dec);stroke:var(--surf);stroke-width:2"},s);
+  sLegend(s,gx+10,gy+4,[["s2","仅丢弃","line"],["dec","近似修正","line"]],11);
+  E("text",{x:gx,y:222,text:"输出相对误差 vs τ",class:"ink3",style:"font-size:11.5px"},s);
+  kv($("#solKV"),[{v:`${k}/48（${f(k/NB*100,1)}%）`,l:"精确计算的块"},{v:f((1-Phi(tau))*100,1)+"%",l:"高斯参照下的预期密度 1−Φ(τ)"},{v:f(eD*100,1)+"%",l:"仅丢弃未选块时的相对误差",c:"bad"},{v:f(eC*100,1)+"%",l:"加零阶近似修正后的相对误差",c:"good"},{v:(eC>0?f(eD/eC,1):"—")+"×",l:"近似修正让误差降低的倍数"}]);}
+$("#solTau").addEventListener("input",drawSol);$("#solCorr").addEventListener("change",drawSol);$("#solReseed").addEventListener("click",()=>{solSeed++;SOL=solGen(solSeed);drawSol();});drawSol();
+
+/* ============ §5.4 LoRA rounding lab ============ */
+const f32=new Float32Array(1),u32=new Uint32Array(f32.buffer);
+function bf16(x){f32[0]=x;let u=u32[0];const lsb=(u>>>16)&1;u=(u+0x7FFF+lsb)>>>0;u=(u&0xFFFF0000)>>>0;u32[0]=u;return f32[0];}
+function e4m3(y){const a=Math.abs(y);if(a===0)return 0;let q;if(a<0.015625){const st=0.001953125;q=Math.round(a/st)*st;}else{const ex=Math.floor(Math.log2(a)),st=Math.pow(2,ex-3);q=Math.round(a/st)*st;}return Math.sign(y)*Math.min(q,448);}
+function mxq(arr){const out=new Float64Array(arr.length);for(let g=0;g<arr.length;g+=32){let am=0;for(let i=g;i<g+32;i++)am=Math.max(am,Math.abs(arr[i]));const e=am>0?Math.floor(Math.log2(am))-8:0,sc=Math.pow(2,e);for(let i=g;i<g+32;i++)out[i]=e4m3(arr[i]/sc)*sc;}return out;}
+const LN=4096;let LW=null,LZ=null,LCUR=null;
+function loraEval(lr){const r=Math.pow(10,lr),n=LN;const b=new Float64Array(n),m=new Float64Array(n),d=new Float64Array(n);
+  for(let i=0;i<n;i++){d[i]=r*0.02*LZ[i];b[i]=bf16(LW[i]);m[i]=bf16(LW[i]+d[i]);}
+  const bm=mxq(b),mm=mxq(m);let rb=0,rbm=0,e=0,em=0,dd=0;
+  for(let i=0;i<n;i++){if(m[i]===b[i])rb++;if(mm[i]===bm[i])rbm++;e+=((m[i]-b[i])-d[i])**2;em+=((mm[i]-bm[i])-d[i])**2;dd+=d[i]**2;}
+  return{lr,rb:rb/n,rbm:rbm/n,err:Math.sqrt(e/dd),errm:Math.sqrt(em/dd)};}
+function drawLora(){if(!LW){const R=mulberry(11);LW=new Float64Array(LN);LZ=new Float64Array(LN);for(let i=0;i<LN;i++){LW[i]=Math.fround(0.02*gauss(R));LZ[i]=gauss(R);}LCUR=[];for(let lr=-4;lr<=-0.4999;lr+=0.05)LCUR.push(loraEval(lr));}
+  const lr=Number($("#loraR").value),fm=segVal("loraFmt"),cur=loraEval(lr);$("#loraRV").textContent="r = "+Math.pow(10,lr).toExponential(1);
+  const s=$("#loraSvg");clear(s);const x0=70,xw=820,X=v=>x0+(v+4)/3.5*xw;
+  // top panel: roundback
+  const t0=14,th=130,TY=v=>t0+th-v*th;
+  E("rect",{x:x0,y:TY(0.944),width:xw,height:TY(0.861)-TY(0.944),style:"fill:var(--low-soft)"},s);E("text",{x:x0+xw-4,y:TY(0.944)-4,"text-anchor":"end",text:"论文：86.1–94.4%",style:"font-size:11px;fill:var(--ink3)"},s);
+  [0,0.25,0.5,0.75,1].forEach(v=>{E("line",{x1:x0,x2:x0+xw,y1:TY(v),y2:TY(v),class:"gridl"},s);E("text",{x:x0-6,y:TY(v)+4,"text-anchor":"end",text:(v*100)+"%",class:"mono ink3",style:"font-size:10.5px"},s);});
+  const path=(key,Y)=>LCUR.map((c,i)=>(i?"L":"M")+X(c.lr)+","+Y(c[key])).join(" ");
+  E("path",{d:path("rb",TY),style:`fill:none;stroke:var(--dec);stroke-width:${fm==="bf16"?2.5:1.3};opacity:${fm==="bf16"?1:.55}`},s);
+  E("path",{d:path("rbm",TY),style:`fill:none;stroke:var(--s2);stroke-width:${fm==="mx"?2.5:1.3};opacity:${fm==="mx"?1:.55}`},s);
+  E("text",{x:x0,y:t0-2,text:"舍入回原值的元素比例",class:"ink3",style:"font-size:11.5px"},s);
+  // bottom panel: log error
+  const b0=176,bh=110,lmin=-2,lmax=Math.log10(30),BY=v=>{const l=Math.log10(Math.max(1e-2,Math.min(30,v)));return b0+bh-(l-lmin)/(lmax-lmin)*bh;};
+  [0.01,0.1,1,10].forEach(v=>{E("line",{x1:x0,x2:x0+xw,y1:BY(v),y2:BY(v),class:"gridl"},s);E("text",{x:x0-6,y:BY(v)+4,"text-anchor":"end",text:(v*100>=1?fi(v*100):v*100)+"%",class:"mono ink3",style:"font-size:10.5px"},s);});
+  E("line",{x1:x0,x2:x0+xw,y1:BY(1),y2:BY(1),style:"stroke:var(--risk);stroke-width:1;opacity:.7"},s);
+  E("path",{d:path("err",BY),style:`fill:none;stroke:var(--dec);stroke-width:${fm==="bf16"?2.5:1.3};opacity:${fm==="bf16"?1:.55}`},s);
+  E("path",{d:path("errm",BY),style:`fill:none;stroke:var(--s2);stroke-width:${fm==="mx"?2.5:1.3};opacity:${fm==="mx"?1:.55}`},s);
+  E("text",{x:x0,y:b0-4,text:"有效更新的相对误差 ‖Δ_eff − δ‖/‖δ‖（对数轴；红线 = 100%）",class:"ink3",style:"font-size:11.5px"},s);
+  [-4,-3,-2,-1].forEach(v=>E("text",{x:X(v),y:b0+bh+16,"text-anchor":"middle",text:"10"+["⁻⁴","⁻³","⁻²","⁻¹"][v+4],class:"mono ink3",style:"font-size:11px"},s));
+  E("line",{x1:X(lr),x2:X(lr),y1:t0,y2:b0+bh,style:"stroke:var(--ink2);stroke-width:1"},s);
+  [[TY(cur.rb),"dec"],[TY(cur.rbm),"s2"],[BY(cur.err),"dec"],[BY(cur.errm),"s2"]].forEach(([y,c])=>E("circle",{cx:X(lr),cy:y,r:4.5,style:`fill:var(--${c});stroke:var(--surf);stroke-width:2`},s));
+  sLegend(s,x0,b0+bh+40,[["dec","BF16 合并","line"],["s2","BF16 合并 → MXFP8","line"]],11.5);
+  const cross=LCUR.find(c=>c.rb<0.9);
+  kv($("#loraKV"),[{v:f(cur.rb*100,1)+"%",l:"BF16：舍入回原值"},{v:f(cur.err*100,0)+"%",l:"BF16：有效更新相对误差",c:cur.err>1?"bad":""},{v:f(cur.rbm*100,1)+"%",l:"再做 MXFP8：舍入回原值"},{v:f(cur.errm*100,0)+"%",l:"MXFP8：有效更新相对误差",c:cur.errm>1?"bad":""},{v:cross?("r ≈ "+Math.pow(10,cross.lr).toExponential(1)):"—",l:"BF16 回原值比例降到 90% 时的 r（在这个合成分布下）"}]);}
+$("#loraR").addEventListener("input",drawLora);seg("loraFmt",drawLora);drawLora();
+
+/* ============ §5.5 VAE tiles ============ */
+function drawTiles(){const m=segVal("tileMode"),s=$("#tileSvg");clear(s);const slots=m==="clip"?28:25,cw=m==="clip"?30:33,x0=64;
+  for(let r=0;r<8;r++){E("text",{x:0,y:24+r*28,text:"卡 "+r,class:"mono ink3",style:"font-size:11px"},s);
+    for(let k=0;k<slots;k++){let clip,pad;if(m==="clip"){clip=Math.floor(k/4);const t=(k%4)*8+r;pad=t>=28;}else{const g=k*8+r;pad=g>=196;clip=pad?6:Math.floor(g/28);}
+      const x=x0+k*cw,y=10+r*28;const rect=E("rect",{x,y,width:cw-3,height:22,rx:3,style:pad?"fill:var(--surf3);stroke:var(--risk);stroke-width:1":`fill:var(--dec);opacity:${clip%2?0.55:0.9}`},s);
+      if(pad){E("line",{x1:x+3,y1:y+19,x2:x+cw-6,y2:y+3,style:"stroke:var(--risk);stroke-width:1"},s);}
+      E("text",{x:x+(cw-3)/2,y:y+15,"text-anchor":"middle",text:pad?"":clip,style:"font-size:10.5px;fill:#fff"},s);
+      hover(rect,()=>pad?`<div class="tt">填充槽</div>复制的 tile，只为凑满 batch`:`<div class="tt">片段 ${clip}</div>${m==="clip"?"第 "+(clip+1)+" 轮调用":"一次性全局调用"}`);}}
+  if(m==="clip")for(let c=1;c<7;c++)E("line",{x1:x0+c*4*cw-1.5,x2:x0+c*4*cw-1.5,y1:6,y2:238,style:"stroke:var(--ink3);stroke-width:1"},s);
+  kv($("#tileKV"),m==="clip"?[{v:"224",l:"执行槽（7 轮 × 8 卡 × 4）"},{v:"28",l:"填充槽",c:"bad"},{v:"7",l:"解码 + gather 调用次数"},{v:"0.359 s",l:"已报告：分片 + 批处理 + compile"}]:[{v:"200",l:"执行槽（8 卡 × 25）"},{v:"4",l:"填充槽",c:"good"},{v:"1",l:"解码 + gather 调用次数"},{v:"未报告",l:"延迟（论文只给了数值偏差：max 0.0137，PSNR 75.75 dB）"}]);}
+seg("tileMode",drawTiles);drawTiles();
+
+/* ============ §6 memory ============ */
+(function(){const s=$("#memSvg"),x0=110,W=800,max=150,X=v=>x0+v/max*W;
+  E("defs",{},s).innerHTML='<pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" style="fill:var(--surf)" opacity="0"/><line x1="0" y1="0" x2="0" y2="6" style="stroke:var(--surf);stroke-width:2;opacity:.55"/></pattern>';
+  function bar(y,label,parts){E("text",{x:0,y:y+20,text:label,class:"ink"},s);let v=0;parts.forEach(([n,c,l,inf])=>{const x=X(v),w=X(v+n)-x;const r=E("rect",{x,y,width:Math.max(1.5,w-2),height:30,rx:3,style:`fill:var(--${c})`},s);if(inf)E("rect",{x,y,width:Math.max(1.5,w-2),height:30,rx:3,fill:"url(#hatch)"},s);hover(r,()=>`<div class="tt">${l}</div><span class="mono">${f(n,1)} GiB · ${inf?"我推算的":"论文 / 项目页给出"}</span>`);{const lab=fitLabel([`${l.split("（")[0]} ${f(n,1)}`,l.split(" ")[0]+" "+f(n,1),f(n,1)],w,10.8);if(lab)E("text",{x:x+5,y:y+19,text:lab,style:"font-size:10.8px;fill:#fff"},s);}v+=n;});E("text",{x:X(v)+6,y:y+20,text:f(v,1)+" GiB",class:"mono ink"},s);}
+  bar(14,"朴素两阶段",[[14.6,"txt","NVFP4 Qwen"],[23.4,"s1","FP8 H3 DiT"],[10.1,"dec","层间 VAE：H3 解码器 + LTX 编码器（推算）",1],[16.2,"txt","Gemma + connector"],[78.1,"s2","LTX 精修器 / 解码器 / 上采样器 / 运行时（推算）",1]]);
+  bar(70,"Sol-H3",[[14.6,"txt","NVFP4 Qwen"],[23.4,"s1","FP8 H3 DiT"],[0.785,"ad","VAE 适配器"],[78.1,"s2","LTX 精修器 / 解码器 / 上采样器 / 运行时（推算）",1]]);
+  E("line",{x1:X(119.68),x2:X(119.68),y1:4,y2:120,style:"stroke:var(--risk);stroke-width:1.5"},s);E("text",{x:X(119.68)+4,y:128,text:"Spark 容量 119.68 GiB",style:"font-size:11px;fill:var(--risk-ink)"},s);
+  [0,25,50,75,100,125,150].forEach(v=>E("text",{x:X(v),y:156,"text-anchor":"middle",text:v,class:"mono ink3",style:"font-size:10.5px"},s));
+  E("text",{x:x0,y:178,text:"斜线 = 推算值；悬停查看。节省 25.5 GiB = −17.9%",class:"ink3",style:"font-size:11.5px"},s);})();
+
+/* ============ §6.1 AdaLN ============ */
+function drawAda(){const n=Number($("#adaSteps").value);$("#adaStepsV").textContent=n;const tb=50*n*9*32256*2;
+  kv($("#adaKV"),[{v:"13.0B / 26 GB",l:"被丢弃的 adaln_proj 权重（BF16）"},{v:tb>1e9?f(tb/1e9,2)+" GB":f(tb/1e6,0)+" MB",l:`预计算表大小（${n} 步）`},{v:f(26e9/8e12*1000,1)+" ms",l:"每步少读 26 GB：GB200（≈8 TB/s）"},{v:f(26e9/273e9*1000,0)+" ms",l:"每步：DGX Spark（273 GB/s）"},{v:f(n*26e9/273e9,2)+" s",l:`${n} 步合计，Spark 上`},{v:f(n*26e9/8e12,3)+" s",l:`${n} 步合计，GB200 上`}]);}
+$("#adaSteps").addEventListener("input",drawAda);drawAda();
+
+/* ============ §6.3 profiles ============ */
+const CAT=[["txt","文本编码"],["s1","Stage 1 生成"],["ad","潜变量交接"],["s2","Stage 2 精修"],["dec","视频解码"],["oth","其他 / 未说明"]];
+function legendHTML(el,keys){el.innerHTML=CAT.filter(c=>!keys||keys.includes(c[0])).map(([c,l])=>`<span><i class="sw ${c}"></i>${l}</span>`).join("");}
+(function(){legendHTML($("#profLegend"));const s=$("#profSvg"),x0=150,W=660;
+  const rows=[["1× GB200",6.226,[1.0168,3.772,0.143,1.079,0.215,0],"s",{ad:"LTX VAE 编码（像素交接）",dec:"TAEH3 0.028 + TAEHV 0.187",txt:"Stage-1 编码 0.373 + Gemma 0.644"}],
+    ["1× DGX Spark",56.17,[2.4,35.2,3.8,44.0,12.5,2.1],"p",{ad:"H3 上采样器 + VAE 适配器",dec:"LTX 官方 VAE 解码",oth:"MP4 封装 1.3% + 请求开销 0.9%（项目页）"}],
+    ["1× RTX 5090",39.80,[34.1,28.2,2.8,19.7,5.1,10.1],"p",{txt:"Qwen 每请求重建（前向仅 0.518 s）",ad:"上采样器 + 适配器",oth:"论文未说明的 10.1%"}]];
+  rows.forEach(([lab,tot,vals,kind,notes],ri)=>{const y=14+ri*58;E("text",{x:0,y:y+20,text:lab,class:"ink"},s);const sum=vals.reduce((a,b)=>a+b,0);let x=x0;
+    vals.forEach((v,i)=>{if(v<=0)return;const w=v/sum*W;const c=CAT[i][0];const sec=kind==="s"?v:v/100*tot,pct=kind==="s"?v/tot*100:v;
+      const r=E("rect",{x,y,width:Math.max(1.5,w-2),height:30,rx:3,style:`fill:var(--${c})`},s);hover(r,()=>`<div class="tt">${CAT[i][1]}</div><span class="mono">${f(sec,2)} s · ${f(pct,1)}%</span>${notes[c]?"<br>"+notes[c]:""}`);
+      if(w>44)E("text",{x:x+w/2-1,y:y+19,"text-anchor":"middle",text:f(pct,1)+"%",style:"font-size:11px;fill:#fff"},s);x+=w;});
+    E("text",{x:x0+W+8,y:y+20,text:f(tot,tot<10?3:2)+" s",class:"mono ink"},s);});
+  E("text",{x:x0,y:196,text:"每行按各自总时长归一；GB200 用项目页逐项秒数，另两行用论文百分比（「其他」= 100% − 各项之和）",class:"ink3",style:"font-size:11.5px"},s);})();
+
+/* ============ §7 reference grid ============ */
+function drawRefGrid(){const st=segVal("refStep"),s=$("#refSvg");clear(s);const G=[["图像参考",3,"ref"],["视频参考",5,"ref"],["文本 + 生成",6,"gen"]],u=18,x0=120,y0=30;let n=0;const pos=[];G.forEach(g=>{pos.push(n);n+=g[1];});
+  G.forEach((g,i)=>{E("text",{x:x0-8,y:y0+(pos[i]+g[1]/2)*u+4,"text-anchor":"end",text:g[0],class:"ink",style:"font-size:12px"},s);E("text",{x:x0+(pos[i]+g[1]/2)*u,y:y0-8,"text-anchor":"middle",text:g[0],class:"ink3",style:"font-size:11px"},s);});
+  for(let qi=0;qi<G.length;qi++)for(let ki=0;ki<G.length;ki++){const qg=G[qi],kg=G[ki];const x=x0+pos[ki]*u,y=y0+pos[qi]*u,w=kg[1]*u-2,h=qg[1]*u-2;let style,lab;
+    if(st==="1"){style=qg[2]==="ref"?"fill:var(--dec);opacity:.8":"fill:var(--s1);opacity:.85";lab="全量计算；参考 token 的 K/V 被写入缓存";}
+    else if(qg[2]==="ref"){style="fill:var(--surf3)";lab="参考 token 的查询行被跳过";}
+    else if(kg[2]==="ref"){style="fill:var(--s2);opacity:.85";lab="生成查询 → 缓存的参考 K/V（交叉注意力）";}
+    else{style="fill:var(--s1);opacity:.85";lab="生成 token 之间的自注意力";}
+    const r=E("rect",{x,y,width:w,height:h,rx:3,style},s);hover(r,()=>`<div class="tt">查询：${qg[0]} · 键：${kg[0]}</div>${lab}`);
+    if(st!=="1"&&qg[2]==="ref"){E("line",{x1:x+4,y1:y+h-4,x2:x+w-4,y2:y+4,style:"stroke:var(--ink3);stroke-width:1"},s);}}
+  const lx=440;const L=st==="1"?[["dec","参考 token 的查询行：照常计算，并缓存每层的 K/V"],["s1","文本 + 生成 token 的查询行：照常计算"]]:[["oth","参考查询行：整行跳过（论文图 4 的灰色部分）"],["s2","生成 → 参考：直接读第 1 步缓存的 K/V"],["s1","生成 → 生成：照常的自注意力"]];
+  L.forEach(([c,t],i)=>{E("rect",{x:lx,y:40+i*26,width:14,height:14,rx:3,style:`fill:var(--${c==="oth"?"surf3":c})`},s);E("text",{x:lx+22,y:52+i*26,text:t,class:"ink",style:"font-size:12.5px"},s);});
+  const N0=38247,nr=31792,full=(N0+nr)**2,cached=N0*(N0+nr);
+  E("text",{x:lx,y:160,text:st==="1"?"第 1 步：注意力代价 ∝ (N₀+n)²":"之后各步：注意力代价 ∝ N₀·(N₀+n)",class:"ink",style:"font-size:12.5px;font-weight:600"},s);
+  E("text",{x:lx,y:182,text:`以「1 段参考视频」为例（n = 31,792）：每步注意力只剩 ${f(cached/full*100,0)}%`,class:"ink2",style:"font-size:12px"},s);
+  E("text",{x:lx,y:204,text:"线性层（QKV/FFN）同样只对 N₀ 个 token 计算",class:"ink2",style:"font-size:12px"},s);
+  E("text",{x:lx,y:236,text:"注意：参考行在第 1 步看到的是纯噪声的生成 token",style:"font-size:12px;fill:var(--med-ink)"},s);
+  E("text",{x:lx,y:256,text:"（全自注意力下，参考 token 的深层 K/V 依赖 x_t）",style:"font-size:12px;fill:var(--med-ink)"},s);}
+seg("refStep",drawRefGrid);drawRefGrid();
+
+/* ============ §7 reference cost charts ============ */
+const RA=0.347,RN0=38247;const Tref=n=>RA*(1+n/RN0)+(1-RA)*(1+n/RN0)**2;
+const REFPTS=[["1 image",14344,1.71],["1 video",31792,2.83],["1 video + 1 image",46136,3.94]];
+const KVPTS=[["1 图",14344,1.14],["2 图",28432,1.35],["3 图",42776,1.56],["1 视频",31792,1.41],["2 视频",63584,1.92],["视频+图",46136,1.65]];
+function drawRef(){const N=Number($("#refN").value);$("#refNV").textContent=N;
+  const a=$("#refCost");clear(a);const x0=44,W=400,y0=226,H=200,X=n=>x0+n/70000*W,Y=v=>y0-(v-1)/5*H;
+  [1,2,3,4,5,6].forEach(v=>{E("line",{x1:x0,x2:x0+W,y1:Y(v),y2:Y(v),class:"gridl"},a);E("text",{x:x0-6,y:Y(v)+4,"text-anchor":"end",text:v+"×",class:"mono ink3",style:"font-size:10.5px"},a);});
+  [0,20000,40000,60000].forEach(n=>E("text",{x:X(n),y:y0+16,"text-anchor":"middle",text:(n/1000)+"k",class:"mono ink3",style:"font-size:10.5px"},a));
+  let d="";for(let n=0;n<=70000;n+=1000)d+=(n?"L":"M")+X(n)+","+Y(Tref(n));E("path",{d,style:"fill:none;stroke:var(--dec);stroke-width:2"},a);
+  REFPTS.forEach(([l,n,v])=>{const c=E("circle",{cx:X(n),cy:Y(v),r:5,style:"fill:var(--s2);stroke:var(--surf);stroke-width:2"},a);hover(c,()=>`<div class="tt">${l}</div><span class="mono">论文 ${v}× · 模型 ${f(Tref(n),2)}×</span>`);E("text",{x:X(n)+8,y:Y(v)+4,text:l,class:"ink2",style:"font-size:11px"},a);});
+  sLegend(a,x0+6,Y(6)+10,[["dec","拟合 a = 0.347","line"],["s2","论文表 2"]],11);
+  const b=$("#refSpeed");clear(b);const bx0=40,BW=410,by0=226,BH=200,BY=v=>by0-(v-1)/2*BH,gw=BW/KVPTS.length;
+  [1,1.5,2,2.5,3].forEach(v=>{E("line",{x1:bx0,x2:bx0+BW,y1:BY(v),y2:BY(v),class:"gridl"},b);E("text",{x:bx0-6,y:BY(v)+4,"text-anchor":"end",text:v+"×",class:"mono ink3",style:"font-size:10.5px"},b);});
+  KVPTS.forEach(([l,n,v],i)=>{const r=n/RN0,Cf=Tref(n),Cc=RA+(1-RA)*(1+r),ub=N*Cf/(Cf+(N-1)*Cc);const x=bx0+i*gw+gw*0.15,w=gw*0.33;
+    const r1=E("rect",{x,y:BY(Math.min(3,v)),width:w-2,height:by0-BY(Math.min(3,v)),rx:3,style:"fill:var(--dec)"},b);hover(r1,()=>`<div class="tt">${l} · 论文</div><span class="mono">${v}×</span>`);
+    const r2=E("rect",{x:x+w,y:BY(Math.min(3,ub)),width:w-2,height:by0-BY(Math.min(3,ub)),rx:3,style:"fill:var(--s2)"},b);hover(r2,()=>`<div class="tt">${l} · 模型上限（N=${N}）</div><span class="mono">${f(ub,2)}× · 报告值 / 上限 = ${f(v/ub*100,0)}%</span>`);
+    E("text",{x:x+w,y:by0+15,"text-anchor":"middle",text:l,class:"ink3",style:"font-size:10.5px"},b);});
+  sLegend(b,bx0+6,BY(3)+10,[["dec","论文报告"],["s2",`模型上限（N=${N}）`]],11);}
+$("#refN").addEventListener("input",drawRef);drawRef();
+
+/* ============ §8.1 Table 1 ============ */
+const T1={base:{1:[129.898,376.942,746.885],4:[35.328,100.440,194.930],8:[18.250,50.660,99.513]},paper:{1:[9.475,24.309,44.958],4:[2.530,6.212,11.471],8:[1.434,3.350,6.062]},readme:{1:[13.745,37.813,52.260],4:[2.918,6.993,12.542],8:[1.653,3.732,6.612]}};
+function drawT1(){const m=segVal("t1Mode"),D=[5,10,15];let h=`<table><thead><tr><th>GPU</th><th>时长</th><th class="num">基线（49 次前向）</th><th class="num">Sol-H3（4 次前向）</th><th class="num">加速比</th><th class="num">÷ 12.25</th></tr></thead><tbody>`;
+  [1,4,8].forEach(g=>D.forEach((d,i)=>{const b=T1.base[g][i],s=T1[m][g][i],sp=b/s;h+=`<tr><td>${g}×</td><td>${d} s</td><td class="num">${b.toFixed(3)}${m==="readme"?' <span class="flag">= 论文</span>':""}</td><td class="num">${s.toFixed(3)}</td><td class="num">${f(sp,2)}×</td><td class="num">${f(sp/12.25,3)}×</td></tr>`;}));
+  h+=`</tbody></table>`;$("#t1Tbl").innerHTML=h;
+  const s=$("#t1Svg");clear(s);const x0=50,W=880,y0=190,H=160,Y=v=>y0-v/1.5*H,gw=W/9;
+  [0,0.5,1,1.5].forEach(v=>{E("line",{x1:x0,x2:x0+W,y1:Y(v),y2:Y(v),class:"gridl"},s);E("text",{x:x0-6,y:Y(v)+4,"text-anchor":"end",text:v.toFixed(1)+"×",class:"mono ink3",style:"font-size:10.5px"},s);});
+  E("line",{x1:x0,x2:x0+W,y1:Y(1),y2:Y(1),style:"stroke:var(--ink2);stroke-width:1"},s);
+  let k=0;[1,4,8].forEach(g=>D.forEach((d,i)=>{const b=T1.base[g][i];[["paper","dec","论文"],["readme","s2","README"]].forEach(([key,c,l],j)=>{const v=b/T1[key][g][i]/12.25,x=x0+k*gw+gw*0.18+j*gw*0.32;const r=E("rect",{x,y:Y(v),width:gw*0.3-2,height:y0-Y(v),rx:3,style:`fill:var(--${c});opacity:${key===m?1:.45}`},s);hover(r,()=>`<div class="tt">${g} 卡 · ${d} s · ${l}</div><span class="mono">${f(b/T1[key][g][i],2)}× ÷ 12.25 = ${f(v,3)}×</span>`);});
+    E("text",{x:x0+k*gw+gw/2,y:y0+15,"text-anchor":"middle",text:`${g}卡·${d}s`,class:"ink3",style:"font-size:10.5px"},s);k++;}));
+  sLegend(s,x0,12,[["dec","论文表 1"],["s2","仓库 README（B300）"],["ink2","1.0× = 加速完全来自步数","line"]],11);}
+seg("t1Mode",drawT1);drawT1();
+
+/* ============ §8.2 ledger ============ */
+(function(){legendHTML($("#ledLegend"),["txt","s1","ad","s2","dec"]);const s=$("#ledSvg"),x0=150,W=720,X=v=>x0+v/17*W;
+  const rows=[["我们的基线",[[0.644,"txt","Gemma 0.644"],[3.772,"s1","H3 DiT 3.772"],[0.143,"ad","LTX VAE 编码 0.143"],[1.930,"s2","稠密精修器 1.930"],[9.831,"dec","完整 VAE 解码：H3 3.427 + LTX 6.404"]]],
+    ["当前 Sol-Super",[[1.0168,"txt","Stage-1 编码 0.373 + Gemma 0.644"],[3.772,"s1","H3 DiT 3.772"],[0.143,"ad","LTX VAE 编码 0.143"],[1.079,"s2","Sol-Attn 精修器 1.079"],[0.215,"dec","TAE 解码：TAEH3 0.028 + TAEHV 0.187"]]]];
+  rows.forEach(([lab,parts],ri)=>{const y=14+ri*64;E("text",{x:0,y:y+21,text:lab,class:"ink"},s);let v=0;parts.forEach(([n,c,l])=>{const x=X(v),w=X(v+n)-x;const r=E("rect",{x,y,width:Math.max(1.5,w-2),height:32,rx:3,style:`fill:var(--${c})`},s);hover(r,()=>`<div class="tt">${l.split(" ")[0]}</div><span class="mono">${l}</span>`);if(w>56)E("text",{x:x+w/2-1,y:y+20,"text-anchor":"middle",text:f(n,2),style:"font-size:11px;fill:#fff"},s);v+=n;});E("text",{x:X(v)+6,y:y+21,text:f(v,3)+" s",class:"mono ink"},s);});
+  [0,4,8,12,16].forEach(v=>E("text",{x:X(v),y:160,"text-anchor":"middle",text:v+" s",class:"mono ink3",style:"font-size:10.5px"},s));
+  kv($("#ledKV"),[{v:"10.09 s",l:"总共省下（16.320 → 6.226）"},{v:"9.62 s · 95%",l:"换成 TAE 小自编码器（近似）",c:"bad"},{v:"0.85 s · 8%",l:"Sol-Attn 精修器（近似）"},{v:"−0.37 s · −4%",l:"Stage-1 编码只记在「当前」一侧"},{v:"0 s",l:"H3 DiT（3.772 s，两侧相同）"}]);})();
+
+/* ============ §8.3 FLOP model ============ */
+function drawFl(){const res=segVal("flRes"),P=Number($("#flP").value)*1e9,sp=$("#flSparse").checked;$("#flPV").textContent=(P/1e9)+"B";
+  const base=fwdF(P_H3,38247,L_H3,D_H3),B=49*(base.lin+base.att);
+  const N1=res==="896"?17527:10275,s1=fwdF(P_H3,N1,L_H3,D_H3),S1=4*(s1.lin+s1.att);
+  const s2=fwdF(P,16128,48,4096,sp?0.12:1),S2=3*(s2.lin+s2.att),ratio=B/(S1+S2);
+  const s=$("#flSvg");clear(s);const x0=40,W=880,lmin=0,lmax=Math.log10(60),X=v=>x0+(Math.log10(v)-lmin)/(lmax-lmin)*W,y=70;
+  E("line",{x1:x0,x2:x0+W,y1:y,y2:y,style:"stroke:var(--axis);stroke-width:2"},s);
+  [1,2,5,10,20,50].forEach(v=>{E("line",{x1:X(v),x2:X(v),y1:y-5,y2:y+5,class:"axis"},s);E("text",{x:X(v),y:y+20,"text-anchor":"middle",text:v+"×",class:"mono ink3",style:"font-size:10.5px"},s);});
+  const marks=[[12.25,"oth","仅 49→4 步（单阶段）",-1],[ratio,"dec",`算法层 FLOPs 缩减 ${f(ratio,1)}×（估）`,-2],[22.2,"s2","实测 22.2×（SGLang）",1],[27.0,"s2","实测 27.0×（Diffusers）",2],[31,"s2","Spark 31×（基线未公开）",3]].filter(m=>res==="896"?m[2].indexOf("Spark")<0:(m[2].indexOf("实测")<0));
+  marks.forEach(([v,c,l,lv])=>{const x=X(v),yy=lv<0?y-18+lv*18:y+22+lv*20;E("circle",{cx:x,cy:y,r:6,style:`fill:var(--${c});stroke:var(--surf);stroke-width:2`},s);E("line",{x1:x,x2:x,y1:y+(lv<0?-6:6),y2:yy+(lv<0?4:-12),style:`stroke:var(--${c});stroke-width:1`},s);E("text",{x:Math.min(x0+W-4,Math.max(x0,x)),y:yy,"text-anchor":x>x0+W-120?"end":(x<x0+100?"start":"middle"),text:l,class:"ink",style:"font-size:11.5px"},s);});
+  kv($("#flKV"),[{v:f(B/1e15,0)+" PF",l:"基线：49 次 × 38,247 token"},{v:f(S1/1e15,1)+" PF",l:`Stage 1：4 次 × ${fi(N1)} token`},{v:f(S2/1e15,1)+" PF",l:`Stage 2：3 次 × 16,128 token（LTX ${P/1e9}B${sp?"，注意力 12%":""}）`},{v:f(ratio,1)+"×",l:"算法层 FLOPs 缩减（估）"},{v:f((res==="896"?22.2:31)/ratio,2),l:res==="896"?"实测 22.2× ÷ 算法缩减":"Spark 31× ÷ 算法缩减（未计 offload 基线）"}]);}
+seg("flRes",drawFl);$("#flP").addEventListener("input",drawFl);$("#flSparse").addEventListener("change",drawFl);drawFl();
+
+/* ============ §9 issues ============ */
+seg("sevFilter",v=>{document.querySelectorAll("#issues .issue").forEach(d=>{d.hidden=!(v==="all"||d.dataset.sev===v);});});
+$("#openAll").addEventListener("click",()=>{const ds=[...document.querySelectorAll("#issues .issue:not([hidden])")];const open=!ds.every(d=>d.open);ds.forEach(d=>d.open=open);$("#openAll").textContent=open?"全部收起":"全部展开";});
+
+})();
+</script>
+</body>
+</html>

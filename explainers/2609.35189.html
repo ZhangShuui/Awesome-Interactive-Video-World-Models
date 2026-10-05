@@ -1,0 +1,1672 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>G³-LoRA 精读</title>
+<meta name="description" content="G³-LoRA（arXiv 2609.35189）精读：奖励加权视频后训练的数据分组。残差梯度相容性矩阵、平均连接聚类、稠密 delta-SVD 合并、多教师在线蒸馏；交互热力图、中心化演示、合并稀释、全部表格复算与存疑清单。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=Noto+Serif+SC:wght@600;700&family=STIX+Two+Text:ital@0;1&display=swap">
+<style>
+/* ============================================================
+   G³-LoRA 精读 — tokens（深色优先；浅色为纸面）
+   方法色（全页固定，跟随实体）：
+     ours = G³ 合并版 r40（蓝）  opd = G³ + OPD（青）  joint = Joint LoRA（橙）
+     expert = 组专家 group-only（黄，非可部署诊断）  base = 基座（中性灰）  ctrl = 其它对照（浅灰）
+   分组色（仅在分组相关图中）：g1 蓝 g2 橙 g3 青 g4 黄 g5 品红（调色板固定顺序）
+   发散色：pos = 相容 / 上升（蓝）  neg = 冲突 / 下降（红）  中点 = 中性灰
+   存疑：risk 高 / med 中 / low 低 / ok 已复算
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#111317; --surf:#171a1f; --surf2:#1d2128; --surf3:#272c35;
+  --rule:#2a3039; --rule2:#3c4450;
+  --ink:#e7eaee; --ink2:#aab2bc; --ink3:#7d8691;
+  --ours:#3987e5; --ours-ink:#8ab8f0; --ours-soft:rgba(57,135,229,.17);
+  --opd:#199e70; --opd-ink:#6fd1a9; --opd-soft:rgba(25,158,112,.17);
+  --joint:#d95926; --joint-ink:#f0a27f; --joint-soft:rgba(217,89,38,.17);
+  --expert:#c98500; --expert-ink:#e8c060; --expert-soft:rgba(201,133,0,.17);
+  --base:#8a929c; --ctrl:#5f6b7a;
+  --g1:#3987e5; --g2:#d95926; --g3:#199e70; --g4:#c98500; --g5:#d55181;
+  --pos:#4c95ea; --neg:#e66767; --mid:#2a2e35;
+  --risk:#e5544c; --risk-ink:#f68a83; --risk-soft:rgba(229,84,76,.15);
+  --med:#d4b144; --med-ink:#ecd07a; --med-soft:rgba(212,177,68,.15);
+  --low:#7f8a97; --low-ink:#b3bcc6; --low-soft:rgba(127,138,151,.15);
+  --ok:#3dba80; --ok-ink:#72d8a7; --ok-soft:rgba(61,186,128,.14);
+  --grid:#232931; --axis:#3c4755;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 32px rgba(0,0,0,.30);
+  --f-head:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --f-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --f-math:"STIX Two Text","Times New Roman",Georgia,serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f3f0; --surf:#fbfbf9; --surf2:#eceee9; --surf3:#e0e3dd;
+    --rule:#d8dbd4; --rule2:#b9beb6;
+    --ink:#13161b; --ink2:#414852; --ink3:#69717b;
+    --ours:#2a78d6; --ours-ink:#1c5cab; --ours-soft:rgba(42,120,214,.11);
+    --opd:#1baf7a; --opd-ink:#0e7a55; --opd-soft:rgba(27,175,122,.12);
+    --joint:#eb6834; --joint-ink:#a8461a; --joint-soft:rgba(235,104,52,.12);
+    --expert:#eda100; --expert-ink:#855b00; --expert-soft:rgba(237,161,0,.14);
+    --base:#8b9097; --ctrl:#b0b7bf;
+    --g1:#2a78d6; --g2:#eb6834; --g3:#1baf7a; --g4:#eda100; --g5:#e87ba4;
+    --pos:#1c5cab; --neg:#c6382f; --mid:#efeeea;
+    --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+    --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+    --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.12);
+    --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.10);
+    --grid:#e6e8e3; --axis:#b9beb6;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f3f0; --surf:#fbfbf9; --surf2:#eceee9; --surf3:#e0e3dd;
+  --rule:#d8dbd4; --rule2:#b9beb6;
+  --ink:#13161b; --ink2:#414852; --ink3:#69717b;
+  --ours:#2a78d6; --ours-ink:#1c5cab; --ours-soft:rgba(42,120,214,.11);
+  --opd:#1baf7a; --opd-ink:#0e7a55; --opd-soft:rgba(27,175,122,.12);
+  --joint:#eb6834; --joint-ink:#a8461a; --joint-soft:rgba(235,104,52,.12);
+  --expert:#eda100; --expert-ink:#855b00; --expert-soft:rgba(237,161,0,.14);
+  --base:#8b9097; --ctrl:#b0b7bf;
+  --g1:#2a78d6; --g2:#eb6834; --g3:#1baf7a; --g4:#eda100; --g5:#e87ba4;
+  --pos:#1c5cab; --neg:#c6382f; --mid:#efeeea;
+  --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+  --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+  --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.12);
+  --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.10);
+  --grid:#e6e8e3; --axis:#b9beb6;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.75;}
+a{color:var(--ours-ink);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:2px solid var(--ours);outline-offset:2px;border-radius:4px}
+b,strong{font-weight:600;color:var(--ink)}
+sub,sup{font-size:.72em;line-height:0}
+.tnum{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono);font-size:.9em}
+.mv{font-family:var(--f-math);font-style:italic;font-size:1.07em;white-space:nowrap}
+.mr{font-family:var(--f-math);font-style:normal}
+.dim{color:var(--ink3)}
+.small{font-size:13.5px;color:var(--ink2);line-height:1.65}
+.c-ours{color:var(--ours-ink)} .c-opd{color:var(--opd-ink)} .c-joint{color:var(--joint-ink)} .c-expert{color:var(--expert-ink)}
+.c-risk{color:var(--risk-ink)} .c-ok{color:var(--ok-ink)} .c-med{color:var(--med-ink)}
+
+.wrap{max-width:1120px;margin:0 auto;padding:0 20px 120px}
+@media (max-width:640px){ .wrap{padding:0 16px 110px} }
+
+/* ---------- hero ---------- */
+.hero{padding:34px 0 26px;border-bottom:1px solid var(--rule)}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}
+.kicker{font-family:var(--f-mono);font-size:12.5px;letter-spacing:.06em;color:var(--ink3);text-transform:uppercase}
+.themebtn{font:500 13px var(--f-mono);color:var(--ink2);background:var(--surf2);border:1px solid var(--rule2);border-radius:999px;padding:6px 12px;cursor:pointer}
+.themebtn:hover{color:var(--ink)}
+h1{font-family:var(--f-head);font-weight:700;font-size:clamp(30px,5vw,46px);line-height:1.18;margin:0 0 14px;letter-spacing:.01em}
+h1 .soft{display:block;font-size:.5em;font-weight:600;color:var(--ink2);margin-top:10px;letter-spacing:0}
+.sub{color:var(--ink2);max-width:880px;margin:0 0 16px}
+.thesis{background:var(--surf);border:1px solid var(--rule);border-left:3px solid var(--ours);border-radius:10px;padding:14px 18px;margin:18px 0;max-width:960px}
+.thesis .lab,.callout .lab{display:inline-block;font:600 11.5px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ours-ink);margin-right:8px}
+.patch{display:grid;grid-template-columns:4px 1fr;gap:16px;margin:20px 0}
+.patch .rail{background:linear-gradient(var(--g1),var(--g2),var(--g3),var(--g4),var(--g5));border-radius:4px}
+.patch dl{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:6px 28px}
+.patch dl div{display:grid;grid-template-columns:78px 1fr;gap:10px;font-size:14.5px;line-height:1.6}
+.patch dt{color:var(--ink3);font-family:var(--f-mono);font-size:12.5px;padding-top:2px}
+.patch dd{margin:0;color:var(--ink2)}
+.patch .no{color:var(--risk-ink);font-weight:600}
+.statstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:20px}
+.statstrip>div{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:12px 14px}
+.statstrip b{display:block;font-family:var(--f-mono);font-size:21px;font-weight:600;letter-spacing:-.01em;margin-bottom:2px}
+.statstrip span{font-size:13px;color:var(--ink2);line-height:1.5;display:block}
+.statstrip .good b{color:var(--ours-ink)}
+.statstrip .opd b{color:var(--opd-ink)}
+.statstrip .jt b{color:var(--joint-ink)}
+.statstrip .warn b{color:var(--med-ink)}
+
+/* ---------- toc ---------- */
+.toc{position:sticky;top:0;z-index:30;display:flex;gap:4px;overflow-x:auto;padding:10px 0;margin:0 0 8px;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--rule);scrollbar-width:none}
+.toc::-webkit-scrollbar{display:none}
+.toc a{flex:0 0 auto;font-size:13.5px;color:var(--ink2);text-decoration:none;padding:5px 10px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+.toc a .n{font-family:var(--f-mono);font-size:11.5px;color:var(--ink3);margin-right:5px}
+.toc a:hover,.toc a.on{color:var(--ink);background:var(--surf2);border-color:var(--rule2)}
+
+/* ---------- sections ---------- */
+section{padding:46px 0 10px;scroll-margin-top:56px}
+h2{font-family:var(--f-head);font-weight:700;font-size:clamp(24px,3.4vw,31px);line-height:1.3;margin:0 0 14px}
+h2 .no{font-family:var(--f-mono);font-weight:500;font-size:.55em;color:var(--ink3);margin-right:12px;vertical-align:.2em}
+h3{font-family:var(--f-head);font-weight:600;font-size:20px;margin:34px 0 10px}
+h4{font-size:15.5px;margin:0 0 6px;font-weight:600}
+.lede{font-size:17px;color:var(--ink2);max-width:900px}
+p{margin:0 0 12px}
+ul.tight{margin:6px 0 10px;padding-left:1.3em} ul.tight li{margin:3px 0}
+ol.tight{margin:6px 0 10px;padding-left:1.4em} ol.tight li{margin:4px 0}
+
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:16px 0}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:16px 0}
+.grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0}
+@media (max-width:900px){ .grid3,.grid4{grid-template-columns:repeat(2,minmax(0,1fr))} }
+@media (max-width:640px){ .grid2,.grid3,.grid4{grid-template-columns:1fr} }
+.card{background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:16px 18px;min-width:0}
+.card p{font-size:14.5px;color:var(--ink2);line-height:1.7;margin:0 0 8px}
+.card p:last-child{margin-bottom:0}
+.card .big{font-family:var(--f-head);font-size:17px;color:var(--ink);margin:2px 0 8px;line-height:1.45}
+.card.ours{border-top:3px solid var(--ours)} .card.joint{border-top:3px solid var(--joint)} .card.neutral{border-top:3px solid var(--base)}
+.card.opd{border-top:3px solid var(--opd)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:7px;vertical-align:.05em}
+.dot.ours{background:var(--ours)} .dot.opd{background:var(--opd)} .dot.joint{background:var(--joint)} .dot.expert{background:var(--expert)} .dot.base{background:var(--base)} .dot.ctrl{background:var(--ctrl)}
+
+.callout{background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:15px 18px;margin:18px 0;max-width:980px}
+.callout p{color:var(--ink2);font-size:15px}
+.callout p:last-child,.callout ul:last-child{margin-bottom:0}
+.callout li{color:var(--ink2);font-size:15px}
+.callout.mine{border-left:3px solid var(--ours)}
+.callout.warn{border-left:3px solid var(--med)} .callout.warn .lab{color:var(--med-ink)}
+.callout.risk{border-left:3px solid var(--risk)} .callout.risk .lab{color:var(--risk-ink)}
+.callout.okc{border-left:3px solid var(--ok)} .callout.okc .lab{color:var(--ok-ink)}
+
+.eq{font-family:var(--f-math);font-size:19px;background:var(--surf2);border:1px solid var(--rule);border-radius:10px;padding:12px 16px;margin:12px 0;overflow-x:auto;white-space:nowrap;line-height:1.9}
+.eq .tag{float:right;font-family:var(--f-mono);font-size:12px;color:var(--ink3);margin-left:16px;line-height:2.6}
+.eq .note{display:block;font-family:var(--f-body);font-size:13px;color:var(--ink3);white-space:normal;line-height:1.55;margin-top:2px}
+.frac{display:inline-flex;flex-direction:column;vertical-align:middle;text-align:center;margin:0 3px;line-height:1.25}
+.frac>span:first-child{border-bottom:1px solid currentColor;padding:0 3px}
+.frac>span{font-size:.92em}
+
+/* ---------- tables ---------- */
+.tbl-wrap{overflow-x:auto;margin:14px 0;border:1px solid var(--rule);border-radius:10px;background:var(--surf)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:8px 11px;border-bottom:1px solid var(--rule);text-align:right;white-space:nowrap}
+th{font-weight:600;color:var(--ink2);background:var(--surf2);font-size:13px}
+th.l,td.l{text-align:left}
+td.wrap-cell{white-space:normal;min-width:200px}
+tr:last-child td{border-bottom:none}
+tr.ours td{background:var(--ours-soft)}
+tr.opdrow td{background:var(--opd-soft)}
+tr.dimrow td{color:var(--ink3)}
+td .neg{color:var(--risk-ink)} td .pos{color:var(--ok-ink)}
+
+/* ---------- viz frame ---------- */
+.viz{background:var(--surf);border:1px solid var(--rule);border-radius:14px;padding:16px 18px 14px;margin:18px 0;box-shadow:var(--shadow)}
+@media (max-width:640px){ .viz{padding:14px 12px 12px} }
+.viz-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px 16px;margin-bottom:10px}
+.viz-title{font-family:var(--f-head);font-weight:600;font-size:17px}
+.viz-sub{font-size:13px;color:var(--ink3)}
+.controls{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:4px 0 12px}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--rule2);border-radius:9px;overflow:hidden;background:var(--surf2)}
+.seg button{font:500 13px var(--f-body);color:var(--ink2);background:transparent;border:0;border-right:1px solid var(--rule2);padding:6px 11px;cursor:pointer;min-height:32px}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--surf3);color:var(--ink);box-shadow:inset 0 -2px 0 var(--ours)}
+.ctl-lab{font:500 12px var(--f-mono);color:var(--ink3);letter-spacing:.04em;margin-right:4px}
+.rng{display:inline-flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink2)}
+.rng input[type=range]{width:150px;accent-color:var(--ours)}
+.rng output{font-family:var(--f-mono);font-size:13px;color:var(--ink);min-width:44px}
+.btn{font:500 13px var(--f-body);color:var(--ink2);background:var(--surf2);border:1px solid var(--rule2);border-radius:9px;padding:6px 12px;cursor:pointer;min-height:32px}
+.btn:hover{color:var(--ink)}
+.chk{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;color:var(--ink2);cursor:pointer}
+.chk input{accent-color:var(--ours);width:16px;height:16px}
+.readouts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:10px}
+.ro{background:var(--surf2);border:1px solid var(--rule);border-radius:9px;padding:8px 11px}
+.ro .k{font-size:12px;color:var(--ink3);display:block;line-height:1.4}
+.ro .v{font-family:var(--f-mono);font-size:17px;font-weight:600;color:var(--ink)}
+.ro .v.bad{color:var(--risk-ink)} .ro .v.good{color:var(--ok-ink)} .ro .v.o{color:var(--ours-ink)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--ink2);margin:8px 0 2px}
+.legend .sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.legend .sw.ring{background:transparent;border:2px solid var(--base);border-radius:50%}
+.cap{font-size:13px;color:var(--ink3);margin-top:8px;line-height:1.6}
+svg{display:block;max-width:100%}
+svg text{font-family:var(--f-body)}
+.svgbox{width:100%;overflow:hidden}
+
+.tip{position:fixed;z-index:60;pointer-events:none;background:var(--surf3);color:var(--ink);border:1px solid var(--rule2);border-radius:9px;padding:8px 11px;font-size:13px;line-height:1.55;box-shadow:var(--shadow);max-width:300px;opacity:0;transition:opacity .08s}
+.tip.on{opacity:1}
+.tip b{font-weight:600}
+.tip .t-k{color:var(--ink3)}
+.tip .mono{font-size:12.5px}
+
+/* ---------- pipeline flow ---------- */
+.flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;margin:20px 0;counter-reset:st}
+.flow .st{position:relative;background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:14px 14px 12px;margin-right:18px}
+.flow .st:last-child{margin-right:0}
+.flow .st:not(:last-child)::after{content:"";position:absolute;right:-15px;top:50%;width:12px;height:12px;border-top:2px solid var(--rule2);border-right:2px solid var(--rule2);transform:translateY(-50%) rotate(45deg)}
+.flow .num{font:600 12px var(--f-mono);color:var(--ink3);letter-spacing:.06em}
+.flow h4{font-family:var(--f-head);font-size:16px;margin:4px 0 6px}
+.flow p{font-size:13.5px;color:var(--ink2);line-height:1.6;margin:0}
+.flow .st.s1{border-top:3px solid var(--base)} .flow .st.s2{border-top:3px solid var(--g1)} .flow .st.s3{border-top:3px solid var(--g3)} .flow .st.s4{border-top:3px solid var(--ours)} .flow .st.s5{border-top:3px solid var(--opd)}
+
+.flow.f4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:980px){ .flow,.flow.f4{grid-template-columns:1fr;gap:16px} .flow .st{margin-right:0} .flow .st:not(:last-child)::after{right:auto;left:28px;top:auto;bottom:-13px;transform:rotate(135deg)} }
+
+/* ---------- group chips ---------- */
+.gchip{display:inline-block;font:600 11.5px var(--f-mono);padding:1px 7px;border-radius:999px;color:#fff;vertical-align:.1em;margin-right:4px}
+.gchip.g1{background:var(--g1)} .gchip.g2{background:var(--g2)} .gchip.g3{background:var(--g3)} .gchip.g4{background:var(--g4)} .gchip.g5{background:var(--g5)}
+:root[data-theme="light"] .gchip.g4, :root[data-theme="light"] .gchip.g3, :root[data-theme="light"] .gchip.g5{color:#13161b}
+@media (prefers-color-scheme: light){ :root:not([data-theme="dark"]) .gchip.g4, :root:not([data-theme="dark"]) .gchip.g3, :root:not([data-theme="dark"]) .gchip.g5{color:#13161b} }
+.dimtag{display:inline-block;font-size:12.5px;background:var(--surf2);border:1px solid var(--rule);border-radius:6px;padding:1px 7px;margin:2px 3px 2px 0;color:var(--ink2)}
+.groupcards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:14px 0}
+@media (max-width:980px){ .groupcards{grid-template-columns:repeat(2,minmax(0,1fr))} }
+@media (max-width:560px){ .groupcards{grid-template-columns:1fr} }
+.gcard{background:var(--surf);border:1px solid var(--rule);border-radius:11px;padding:12px 13px}
+.gcard .meta{font-family:var(--f-mono);font-size:12px;color:var(--ink3);margin-top:6px;line-height:1.55}
+
+/* ---------- heatmap layout ---------- */
+.hm-layout{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:900px){ .hm-layout{grid-template-columns:1fr} }
+.statsbox{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.statsbox .ro .v{font-size:16px}
+.hm-cells rect{cursor:crosshair}
+.lbl-click{cursor:pointer}
+.lbl-click:hover{text-decoration:underline}
+
+/* ---------- doubts ---------- */
+.filters{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 14px}
+.filters.seg{display:inline-flex;gap:0}
+.doubt{background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:14px 18px;margin:12px 0;border-left:4px solid var(--low)}
+.doubt.hi{border-left-color:var(--risk)} .doubt.md{border-left-color:var(--med)}
+.doubt h4{font-size:16px;margin:0 0 6px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.doubt h4 .id{font-family:var(--f-mono);font-size:12.5px;color:var(--ink3)}
+.sev{font:600 11.5px var(--f-mono);padding:2px 8px;border-radius:999px;letter-spacing:.04em}
+.sev.hi{background:var(--risk-soft);color:var(--risk-ink)} .sev.md{background:var(--med-soft);color:var(--med-ink)} .sev.lo{background:var(--low-soft);color:var(--low-ink)}
+.doubt p{font-size:14.5px;color:var(--ink2);margin:0 0 8px}
+.doubt p:last-child{margin-bottom:0}
+.doubt .fix{font-size:13.5px;color:var(--ink3)}
+.doubt .fix b{color:var(--ok-ink);font-weight:600}
+
+/* ---------- checklist ---------- */
+.st-ok{color:var(--ok-ink);font-weight:600} .st-warn{color:var(--med-ink);font-weight:600} .st-bad{color:var(--risk-ink);font-weight:600}
+
+details.more{margin:12px 0;border:1px solid var(--rule);border-radius:10px;background:var(--surf)}
+details.more summary{cursor:pointer;padding:10px 14px;font-size:14px;color:var(--ink2);font-weight:600}
+details.more[open] summary{border-bottom:1px solid var(--rule)}
+details.more .inner{padding:4px 0}
+
+footer{margin-top:50px;padding-top:18px;border-top:1px solid var(--rule);font-size:13.5px;color:var(--ink3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="topbar">
+    <span class="kicker">arXiv 2609.35189 · 精读 · HKUST(GZ) × Tencent</span>
+    <button class="themebtn" id="themeBtn" type="button" aria-label="切换浅色/深色">◐ 主题</button>
+  </div>
+  <h1>G³-LoRA 精读<span class="soft">先量一量哪些数据合得来，再决定谁和谁共用一个 LoRA</span></h1>
+  <p class="sub">论文全名 <i>G³-LoRA: Organizing Reward-Weighted Video Data with Gradient-Guided Grouped LoRA</i>。它讨论视频模型后训练里一个通常被默认掉的问题：把好几种“奖励维度”的数据混在一起训练一个 LoRA，真的没问题吗？本页用人话拆开它的四步做法，复算了论文里能复算的数字（相容性矩阵、聚类、全部表格的均值和计数），把梯度中心化、分区、合并稀释做成可以动手调的图，最后列出我认为存疑的地方。</p>
+  <p class="thesis"><span class="lab">一句话</span>把 VBench2.0 的 17 个维度当成 17 桶训练数据。先在每桶数据上算一次 LoRA 梯度，减掉所有桶共有的“公共方向”，再比较剩下的“个性方向”两两之间的余弦相似度；按相似度把 17 桶聚成 5 组，每组训一个 LoRA 专家；最后把 5 个专家加权平均成一个 LoRA 部署，再用<span class="c-opd"><b>在线蒸馏（OPD）</b></span>把合并时被稀释的专长补回来一部分。</p>
+  <div class="patch">
+    <div class="rail" aria-hidden="true"></div>
+    <dl>
+      <div><dt>论文</dt><dd>arXiv 2609.35189v1，2026-09-28 提交（cs.CV），预印本</dd></div>
+      <div><dt>作者</dt><dd>Jia Song、Wenhow Li（共同一作）、Lichen Bai、Bada Ye（Tencent）、Zeke Xie（通讯）；港科大（广州）</dd></div>
+      <div><dt>骨干</dt><dd>Wan2.1-T2V-1.3B-Diffusers（主实验）；CogVideoX-2B（整套流程重跑一遍）</dd></div>
+      <div><dt>数据</dt><dd>基座<b>自己生成</b>的视频：17 维 × 约 560 条，产出 9,512 条，保留 9,448 条</dd></div>
+      <div><dt>奖励</dt><dd>Qwen3-VL-8B-Instruct 按维度出是/否题，再看视频作答，答对比例 → 样本权重</dd></div>
+      <div><dt>评测</dt><dd>VBench2.0 快速协议（每维 25 个 prompt × 2 个视频）；独立评测 VideoScore-v1.1</dd></div>
+      <div><dt>代码</dt><dd><span class="no">未公开</span>（论文写 “plan to release”；2026-09-30 检索未找到仓库）</dd></div>
+    </dl>
+  </div>
+  <div class="statstrip">
+    <div class="good"><b>+1.11</b><span>分组合并版 相对基座的 VBench2.0 均值（47.07 → 48.18）；95% 区间 [−0.08, +2.26] 含 0</span></div>
+    <div class="opd"><b>+2.84</b><span>再加 OPD 后（49.91）；OPD 相对合并版 +1.73，区间 [+0.42, +3.05]</span></div>
+    <div class="jt"><b>−0.07</b><span>Joint LoRA（全混训练）相对基座：9 维涨 8 维跌，平均持平</span></div>
+    <div><b>0/136 → 75/136</b><span>维度两两的梯度余弦：原始全为正；去掉公共方向后 55% 为负</span></div>
+    <div><b>27.95 vs 40.99</b><span>CogVideoX-2B：Joint 从基座 39.87 掉到 27.95；分组版 40.99</span></div>
+    <div class="warn"><b>+0.62</b><span>去掉 Multi-view 这一维后，分组合并版的增益（原为 +1.11）</span></div>
+    <div class="warn"><b>≈205 vs 46.9</b><span>GPU·h：OPD 单独一步（4090）对比 探针 + Joint + 五个专家 合计（A800）</span></div>
+  </div>
+</header>
+
+<nav class="toc" aria-label="目录">
+  <a href="#s1"><span class="n">01</span>定位</a>
+  <a href="#s2"><span class="n">02</span>补课</a>
+  <a href="#s3"><span class="n">03</span>能力平均</a>
+  <a href="#s4"><span class="n">04</span>残差梯度</a>
+  <a href="#s5"><span class="n">05</span>相容性矩阵</a>
+  <a href="#s6"><span class="n">06</span>分组与合并</a>
+  <a href="#s7"><span class="n">07</span>在线蒸馏</a>
+  <a href="#s8"><span class="n">08</span>结果</a>
+  <a href="#s9"><span class="n">09</span>复算清单</a>
+  <a href="#s10"><span class="n">10</span>存疑</a>
+  <a href="#s11"><span class="n">11</span>结论与启示</a>
+</nav>
+
+<!-- =============================== 01 =============================== -->
+<section id="s1">
+  <h2><span class="no">01</span>一句话与定位</h2>
+  <p class="lede">视频生成模型的后训练越来越常把多种监督混在一起：不同领域、不同任务、不同的质量维度。默认做法很简单：全部倒进一个锅，训一个 adapter。这个做法暗含一个假设：共用一个模型的数据，也想把模型往差不多的方向推。论文的主张是，这个假设应该先量一量，而不是默认成立。</p>
+  <div class="grid3">
+    <div class="card joint">
+      <h4><span class="dot joint"></span>全混 · Joint LoRA</h4>
+      <p class="big">一个 LoRA 吃下 17 个维度的全部数据</p>
+      <p>数据共享最充分，但如果不同维度想要的更新方向不一致，就会在同一组参数上互相拉扯。论文结果：均值 46.99（基座 47.07），9 维涨、8 维跌，最多跌 8 分（人际互动）。</p>
+    </div>
+    <div class="card neutral">
+      <h4><span class="dot base"></span>全拆 · 一维一个 LoRA</h4>
+      <p class="big">互不干扰，但数据最少</p>
+      <p>每个 LoRA 只有约 560 条数据，维度之间也没法互相借力，最后还得想办法合成一个模型部署。论文只在引言里提到这个极端，<b>没有做成实验对照</b>。</p>
+    </div>
+    <div class="card ours">
+      <h4><span class="dot ours"></span>G³-LoRA · 先量再分</h4>
+      <p class="big">用梯度量出“谁和谁合得来”，合得来的共用一个专家</p>
+      <p>5 个组、5 个 LoRA 专家；部署前把它们合并成一个 LoRA，再用在线蒸馏把被稀释的专长补回一部分。均值 48.18，加蒸馏后 49.91。</p>
+    </div>
+  </div>
+
+  <h3>整条流水线</h3>
+  <div class="flow">
+    <div class="st s1"><span class="num">STEP 1</span><h4>造数据</h4><p>每维一套专用 prompt → Wan2.1 自己生成约 560 条视频 → Qwen3-VL 按维度出是/否题、看视频作答 → 每条视频一个权重 <span class="mv">w</span>。</p></div>
+    <div class="st s2"><span class="num">STEP 2</span><h4>量梯度</h4><p>每维 100 个探针样本，算奖励加权损失对 LoRA 的梯度 <span class="mv">g<sub>i</sub></span>；混合批次得到公共梯度 <span class="mv">g</span>。在 Joint 训练的 0/25/50/75/100% 处各测一次。</p></div>
+    <div class="st s3"><span class="num">STEP 3</span><h4>去公共、聚类</h4><p><span class="mv">r<sub>i</sub></span> = <span class="mv">g<sub>i</sub></span> 减去它在 <span class="mv">g</span> 上的投影；<span class="mv">S<sub>ij</sub></span> = cos(<span class="mv">r<sub>i</sub>, r<sub>j</sub></span>)，五个时间点取平均；用 1 − <span class="mv">S̄</span> 做平均连接聚类，切成 5 组。</p></div>
+    <div class="st s4"><span class="num">STEP 4</span><h4>分组训练、合并</h4><p>每组训一个 rank-8 LoRA 专家（1 epoch）；展开成稠密 <span class="mv">ΔW</span>，按组内维度数加权平均，再用 SVD 压回一个 rank-40 LoRA。</p></div>
+    <div class="st s5"><span class="num">STEP 5</span><h4>在线蒸馏 OPD</h4><p>学生 = 合并后的 LoRA。在学生自己的采样轨迹上，让它的速度预测逼近该 prompt 所属组的专家；约 205 GPU·h。</p></div>
+  </div>
+
+  <div class="callout mine">
+    <span class="lab">我的理解</span>
+    <p>这篇论文的骨架是三件已有东西串起来：</p>
+    <ol class="tight">
+      <li><b>多任务学习里的“任务分组”。</b>用梯度相似度，或者“沿一个任务走一步、看别的任务损失怎么变”，来决定哪些任务一起训。Standley et al. 2020、TAG（Fifty et al. 2021）做的就是这件事，论文没有引用它们（存疑 #16）。</li>
+      <li><b>模型合并。</b>把多个 LoRA 的 <span class="mv">ΔW</span> 加权平均，同 task arithmetic、model soup 一脉。</li>
+      <li><b>多教师在线蒸馏。</b>延续 Flow-OPD。</li>
+    </ol>
+    <p>新意在于把它们用到“奖励加权的视频自生成数据”上，并在比较之前加了一步“减掉公共方向”。</p>
+    <p>还有一个容易被忽略的事实：<b>训练视频是基座自己生成的，奖励权重被公式限制在 0.5–1.5 之间</b>（§02）。所以这里的“后训练”更像是在自己的输出上做一次轻度加权的自蒸馏，而不是强化学习。这一点决定了能指望多大的增益，也决定了应该补哪些对照（存疑 #1）。</p>
+  </div>
+</section>
+
+<!-- =============================== 02 =============================== -->
+<section id="s2">
+  <h2><span class="no">02</span>先补课：流匹配、奖励权重、LoRA、VBench2.0</h2>
+  <p class="lede">后面所有图都建立在这几样东西上。符号和数字全部按论文的实际配置。</p>
+  <div class="grid2">
+    <div class="card">
+      <h4>流匹配（flow matching）</h4>
+      <p>VAE 把视频压成潜变量 <span class="mv">z<sub>1</sub></span>，采一个高斯噪声 <span class="mv">z<sub>0</sub></span>，取时间 <span class="mv">t</span> 做线性插值；模型要预测从噪声指向数据的“速度” <span class="mv">u</span>：</p>
+      <div class="eq" style="font-size:17px">z<sub>t</sub> = (1 − t) z<sub>0</sub> + t z<sub>1</sub>,&nbsp;&nbsp; u = z<sub>1</sub> − z<sub>0</sub><span class="tag">(1)</span><span class="note">论文记号里 t = 0 是纯噪声，t = 1 是干净视频。</span></div>
+    </div>
+    <div class="card">
+      <h4>奖励加权损失</h4>
+      <p>就是给每个样本的 MSE 乘一个系数，没有偏好对，也没有策略梯度：</p>
+      <div class="eq" style="font-size:17px">L(φ; x) = <span class="frac"><span>w</span><span>w̄</span></span> ‖ û<sub>φ</sub>(z<sub>t</sub>, p, t) − u ‖²<span class="tag">(2)</span><span class="note">φ 只是 LoRA 参数；w̄ 是全体样本的平均权重。Joint 基线就是对全部 17 维平均这个损失。</span></div>
+    </div>
+    <div class="card">
+      <h4>LoRA</h4>
+      <p>冻结原权重 <span class="mv">W</span>，只学一个低秩增量 <span class="mv">ΔW = BA</span>（<span class="mv">B</span>: d<sub>out</sub>×r，<span class="mv">A</span>: r×d<sub>in</sub>）。本文 LoRA 挂在注意力的 q/k/v/o 投影上，专家 rank = 8。Wan2.1-1.3B 有 30 层，每层自注意力 + 交叉注意力各 4 个投影，共 240 个模块，和论文表 16 里的 “240 modules” 对得上<span class="dim">（这是我的推算，论文没写）</span>。</p>
+    </div>
+    <div class="card">
+      <h4>VBench2.0</h4>
+      <p>一个“内在忠实度”视频评测，18 个维度分成 5 大类（人体保真、创造力、可控性、物理、常识）。去掉 diversity 剩 17 维。这篇论文让每一维身兼两职：<b>既是评测指标，也是一桶训练数据</b>。</p>
+    </div>
+  </div>
+
+  <h3>奖励从哪里来</h3>
+  <p>对每个 prompt 和它所属的维度，Qwen3-VL-8B 先读文字，生成一小组是/否问题，期望答案由 prompt 决定。以“动作顺序”为例（模板要求 2–4 个问题）：prompt 写“拍手、弯腰、再捡起包”，问题就是“拍手是否发生在弯腰之前？”这类，而且模板明确排除镜头、衣服、背景等无关属性。然后 Qwen 看生成的视频作答，答案与期望一致记 1 分：</p>
+  <div class="eq">r = <span class="frac"><span>1</span><span>N</span></span> Σ<sub>j</sub> a<sub>j</sub>,&nbsp;&nbsp;&nbsp; w = clip( 1 + α (r − r̄), w<sub>min</sub>, w<sub>max</sub> )<span class="tag">(7)(8)</span><span class="note">α = 0.5，w<sub>min</sub> = 0.5，w<sub>max</sub> = 2.0；r̄ 是同一轮里全部保留样本的平均奖励。没有有效问题的样本丢弃；有效问题少于建议数、但至少 1 个的样本保留。</span></div>
+
+  <div class="viz" id="wviz">
+    <div class="viz-head"><span class="viz-title">权重到底能拉开多大差距？</span><span class="viz-sub">拖动 r̄ 和 α，看 w 的取值范围与 clip 边界</span></div>
+    <div class="controls">
+      <label class="rng">平均奖励 r̄ <input type="range" id="w-rbar" min="0.05" max="0.95" step="0.01" value="0.60"><output id="w-rbar-o">0.60</output></label>
+      <label class="rng">α <input type="range" id="w-alpha" min="0.1" max="2" step="0.05" value="0.5"><output id="w-alpha-o">0.50</output></label>
+      <button class="btn" type="button" id="w-reset">回到论文设置 α = 0.5</button>
+    </div>
+    <div class="svgbox" id="w-svg"></div>
+    <div class="readouts" id="w-ro"></div>
+    <p class="cap">柱子是不同奖励 r（例如 2–4 道题能取到的分数）对应的权重 w。两条横线是 clip 的上下界。论文设置下 w 必然落在 (1 − α r̄, 1 + α(1 − r̄)) ⊂ (0.5, 1.5)，所以 clip 永远不会触发。</p>
+  </div>
+
+  <div class="callout mine">
+    <span class="lab">我的读法 · 权重很温和</span>
+    <ul class="tight">
+      <li>α = 0.5 时 w 一定落在 (0.5, 1.5) 里。0.5 的下界只在 “r = 0 且 r̄ = 1” 时才能碰到，这不可能；2.0 的上界更是碰不到。所以表 7 里 “Samples at a weight-clipping bound: 0” 是公式保证的结果，算不上审计发现。</li>
+      <li>r̄ ≈ 0.6 时，最好样本的权重只有最差样本的约 1.7 倍。</li>
+      <li>如果 r̄ 和 w̄ 是在同一批样本上算的，按定义 w̄ = 1，式 (2) 里除以 w̄ 实际上什么都没做。</li>
+      <li>结论：每一维的梯度主要由“这一维的 prompt 生成出的这批视频”决定，奖励只做轻微调整。后面看到的“维度之间相容 / 冲突”，有多少来自奖励、有多少只是内容不同，论文没有拆开（存疑 #1）。</li>
+    </ul>
+  </div>
+
+  <h3>17 个维度一览</h3>
+  <div class="tbl-wrap">
+    <table id="dimtable">
+      <thead><tr><th class="l">维度</th><th class="l">大致在测什么</th><th class="l">官方类别</th><th class="l">G³ 分组</th><th>基座分（Wan2.1）</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p class="small">“大致在测什么”是我按 VBench2.0 维度定义做的一句话概括，不是论文原文。分数是论文表 8 的快速协议分数（百分制）。镜头运动的判定方式取自论文 §3.3：先用 CoTracker 估计运动类别，再和标签做硬匹配。</p>
+</section>
+
+<!-- =============================== 03 =============================== -->
+<section id="s3">
+  <h2><span class="no">03</span>为什么共用一个 LoRA 会“能力平均”</h2>
+  <p class="lede">论文的机制解释是这样的：奖励加权的流匹配，本质是在回归一个“被奖励倾斜过的速度场”。MSE 回归学到的是条件均值。假如两个维度在同一片带噪潜变量区域想要不同的速度，共享的 LoRA 只能学到二者的平均，结果两边都不到位：镜头运动变软、属性变化变弱、结构保了一半。</p>
+  <div class="eq">û<sup>*</sup>(z, p, t) = E<sub>w</sub>[ u | z<sub>t</sub> = z, p, t ] = <span class="frac"><span>Σ<sub>x</sub> w(x) · u(x) · q(z | x)</span><span>Σ<sub>x</sub> w(x) · q(z | x)</span></span><span class="note">加权 MSE 的最优解：落在同一个 (z, p, t) 上的所有训练样本，其目标速度按 w 做加权平均。这是标准结论，公式为我所写。</span></div>
+
+  <div class="viz" id="avgviz">
+    <div class="viz-head"><span class="viz-title">条件均值：两种想要的速度，一个共享的回答</span><span class="viz-sub">示意图，不是论文数据</span></div>
+    <div class="controls">
+      <label class="rng">维度 A 在这片区域的占比 × 权重 <input type="range" id="avg-rho" min="0" max="1" step="0.01" value="0.5"><output id="avg-rho-o">0.50</output></label>
+      <div class="seg" role="group" aria-label="条件">
+        <button type="button" data-cond="same" aria-pressed="true">同一条件（同 prompt、同一带噪区域）</button>
+        <button type="button" data-cond="diff" aria-pressed="false">各自的 prompt</button>
+      </div>
+    </div>
+    <div class="svgbox" id="avg-svg"></div>
+    <div class="readouts" id="avg-ro"></div>
+  </div>
+
+  <div class="callout warn">
+    <span class="lab">我的看法 · 这个论证只是定性的</span>
+    <p>条件均值要真的“平均”，前提是<b>同一个 (z<sub>t</sub>, p, t)</b> 上同时出现两种目标。但这篇论文里每个维度用的是各自的 prompt（“dimension-specific prompts”）。对一个足够灵活的模型，它完全可以对 prompt A 学 u<sub>A</sub>、对 prompt B 学 u<sub>B</sub>，二者并不矛盾（切到“各自的 prompt”看）。</p>
+    <p>真正的冲突只能来自<b>共享的有限参数</b>：专家 rank 只有 8，不同 prompt 的更新挤在同一个低秩子空间里。这恰好是梯度余弦能测到的东西，所以方法本身并不依赖这个理论是否严格成立。只是论文没有给出“重叠区域”确实存在的证据，理论部分更像动机而不是推导。</p>
+  </div>
+</section>
+
+<!-- =============================== 04 =============================== -->
+<section id="s4">
+  <h2><span class="no">04</span>残差梯度：先减掉“大家都想要的”，再比较</h2>
+  <p class="lede">这是方法的核心，一共四步。</p>
+  <div class="grid2">
+    <div class="card">
+      <h4>① 每个维度一个梯度</h4>
+      <div class="eq" style="font-size:17px">g<sub>i</sub> = <span class="frac"><span>1</span><span>|B<sub>i</sub>|</span></span> Σ<sub>x∈B<sub>i</sub></sub> ∇<sub>φ</sub> L(φ; x)<span class="tag">(3)</span></div>
+      <p><span class="mv">B<sub>i</sub></span> 是固定的探针子集，每维 100 个样本。为了降噪，扩散时间步和噪声种子都固定。在参考 Joint 训练轨迹的 0/25/50/75/100% 处各测一次。</p>
+    </div>
+    <div class="card">
+      <h4>② 减掉公共方向</h4>
+      <div class="eq" style="font-size:17px">r<sub>i</sub> = g<sub>i</sub> − <span class="frac"><span>⟨g<sub>i</sub>, g<sub>global</sub>⟩</span><span>‖g<sub>global</sub>‖² + ε</span></span> g<sub>global</sub><span class="tag">(4)</span></div>
+      <p><span class="mv">g<sub>global</sub></span> 是混合探针批次上的梯度。论文的理由是：原始梯度被一个对所有维度都有用的方向主导（适应分辨率、prompt 分布、LoRA 参数化），它会掩盖维度之间的差异。附录还说，直接做 <span class="mv">g<sub>i</sub> − g<sub>global</sub></span> 得到完全相同的分组（ARI = 1.0）。</p>
+    </div>
+    <div class="card">
+      <h4>③ 残差余弦 → 相容性矩阵</h4>
+      <div class="eq" style="font-size:17px">S<sub>ij</sub> = <span class="frac"><span>⟨r<sub>i</sub>, r<sub>j</sub>⟩</span><span>‖r<sub>i</sub>‖ ‖r<sub>j</sub>‖ + ε</span></span>,&nbsp;&nbsp; S̄<sub>ij</sub> = 五个时间点的平均<span class="tag">(5)</span></div>
+      <p>正值被解读为“个性方向相近”，负值被解读为“潜在干扰”。</p>
+    </div>
+    <div class="card">
+      <h4>④ 聚类</h4>
+      <p>距离 <span class="mv">D<sub>ij</sub></span> = 1 − <span class="mv">S̄<sub>ij</sub></span>，平均连接（average-linkage）层次聚类，切成 <span class="mv">M</span> = 5 组。选 5 而不选 4，是因为 M = 4 时组内还剩 3 对负相关（§05 可以拖动 M 验证）。</p>
+    </div>
+  </div>
+
+  <p>去掉公共方向这一步的效果很显著：原始梯度下，136 对维度两两余弦<b>全部为正</b>；去掉之后，75 对（55%）变成负数。CogVideoX-2B 的三个互不重叠的探针批次上，负配对是 81–87 对。论文据此说：冲突原本被公共方向藏住了。</p>
+
+  <div class="viz" id="cviz">
+    <div class="viz-head"><span class="viz-title">中心化演示：没有任何冲突，也能“减出”一堆负数</span><span class="viz-sub">随机合成的梯度，d = 256，5 个潜在簇</span></div>
+    <div class="controls">
+      <label class="rng">维度数 K <input type="range" id="c-k" min="5" max="17" step="1" value="17"><output id="c-k-o">17</output></label>
+      <label class="rng">公共方向强度 <input type="range" id="c-s" min="0" max="3" step="0.1" value="2"><output id="c-s-o">2.0</output></label>
+      <label class="rng">簇结构强度 <input type="range" id="c-c" min="0" max="2" step="0.1" value="0"><output id="c-c-o">0.0</output></label>
+      <button class="btn" type="button" id="c-resample">重新抽样</button>
+      <div class="seg" role="group" aria-label="预设">
+        <button type="button" data-preset="none" aria-pressed="true">无结构</button>
+        <button type="button" data-preset="paper" aria-pressed="false">加入 5 个簇</button>
+      </div>
+    </div>
+    <div class="grid2" style="margin:6px 0">
+      <div><div class="small" style="margin-bottom:4px"><b>原始梯度</b> cos(g<sub>i</sub>, g<sub>j</sub>)</div><div class="svgbox" id="c-raw"></div></div>
+      <div><div class="small" style="margin-bottom:4px"><b>去掉公共方向后</b> cos(r<sub>i</sub>, r<sub>j</sub>)</div><div class="svgbox" id="c-res"></div></div>
+    </div>
+    <div class="readouts" id="c-ro"></div>
+    <p class="cap">每个合成梯度 = 公共方向 × 强度 + 所属簇的方向 × 簇强度 + 独立噪声，各分量每一维都是标准正态。公共梯度取 K 个梯度的平均，与论文“混合批次上的梯度”近似。色阶：蓝 = 正，红 = 负，灰 = 0。</p>
+  </div>
+
+  <div class="callout risk">
+    <span class="lab">要小心 · 去均值本身就会制造负数</span>
+    <p>如果 <span class="mv">g<sub>global</sub></span> 约等于各维梯度的平均（混合批次大致均衡时正是如此），那么所有残差之和约为 0：</p>
+    <div class="eq" style="font-size:17px">Σ<sub>i</sub> r<sub>i</sub> ≈ 0 &nbsp;⟹&nbsp; Σ<sub>i≠j</sub> ⟨r<sub>i</sub>, r<sub>j</sub>⟩ = − Σ<sub>i</sub> ‖r<sub>i</sub>‖² &nbsp;⟹&nbsp; 平均两两余弦 ≈ −1/(K − 1)<span class="note">范数相近时成立。K = 17 时为 −0.0625；论文图 2 矩阵实测非对角平均为 −0.0575（我复算），几乎就是这个值。</span></div>
+    <p>在高维空间（真实梯度有上百万维），即使维度之间毫无结构，去均值后两两余弦也会集中在 −1/(K−1) 附近，几乎<b>全部为负</b>；上面的演示在 d = 256 时已经有约八成是负的。所以“去掉后 55% 为负”本身<b>不能</b>证明存在冲突。</p>
+    <p>真正有信息量的是另两件事：矩阵里有 ±0.8 量级的强块结构，远超中心化基线；而且这种结构跨阶段、跨重采样可以复现。也就是说，“谁和谁更像”是真信号，“负数就是干扰”是过度解读。</p>
+    <p>还有一点：原始梯度两两余弦<b>全为正</b>，意味着在探针损失上，沿任何一个维度的梯度走一小步，一阶近似下所有其他维度的损失都会下降。论文附录的 held-out 迁移检验（Spearman ρ = 0.256，p = 0.003）说明残差相似度能部分预测“下降多少”，但没有拿原始余弦做对照，也没报告有没有哪一对真的是“一步上去、对方损失上升”。</p>
+  </div>
+</section>
+
+<!-- =============================== 05 =============================== -->
+<section id="s5">
+  <h2><span class="no">05</span>相容性矩阵：可以动手的图 2</h2>
+  <p class="lede">下面是论文图 2（五个时间点平均）和图 6（逐时间点）的全部数值，树状图由本页用平均连接聚类现场计算。可以切换矩阵、叠加不同分区、拖动 M，或者点左侧维度名给它换组，自己拼一个分区。</p>
+
+  <div class="viz" id="hmviz">
+    <div class="controls">
+      <span class="ctl-lab">矩阵</span>
+      <div class="seg" role="group" aria-label="矩阵" id="hm-mat">
+        <button type="button" data-m="mean" aria-pressed="true">五阶段平均</button>
+        <button type="button" data-m="0" aria-pressed="false">0%</button>
+        <button type="button" data-m="25" aria-pressed="false">25%</button>
+        <button type="button" data-m="50" aria-pressed="false">50%</button>
+        <button type="button" data-m="75" aria-pressed="false">75%</button>
+        <button type="button" data-m="100" aria-pressed="false">100%</button>
+      </div>
+    </div>
+    <div class="controls">
+      <span class="ctl-lab">分区</span>
+      <div class="seg" role="group" aria-label="分区" id="hm-part">
+        <button type="button" data-p="g3" aria-pressed="true">G³（聚类，可调 M）</button>
+        <button type="button" data-p="sem" aria-pressed="false">官方语义</button>
+        <button type="button" data-p="ra" aria-pressed="false">随机 A</button>
+        <button type="button" data-p="rb" aria-pressed="false">随机 B</button>
+        <button type="button" data-p="custom" aria-pressed="false">自定义</button>
+      </div>
+      <label class="rng" id="hm-mwrap">M <input type="range" id="hm-m" min="2" max="8" step="1" value="5"><output id="hm-m-o">5</output></label>
+    </div>
+    <div class="hm-layout">
+      <div>
+        <div class="svgbox" id="hm-svg"></div>
+        <div class="legend" id="hm-legend"></div>
+      </div>
+      <div>
+        <div class="statsbox" id="hm-stats"></div>
+        <p class="cap" id="hm-note"></p>
+      </div>
+    </div>
+    <p class="cap">蓝 = 残差余弦为正（论文称“相容”），红 = 为负（论文称“潜在干扰”）；注意论文原图的配色相反（蓝表示负）。黑/白框是当前分区的组内块；树状图固定在五阶段平均矩阵上计算，竖线是切成 M 组的位置。悬停格子可以看五个时间点的数值。“自定义”模式下，点左侧维度名可以循环切换它的组。窄屏下不显示树状图。</p>
+  </div>
+
+  <h3>值得一看的配对</h3>
+  <div class="grid2">
+    <div class="card">
+      <h4 class="c-ok">最相容（五阶段平均）</h4>
+      <p>材料 × 热学 <b class="mono">0.84</b>；动态属性 × 热学 <b class="mono">0.82</b>；人体结构 × 身份一致 <b class="mono">0.71</b>。前两对都是“东西在视频里发生状态变化”，第三对都是“人要长得对、长得稳”。</p>
+    </div>
+    <div class="card">
+      <h4 class="c-risk">最“冲突”（五阶段平均）</h4>
+      <p>衣着一致 × 热学 <b class="mono">−0.82</b>；动态属性 × 衣着一致 <b class="mono">−0.80</b>；动作顺序 × 多视角 <b class="mono">−0.63</b>。直觉上说得通：一方要求“保持不变”，另一方要求“发生变化”。</p>
+    </div>
+  </div>
+
+  <h3>分区“干净度”和下游分数并不同步</h3>
+  <p>论文用组内平均相似度减组间平均相似度（separation）来衡量一个分区干不干净。我把四个公开了分组的分区都在同一个 <span class="mv">S̄</span> 上算了一遍，再对照它们在表 1 的 VBench2.0 均值：</p>
+  <div class="viz" id="sepviz">
+    <div class="viz-head"><span class="viz-title">分离度 vs. VBench2.0 均值</span><span class="viz-sub">分离度为我在图 2 矩阵上复算；分数取自论文表 1</span></div>
+    <div class="svgbox" id="sep-svg"></div>
+    <p class="cap">灰带：与各分区组大小相同的<b>均匀随机</b>划分（各 2 万次，我模拟），其分离度的 99% 分位约在 0.20–0.25 之间。原始梯度分区（47.35）的分组论文没有列出，无法放进图里。</p>
+  </div>
+  <div class="callout risk">
+    <span class="lab">我的发现 · 两个“随机”分区并不随机</span>
+    <ul class="tight">
+      <li><b>随机 B 的分离度 0.531</b>，只有 3 对组内负配对，干净程度接近 G³（0.633）。按同样组大小（8/4/2/2/1）做 2 万次均匀随机划分，最大值约 0.38（换随机种子会在 0.36–0.46 之间浮动），没有一次达到 0.531。仔细看它的分组：8 个以人物和动作为主的维度一组，动态属性加 3 个物理维度一组，镜头 + 多视角一组。这更像人工设计的分组，不像随机抽的。<b>随机 A</b> 也在第 98 百分位。论文没有说明这两个分区是怎么生成的。</li>
+      <li>更要紧的是结果：随机 B 几乎和 G³ 一样“干净”，下游却是全场最差（45.82）；最不干净的语义分区（0.147，组内 13 对负配对）反而是 47.20，高于两个随机分区。四个点里看不出“越相容越好”的剂量关系。“分区本身很重要”这个结论，目前只靠 G³ 这一个点撑着（存疑 #3）。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- =============================== 06 =============================== -->
+<section id="s6">
+  <h2><span class="no">06</span>分组训练与合并：五个专家怎么变成一个 LoRA</h2>
+  <p class="lede">五个组各自训练一个 LoRA 专家：rank 8，只用本组维度的样本，在本组数据上跑 1 个 epoch，损失同式 (2)。部署时只能挂一个 adapter，所以要把五个专家合并。</p>
+  <div class="groupcards" id="groupcards"></div>
+
+  <h3>稠密 delta + SVD 合并</h3>
+  <div class="flow f4">
+    <div class="st s2"><span class="num">展开</span><h4>ΔW<sub>m</sub> = B<sub>m</sub>A<sub>m</sub></h4><p>每个专家在每一层上是 rank-8 的两个小矩阵，乘出来得到稠密的权重增量（合并时 LoRA 缩放记为 1）。</p></div>
+    <div class="st s3"><span class="num">平均</span><h4>ΔW = Σ α<sub>m</sub> ΔW<sub>m</sub></h4><p>α 按组内维度数分配：[4, 4, 3, 4, 2] / 17，和为 1。这是<b>平均</b>，不是相加。</p></div>
+    <div class="st s4"><span class="num">压缩</span><h4>ΔW ≈ U<sub>40</sub> Σ<sub>40</sub> V<sub>40</sub><sup>⊤</sup></h4><p>5 个 rank-8 之和的秩最多是 40，所以截断到 40 是<b>精确</b>的，实测误差 1.46 × 10⁻⁶。</p></div>
+    <div class="st s5"><span class="num">还原</span><h4>B = UΣ<sup>½</sup>，A = Σ<sup>½</sup>V<sup>⊤</sup></h4><p>重新拆成标准 LoRA 格式，一个 rank-40 adapter。CogVideoX 上是 5 个 rank-128 精确合成 rank-640。</p></div>
+  </div>
+
+  <div class="viz" id="dilviz">
+    <div class="viz-head"><span class="viz-title">合并会稀释什么？</span><span class="viz-sub">假设五个专家的 ΔW 范数相同、两两余弦都等于 c（简化模型）</span></div>
+    <div class="controls">
+      <label class="rng">专家之间的余弦 c <input type="range" id="d-c" min="0" max="1" step="0.001" value="0.867"><output id="d-c-o">0.867</output></label>
+      <span class="small">论文表 16：实测两两余弦 0.730–0.938</span>
+    </div>
+    <div class="svgbox" id="d-svg"></div>
+    <div class="readouts" id="d-ro"></div>
+    <p class="cap">把每个专家拆成“大家都有的公共部分”和“自己独有的部分”。加权平均后，公共部分几乎原样保留，独有部分被缩小到 α<sub>m</sub> 倍。范数保留率 = √(c + (1 − c)·Σα²)，Σα² = 61/289 ≈ 0.211。论文实测 0.946，按这个模型反推 c ≈ 0.867，正好落在 0.730–0.938 之间：两组数字互相吻合。</p>
+  </div>
+
+  <div class="callout mine">
+    <span class="lab">我的理解</span>
+    <p>专家两两余弦高达 0.73–0.94，说明<b>五个专家学到的东西大部分相同</b>，多半就是 §04 里被减掉的那个公共方向。合并后，公共部分完整保留；每个专家的“专长”被压到原来的 12%–24%（α = 2/17 到 4/17）。第 5 组（复杂情节 + 力学）只占 2/17 的权重，它的 delta 只占加权总范数的 2.08%，所以力学专长几乎被平均没了。论文排除了“SVD 截断”（误差 10⁻⁶）和“符号相消”（240 个模块里没有一对专家余弦为负）这两种解释，这两条都成立；剩下的解释就是平均本身。</p>
+  </div>
+
+  <h3>合并前后：每个专家在自己的维度上</h3>
+  <div class="viz" id="retviz">
+    <div class="viz-head"><span class="viz-title">基座 / 组专家 / 合并版 / +OPD，逐维对照</span><span class="viz-sub">论文表 8、表 15；组专家只在本组维度上评测（不可部署的诊断）</span></div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="筛选" id="ret-filter">
+        <button type="button" data-f="all" aria-pressed="true">全部 17 维</button>
+        <button type="button" data-f="win" aria-pressed="false">只看专家胜过基座的 6 维</button>
+        <button type="button" data-f="lose" aria-pressed="false">专家不如基座的 11 维</button>
+      </div>
+    </div>
+    <div class="legend">
+      <span><span class="sw ring"></span>基座</span>
+      <span><span class="sw" style="background:var(--expert);transform:rotate(45deg);border-radius:1px"></span>组专家（本组维度）</span>
+      <span><span class="sw" style="background:var(--ours);border-radius:50%"></span>合并版 r40（论文主方法）</span>
+      <span><span class="sw" style="background:var(--opd)"></span>+OPD</span>
+    </div>
+    <div class="svgbox" id="ret-svg"></div>
+  </div>
+
+  <div class="callout risk">
+    <span class="lab">两处需要换个角度读</span>
+    <ul class="tight">
+      <li><b>专家在自己的维度上多数变差了。</b>组专家在 17 维里有 11 维低于基座；第 1 组、第 2 组的专家在本组维度上的均值都低于基座（57.11 vs 60.03，63.10 vs 66.39）。“组内相容 → 专家学到本组技能”这条叙事，在第 3 组只是略高于基座（27.47 vs 26.70），在第 4、5 组才明显成立，而且主要靠多视角（+30.6）和力学（+16.4）两维。</li>
+      <li><b>“专家赢的 6 维，合并版全部低于专家；其余 11 维，合并版全部高于专家”</b>（我逐项核对属实）。论文把前半句读成“合并压缩了专长”，把后半句读成“跨组迁移”。但这正是<b>回归均值</b>的典型样子：每维只有约 50 个视频，专家分数本身噪声很大；事后挑出“专家考得好”的维度，下一次测量（合并版）自然会往回落。同理，“逐维取两者较大值 = 51.07 的上界”被取最大值偏差抬高了，“OPD 补回了 60% 的差距”这个比例的分母也就偏大（存疑 #7）。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- =============================== 07 =============================== -->
+<section id="s7">
+  <h2><span class="no">07</span>在线蒸馏（OPD）：把专家的本事蒸回合并版</h2>
+  <p class="lede">既然合并会稀释专长，就让合并后的 LoRA（学生）去模仿各组专家（教师）。关键词是“在线”（on-policy）：训练用的带噪潜变量不是把训练视频加噪得来的，而是学生自己从噪声采样出来的中间状态，这样学生在它推理时真正会走到的地方受到监督。</p>
+  <div class="eq">L<sub>OPD</sub>(φ) = E<sub>p, z<sub>τ</sub>∼ρ<sub>φ</sub>(·|p)</sub> [ ‖ û<sub>φ</sub>(z<sub>τ</sub>, p, τ) − sg û<sub>ψ<sub>m(p)</sub></sub>(z<sub>τ</sub>, p, τ) ‖² + λ ‖ û<sub>φ</sub>(z<sub>τ</sub>, p, τ) − sg û<sub>φ<sub>0</sub></sub>(z<sub>τ</sub>, p, τ) ‖² ]<span class="tag">(6)</span><span class="note">ψ<sub>m(p)</sub>：prompt p 所属维度对应的组专家；φ<sub>0</sub>：冻结的合并版，作锚点，λ = 0.1；sg = stop-gradient。不用奖励权重，不用训练视频。</span></div>
+
+  <div class="flow f4">
+    <div class="st s1"><span class="num">① 采样</span><h4>学生自己跑 8 步</h4><p>从新鲜噪声出发，无梯度、无 CFG（guidance = 1.0），832×480、81 帧。</p></div>
+    <div class="st s2"><span class="num">② 取状态</span><h4>存 2 个中间状态</h4><p>每个 prompt 取轨迹内部的 2 个 z<sub>τ</sub> 和它们的时间步。</p></div>
+    <div class="st s3"><span class="num">③ 查教师</span><h4>按维度路由</h4><p>prompt 属于哪一维，就用那一组的专家预测速度；锚点 φ<sub>0</sub> 也预测一次。所有 LoRA 共用同一个冻结骨干，原地切换。</p></div>
+    <div class="st s5"><span class="num">④ 更新</span><h4>只更新学生 LoRA</h4><p>AdamW，lr 1 × 10⁻⁶，prompt 过一遍；16 张 4090、每卡 1 个 prompt，共 12 小时 48 分 ≈ 205 GPU·h。</p></div>
+  </div>
+
+  <div class="viz" id="recviz">
+    <div class="viz-head"><span class="viz-title">OPD 补回了多少“专长缺口”</span><span class="viz-sub">缺口 = 组专家 − 合并版（只看专家更好的 6 维）；论文表 15、表 17</span></div>
+    <div class="svgbox" id="rec-svg"></div>
+    <p class="cap">浅色长条是缺口大小，青色是 OPD 补回的部分；组合创造一行 OPD 反而又退了 0.50（红色）。另外三维涨得最多的并不在“缺口”里：人际互动 +6.00（62 → 68，超过它的专家 58），复杂情节 +5.07，动态属性 +4.00。</p>
+  </div>
+
+  <div class="callout warn">
+    <span class="lab">读这组数字时注意</span>
+    <ul class="tight">
+      <li>OPD 让均值从 48.18 到 49.91，+1.73，95% 区间 [+0.42, +3.05] 不含 0。在 Wan2.1 的 VBench2.0 比较里，这是唯一一个区间不含 0 的“方法 vs 方法”比较（全文另外两个不含 0 的区间是 CogVideoX 上的 G³ vs Joint，以及 VideoScore 上的 G³ vs 基座）。但它只是<b>一次训练</b>的评测抽样区间，论文自己也写了没测训练随机性。</li>
+      <li>OPD 只用在 G³ 上，没有给 Joint 和几个对照分区做，所以 49.91 不能拿来和 46.99 比“分组的价值”。它的算力（≈205 GPU·h，4090）是前面所有训练加起来（46.9 GPU·h，A800）的四倍多。</li>
+      <li>“人际互动 68 高于专家 58，说明 OPD 不是简单复制教师”：这两个分数相差 5 个视频（共 50 个），不宜过度解读。</li>
+      <li>“在线”的口径比较宽：蒸馏时学生用 8 步、无 CFG 采样，评测时用 50 步 UniPC、CFG 5.0；蒸馏只监督条件分支。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- =============================== 08 =============================== -->
+<section id="s8">
+  <h2><span class="no">08</span>结果：均值、逐维、第二骨干、独立评测</h2>
+  <p class="lede">论文的正面结论是：分组合并版的均值高于基座、Joint 和四个对照分区，最差维度掉得更少；CogVideoX 上避开了 Joint 的负迁移；独立评测器也同意。下面把数字摊开，并标出哪些有置信区间、哪些没有。</p>
+
+  <div class="viz" id="meanviz">
+    <div class="viz-head"><span class="viz-title">VBench2.0 17 维均值（Wan2.1，快速协议）</span><span class="viz-sub">论文表 1、表 8</span></div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="口径" id="mean-mode">
+        <button type="button" data-mm="all" aria-pressed="true">全部 17 维</button>
+        <button type="button" data-mm="nomv" aria-pressed="false">去掉 Multi-view（16 维）</button>
+      </div>
+    </div>
+    <div class="svgbox" id="mean-svg"></div>
+    <p class="cap" id="mean-cap">须线：G³ 行是“相对基座差值”的 95% 区间平移到绝对分数上；+OPD 行是“相对合并版差值”的区间。其余方法论文<b>没有给区间</b>。† 为不可部署的诊断行。语义分区和原始梯度分区论文只给了均值，没有逐维分数，所以去掉 Multi-view 后无法计算。</p>
+  </div>
+
+  <div class="grid2">
+    <div class="callout warn" style="margin:0">
+      <span class="lab">噪声量级（粗估）</span>
+      <p>G³ 相对基座的 95% 区间半宽约 ±1.17。两个 adapter 之间的差值，评测噪声大致也是这个量级。所以 G³ 对 Joint 的 +1.19 只在边缘，对语义分区 +0.98、对原始梯度分区 +0.83 很可能在噪声内。这是我按论文自己的 bootstrap 做的推断；论文没有给这些比较的区间，也没有重复训练。</p>
+    </div>
+    <div class="callout warn" style="margin:0">
+      <span class="lab">一个维度撑起一半增益</span>
+      <p>多视角一致在表 8 的 8 列之间（含基座与组专家）从 30.5 跳到 73.6。去掉这一维，G³ 相对基座的增益从 +1.11 降到 +0.62，+OPD 从 +2.84 降到 +1.96；而论文附录里被放弃的 rank-8 合并版反而变成 +1.13。</p>
+    </div>
+  </div>
+
+  <div class="viz" id="dviz">
+    <div class="viz-head"><span class="viz-title">逐维变化（相对基座）</span><span class="viz-sub">论文图 3 / 表 8；色阶固定在 ±20</span></div>
+    <div class="controls">
+      <label class="chk"><input type="checkbox" id="d-noise"> 淡化 |Δ| &lt; 4.8 的格子（单维噪声粗估）</label>
+      <label class="chk"><input type="checkbox" id="d-vals" checked> 显示数值</label>
+    </div>
+    <div class="svgbox" id="dh-svg"></div>
+    <p class="cap">± 4.8 来自：均值区间半宽 1.17 × √17，假设各维方差相近、互相独立，只是量级参考。镜头运动、动态空间关系、动态属性、人际互动、动作合理这 5 维的分数绝大多数能写成 k/50（例外：r8 的人际互动 60.03、+OPD 的动作合理 40.20），看起来是逐视频的二值判定（我的推断）；两边分数都是 k/50 时，悬停会把分差换算成“差几个视频”。† 组专家、r8 合并为论文附录中的诊断行。</p>
+  </div>
+
+  <h3>第二骨干：CogVideoX-2B</h3>
+  <div class="grid2">
+    <div class="viz" style="margin:0">
+      <div class="viz-head"><span class="viz-title">Joint 训练过程 vs. 分组合并版</span><span class="viz-sub">论文表 18</span></div>
+      <div class="svgbox" id="cog-svg"></div>
+      <p class="cap">VBench2.0 17 维宏平均（×100）。多视角一致对所有 CogVideoX 方法都是 0，所以实际只有 16 维在起作用。</p>
+    </div>
+    <div>
+      <p>CogVideoX-2B 的架构和训练目标都不同（原生去噪损失，LoRA rank 128、α = 128、lr 1 × 10⁻⁴）。Joint 训练到 25% 时已经从 39.87 掉到 36.78，训完只剩 27.95；分组合并版 40.99，比 Joint 高 13.04，区间 [9.08, 16.92]，相对基座只高 1.12。这是全文最有力的证据：<b>分组加合并确实避开了一次明显的崩坏</b>。</p>
+      <div class="callout warn" style="margin-top:10px">
+        <span class="lab">但“能力平均”这个解释不一定对</span>
+        <p>Joint 下人体结构 48.5 → 98.4、身份一致 70.9 → 97.9、热学 46.8 → 56.0，同时人际互动、动作顺序、动作合理大幅下滑。论文说这是维度选择性的退化，“符合能力平均而不是整体失败”。可一个接近静止、人物模糊的视频，本来就容易在“结构无异常”“身份不变”上拿高分，所以这组数字同样符合<b>退化成低运动 / 静态输出</b>。论文没报告动态程度，也没做“更小学习率或更小 LoRA 缩放的 Joint”对照。</p>
+      </div>
+    </div>
+  </div>
+
+  <h3>独立评测：VideoScore-v1.1</h3>
+  <div class="grid2">
+    <div class="viz" style="margin:0">
+      <div class="viz-head"><span class="viz-title">基座 → 分组合并版，五个方面</span><span class="viz-sub">论文表 19，同一批 Wan2.1 评测视频</span></div>
+      <div class="svgbox" id="vs-svg"></div>
+    </div>
+    <div>
+      <p>训练奖励来自 Qwen3-VL，VBench2.0 也部分依赖视觉语言模型判分，二者有耦合。所以作者用一个基于人类评分训练、不基于 Qwen 的 VideoScore 重新打分：五个方面全部提升，平均 +0.166，区间 [0.140, 0.192]。</p>
+      <div class="callout warn" style="margin-top:10px">
+        <span class="lab">它证明了什么，没证明什么</span>
+        <p>VideoScore 只比较了<b>分组合并版 vs. 基座</b>，没评 Joint、随机分区和语义分区。所以它支持“做了这种后训练，画面更好了”，却不能支持“分组比全混好”这个核心论点。摘要里的 “an independent evaluator agrees” 很容易被读成后者。</p>
+      </div>
+    </div>
+  </div>
+
+  <h3>定性例子（图 4）</h3>
+  <p>论文挑了两个 prompt：组合创造（狗、猫、篮子的关系要在时间上保持）和热学（奶酪受热逐渐软化）。分组合并版的关系更连贯、形变更明显。作者自己也提醒：这是单个案例，组合创造维度的整体分数几乎没变（47.80 vs 48.10）。本页没有转载图片。</p>
+
+  <details class="more">
+    <summary>完整逐维分数表（论文表 8）</summary>
+    <div class="inner"><div class="tbl-wrap" style="border:0;margin:0"><table id="t8"></table></div></div>
+  </details>
+</section>
+
+<!-- =============================== 09 =============================== -->
+<section id="s9">
+  <h2><span class="no">09</span>复算清单</h2>
+  <p class="lede">矩阵数值取自论文图 2、图 6 的格内标注（两位小数），表格数值取自附录。脚本思路：numpy + scipy 的平均连接聚类，外加逐项比对。</p>
+  <div class="tbl-wrap">
+    <table id="checks">
+      <thead><tr><th class="l">#</th><th class="l">检查项</th><th class="l">论文</th><th class="l">我的复算</th><th class="l">结论</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- =============================== 10 =============================== -->
+<section id="s10">
+  <h2><span class="no">10</span>存疑</h2>
+  <p class="lede">论文在局限性一节已经主动承认了一部分（区间含 0、只有两个 ≤ 2B 的骨干、没有人评、OPD 没用在对照上）。下面把这些和我额外发现的问题放在一起，按严重程度排列。“高”表示会动摇核心结论。</p>
+  <div class="filters seg" role="group" aria-label="严重程度筛选" id="dfilter">
+    <button type="button" data-s="all" aria-pressed="true">全部</button>
+    <button type="button" data-s="hi" aria-pressed="false">高</button>
+    <button type="button" data-s="md" aria-pressed="false">中</button>
+    <button type="button" data-s="lo" aria-pressed="false">低</button>
+  </div>
+  <div id="doubts"></div>
+</section>
+
+<!-- =============================== 11 =============================== -->
+<section id="s11">
+  <h2><span class="no">11</span>结论与启示</h2>
+  <div class="grid3">
+    <div class="card opd">
+      <h4 class="c-ok">站得住的</h4>
+      <ul class="tight small">
+        <li>残差梯度相似度里有真实、可复现的块结构：跨阶段 Pearson 0.966，独立重采样 0.847。</li>
+        <li>CogVideoX-2B 上，分组加合并避开了 Joint 的明显崩坏（+13.04，区间不含 0）。</li>
+        <li>多教师 OPD 在合并版上再加 +1.73，区间不含 0（单次训练）。</li>
+        <li>报告诚实：区间含 0、镜头运动的损失、合并丢失的专长，都写了。</li>
+      </ul>
+    </div>
+    <div class="card joint">
+      <h4 class="c-risk">还没被证明的</h4>
+      <ul class="tight small">
+        <li>“按相容性分组”优于其它分区：差值多在噪声内，对照分区之间也没有剂量关系。</li>
+        <li>奖励加权本身的作用：没有 w ≡ 1 的对照。</li>
+        <li>“负残差余弦 = 干扰”：去均值会机械地产生负数，原始余弦全为正。</li>
+        <li>“能力平均”机制：没有直接证据，CogVideoX 的退化也可以用静态化解释。</li>
+      </ul>
+    </div>
+    <div class="card ours">
+      <h4 class="c-ours">一句话评价</h4>
+      <p>一篇诊断做得很细、结论写得克制的工作。它提出的“先量梯度再分组”作为数据组织的<b>诊断工具</b>有价值；作为<b>提升分数的方法</b>，目前的证据主要来自 CogVideoX 上的一次避险和 OPD，而分组本身带来的 Wan2.1 增益在噪声边缘。</p>
+    </div>
+  </div>
+
+  <h3>对交互式视频世界模型的启示</h3>
+  <ol class="tight">
+    <li><b>世界模型的后训练同样是多目标混合。</b>动作跟随、物理合理、长程一致、画质，每一项都可以当成一桶数据。先花一次便宜的梯度探针（本文探针加 Joint 训练共 13.4 A800 GPU·h）看看谁和谁合得来，是低成本的体检。</li>
+    <li><b>判断冲突时别只看中心化后的符号。</b>更可靠的做法是同时看原始余弦，以及 TAG 式的“前瞻一步迁移”：沿 A 走一步，B 的 held-out 损失是涨还是跌。论文附录已经实现了后者，只是没拿它来分组。</li>
+    <li><b>专家 + 权重平均 ≈ 把个性缩到 1/M。</b>如果专家们学到的大多是同一件事（余弦 0.73–0.94），合并后几乎就是平均；真要保住专长，得靠蒸馏或路由（按动作类别路由的 LoRA 在推理时切换，也许比合并更适合交互场景）。</li>
+    <li><b>自生成数据加温和权重，增益天花板有限。</b>对世界模型，更强的信号（真实交互数据、可验证的物理 / 动作一致性奖励）可能比精细分组更重要。</li>
+  </ol>
+
+  <h3>最值钱的后续实验</h3>
+  <ol class="tight">
+    <li><b>w ≡ 1 对照</b>：不加奖励，同样的 Joint / G³ 训练，并重算相容性矩阵。直接回答“奖励有没有用”和“分组结构来自奖励还是内容”。</li>
+    <li><b>多种子训练 + 所有比较都给区间</b>，外加 10 个以上真正均匀随机的分区，得到一个零分布。</li>
+    <li><b>容量和步数对齐的 Joint</b>：rank 40、与专家总步数相同，外加更小学习率或 LoRA 缩放 0.2 的版本，排除“合并 = 隐式缩小更新”的解释。</li>
+    <li><b>VideoScore / 人评覆盖所有 adapter</b>，不只基座和 G³。</li>
+    <li><b>原始余弦、残差余弦、TAG 亲和度</b>三者谁更能预测迁移，并比较各自分组的下游结果。</li>
+    <li><b>OPD 的公平对照</b>：用随机分区的专家、或单一 Joint 教师做同样的 OPD。</li>
+    <li><b>完整 VBench2.0</b>（不只每维 50 个视频），并说明训练 prompt 与评测 prompt 是否重叠。</li>
+  </ol>
+</section>
+
+<footer>
+  <p>本页是读者笔记，不是论文本身，也不代表作者观点；与论文冲突之处以论文为准。数字来自 arXiv 2609.35189v1 正文与附录 A–J；标注“我复算 / 我的推断 / 我模拟”的内容为本页作者所做。</p>
+  <p>论文：<a href="https://arxiv.org/abs/2609.35189" target="_blank" rel="noopener">arxiv.org/abs/2609.35189</a> · HTML 版：<a href="https://arxiv.org/html/2609.35189" target="_blank" rel="noopener">arxiv.org/html/2609.35189</a></p>
+</footer>
+</div>
+<div class="tip" id="tip" role="status" aria-live="polite"></div>
+<script>
+const MATS={"mean":[[1.0,0.4,0.22,0.61,-0.15,-0.33,0.09,0.09,0.32,-0.1,-0.01,-0.49,-0.44,-0.35,-0.62,0.08,0.31],[0.4,1.0,0.61,0.62,0.08,0.3,0.59,0.18,0.29,0.01,-0.12,-0.8,-0.71,-0.38,-0.82,-0.28,-0.37],[0.22,0.61,1.0,0.49,-0.05,0.1,0.36,0.02,0.05,0.13,0.09,-0.56,-0.33,-0.4,-0.53,-0.47,-0.41],[0.61,0.62,0.49,1.0,0.24,0.25,0.5,0.45,0.03,-0.39,-0.33,-0.53,-0.58,-0.63,-0.69,-0.27,0.07],[-0.15,0.08,-0.05,0.24,1.0,0.71,0.16,0.39,-0.24,-0.59,-0.53,0.22,-0.15,-0.29,0.02,-0.37,-0.03],[-0.33,0.3,0.1,0.25,0.71,1.0,0.43,0.4,-0.25,-0.41,-0.45,0.03,-0.33,-0.19,-0.08,-0.42,-0.37],[0.09,0.59,0.36,0.5,0.16,0.43,1.0,0.59,-0.15,-0.31,-0.37,-0.53,-0.39,-0.34,-0.44,-0.27,-0.33],[0.09,0.18,0.02,0.45,0.39,0.4,0.59,1.0,-0.53,-0.63,-0.62,-0.08,-0.01,-0.27,-0.04,-0.37,0.12],[0.32,0.29,0.05,0.03,-0.24,-0.25,-0.15,-0.53,1.0,0.37,0.27,-0.37,-0.5,0.1,-0.48,0.24,-0.02],[-0.1,0.01,0.13,-0.39,-0.59,-0.41,-0.31,-0.63,0.37,1.0,0.58,-0.25,-0.11,0.26,-0.13,0.24,-0.32],[-0.01,-0.12,0.09,-0.33,-0.53,-0.45,-0.37,-0.62,0.27,0.58,1.0,-0.11,0.13,0.08,0.04,0.13,-0.24],[-0.49,-0.8,-0.56,-0.53,0.22,0.03,-0.53,-0.08,-0.37,-0.25,-0.11,1.0,0.64,0.35,0.82,-0.04,0.3],[-0.44,-0.71,-0.33,-0.58,-0.15,-0.33,-0.39,-0.01,-0.5,-0.11,0.13,0.64,1.0,0.3,0.84,-0.07,0.18],[-0.35,-0.38,-0.4,-0.63,-0.29,-0.19,-0.34,-0.27,0.1,0.26,0.08,0.35,0.3,1.0,0.4,0.13,-0.05],[-0.62,-0.82,-0.53,-0.69,0.02,-0.08,-0.44,-0.04,-0.48,-0.13,0.04,0.82,0.84,0.4,1.0,-0.04,0.17],[0.08,-0.28,-0.47,-0.27,-0.37,-0.42,-0.27,-0.37,0.24,0.24,0.13,-0.04,-0.07,0.13,-0.04,1.0,0.21],[0.31,-0.37,-0.41,0.07,-0.03,-0.37,-0.33,0.12,-0.02,-0.32,-0.24,0.3,0.18,-0.05,0.17,0.21,1.0]],"0":[[1.0,0.53,0.32,0.68,-0.15,-0.34,0.12,0.19,0.27,-0.05,-0.06,-0.61,-0.48,-0.3,-0.67,0.05,0.33],[0.53,1.0,0.56,0.63,0.17,0.22,0.51,0.17,0.28,0.01,-0.11,-0.77,-0.7,-0.42,-0.85,-0.17,-0.26],[0.32,0.56,1.0,0.48,0.05,0.02,0.29,0.06,0.05,0.07,0.04,-0.51,-0.28,-0.35,-0.52,-0.45,-0.24],[0.68,0.63,0.48,1.0,0.27,0.16,0.45,0.5,-0.0,-0.38,-0.37,-0.53,-0.57,-0.62,-0.7,-0.2,0.19],[-0.15,0.17,0.05,0.27,1.0,0.77,0.15,0.31,-0.2,-0.52,-0.52,0.16,-0.25,-0.33,-0.07,-0.4,-0.1],[-0.34,0.22,0.02,0.16,0.77,1.0,0.33,0.25,-0.24,-0.36,-0.39,0.13,-0.34,-0.2,-0.08,-0.3,-0.41],[0.12,0.51,0.29,0.45,0.15,0.33,1.0,0.51,-0.14,-0.25,-0.29,-0.48,-0.41,-0.39,-0.47,-0.06,-0.3],[0.19,0.17,0.06,0.5,0.31,0.25,0.51,1.0,-0.51,-0.58,-0.55,-0.08,-0.05,-0.3,-0.13,-0.32,0.19],[0.27,0.28,0.05,-0.0,-0.2,-0.24,-0.14,-0.51,1.0,0.38,0.22,-0.37,-0.44,0.12,-0.42,0.23,-0.01],[-0.05,0.01,0.07,-0.38,-0.52,-0.36,-0.25,-0.58,0.38,1.0,0.56,-0.25,-0.12,0.3,-0.09,0.2,-0.31],[-0.06,-0.11,0.04,-0.37,-0.52,-0.39,-0.29,-0.55,0.22,0.56,1.0,-0.17,0.19,0.14,0.08,0.14,-0.27],[-0.61,-0.77,-0.51,-0.53,0.16,0.13,-0.48,-0.08,-0.37,-0.25,-0.17,1.0,0.62,0.39,0.82,-0.15,0.19],[-0.48,-0.7,-0.28,-0.57,-0.25,-0.34,-0.41,-0.05,-0.44,-0.12,0.19,0.62,1.0,0.29,0.82,-0.15,0.17],[-0.3,-0.42,-0.35,-0.62,-0.33,-0.2,-0.39,-0.3,0.12,0.3,0.14,0.39,0.29,1.0,0.39,0.03,-0.11],[-0.67,-0.85,-0.52,-0.7,-0.07,-0.08,-0.47,-0.13,-0.42,-0.09,0.08,0.82,0.82,0.39,1.0,-0.07,0.1],[0.05,-0.17,-0.45,-0.2,-0.4,-0.3,-0.06,-0.32,0.23,0.2,0.14,-0.15,-0.15,0.03,-0.07,1.0,0.07],[0.33,-0.26,-0.24,0.19,-0.1,-0.41,-0.3,0.19,-0.01,-0.31,-0.27,0.19,0.17,-0.11,0.1,0.07,1.0]],"25":[[1.0,0.5,0.32,0.7,-0.14,-0.36,0.16,0.19,0.26,-0.13,-0.09,-0.61,-0.47,-0.39,-0.67,0.07,0.35],[0.5,1.0,0.62,0.64,0.08,0.19,0.58,0.15,0.32,0.02,-0.13,-0.8,-0.73,-0.43,-0.85,-0.2,-0.27],[0.32,0.62,1.0,0.51,-0.01,0.02,0.37,0.04,0.06,0.1,0.05,-0.58,-0.33,-0.43,-0.55,-0.46,-0.33],[0.7,0.64,0.51,1.0,0.25,0.14,0.47,0.44,0.07,-0.41,-0.33,-0.57,-0.6,-0.71,-0.74,-0.21,0.2],[-0.14,0.08,-0.01,0.25,1.0,0.75,0.12,0.31,-0.15,-0.58,-0.51,0.21,-0.21,-0.35,-0.04,-0.4,-0.01],[-0.36,0.19,0.02,0.14,0.75,1.0,0.3,0.23,-0.17,-0.38,-0.37,0.15,-0.33,-0.2,-0.07,-0.35,-0.37],[0.16,0.58,0.37,0.47,0.12,0.3,1.0,0.54,-0.1,-0.27,-0.34,-0.54,-0.42,-0.38,-0.49,-0.15,-0.28],[0.19,0.15,0.04,0.44,0.31,0.23,0.54,1.0,-0.54,-0.61,-0.62,-0.09,0.0,-0.28,-0.08,-0.28,0.17],[0.26,0.32,0.06,0.07,-0.15,-0.17,-0.1,-0.54,1.0,0.34,0.23,-0.37,-0.54,0.03,-0.48,0.26,0.01],[-0.13,0.02,0.1,-0.41,-0.58,-0.38,-0.27,-0.61,0.34,1.0,0.57,-0.2,-0.06,0.35,-0.05,0.19,-0.34],[-0.09,-0.13,0.05,-0.33,-0.51,-0.37,-0.34,-0.62,0.23,0.57,1.0,-0.13,0.17,0.12,0.09,0.16,-0.28],[-0.61,-0.8,-0.58,-0.57,0.21,0.15,-0.54,-0.09,-0.37,-0.2,-0.13,1.0,0.63,0.43,0.83,-0.1,0.18],[-0.47,-0.73,-0.33,-0.6,-0.21,-0.33,-0.42,0.0,-0.54,-0.06,0.17,0.63,1.0,0.37,0.86,-0.11,0.1],[-0.39,-0.43,-0.43,-0.71,-0.35,-0.2,-0.38,-0.28,0.03,0.35,0.12,0.43,0.37,1.0,0.47,0.1,-0.15],[-0.67,-0.85,-0.55,-0.74,-0.04,-0.07,-0.49,-0.08,-0.48,-0.05,0.09,0.83,0.86,0.47,1.0,-0.05,0.07],[0.07,-0.2,-0.46,-0.21,-0.4,-0.35,-0.15,-0.28,0.26,0.19,0.16,-0.1,-0.11,0.1,-0.05,1.0,0.19],[0.35,-0.27,-0.33,0.2,-0.01,-0.37,-0.28,0.17,0.01,-0.34,-0.28,0.18,0.1,-0.15,0.07,0.19,1.0]],"50":[[1.0,0.32,0.19,0.66,-0.14,-0.4,0.09,0.06,0.33,-0.16,0.05,-0.46,-0.41,-0.47,-0.62,0.09,0.4],[0.32,1.0,0.62,0.53,-0.01,0.26,0.6,0.15,0.33,0.13,-0.09,-0.81,-0.72,-0.32,-0.8,-0.22,-0.41],[0.19,0.62,1.0,0.43,-0.1,0.06,0.39,0.01,0.08,0.22,0.12,-0.58,-0.34,-0.36,-0.53,-0.45,-0.43],[0.66,0.53,0.43,1.0,0.2,0.11,0.46,0.37,0.08,-0.4,-0.23,-0.5,-0.56,-0.71,-0.7,-0.18,0.17],[-0.14,-0.01,-0.1,0.2,1.0,0.69,0.12,0.39,-0.25,-0.6,-0.5,0.29,-0.1,-0.3,0.06,-0.38,-0.01],[-0.4,0.26,0.06,0.11,0.69,1.0,0.37,0.4,-0.28,-0.33,-0.47,0.09,-0.28,-0.1,-0.02,-0.38,-0.42],[0.09,0.6,0.39,0.46,0.12,0.37,1.0,0.58,-0.15,-0.23,-0.36,-0.54,-0.39,-0.33,-0.44,-0.25,-0.35],[0.06,0.15,0.01,0.37,0.39,0.4,0.58,1.0,-0.53,-0.58,-0.65,-0.08,0.03,-0.27,-0.01,-0.37,0.05],[0.33,0.33,0.08,0.08,-0.25,-0.28,-0.15,-0.53,1.0,0.37,0.3,-0.39,-0.55,0.06,-0.52,0.28,-0.01],[-0.16,0.13,0.22,-0.4,-0.6,-0.33,-0.23,-0.58,0.37,1.0,0.53,-0.3,-0.15,0.3,-0.14,0.19,-0.38],[0.05,-0.09,0.12,-0.23,-0.5,-0.47,-0.36,-0.65,0.3,0.53,1.0,-0.14,0.07,0.05,-0.03,0.17,-0.17],[-0.46,-0.81,-0.58,-0.5,0.29,0.09,-0.54,-0.08,-0.39,-0.3,-0.14,1.0,0.65,0.35,0.82,-0.08,0.27],[-0.41,-0.72,-0.34,-0.56,-0.1,-0.28,-0.39,0.03,-0.55,-0.15,0.07,0.65,1.0,0.32,0.86,-0.13,0.17],[-0.47,-0.32,-0.36,-0.71,-0.3,-0.1,-0.33,-0.27,0.06,0.3,0.05,0.35,0.32,1.0,0.45,0.11,-0.17],[-0.62,-0.8,-0.53,-0.7,0.06,-0.02,-0.44,-0.01,-0.52,-0.14,-0.03,0.82,0.86,0.45,1.0,-0.08,0.13],[0.09,-0.22,-0.45,-0.18,-0.38,-0.38,-0.25,-0.37,0.28,0.19,0.17,-0.08,-0.13,0.11,-0.08,1.0,0.25],[0.4,-0.41,-0.43,0.17,-0.01,-0.42,-0.35,0.05,-0.01,-0.38,-0.17,0.27,0.17,-0.17,0.13,0.25,1.0]],"75":[[1.0,0.27,0.11,0.53,-0.15,-0.37,-0.04,-0.02,0.36,-0.08,0.07,-0.36,-0.41,-0.37,-0.58,0.15,0.31],[0.27,1.0,0.62,0.63,0.06,0.41,0.58,0.15,0.29,0.01,-0.1,-0.8,-0.71,-0.35,-0.78,-0.38,-0.52],[0.11,0.62,1.0,0.43,-0.11,0.17,0.31,-0.07,0.09,0.18,0.18,-0.58,-0.33,-0.38,-0.5,-0.49,-0.52],[0.53,0.63,0.43,1.0,0.26,0.35,0.56,0.44,0.02,-0.41,-0.37,-0.53,-0.57,-0.56,-0.65,-0.32,-0.1],[-0.15,0.06,-0.11,0.26,1.0,0.66,0.2,0.46,-0.29,-0.63,-0.57,0.25,-0.09,-0.27,0.1,-0.36,-0.04],[-0.37,0.41,0.17,0.35,0.66,1.0,0.56,0.48,-0.27,-0.45,-0.51,-0.09,-0.31,-0.16,-0.07,-0.52,-0.43],[-0.04,0.58,0.31,0.56,0.2,0.56,1.0,0.62,-0.19,-0.38,-0.42,-0.51,-0.33,-0.26,-0.34,-0.41,-0.43],[-0.02,0.15,-0.07,0.44,0.46,0.48,0.62,1.0,-0.54,-0.67,-0.65,-0.0,0.05,-0.26,0.07,-0.4,0.05],[0.36,0.29,0.09,0.02,-0.29,-0.27,-0.19,-0.54,1.0,0.37,0.3,-0.39,-0.51,0.12,-0.52,0.21,-0.04],[-0.08,0.01,0.18,-0.41,-0.63,-0.45,-0.38,-0.67,0.37,1.0,0.62,-0.26,-0.15,0.2,-0.19,0.28,-0.24],[0.07,-0.1,0.18,-0.37,-0.57,-0.51,-0.42,-0.65,0.3,0.62,1.0,-0.12,0.07,0.05,-0.03,0.13,-0.14],[-0.36,-0.8,-0.58,-0.53,0.25,-0.09,-0.51,-0.0,-0.39,-0.26,-0.12,1.0,0.66,0.3,0.81,0.06,0.43],[-0.41,-0.71,-0.33,-0.57,-0.09,-0.31,-0.33,0.05,-0.51,-0.15,0.07,0.66,1.0,0.28,0.84,-0.03,0.25],[-0.37,-0.35,-0.38,-0.56,-0.27,-0.16,-0.26,-0.26,0.12,0.2,0.05,0.3,0.28,1.0,0.37,0.14,0.01],[-0.58,-0.78,-0.5,-0.65,0.1,-0.07,-0.34,0.07,-0.52,-0.19,-0.03,0.81,0.84,0.37,1.0,-0.03,0.25],[0.15,-0.38,-0.49,-0.32,-0.36,-0.52,-0.41,-0.4,0.21,0.28,0.13,0.06,-0.03,0.14,-0.03,1.0,0.33],[0.31,-0.52,-0.52,-0.1,-0.04,-0.43,-0.43,0.05,-0.04,-0.24,-0.14,0.43,0.25,0.01,0.25,0.33,1.0]],"100":[[1.0,0.38,0.18,0.5,-0.19,-0.19,0.1,0.03,0.38,-0.08,-0.03,-0.41,-0.45,-0.21,-0.56,0.02,0.18],[0.38,1.0,0.63,0.68,0.1,0.43,0.67,0.3,0.23,-0.1,-0.17,-0.8,-0.7,-0.39,-0.81,-0.43,-0.39],[0.18,0.63,1.0,0.6,-0.07,0.23,0.41,0.09,-0.02,0.08,0.08,-0.57,-0.36,-0.48,-0.54,-0.52,-0.52],[0.5,0.68,0.6,1.0,0.21,0.48,0.57,0.48,-0.03,-0.36,-0.35,-0.51,-0.61,-0.55,-0.65,-0.44,-0.12],[-0.19,0.1,-0.07,0.21,1.0,0.68,0.22,0.47,-0.29,-0.59,-0.56,0.19,-0.12,-0.23,0.06,-0.33,0.02],[-0.19,0.43,0.23,0.48,0.68,1.0,0.59,0.63,-0.31,-0.55,-0.51,-0.12,-0.39,-0.31,-0.17,-0.55,-0.2],[0.1,0.67,0.41,0.57,0.22,0.59,1.0,0.7,-0.18,-0.43,-0.41,-0.56,-0.39,-0.35,-0.44,-0.48,-0.27],[0.03,0.3,0.09,0.48,0.47,0.63,0.7,1.0,-0.5,-0.72,-0.64,-0.12,-0.08,-0.26,-0.05,-0.49,0.14],[0.38,0.23,-0.02,-0.03,-0.29,-0.31,-0.18,-0.5,1.0,0.37,0.27,-0.34,-0.45,0.18,-0.44,0.22,-0.07],[-0.08,-0.1,0.08,-0.36,-0.59,-0.55,-0.43,-0.72,0.37,1.0,0.62,-0.23,-0.09,0.15,-0.16,0.35,-0.33],[-0.03,-0.17,0.08,-0.35,-0.56,-0.51,-0.41,-0.64,0.27,0.62,1.0,-0.01,0.16,0.06,0.09,0.07,-0.33],[-0.41,-0.8,-0.57,-0.51,0.19,-0.12,-0.56,-0.12,-0.34,-0.23,-0.01,1.0,0.64,0.29,0.84,0.09,0.42],[-0.45,-0.7,-0.36,-0.61,-0.12,-0.39,-0.39,-0.08,-0.45,-0.09,0.16,0.64,1.0,0.26,0.83,0.06,0.21],[-0.21,-0.39,-0.48,-0.55,-0.23,-0.31,-0.35,-0.26,0.18,0.15,0.06,0.29,0.26,1.0,0.31,0.27,0.17],[-0.56,-0.81,-0.54,-0.65,0.06,-0.17,-0.44,-0.05,-0.44,-0.16,0.09,0.84,0.83,0.31,1.0,0.03,0.29],[0.02,-0.43,-0.52,-0.44,-0.33,-0.55,-0.48,-0.49,0.22,0.35,0.07,0.09,0.06,0.27,0.03,1.0,0.22],[0.18,-0.39,-0.52,-0.12,0.02,-0.2,-0.27,0.14,-0.07,-0.33,-0.33,0.42,0.21,0.17,0.29,0.22,1.0]]};
+
+/* ================================================================
+   Data (all numbers from arXiv 2609.35189v1 unless marked)
+   ================================================================ */
+const DIMS = [ // matrix order = paper's Fig. 2 order (G³ grouping order)
+ {k:'dsr',    zh:'动态空间关系', s:'动态空间', off:'可控性',   desc:'物体间的位置关系按描述随时间变化'},
+ {k:'clothes',zh:'衣着一致',     s:'衣着一致', off:'人体保真', desc:'同一人的衣服在视频中保持不变'},
+ {k:'inst',   zh:'实例保持',     s:'实例保持', off:'常识',     desc:'运动中物体实例不凭空增减或合并'},
+ {k:'mo',     zh:'动作顺序',     s:'动作顺序', off:'可控性',   desc:'多个动作按描述的先后顺序发生'},
+ {k:'anat',   zh:'人体结构',     s:'人体结构', off:'人体保真', desc:'手、脸、躯干等没有畸形或异常'},
+ {k:'ident',  zh:'身份一致',     s:'身份一致', off:'人体保真', desc:'同一人的面部 / 身份在视频中保持'},
+ {k:'inter',  zh:'人际互动',     s:'人际互动', off:'可控性',   desc:'两人之间按描述完成互动动作'},
+ {k:'mrat',   zh:'动作合理',     s:'动作合理', off:'常识',     desc:'动作真的完成、合乎常识，而不是“假动作”'},
+ {k:'cam',    zh:'镜头运动',     s:'镜头运动', off:'可控性',   desc:'平移、推拉等镜头运动与描述一致'},
+ {k:'land',   zh:'复杂风景',     s:'复杂风景', off:'可控性',   desc:'长描述下的多段风景 / 镜头依次呈现'},
+ {k:'comp',   zh:'组合创造',     s:'组合创造', off:'创造力',   desc:'不常见的元素组合被正确生成'},
+ {k:'dattr',  zh:'动态属性',     s:'动态属性', off:'可控性',   desc:'颜色、形状等属性按描述随时间变化'},
+ {k:'mat',    zh:'材料',         s:'材料',     off:'物理',     desc:'与材料属性相关的物理现象'},
+ {k:'mv',     zh:'多视角一致',   s:'多视角',   off:'物理',     desc:'镜头移动时场景的三维结构保持一致'},
+ {k:'thermo', zh:'热学',         s:'热学',     off:'物理',     desc:'融化、沸腾、燃烧等受热引起的状态变化'},
+ {k:'plot',   zh:'复杂情节',     s:'复杂情节', off:'可控性',   desc:'多段情节按描述依次展开'},
+ {k:'mech',   zh:'力学',         s:'力学',     off:'物理',     desc:'受力、碰撞、下落等符合力学常识'},
+];
+const N = DIMS.length;
+const IDX = Object.fromEntries(DIMS.map((d,i)=>[d.k,i]));
+const G3LAB = [1,1,1,1,2,2,2,2,3,3,3,4,4,4,4,5,5];
+function labFrom(groups){ const l=new Array(N).fill(0); groups.forEach((g,gi)=>g.forEach(k=>l[IDX[k]]=gi+1)); return l; }
+const PARTS = {
+  g3:  {name:'G³', lab:G3LAB, gnames:['G1','G2','G3','G4','G5'], vb:48.18},
+  sem: {name:'官方语义', lab:labFrom([['anat','ident','clothes'],['comp'],['dsr','dattr','mo','inter','land','plot','cam'],['mech','thermo','mat','mv'],['mrat','inst']]), gnames:['人体保真','创造力','可控性','物理','常识'], vb:47.20},
+  ra:  {name:'随机 A', lab:labFrom([['land','plot','comp','ident','mech'],['dattr','mat','thermo'],['cam','anat','mv'],['mo','mrat','clothes'],['dsr','inter','inst']]), gnames:['A1','A2','A3','A4','A5'], vb:46.38},
+  rb:  {name:'随机 B', lab:labFrom([['dsr','anat','clothes','ident','inter','inst','mo','mrat'],['dattr','mat','mech','thermo'],['cam','mv'],['land','comp'],['plot']]), gnames:['B1','B2','B3','B4','B5'], vb:45.82},
+};
+// Table 8: base, joint, randA, randB, group-only expert, r8, r40 (ours), +OPD
+const T8COLS = ['基座','Joint','随机 A','随机 B','组专家†','合并 r8†','G³ r40','+OPD'];
+const T8 = {
+ anat:[88.21,86.27,87.38,86.66,83.88,85.00,85.99,85.94],
+ clothes:[97.92,97.96,95.92,97.96,92.00,83.33,95.92,98.40],
+ ident:[73.37,71.69,73.40,73.01,68.54,77.15,71.59,71.49],
+ comp:[48.10,46.30,49.40,50.20,53.60,46.30,47.80,47.30],
+ mech:[56.52,61.70,54.35,61.70,72.92,70.00,57.78,58.49],
+ mat:[36.67,29.03,34.48,31.03,30.00,45.83,32.14,32.70],
+ thermo:[47.83,51.16,48.89,48.94,55.32,66.67,51.11,51.69],
+ mv:[42.96,47.60,55.37,43.91,73.56,30.54,51.95,60.02],
+ dsr:[34.00,38.00,40.00,34.00,32.00,30.00,38.00,38.00],
+ dattr:[20.00,14.00,16.00,16.00,12.00,16.00,20.00,24.00],
+ mo:[24.00,26.00,24.00,26.00,22.45,28.57,32.00,34.04],
+ inter:[66.00,58.00,58.00,50.00,58.00,60.03,62.00,68.00],
+ land:[20.00,21.60,20.80,21.20,22.80,18.80,22.40,22.80],
+ plot:[10.40,13.60,8.40,16.40,10.00,9.20,12.40,17.47],
+ cam:[12.00,20.00,8.00,10.00,6.00,16.00,12.00,12.00],
+ mrat:[38.00,36.00,38.00,36.00,42.00,38.00,40.00,40.20],
+ inst:[84.21,80.00,76.00,76.00,82.00,84.51,86.00,86.00],
+};
+const T8ORDER = ['anat','clothes','ident','comp','mech','mat','thermo','mv','dsr','dattr','mo','inter','land','plot','cam','mrat','inst'];
+const BIN50 = new Set(['cam','dsr','dattr','inter','mrat']);
+const STAGE_KEYS = ['0','25','50','75','100'];
+
+/* ================================================================
+   Helpers
+   ================================================================ */
+const $ = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
+function cssv(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function hex2rgb(h){ h=h.replace('#',''); if(h.length===3) h=h.split('').map(c=>c+c).join(''); const n=parseInt(h,16); return [(n>>16)&255,(n>>8)&255,n&255]; }
+function rgb2hex(c){ return '#'+c.map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join(''); }
+function mix(a,b,t){ const A=hex2rgb(a),B=hex2rgb(b); return rgb2hex(A.map((v,i)=>v+(B[i]-v)*t)); }
+function lum(h){ const c=hex2rgb(h).map(v=>{v/=255; return v<=0.03928? v/12.92 : Math.pow((v+0.055)/1.055,2.4);}); return 0.2126*c[0]+0.7152*c[1]+0.0722*c[2]; }
+function divColor(v, vmax){ // diverging: pos blue, neg red, mid gray
+  const t=Math.max(-1,Math.min(1,v/vmax));
+  const mid=cssv('--mid'), pos=cssv('--pos'), neg=cssv('--neg');
+  const a=Math.pow(Math.abs(t),0.85);
+  return t>=0? mix(mid,pos,a) : mix(mid,neg,a);
+}
+function textOn(bg){ return lum(bg)>0.32 ? '#13161b' : '#f3f5f7'; }
+function fmt(v,d=2){ return (v<0?'−':'')+Math.abs(v).toFixed(d); }
+function fmts(v,d=2){ return (v>0?'+':v<0?'−':'±')+Math.abs(v).toFixed(d); }
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function width(el){ return Math.max(280, Math.floor(el.getBoundingClientRect().width)); }
+function isNarrow(){ return window.innerWidth < 560; }
+
+// tooltip
+const tip = $('#tip');
+function showTip(html, ev){
+  tip.innerHTML = html; tip.classList.add('on');
+  const pad=14, r=tip.getBoundingClientRect();
+  let x = ev.clientX + pad, y = ev.clientY + pad;
+  if (x + r.width > window.innerWidth - 8) x = ev.clientX - r.width - pad;
+  if (y + r.height > window.innerHeight - 8) y = ev.clientY - r.height - pad;
+  tip.style.left = Math.max(8,x)+'px'; tip.style.top = Math.max(8,y)+'px';
+}
+function hideTip(){ tip.classList.remove('on'); }
+function bindTips(root, fn){
+  root.addEventListener('pointermove', ev=>{ const t=ev.target.closest('[data-tip]'); if(t && root.contains(t)){ const h=fn(t); if(h) showTip(h,ev); else hideTip(); } else hideTip(); });
+  root.addEventListener('pointerleave', hideTip);
+  root.addEventListener('pointerdown', ev=>{ const t=ev.target.closest('[data-tip]'); if(t){ const h=fn(t); if(h) showTip(h,ev);} });
+}
+function segBind(container, attr, cb){
+  container.addEventListener('click', ev=>{
+    const b=ev.target.closest('button'); if(!b || !container.contains(b)) return;
+    $$('button',container).forEach(x=>x.setAttribute('aria-pressed', x===b?'true':'false'));
+    cb(b.dataset[attr]);
+  });
+}
+function setPressed(container, attr, val){ $$('button',container).forEach(x=>x.setAttribute('aria-pressed', x.dataset[attr]===String(val)?'true':'false')); }
+
+// seeded RNG
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function gauss(rng){ let u=0,v=0; while(u===0)u=rng(); while(v===0)v=rng(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+
+/* ================================================================
+   Linkage (average / UPGMA) on 1 - S̄
+   ================================================================ */
+function avgLinkage(S){
+  const n=S.length; const size={}; const members={}; const dist=new Map();
+  const key=(a,b)=>a<b? a+','+b : b+','+a;
+  for(let i=0;i<n;i++){ size[i]=1; members[i]=[i]; for(let j=i+1;j<n;j++) dist.set(key(i,j), 1-S[i][j]); }
+  let active=[...Array(n).keys()], next=n; const merges=[];
+  while(active.length>1){
+    let best=null;
+    for(let x=0;x<active.length;x++) for(let y=x+1;y<active.length;y++){
+      const a=active[x], b=active[y], d=dist.get(key(a,b));
+      if(best===null || d<best[0]-1e-12) best=[d,a,b];
+    }
+    const [d,a,b]=best; const id=next++;
+    size[id]=size[a]+size[b]; members[id]=members[a].concat(members[b]);
+    merges.push({id,a,b,h:d});
+    for(const c of active){ if(c===a||c===b) continue; dist.set(key(c,id), (size[a]*dist.get(key(a,c))+size[b]*dist.get(key(b,c)))/(size[a]+size[b])); }
+    active=active.filter(c=>c!==a&&c!==b); active.push(id);
+  }
+  const root=next-1; const byId={}; merges.forEach(m=>byId[m.id]=m);
+  const minm=id=>Math.min(...members[id]);
+  function order(id){ if(id<n) return [id]; let {a,b}=byId[id]; if(minm(a)>minm(b)) [a,b]=[b,a]; return order(a).concat(order(b)); }
+  return {merges, byId, members, root, n, order:order(root)};
+}
+function cutTree(L, M){
+  // perform first n-M merges
+  const n=L.n; let parent={}; const find=x=>{ while(parent[x]!==undefined) x=parent[x]; return x; };
+  const sorted=L.merges.slice(0, n-M);
+  for(const m of sorted){ parent[m.a]=m.id; parent[m.b]=m.id; }
+  const roots=[...new Set([...Array(n).keys()].map(find))];
+  // number clusters by first appearance in leaf order
+  const pos={}; L.order.forEach((leaf,p)=>pos[leaf]=p);
+  roots.sort((r1,r2)=>Math.min(...L.members[r1].map(x=>pos[x]))-Math.min(...L.members[r2].map(x=>pos[x])));
+  const lab=new Array(n); roots.forEach((r,ri)=>L.members[r].forEach(x=>lab[x]=ri+1));
+  const hs=L.merges.map(m=>m.h);
+  const thr = M>=n? 0 : (M<=1? hs[hs.length-1]+0.05 : (hs[n-M-1]+hs[n-M])/2);
+  return {lab, thr, roots};
+}
+function partStats(S, lab){
+  let w=[],b=[];
+  for(let i=0;i<N;i++) for(let j=i+1;j<N;j++){ (lab[i]===lab[j]?w:b).push(S[i][j]); }
+  const mean=a=>a.length? a.reduce((x,y)=>x+y,0)/a.length : NaN;
+  return {within:mean(w), between:mean(b), sep:mean(w)-mean(b), negW:w.filter(v=>v<0).length, minW:w.length?Math.min(...w):NaN, nW:w.length};
+}
+const LINK = avgLinkage(MATS.mean);
+
+/* ================================================================
+   §02 dims table
+   ================================================================ */
+function renderDimTable(){
+  const tb=$('#dimtable tbody'); let h='';
+  DIMS.forEach((d,i)=>{
+    const g=G3LAB[i];
+    h+=`<tr><td class="l"><b>${d.zh}</b></td><td class="l wrap-cell">${d.desc}</td><td class="l">${d.off}</td><td class="l"><span class="gchip g${g}">G${g}</span></td><td class="tnum">${T8[d.k][0].toFixed(2)}</td></tr>`;
+  });
+  tb.innerHTML=h;
+}
+
+/* ================================================================
+   §02 weight widget
+   ================================================================ */
+function renderWeight(){
+  const box=$('#w-svg'); const W=width(box), H=230;
+  const rbar=+$('#w-rbar').value, alpha=+$('#w-alpha').value;
+  $('#w-rbar-o').textContent=rbar.toFixed(2); $('#w-alpha-o').textContent=alpha.toFixed(2);
+  const rs=[0,1/4,1/3,1/2,2/3,3/4,1], rl=['0','1/4','1/3','1/2','2/3','3/4','1'];
+  const wf=r=>1+alpha*(r-rbar); const clip=w=>Math.min(2,Math.max(0.5,w));
+  const ml=40, mr=12, mt=14, mb=34; const pw=W-ml-mr, ph=H-mt-mb;
+  const ymax=2.4, y=v=>mt+ph*(1-Math.max(0,v)/ymax);
+  const band=pw/rs.length, bw=Math.min(46,band*0.55);
+  let s=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="不同奖励对应的样本权重">`;
+  [0,0.5,1,1.5,2].forEach(v=>{ s+=`<line x1="${ml}" x2="${W-mr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/><text x="${ml-6}" y="${y(v)+4}" font-size="11" fill="var(--ink3)" text-anchor="end">${v}</text>`; });
+  // unclipped range band
+  const lo=1-alpha*rbar, hi=1+alpha*(1-rbar);
+  s+=`<rect x="${ml}" y="${y(Math.min(ymax,hi))}" width="${pw}" height="${Math.max(0,y(Math.max(0,lo))-y(Math.min(ymax,hi)))}" fill="var(--ours-soft)"/>`;
+  // clip lines
+  s+=`<line x1="${ml}" x2="${W-mr}" y1="${y(0.5)}" y2="${y(0.5)}" stroke="var(--risk)" stroke-width="1.5"/>`;
+  s+=`<line x1="${ml}" x2="${W-mr}" y1="${y(2)}" y2="${y(2)}" stroke="var(--risk)" stroke-width="1.5"/><text x="${W-mr-2}" y="${y(2)-5}" font-size="11" fill="var(--risk-ink)" text-anchor="end">红线：clip 的下界 0.5 与上界 2.0</text>`;
+  rs.forEach((r,i)=>{
+    const w=clip(wf(r)), raw=wf(r), cx=ml+band*i+band/2, clipped=Math.abs(w-raw)>1e-9;
+    s+=`<rect x="${cx-bw/2}" y="${y(w)}" width="${bw}" height="${y(0)-y(w)}" rx="3" fill="${clipped?'var(--risk)':'var(--ours)'}" data-tip="${i}"/>`;
+    s+=`<text x="${cx}" y="${y(w)-5}" font-size="11.5" fill="var(--ink2)" text-anchor="middle" class="tnum">${w.toFixed(2)}</text>`;
+    s+=`<text x="${cx}" y="${H-mb+16}" font-size="12" fill="var(--ink3)" text-anchor="middle">${W<520?rl[i]:'r = '+rl[i]}</text>`;
+  });
+  s+=`<line x1="${ml}" x2="${W-mr}" y1="${y(0)}" y2="${y(0)}" stroke="var(--axis)"/>`;
+  s+='</svg>';
+  box.innerHTML=s;
+  const wlo=clip(wf(0)), whi=clip(wf(1)); const trig=(wf(0)<0.5)||(wf(1)>2);
+  $('#w-ro').innerHTML=`
+    <div class="ro"><span class="k">w 可能的范围（clip 前）</span><span class="v">${fmt(lo)} – ${fmt(hi)}</span></div>
+    <div class="ro"><span class="k">最好 / 最差样本的权重比</span><span class="v o">${(whi/wlo).toFixed(2)}×</span></div>
+    <div class="ro"><span class="k">clip 会不会触发</span><span class="v ${trig?'bad':'good'}">${trig?'会':'永远不会'}</span></div>
+    <div class="ro"><span class="k">平均权重 w̄（同批样本）</span><span class="v">1.00</span></div>`;
+  bindOnce(box,'wtip',()=>bindTips(box, t=>{ const i=+t.dataset.tip; const r=rs[i]; const raw=1+(+$('#w-alpha').value)*(r-(+$('#w-rbar').value)); return `<b>r = ${rl[i]}</b><br><span class="t-k">1 + α(r − r̄) =</span> <span class="mono">${raw.toFixed(3)}</span><br><span class="t-k">clip 后</span> <span class="mono">${clip(raw).toFixed(3)}</span>`; }));
+}
+const _bound=new Set(); function bindOnce(el,key,fn){ const k=key; if(_bound.has(k)) return; _bound.add(k); fn(); }
+
+/* ================================================================
+   §03 averaging widget
+   ================================================================ */
+let avgCond='same';
+function arrow(x1,y1,x2,y2,color,w=2.5,id=''){
+  const a=Math.atan2(y2-y1,x2-x1), L=10, s=0.45;
+  const p1=[x2-L*Math.cos(a-s), y2-L*Math.sin(a-s)], p2=[x2-L*Math.cos(a+s), y2-L*Math.sin(a+s)];
+  return `<line x1="${x1}" y1="${y1}" x2="${x2-6*Math.cos(a)}" y2="${y2-6*Math.sin(a)}" stroke="${color}" stroke-width="${w}" stroke-linecap="round"/><polygon points="${x2},${y2} ${p1[0]},${p1[1]} ${p2[0]},${p2[1]}" fill="${color}"/>`;
+}
+function renderAvg(){
+  const rho=+$('#avg-rho').value; $('#avg-rho-o').textContent=rho.toFixed(2);
+  const box=$('#avg-svg'); const W=Math.min(width(box),720), H=250;
+  const uA=[1,0.12], uB=[-0.22,-0.95]; // unit-ish, y down
+  const len=v=>Math.hypot(v[0],v[1]); const cos=(a,b)=>(a[0]*b[0]+a[1]*b[1])/(len(a)*len(b));
+  let s=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="条件均值示意">`;
+  if(avgCond==='same'){
+    const O=[W*0.36,H*0.72], sc=Math.min(170,W*0.34);
+    const m=[rho*uA[0]+(1-rho)*uB[0], rho*uA[1]+(1-rho)*uB[1]];
+    s+=`<circle cx="${O[0]}" cy="${O[1]}" r="46" fill="var(--surf2)" stroke="var(--rule2)"/>`;
+    s+=`<text x="${O[0]}" y="${O[1]+64}" font-size="12" fill="var(--ink3)" text-anchor="middle">同一片带噪区域 (z<tspan baseline-shift="sub" font-size="9">t</tspan>, p, t)</text>`;
+    s+=arrow(O[0],O[1],O[0]+sc*uA[0],O[1]+sc*uA[1],'var(--g2)',3);
+    s+=`<text x="${O[0]+sc*uA[0]+8}" y="${O[1]+sc*uA[1]+4}" font-size="12.5" fill="var(--ink2)">u<tspan baseline-shift="sub" font-size="9">A</tspan> 维度 A 想要（如：大幅运动）</text>`;
+    s+=arrow(O[0],O[1],O[0]+sc*uB[0],O[1]+sc*uB[1],'var(--g3)',3);
+    s+=`<text x="${O[0]+sc*uB[0]-6}" y="${O[1]+sc*uB[1]-8}" font-size="12.5" fill="var(--ink2)" text-anchor="middle">u<tspan baseline-shift="sub" font-size="9">B</tspan> 维度 B 想要（如：保持外观）</text>`;
+    s+=arrow(O[0],O[1],O[0]+sc*m[0],O[1]+sc*m[1],'var(--ink)',3.5);
+    s+=`<text x="${O[0]+sc*m[0]+8}" y="${O[1]+sc*m[1]+16}" font-size="12.5" fill="var(--ink)" font-weight="600">û* 共享回归学到的</text>`;
+    s+='</svg>'; box.innerHTML=s;
+    const shrink=len(m)/((len(uA)+len(uB))/2);
+    $('#avg-ro').innerHTML=`
+      <div class="ro"><span class="k">与 A 的余弦</span><span class="v">${fmt(cos(m,uA))}</span></div>
+      <div class="ro"><span class="k">与 B 的余弦</span><span class="v">${fmt(cos(m,uB))}</span></div>
+      <div class="ro"><span class="k">回答的长度 / 目标长度</span><span class="v ${shrink<0.8?'bad':''}">${(shrink*100).toFixed(0)}%</span></div>
+      <div class="ro"><span class="k">解读</span><span class="v" style="font-size:13.5px;font-family:var(--f-body);font-weight:500">${rho>0.85?'几乎只服务 A':rho<0.15?'几乎只服务 B':'两边都不到位，且被“缩短”'}</span></div>`;
+  } else {
+    const half=W/2; const sc=Math.min(120,half*0.5);
+    [[uA,'var(--g2)','prompt 属于维度 A','A'],[uB,'var(--g3)','prompt 属于维度 B','B']].forEach((it,k)=>{
+      const O=[half*k+half*0.42, H*0.66];
+      s+=`<circle cx="${O[0]}" cy="${O[1]}" r="36" fill="var(--surf2)" stroke="var(--rule2)"/>`;
+      s+=`<text x="${O[0]}" y="${O[1]+56}" font-size="12" fill="var(--ink3)" text-anchor="middle">${it[2]}</text>`;
+      s+=arrow(O[0],O[1],O[0]+sc*it[0][0],O[1]+sc*it[0][1],it[1],6);
+      s+=arrow(O[0],O[1],O[0]+sc*it[0][0],O[1]+sc*it[0][1],'var(--ink)',2);
+      s+=`<text x="${O[0]+sc*it[0][0]+(k?0:8)}" y="${O[1]+sc*it[0][1]+(k?-10:4)}" font-size="12.5" fill="var(--ink2)" text-anchor="${k?'middle':'start'}">û* = u<tspan baseline-shift="sub" font-size="9">${it[3]}</tspan></text>`;
+    });
+    s+=`<line x1="${half}" x2="${half}" y1="16" y2="${H-16}" stroke="var(--rule)"/>`;
+    s+='</svg>'; box.innerHTML=s;
+    $('#avg-ro').innerHTML=`
+      <div class="ro"><span class="k">与 A 的余弦（prompt A）</span><span class="v good">1.00</span></div>
+      <div class="ro"><span class="k">与 B 的余弦（prompt B）</span><span class="v good">1.00</span></div>
+      <div class="ro" style="grid-column:span 2"><span class="k">解读</span><span class="v" style="font-size:13.5px;font-family:var(--f-body);font-weight:500">条件不同 → 理想回归器可以两者兼得；冲突只能来自共享的有限参数</span></div>`;
+  }
+}
+
+/* ================================================================
+   §04 centering demo
+   ================================================================ */
+let cSeed=7;
+function cosMat(V){
+  const K=V.length, n=V.map(v=>Math.sqrt(v.reduce((a,x)=>a+x*x,0))||1);
+  const M=[]; for(let i=0;i<K;i++){ M.push([]); for(let j=0;j<K;j++){ let d=0; for(let t=0;t<V[i].length;t++) d+=V[i][t]*V[j][t]; M[i].push(d/(n[i]*n[j])); } }
+  return M;
+}
+function miniHeat(box, M, clusters){
+  const K=M.length; const W=width(box); const cell=Math.max(8,Math.min(22,Math.floor((W-6)/K))); const S=cell*K;
+  let s=`<svg width="${S+2}" height="${S+2}" viewBox="0 0 ${S+2} ${S+2}" role="img" aria-label="余弦相似度矩阵">`;
+  for(let i=0;i<K;i++) for(let j=0;j<K;j++){
+    const v=M[i][j]; s+=`<rect x="${1+j*cell}" y="${1+i*cell}" width="${cell-1}" height="${cell-1}" fill="${i===j?cssv('--surf3'):divColor(v,1)}" data-tip="${i},${j}"/>`;
+  }
+  // cluster boundaries
+  for(let i=1;i<K;i++) if(clusters[i]!==clusters[i-1]){ s+=`<line x1="${1+i*cell-0.5}" x2="${1+i*cell-0.5}" y1="1" y2="${S+1}" stroke="var(--ink3)" stroke-width="0.6" opacity=".6"/><line y1="${1+i*cell-0.5}" y2="${1+i*cell-0.5}" x1="1" x2="${S+1}" stroke="var(--ink3)" stroke-width="0.6" opacity=".6"/>`; }
+  s+='</svg>'; box.innerHTML=s; box._M=M;
+}
+function renderCenter(){
+  const K=+$('#c-k').value, sh=+$('#c-s').value, cl=+$('#c-c').value;
+  $('#c-k-o').textContent=K; $('#c-s-o').textContent=sh.toFixed(1); $('#c-c-o').textContent=cl.toFixed(1);
+  const d=256, rng=mulberry32(cSeed);
+  const vec=()=>Array.from({length:d},()=>gauss(rng));
+  const a=vec(); const B=[vec(),vec(),vec(),vec(),vec()];
+  const clusters=K===17? G3LAB.map(x=>x-1) : Array.from({length:K},(_,i)=>Math.floor(i*5/K));
+  const G=[]; for(let i=0;i<K;i++){ const e=vec(); G.push(e.map((x,t)=>sh*a[t]+cl*B[clusters[i]][t]+x)); }
+  const g=Array.from({length:d},(_,t)=>G.reduce((acc,v)=>acc+v[t],0)/K);
+  const gg=g.reduce((x,y)=>x+y*y,0);
+  const R=G.map(v=>{ const p=v.reduce((acc,x,t)=>acc+x*g[t],0)/(gg+1e-8); return v.map((x,t)=>x-p*g[t]); });
+  const MR=cosMat(G), MS=cosMat(R);
+  miniHeat($('#c-raw'),MR,clusters); miniHeat($('#c-res'),MS,clusters);
+  let nr=0,ns=0,sum=0,cnt=0,w=[],b=[];
+  for(let i=0;i<K;i++) for(let j=i+1;j<K;j++){ cnt++; if(MR[i][j]<0) nr++; if(MS[i][j]<0) ns++; sum+=MS[i][j]; (clusters[i]===clusters[j]?w:b).push(MS[i][j]); }
+  const mean=x=>x.length? x.reduce((p,q)=>p+q,0)/x.length : NaN;
+  $('#c-ro').innerHTML=`
+    <div class="ro"><span class="k">原始：负配对比例</span><span class="v">${(nr/cnt*100).toFixed(0)}%</span></div>
+    <div class="ro"><span class="k">去公共方向后：负配对比例</span><span class="v bad">${(ns/cnt*100).toFixed(0)}%</span></div>
+    <div class="ro"><span class="k">残差平均两两余弦</span><span class="v">${fmt(sum/cnt,3)}</span></div>
+    <div class="ro"><span class="k">中心化基线 −1/(K−1)</span><span class="v">${fmt(-1/(K-1),3)}</span></div>
+    <div class="ro"><span class="k">残差 · 同簇均值 / 异簇均值</span><span class="v">${isNaN(mean(w))?'—':fmt(mean(w))} / ${fmt(mean(b))}</span></div>
+    <div class="ro"><span class="k">参照：论文（K = 17）</span><span class="v" style="font-size:14px">0% → 55% 负；均值 −0.058</span></div>`;
+}
+
+/* ================================================================
+   §05 main heatmap
+   ================================================================ */
+const HM={mat:'mean', part:'g3', M:5, custom:G3LAB.slice()};
+const GROUPCOL=['--g1','--g2','--g3','--g4','--g5'];
+const EXTRA_COL={light:['#008300','#4a3aa7','#e34948'], dark:['#008300','#9085e9','#e66767']};
+function isDark(){ return cssv('color-scheme').includes('dark'); }
+function gcol(g){ if(g<=5) return cssv(GROUPCOL[g-1]); const ex=isDark()?EXTRA_COL.dark:EXTRA_COL.light; return ex[g-6]||cssv('--base'); }
+function curLab(){
+  if(HM.part==='g3') return cutTree(LINK,HM.M).lab;
+  if(HM.part==='custom') return HM.custom;
+  return PARTS[HM.part].lab;
+}
+function groupName(g){
+  if(HM.part==='g3') return 'G'+g;
+  if(HM.part==='custom') return 'C'+g;
+  return PARTS[HM.part].gnames[g-1];
+}
+function renderHeat(){
+  const box=$('#hm-svg'); const W=width(box); const narrow=W<520;
+  const S=MATS[HM.mat]; const lab=curLab(); const ord=LINK.order;
+  const labelW=narrow?56:104, dendW=narrow?0:118, gap=narrow?0:8, topH=24;
+  const cell=Math.max(11,Math.min(30,Math.floor((W-labelW-dendW-gap-4)/N)));
+  const gridW=cell*N, H=topH+gridW+6, totalW=labelW+gridW+gap+dendW;
+  const x0=labelW, y0=topH, fs=narrow?11:12.5;
+  let s=`<svg width="${totalW}" height="${H}" viewBox="0 0 ${totalW} ${H}" role="img" aria-label="残差梯度相容性矩阵">`;
+  // top group band
+  ord.forEach((d,p)=>{ s+=`<rect x="${x0+p*cell}" y="${y0-9}" width="${cell-1}" height="6" rx="1.5" fill="${gcol(lab[d])}"/>`; });
+  // row labels
+  ord.forEach((d,p)=>{
+    const cy=y0+p*cell+cell/2;
+    if(!narrow) s+=`<circle cx="${6}" cy="${cy}" r="3.5" fill="${gcol(lab[d])}"/>`;
+    s+=`<text x="${labelW-6}" y="${cy+4}" font-size="${fs}" fill="var(--ink2)" text-anchor="end" class="${HM.part==='custom'?'lbl-click':''}" data-lbl="${d}">${narrow?DIMS[d].s:DIMS[d].zh}</text>`;
+  });
+  // cells
+  s+=`<g class="hm-cells">`;
+  ord.forEach((di,pi)=>ord.forEach((dj,pj)=>{
+    const v=S[di][dj];
+    const fill= di===dj? cssv('--surf3') : divColor(v,1);
+    s+=`<rect x="${x0+pj*cell}" y="${y0+pi*cell}" width="${cell-1}" height="${cell-1}" fill="${fill}" data-tip="${di},${dj}"/>`;
+  }));
+  s+=`</g>`;
+  // group outlines: contiguous → block; else per-cell
+  const groups=[...new Set(lab)];
+  const ink=cssv('--ink');
+  groups.forEach(g=>{
+    const pos=ord.map((d,p)=>lab[d]===g?p:-1).filter(p=>p>=0);
+    const contiguous=pos[pos.length-1]-pos[0]===pos.length-1;
+    if(contiguous){
+      s+=`<rect x="${x0+pos[0]*cell-1}" y="${y0+pos[0]*cell-1}" width="${pos.length*cell+1}" height="${pos.length*cell+1}" fill="none" stroke="${ink}" stroke-width="1.6" pointer-events="none"/>`;
+    } else {
+      pos.forEach(p=>pos.forEach(q=>{ if(p!==q) s+=`<rect x="${x0+q*cell+1.2}" y="${y0+p*cell+1.2}" width="${cell-3.4}" height="${cell-3.4}" fill="none" stroke="${ink}" stroke-width="1.1" pointer-events="none"/>`; }));
+    }
+  });
+  // dendrogram (fixed on mean matrix)
+  const xd0=x0+gridW+gap, hmax=1.32, xs=h=>xd0+Math.min(1,h/hmax)*(dendW-6);
+  const posOf={}; ord.forEach((d,p)=>posOf[d]=y0+p*cell+cell/2);
+  const nodeY={}, nodeH={};
+  for(let i=0;i<N;i++){ nodeY[i]=posOf[i]; nodeH[i]=0; }
+  const cut=HM.part==='g3'? cutTree(LINK,HM.M) : null;
+  if(!narrow) LINK.merges.forEach(m=>{
+    nodeY[m.id]=(nodeY[m.a]+nodeY[m.b])/2; nodeH[m.id]=m.h;
+    let col=cssv('--ink3');
+    if(cut && m.h<cut.thr){ col=gcol(cut.lab[LINK.members[m.id][0]]); }
+    const xa=xs(nodeH[m.a]), xb=xs(nodeH[m.b]), xm=xs(m.h);
+    s+=`<path d="M${xa},${nodeY[m.a]}H${xm}V${nodeY[m.b]}H${xb}" fill="none" stroke="${col}" stroke-width="1.5"/>`;
+  });
+  if(cut && !narrow){ const xc=xs(cut.thr); s+=`<line x1="${xc}" x2="${xc}" y1="${y0-10}" y2="${y0+gridW}" stroke="var(--risk)" stroke-width="1.4"/><text x="${xc}" y="${y0-13}" font-size="10.5" fill="var(--risk-ink)" text-anchor="middle">M=${HM.M}</text>`; }
+  s+='</svg>'; box.innerHTML=s;
+
+  // legend
+  let lg=''; groups.sort((a,b)=>a-b).forEach(g=>{ const mem=DIMS.filter((d,i)=>lab[i]===g).length; lg+=`<span><span class="sw" style="background:${gcol(g)}"></span>${esc(groupName(g))} · ${mem} 维</span>`; });
+  $('#hm-legend').innerHTML=lg;
+  // stats
+  const st=partStats(S,lab);
+  let totalNeg=0; for(let i=0;i<N;i++) for(let j=i+1;j<N;j++) if(S[i][j]<0) totalNeg++;
+  let vb='—', vbk='VBench2.0 均值';
+  if(HM.part==='g3') vb = HM.M===5? '48.18' : '未训练';
+  else if(HM.part!=='custom') vb=PARTS[HM.part].vb.toFixed(2);
+  $('#hm-stats').innerHTML=`
+    <div class="ro"><span class="k">组数</span><span class="v">${groups.length}</span></div>
+    <div class="ro"><span class="k">${vbk}</span><span class="v o">${vb}</span></div>
+    <div class="ro"><span class="k">组内平均相似度</span><span class="v">${fmt(st.within,3)}</span></div>
+    <div class="ro"><span class="k">组间平均相似度</span><span class="v">${fmt(st.between,3)}</span></div>
+    <div class="ro"><span class="k">分离度（组内 − 组间）</span><span class="v o">${fmt(st.sep,3)}</span></div>
+    <div class="ro"><span class="k">组内负配对 / 组内配对</span><span class="v ${st.negW>0?'bad':'good'}">${st.negW} / ${st.nW}</span></div>
+    <div class="ro"><span class="k">组内最小值</span><span class="v ${st.minW<0?'bad':''}">${isNaN(st.minW)?'—':fmt(st.minW)}</span></div>
+    <div class="ro"><span class="k">矩阵负配对总数</span><span class="v">${totalNeg} / 136</span></div>`;
+  const notes={
+    g3: HM.M===5? '论文的分组：M = 5 时组内没有任何负配对。可以拖动 M：M = 4 会把 G1 和 G2 并在一起，留下 3 对负配对；M = 6–8 同样没有组内负配对，分离度还更高。' : (HM.M<5? '组数变少：更多“冲突”配对被迫共用一个专家。' : '组数变多：分离度继续上升，组内仍然没有负配对。论文只比较了 M = 4 和 5。'),
+    sem: 'VBench2.0 官方 5 大类（去掉 diversity）。组内共 13 对负配对：“可控性”一类（7 维）占 12 对，例如动作顺序 × 复杂情节、动态属性 × 人际互动；“物理”一类还有 1 对（力学 × 多视角 −0.05）。下游 47.20，仍高于两个随机分区。',
+    ra: '论文附录 C 的随机分区 A。按同样组大小做均匀随机划分，它的分离度在第 98 百分位左右。下游 46.38。',
+    rb: '论文附录 C 的随机分区 B：8 个以人物和动作为主的维度一组、动态属性加 3 个物理维度一组、镜头 + 多视角一组。分离度 0.531，我模拟的 2 万次同组大小的均匀随机划分没有一次达到（最大约 0.38）；却是下游最差的 45.82。',
+    custom: '点左侧的维度名，给它换到下一组（1 → 5 循环）。右侧数字实时更新；下游分数没有对应实验，所以显示“—”。'
+  };
+  $('#hm-note').textContent=notes[HM.part];
+  $('#hm-mwrap').style.display = HM.part==='g3'?'':'none';
+}
+function initHeat(){
+  segBind($('#hm-mat'),'m',v=>{HM.mat=v; renderHeat();});
+  segBind($('#hm-part'),'p',v=>{ if(v==='custom' && HM.part!=='custom'){ HM.custom=curLab().slice(); } HM.part=v; renderHeat(); });
+  $('#hm-m').addEventListener('input',e=>{ HM.M=+e.target.value; $('#hm-m-o').textContent=HM.M; renderHeat(); });
+  const box=$('#hm-svg');
+  box.addEventListener('click',ev=>{ const t=ev.target.closest('[data-lbl]'); if(!t || HM.part!=='custom') return; const d=+t.dataset.lbl; HM.custom[d]=HM.custom[d]%5+1; renderHeat(); });
+  bindTips(box, t=>{
+    const [i,j]=t.dataset.tip.split(',').map(Number); if(i===j) return `<b>${DIMS[i].zh}</b><br><span class="t-k">对角线</span>`;
+    const vals=STAGE_KEYS.map(k=>MATS[k][i][j]);
+    const lab=curLab(); const same=lab[i]===lab[j];
+    return `<b>${DIMS[i].zh} × ${DIMS[j].zh}</b><br><span class="t-k">当前矩阵</span> <span class="mono">${fmt(MATS[HM.mat][i][j])}</span>　<span class="t-k">五阶段平均</span> <span class="mono">${fmt(MATS.mean[i][j])}</span><br><span class="t-k">0/25/50/75/100%：</span><span class="mono">${vals.map(v=>fmt(v)).join(' ')}</span><br><span class="t-k">${same?'同组（共用一个专家）':'不同组'}</span>`;
+  });
+}
+
+/* ================================================================
+   §05 separation vs VBench
+   ================================================================ */
+function renderSep(){
+  const box=$('#sep-svg'); const W=Math.min(width(box),760), H=270;
+  const ml=46, mr=18, mt=16, mb=40, pw=W-ml-mr, ph=H-mt-mb;
+  const xd=[0,0.7], yd=[45.4,48.6];
+  const x=v=>ml+pw*(v-xd[0])/(xd[1]-xd[0]), y=v=>mt+ph*(1-(v-yd[0])/(yd[1]-yd[0]));
+  const pts=[
+    {n:'官方语义',x:0.147,y:47.20,neg:13,c:'var(--ctrl)',lc:'var(--ink2)'},
+    {n:'随机 A',x:0.217,y:46.38,neg:8,c:'var(--ctrl)',lc:'var(--ink2)'},
+    {n:'随机 B',x:0.531,y:45.82,neg:3,c:'var(--ctrl)',lc:'var(--ink2)'},
+    {n:'G³',x:0.633,y:48.18,neg:0,c:'var(--ours)',lc:'var(--ours-ink)'},
+  ];
+  let s=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="分区分离度与下游分数">`;
+  s+=`<rect x="${x(0)}" y="${mt}" width="${x(0.24)-x(0)}" height="${ph}" fill="var(--surf3)" opacity=".7"/>`;
+  s+=`<text x="${x(0.12)}" y="${mt+ph-8}" font-size="11" fill="var(--ink3)" text-anchor="middle">随机划分 99% 以内</text>`;
+  [45.5,46,46.5,47,47.5,48,48.5].forEach(v=>{ s+=`<line x1="${ml}" x2="${W-mr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/><text x="${ml-6}" y="${y(v)+4}" font-size="11" fill="var(--ink3)" text-anchor="end">${v.toFixed(1)}</text>`; });
+  [0,0.1,0.2,0.3,0.4,0.5,0.6,0.7].forEach(v=>{ s+=`<text x="${x(v)}" y="${H-mb+16}" font-size="11" fill="var(--ink3)" text-anchor="middle">${v.toFixed(1)}</text>`; });
+  s+=`<text x="${ml+pw/2}" y="${H-6}" font-size="12" fill="var(--ink2)" text-anchor="middle">分离度（组内 − 组间平均残差相似度）</text>`;
+  s+=`<line x1="${ml}" x2="${W-mr}" y1="${y(47.07)}" y2="${y(47.07)}" stroke="var(--base)" stroke-width="1.5"/><text x="${W-mr-2}" y="${y(47.07)-5}" font-size="11" fill="var(--ink2)" text-anchor="end">基座 47.07</text>`;
+  s+=`<line x1="${ml}" x2="${W-mr}" y1="${y(46.99)}" y2="${y(46.99)}" stroke="var(--joint)" stroke-width="1.5"/><text x="${W-mr-2}" y="${y(46.99)+14}" font-size="11" fill="var(--joint-ink)" text-anchor="end">Joint 46.99</text>`;
+  pts.forEach((p,i)=>{
+    s+=`<circle cx="${x(p.x)}" cy="${y(p.y)}" r="7" fill="${p.c}" stroke="var(--surf)" stroke-width="2" data-tip="${i}"/>`;
+    const left=p.x>0.45; const dx= left? -12 : 12, anc= left?'end':'start';
+    s+=`<text x="${x(p.x)+dx}" y="${y(p.y)+4}" font-size="12.5" fill="${p.lc}" text-anchor="${anc}" font-weight="600">${p.n} ${p.y.toFixed(2)}</text>`;
+  });
+  s+='</svg>'; box.innerHTML=s;
+  bindOnce(box,'septip',()=>bindTips(box,t=>{ const p=pts[+t.dataset.tip]; return `<b>${p.n}</b><br><span class="t-k">分离度</span> <span class="mono">${p.x.toFixed(3)}</span><br><span class="t-k">组内负配对</span> <span class="mono">${p.neg}</span><br><span class="t-k">VBench2.0 均值</span> <span class="mono">${p.y.toFixed(2)}</span>`; }));
+}
+
+/* ================================================================
+   §06 group cards + dilution + retention
+   ================================================================ */
+function renderGroupCards(){
+  const S=MATS.mean; let h='';
+  for(let g=1; g<=5; g++){
+    const ids=DIMS.map((d,i)=>i).filter(i=>G3LAB[i]===g);
+    let w=[]; ids.forEach((i,a)=>ids.slice(a+1).forEach(j=>w.push(S[i][j])));
+    const wm=w.reduce((x,y)=>x+y,0)/w.length;
+    const m=(col)=>ids.reduce((acc,i)=>acc+T8[DIMS[i].k][col],0)/ids.length;
+    h+=`<div class="gcard"><span class="gchip g${g}">G${g}</span> <span class="small">α = ${ids.length}/17</span><div style="margin-top:6px">${ids.map(i=>`<span class="dimtag">${DIMS[i].zh}</span>`).join('')}</div>
+      <div class="meta">组内相似度 ${fmt(wm,2)}<br>基座 ${m(0).toFixed(2)} · 专家 ${m(4).toFixed(2)}<br>合并 ${m(6).toFixed(2)} · +OPD ${m(7).toFixed(2)}</div></div>`;
+  }
+  $('#groupcards').innerHTML=h;
+}
+function renderDil(){
+  const c=+$('#d-c').value; $('#d-c-o').textContent=c.toFixed(3);
+  const al=[4,4,3,4,2].map(v=>v/17), sa2=al.reduce((x,y)=>x+y*y,0);
+  const ret=Math.sqrt(c+(1-c)*sa2);
+  const box=$('#d-svg'); const W=Math.min(width(box),760), rowH=30, H=rowH*6+30;
+  const ml=isNarrow()?74:150, mr=60, pw=W-ml-mr;
+  let s=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="合并后各专家独有部分的保留比例">`;
+  s+=`<text x="${ml}" y="14" font-size="11.5" fill="var(--ink3)">0%</text><text x="${ml+pw}" y="14" font-size="11.5" fill="var(--ink3)" text-anchor="end">100%</text>`;
+  // shared row
+  const y0=22;
+  s+=`<text x="${ml-8}" y="${y0+rowH/2+4}" font-size="12.5" fill="var(--ink2)" text-anchor="end">${isNarrow()?'公共部分':'公共部分（五家都有）'}</text>`;
+  s+=`<rect x="${ml}" y="${y0+6}" width="${pw}" height="${rowH-12}" rx="3" fill="var(--surf3)"/><rect x="${ml}" y="${y0+6}" width="${pw}" height="${rowH-12}" rx="3" fill="var(--base)"/>`;
+  s+=`<text x="${ml+pw+6}" y="${y0+rowH/2+4}" font-size="12" fill="var(--ink)" class="tnum">≈100%</text>`;
+  al.forEach((a,i)=>{
+    const y=y0+rowH*(i+1);
+    s+=`<text x="${ml-8}" y="${y+rowH/2+4}" font-size="12.5" fill="var(--ink2)" text-anchor="end">G${i+1} ${isNarrow()?'':'独有部分'}</text>`;
+    s+=`<rect x="${ml}" y="${y+6}" width="${pw}" height="${rowH-12}" rx="3" fill="var(--surf3)"/>`;
+    s+=`<rect x="${ml}" y="${y+6}" width="${pw*a}" height="${rowH-12}" rx="3" fill="${cssv(GROUPCOL[i])}"/>`;
+    s+=`<text x="${ml+pw+6}" y="${y+rowH/2+4}" font-size="12" fill="var(--ink)" class="tnum">${(a*100).toFixed(1)}%</text>`;
+  });
+  s+='</svg>'; box.innerHTML=s;
+  $('#d-ro').innerHTML=`
+    <div class="ro"><span class="k">每个专家里“公共部分”的占比（范数²）</span><span class="v">${(c*100).toFixed(1)}%</span></div>
+    <div class="ro"><span class="k">合并后范数保留率（模型）</span><span class="v o">${ret.toFixed(3)}</span></div>
+    <div class="ro"><span class="k">论文实测保留率</span><span class="v">0.946</span></div>
+    <div class="ro"><span class="k">反推的 c</span><span class="v">0.867</span></div>`;
+}
+let retFilter='all';
+function renderRet(){
+  const box=$('#ret-svg'); const W=width(box); const narrow=W<560;
+  const labelW=narrow?66:96, mr=14, rowH=24, headH=22;
+  const rows=[];
+  for(let g=1; g<=5; g++){
+    const ids=DIMS.map((d,i)=>i).filter(i=>G3LAB[i]===g).filter(i=>{ const v=T8[DIMS[i].k]; const win=v[4]>v[0]; return retFilter==='all' || (retFilter==='win'?win:!win); });
+    if(!ids.length) continue;
+    rows.push({head:g}); ids.forEach(i=>rows.push({i}));
+  }
+  const H=rows.reduce((a,r)=>a+(r.head?headH:rowH),0)+30;
+  const pw=W-labelW-mr, x=v=>labelW+pw*v/100;
+  let s=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="逐维保留对照">`;
+  [0,20,40,60,80,100].forEach(v=>{ s+=`<line x1="${x(v)}" x2="${x(v)}" y1="4" y2="${H-24}" stroke="var(--grid)"/><text x="${x(v)}" y="${H-8}" font-size="11" fill="var(--ink3)" text-anchor="middle">${v}</text>`; });
+  let y=4;
+  rows.forEach(r=>{
+    if(r.head){ s+=`<text x="4" y="${y+15}" font-size="12" font-weight="600" fill="${cssv(GROUPCOL[r.head-1])}">G${r.head}</text><line x1="${labelW}" x2="${W-mr}" y1="${y+headH-3}" y2="${y+headH-3}" stroke="var(--rule)"/>`; y+=headH; return; }
+    const d=DIMS[r.i], v=T8[d.k]; const cy=y+rowH/2;
+    const vals=[v[0],v[4],v[6],v[7]]; const lo=Math.min(...vals), hi=Math.max(...vals);
+    const win=v[4]>v[0];
+    s+=`<rect x="0" y="${y}" width="${W}" height="${rowH}" fill="transparent" data-tip="${r.i}"/>`;
+    s+=`<text x="${labelW-8}" y="${cy+4}" font-size="12" fill="${win?'var(--ink)':'var(--ink2)'}" text-anchor="end" font-weight="${win?600:400}" pointer-events="none">${narrow?d.s:d.zh}</text>`;
+    s+=`<line x1="${x(lo)}" x2="${x(hi)}" y1="${cy}" y2="${cy}" stroke="var(--ink3)" stroke-width="1" pointer-events="none"/>`;
+    s+=`<circle cx="${x(v[0])}" cy="${cy}" r="5" fill="var(--surf)" stroke="var(--base)" stroke-width="2" pointer-events="none"/>`;
+    const ex=x(v[4]); s+=`<rect x="${ex-4.6}" y="${cy-4.6}" width="9.2" height="9.2" transform="rotate(45 ${ex} ${cy})" fill="var(--expert)" stroke="var(--surf)" stroke-width="1.5" pointer-events="none"/>`;
+    s+=`<rect x="${x(v[7])-4.5}" y="${cy-4.5}" width="9" height="9" rx="1.5" fill="var(--opd)" stroke="var(--surf)" stroke-width="1.5" pointer-events="none"/>`;
+    s+=`<circle cx="${x(v[6])}" cy="${cy}" r="5.2" fill="var(--ours)" stroke="var(--surf)" stroke-width="1.5" pointer-events="none"/>`;
+    y+=rowH;
+  });
+  s+='</svg>'; box.innerHTML=s;
+  bindOnce(box,'rettip',()=>bindTips(box,t=>{ const d=DIMS[+t.dataset.tip], v=T8[d.k]; return `<b>${d.zh}</b>（G${G3LAB[+t.dataset.tip]}）<br><span class="t-k">基座</span> <span class="mono">${v[0].toFixed(2)}</span><br><span class="t-k">组专家</span> <span class="mono">${v[4].toFixed(2)}</span> <span class="t-k">(${fmts(v[4]-v[0])})</span><br><span class="t-k">合并 r40</span> <span class="mono">${v[6].toFixed(2)}</span> <span class="t-k">(相对专家 ${fmts(v[6]-v[4])})</span><br><span class="t-k">+OPD</span> <span class="mono">${v[7].toFixed(2)}</span>`; }));
+}
+
+/* ================================================================
+   §07 recovery chart
+   ================================================================ */
+function renderRec(){
+  const box=$('#rec-svg'); const W=Math.min(width(box),820); const narrow=W<560;
+  const rows=[['mv',21.61,8.07],['mech',15.14,0.71],['comp',5.80,-0.50],['thermo',4.21,0.58],['mrat',2.00,0.20],['land',0.40,0.40]];
+  const labelW=narrow?62:92, mr=narrow?86:120, rowH=30, H=rows.length*rowH+30;
+  const xd=[-2,22], pw=W-labelW-mr, x=v=>labelW+pw*(v-xd[0])/(xd[1]-xd[0]);
+  let s=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="OPD 补回的专长缺口">`;
+  [0,5,10,15,20].forEach(v=>{ s+=`<line x1="${x(v)}" x2="${x(v)}" y1="4" y2="${H-24}" stroke="var(--grid)"/><text x="${x(v)}" y="${H-8}" font-size="11" fill="var(--ink3)" text-anchor="middle">${v}</text>`; });
+  rows.forEach((r,i)=>{
+    const d=DIMS[IDX[r[0]]], y=6+i*rowH, bh=rowH-12;
+    s+=`<text x="${labelW-8}" y="${y+bh/2+5}" font-size="12.5" fill="var(--ink2)" text-anchor="end">${narrow?d.s:d.zh}</text>`;
+    s+=`<rect x="${x(0)}" y="${y}" width="${x(r[1])-x(0)}" height="${bh}" rx="3" fill="var(--surf3)" data-tip="${i}"/>`;
+    if(r[2]>=0) s+=`<rect x="${x(0)}" y="${y}" width="${Math.max(1.5,x(r[2])-x(0))}" height="${bh}" rx="3" fill="var(--opd)" data-tip="${i}"/>`;
+    else s+=`<rect x="${x(r[2])}" y="${y}" width="${x(0)-x(r[2])}" height="${bh}" rx="3" fill="var(--risk)" data-tip="${i}"/>`;
+    const pct=r[2]/r[1]*100;
+    s+=`<text x="${Math.max(x(r[1]),x(0))+6}" y="${y+bh/2+5}" font-size="12" fill="var(--ink)" class="tnum">${fmt(r[2])} / ${r[1].toFixed(2)}${narrow?'':`（${pct>=0?'':'−'}${Math.abs(pct).toFixed(0)}%）`}</text>`;
+  });
+  s+=`<line x1="${x(0)}" x2="${x(0)}" y1="2" y2="${H-24}" stroke="var(--axis)"/>`;
+  s+='</svg>'; box.innerHTML=s;
+  bindOnce(box,'rectip',()=>bindTips(box,t=>{ const r=rows[+t.dataset.tip], v=T8[r[0]]; return `<b>${DIMS[IDX[r[0]]].zh}</b><br><span class="t-k">组专家</span> <span class="mono">${v[4].toFixed(2)}</span>　<span class="t-k">合并</span> <span class="mono">${v[6].toFixed(2)}</span>　<span class="t-k">+OPD</span> <span class="mono">${v[7].toFixed(2)}</span><br><span class="t-k">缺口</span> <span class="mono">${r[1].toFixed(2)}</span>　<span class="t-k">补回</span> <span class="mono">${fmt(r[2])}</span>`; }));
+}
+
+/* ================================================================
+   §08 means chart
+   ================================================================ */
+let meanMode='all';
+function colMean(ci, excl){ const ks=T8ORDER.filter(k=>!(excl&&k==='mv')); return ks.reduce((a,k)=>a+T8[k][ci],0)/ks.length; }
+function renderMeans(){
+  const box=$('#mean-svg'); const W=Math.min(width(box),860); const narrow=W<560;
+  const nomv=meanMode==='nomv';
+  const rows=[
+    {n:'基座',v:nomv?colMean(0,1):47.07,c:'var(--surf)',st:'var(--base)',ring:true},
+    {n:'Joint LoRA',v:nomv?colMean(1,1):46.99,d:-0.07,c:'var(--joint)'},
+    {n:'随机分区 A',v:nomv?colMean(2,1):46.38,d:-0.69,c:'var(--ctrl)'},
+    {n:'随机分区 B',v:nomv?colMean(3,1):45.82,d:-1.25,c:'var(--ctrl)'},
+    {n:'官方语义分区',v:nomv?null:47.20,d:0.13,c:'var(--ctrl)'},
+    {n:'原始梯度分区',v:nomv?null:47.35,d:0.28,c:'var(--ctrl)'},
+    {n:'G³ 合并 r40',v:nomv?colMean(6,1):48.18,d:1.11,c:'var(--ours)',ci:nomv?null:[46.99,49.33],bold:true},
+    {n:'G³ + OPD',v:nomv?colMean(7,1):49.91,d:2.84,c:'var(--opd)',ci:nomv?null:[48.60,51.23],bold:true},
+    {n:'合并 r8 †',v:nomv?colMean(5,1):47.41,d:0.34,c:'var(--ctrl)',dim:true},
+    {n:'组专家 †',v:nomv?colMean(4,1):48.06,d:0.99,c:'var(--expert)',dim:true},
+  ];
+  const labelW=narrow?92:128, mr=narrow?48:64, rowH=28, H=rows.length*rowH+34;
+  const xd=[45,51.5], pw=W-labelW-mr, x=v=>labelW+pw*(v-xd[0])/(xd[1]-xd[0]);
+  const base=rows[0].v;
+  let s=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="各方法 VBench2.0 均值">`;
+  for(let v=45; v<=51.5; v+=0.5){ const major=Math.abs(v-Math.round(v))<1e-9; s+=`<line x1="${x(v)}" x2="${x(v)}" y1="4" y2="${H-26}" stroke="var(--grid)" stroke-width="${major?1:0.5}"/>`; if(major||!narrow) s+= major? `<text x="${x(v)}" y="${H-8}" font-size="11" fill="var(--ink3)" text-anchor="middle">${v}</text>`:''; }
+  s+=`<line x1="${x(base)}" x2="${x(base)}" y1="4" y2="${H-26}" stroke="var(--base)" stroke-width="1.5"/>`;
+  rows.forEach((r,i)=>{
+    const cy=8+i*rowH+rowH/2;
+    s+=`<text x="${labelW-10}" y="${cy+4}" font-size="12.5" fill="${r.dim?'var(--ink3)':'var(--ink2)'}" text-anchor="end" font-weight="${r.bold?600:400}">${r.n}</text>`;
+    if(r.v===null){ s+=`<text x="${x(base)+8}" y="${cy+4}" font-size="12" fill="var(--ink3)">无逐维数据</text>`; return; }
+    if(r.ci){ s+=`<line x1="${x(r.ci[0])}" x2="${x(r.ci[1])}" y1="${cy}" y2="${cy}" stroke="${r.c}" stroke-width="2" opacity=".75"/><line x1="${x(r.ci[0])}" x2="${x(r.ci[0])}" y1="${cy-5}" y2="${cy+5}" stroke="${r.c}" stroke-width="2"/><line x1="${x(r.ci[1])}" x2="${x(r.ci[1])}" y1="${cy-5}" y2="${cy+5}" stroke="${r.c}" stroke-width="2"/>`; }
+    s+= r.ring? `<circle cx="${x(r.v)}" cy="${cy}" r="6" fill="var(--surf)" stroke="var(--base)" stroke-width="2.2" data-tip="${i}"/>` : `<circle cx="${x(r.v)}" cy="${cy}" r="6.5" fill="${r.c}" stroke="var(--surf)" stroke-width="2" data-tip="${i}"/>`;
+    const tx= r.ci? x(r.ci[1])+6 : x(r.v)+11;
+    const dd = (!nomv && r.d!==undefined)? r.d : r.v-base;
+    const showD = i>0 && !(narrow && r.ci);
+    s+=`<text x="${tx}" y="${cy+4}" font-size="12" fill="var(--ink)" class="tnum">${r.v.toFixed(2)}${showD?` <tspan fill="var(--ink3)">${fmts(dd)}</tspan>`:''}</text>`;
+  });
+  s+='</svg>'; box.innerHTML=s;
+  box._rows=rows;
+  bindOnce(box,'meantip',()=>bindTips(box,t=>{ const r=box._rows[+t.dataset.tip]; const b=box._rows[0].v; const dd=(meanMode==='all' && r.d!==undefined)? r.d : r.v-b; return `<b>${r.n}</b><br><span class="t-k">均值</span> <span class="mono">${r.v.toFixed(2)}</span>　<span class="t-k">相对基座</span> <span class="mono">${fmts(dd)}</span>${r.ci?`<br><span class="t-k">95% 区间（差值平移）</span> <span class="mono">${r.ci[0].toFixed(2)} – ${r.ci[1].toFixed(2)}</span>`:''}`; }));
+}
+
+/* ================================================================
+   §08 delta heatmap (rows = dims, cols = methods)
+   ================================================================ */
+function renderDelta(){
+  const box=$('#dh-svg'); const W=Math.min(width(box),900); const narrow=W<560;
+  const noise=$('#d-noise').checked, showv=$('#d-vals').checked;
+  const cols=[1,2,3,4,5,6,7], cn=['Joint','随机A','随机B','专家†','r8†','G³','+OPD'];
+  const labelW=narrow?62:96, headH=30;
+  const cw=Math.max(34,Math.min(84,Math.floor((W-labelW-4)/cols.length))), rh=narrow?22:24;
+  const order=[...Array(N).keys()]; // G³ order
+  const H=headH+(N+1)*rh+10, totalW=labelW+cw*cols.length+2;
+  let s=`<svg width="${totalW}" height="${H}" viewBox="0 0 ${totalW} ${H}" role="img" aria-label="逐维变化热力图">`;
+  cols.forEach((c,ci)=>{ const col= c===6?'var(--ours-ink)': c===7?'var(--opd-ink)': c===1?'var(--joint-ink)': c===4?'var(--expert-ink)':'var(--ink2)'; s+=`<text x="${labelW+ci*cw+cw/2}" y="${headH-10}" font-size="${narrow?11:12}" fill="${col}" text-anchor="middle" font-weight="${c>=6?600:400}">${cn[ci]}</text>`; });
+  const rowsAll=order.map(i=>({i,k:DIMS[i].k})).concat([{mean:true}]);
+  rowsAll.forEach((r,ri)=>{
+    const y=headH+ri*rh+(r.mean?6:0);
+    const lbl= r.mean? '17 维均值' : (narrow?DIMS[r.i].s:DIMS[r.i].zh);
+    if(!r.mean) s+=`<rect x="0" y="${y+rh/2-3}" width="4" height="6" rx="1" fill="${cssv(GROUPCOL[G3LAB[r.i]-1])}"/>`;
+    s+=`<text x="${labelW-6}" y="${y+rh/2+4}" font-size="${narrow?11:12}" fill="var(--ink2)" text-anchor="end" font-weight="${r.mean?600:400}">${lbl}</text>`;
+    cols.forEach((c,ci)=>{
+      const v= r.mean? colMean(c,0)-colMean(0,0) : T8[r.k][c]-T8[r.k][0];
+      const fill=divColor(v,20); const faded= noise && !r.mean && Math.abs(v)<4.8;
+      s+=`<rect x="${labelW+ci*cw}" y="${y}" width="${cw-2}" height="${rh-2}" rx="2" fill="${fill}" opacity="${faded?0.22:1}" data-tip="${r.mean?'m':r.i},${c}"/>`;
+      if(showv) s+=`<text x="${labelW+ci*cw+(cw-2)/2}" y="${y+rh/2+3.5}" font-size="${narrow?10:11}" fill="${faded?cssv('--ink3'):textOn(fill)}" text-anchor="middle" class="tnum" pointer-events="none">${Math.abs(v)<0.005?'0':(v>0?'+':'−')+Math.abs(v).toFixed(1)}</text>`;
+    });
+  });
+  s+='</svg>'; box.innerHTML=s;
+  bindOnce(box,'dtip',()=>bindTips(box,t=>{
+    const [a,b]=t.dataset.tip.split(','); const c=+b; const cname=T8COLS[c];
+    if(a==='m'){ const v=colMean(c,0); return `<b>${cname} · 17 维均值</b><br><span class="mono">${v.toFixed(2)}</span> <span class="t-k">相对基座</span> <span class="mono">${fmts(v-colMean(0,0))}</span>`; }
+    const d=DIMS[+a], v=T8[d.k]; const dv=v[c]-v[0];
+    const k50=x=>Math.abs(x/2-Math.round(x/2))<0.006;
+    let extra=''; if(BIN50.has(d.k) && k50(v[c]) && k50(v[0])) extra=`<br><span class="t-k">≈ ${dv>=0?'多':'少'} ${Math.abs(dv/2).toFixed(1)} 个视频（共 50 个，二值判定为我的推断）</span>`;
+    return `<b>${d.zh} · ${cname}</b><br><span class="t-k">分数</span> <span class="mono">${v[c].toFixed(2)}</span>　<span class="t-k">基座</span> <span class="mono">${v[0].toFixed(2)}</span><br><span class="t-k">变化</span> <span class="mono">${fmts(dv)}</span>${Math.abs(dv)<4.8?' <span class="t-k">（在 ±4.8 粗估噪声带内）</span>':''}${extra}`;
+  }));
+}
+
+/* ================================================================
+   §08 CogVideoX & VideoScore
+   ================================================================ */
+function renderCog(){
+  const box=$('#cog-svg'); const W=Math.min(width(box),560), H=250;
+  const ml=40, mr=78, mt=14, mb=36, pw=W-ml-mr, ph=H-mt-mb;
+  const xs=[0,25,50,75,100], jv=[39.87,36.78,31.58,32.12,27.95];
+  const x=v=>ml+pw*v/100, y=v=>mt+ph*(1-(v-25)/(43-25));
+  let s=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="CogVideoX Joint 训练曲线">`;
+  [25,30,35,40].forEach(v=>{ s+=`<line x1="${ml}" x2="${W-mr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/><text x="${ml-6}" y="${y(v)+4}" font-size="11" fill="var(--ink3)" text-anchor="end">${v}</text>`; });
+  xs.forEach(v=>{ s+=`<text x="${x(v)}" y="${H-mb+16}" font-size="11" fill="var(--ink3)" text-anchor="middle">${v}%</text>`; });
+  s+=`<text x="${ml+pw/2}" y="${H-4}" font-size="11.5" fill="var(--ink2)" text-anchor="middle">训练进度（数据曝光）</text>`;
+  s+=`<line x1="${ml}" x2="${W-mr}" y1="${y(39.87)}" y2="${y(39.87)}" stroke="var(--base)" stroke-width="1.5"/><text x="${W-mr+6}" y="${y(39.87)+4}" font-size="11.5" fill="var(--ink2)">基座 39.87</text>`;
+  s+=`<polyline points="${xs.map((v,i)=>x(v)+','+y(jv[i])).join(' ')}" fill="none" stroke="var(--joint)" stroke-width="2"/>`;
+  xs.forEach((v,i)=>{ s+=`<circle cx="${x(v)}" cy="${y(jv[i])}" r="${i===0?5:5}" fill="${i===0?'var(--surf)':'var(--joint)'}" stroke="${i===0?'var(--base)':'var(--surf)'}" stroke-width="2" data-tip="j${i}"/>`; });
+  s+=`<text x="${W-mr+6}" y="${y(27.95)+4}" font-size="11.5" fill="var(--joint-ink)">Joint 27.95</text>`;
+  s+=`<circle cx="${x(100)}" cy="${y(40.99)}" r="6.5" fill="var(--ours)" stroke="var(--surf)" stroke-width="2" data-tip="g"/><text x="${W-mr+6}" y="${y(40.99)-6}" font-size="11.5" fill="var(--ours-ink)" font-weight="600">分组 40.99</text>`;
+  s+='</svg>'; box.innerHTML=s;
+  bindOnce(box,'cogtip',()=>bindTips(box,t=>{ const k=t.dataset.tip; if(k==='g') return `<b>G³ 分组合并版</b><br><span class="mono">40.99</span> <span class="t-k">相对 Joint +13.04，区间 [9.08, 16.92]</span>`; const i=+k.slice(1); return `<b>${i===0?'基座':'Joint LoRA · '+xs[i]+'%'}</b><br><span class="mono">${jv[i].toFixed(2)}</span>`; }));
+}
+function renderVS(){
+  const box=$('#vs-svg'); const W=Math.min(width(box),560); const narrow=W<460;
+  const rows=[['视觉质量',3.029,3.196],['时间一致',2.748,2.931],['动态程度',3.225,3.380],['文本对齐',2.911,3.041],['事实一致',2.659,2.851],['五项平均',2.914,3.080]];
+  const labelW=narrow?64:80, mr=58, rowH=30, H=rows.length*rowH+32;
+  const xd=[2.5,3.5], pw=W-labelW-mr, x=v=>labelW+pw*(v-xd[0])/(xd[1]-xd[0]);
+  let s=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="VideoScore 五个方面">`;
+  [2.5,2.75,3,3.25,3.5].forEach(v=>{ s+=`<line x1="${x(v)}" x2="${x(v)}" y1="4" y2="${H-26}" stroke="var(--grid)"/><text x="${x(v)}" y="${H-8}" font-size="11" fill="var(--ink3)" text-anchor="middle">${v}</text>`; });
+  rows.forEach((r,i)=>{
+    const cy=10+i*rowH+rowH/2, last=i===rows.length-1;
+    if(last) s+=`<line x1="${labelW}" x2="${W-mr}" y1="${cy-rowH/2}" y2="${cy-rowH/2}" stroke="var(--rule)"/>`;
+    s+=`<text x="${labelW-8}" y="${cy+4}" font-size="12.5" fill="var(--ink2)" text-anchor="end" font-weight="${last?600:400}">${r[0]}</text>`;
+    s+=`<line x1="${x(r[1])}" x2="${x(r[2])}" y1="${cy}" y2="${cy}" stroke="var(--ink3)" stroke-width="1.5"/>`;
+    s+=`<circle cx="${x(r[1])}" cy="${cy}" r="5.5" fill="var(--surf)" stroke="var(--base)" stroke-width="2" data-tip="${i}"/>`;
+    s+=`<circle cx="${x(r[2])}" cy="${cy}" r="6" fill="var(--ours)" stroke="var(--surf)" stroke-width="2" data-tip="${i}"/>`;
+    s+=`<text x="${x(r[2])+10}" y="${cy+4}" font-size="11.5" fill="var(--ink2)" class="tnum">+${(r[2]-r[1]).toFixed(3)}</text>`;
+  });
+  s+='</svg>'; box.innerHTML=s;
+  bindOnce(box,'vstip',()=>bindTips(box,t=>{ const r=rows[+t.dataset.tip]; return `<b>${r[0]}</b><br><span class="t-k">基座</span> <span class="mono">${r[1].toFixed(3)}</span>　<span class="t-k">分组合并版</span> <span class="mono">${r[2].toFixed(3)}</span>`; }));
+}
+function renderT8(){
+  let h='<thead><tr><th class="l">维度</th><th class="l">组</th>'+T8COLS.map((c,i)=>`<th>${c}</th>`).join('')+'</tr></thead><tbody>';
+  DIMS.forEach((d,i)=>{ const v=T8[d.k]; h+=`<tr><td class="l">${d.zh}</td><td class="l"><span class="gchip g${G3LAB[i]}">G${G3LAB[i]}</span></td>`+v.map((x,c)=>{ const dv=x-v[0]; const cls=c===0?'':(dv>0?'pos':dv<0?'neg':''); return `<td class="tnum"><span class="${cls}">${x.toFixed(2)}</span></td>`; }).join('')+'</tr>'; });
+  h+='<tr class="ours"><td class="l"><b>均值</b></td><td></td>'+T8COLS.map((c,ci)=>`<td class="tnum"><b>${colMean(ci,0).toFixed(2)}</b></td>`).join('')+'</tr></tbody>';
+  $('#t8').innerHTML=h;
+}
+
+/* ================================================================
+   §09 checks, §10 doubts
+   ================================================================ */
+const CHECKS=[
+ ['图 2 矩阵对称；五个阶段矩阵的平均 vs 图 2','—','最大差 0.006（两位小数舍入）','ok'],
+ ['负配对数','75/136','75/136；各阶段 75/74/75/75/75','ok'],
+ ['五个阶段全为负 / ≥ 4 个阶段为负','65 / 71','65 / 71（“−0.00”按负号计；否则 64）','ok'],
+ ['阶段间相关（均值）','Pearson 0.966 / Spearman 0.962','0.966 / 0.962','ok'],
+ ['平均连接聚类，M = 5','论文的 5 组','完全一致','ok'],
+ ['M = 5：组内 / 组间 / 分离度 / 组内负配对','0.473 / −0.160 / 0.633 / 0','0.473 / −0.160 / 0.633 / 0','ok'],
+ ['M = 4：组内 / 分离度 / 组内负配对','0.345 / 0.559 / 3','0.346 / 0.559 / 3（舍入）','ok'],
+ ['官方语义分区的组内负配对','13','13','ok'],
+ ['正文点名的 6 个配对值','0.841 / 0.824 / 0.709 / −0.818 / −0.798 / −0.630','0.842 / 0.824 / 0.710 / −0.818 / −0.796 / −0.630（由五阶段平均）','ok'],
+ ['表 8 八列的均值','47.07 … 49.91','全部吻合（±0.005）','ok'],
+ ['表 1：涨 / 跌 / 最差下降','Joint 9/8/−8.00；A 6/9/−8.21；B 8/8/−16.00；G³ 9/6/−4.52；OPD 12/4/−3.97','全部吻合（G³ 最差 −4.53，舍入）','ok'],
+ ['图 3 每一格 = 表 8 差值','—','6 行 × 18 列全部一致（r8 行只在表 8）','ok'],
+ ['表 14 各组均值','如 G4：36.86 / 38.80 / 42.72','一致（G2 专家 63.11 vs 63.10，舍入）','ok'],
+ ['“专家胜基座的 6 维，合并全部低于专家；其余 11 维全部高于专家”','文字','属实（6 维：组合创造、力学、热学、多视角、复杂风景、动作合理）','ok'],
+ ['逐维取较大值的上界；OPD 补回比例','51.07；约 60%','51.07；59.9%','ok'],
+ ['表 17 与各维恢复量','8.07/21.61、0.71/15.14 …','一致','ok'],
+ ['VideoScore 五项均值','2.914 → 3.080','2.914 → 3.080（视觉质量差 0.167 vs 0.168，舍入）','ok'],
+ ['CogVideoX 差值','+13.04 / +1.12','一致','ok'],
+ ['奖励保留率','9,448 / 9,512 = 99.33%','99.33%','ok'],
+ ['rank-40 合并是否精确；模块数','误差 1.46e−6；240 个模块','5 × 8 = 40 精确；30 层 × 2 种注意力 × 4 投影 = 240（我的推算）','ok'],
+ ['合并范数保留 0.946 与专家两两余弦 0.730–0.938 是否相容','—','等范数模型下保留率 0.887–0.975；0.946 对应 c ≈ 0.867','ok'],
+ ['OPD 算力','≈ 205 GPU·h','16 × 12 h 48 min = 204.8','ok'],
+ ['式 (8) 的权重范围','“0 个样本触碰 clip 边界”','α = 0.5 时 w ∈ (0.5, 1.5)，边界不可能触碰：这是必然结果','warn'],
+ ['残差矩阵非对角均值','—','−0.0575；中心化基线 −1/16 = −0.0625（见 §04）','warn'],
+ ['两个随机分区的“随机性”','random partitions','随机 A 在第 98 百分位；随机 B 的 0.531 在 2 万次模拟中从未达到（最大约 0.38；见 §05）','warn'],
+ ['M 的选择','M = 5 比 M = 4 更干净','M = 6–9 同样没有组内负配对，分离度 0.642–0.715','warn'],
+ ['去掉 Multi-view 后的增益','—','G³ +1.11 → +0.62；OPD +2.84 → +1.96；r8 +0.34 → +1.13','warn'],
+];
+function renderChecks(){
+  $('#checks tbody').innerHTML=CHECKS.map((c,i)=>`<tr><td class="l tnum">${i+1}</td><td class="l wrap-cell">${c[0]}</td><td class="l wrap-cell">${c[1]}</td><td class="l wrap-cell">${c[2]}</td><td class="l">${c[3]==='ok'?'<span class="st-ok">✓ 通过</span>':'<span class="st-warn">⚠ 需注意</span>'}</td></tr>`).join('');
+}
+const DOUBTS=[
+ {s:'hi',t:'没有“不加奖励”（w ≡ 1）的对照：增益和分组结构都无法归因于奖励',
+  p:['训练视频是基座自己生成的（生成参数论文没写；表 3 的 CFG 5.0、50 步是评测用的设置）；奖励权重被式 (8) 限制在 (0.5, 1.5)，典型情况下最好样本只比最差样本重约 1.7 倍。所以每一维的梯度主要由“这一维的 prompt 和生成内容”决定。在自生成样本上做流匹配 SFT 本身就可能改变模型：如果生成时用了 CFG，这有点像把 CFG 的效果蒸进条件分支。这些变化不一定需要奖励。',
+     '论文写 “Reward weighting ... changes the compatibility structure that G³-LoRA estimates”，但没有给出 w ≡ 1 时的矩阵或下游结果。'],
+  f:'同配置跑 w ≡ 1 的 Joint 与 G³，并重算相容性矩阵。'},
+ {s:'hi',t:'方法之间的差距多在噪声内，而且每个配置只训练一次',
+  p:['G³ vs 基座：+1.11，95% 区间 [−0.08, +2.26]（论文承认）。G³ vs Joint +1.19、vs 语义分区 +0.98、vs 原始梯度分区 +0.83，都没有区间；按同一 bootstrap 的量级粗推（半宽约 1.2），它们多半不显著。训练随机性完全没测，随机分区只有 2 个。',
+     '摘要却写成 “improves ... over the base model, a joint reward-weighted LoRA baseline, and random, semantic, and raw-gradient partitions”。'],
+  f:'多种子训练；所有两两比较给配对区间；≥ 10 个均匀随机分区构成零分布。'},
+ {s:'hi',t:'对照分区之间看不到“越相容越好”，两个“随机”分区也不随机',
+  p:['在同一个 S̄ 上算分离度：语义 0.147（组内 13 对负配对）→ 47.20；随机 A 0.217 → 46.38；随机 B 0.531（3 对）→ 45.82；G³ 0.633（0 对）→ 48.18。随机 B 几乎和 G³ 一样“干净”，下游却最差。',
+     '按同样组大小做 2 万次均匀随机划分，分离度最大约 0.38（换种子在 0.36–0.46 之间），随机 B 的 0.531 一次也没达到；随机 A 在第 98 百分位。论文没交代这两个分区是怎么产生的（§05）。'],
+  f:'把分离度当自变量，扫一批分区的下游分数，看有没有单调关系。'},
+ {s:'hi',t:'增益高度依赖一个极不稳定的维度',
+  p:['多视角一致在表 8 的 8 列之间（含基座与组专家）从 30.54 到 73.56。去掉这一维，G³ 的增益 +1.11 → +0.62，+OPD +2.84 → +1.96。',
+     '同一组专家只是把合并秩从 40 截到 8：多视角 51.95 → 30.54，热学 51.11 → 66.67，衣着一致 95.92 → 83.33。单维分数对很小的参数扰动都非常敏感。'],
+  f:'给每维报告区间；多视角单独做多次评测。'},
+ {s:'md',t:'“负残差余弦 = 冲突”在数学上站不稳',
+  p:['原始余弦 136 对全为正。去掉均值方向后，残差之和约为 0，平均两两余弦被推向 −1/(K−1) = −0.0625，实测 −0.0575。高维下即使毫无结构，去均值后也几乎全是负数（§04 演示）。',
+     '所以“55% 为负”“语义分区把 13 对冲突放进同组”这类说法，实际含义是“比平均更不像”，而不是“互相拖累”。held-out 迁移检验 ρ = 0.256，没有与原始余弦做对照。'],
+  f:'报告 held-out 迁移里有多少对是真正的负迁移；用原始余弦和 TAG 亲和度做对照。'},
+ {s:'md',t:'组专家在自己的维度上多数变差',
+  p:['组专家在 11/17 维低于基座；第 1、2 组专家在本组维度上的均值低于基座（57.11 vs 60.03、63.10 vs 66.39）。“相容的维度一起训 → 学到本组技能”在第 3 组只是略高于基座（27.47 vs 26.70），在第 4、5 组才明显成立，靠的是多视角和力学两维。',
+     '第 5 组的 delta 只占加权范数的 2.08%，力学却 +16.4（约 48 个样本中多了 8 个），更像评测噪声，不像学到的技能。'],
+  f:'给组专家做多次评测，并与“同样数据量的 Joint 子集训练”比较。'},
+ {s:'md',t:'合并保留分析有选择效应（回归均值）',
+  p:['“专家胜基座的 6 维，合并全部低于专家；其余 11 维，合并全部高于专家”，以及“逐维取较大值 = 51.07 的上界”，都是在两个带噪测量之间事后挑选。这正是回归均值和取最大值偏差的典型样子：上界被抬高，“OPD 补回 60%”的分母也就偏大。'],
+  f:'换种子做一次独立的第二次评测，专门评“专家赢的那几维”。'},
+ {s:'md',t:'容量、步数、算力都不对等',
+  p:['Wan 上 Joint LoRA 的 rank、学习率、epoch 都没写（表 4 只写了专家 rank 8、1 epoch），而合并版是 rank 40。CogVideoX 上 Joint 是 rank 128，合并版是 rank 640。',
+     'GPU·h：Joint + 梯度探针合计 13.4，五个专家 33.5。如果 Wan 上的 Joint 也是 1 epoch（论文没写；CogVideoX 上明确是每个样本只看一次），两者看的样本总数相同，专家却贵约 2.5 倍，原因没说。OPD 再加约 205 GPU·h（4090），只用在 G³ 上。',
+     '另外，加权平均在效果上把每个专家的独有更新缩小到 α 倍，这本身是一种隐式正则。论文缺少“更小学习率 / LoRA 缩放的 Joint”对照。'],
+  f:'rank 40、步数对齐的 Joint；LoRA 缩放 0.2 的 Joint；把 OPD 也用在对照上。'},
+ {s:'md',t:'CogVideoX 的退化可能是“静态化”，而不是“能力平均”',
+  p:['Joint 下人体结构 48.5 → 98.4、身份一致 70.9 → 97.9，同时运动类维度大幅下滑。静止、模糊的视频本来就容易在这些“别出错”型维度上拿高分。论文没有给动态程度，也没有样例。',
+     '多视角对所有 CogVideoX 方法都是 0，说明这一维在该骨干上评测失效，17 维宏平均实际只有 16 维。'],
+  f:'报告动态程度（VBench 或 VideoScore 的 dynamic degree）并给出 Joint 的样例。'},
+ {s:'md',t:'独立评测只比较了 G³ 和基座',
+  p:['VideoScore 的 +0.166 支持“这种后训练让画面更好”，但不能支持“分组优于 Joint / 其它分区”。摘要的 “an independent evaluator agrees” 容易让人以为后者也被验证了。'],
+  f:'用 VideoScore 评全部 adapter。'},
+ {s:'md',t:'奖励与评测耦合，训练 prompt 来源不明',
+  p:['奖励是 Qwen3-VL 按 VBench2.0 维度定义出的是非题；VBench2.0 自身也用视觉语言模型判分。论文在局限性一节承认了这种耦合。',
+     '训练用的 “dimension-specific prompts” 从哪里来、与评测用的 VBench2.0 prompt 是否重叠，没有说明。如果重叠，评测就是分布内的。'],
+  f:'公开训练 prompt 清单，或在不重叠的 prompt 上重评。'},
+ {s:'md',t:'评测规模小：每维 50 个视频',
+  p:['快速协议每维 25 个 prompt × 2 个视频。二值型维度一个视频就是 2 分：Joint 在镜头运动上的 “+8.00” 是多对了 4 个视频，随机 B 在人际互动上的 “−16.00” 是 8 个视频。',
+     '论文的逐维叙事（“放弃了镜头运动的增益”“多视角提升 8.99”）大多落在 ±4.8 的粗估噪声带内或附近。'],
+  f:'跑完整 VBench2.0，或至少画出逐维区间。'},
+ {s:'lo',t:'五阶段平均不是五次独立测量；分区本身的稳定性没有报告',
+  p:['五个阶段用同一批探针、固定时间步和噪声种子，阶段间 Pearson 0.966 主要反映的是同一批数据。真正独立的三次重采样之间只有 0.728，符号一致率 0.755，约四分之一的配对会翻号。论文没有报告重采样后聚出的分区与原分区的 ARI。'],
+  f:'报告重采样分区的 ARI，或 bootstrap 聚类的共现矩阵。'},
+ {s:'lo',t:'M 的选择只比较了 4 和 5',
+  p:['我复算：M = 6、7、8、9 同样没有组内负配对，分离度更高（0.642 → 0.715）。选 5 也许是为了与 VBench2.0 的 5 个官方类别、以及对照分区的组数对齐；但文中给的理由（“比 4 更干净”）同样支持更大的 M。'],
+  f:'给出 M 的下游扫描。'},
+ {s:'lo',t:'理论机制是定性的',
+  p:['条件均值论证要求同一 (z_t, p, t) 上存在不同目标；而各维 prompt 不同，理想回归器可以分别拟合。冲突只能来自共享的有限参数（rank 8）。论文没有给出“重叠区域”的证据（§03）。'],
+  f:'可以当作动机，但不宜表述为 “provides a local mechanism”。'},
+ {s:'lo',t:'缺少最相关的前人工作：任务分组',
+  p:['任务分组是多任务学习里的成熟问题：Standley et al.（ICML 2020）、TAG（Fifty et al., NeurIPS 2021）。TAG 用“沿一个任务的梯度走一步，看另一个任务损失的变化”来衡量亲和度，和本文附录的 held-out 迁移检验几乎一样。论文引用了 PCGrad、GradVac、CAGrad 等梯度手术方法，却没有引用或比较分组方法。'],
+  f:'加入 TAG 分组作为对照。'},
+ {s:'lo',t:'评测分母似乎因方法而异（我的推断）',
+  p:['很多分数恰好等于小分母的分数：热学 22/46、22/43、22/45、23/47、26/47、23/45；材料的分母在 24–31 之间。如果属实，每个方法实际被评分的视频子集不同（可能是评测器过滤了一部分视频），“matched protocol”只在输入层面匹配，配对 bootstrap 的配对关系也会受影响。'],
+  f:'报告每维每方法的有效样本数。'},
+ {s:'lo',t:'OPD 的若干口径',
+  p:['“在线”采样用 8 步、无 CFG，推理用 50 步、CFG 5.0，而且只监督条件分支。“人际互动 68 高于专家 58，所以不是复制教师”只差 5 个视频。OPD 没有做“随机分区专家当教师”的对照，所以 +1.73 里有多少来自 G³ 的分组并不清楚。'],
+  f:'用随机分区的专家、或单一 Joint 教师做同样的 OPD。'},
+ {s:'lo',t:'CogVideoX 的分组没有公开，结构也弱得多',
+  p:['表 11：CogVideoX 组内平均相似度 +0.154、分离度 0.257，远低于 Wan 的 0.473 / 0.633。它的 5 组具体包含哪些维度，附录没有列出。'],
+  f:'列出分组，并说明与 Wan 分组的重合度。'},
+ {s:'lo',t:'复现信息缺口',
+  p:['代码未公开；Wan 上的学习率、batch、Joint LoRA 配置缺失；原始梯度分区的具体分组未列出；训练 prompt 未列出。'],
+  f:'随代码公开配置、分区和 prompt 清单（论文说计划公开）。'},
+];
+let dFilter='all';
+function renderDoubts(){
+  const lab={hi:'高',md:'中',lo:'低'};
+  $('#doubts').innerHTML=DOUBTS.map((d,i)=>({d,i})).filter(o=>dFilter==='all'||o.d.s===dFilter).map(({d,i})=>`
+    <div class="doubt ${d.s}"><h4><span class="id">#${i+1}</span><span class="sev ${d.s}">${lab[d.s]}</span>${d.t}</h4>${d.p.map(x=>`<p>${x}</p>`).join('')}<p class="fix"><b>建议的检验：</b>${d.f}</p></div>`).join('');
+}
+
+/* ================================================================
+   Theme, TOC, init
+   ================================================================ */
+function renderAll(){
+  renderWeight(); renderAvg(); renderCenter(); renderHeat(); renderSep(); renderDil(); renderRet(); renderRec(); renderMeans(); renderDelta(); renderCog(); renderVS();
+}
+function init(){
+  renderDimTable(); renderGroupCards(); renderT8(); renderChecks(); renderDoubts();
+  ['#w-rbar','#w-alpha'].forEach(s=>$(s).addEventListener('input',renderWeight));
+  $('#w-reset').addEventListener('click',()=>{ $('#w-alpha').value=0.5; $('#w-rbar').value=0.6; renderWeight(); });
+  $('#avg-rho').addEventListener('input',renderAvg);
+  segBind($('#avgviz .seg'),'cond',v=>{avgCond=v; renderAvg();});
+  ['#c-k','#c-s','#c-c'].forEach(s=>$(s).addEventListener('input',()=>{ setPressed($('#cviz .seg'),'preset','__'); renderCenter(); }));
+  $('#c-resample').addEventListener('click',()=>{ cSeed+=1; renderCenter(); });
+  segBind($('#cviz .seg'),'preset',v=>{ if(v==='none'){ $('#c-s').value=2; $('#c-c').value=0; } else { $('#c-s').value=2; $('#c-c').value=1.2; } renderCenter(); });
+  [['#c-raw'],['#c-res']].forEach(([sel])=>{ const box=$(sel); bindTips(box,t=>{ const [i,j]=t.dataset.tip.split(',').map(Number); if(i===j) return null; return `<span class="t-k">维度</span> ${i+1} × ${j+1}<br><span class="t-k">余弦</span> <span class="mono">${fmt(box._M[i][j],3)}</span>`; }); });
+  initHeat();
+  $('#d-c').addEventListener('input',renderDil);
+  segBind($('#ret-filter'),'f',v=>{retFilter=v; renderRet();});
+  segBind($('#mean-mode'),'mm',v=>{meanMode=v; renderMeans();});
+  $('#d-noise').addEventListener('change',renderDelta); $('#d-vals').addEventListener('change',renderDelta);
+  segBind($('#dfilter'),'s',v=>{dFilter=v; renderDoubts();});
+  // theme
+  $('#themeBtn').addEventListener('click',()=>{ const cur=isDark()?'dark':'light'; document.documentElement.setAttribute('data-theme', cur==='dark'?'light':'dark'); requestAnimationFrame(renderAll); });
+  const mq=window.matchMedia('(prefers-color-scheme: dark)'); if(mq.addEventListener) mq.addEventListener('change',()=>requestAnimationFrame(renderAll));
+  // resize
+  let rt=null, lastW=window.innerWidth; window.addEventListener('resize',()=>{ if(Math.abs(window.innerWidth-lastW)<4) return; lastW=window.innerWidth; clearTimeout(rt); rt=setTimeout(renderAll,120); });
+  // toc highlight
+  const links=$$('.toc a'); const map=new Map(links.map(a=>[a.getAttribute('href').slice(1),a]));
+  if('IntersectionObserver' in window){
+    const io=new IntersectionObserver(es=>{ es.forEach(e=>{ if(e.isIntersecting){ links.forEach(a=>a.classList.remove('on')); const a=map.get(e.target.id); if(a){ a.classList.add('on'); const nav=$('.toc'); nav.scrollTo({left:Math.max(0,a.offsetLeft-nav.clientWidth/2+a.clientWidth/2),behavior:'smooth'}); } } }); },{rootMargin:'-45% 0px -50% 0px'});
+    $$('section[id]').forEach(s=>io.observe(s));
+  }
+  renderAll();
+  window.addEventListener('scroll',hideTip,{passive:true});
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
+
+</script>
+</body>
+</html>

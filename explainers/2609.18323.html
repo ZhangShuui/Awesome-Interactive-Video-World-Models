@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MiniMax-H3 能推理物理世界吗</title>
+<meta name="description" content="MiniMax-H3 物理推理评测（arXiv 2609.18323）精读：四个隐式推理场景、表 2 逐格重算与置信区间、prompt 泄露检查、被测系统究竟是托管 Context-IR 还是开源权重，以及 15 条存疑。">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+/* ============================================================
+   MiniMax-H3 推理评测 精读 — design tokens（dark-first）
+   角色色：msr = 多视角空间推理      adr = 音频消歧推理
+           vdr = 视频决策推理        avir = 音视频融合推理
+           ctx = 托管 Context-IR / 「真正被测的东西」
+           risk = 存疑 / 缺证
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0c0e12; --surf:#12151a; --surf2:#181c23; --surf3:#20252e;
+  --rule:#232932; --rule2:#38414e;
+  --ink:#e8edf3; --ink2:#a4adba; --ink3:#77828f;
+
+  --msr:#3a9fd8;  --msr-ink:#68c1f2;  --msr-soft:rgba(58,159,216,.17);
+  --adr:#9a7df0;  --adr-ink:#b9a3ff;  --adr-soft:rgba(154,125,240,.18);
+  --vdr:#dfa83a;  --vdr-ink:#f2c562;  --vdr-soft:rgba(223,168,58,.17);
+  --avir:#ea7452; --avir-ink:#ff9b7a; --avir-soft:rgba(234,116,82,.17);
+  --ctx:#2ea87e;  --ctx-ink:#55d3a5;  --ctx-soft:rgba(46,168,126,.16);
+  --risk:#e8658f; --risk-ink:#ff8db1; --risk-soft:rgba(232,101,143,.16);
+
+  --ok:#3fb27a; --ok-ink:#62cf95; --ok-soft:rgba(63,178,122,.14);
+  --bad:#e0605a; --bad-ink:#f0857f; --bad-soft:rgba(224,96,90,.14);
+  --warn:#e3b341; --warn-ink:#f0c766; --warn-soft:rgba(227,179,65,.15);
+
+  --hl-leak:rgba(224,96,90,.26); --hl-hint:rgba(227,179,65,.26);
+  --hl-cand:rgba(58,159,216,.22); --hl-fmt:rgba(160,170,185,.12);
+
+  --grid:#1d232b; --axis:#3a4350; --tint:rgba(255,255,255,.03);
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 30px rgba(0,0,0,.34);
+  --font-display:"Familjen Grotesk","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-body:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font-math:"Source Serif 4",Georgia,"Times New Roman","Songti SC",serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f3f5; --surf:#ffffff; --surf2:#eaedf1; --surf3:#dee3e9;
+    --rule:#dadfe5; --rule2:#bcc4cd;
+    --ink:#10151b; --ink2:#434c57; --ink3:#6a7581;
+    --msr:#0f78b0;  --msr-ink:#0b5f8c;  --msr-soft:rgba(15,120,176,.13);
+    --adr:#6a4fd6;  --adr-ink:#5439bd;  --adr-soft:rgba(106,79,214,.13);
+    --vdr:#a87b06;  --vdr-ink:#846005;  --vdr-soft:rgba(168,123,6,.15);
+    --avir:#cf5328; --avir-ink:#ab4119; --avir-soft:rgba(207,83,40,.13);
+    --ctx:#0f8a63;  --ctx-ink:#0b6d4e;  --ctx-soft:rgba(15,138,99,.13);
+    --risk:#c73a6f; --risk-ink:#a42c5b; --risk-soft:rgba(199,58,111,.12);
+    --ok:#138752; --ok-ink:#0d6c41; --ok-soft:rgba(19,135,82,.12);
+    --bad:#c5352e; --bad-ink:#a62923; --bad-soft:rgba(197,53,46,.11);
+    --warn:#b58312; --warn-ink:#8c6408; --warn-soft:rgba(181,131,18,.14);
+    --hl-leak:rgba(197,53,46,.17); --hl-hint:rgba(181,131,18,.2);
+    --hl-cand:rgba(15,120,176,.14); --hl-fmt:rgba(90,100,115,.09);
+    --grid:#e1e5ea; --axis:#b7bfc9; --tint:rgba(15,20,28,.028);
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f3f5; --surf:#ffffff; --surf2:#eaedf1; --surf3:#dee3e9;
+  --rule:#dadfe5; --rule2:#bcc4cd;
+  --ink:#10151b; --ink2:#434c57; --ink3:#6a7581;
+  --msr:#0f78b0;  --msr-ink:#0b5f8c;  --msr-soft:rgba(15,120,176,.13);
+  --adr:#6a4fd6;  --adr-ink:#5439bd;  --adr-soft:rgba(106,79,214,.13);
+  --vdr:#a87b06;  --vdr-ink:#846005;  --vdr-soft:rgba(168,123,6,.15);
+  --avir:#cf5328; --avir-ink:#ab4119; --avir-soft:rgba(207,83,40,.13);
+  --ctx:#0f8a63;  --ctx-ink:#0b6d4e;  --ctx-soft:rgba(15,138,99,.13);
+  --risk:#c73a6f; --risk-ink:#a42c5b; --risk-soft:rgba(199,58,111,.12);
+  --ok:#138752; --ok-ink:#0d6c41; --ok-soft:rgba(19,135,82,.12);
+  --bad:#c5352e; --bad-ink:#a62923; --bad-soft:rgba(197,53,46,.11);
+  --warn:#b58312; --warn-ink:#8c6408; --warn-soft:rgba(181,131,18,.14);
+  --hl-leak:rgba(197,53,46,.17); --hl-hint:rgba(181,131,18,.2);
+  --hl-cand:rgba(15,120,176,.14); --hl-fmt:rgba(90,100,115,.09);
+  --grid:#e1e5ea; --axis:#b7bfc9; --tint:rgba(15,20,28,.028);
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth; -webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important; animation:none!important} }
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-body); font-size:16.5px; line-height:1.72;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1000px; margin:0 auto; padding-inline:20px; padding-block:0 140px}
+@media(max-width:640px){ .wrap{padding-inline:16px; padding-block:0 120px} body{font-size:16px} }
+
+/* ---------- header ---------- */
+header.hero{padding:60px 0 26px; border-bottom:1px solid var(--rule); margin-bottom:0}
+.kicker{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink3); margin-bottom:16px; line-height:1.8}
+.kicker a{color:var(--ctx-ink); text-decoration:none; border-bottom:1px solid transparent}
+.kicker a:hover{border-bottom-color:currentColor}
+h1{font-family:var(--font-display); font-weight:700; font-size:clamp(30px,5.4vw,50px); line-height:1.12; letter-spacing:-.02em; margin:0 0 10px; text-wrap:balance}
+.sub{font-family:var(--font-display); font-weight:500; font-size:clamp(16px,2.4vw,20px); color:var(--ink2); line-height:1.5; margin:0 0 22px; max-width:60ch; text-wrap:balance}
+.thesis{font-family:var(--font-math); font-size:clamp(16.5px,2.3vw,19px); line-height:1.66; color:var(--ink); border-left:3px solid var(--ctx); padding:2px 0 2px 18px; margin:0 0 26px; max-width:70ch}
+.thesis b{font-weight:600}
+.statstrip{display:flex; flex-wrap:wrap; gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:10px; overflow:hidden}
+.statstrip div{flex:1 1 128px; background:var(--surf); padding:12px 14px}
+.statstrip b{display:block; font-family:var(--font-display); font-size:22px; font-weight:700; letter-spacing:-.01em; line-height:1.2; font-variant-numeric:tabular-nums}
+.statstrip span{display:block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink3); margin-top:3px}
+.meta-line{font-size:13.5px; color:var(--ink3); margin:14px 0 0}
+.meta-line a{color:var(--ink2)}
+
+/* ---------- nav ---------- */
+nav.toc{
+  position:sticky; top:env(safe-area-inset-top, 0px); z-index:40;
+  background:color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--rule);
+  margin:0 -20px 40px; padding:9px 20px; overflow-x:auto; white-space:nowrap; scrollbar-width:none;
+}
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{display:inline-block; font-family:var(--font-mono); font-size:11.5px; letter-spacing:.03em; color:var(--ink3); text-decoration:none; padding:3px 9px; border-radius:6px; margin-right:2px}
+nav.toc a:hover, nav.toc a:focus-visible{color:var(--ink); background:var(--surf2); outline:none}
+@media(max-width:640px){ nav.toc{margin:0 -16px 34px; padding:9px 16px} }
+
+/* ---------- typography ---------- */
+h2{font-family:var(--font-display); font-weight:700; font-size:clamp(23px,3.5vw,30px); letter-spacing:-.016em; line-height:1.22; margin:74px 0 6px; scroll-margin-top:64px; text-wrap:balance}
+h2 .num{color:var(--ink3); font-family:var(--font-mono); font-size:.5em; font-weight:500; letter-spacing:.06em; display:block; margin-bottom:9px}
+h3{font-family:var(--font-display); font-weight:600; font-size:clamp(17.5px,2.4vw,20.5px); letter-spacing:-.008em; margin:40px 0 4px; scroll-margin-top:64px; text-wrap:balance}
+h4{font-family:var(--font-display); font-weight:600; font-size:16px; margin:22px 0 2px}
+p{margin:14px 0; max-width:74ch}
+a{color:var(--ctx-ink)}
+strong{font-weight:600; color:var(--ink)}
+code,.m{font-family:var(--font-mono); font-size:.86em; background:var(--surf2); border:1px solid var(--rule); border-radius:4px; padding:1px 5px; color:var(--ink)}
+.eq{font-family:var(--font-math); font-style:italic; font-size:1.04em; white-space:nowrap}
+.lede{font-size:1.05em; color:var(--ink2); max-width:72ch}
+ul,ol{max-width:74ch; padding-left:22px}
+li{margin:7px 0}
+li::marker{color:var(--ink3)}
+blockquote{margin:18px 0; padding:4px 0 4px 16px; border-left:2px solid var(--rule2); color:var(--ink2); font-family:var(--font-math); font-size:.98em; max-width:72ch}
+blockquote cite{display:block; font-family:var(--font-mono); font-style:normal; font-size:11px; letter-spacing:.05em; color:var(--ink3); margin-top:4px}
+.en{font-family:var(--font-math); font-style:italic; color:var(--ink2)}
+
+/* ---------- role text ---------- */
+.c-msr{color:var(--msr-ink)} .c-adr{color:var(--adr-ink)} .c-vdr{color:var(--vdr-ink)}
+.c-avir{color:var(--avir-ink)} .c-ctx{color:var(--ctx-ink)} .c-risk{color:var(--risk-ink)}
+.c-ok{color:var(--ok-ink)} .c-bad{color:var(--bad-ink)} .c-warn{color:var(--warn-ink)} .c-3{color:var(--ink3)}
+
+/* ---------- cards / notes ---------- */
+.card{background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:18px 20px; margin:22px 0; box-shadow:var(--shadow)}
+.card > :first-child{margin-top:0} .card > :last-child{margin-bottom:0}
+.note{border-left:3px solid var(--rule2); background:var(--surf); border-radius:0 10px 10px 0; padding:14px 18px; margin:22px 0}
+.note > :first-child{margin-top:0} .note > :last-child{margin-bottom:0}
+.note p{max-width:none}
+.note .tag{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; display:block; margin-bottom:5px; color:var(--ink3)}
+.note.ctx{border-left-color:var(--ctx)} .note.ctx .tag{color:var(--ctx-ink)}
+.note.risk{border-left-color:var(--risk)} .note.risk .tag{color:var(--risk-ink)}
+.note.ok{border-left-color:var(--ok)} .note.ok .tag{color:var(--ok-ink)}
+.note.warn{border-left-color:var(--warn)} .note.warn .tag{color:var(--warn-ink)}
+.note.adr{border-left-color:var(--adr)} .note.adr .tag{color:var(--adr-ink)}
+
+.pill{display:inline-block; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; padding:1px 8px; border-radius:20px; border:1px solid currentColor; line-height:1.7; vertical-align:2px; white-space:nowrap}
+
+/* ---------- figures ---------- */
+figure{margin:28px 0; background:var(--surf); border:1px solid var(--rule); border-radius:12px; padding:18px 18px 4px; box-shadow:var(--shadow)}
+figure svg{display:block; width:100%; max-width:100%; height:auto}
+figcaption{font-size:13.5px; line-height:1.62; color:var(--ink2); border-top:1px solid var(--rule); margin-top:14px; padding:12px 2px 14px}
+figcaption b{color:var(--ink)}
+.fig-h{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3); margin-bottom:12px}
+.scroll-x{overflow-x:auto; -webkit-overflow-scrolling:touch}
+.scroll-x > svg{min-width:680px}
+@media(max-width:640px){ figure{padding:14px 12px 2px} }
+
+/* ---------- controls ---------- */
+.ctl{display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; margin:0 0 14px; padding:10px 12px; background:var(--surf2); border:1px solid var(--rule); border-radius:9px}
+.ctl .lab{font-family:var(--font-mono); font-size:11px; letter-spacing:.05em; color:var(--ink3); text-transform:uppercase}
+.ctl output{font-family:var(--font-mono); font-size:12.5px; color:var(--ink); min-width:5ch; display:inline-block; font-variant-numeric:tabular-nums}
+.ctl .grp{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+input[type=range]{-webkit-appearance:none; appearance:none; height:4px; background:var(--rule2); border-radius:3px; outline:none; flex:1 1 170px; min-width:120px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:var(--ink); border:2px solid var(--bg); cursor:pointer}
+input[type=range]::-moz-range-thumb{width:16px; height:16px; border-radius:50%; background:var(--ink); border:2px solid var(--bg); cursor:pointer}
+input[type=range]:focus-visible{box-shadow:0 0 0 3px var(--ctx-soft)}
+.seg{display:inline-flex; flex-wrap:wrap; background:var(--surf3); border:1px solid var(--rule); border-radius:7px; overflow:hidden}
+.seg button{font-family:var(--font-mono); font-size:11px; letter-spacing:.03em; padding:5px 11px; background:transparent; border:0; border-right:1px solid var(--rule); color:var(--ink3); cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button:hover{color:var(--ink)}
+.seg button:focus-visible{outline:2px solid var(--ctx); outline-offset:-2px}
+.seg button.on{background:var(--ink); color:var(--bg); font-weight:700}
+.tgl{font-family:var(--font-mono); font-size:11px; letter-spacing:.03em; padding:5px 11px; border-radius:7px; border:1px solid var(--rule2); background:var(--surf3); color:var(--ink3); cursor:pointer}
+.tgl[aria-pressed="true"]{color:var(--ink); border-color:var(--ink2); background:var(--surf)}
+.tgl[aria-pressed="true"]::before{content:"● "; color:var(--ctx-ink)}
+.tgl[aria-pressed="false"]::before{content:"○ "}
+.tgl:focus-visible{outline:2px solid var(--ctx); outline-offset:1px}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto; margin:22px 0; border:1px solid var(--rule); border-radius:11px; background:var(--surf); box-shadow:var(--shadow)}
+table{border-collapse:collapse; width:100%; font-size:13.5px; min-width:560px}
+th,td{padding:8px 12px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:top}
+thead th{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--ink3); font-weight:500; background:var(--surf2); border-bottom:1px solid var(--rule2)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--tint)}
+td.n, th.n{text-align:right; font-family:var(--font-mono); font-size:12.5px; font-variant-numeric:tabular-nums; white-space:nowrap}
+td.k{font-family:var(--font-mono); font-size:12px; color:var(--ink2)}
+tr.tot td{font-weight:700; background:var(--surf2); border-top:1px solid var(--rule2)}
+td.sig{font-weight:700; color:var(--ink)}
+td.nsig{color:var(--ink3)}
+.small{font-size:12.5px; color:var(--ink3)}
+
+/* ---------- hero evidence grid ---------- */
+.chips{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:0 0 14px}
+@media(max-width:720px){ .chips{grid-template-columns:minmax(0,1fr)} }
+.chip{border:1px solid var(--rule); border-radius:9px; padding:9px 12px; background:var(--surf2); font-size:13.5px; line-height:1.55; transition:opacity .2s}
+.chip .h{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); display:block; margin-bottom:3px}
+.chip.off{opacity:.38}
+.chip .en{font-size:12.5px}
+.gridstat{font-family:var(--font-display); font-size:17px; font-weight:600; margin:10px 0 2px}
+.gridstat b{font-variant-numeric:tabular-nums}
+#evGrid .cell{transition:fill .25s, stroke .25s, opacity .25s}
+
+/* ---------- tabs (scenarios) ---------- */
+.tabs{display:flex; flex-wrap:wrap; gap:6px; margin:0 0 -1px; position:relative; z-index:1}
+.tabs button{font-family:var(--font-display); font-weight:600; font-size:14.5px; padding:9px 14px 8px; background:var(--surf2); color:var(--ink3); border:1px solid var(--rule); border-bottom-color:var(--rule); border-radius:9px 9px 0 0; cursor:pointer}
+.tabs button .ab{font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; margin-right:6px}
+.tabs button.on{background:var(--surf); color:var(--ink); border-bottom-color:var(--surf)}
+.tabs button:focus-visible{outline:2px solid var(--ctx); outline-offset:-2px}
+.tabs button[data-s="MSR"].on .ab{color:var(--msr-ink)} .tabs button[data-s="ADR"].on .ab{color:var(--adr-ink)}
+.tabs button[data-s="VDR"].on .ab{color:var(--vdr-ink)} .tabs button[data-s="AVIR"].on .ab{color:var(--avir-ink)}
+.tabpanel{background:var(--surf); border:1px solid var(--rule); border-radius:0 12px 12px 12px; padding:18px 20px 16px; box-shadow:var(--shadow)}
+.tabpanel .schem{margin:0 0 12px}
+.kvgrid{display:grid; grid-template-columns:132px minmax(0,1fr); gap:0; border-top:1px solid var(--rule); margin-top:8px}
+.kvgrid > div{padding:9px 0; border-bottom:1px solid var(--rule); font-size:14.5px; line-height:1.62}
+.kvgrid > div.k{font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink3); padding-top:12px; padding-right:12px}
+@media(max-width:640px){ .kvgrid{grid-template-columns:minmax(0,1fr)} .kvgrid > div.k{border-bottom:0; padding-bottom:0} }
+.srbig{font-family:var(--font-display); font-weight:700; font-size:26px; letter-spacing:-.01em; font-variant-numeric:tabular-nums}
+
+/* ---------- pipeline ---------- */
+.pipe{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:22px 0; counter-reset:st}
+@media(max-width:820px){ .pipe{grid-template-columns:minmax(0,1fr) minmax(0,1fr)} }
+@media(max-width:520px){ .pipe{grid-template-columns:minmax(0,1fr)} }
+.pipe .st{background:var(--surf); border:1px solid var(--rule); border-radius:11px; padding:14px 15px 12px; position:relative; box-shadow:var(--shadow)}
+.pipe .st::before{counter-increment:st; content:"STEP " counter(st); font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; color:var(--ink3); display:block; margin-bottom:4px}
+.pipe .st h4{margin:0 0 6px; font-size:15.5px}
+.pipe .st ul{margin:0; padding-left:17px; font-size:13.5px; line-height:1.58}
+.pipe .st li{margin:4px 0}
+.pipe .st .flag{display:block; margin-top:8px; font-size:12.5px; color:var(--risk-ink); line-height:1.5}
+
+/* ---------- prompt inspector ---------- */
+.insp{display:grid; grid-template-columns:230px minmax(0,1fr); gap:14px}
+@media(max-width:760px){ .insp{grid-template-columns:minmax(0,1fr)} }
+.plist{display:flex; flex-direction:column; gap:5px; max-height:520px; overflow:auto; padding-right:2px}
+@media(max-width:760px){ .plist{flex-direction:row; overflow-x:auto; max-height:none; padding-bottom:4px} .plist button{flex:0 0 auto} }
+.plist button{text-align:left; font-family:var(--font-body); font-size:13.5px; line-height:1.35; padding:7px 10px; background:var(--surf2); border:1px solid var(--rule); border-radius:8px; color:var(--ink2); cursor:pointer; display:flex; gap:8px; align-items:center}
+.plist button:hover{color:var(--ink)}
+.plist button.on{background:var(--surf); color:var(--ink); border-color:var(--ink3)}
+.plist button:focus-visible{outline:2px solid var(--ctx); outline-offset:1px}
+.plist .sc{font-family:var(--font-mono); font-size:10px; letter-spacing:.05em; padding:1px 5px; border-radius:4px; border:1px solid currentColor; flex:0 0 auto}
+.ppane{background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:14px 16px}
+.ppane .pmeta{font-family:var(--font-mono); font-size:11px; letter-spacing:.04em; color:var(--ink3); margin-bottom:8px; display:flex; flex-wrap:wrap; gap:6px 14px}
+.ptext{font-family:var(--font-math); font-size:15px; line-height:1.78; color:var(--ink)}
+.ptext span{border-radius:3px; padding:1px 0; box-decoration-break:clone; -webkit-box-decoration-break:clone}
+.ptext .leak{background:var(--hl-leak); box-shadow:inset 0 -2px 0 var(--bad)}
+.ptext .hint{background:var(--hl-hint); box-shadow:inset 0 -2px 0 var(--warn)}
+.ptext .cand{background:var(--hl-cand)}
+.ptext .fmt{background:var(--hl-fmt); color:var(--ink3)}
+.legend{display:flex; flex-wrap:wrap; gap:6px 16px; font-size:12.5px; color:var(--ink2); margin:0 0 12px}
+.legend i{display:inline-block; width:22px; height:11px; border-radius:3px; vertical-align:-1px; margin-right:6px}
+.ppane .infer{margin-top:12px; padding-top:10px; border-top:1px dashed var(--rule2); font-size:14px}
+.dots{display:inline-flex; gap:4px; vertical-align:-1px}
+.dots i{width:10px; height:10px; border-radius:50%; border:1.5px solid var(--ctx); display:inline-block}
+.dots i.f{background:var(--ctx)}
+
+/* ---------- issue list ---------- */
+.issue{border:1px solid var(--rule); border-radius:11px; background:var(--surf); margin:12px 0; overflow:hidden}
+.issue > summary{cursor:pointer; padding:13px 16px; display:flex; gap:12px; align-items:flex-start; list-style:none; font-weight:600; line-height:1.5}
+.issue > summary::-webkit-details-marker{display:none}
+.issue > summary:hover{background:var(--tint)}
+.issue > summary:focus-visible{outline:2px solid var(--ctx); outline-offset:-2px}
+.sev{font-family:var(--font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; padding:2px 7px; border-radius:4px; flex:0 0 auto; margin-top:3px; font-weight:700}
+.sev.hi{background:var(--bad-soft); color:var(--bad-ink); border:1px solid var(--bad)}
+.sev.md{background:var(--warn-soft); color:var(--warn-ink); border:1px solid var(--warn)}
+.sev.lo{background:var(--surf3); color:var(--ink3); border:1px solid var(--rule2)}
+.issue .idx{font-family:var(--font-mono); font-size:12px; color:var(--ink3); flex:0 0 auto; margin-top:2px; min-width:2.2ch}
+.issue .body{padding:13px 16px 14px; border-top:1px solid var(--rule)}
+.issue .body > :first-child{margin-top:0} .issue .body > :last-child{margin-bottom:0}
+.issue .body p, .issue .body ul{max-width:none}
+.issue .ev{font-size:13px; color:var(--ink3); border-left:2px solid var(--rule2); padding-left:10px; margin-top:10px}
+
+/* ---------- misc ---------- */
+.grid2{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:14px; margin:22px 0}
+@media(max-width:720px){ .grid2{grid-template-columns:minmax(0,1fr)} }
+.grid2 > .card{margin:0}
+.grid2 > *, .insp > *, .pipe > *, .chain > *, .chips > *, .calc-out > *{min-width:0}
+.fm{border:1px solid var(--rule); border-radius:11px; background:var(--surf); padding:14px 16px}
+.fm h4{margin:0 0 4px; display:flex; align-items:baseline; gap:8px}
+.fm h4 .k{font-family:var(--font-mono); font-size:11px; color:var(--ink3); font-weight:500}
+.fm p{margin:6px 0; font-size:14px; max-width:none}
+.fm .ex{font-size:13px; color:var(--ink3)}
+.chain{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:6px 0 4px}
+@media(max-width:720px){ .chain{grid-template-columns:minmax(0,1fr) minmax(0,1fr)} }
+.chain > div{background:var(--surf2); border:1px solid var(--rule); border-radius:10px; padding:11px 12px; font-size:13.5px; line-height:1.55; position:relative}
+.chain > div b{display:block; font-family:var(--font-display); font-size:15px; margin-bottom:3px}
+.chain > div .ctrl{display:block; margin-top:6px; font-size:12.5px; color:var(--ctx-ink)}
+.chain > div.end{background:var(--surf); border-color:var(--ink3)}
+.calc-out{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:12px 0 4px}
+@media(max-width:640px){ .calc-out{grid-template-columns:minmax(0,1fr)} }
+.calc-out > div{background:var(--surf2); border:1px solid var(--rule); border-radius:9px; padding:10px 12px}
+.calc-out b{display:block; font-family:var(--font-display); font-size:22px; font-variant-numeric:tabular-nums}
+.calc-out span{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--ink3)}
+.verdict{margin:12px 0 6px; padding:11px 14px; border-radius:9px; font-size:14.5px; border:1px solid var(--rule2); background:var(--surf2)}
+.verdict.v-ok{border-color:var(--ok); background:var(--ok-soft)}
+.verdict.v-mid{border-color:var(--warn); background:var(--warn-soft)}
+.verdict.v-bad{border-color:var(--bad); background:var(--bad-soft)}
+.exp{counter-reset:ex; display:grid; gap:10px; margin:18px 0}
+.exp > div{background:var(--surf); border:1px solid var(--rule); border-radius:11px; padding:13px 16px 12px 16px; display:grid; grid-template-columns:34px minmax(0,1fr); gap:4px 10px}
+.exp > div::before{counter-increment:ex; content:counter(ex); font-family:var(--font-display); font-weight:700; font-size:22px; color:var(--ctx-ink); grid-row:span 2; line-height:1.1}
+.exp b{font-family:var(--font-display); font-size:15.5px}
+.exp p{margin:0; font-size:14px; color:var(--ink2); max-width:none}
+#tip{position:fixed; z-index:80; pointer-events:none; background:var(--surf); color:var(--ink); border:1px solid var(--rule2); border-radius:8px; padding:8px 10px; font-size:12.5px; line-height:1.5; box-shadow:var(--shadow); max-width:260px; font-family:var(--font-body)}
+#tip b{font-family:var(--font-display)}
+#tip .m2{font-family:var(--font-mono); font-size:11.5px; color:var(--ink2)}
+footer{border-top:1px solid var(--rule); margin-top:76px; padding-top:22px; color:var(--ink3); font-size:13px}
+footer a{color:var(--ink2)}
+.srcs{font-size:13px; line-height:1.9; padding-left:18px}
+
+/* ---------- svg ---------- */
+.sv-t{fill:var(--ink); font-family:var(--font-body); font-size:13px}
+.sv-t2{fill:var(--ink2); font-family:var(--font-body); font-size:12px}
+.sv-t3{fill:var(--ink3); font-family:var(--font-mono); font-size:10.5px; letter-spacing:.04em}
+.sv-h{fill:var(--ink); font-family:var(--font-display); font-weight:600; font-size:14px}
+.sv-box{fill:var(--surf2); stroke:var(--rule2); stroke-width:1}
+.sv-box2{fill:var(--surf3); stroke:var(--rule2); stroke-width:1}
+.sv-line{stroke:var(--ink3); stroke-width:1.4; fill:none}
+.sv-grid{stroke:var(--grid); stroke-width:1}
+.sv-axis{stroke:var(--axis); stroke-width:1}
+.dim{opacity:.26}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker"><a href="https://arxiv.org/abs/2609.18323">arXiv 2609.18323</a> · cs.CV · v1 2026-09-16 · 新国立 / 复旦 / 腾讯 · <a href="https://github.com/gulucaptain/MiniMax-H3-Reason">gulucaptain/MiniMax-H3-Reason</a></div>
+  <h1>MiniMax-H3 能推理物理世界吗？</h1>
+  <p class="sub">一份 517 题的「隐式 prompt」评测：精读、逐格重算，以及它其实没能回答的那个问题</p>
+  <p class="thesis">这篇论文的<b>问题框架</b>是好的：不把答案写进 prompt，而是拆到图、音、视频里，看模型能不能<b>自己推断出该生成什么</b>。但它只测了一个模型、没有任何对照组，而且没交代测的是哪个「H3」。MiniMax 官方文档写明，跨模态关联和复杂逻辑推理由一个<b>托管、未开源</b>的预处理系统 <span class="c-ctx">H3-Context-IR</span> 负责。所以 41.97% 只能读作「这套系统在这 517 题上的端到端通过率」，读不出「多模态对齐带来了推理能力」这个结论。</p>
+  <div class="statstrip">
+    <div><b>517</b><span>题（实例）</span></div>
+    <div><b>4 · 29</b><span>场景 · 子类</span></div>
+    <div><b>41.97%</b><span>总成功率 = 217/517</span></div>
+    <div><b>27.4% ↔ 56.0%</b><span>ADR 最低 ↔ VDR 最高</span></div>
+    <div><b>3 人 · 二元</b><span>专家判定</span></div>
+    <div><b>1</b><span>被测模型 · 0 对照</span></div>
+  </div>
+  <p class="meta-line">作者：Haoyu Zhao（项目负责）、Zihao Zhao、Tianyu Deng、Ziqin Xu（共同一作）等；通讯作者 Yeying Jin、Jiaxi Gu（腾讯）；另有 Zuxuan Wu、Shuicheng Yan。数据集与逐题结果在仓库中仍标为 TODO。</p>
+</header>
+
+<nav class="toc" aria-label="目录">
+  <a href="#s1">§1 一图看懂</a><a href="#s2">§2 三句话</a><a href="#s3">§3 四个场景</a><a href="#s4">§4 数据怎么造</a><a href="#s5">§5 结果重算</a><a href="#s6">§6 隐式有多隐式</a><a href="#s7">§7 测的是哪个 H3</a><a href="#s8">§8 分数拆解</a><a href="#s9">§9 失败模式</a><a href="#s10">§10 存疑清单</a><a href="#s11">§11 该补的实验</a><a href="#s12">§12 定位</a><a href="#s13">§13 复现速查</a>
+</nav>
+
+<!-- ============================ §1 ============================ -->
+<h2 id="s1"><span class="num">§ 1</span>一图看懂：把答案拆散到几种模态里</h2>
+<p class="lede">常见的视频生成评测，prompt 几乎就是答案，比如「一个人把陶瓷杯推下桌，摔碎了」，模型照着画就行。这篇论文反过来做：<strong>故意把关键语义从 prompt 里删掉</strong>，拆到图像、音频、视频里，每一路只给一部分证据，只有几路对齐起来才能确定「该生成什么」。下面用论文图 1(b) 的杯子例子演示（三种材质是示意）。</p>
+
+<figure>
+  <div class="fig-h">交互 · 证据交集</div>
+  <div class="ctl">
+    <div class="grp"><span class="lab">模态</span>
+      <button class="tgl" id="tgT" aria-pressed="true">文本</button>
+      <button class="tgl" id="tgA" aria-pressed="true">音频</button>
+    </div>
+    <div class="grp"><span class="lab">prompt 写法</span>
+      <div class="seg" id="segMode"><button data-v="implicit" class="on">隐式（本文）</button><button data-v="explicit">显式（常见 benchmark）</button></div>
+    </div>
+  </div>
+  <div class="chips">
+    <div class="chip" id="chI"><span class="h">图像 · 始终给出</span>桌上有三只杯子：陶瓷、玻璃、金属。<span class="c-3">它只给出<b>候选</b>，不说哪只会出事。</span></div>
+    <div class="chip" id="chT"><span class="h">文本</span><span id="chTtxt"></span></div>
+    <div class="chip" id="chA"><span class="h">音频</span>陶瓷碎裂声（图 1(b) 标注为 <span class="en">“Ceramic shattered”</span>）。<span class="c-3">它给出<b>材质</b>和<b>结局</b>，不说是谁弄的。</span></div>
+  </div>
+  <div class="scroll-x"><svg id="evGrid" viewBox="0 0 720 262" role="img" aria-label="3×3 假设网格：行是杯子材质，列是事件类型"></svg></div>
+  <div class="gridstat" id="evStat"></div>
+  <figcaption><b>读法：</b>9 个格子是在同一个场景里「可能发生的事件」。图像把候选限定在三只杯子，文本锁定动作，音频锁定材质和结局。单开文本或单开音频都还剩多个格子，只有两路一起才收敛到 1 格，这就是论文说的 <span class="en">“every single modality provides only partial evidence”</span>。切到「显式写法」再看：文本一路就把 9 格压成 1 格，另外两路全成了冗余，模型不用推理、照着 prompt 画就能过。论文的原话是 <span class="en">“existing benchmarks ask whether a model can generate what it is told; we instead ask whether it can determine what it should generate.”</span></figcaption>
+</figure>
+
+<!-- ============================ §2 ============================ -->
+<h2 id="s2"><span class="num">§ 2</span>三句话版本</h2>
+<ol>
+  <li><strong>这是评测论文，不提新方法。</strong>作者只针对 MiniMax-H3 一个模型，造了 517 道「隐式」题，分 4 个场景、29 个子类。H3 生成视频后，3 位专家按每题各自的语义要求判「成功 / 失败」。</li>
+  <li><strong>总成功率 41.97%（217/517）。</strong>视频续写决策（VDR）56.0% 最高，音频消歧（ADR）27.4% 最低。表 2 的每个百分数都能还原成整数计数，算术完全自洽（§5）。</li>
+  <li><strong>但它回答不了自己在摘要里提的问题</strong>（<span class="en">“Can multimodal alignment improve the model’s world reasoning?”</span>）。全文没有任何对照：没去掉某一路模态，没替换音频，没把答案写进 prompt 当上限，也没换别的模型比。它也没说测的是托管 API 还是开源权重，而这两者在「谁来做跨模态推理」这件事上<strong>是两个不同的系统</strong>（§7）。</li>
+</ol>
+<div class="note ctx"><span class="tag">一句话判断</span><p>值得借鉴的是它的<strong>问题框架</strong>（不告诉模型结局，让它从观测里推），以及 ADR 这种两个候选声源由音频决定的干净设计。数据集发布后，这份题目清单会很有用。<strong>现有的数字只能当作一次端到端通过率来读</strong>：它说明 H3 这套系统在这批题上大约一半会失败，但分不清失败出在「没看懂/没听懂」、「没想对」还是「没画对」。</p></div>
+
+<!-- ============================ §3 ============================ -->
+<h2 id="s3"><span class="num">§ 3</span>四个场景：每道题藏了什么</h2>
+<p>四个场景共用同一个生成式 <span class="eq">Ŷ ∼ p<sub>θ</sub>(Y | q, x)</span>：<span class="eq">q</span> 是隐式任务 prompt，<span class="eq">x</span> 是观测，<span class="eq">p<sub>θ</sub></span> 是 H3 诱导出的输出视频分布。四个场景的区别只在 <span class="eq">x</span> 由哪些模态组成、以及信息被藏在哪一路。表中「公开接口里的入口」一栏是<strong>我根据 H3 公开文档做的推断</strong>，论文本身没写（§7 细说）。</p>
+
+<div class="tabs" role="tablist" id="scTabs">
+  <button role="tab" data-s="MSR" class="on" aria-selected="true"><span class="ab">MSR</span>多视角空间</button>
+  <button role="tab" data-s="ADR" aria-selected="false"><span class="ab">ADR</span>音频消歧</button>
+  <button role="tab" data-s="VDR" aria-selected="false"><span class="ab">VDR</span>视频决策</button>
+  <button role="tab" data-s="AVIR" aria-selected="false"><span class="ab">AVIR</span>音视频融合</button>
+</div>
+<div class="tabpanel" role="tabpanel" id="scPanel"></div>
+
+<!-- ============================ §4 ============================ -->
+<h2 id="s4"><span class="num">§ 4</span>数据是怎么造的</h2>
+<p>每道题最后落成三元组 <span class="eq">E<sub>i</sub> = (q<sub>i</sub>, x<sub>i</sub>, τ<sub>i</sub>)</span>：隐式 prompt、观测、场景标签（MSR / ADR / VDR / AVIR）。另外每题还有一个「标注的语义目标」，也就是专家据以判分的要求。构造分四步：</p>
+<div class="pipe">
+  <div class="st"><h4>素材收集</h4><ul>
+    <li><b>真实</b>：多视角来自 HiFi-UMI-2K、VISTA-UMI-5K、HuMI-Unsheathe、Hy-Embodied-0.5-VLA-Data、10Kh-RealOmin；视频来自 LLaVA-Video-178K；声音来自 FSD50K、ESC-50</li>
+    <li><b>合成</b>：视频用 Seedance 2.0 生成，音频用 ChatGPT Voice 生成</li>
+    <li>按感知质量、语义清晰度过滤</li></ul>
+    <span class="flag">真实 / 合成的比例、每个来源各占多少：均未报告。</span></div>
+  <div class="st"><h4>按场景构造实例</h4><ul>
+    <li>选观测、定输出目标、写生成 prompt</li>
+    <li>标注「支持目标的证据」与「合格输出必须满足的语义要求」</li>
+    <li>要求只约束推断结果，不约束外观与运动的具体实现</li></ul></div>
+  <div class="st"><h4>隐式 prompt</h4><ul>
+    <li>ChatGPT 与 Qwen3 起草候选措辞，专家修改</li>
+    <li>两条准则：① 文本本身不泄露目标；② 多模态输入足以推出目标</li>
+    <li>泄露答案、目标含糊、需要输入之外假设的 prompt 被改写</li></ul>
+    <span class="flag">论文写 “we demonstrate that…”，但没有给出任何泄露检测（例如纯文本盲猜率）。</span></div>
+  <div class="st"><h4>10 轮专家审核</h4><ul>
+    <li>四个维度：场景复杂度 · 推断丰富度 · 条件一致性 · prompt 隐式性</li>
+    <li>未通过的题改 prompt 或换输入后重审</li></ul>
+    <span class="flag">原句：<span class="en">“Each condition-prompt pair is verified to support the intended inference through video generation for MiniMax-H3.”</span> 审核有没有看 H3 的输出？如果看了，题目就是按被测模型筛过的（§10 M4）。</span></div>
+</div>
+<p>最终得到 517 题：MSR 200（10 子类）、ADR 146（6）、VDR 100（8）、AVIR 71（5）。MSR 独占 38.7%，所以 <strong>「总体 41.97%」是按样本加权的</strong>，受配比影响。换成按场景宏平均是 43.70%，按 29 个子类宏平均是 44.47%。差别不大，但说明「总体」这个数没有特别的含义。</p>
+
+<!-- ============================ §5 ============================ -->
+<h2 id="s5"><span class="num">§ 5</span>结果：把表 2 逐格重算一遍</h2>
+<p>表 2 只给了子类的 N 和百分数。<strong>每个百分数乘以 N 都正好是整数</strong>（例如 Deformation 41.20% × 34 = 14.0，Pouring 58.30% × 12 = 7.0），加起来是 MSR 87/200、ADR 40/146、VDR 56/100、AVIR 34/71，合计 217/517 = 41.973%，与论文完全一致。数字本身没有问题，下面讨论的是<strong>它们能支撑多强的结论</strong>。</p>
+
+<figure>
+  <div class="fig-h">交互 · 表 2 全部 29 个子类</div>
+  <div class="ctl">
+    <div class="grp"><span class="lab">视图</span><div class="seg" id="segView"><button data-v="mosaic" class="on">马赛克（样本量 × 成功率）</button><button data-v="forest">置信区间（森林图）</button></div></div>
+    <div class="grp" id="grpSort" hidden><span class="lab">排序</span><div class="seg" id="segSort"><button data-v="paper" class="on">论文顺序</button><button data-v="sr">按成功率</button></div></div>
+  </div>
+  <div class="scroll-x" id="chartBox"><svg id="chart" role="img" aria-label="表 2 子类成功率图"></svg></div>
+  <figcaption id="chartCap"></figcaption>
+</figure>
+
+<h3>哪些差异站得住</h3>
+<div class="tw"><table>
+  <thead><tr><th>场景</th><th class="n">成功 / 总数</th><th class="n">SR</th><th class="n">95% Wilson 区间</th><th class="n">子类同质性 χ²</th><th>读法</th></tr></thead>
+  <tbody>
+    <tr><td><span class="c-msr">MSR</span> 多视角空间</td><td class="n">87 / 200</td><td class="n">43.50%</td><td class="n">36.8 – 50.4</td><td class="n">p = 0.54</td><td>10 个子类之间<b>看不出</b>真实差异</td></tr>
+    <tr><td><span class="c-adr">ADR</span> 音频消歧</td><td class="n">40 / 146</td><td class="n">27.40%</td><td class="n">20.8 – 35.1</td><td class="n">p = 0.058</td><td>只有 Nature 12/22 对 Machinery 6/34 较稳（Fisher p = 0.007）</td></tr>
+    <tr><td><span class="c-vdr">VDR</span> 视频决策</td><td class="n">56 / 100</td><td class="n">56.00%</td><td class="n">46.2 – 65.3</td><td class="n">p = 0.047</td><td>主要由 Traffic 9/9 和 Puzzles 1/6 两个小格子驱动</td></tr>
+    <tr><td><span class="c-avir">AVIR</span> 音视频融合</td><td class="n">34 / 71</td><td class="n">47.89%</td><td class="n">36.7 – 59.3</td><td class="n">p = 0.65</td><td>5 个子类之间<b>看不出</b>真实差异</td></tr>
+    <tr class="tot"><td>合计</td><td class="n">217 / 517</td><td class="n">41.97%</td><td class="n">37.8 – 46.3</td><td class="n">—</td><td></td></tr>
+  </tbody>
+</table></div>
+
+<div class="grid2">
+  <div class="card">
+    <h4 style="margin-top:0">场景两两差（百分点，z 值）</h4>
+    <div class="scroll-x"><table style="min-width:340px">
+      <thead><tr><th></th><th class="n">ADR</th><th class="n">VDR</th><th class="n">AVIR</th></tr></thead>
+      <tbody>
+        <tr><td class="k">MSR</td><td class="n sig">+16.1 (3.16)</td><td class="n nsig">−12.5 (−2.06)</td><td class="n nsig">−4.4 (−0.64)</td></tr>
+        <tr><td class="k">ADR</td><td></td><td class="n sig">−28.6 (−4.62)</td><td class="n sig">−20.5 (−2.93)</td></tr>
+        <tr><td class="k">VDR</td><td></td><td></td><td class="n nsig">+8.1 (1.05)</td></tr>
+      </tbody>
+    </table></div>
+    <p class="small" style="margin-bottom:0">加粗 = 对 6 对比较做 Bonferroni 校正后仍显著（|z| &gt; 2.64）。</p>
+  </div>
+  <div class="card">
+    <h4 style="margin-top:0">所以能说的只有</h4>
+    <ul style="margin:6px 0 0; padding-left:18px; font-size:14.5px">
+      <li><b>ADR 明显低于另外三个场景。</b>这一条是稳的。</li>
+      <li>VDR &gt; AVIR &gt; MSR 这个排序<b>没有统计支撑</b>，三者可以视为同一档。</li>
+      <li>论文正文写的 “threading 75% vs cleaning ~33%” 是 6/8 对 9/27，Fisher p = 0.051，而且是 45 对子类里挑出的最极端一对。</li>
+      <li>“Traffic 100%” 是 9/9，95% 区间 70–100%；“Puzzles 16.67%” 是 1/6；“Cartoons 20%” 是 1/5。</li>
+    </ul>
+  </div>
+</div>
+<p class="small">另外要注意：论文自己也写了 <span class="en">“since the scenarios differ in data, prompts, and generation targets, the results mainly reflect task-level performance rather than a direct comparison between video and audio modalities.”</span> 可摘要和结论还是把 ADR 最低上升成了「音频推理最弱」「多模态输入支持与有效推理之间存在显著差距」。</p>
+
+<!-- ============================ §6 ============================ -->
+<h2 id="s6"><span class="num">§ 6</span>「隐式」到底有多隐式</h2>
+<p>表 1 把本文的 Prompt Type 标成 <b>Implicit</b>，好像是全体题目共有的二元属性。我把论文图 1、3、9–12 中<strong>公开展示的 12 条 prompt</strong> 逐句标了颜色：哪些句子把应当推断的东西直接说了，哪些提示了推断方向，哪些只是在约束格式。评级是我的主观判断，仅供参考；样本也是作者自己挑出来展示的，不是随机抽样。</p>
+
+<figure>
+  <div class="fig-h">交互 · prompt 泄露检查</div>
+  <div class="legend">
+    <span><i style="background:var(--hl-leak); box-shadow:inset 0 -2px 0 var(--bad)"></i>目标被写明 / 由输入直接给出</span>
+    <span><i style="background:var(--hl-hint); box-shadow:inset 0 -2px 0 var(--warn)"></i>提示了机制或方向</span>
+    <span><i style="background:var(--hl-cand)"></i>列出候选（中性）</span>
+    <span><i style="background:var(--hl-fmt)"></i>格式 / 保真约束</span>
+  </div>
+  <div class="insp">
+    <div class="plist" id="plist" role="listbox" aria-label="prompt 列表"></div>
+    <div class="ppane" id="ppane" aria-live="polite"></div>
+  </div>
+  <figcaption><b>规律：</b>ADR 和 AVIR 的展示 prompt 最「干净」。它们列出候选却不点名答案，把决定权交给音频。MSR 最不隐式：任务名直接写在 prompt 里，<b>末帧还把终态直接给了</b>，真正要推的只剩「中间过程两个视角是否同步」。VDR 两头都有：图 10 第 1 行是真正的开放决策；第 2 行把镜头动作写明了（实际考的是记忆，不是决策）；第 5 行直接点名「温度和气压」这两个因果变量。</figcaption>
+</figure>
+<div class="note warn"><span class="tag">隐式程度解释不了分数</span><p>按展示 prompt 的平均隐式度排，AVIR（3.0）&gt; ADR（2.5）&gt; VDR（1.8）&gt; MSR（0.5）。成功率却是 VDR &gt; AVIR &gt; MSR &gt; ADR。<strong>最不隐式的 MSR 并不容易，最隐式的 AVIR 也不是最难。</strong>这说明场景之间的难度差主要来自别处：双视角同步渲染本身就难；音频走哪条通路进入模型（§7）。场景分数混在了一起，而论文没有设计能把它们拆开的实验。</p></div>
+
+<!-- ============================ §7 ============================ -->
+<h2 id="s7"><span class="num">§ 7</span>被测的究竟是哪个「H3」</h2>
+<p>论文图 1 把 H3 画成「模态编码器 → 跨模态对齐 → 统一 token」，摘要说它 <span class="en">“combining multimodal context understanding with joint audio-visual generation in a shared latent framework”</span>。但对照 MiniMax 自己的公开文档，<strong>「多模态上下文理解」与「共享潜空间里的生成」其实是两个不同的部件，一个托管、一个开源</strong>。全文没提这一点，也没说用的是哪条路径。</p>
+
+<figure>
+  <div class="fig-h">交互 · 三种画法</div>
+  <div class="ctl"><div class="grp"><span class="lab">看</span><div class="seg" id="segH3"><button data-v="paper">论文图 1 的画法</button><button data-v="hosted" class="on">托管 API（官方工作流）</button><button data-v="open">开源权重（diffusers）</button></div></div></div>
+  <div class="scroll-x"><svg id="h3svg" viewBox="0 0 1000 400" role="img" aria-label="MiniMax-H3 系统结构示意">
+    <defs>
+      <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink3)"/></marker>
+      <marker id="ahc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ctx)"/></marker>
+      <marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--risk)"/></marker>
+    </defs>
+    <!-- inputs -->
+    <g id="gIn">
+      <text x="14" y="50" class="sv-t3">输入</text>
+      <rect x="14" y="60" width="118" height="42" rx="7" class="sv-box"/><text x="26" y="86" class="sv-t">文本 prompt</text>
+      <rect x="14" y="130" width="118" height="42" rx="7" class="sv-box"/><text x="26" y="156" class="sv-t">图像 ≤ 9</text>
+      <rect x="14" y="200" width="118" height="42" rx="7" class="sv-box"/><text x="26" y="226" class="sv-t">视频 ≤ 3</text>
+      <rect x="14" y="270" width="118" height="42" rx="7" class="sv-box"/><text x="26" y="296" class="sv-t">音频 ≤ 3</text>
+    </g>
+    <!-- paper's abstraction -->
+    <g id="gPaper">
+      <path d="M132,81 C160,81 165,150 190,150" class="sv-line" marker-end="url(#ah)"/>
+      <path d="M132,151 C160,151 165,172 190,172" class="sv-line" marker-end="url(#ah)"/>
+      <path d="M132,221 C160,221 165,196 190,196" class="sv-line" marker-end="url(#ah)"/>
+      <path d="M132,291 C160,291 165,220 190,220" class="sv-line" marker-end="url(#ah)"/>
+      <rect x="190" y="120" width="150" height="130" rx="9" class="sv-box"/>
+      <text x="206" y="178" class="sv-h">模态编码器</text><text x="206" y="200" class="sv-t3">T · A · I · V</text>
+      <path d="M340,185 L378,185" class="sv-line" marker-end="url(#ah)"/>
+      <rect x="380" y="150" width="140" height="70" rx="9" class="sv-box"/><text x="398" y="191" class="sv-h">跨模态对齐</text>
+      <path d="M520,185 L558,185" class="sv-line" marker-end="url(#ah)"/>
+      <rect x="560" y="150" width="130" height="70" rx="9" class="sv-box"/><text x="584" y="191" class="sv-h">统一 token</text>
+      <path d="M690,185 L728,185" class="sv-line" marker-end="url(#ah)"/>
+      <rect x="730" y="140" width="116" height="90" rx="9" class="sv-box2"/><text x="748" y="190" class="sv-h">MiniMax H3</text>
+      <path d="M846,185 L874,185" class="sv-line" marker-end="url(#ah)"/>
+      <rect x="876" y="155" width="110" height="60" rx="9" class="sv-box"/><text x="890" y="190" class="sv-t">音视频输出</text>
+      <text x="190" y="352" class="sv-t2">论文图 1 的画法：一个抽象的「跨模态对齐 → 统一 token」，没有落到任何具体组件上。</text>
+      <text x="190" y="374" class="sv-t2">读者会自然以为：推理发生在这条管线内部。</text>
+    </g>
+    <!-- real system -->
+    <g id="gReal">
+      <!-- Context-IR -->
+      <g id="gCtx">
+        <rect x="176" y="10" width="262" height="80" rx="10" style="fill:var(--ctx-soft); stroke:var(--ctx); stroke-width:1.4"/>
+        <text x="190" y="33" class="sv-h">H3-Context-IR</text>
+        <rect x="336" y="19" width="92" height="20" rx="10" style="fill:var(--surf); stroke:var(--ctx)"/><text x="346" y="33" class="sv-t3" style="fill:var(--ctx-ink)">托管 · 未开源</text>
+        <text x="190" y="57" class="sv-t2">指令解析 · 跨模态关联</text>
+        <text x="190" y="77" class="sv-t2">时序理解 · 复杂逻辑推理</text>
+      </g>
+      <!-- base -->
+      <rect x="476" y="104" width="196" height="58" rx="9" class="sv-box2"/>
+      <text x="490" y="127" class="sv-h">H3-Encoder</text><text x="490" y="149" class="sv-t2">Qwen3-VL-32B · 取第 50 层</text>
+      <rect x="476" y="190" width="196" height="50" rx="9" class="sv-box"/>
+      <text x="490" y="211" class="sv-h">视频 VAE</text><text x="490" y="230" class="sv-t3">时间因果 · f16t4</text>
+      <rect x="476" y="268" width="196" height="50" rx="9" class="sv-box"/>
+      <text x="490" y="289" class="sv-h">音频 VAE</text><text x="490" y="308" class="sv-t3">32 kHz 立体声 → 40 Hz</text>
+      <path d="M672,133 L706,133" class="sv-line" marker-end="url(#ah)"/>
+      <path d="M672,215 L706,215" class="sv-line" marker-end="url(#ah)"/>
+      <path d="M672,293 L706,293" class="sv-line" marker-end="url(#ah)"/>
+      <rect x="708" y="96" width="152" height="232" rx="10" class="sv-box2"/>
+      <text x="720" y="118" class="sv-h">H3-Omni-</text><text x="720" y="136" class="sv-h">Transformer</text>
+      <text x="720" y="154" class="sv-t3">33.1B · 稠密 · 单流</text>
+      <rect x="720" y="166" width="128" height="30" rx="4" style="fill:var(--surf); stroke:var(--rule2)"/><text x="730" y="186" class="sv-t2">文本条件</text>
+      <rect x="720" y="200" width="128" height="30" rx="4" style="fill:var(--surf); stroke:var(--rule2)"/><text x="730" y="220" class="sv-t2">关键帧 latent</text>
+      <rect x="720" y="234" width="128" height="30" rx="4" style="fill:var(--adr-soft); stroke:var(--adr)"/><text x="730" y="254" class="sv-t2">音频 latent</text>
+      <rect x="720" y="268" width="128" height="30" rx="4" style="fill:var(--msr-soft); stroke:var(--msr)"/><text x="730" y="288" class="sv-t2">视频 latent</text>
+      <text x="720" y="318" class="sv-t3">一条 packed 序列</text>
+      <!-- 2K -->
+      <g id="g2k">
+        <rect x="888" y="96" width="100" height="72" rx="9" style="fill:var(--ctx-soft); stroke:var(--ctx); stroke-width:1.2"/>
+        <text x="898" y="118" class="sv-h">Regenerate</text><text x="898" y="136" class="sv-h">-2K</text><text x="898" y="157" class="sv-t3" style="fill:var(--ctx-ink)">托管</text>
+      </g>
+      <rect x="888" y="226" width="100" height="102" rx="9" class="sv-box"/>
+      <text x="898" y="248" class="sv-h">输出</text>
+      <text x="898" y="270" class="sv-t2" id="outRes">2K</text>
+      <text x="898" y="290" class="sv-t2">24 fps · ≤15 s</text>
+      <text x="898" y="310" class="sv-t2">立体声音频</text>
+    </g>
+    <!-- hosted arrows -->
+    <g id="gHosted">
+      <path d="M132,81 C170,81 210,120 210,92" style="stroke:var(--ctx); stroke-width:1.5; fill:none" marker-end="url(#ahc)"/>
+      <path d="M132,151 C190,151 250,130 250,92" style="stroke:var(--ctx); stroke-width:1.5; fill:none" marker-end="url(#ahc)"/>
+      <path d="M132,221 C220,221 290,140 290,92" style="stroke:var(--ctx); stroke-width:1.5; fill:none" marker-end="url(#ahc)"/>
+      <path d="M132,291 C250,291 330,150 330,92" style="stroke:var(--ctx); stroke-width:1.5; fill:none" marker-end="url(#ahc)"/>
+      <path d="M438,50 C466,50 448,128 474,128" style="stroke:var(--ctx); stroke-width:1.8; fill:none" marker-end="url(#ahc)"/>
+      <text x="384" y="108" class="sv-t3" style="fill:var(--ctx-ink)">结构化表示</text>
+      <path d="M132,151 C330,151 360,210 474,210" class="sv-line" stroke-dasharray="4 4" marker-end="url(#ah)"/>
+      <path d="M132,221 C330,221 360,220 474,220" class="sv-line" stroke-dasharray="4 4" marker-end="url(#ah)"/>
+      <path d="M132,291 C330,291 360,293 474,293" class="sv-line" stroke-dasharray="4 4" marker-end="url(#ah)"/>
+      <text x="300" y="262" class="sv-t3">媒体如何进入 H3-Base：未公开</text>
+      <path d="M860,131 L886,131" class="sv-line" marker-end="url(#ah)"/>
+      <path d="M938,168 L938,224" class="sv-line" marker-end="url(#ah)"/>
+      <text x="14" y="352" class="sv-t2">MiniMax：Context-IR「依赖多阶段工作流以及多个托管模型与服务」，负责指令解析、跨模态关联、时序理解与复杂逻辑推理，</text>
+      <text x="14" y="374" class="sv-t2">再把理解结果序列化成 H3-Base 接受的结构化表示。<tspan style="fill:var(--ctx-ink)">这恰好就是本文想测的「推理」。</tspan></text>
+    </g>
+    <!-- open arrows -->
+    <g id="gOpen">
+      <path d="M132,81 C300,81 380,128 474,128" class="sv-line" marker-end="url(#ah)"/>
+      <path d="M132,151 C300,151 380,210 474,210" class="sv-line" marker-end="url(#ah)"/>
+      <path d="M132,221 C300,221 380,220 474,220" class="sv-line" marker-end="url(#ah)"/>
+      <path d="M132,151 C300,151 400,142 474,142" class="sv-line" stroke-dasharray="3 4" marker-end="url(#ah)"/>
+      <text x="146" y="124" class="sv-t3">? 图/视频进不进 Qwen3-VL：未说明</text>
+      <path d="M132,291 C300,291 380,293 474,293" style="stroke:var(--risk); stroke-width:2; fill:none" marker-end="url(#ahr)"/>
+      <text x="146" y="342" class="sv-t3" style="fill:var(--risk-ink)">音频参考：“never reaches the conditioner and is encoded by the audio VAE alone”</text>
+      <path d="M860,277 L886,277" class="sv-line" marker-end="url(#ah)"/>
+      <text x="14" y="360" class="sv-t2">开源发布只有两个 checkpoint（FL2VA、Ref2VA），diffusers 只有三个工作流：t2va · fl2va · ref2va。</text>
+      <text x="14" y="382" class="sv-t2">其中<tspan style="fill:var(--risk-ink)">没有「续写已有视频」，也没有「编辑视频」</tspan>；参考图「不绑定生成几何」。</text>
+    </g>
+  </svg></div>
+  <figcaption><b>来源：</b>MiniMax H3 开源公告（2026-08-03）、Hugging Face 模型卡、diffusers <code>MiniMaxH3ModularPipeline</code> 文档、fal 托管端点页。灰掉的部件是托管侧有、开源发布里没有的。文字说明都是按原文翻译的，箭头走向是我的示意，其中托管侧的内部接口 MiniMax 没有公开。</figcaption>
+</figure>
+
+<h3>这对论文的每个场景意味着什么</h3>
+<div class="tw"><table>
+  <thead><tr><th>场景</th><th>题目需要的输入</th><th>公开接口里能对上的入口（推断）</th><th>后果</th></tr></thead>
+  <tbody>
+    <tr><td><span class="c-msr">MSR</span></td><td>左右腕视角的首帧 + 末帧，生成并排双视角视频</td><td>首尾帧工作流（FL2VA）最吻合。prompt 反复写 “start exactly from the provided first frame … transition accurately to the provided final frame”</td><td>本质上是<b>给定两端的插值</b>，考双视角同步，不考终态推断</td></tr>
+    <tr><td><span class="c-adr">ADR</span></td><td>一张图 + 一段音频</td><td>开源版和 fal 托管端点里，音频都只能从「参考生成」这个入口进。该模式下参考图「不绑定生成几何」，所以模型要按文字描述<b>重新画出</b>整个场景</td><td>在开源路径里，音频<b>只以 40 Hz 的声学 latent 进入</b>，没有任何语义编码器读它。「听出是哪个物体发声」这件事，完全要靠扩散主干从联合训练里学到</td></tr>
+    <tr><td><span class="c-vdr">VDR</span></td><td>前缀视频 → 续写</td><td>开源版没有续写工作流。视频只能作为参考片段输入，fal 把它定位为「motion」参考。托管 README 列了 video-to-video，但没说是哪种</td><td>「续写」到底是真的从最后一帧往后接，还是「参考前缀、另起一段」？论文图 10 看不出来，正文也没说</td></tr>
+    <tr><td><span class="c-avir">AVIR</span></td><td>视频 + 音频（续写或打红圈编辑）</td><td>同 VDR，外加「编辑」。开源版没有编辑工作流</td><td>定位类题目的音频是<b>口述句子</b>（如 “Kick the ball to the middle.”）。开源路径要从音频 latent 里「听懂一句话」；托管路径大概率由 Context-IR 先转成文字</td></tr>
+  </tbody>
+</table></div>
+
+<div class="note ctx"><span class="tag">关键推论</span>
+<p><strong>如果作者用的是托管 API：</strong>被测的是「Context-IR（多模型推理流水线）+ H3-Base」这个组合。H3 官方自己就说，跨模态关联与复杂逻辑推理是 Context-IR 做的。那么把结果归因于 <span class="en">“multimodal alignment in a shared latent framework”</span> 就站不住，这 41.97% 很可能主要反映 Context-IR 这个理解模块的水平。</p>
+<p><strong>如果用的是开源权重：</strong>音频从来不经过任何语义编码器，VDR / AVIR 也没有原生的续写与编辑入口。那么「ADR 最低、VDR 最高」有相当一部分可能来自<strong>接口语义</strong>，而不是推理能力。</p>
+<p><strong>两种情况论文都没排除。</strong>对本仓库更实际的一点是：如果你在开源 H3 上做世界模型（SolarWM 用 LoRA 微调了 H3-33B，LynnReal-Omni 直接以 H3 为底座），<strong>这篇的数字不一定适用于你手里的权重</strong>。</p></div>
+
+<!-- ============================ §8 ============================ -->
+<h2 id="s8"><span class="num">§ 8</span>41.97% 里有多少是「推理」失败？</h2>
+<p>论文 §4.5 自己承认：<span class="en">“A failed output may arise from incorrect input understanding, weak cross-modal integration, or errors during video generation. Further controlled experiments, such as removing individual modalities or replacing audio while keeping the visual input fixed, could help separate these factors.”</span> 也就是说，每道题的一个 0/1 实际上是一长串环节的乘积：</p>
+<div class="chain">
+  <div><b>感知</b>看到或听到了证据<span class="ctrl">隔离手段：去掉该模态 / 换成无关音频</span></div>
+  <div><b>整合推断</b>确定「该生成什么」<span class="ctrl">隔离手段：把答案写进 prompt，看差多少</span></div>
+  <div><b>渲染</b>把事件画对、不违反物理<span class="ctrl">隔离手段：显式 prompt oracle 给出上限 r</span></div>
+  <div class="end"><b>专家判 1</b>三人交叉核对<span class="ctrl" style="color:var(--risk-ink)">未报告一致性 κ，也没说聚合规则</span></div>
+</div>
+<p>论文只报告了整条链的乘积。下面用 ADR 演示为什么这很要紧。<strong>论文展示的 6 个 ADR 例子（图 3 一个、图 11 五个）全都是左右两个候选声源</strong>，引言里的杯子例子是三个。设想一个<strong>完全不听音频</strong>的模型：它从 c 个候选里随机挑一个来动，并且只要挑对了就有概率 r 把事件画对。这个「盲听」模型的成功率是 <span class="eq">r / c</span>。</p>
+
+<figure>
+  <div class="fig-h">交互 · ADR 的「盲听基线」</div>
+  <div class="ctl">
+    <div class="grp"><span class="lab">候选数 c</span><div class="seg" id="segC"><button data-v="2" class="on">2</button><button data-v="3">3</button><button data-v="4">4</button></div></div>
+    <div class="grp" style="flex:1 1 300px"><label class="lab" for="rSlider">渲染上限 r</label><input type="range" id="rSlider" min="0.25" max="1" step="0.01" value="0.6"><output id="rOut" for="rSlider">0.60</output></div>
+  </div>
+  <div class="scroll-x"><svg id="calcSvg" viewBox="0 0 720 150" role="img" aria-label="盲听基线与 H3 实测成功率对比" style="min-width:520px"></svg></div>
+  <div class="calc-out">
+    <div><span>盲听模型成功率 r / c</span><b id="oBlind">—</b></div>
+    <div><span>H3 实测 ADR（95% 区间）</span><b>27.4%</b><span class="c-3">20.8 – 35.1</span></div>
+    <div><span>反推 H3「选对目标」的概率 a = SR / r</span><b id="oA">—</b><span class="c-3" id="oAci"></span></div>
+  </div>
+  <div class="verdict" id="verdict"></div>
+  <figcaption><b>假设：</b>选错目标就判失败；选对了以概率 r 画对，r 与选没选对无关。<b>结论：</b>c = 2 时，只有 r &lt; 0.42，也就是「就算把答案直接写进 prompt，H3 也有一半以上的题画不对」，27.4% 才能算作「用上了音频」的证据；而 r &gt; 0.70 时，H3 反而<b>比盲猜还差</b>，说明失败的主因不在「没听懂」。r 恰恰是论文没测的量，所以<b>单凭 27.4% 分不清 H3 到底有没有利用音频</b>。补一个「显式 prompt」对照，这道题就能解。</figcaption>
+</figure>
+
+<!-- ============================ §9 ============================ -->
+<h2 id="s9"><span class="num">§ 9</span>失败模式：四类，三类在「渲染」这一侧</h2>
+<p>§4.4 与图 13、14 把失败归成四类。论文<strong>没给各类的频数</strong>，所以看不出哪一类占主导。但按上面的链条来分，四类里只有第一类明确是「推理 / 锚定」失败，其余三类都发生在渲染阶段。</p>
+<div class="grid2">
+  <div class="fm"><h4>① 证据锚定错误 <span class="k">推理侧</span></h4><p>认出了一个合理事件，却把证据安到了错误的对象或动作上。</p><p class="ex">图 13(a) 猫叫却让狗动了；13(c) 两种清洁机器的声音分不清。</p></div>
+  <div class="fm"><h4>② 事件没实现 <span class="k">渲染侧</span></h4><p>相关物体都在画面里，但隐含的交互没发生。</p><p class="ex">图 13(b) 打字声却没有打字；13(d) 开罐头，小物体交互失败。</p></div>
+  <div class="fm"><h4>③ 物理 / 构型违例 <span class="k">渲染侧</span></h4><p>接触动力学、几何或状态转移出错。</p><p class="ex">图 14(a) 滑板、(b) 轮胎压杯、(f) 滚球；(c) 滑块拼图、(d) 魔方的细粒度操作。</p></div>
+  <div class="fm"><h4>④ 时序状态不一致 <span class="k">渲染 / 记忆侧</span></h4><p>先前确立的物体状态、运动趋势或场景内容没能保持。</p><p class="ex">图 14(e) 狗丢下球跑开；(g) 镜头平移后场景变了。</p></div>
+</div>
+<p class="small">另一个小观察：图 11 标题是 “ADR results”，展示了五例，但图注只点名其中两例（开柜、打字机）<span class="en">“produce visible events consistent with the supplied sounds”</span>。另外三例（打印机、风扇、快门）的结果没有说明。</p>
+
+<!-- ============================ §10 ============================ -->
+<h2 id="s10"><span class="num">§ 10</span>存疑清单</h2>
+<div class="note ok"><span class="tag">先说公道话：做对的地方</span>
+<ul style="margin:4px 0 0">
+  <li><b>问题框架有价值。</b>「不告诉模型结局，让它从分布在多模态里的观测去推」，比现有 VBench / WorldModelBench 那种「照 prompt 画」更接近世界模型该考的东西。</li>
+  <li><b>ADR 的设计很干净。</b>两个都能发声的候选，由音频决定是哪个。这天然适合做反事实：换一段音频，被动的物体就该跟着换（§11 第 1 条）。</li>
+  <li><b>数字全部自洽</b>，表 2 可以完整还原成整数计数。</li>
+  <li><b>作者没有掩饰失败</b>：给出了失败分类和图例，§4.5 也主动承认结果混杂了几种因素，并提出了该做的消融。</li>
+</ul></div>
+
+<div class="ctl" style="margin-top:22px"><span class="lab">筛选</span><div class="seg" id="segSev"><button data-v="all" class="on">全部 15</button><button data-v="hi">高 5</button><button data-v="md">中 6</button><button data-v="lo">低 4</button></div></div>
+<div id="issues">
+
+<details class="issue" data-sev="hi" open><summary><span class="idx">H1</span><span class="sev hi">高</span><span>被测对象不清：论文从未提到 H3-Context-IR，也没说用的是 API 还是开源权重</span></summary><div class="body">
+<p>MiniMax 在开源公告里写明，Context-IR 是<strong>托管</strong>的预处理与编排系统，由「多阶段工作流与多个托管模型和服务」组成，负责 <span class="en">“instruction parsing, cross-modal association, temporal understanding, and complex logical reasoning”</span>，然后把理解结果序列化给 H3-Base。本文测的正是这些能力，却把结果归因于 <span class="en">“multimodal alignment … in a shared latent framework”</span>。</p>
+<p>论文图 2 称 H3 为 <span class="en">“open-weight”</span>，但开源权重里恰恰没有这个组件。两种路径下，谁在做推理完全不同（§7）。</p>
+<p class="ev">证据：arXiv 全文无 “Context-IR”“API”“checkpoint”“Ref2VA/FL2VA” 等字样；GitHub README 也未说明推理设置。</p></div></details>
+
+<details class="issue" data-sev="hi" open><summary><span class="idx">H2</span><span class="sev hi">高</span><span>标题与摘要提的问题（「多模态对齐能否提升世界推理」）没有被回答</span></summary><div class="body">
+<p>要回答「能否<strong>提升</strong>」，至少需要一个比较：去掉某一路模态、替换音频、换一个对齐更弱的模型，或者与显式 prompt 对比。本文一样都没做，只有一个单点成功率。§4.5 原话承认 <span class="en">“Further controlled experiments, such as removing individual modalities or replacing audio while keeping the visual input fixed, could help separate these factors”</span>。结论段却仍写 <span class="en">“revealing a substantial gap between omni-modal input support and effective physical-world reasoning”</span>。</p></div></details>
+
+<details class="issue" data-sev="hi"><summary><span class="idx">H3</span><span class="sev hi">高</span><span>没有上下界基线，连「H3 有没有用上音频」都判断不了</span></summary><div class="body">
+<p>缺三类基线：显式 prompt oracle（渲染上限 r）、去模态 / 盲测（下限），以及机会基线。§8 的计算表明，在 c = 2 的 ADR 题上，只要 r 落在 0.42–0.70 之间，27.4% 就和「完全不听音频、随机挑一个」<strong>在统计上无法区分</strong>。而 r 这个量本文没有测。</p></div></details>
+
+<details class="issue" data-sev="hi"><summary><span class="idx">H4</span><span class="sev hi">高</span><span>人工评测协议不透明</span></summary><div class="body">
+<ul>
+<li>三位专家 <span class="en">“independently evaluate … and then cross-check their judgments”</span>：没有一致性指标（Cohen / Fleiss κ），也没说分歧怎么定（多数票还是协商）。</li>
+<li>没说是否盲评。专家很可能就是作者，而且知道被测模型是谁。</li>
+<li>判分依据是每题的「语义目标」和场景级的一句话标准，<strong>rubric 与语义目标均未发布</strong>。</li>
+<li>结果只有二元的成败，没有部分得分，也没区分「选对了但画坏了」这种情况，而这恰恰是 §8 需要的信息。</li>
+</ul></div></details>
+
+<details class="issue" data-sev="hi"><summary><span class="idx">H5</span><span class="sev hi">高</span><span>完全无法复现：生成设置为零，数据与结果仍为 TODO</span></summary><div class="body">
+<p>接口 / checkpoint、输出时长、分辨率、采样步数、种子、<strong>每题采样几次</strong>（单次 pass@1 还是多次取最好）全都没写。H3 输出是随机的，单种子的 517 次二元判定本身就带着采样方差。GitHub 仓库目前只有 README 和 15 个以上的 VDR 样例视频，「开源评测数据集」和「开源评测结果」都标着 TODO。</p></div></details>
+
+<details class="issue" data-sev="md"><summary><span class="idx">M1</span><span class="sev md">中</span><span>子类层面的结论大多是噪声</span></summary><div class="body">
+<p>子类同质性检验：MSR p = 0.54，AVIR p = 0.65，都看不出子类间有真实差异。VDR p = 0.047 主要由 Traffic 9/9 与 Puzzles 1/6 驱动。正文却逐条解读 “threading 75% / pouring 58.3% vs cleaning, articulation, transport 33–35%”、“cartoons 20% / puzzles 16.67%”。这些格子的 N 只有 5–8。见 §5 森林图。</p></div></details>
+
+<details class="issue" data-sev="md"><summary><span class="idx">M2</span><span class="sev md">中</span><span>「Implicit」被当成全体题目的二元属性，实际隐式程度差别很大</span></summary><div class="body">
+<p>MSR 的展示 prompt 直接写出任务名（“Put the inner pot and the steamer tray into the rice cooker.”），<strong>末帧还把终态给了出来</strong>；公式 (2) 描述的「K 个视角图、推断单视角看不到的关系」和实际做法（并排双视角、给首尾帧的插值）并不一致。VDR 有的 prompt 把镜头动作写明，有的点名「温度与气压」这两个因果变量。连 ADR 图 3 的例子也有轻微倾向：左边的木板写着「待锯」，右边的电锯写着「已关机」。见 §6。</p></div></details>
+
+<details class="issue" data-sev="md"><summary><span class="idx">M3</span><span class="sev md">中</span><span>场景分数与接口语义耦合</span></summary><div class="body">
+<p>按公开接口推断：图 + 音只能走参考模式（参考图不绑定几何，模型得先按文字重画场景）；视频只能作为参考片段；开源版没有续写和编辑入口。因此 ADR 与 VDR 之间 28.6 个百分点的差，有多少是「音频推理弱」，有多少是「音频这条通路本来就只有声学 latent」，又有多少是「VDR 前缀视频的像素直接进入了同一个 latent 空间」，本文的设计分不开。</p></div></details>
+
+<details class="issue" data-sev="md"><summary><span class="idx">M4</span><span class="sev md">中</span><span>构造阶段可能按被测模型筛过题</span></summary><div class="body">
+<p><span class="en">“Each condition-prompt pair is verified to support the intended inference through video generation for MiniMax-H3”</span>，再加上 <span class="en">“Pairs that fail review are revised … and then reassessed”</span> 和「10 轮专家审核」。如果审核时看过 H3 的输出，那题库就是针对 H3 选择过的，偏差方向未知：可能删掉了 H3 完全做不了的题，也可能保留了它「差一点」的题。措辞有歧义，论文没澄清。</p></div></details>
+
+<details class="issue" data-sev="md"><summary><span class="idx">M5</span><span class="sev md">中</span><span>只测一个模型，却把结论泛化到「Omni-Models」</span></summary><div class="body">
+<p>结论写 <span class="en">“omni-modal generative models”</span> 的推理差距，证据只有 H3 一个模型。同期已有功能相近的系统：作者用来<strong>造测试视频的 Seedance 2.0</strong>（2026-02）本身就支持 9 图 + 3 视频 + 3 音频混合参考，还支持视频延长与编辑。在真实数据子集上拿它做对照是可行的；在它自己生成的子集上则会有循环问题。</p></div></details>
+
+<details class="issue" data-sev="md"><summary><span class="idx">M6</span><span class="sev md">中</span><span>表 1 的对比对象挑得太「显式」</span></summary><div class="body">
+<p>表 1 只列了 VBench、TC-Bench、VideoPhy、WorldModelBench 四个显式 prompt 基准，于是「Implicit ✓ / Reasoning ✓」看上去是本文独有。但正文 Related Work 自己引用的 Physics-IQ（<span class="en">“without disclosing future outcomes”</span>）、RISE-Video（<span class="en">“explicitly tests implicit world-rule reasoning”</span>）、AV-Phys Bench（生成音视频流内部与之间的物理一致性）、ROVER（全模态生成的跨模态推理）都与本文更接近，却没有进表。表 1 里的 “Multi Scene” 一列也没有定义。</p></div></details>
+
+<details class="issue" data-sev="lo"><summary><span class="idx">L1</span><span class="sev lo">低</span><span>「物理世界推理」的口径被稀释</span></summary><div class="body">
+<p>子类里包括 Cartoons、Animation、Puzzles（滑块拼图、魔方），还有「在视频里画红圈」这种标注式编辑。部分前缀视频由 Seedance 2.0 生成，部分音频由 ChatGPT Voice 生成，合成素材本身的物理未必正确。VDR 的 Synthetic 子类有 19 题，但合成素材的总占比没有报告。</p></div></details>
+
+<details class="issue" data-sev="lo"><summary><span class="idx">L2</span><span class="sev lo">低</span><span>只「omni」了输入，没有评输出音频</span></summary><div class="body">
+<p>H3 会联合生成 32 kHz 立体声，但判分只看画面，生成的音频是否与事件一致从未评估。对一篇以「全模态」为卖点的评测来说，这是一块明显的空白。</p></div></details>
+
+<details class="issue" data-sev="lo"><summary><span class="idx">L3</span><span class="sev lo">低</span><span>「Chain-of-Frames」与图 1 架构示意缺乏依据</span></summary><div class="body">
+<p><span class="en">“intermediate predictions can be interpreted as a form of Chain-of-Frames”</span> 这句没有任何实验支撑。图 1 的「Modality Encoders → Cross-Modal Alignment → Unified Tokens」是作者自己画的抽象图，与 H3 文档里的实际组件（Qwen3-VL-32B 编码器 + 视频 / 音频 VAE + 33.1B 单流主干 + 托管 Context-IR）对不上，却放在「Omni-Model」框里，容易让人误以为这就是 H3 的结构。</p></div></details>
+
+<details class="issue" data-sev="lo"><summary><span class="idx">L4</span><span class="sev lo">低</span><span>文字与引用瑕疵</span></summary><div class="body">
+<p>“Omni-Modes”（§3 首段）、“Phys. Aaware”（表 1），以及 “We demonstrate that this prompt construction follows two criteria”，但后文其实没有任何论证。Related Work 的「视频生成评测」一段里，引用了多篇作者自己的<strong>方法</strong>论文（MagDiff、DynamiCtrl、LSTD、CameraNoise、SPEED、RefocusEraser），它们并不是评测工作。</p></div></details>
+
+</div>
+
+<!-- ============================ §11 ============================ -->
+<h2 id="s11"><span class="num">§ 11</span>最值钱的几个补充实验</h2>
+<p>按「花最少的力气、最能把分数拆开」排序。前两个不需要新数据，拿现有 517 题就能做。</p>
+<div class="exp">
+  <div><b>ADR 反事实换音频</b><p>同一张图，只把音频换成另一个候选的声音。被动的物体应该跟着换。看「成对一致率」：它直接度量模型用没用上音频，而且对渲染质量不敏感，因为两次画得一样差也能判出来。对应 H3、M3。</p></div>
+  <div><b>显式 prompt oracle</b><p>把被隐藏的信息写回 prompt 重跑一遍，得到渲染上限 r。「推理差距 = SR<sub>显式</sub> − SR<sub>隐式</sub>」才是标题问题的答案。对应 H2、H3。</p></div>
+  <div><b>去模态 / 盲测</b><p>去掉音频、只给末帧、打乱两个视角，得到下限。如果去掉音频后 ADR 还剩 25%，那 27.4% 基本就是盲猜。对应 H3。</p></div>
+  <div><b>托管 vs 开源，同题对跑</b><p>在同一批题上分别跑托管 API 和开源 Ref2VA / FL2VA，两者之差就是 Context-IR 的贡献。对在开源 H3 上做研究的人最有用。对应 H1。</p></div>
+  <div><b>多种子 + 一致性 + 公开 rubric</b><p>每题 ≥ 3 个种子，报告均值与方差；报告三位专家的 Fleiss κ；发布每题的语义目标。对应 H4、H5。</p></div>
+  <div><b>至少再测一个模型</b><p>比如在真实数据子集上测 Seedance 2.0，给 41.97% 一个参照：这到底算好还是算差？对应 M5。</p></div>
+</div>
+
+<!-- ============================ §12 ============================ -->
+<h2 id="s12"><span class="num">§ 12</span>定位：它在评测谱系里补了哪一格</h2>
+<p>下表中其他基准的描述，都取自<strong>本文 Related Work 自己的概括</strong>；「与本文关系」一列是我的判断。</p>
+<div class="tw"><table>
+  <thead><tr><th>基准</th><th>本文对它的描述</th><th>进了表 1 吗</th><th>与本文关系</th></tr></thead>
+  <tbody>
+    <tr><td>VBench / VBench-2.0</td><td>感知质量与语义对齐；内在忠实度</td><td>VBench 进了</td><td>显式 prompt 的代表，本文的反面</td></tr>
+    <tr><td>VideoPhy / VideoPhy-2</td><td>物理常识（动作中心）</td><td>VideoPhy 进了</td><td>物理但显式</td></tr>
+    <tr><td>WorldModelBench</td><td>应用域的指令遵循与物理遵循</td><td>进了</td><td>世界模型但显式</td></tr>
+    <tr><td>Physics-IQ</td><td>从观测帧预测物理，<b>不披露未来结果</b></td><td class="c-risk">没进</td><td>与 VDR 最接近，隐式的先行者</td></tr>
+    <tr><td>RISE-Video</td><td>显式检验<b>隐式世界规则</b>推理</td><td class="c-risk">没进</td><td>「隐式」这个卖点的直接前驱</td></tr>
+    <tr><td>AV-Phys Bench</td><td>生成音视频流内部与之间的物理一致性</td><td class="c-risk">没进</td><td>与 ADR / AVIR 最接近，而且评了输出音频</td></tr>
+    <tr><td>ROVER</td><td>全模态生成中的互惠跨模态推理</td><td class="c-risk">没进</td><td>「全模态 + 推理」的直接前驱</td></tr>
+    <tr><td>WorldScore / WorldMark / Omni-WorldBench</td><td>相机轨迹、控制对齐、动作相关的状态转移</td><td>没进</td><td>交互式世界模型评测，与本文互补</td></tr>
+  </tbody>
+</table></div>
+<div class="note adr"><span class="tag">对本仓库（交互式视频世界模型）的意义</span>
+<p>按本列表的范围，它是一个 <b>benchmarks</b> 条目，但考的<strong>不是交互式世界模型</strong>：没有逐步动作条件，没有流式生成，时长只有 5–15 秒的一次性生成。和世界模型最相关的只有 VDR 的 Memory（6 题，4 题成功）与 Traffic（9 题）两个小子类。</p>
+<p>值得搬过来的是方法论：<strong>给世界模型一个前缀，让「正确的后果」必须从观测里推出来，而不是从 prompt 里读出来</strong>。搬的时候要把本文缺的三件套（显式上限、去模态下限、反事实对照）一起带上。</p>
+<p>另一个实际提醒：H3 正在成为本列表里的常见底座（SolarWM 的 H3-33B LoRA、LynnReal-Omni）。本文是第一份针对 H3 「推理」的第三方测评，但由于 §7 的问题，<strong>它的数字不能直接当作开源 H3 底座的能力参考</strong>。</p></div>
+
+<!-- ============================ §13 ============================ -->
+<h2 id="s13"><span class="num">§ 13</span>复现速查</h2>
+<div class="grid2">
+  <div class="card"><h4 style="margin-top:0" class="c-ok">已公开</h4><ul style="margin:6px 0 0; padding-left:18px; font-size:14.5px">
+    <li>论文（arXiv v1，2026-09-16）</li>
+    <li>GitHub README：框架说明、表 2 数字</li>
+    <li>15 个以上的 VDR 生成样例视频 / GIF</li>
+    <li>表 2 的子类计数（可还原为整数，见 §5）</li>
+    <li>数据来源名单（数据集 + Seedance 2.0 / ChatGPT Voice）</li>
+  </ul></div>
+  <div class="card"><h4 style="margin-top:0" class="c-bad">缺失</h4><ul style="margin:6px 0 0; padding-left:18px; font-size:14.5px">
+    <li>517 题数据集（仓库 TODO）</li>
+    <li>逐题判定结果（仓库 TODO）</li>
+    <li>每题的语义目标与判分 rubric</li>
+    <li>评审一致性、聚合规则、是否盲评</li>
+    <li>被测接口：托管 API / 开源 checkpoint / 哪个工作流</li>
+    <li>生成设置：时长、分辨率、步数、种子、每题采样次数</li>
+    <li>prompt 起草用的 ChatGPT / Qwen3 模板</li>
+    <li>真实与合成素材的比例、逐源题数</li>
+  </ul></div>
+</div>
+
+<footer>
+  <p>本页是读者笔记，不是论文本身，也不代表作者的说法；与论文冲突的地方以论文为准。§5 的所有重算、§8 的计算和 §6 的评级都是笔者所做。§7 的组件信息来自 MiniMax 的公开文档，「公开接口里的入口」一栏是推断。</p>
+  <p><b>来源</b></p>
+  <ul class="srcs">
+    <li><a href="https://arxiv.org/abs/2609.18323">Zhao et al. Can MiniMax-H3 Reason About the Physical World? An Evaluation of Omni-Modal Generative Model. arXiv:2609.18323</a></li>
+    <li><a href="https://github.com/gulucaptain/MiniMax-H3-Reason">gulucaptain/MiniMax-H3-Reason（GitHub）</a></li>
+    <li><a href="https://www.minimax.io/news/minimax-h3-open-source">MiniMax：Open General Intelligence: MiniMax H3 Is Now Open Source（2026-08-03）</a></li>
+    <li><a href="https://www.minimax.io/blog/minimax-h3">MiniMax：MiniMax H3: An Open Model Breaking the Boundaries Between Tasks and Modalities（2026-07-31）</a></li>
+    <li><a href="https://huggingface.co/MiniMaxAI/MiniMax-H3">MiniMaxAI/MiniMax-H3（Hugging Face 模型卡）</a></li>
+    <li><a href="https://huggingface.co/docs/diffusers/api/pipelines/minimax_h3">diffusers 文档：MiniMax-H3</a></li>
+    <li><a href="https://fal.ai/minimax-h3">fal：MiniMax H3 托管端点</a></li>
+    <li><a href="https://www.runpod.io/blog/minimax-h3-the-open-weight-omni-modal-video-model-and-what-it-takes-to-run-it">RunPod：MiniMax H3 — the open-weight omni-modal video model</a></li>
+    <li><a href="https://seed.bytedance.com/en/blog/official-launch-of-seedance-2-0">ByteDance Seed：Seedance 2.0 Official Launch（2026-02-12）</a></li>
+  </ul>
+</footer>
+
+</div>
+<div id="tip" hidden></div>
+
+<script>
+(function(){
+"use strict";
+/* ---------------- tooltip ---------------- */
+var TIPS = [];
+function tipKey(html){ TIPS.push(html); return TIPS.length-1; }
+var tip = document.getElementById('tip');
+function showTip(e){
+  var t = e.target && e.target.closest ? e.target.closest('[data-tip]') : null;
+  if(!t){ tip.hidden = true; return; }
+  tip.innerHTML = TIPS[+t.getAttribute('data-tip')] || '';
+  tip.hidden = false;
+  var pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+  var x = e.clientX + pad, y = e.clientY + pad;
+  if(x + w > window.innerWidth - 8) x = e.clientX - w - pad;
+  if(y + h > window.innerHeight - 8) y = e.clientY - h - pad;
+  tip.style.left = Math.max(8,x) + 'px'; tip.style.top = Math.max(8,y) + 'px';
+}
+document.addEventListener('pointermove', showTip);
+document.addEventListener('pointerdown', showTip);
+window.addEventListener('scroll', function(){ tip.hidden = true; }, {passive:true});
+
+function seg(id, cb){
+  var el = document.getElementById(id); if(!el) return;
+  el.addEventListener('click', function(e){
+    var b = e.target.closest('button'); if(!b || !el.contains(b)) return;
+    el.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x===b); });
+    cb(b.getAttribute('data-v'));
+  });
+}
+function pct(x, d){ return (x*100).toFixed(d==null?1:d) + '%'; }
+function wilson(k,n){ var z=1.959964, p=k/n, d=1+z*z/n, c=(p+z*z/(2*n))/d, h=z*Math.sqrt(p*(1-p)/n+z*z/(4*n*n))/d; return [Math.max(0,c-h), Math.min(1,c+h)]; }
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* ---------------- §1 evidence grid ---------------- */
+(function(){
+  var st = {T:true, A:true, mode:'implicit'};
+  var cups = [{n:'陶瓷杯', f:'#efe8da'},{n:'玻璃杯', f:'rgba(110,175,220,.40)'},{n:'金属杯', f:'#98a2ad'}];
+  var ev = ['被人推落','自己滑落','被人拿起'];
+  var svg = document.getElementById('evGrid');
+  var X0=178, CW=172, GX=8, Y0=40, CH=64, GY=8;
+  function killers(r,c){
+    var k=[];
+    if(st.T){ if(st.mode==='implicit'){ if(c!==0) k.push('文本'); } else { if(!(r===0&&c===0)) k.push('文本'); } }
+    if(st.A){ if(!(r===0 && c<=1)) k.push('音频'); }
+    return k;
+  }
+  function cup(x,y,f){
+    return '<path d="M'+x+','+y+' L'+(x+26)+','+y+' L'+(x+22)+','+(y+30)+' L'+(x+4)+','+(y+30)+' Z" style="fill:'+f+'; stroke:var(--ink3); stroke-width:1.2"/>'+
+      '<path d="M'+(x+25)+','+(y+7)+' C'+(x+36)+','+(y+7)+' '+(x+36)+','+(y+22)+' '+(x+23)+','+(y+22)+'" style="fill:none; stroke:var(--ink3); stroke-width:1.4"/>';
+  }
+  function draw(){
+    var s='', alive=0;
+    for(var c=0;c<3;c++){ s+='<text x="'+(X0+c*(CW+GX)+CW/2)+'" y="26" text-anchor="middle" class="sv-t3">'+ev[c]+'</text>'; }
+    for(var r=0;r<3;r++){
+      var y=Y0+r*(CH+GY);
+      s+=cup(22,y+16,cups[r].f)+'<text x="72" y="'+(y+37)+'" class="sv-t">'+cups[r].n+'</text>';
+      for(c=0;c<3;c++){
+        var x=X0+c*(CW+GX), k=killers(r,c), ok=!k.length; if(ok) alive++;
+        s+='<rect class="cell" x="'+x+'" y="'+y+'" width="'+CW+'" height="'+CH+'" rx="8" style="fill:'+(ok?'var(--ctx-soft)':'var(--surf2)')+'; stroke:'+(ok?'var(--ctx)':'var(--rule)')+'; stroke-width:'+(ok?1.6:1)+'"/>';
+        if(ok){
+          s+='<text x="'+(x+14)+'" y="'+(y+28)+'" class="sv-h">'+cups[r].n+' · '+ev[c]+'</text><text x="'+(x+14)+'" y="'+(y+48)+'" class="sv-t3" style="fill:var(--ctx-ink)">仍然可能</text>';
+        } else {
+          s+='<text x="'+(x+14)+'" y="'+(y+28)+'" class="sv-t2" style="opacity:.55">'+cups[r].n+' · '+ev[c]+'</text><text x="'+(x+14)+'" y="'+(y+48)+'" class="sv-t3" style="opacity:.8">被'+k.join(' + ')+'排除</text>'+
+            '<path d="M'+(x+CW-26)+','+(y+14)+' l12,12 m0,-12 l-12,12" style="stroke:var(--ink3); stroke-width:1.4; opacity:.6"/>';
+        }
+      }
+    }
+    svg.innerHTML=s;
+    var msg;
+    if(st.mode==='explicit' && st.T){ msg = st.A ? '文本一路就锁定了答案，音频成了冗余。模型照着画就能过。' : '只靠文本就锁定了答案，这正是「照 prompt 画」的评测。'; }
+    else if(st.T && st.A){ msg='三路证据缺一不可：陶瓷杯被人推下桌、摔碎。'; }
+    else if(st.T){ msg='知道有人把杯子推了下去，但不知道是哪一只。'; }
+    else if(st.A){ msg='知道是陶瓷杯摔碎了，但不知道是被人推的还是自己滑下去的。'; }
+    else { msg='只看图像：三只杯子发生什么都有可能。'; }
+    document.getElementById('evStat').innerHTML='剩余 <b>'+alive+'</b> / 9 种可能 <span class="c-3" style="font-weight:400; font-size:15px">· '+msg+'</span>';
+    document.getElementById('chTtxt').innerHTML = st.mode==='implicit'
+      ? '「根据音频提示，一个人把面前的一只杯子推到了地上。」<span class="en">“According to the prompts in the audio, a man pushed a cup in front of him to the ground.”</span> <span class="c-3">它给出<b>动作</b>，不说是哪只杯子。</span>'
+      : '「一个人把陶瓷杯推下桌，杯子摔碎了。」<span class="c-3">（构造的显式写法）答案全在这一句里。</span>';
+    document.getElementById('chT').classList.toggle('off', !st.T);
+    document.getElementById('chA').classList.toggle('off', !st.A);
+  }
+  function tg(id,key){ var b=document.getElementById(id); b.addEventListener('click',function(){ st[key]=!st[key]; b.setAttribute('aria-pressed', st[key]); draw(); }); }
+  tg('tgT','T'); tg('tgA','A');
+  seg('segMode', function(v){ st.mode=v; draw(); });
+  draw();
+})();
+
+/* ---------------- data ---------------- */
+var SC = {
+  MSR:{zh:'多视角空间推理', col:'msr', rows:[['Deformation','形变',34,14],['Cleaning','清洁',27,9],['Articulation','铰接',26,9],['Arrangement','摆放',23,11],['Transport','搬运',23,8],['Loading','装载',20,10],['Assembly','组装',20,10],['Pouring','倾倒',12,7],['Threading','穿线',8,6],['Control','操控',7,3]]},
+  ADR:{zh:'音频消歧推理', col:'adr', rows:[['Vocalizations','发声',16,5],['Alerts','警报',26,6],['Music','乐器',16,4],['Machinery','机械',34,6],['Contact','接触',32,7],['Nature','自然',22,12]]},
+  VDR:{zh:'视频决策推理', col:'vdr', rows:[['Humans','人',34,19],['Cartoons','卡通',5,1],['Animals','动物',11,7],['Traffic','交通',9,9],['Physics','物理',10,5],['Memory','记忆',6,4],['Puzzles','谜题',6,1],['Synthetic','合成',19,10]]},
+  AVIR:{zh:'音视频融合推理', col:'avir', rows:[['Activities','活动',14,8],['Animation','动画',6,2],['Making','制作',21,11],['Animals','动物',10,3],['Cues','线索',20,10]]}
+};
+var ORDER=['MSR','ADR','VDR','AVIR'];
+var HOMO={MSR:'0.54',ADR:'0.058',VDR:'0.047',AVIR:'0.65'};
+ORDER.forEach(function(s){ var K=0,N=0; SC[s].rows.forEach(function(r){K+=r[3];N+=r[2];}); SC[s].k=K; SC[s].n=N; });
+var OVER = 217/517;
+
+/* ---------------- §3 scenario tabs ---------------- */
+(function(){
+  function box(x,y,w,h,extra){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="6" class="sv-box" '+(extra||'')+'/>'; }
+  function lab(x,y,t,cls,style){ return '<text x="'+x+'" y="'+y+'" class="'+(cls||'sv-t3')+'"'+(style?' style="'+style+'"':'')+'>'+t+'</text>'; }
+  function arrow(x1,y1,x2,y2){ return '<path d="M'+x1+','+y1+' L'+x2+','+y2+'" class="sv-line" marker-end="url(#ahs)"/>'; }
+  function strip(x,y,n,fw,fh,gap,col,fn){ var s=''; for(var i=0;i<n;i++){ var xx=x+i*(fw+gap); s+='<rect x="'+xx+'" y="'+y+'" width="'+fw+'" height="'+fh+'" rx="4" style="fill:var(--surf3); stroke:var(--rule2)"/>'+'<rect x="'+xx+'" y="'+(y+fh-4)+'" width="'+fw+'" height="4" rx="1" style="fill:var(--'+col+'); opacity:.75"/>'; if(fn) s+=fn(xx,y,fw,fh,i); } return s; }
+  function wave(x,y,w,h,col){ var s='', n=Math.floor(w/5); for(var i=0;i<n;i++){ var a=Math.abs(Math.sin(i*0.61)*0.6+Math.sin(i*0.23+1)*0.4); var bh=Math.max(2,a*(h-6)); s+='<rect x="'+(x+i*5+1)+'" y="'+(y+h/2-bh/2)+'" width="3" height="'+bh+'" rx="1" style="fill:var(--'+col+')"/>'; } return s; }
+  function model(){ return '<rect x="262" y="52" width="76" height="62" rx="9" class="sv-box2"/>'+lab(285,89,'H3','sv-h'); }
+  var DEFS='<defs><marker id="ahs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink3)"/></marker></defs>';
+  var SCH={
+    MSR: function(){
+      var s=DEFS;
+      s+=box(14,10,220,44)+'<line x1="124" y1="10" x2="124" y2="54" style="stroke:var(--rule2)"/>'+lab(24,36,'左腕 · 首帧')+lab(134,36,'右腕 · 首帧');
+      s+='<rect x="14" y="62" width="220" height="44" rx="6" style="fill:var(--surf2); stroke:var(--risk); stroke-width:1.4"/><line x1="124" y1="62" x2="124" y2="106" style="stroke:var(--rule2)"/>'+lab(24,88,'左腕 · 末帧','sv-t3','fill:var(--risk-ink)')+lab(134,88,'右腕 · 末帧','sv-t3','fill:var(--risk-ink)');
+      s+='<rect x="14" y="114" width="220" height="44" rx="6" style="fill:var(--surf); stroke:var(--rule2); stroke-dasharray:4 3"/>'+lab(24,134,'prompt：点名任务','sv-t2')+lab(24,150,'「把内胆和蒸屉放进电饭煲」','sv-t3','fill:var(--risk-ink)');
+      s+=arrow(234,32,260,70)+arrow(234,84,260,83)+arrow(234,136,260,96)+model()+arrow(338,83,368,83);
+      s+=lab(372,24,'输出：左右并排双视角视频');
+      s+=strip(372,34,5,52,48,6,'msr')+strip(372,90,5,52,48,6,'msr');
+      s+=lab(372,160,'终态已由末帧给出 → 考的是中间过程的同步','sv-t3','fill:var(--risk-ink)');
+      return s;
+    },
+    ADR: function(){
+      var s=DEFS;
+      s+=box(14,8,220,72)+'<circle cx="70" cy="44" r="18" style="fill:var(--adr-soft); stroke:var(--adr)"/>'+lab(58,48,'A','sv-h')+'<rect x="160" y="26" width="36" height="36" rx="4" style="fill:var(--surf3); stroke:var(--ink3)"/>'+lab(172,49,'B','sv-h')+lab(22,74,'静态图：两个都能发声');
+      s+='<rect x="14" y="88" width="220" height="34" rx="6" class="sv-box"/>'+wave(20,90,210,30,'adr');
+      s+='<rect x="14" y="130" width="220" height="32" rx="6" style="fill:var(--surf); stroke:var(--rule2); stroke-dasharray:4 3"/>'+lab(24,151,'prompt：列出 A、B，不说是谁','sv-t2');
+      s+=arrow(234,44,260,70)+arrow(234,105,260,86)+arrow(234,146,260,100)+model()+arrow(338,83,368,83);
+      s+=lab(372,30,'输出：只有「发声的那个」发生事件');
+      s+=strip(372,42,5,52,72,6,'adr',function(x,y,w,h,i){ var r=6+i*1.2; return '<circle cx="'+(x+15)+'" cy="'+(y+30)+'" r="'+r+'" style="fill:var(--adr-soft); stroke:var(--adr); stroke-width:1.4"/><rect x="'+(x+32)+'" y="'+(y+24)+'" width="12" height="12" rx="2" style="fill:none; stroke:var(--ink3)"/>'+(i>0?'<path d="M'+(x+6)+','+(y+14)+' q9,-6 18,0" style="fill:none; stroke:var(--adr); stroke-width:1.2"/>':''); });
+      s+=lab(372,140,'判分：生成的事件是否与音频一致','sv-t3');
+      return s;
+    },
+    VDR: function(){
+      var s=DEFS;
+      s+=lab(14,26,'前缀视频 V₁:T');
+      s+=strip(14,34,4,50,62,6.6,'ink3',function(x,y,w,h,i){ return '<circle cx="'+(x+10+i*8)+'" cy="'+(y+40)+'" r="5" style="fill:var(--vdr)"/>'; });
+      s+='<rect x="14" y="112" width="220" height="42" rx="6" style="fill:var(--surf); stroke:var(--rule2); stroke-dasharray:4 3"/>'+lab(24,131,'prompt：续写「下一步合理的行为」','sv-t2')+lab(24,147,'不给具体动作','sv-t3');
+      s+=arrow(234,65,260,76)+arrow(234,133,260,96)+model()+arrow(338,83,368,83);
+      s+=lab(372,26,'输出：续写（决策体现在动作里）');
+      s+=strip(372,34,5,52,62,6,'vdr',function(x,y,w,h,i){ return '<circle cx="'+(x+8+Math.min(i,2)*12)+'" cy="'+(y+40)+'" r="5" style="fill:var(--vdr)"/>'+(i>=2?'<rect x="'+(x+40)+'" y="'+(y+30)+'" width="4" height="20" style="fill:var(--ok)"/>':''); });
+      s+=lab(372,118,'例：球滚上马路 → 车在孩子出现前停下','sv-t3');
+      s+=lab(372,136,'判分：是否延续观察到的运动、满足任务约束','sv-t3');
+      return s;
+    },
+    AVIR: function(){
+      var s=DEFS;
+      s+=strip(14,10,4,50,48,6.6,'ink3');
+      s+=lab(20,24,'视频');
+      s+='<rect x="14" y="68" width="220" height="44" rx="6" class="sv-box"/>'+wave(20,74,150,32,'avir')+lab(176,86,'环境声','sv-t3')+lab(176,102,'或口述','sv-t3');
+      s+='<rect x="14" y="120" width="220" height="40" rx="6" style="fill:var(--surf); stroke:var(--rule2); stroke-dasharray:4 3"/>'+lab(24,137,'prompt：推断下一步 / 找出矛盾','sv-t2')+lab(24,153,'音频与视频不必时间对齐','sv-t3');
+      s+=arrow(234,34,260,70)+arrow(234,90,260,84)+arrow(234,140,260,98)+model()+arrow(338,70,368,48)+arrow(338,98,368,118);
+      s+=lab(372,16,'续写');
+      s+=strip(372,22,5,52,50,6,'avir');
+      s+=lab(372,92,'或：编辑，用红圈标出矛盾处');
+      s+=strip(372,98,5,52,50,6,'avir',function(x,y,w,h,i){ return (i>=1&&i<=3)?'<circle cx="'+(x+28)+'" cy="'+(y+22)+'" r="11" style="fill:none; stroke:#e0302a; stroke-width:2"/>':''; });
+      return s;
+    }
+  };
+  var TXT={
+    MSR:{f:'Ŷ<sub>MSR</sub> ∼ p<sub>θ</sub>(Y | q, I)，I = {I<sup>(k)</sup>}<sub>k=1…K</sub>',
+      rows:[['输入','左右两个腕部相机的画面。展示的题目都是「首帧 + 末帧」，要求输出<b>左右并排</b>的双视角视频。'],
+      ['论文说藏了什么','单一视角看不全的空间关系：需要建立跨视角对应，并处理视角变化与遮挡。'],
+      ['实际上','prompt 直接写出任务名，终态由末帧给出。真正要考的是<b>中间过程两路视角是否同步</b>、左右手身份是否一致，以及视角变化是否只来自夹爪自身的运动。'],
+      ['专家怎么判','生成视频是否保持所需的空间关系与跨视角的协调动作。'],
+      ['公开接口入口','<span class="c-3">（推断）</span>首尾帧工作流 FL2VA，关键帧会约束生成的几何。'],
+      ['数据','HiFi-UMI-2K、VISTA-UMI-5K、HuMI-Unsheathe、Hy-Embodied-0.5-VLA-Data、10Kh-RealOmin。家居与桌面操作，含大幅视角变化与部分遮挡。'],
+      ['结果','<span class="srbig c-msr">43.5%</span> 87 / 200 · 95% 区间 36.8–50.4 · 10 个子类同质性 p = 0.54（看不出差异）']]},
+    ADR:{f:'Ŷ<sub>ADR</sub> ∼ p<sub>θ</sub>(Y | q, I, A)',
+      rows:[['输入','一张可以有多种解释的静态图 + 一段音频。'],
+      ['藏了什么','<b>哪个物体发声、发生了什么事件</b>。只看图无法确定，只有音频能区分。引言的例子：三只不同材质的杯子，掉下去的那只由碎裂声决定。'],
+      ['论文例子','马桶 vs 柜子 + 开柜声；键盘 vs 打字机 + 打字机声；风扇 vs 微波炉 + 风扇声；手锯 vs 电锯 + 锯木声。<b>展示的 6 例都只有左右两个候选。</b>'],
+      ['专家怎么判','生成的事件是否与给定音频一致。'],
+      ['公开接口入口','<span class="c-3">（推断）</span>图 + 音只能走参考生成 Ref2VA：参考图<b>不绑定生成几何</b>；开源版里音频<b>只进 audio VAE</b>，不经过任何语义编码器。'],
+      ['数据','FSD50K、ESC-50，以及用 ChatGPT Voice 合成的音频。6 个子类：发声、警报、乐器、机械、接触、自然。'],
+      ['结果','<span class="srbig c-adr">27.4%</span> 40 / 146 · 95% 区间 20.8–35.1 · Nature 12/22 明显好于 Machinery 6/34（p = 0.007）']]},
+    VDR:{f:'Ŷ<sub>VDR</sub> ∼ p<sub>θ</sub>(Y | q, V<sub>1:T</sub>)',
+      rows:[['输入','一段前缀视频。'],
+      ['藏了什么','<b>该怎么应对</b>。prompt 不给具体动作，模型要从前缀里的运动、状态变化和交互中推出后果，并做出合适的反应。论文的例子：球滚上马路，意味着可能有孩子跟出来，车应该在危险变得可见之前就停下。'],
+      ['论文例子','驾驶中问「该怎么办」→ 停车；狗走向门口；熨斗接触布料；加热瓶中的气球；卡通杂耍；镜头平移后回看旧场景（Memory）。'],
+      ['专家怎么判','续写是否延续了观察到的运动，并满足任务约束。'],
+      ['公开接口入口','<span class="c-3">（推断）</span>开源版<b>没有续写工作流</b>，视频只能作为参考片段（fal 定位为「motion」参考）；托管 README 列有 video-to-video，但没说明细节。'],
+      ['数据','LLaVA-Video-178K，以及 Seedance 2.0 生成的视频。8 个子类里有 Cartoons、Puzzles、Synthetic 等非真实物理的类别。'],
+      ['结果','<span class="srbig c-vdr">56.0%</span> 56 / 100 · 95% 区间 46.2–65.3 · Traffic 9/9、Puzzles 1/6、Cartoons 1/5']]},
+    AVIR:{f:'Ŷ<sub>AVIR</sub> ∼ p<sub>θ</sub>(Y | q, V, A)',
+      rows:[['输入','视频（前缀或完整片段）+ 音频（环境声或<b>口述约束</b>），两者不必时间对齐。'],
+      ['藏了什么','续写题：音频决定接下来发生什么。编辑题：找出视频里与口述约束矛盾的地方，用红圈标出来。与 ADR 的区别在于，音频要放到一串视觉事件的上下文里去理解。'],
+      ['论文例子','口述 “Kick the ball to the middle.” / “The last letter jumps to 3.” / “character turns around.”，要求圈出矛盾；听到狗叫后，人的下一步反应。'],
+      ['专家怎么判','音频是否被正确反映在相关的视觉内容里。'],
+      ['公开接口入口','<span class="c-3">（推断）</span>与 VDR 相同，另外还需要「编辑」，开源版没有编辑工作流。口述约束本质上是<b>藏在音频里的文本指令</b>。'],
+      ['数据','视频 + 环境声 / 口述约束。5 个子类：活动、动画、制作、动物、线索。'],
+      ['结果','<span class="srbig c-avir">47.9%</span> 34 / 71 · 95% 区间 36.7–59.3 · 5 个子类同质性 p = 0.65（看不出差异）']]}
+  };
+  var panel=document.getElementById('scPanel'), tabs=document.getElementById('scTabs');
+  function show(s){
+    var t=TXT[s], h='<div class="schem scroll-x"><svg viewBox="0 0 680 168" role="img" aria-label="'+s+' 输入输出示意" style="min-width:560px">'+SCH[s]()+'</svg></div>';
+    h+='<div style="font-family:var(--font-math); font-style:italic; font-size:16px; margin:4px 0 2px">'+t.f+'</div><div class="kvgrid">';
+    t.rows.forEach(function(r){ h+='<div class="k">'+r[0]+'</div><div>'+r[1]+'</div>'; });
+    panel.innerHTML=h+'</div>';
+    tabs.querySelectorAll('button').forEach(function(b){ var on=b.getAttribute('data-s')===s; b.classList.toggle('on',on); b.setAttribute('aria-selected',on); });
+  }
+  tabs.addEventListener('click',function(e){ var b=e.target.closest('button'); if(b) show(b.getAttribute('data-s')); });
+  show('MSR');
+})();
+
+/* ---------------- §5 chart ---------------- */
+(function(){
+  var svg=document.getElementById('chart'), cap=document.getElementById('chartCap');
+  var view='mosaic', sort='paper';
+  function mosaic(){
+    var W=960,T=38,PH=232,B=98,L=40,R=8,H=T+PH+B, gap=14, usable=W-L-R-3*gap, px=usable/517;
+    function y(p){ return T+PH*(1-p); }
+    var s='';
+    [0,.25,.5,.75,1].forEach(function(p){ s+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(p)+'" y2="'+y(p)+'" class="sv-grid"/><text x="'+(L-6)+'" y="'+(y(p)+4)+'" text-anchor="end" class="sv-t3">'+(p*100)+'%</text>'; });
+    var x=L;
+    ORDER.forEach(function(sn){
+      var S=SC[sn], gx=x, sr=S.k/S.n;
+      S.rows.forEach(function(r){
+        var w=Math.max(1,r[2]*px-1.5), p=r[3]/r[2], ci=wilson(r[3],r[2]);
+        var k=tipKey('<b>'+sn+' · '+esc(r[0])+'</b>（'+r[1]+'）<div class="m2">'+r[3]+' / '+r[2]+' = '+(p*100).toFixed(2)+'%</div><div class="m2">95% 区间 '+(ci[0]*100).toFixed(1)+'–'+(ci[1]*100).toFixed(1)+'%</div>');
+        s+='<g data-tip="'+k+'" style="cursor:default"><rect x="'+x+'" y="'+y(1)+'" width="'+w+'" height="'+(y(p)-y(1))+'" style="fill:var(--'+S.col+'-soft)"/><rect x="'+x+'" y="'+y(p)+'" width="'+w+'" height="'+(y(0)-y(p))+'" style="fill:var(--'+S.col+'); opacity:.88"/></g>';
+        if(r[2]>=7) s+='<text transform="translate('+(x+w/2+3.5)+','+(T+PH+7)+') rotate(-90)" text-anchor="end" class="sv-t3" style="font-size:10px">'+esc(r[0])+'</text>';
+        x+=r[2]*px;
+      });
+      s+='<line x1="'+gx+'" x2="'+(x-1.5)+'" y1="'+y(sr)+'" y2="'+y(sr)+'" style="stroke:var(--ink); stroke-width:1.6"/>';
+      s+='<text x="'+gx+'" y="'+(T-12)+'" class="sv-h" style="fill:var(--'+S.col+'-ink)">'+sn+' <tspan class="sv-t2" style="fill:var(--ink2)">'+(sr*100).toFixed(1)+'%</tspan></text>';
+      x+=gap;
+    });
+    s+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(OVER)+'" y2="'+y(OVER)+'" style="stroke:var(--ink); stroke-width:1.2; stroke-dasharray:5 4"/>';
+    s+='<text x="'+(W-R-2)+'" y="'+(y(OVER)-6)+'" text-anchor="end" class="sv-t3" style="fill:var(--ink); paint-order:stroke; stroke:var(--surf); stroke-width:4px; stroke-linejoin:round">总体 41.97%</text>';
+    svg.setAttribute('viewBox','0 0 '+W+' '+H); svg.innerHTML=s;
+    cap.innerHTML='<b>读法：</b>每一列是一个子类，<b>宽度 = 题数</b>，实色高度 = 成功率。实线是场景平均，虚线是总体 41.97%。悬停可看计数与置信区间，窄列（N &lt; 7）的名字只在悬停里显示。一眼能看出两件事：ADR 整体偏低；很多「显眼」的高低柱其实非常窄，例如 VDR 的 Traffic（9 题）和 Puzzles（6 题）。';
+  }
+  function forest(){
+    var rows=[];
+    ORDER.forEach(function(sn){
+      var S=SC[sn]; rows.push({h:true,sn:sn,name:sn+' · '+S.zh,k:S.k,n:S.n});
+      var rr=S.rows.map(function(r){ return {sn:sn,name:r[0],zh:r[1],k:r[3],n:r[2]}; });
+      if(sort==='sr') rr.sort(function(a,b){ return b.k/b.n-a.k/a.n; });
+      rows=rows.concat(rr);
+    });
+    var W=960,T=34,RH=21,H=T+rows.length*RH+14, X0=258, PW=640;
+    function x(p){ return X0+PW*p; }
+    var s='';
+    [0,.25,.5,.75,1].forEach(function(p){ s+='<line x1="'+x(p)+'" x2="'+x(p)+'" y1="'+(T-6)+'" y2="'+(H-8)+'" class="sv-grid"/><text x="'+x(p)+'" y="'+(T-12)+'" text-anchor="middle" class="sv-t3">'+(p*100)+'%</text>'; });
+    s+='<line x1="'+x(OVER)+'" x2="'+x(OVER)+'" y1="'+(T-6)+'" y2="'+(H-8)+'" style="stroke:var(--ink); stroke-width:1.1; stroke-dasharray:5 4"/>';
+    s+='<text x="'+(W-4)+'" y="'+(T-12)+'" text-anchor="end" class="sv-t3">SR</text>';
+    rows.forEach(function(r,i){
+      var yc=T+i*RH+RH/2, S=SC[r.sn], p=r.k/r.n, ci=wilson(r.k,r.n);
+      var k=tipKey('<b>'+esc(r.h?r.name:(r.sn+' · '+r.name))+'</b>'+(r.zh?'（'+r.zh+'）':'')+'<div class="m2">'+r.k+' / '+r.n+' = '+(p*100).toFixed(2)+'%</div><div class="m2">95% Wilson 区间 '+(ci[0]*100).toFixed(1)+'–'+(ci[1]*100).toFixed(1)+'%</div>'+(r.h?'<div class="m2">子类同质性 p = '+HOMO[r.sn]+'</div>':''));
+      s+='<g data-tip="'+k+'">';
+      if(r.h) s+='<rect x="0" y="'+(yc-RH/2)+'" width="'+W+'" height="'+RH+'" style="fill:var(--tint)"/>';
+      else s+='<rect x="0" y="'+(yc-RH/2)+'" width="'+W+'" height="'+RH+'" style="fill:transparent"/>';
+      s+='<text x="'+(r.h?4:18)+'" y="'+(yc+4)+'" class="'+(r.h?'sv-h':'sv-t2')+'" style="'+(r.h?'fill:var(--'+S.col+'-ink); font-size:13px':'')+'">'+esc(r.name)+'</text>';
+      s+='<text x="'+(X0-14)+'" y="'+(yc+4)+'" text-anchor="end" class="sv-t3">'+r.k+'/'+r.n+'</text>';
+      s+='<line x1="'+x(ci[0])+'" x2="'+x(ci[1])+'" y1="'+yc+'" y2="'+yc+'" style="stroke:var(--'+S.col+'); stroke-width:'+(r.h?3:1.8)+'; stroke-linecap:round; opacity:'+(r.h?1:.8)+'"/>';
+      if(r.h) s+='<path d="M'+x(p)+','+(yc-7)+' l7,7 l-7,7 l-7,-7 z" style="fill:var(--'+S.col+'); stroke:var(--bg); stroke-width:1.2"/>';
+      else { var rad=2.6+Math.sqrt(r.n)*0.5; s+='<circle cx="'+x(p)+'" cy="'+yc+'" r="'+rad+'" style="fill:var(--'+S.col+'); stroke:var(--bg); stroke-width:1"/>'; }
+      s+='<text x="'+(W-4)+'" y="'+(yc+4)+'" text-anchor="end" class="sv-t3" style="fill:var(--ink2)">'+(p*100).toFixed(1)+'</text></g>';
+    });
+    svg.setAttribute('viewBox','0 0 '+W+' '+H); svg.innerHTML=s;
+    cap.innerHTML='<b>读法：</b>横线是 95% Wilson 置信区间，点的大小 ∝ √N，菱形是场景合计，虚线是总体 41.97%。子类的区间大多又宽又互相重叠：Traffic 9/9 的区间是 70–100%，Puzzles 1/6 是 3–56%。MSR 和 AVIR 内部的高低差在统计上都不显著（同质性 p = 0.54 / 0.65）。只有 ADR 的菱形明显落在另外三个的区间之外。';
+  }
+  function draw(){ document.getElementById('grpSort').hidden = view!=='forest'; if(view==='mosaic') mosaic(); else forest(); }
+  seg('segView',function(v){ view=v; draw(); });
+  seg('segSort',function(v){ sort=v; draw(); });
+  draw();
+})();
+
+/* ---------------- §6 prompt inspector ---------------- */
+(function(){
+  var P=[
+   {s:'MSR',src:'图 9 第 1 行',t:'电饭煲',inp:'左右腕首帧 + 末帧（并排）',sc:0,
+    seg:[['fmt','First-person video with side-by-side left and right wrist-camera views: the left half always shows the left wrist-camera feed, and the right half always shows the right wrist-camera feed. Both feeds synchronously capture the same scene at the same moment. '],['p','The two hands actively grasp and manipulate objects in coordination, maintaining consistent left–right hand identities while completing the task: '],['leak','“Put the inner pot and the steamer tray into the rice cooker.”'],['p',' '],['fmt','Start exactly from the provided first frame, follow the natural sequence of real-world actions, and '],['leak','transition accurately to the provided final frame.']],
+    inf:'中间过程：两个视角的动作是否同步，左右手身份是否保持一致。',
+    note:'任务名写在 prompt 里，终态由末帧给出。这道题的「推理」几乎都被输入和 prompt 预先做掉了，剩下的是一个很难的<b>渲染</b>问题。'},
+   {s:'MSR',src:'图 3',t:'系鞋带',inp:'左右腕视角图',sc:1,
+    seg:[['fmt','The left half show the view from the left wrist camera, and the right half from the right wrist camera. '],['p','The two robot arms continuously perform a coherent '],['leak','shoelace-tying action.']],
+    inf:'双视角之间的对应关系与动作的连贯性。',note:'任务名被直接点出。'},
+   {s:'ADR',src:'图 11 第 1 行',t:'马桶 / 柜子',inp:'场景图 + 音频：柜门打开声',sc:3,
+    seg:[['cand','A toilet with a visible flush control occupies the left, while a closed bathroom storage cabinet occupies the right;'],['fmt',' the tiled floor, walls, fixtures, and light form one continuous bathroom, establishing the spatial layout from the beginning of the shot. The camera holds a steady shot throughout the entire take, preserving the original composition and keeping all principal subjects and objects recognizable. All movements follow realistic physical behavior and remain consistent with the established spatial layout. No unrelated objects or unexpected scene changes appear, and the subjects, objects, and surrounding environment remain visually coherent from the first frame to the last.']],
+    inf:'发声的是柜子而不是马桶，事件是「柜门打开」。',
+    note:'标准的隐式写法：列出两个候选，但不说是哪个，判断完全交给音频。另外，prompt 用了大量文字<b>重新描述整个场景布局</b>。这与参考生成模式的特点吻合：参考图不绑定几何，模型要照文字重画场景（§7）。'},
+   {s:'ADR',src:'图 3',t:'手锯 / 电锯',inp:'场景图 + 音频：锯木声（Wood sawing）',sc:2,
+    seg:[['cand','The left side shows a hand saw and '],['hint','a wooden board ready to be cut'],['cand',', while the right side shows a '],['hint','powered-off'],['cand',' electric chainsaw.'],['p',' Generate a realistic and plausible video according to the audio content.']],
+    inf:'是手锯还是电锯在锯：要分辨手锯来回拉的声音和电锯的马达声。',
+    note:'两个状态描述都<b>偏向左边</b>：木板「待锯」，电锯「已关机」。一个只读文本的模型就有理由猜是手锯。'},
+   {s:'VDR',src:'图 10 第 1 行',t:'通用决策',inp:'前缀视频（例：狗走向门口）',sc:3,
+    seg:[['p','Based on the given video content, naturally generate a continuous scene that immediately follows the end of the video, reasonably depicting the next decisions and behaviors of the person or animal in the frame. Infer subsequent changes solely from the visual information, motion states, and spatial relationships already present in the video. '],['fmt','Maintain continuous motion and physical plausibility while preserving the original environment, object appearances, and spatial layout. Do not introduce new key objects or additional events, and do not skip ahead to distant outcomes. Keep it as one continuous shot, with no subtitles, no text, and no watermark.']],
+    inf:'画面里的人或动物接下来会做什么。',note:'真正开放的决策题。'},
+   {s:'VDR',src:'图 10 第 2 行',t:'镜头右移',inp:'前缀视频（先广角、后推近）',sc:1,
+    seg:[['p','Based on the given video content, naturally generate a continuous scene that immediately follows the end of the video. '],['fmt','Maintain the zoom level and close-up composition from the end of the video, '],['leak','stop the camera from continuing forward, and smoothly transition into a rightward lateral move, '],['hint','sequentially revealing the original colorful scene content to the right of the current person that has already appeared in the earlier wider view.'],['fmt',' The camera motion should be continuous and uniform, accurately preserving the appearance, position, scale, and spatial relationships of all people and objects. Only scene elements that have already appeared may be shown, and the lateral camera movement must not alter the original scene content.']],
+    inf:'右侧应该出现什么，这取决于对前文广角画面的记忆。',
+    note:'「决策」（镜头怎么动）已被写明，真正考的是<b>记忆与一致性</b>，大概属于 VDR 的 Memory 子类（6 题）。这恰恰是和世界模型最相关的一类。'},
+   {s:'VDR',src:'图 10 第 3 行',t:'滑板',inp:'前缀视频（准备滑下的人）',sc:2,
+    seg:[['p','Based on the given video content, naturally generate a continuous scene that immediately follows the end of the video, depicting the next reasonable reactions and actions of the red-haired woman wearing a helmet and standing on a skateboard, the girl supporting her from behind, and the nearby observers, '],['hint','while also showing the skateboard\'s short-term movement caused by changes in the woman\'s center of gravity.'],['p',' Infer subsequent changes solely from the visual information, motion states, and scene relationships already present in the video. '],['fmt','Maintain continuous motion and physical plausibility while preserving the original environment, subject appearances, and spatial layout. Do not introduce new key objects or additional events, and do not skip ahead to distant outcomes.']],
+    inf:'人会怎么反应，滑板会怎么动。',note:'因果机制「重心变化 → 滑板运动」被点明了。图 14(a) 的失败例正是一个滑板场景。'},
+   {s:'VDR',src:'图 10 第 4 行',t:'卡通杂耍',inp:'前缀视频（抛接菠萝、熨斗、烤面包机）',sc:1,
+    seg:[['p','Based on the given video content, naturally generate a continuous scene that immediately follows the end of the video, '],['leak','continuing the illustrated character\'s juggling with a pineapple, an iron, and a toaster, and showing the next positional exchange of the three objects according to the established rhythm and motion trajectories.'],['p',' Infer subsequent changes solely from the visual information, motion states, and scene relationships already present in the video. '],['fmt','Maintain continuous motion and physical plausibility while preserving the original environment, subject appearances, and spatial layout. Do not introduce new key objects or additional events, and do not skip ahead to distant outcomes. Keep it as one continuous shot, without adding subtitles, text, or a watermark.']],
+    inf:'下一次交换的具体轨迹。',note:'要生成的内容（继续抛接、按既定节奏交换位置）被完整写了出来。'},
+   {s:'VDR',src:'图 10 第 5 行',t:'瓶中气球',inp:'前缀视频（加热玻璃瓶里的气球）',sc:1,
+    seg:[['p','Based on the given video content, naturally generate a continuous scene that immediately follows the end of the video. '],['hint','Considering that the glass bottle has already been heated'],['p',', the balloon\'s current shape and position inside the bottle, '],['hint','and the possible changes in the temperature and pressure of the air inside the bottle'],['p',', infer the balloon\'s most reasonable subsequent deformation and motion. Infer subsequent changes solely from the experimental apparatus, object states, and physical conditions already visible in the video. '],['hint','The balloon\'s expansion, contraction, and positional changes inside the bottle should remain continuous and reflect the effects of temperature, air pressure, buoyancy, material elasticity, and other physical factors.']],
+    inf:'气球接下来会胀大还是缩小、往哪里移动。',note:'「已被加热」这个关键前提，以及温度、气压两个因果变量，全都由文本给出。视频只需要提供初始状态。'},
+   {s:'VDR',src:'图 1(c)',t:'驾驶',inp:'前缀视频（驾驶视角，前方出现情况）',sc:3,
+    seg:[['p','What should you do when you encounter this situation while driving?']],
+    inf:'应该停车（图中标注 “Stop Driving”）。',
+    note:'非常隐式，但<b>决策空间很窄</b>：停或不停，而且先验本来就偏向「减速停车」。Traffic 子类 9/9 全对，未必说明推理能力强。'},
+   {s:'AVIR',src:'图 12 上',t:'红圈定位',inp:'视频 + 口述音频 “Kick the ball to the middle.”',sc:3,
+    seg:[['p','Comprehensively analyze the video frames together with the synchronized audio to determine whether the two modalities contain any clear inconsistency in observable objects, actions, state changes, or event outcomes. '],['fmt','Only when a visible region can be directly confirmed, based on the audio and video, to contradict the audio information, add a clear, compact red circle at the location where the relevant object or action appears; the circle must accurately cover the key visual evidence of the inconsistency and be shown only during the time interval in which that inconsistency is present.']],
+    inf:'视频里哪一处违背了口述约束。',
+    note:'prompt 很干净，但音频其实是<b>一句话</b>。这等于把文本指令藏进了音频，考的是语音理解。开源路径里，这句话只以声学 latent 的形式进入模型（§7）。'},
+   {s:'AVIR',src:'图 12 下',t:'狗叫续写',inp:'视频 + 音频：狗叫声',sc:3,
+    seg:[['p','Using the video frames and synchronized audio, infer the most reasonable and immediate next action or behavior of the person in the current situation, and generate a continuous scene immediately following the end of the original video. '],['fmt','Base the inference only on visual cues already present in the input, the person\'s posture and motion state, spatial relationships among objects, and information provided by the audio. The subsequent behavior should be consistent with the person\'s current intent and environmental constraints, and should follow causal relationships, action continuity, and basic physical laws.']],
+    inf:'听到狗叫之后，人的下一步反应。',note:'干净的音视频融合题。'}
+  ];
+  var list=document.getElementById('plist'), pane=document.getElementById('ppane');
+  var col={MSR:'msr',ADR:'adr',VDR:'vdr',AVIR:'avir'};
+  P.forEach(function(p,i){
+    var b=document.createElement('button'); b.type='button'; b.setAttribute('role','option');
+    b.innerHTML='<span class="sc c-'+col[p.s]+'">'+p.s+'</span><span>'+p.t+'<br><span class="c-3" style="font-size:11.5px">'+p.src+'</span></span>';
+    b.addEventListener('click',function(){ show(i); });
+    list.appendChild(b);
+  });
+  function dots(n){ var s='<span class="dots" aria-label="隐式度 '+n+' / 3">'; for(var i=0;i<3;i++) s+='<i'+(i<n?' class="f"':'')+'></i>'; return s+'</span>'; }
+  function show(i){
+    var p=P[i];
+    list.querySelectorAll('button').forEach(function(b,j){ b.classList.toggle('on',j===i); b.setAttribute('aria-selected',j===i); });
+    var t=p.seg.map(function(s){ return s[0]==='p' ? esc(s[1]) : '<span class="'+s[0]+'">'+esc(s[1])+'</span>'; }).join('');
+    pane.innerHTML='<div class="pmeta"><span class="c-'+col[p.s]+'">'+p.s+'</span><span>'+p.src+'</span><span>输入：'+esc(p.inp)+'</span></div>'+
+      '<div class="ptext">'+t+'</div>'+
+      '<div class="infer"><b>留给模型推断的：</b>'+p.inf+'</div>'+
+      '<div class="infer" style="border-top:0; padding-top:0; margin-top:6px"><b>隐式度</b> '+dots(p.sc)+' <span class="c-3" style="font-size:12.5px">（笔者主观评级）</span></div>'+
+      '<p style="margin:8px 0 0; font-size:14px; color:var(--ink2)">'+p.note+'</p>';
+  }
+  show(0);
+})();
+
+/* ---------------- §7 H3 system toggle ---------------- */
+(function(){
+  var g=function(id){ return document.getElementById(id); };
+  function set(v){
+    g('gPaper').style.display = v==='paper' ? '' : 'none';
+    g('gReal').style.display = v==='paper' ? 'none' : '';
+    g('gHosted').style.display = v==='hosted' ? '' : 'none';
+    g('gOpen').style.display = v==='open' ? '' : 'none';
+    g('gCtx').classList.toggle('dim', v==='open');
+    g('g2k').classList.toggle('dim', v==='open');
+    g('outRes').textContent = v==='open' ? '768p 短边' : '2K（托管）';
+  }
+  seg('segH3', set); set('hosted');
+})();
+
+/* ---------------- §8 ADR calculator ---------------- */
+(function(){
+  var c=2, r=0.6, SR=0.274, LO=0.208, HI=0.351;
+  var svg=document.getElementById('calcSvg'), sl=document.getElementById('rSlider');
+  function x(p){ return 170+520*Math.max(0,Math.min(1,p)); }
+  function draw(){
+    document.getElementById('rOut').textContent=r.toFixed(2);
+    var blind=r/c, a=SR/r, alo=LO/r, ahi=Math.min(1,HI/r), ch=1/c;
+    var s='';
+    [0,.25,.5,.75,1].forEach(function(p){ s+='<line x1="'+x(p)+'" x2="'+x(p)+'" y1="14" y2="136" class="sv-grid"/><text x="'+x(p)+'" y="148" text-anchor="middle" class="sv-t3">'+(p*100)+'%</text>'; });
+    // row 1
+    s+='<text x="8" y="44" class="sv-t2">成功率</text><text x="8" y="60" class="sv-t3">H3 vs 盲听模型</text>';
+    s+='<rect x="'+x(LO)+'" y="34" width="'+(x(HI)-x(LO))+'" height="16" rx="3" style="fill:var(--adr-soft); stroke:var(--adr)"/>';
+    s+='<circle cx="'+x(SR)+'" cy="42" r="6" style="fill:var(--adr); stroke:var(--bg); stroke-width:1.2"/>';
+    s+='<text x="'+x(SR)+'" y="26" text-anchor="middle" class="sv-t3" style="fill:var(--adr-ink)">H3 27.4%</text>';
+    s+='<path d="M'+x(blind)+',34 l8,8 l-8,8 l-8,-8 z" style="fill:var(--ink); stroke:var(--bg); stroke-width:1"/>';
+    s+='<text x="'+x(blind)+'" y="66" text-anchor="middle" class="sv-t3" style="fill:var(--ink)">盲听 '+(blind*100).toFixed(1)+'%</text>';
+    // row 2
+    s+='<text x="8" y="106" class="sv-t2">选对目标</text><text x="8" y="122" class="sv-t3">a = SR / r</text>';
+    s+='<line x1="'+x(ch)+'" x2="'+x(ch)+'" y1="86" y2="130" style="stroke:var(--ink); stroke-width:1.4; stroke-dasharray:4 3"/>';
+    s+='<text x="'+(x(ch)+5)+'" y="94" class="sv-t3" style="fill:var(--ink)">机会 1/c = '+(ch*100).toFixed(0)+'%</text>';
+    s+='<rect x="'+x(alo)+'" y="100" width="'+Math.max(2,x(ahi)-x(alo))+'" height="16" rx="3" style="fill:var(--ctx-soft); stroke:var(--ctx)"/>';
+    s+='<circle cx="'+x(Math.min(1,a))+'" cy="108" r="6" style="fill:var(--ctx); stroke:var(--bg); stroke-width:1.2"/>';
+    svg.innerHTML=s;
+    document.getElementById('oBlind').textContent=(blind*100).toFixed(1)+'%';
+    document.getElementById('oA').textContent=(a>1?'> 100%':(a*100).toFixed(1)+'%');
+    document.getElementById('oAci').textContent='区间 '+(alo*100).toFixed(1)+' – '+(HI/r>1?'100+':(ahi*100).toFixed(1))+'%';
+    var v=document.getElementById('verdict'), lo=(LO*c), hi=(HI*c), cls, msg;
+    if(a>1){ cls='v-ok'; msg='r 低于 H3 的实测成功率，这个组合在逻辑上不可能：画对的概率不可能比成功率还低。'; }
+    else if(alo>ch){ cls='v-ok'; msg='在这个 r 下，H3 选对目标的概率<b>显著高于盲猜</b>（下界 '+(alo*100).toFixed(1)+'% &gt; '+(ch*100).toFixed(0)+'%），可以算作「用上了音频」的证据。'; }
+    else if(ahi<ch){ cls='v-bad'; msg='在这个 r 下，H3 <b>比「完全不听音频、随机挑一个」还差</b>（上界 '+(ahi*100).toFixed(1)+'% &lt; '+(ch*100).toFixed(0)+'%）。失败的主因不是没听懂，而是系统性地选错、同时动两个，或者什么都没画出来。'; }
+    else { cls='v-mid'; msg='在这个 r 下，H3 与盲猜<b>统计上无法区分</b>：区间 '+(alo*100).toFixed(1)+'–'+(ahi*100).toFixed(1)+'% 覆盖了 1/c = '+(ch*100).toFixed(0)+'%，所以 27.4% 证明不了它用上了音频。'; }
+    msg+='<br><span class="c-3" style="font-size:13px">c = '+c+' 时：r &lt; '+lo.toFixed(2)+' 才构成「用了音频」的证据；'+(hi<=1?'r &gt; '+hi.toFixed(2)+' 则比盲猜还差。':'在 r ≤ 1 的范围内不会显著差于盲猜。')+'</span>';
+    v.className='verdict '+cls; v.innerHTML=msg;
+  }
+  sl.addEventListener('input',function(){ r=+sl.value; draw(); });
+  seg('segC',function(vv){ c=+vv; draw(); });
+  draw();
+})();
+
+/* ---------------- §10 issue filter ---------------- */
+seg('segSev',function(v){
+  document.querySelectorAll('#issues .issue').forEach(function(d){ d.hidden = !(v==='all' || d.getAttribute('data-sev')===v); });
+});
+})();
+</script>
+
+</body>
+</html>

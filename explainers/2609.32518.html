@@ -1,0 +1,1500 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UnStep 精读</title>
+<meta name="description" content="UnStep（arXiv 2609.32518）精读：Self Forcing 类因果视频模型的免训练推理加速。包括时间账本与耗时模型拟合、逐块调度与 KV 窗口图、clean-cache 精修与 V/O 截断 SVD 的机制剖析、玩具模型复现实验室、代码与论文的差异，以及存疑清单。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=Noto+Serif+SC:wght@600;700&family=STIX+Two+Text:ital@0;1&display=swap">
+<style>
+/* ============================================================
+   UnStep 精读 — tokens（深色优先：机房 / 示波器；浅色：纸面）
+   角色色：sf   = 原版 Self Forcing（冷蓝）      un  = UnStep（暖橙）
+           rt   = 工程栈 / runtime（紫）          cut = 砍计算：少步 + KV 窗口（玫红）
+           rec  = 补分：缓存精修 + V/O SVD（青）   vae = VAE 解码与其他固定开销（石板灰）
+           sink = KV 的 sink 帧（紫）  recent = 保留的最近帧（蓝）
+           risk / med / low = 存疑·高 / 中 / 低     ok = 已复算通过
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0e1115; --surf:#141920; --surf2:#1a2028; --surf3:#232b35;
+  --rule:#252f3a; --rule2:#394553;
+  --ink:#e6ebf0; --ink2:#a9b3be; --ink3:#7c8793;
+  --sf:#4f9be8; --sf-ink:#8fc0f5; --sf-soft:rgba(79,155,232,.16);
+  --un:#ec8b3e; --un-ink:#f6b077; --un-soft:rgba(236,139,62,.16);
+  --rt:#9d86ec; --rt-ink:#c3b4f7; --rt-soft:rgba(157,134,236,.17);
+  --cut:#e0647f; --cut-ink:#f196aa; --cut-soft:rgba(224,100,127,.17);
+  --rec:#2fb5a8; --rec-ink:#6fd6cb; --rec-soft:rgba(47,181,168,.16);
+  --vae:#7f8a97; --vae-ink:#b3bcc6; --vae-soft:rgba(127,138,151,.18);
+  --sink:#9d86ec; --recent:#4f9be8; --evict:#3a4654;
+  --risk:#e5544c; --risk-ink:#f68a83; --risk-soft:rgba(229,84,76,.15);
+  --med:#d4b144; --med-ink:#ecd07a; --med-soft:rgba(212,177,68,.15);
+  --low:#7f8a97; --low-ink:#b3bcc6; --low-soft:rgba(127,138,151,.15);
+  --ok:#3dba80; --ok-ink:#72d8a7; --ok-soft:rgba(61,186,128,.14);
+  --grid:#1f2730; --axis:#3c4755;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 32px rgba(0,0,0,.30);
+  --f-head:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --f-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --f-math:"STIX Two Text","Times New Roman",Georgia,serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#eef1f4; --surf:#ffffff; --surf2:#e9edf1; --surf3:#dde3e9;
+    --rule:#d6dce3; --rule2:#b7c0cb;
+    --ink:#121821; --ink2:#3e4854; --ink3:#65707c;
+    --sf:#1f6fc4; --sf-ink:#17579c; --sf-soft:rgba(31,111,196,.10);
+    --un:#c8641a; --un-ink:#9c4c0f; --un-soft:rgba(200,100,26,.11);
+    --rt:#6b52cf; --rt-ink:#533ca8; --rt-soft:rgba(107,82,207,.11);
+    --cut:#c43a5c; --cut-ink:#9e2946; --cut-soft:rgba(196,58,92,.10);
+    --rec:#138a7f; --rec-ink:#0c6a61; --rec-soft:rgba(19,138,127,.11);
+    --vae:#6b7683; --vae-ink:#4f5965; --vae-soft:rgba(107,118,131,.13);
+    --sink:#6b52cf; --recent:#1f6fc4; --evict:#c5ccd4;
+    --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+    --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+    --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.12);
+    --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.10);
+    --grid:#e4e9ee; --axis:#b7c0cb;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#eef1f4; --surf:#ffffff; --surf2:#e9edf1; --surf3:#dde3e9;
+  --rule:#d6dce3; --rule2:#b7c0cb;
+  --ink:#121821; --ink2:#3e4854; --ink3:#65707c;
+  --sf:#1f6fc4; --sf-ink:#17579c; --sf-soft:rgba(31,111,196,.10);
+  --un:#c8641a; --un-ink:#9c4c0f; --un-soft:rgba(200,100,26,.11);
+  --rt:#6b52cf; --rt-ink:#533ca8; --rt-soft:rgba(107,82,207,.11);
+  --cut:#c43a5c; --cut-ink:#9e2946; --cut-soft:rgba(196,58,92,.10);
+  --rec:#138a7f; --rec-ink:#0c6a61; --rec-soft:rgba(19,138,127,.11);
+  --vae:#6b7683; --vae-ink:#4f5965; --vae-soft:rgba(107,118,131,.13);
+  --sink:#6b52cf; --recent:#1f6fc4; --evict:#c5ccd4;
+  --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+  --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+  --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.12);
+  --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.10);
+  --grid:#e4e9ee; --axis:#b7c0cb;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.75;}
+a{color:var(--sf-ink);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:2px solid var(--sf);outline-offset:2px;border-radius:4px}
+b,strong{font-weight:600;color:var(--ink)}
+sub,sup{font-size:.72em;line-height:0}
+.tnum{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono);font-size:.9em}
+.mv{font-family:var(--f-math);font-style:italic;font-size:1.07em;white-space:nowrap}
+.dim{color:var(--ink3)}
+.c-sf{color:var(--sf-ink)} .c-un{color:var(--un-ink)} .c-rt{color:var(--rt-ink)} .c-cut{color:var(--cut-ink)} .c-rec{color:var(--rec-ink)} .c-vae{color:var(--vae-ink)}
+.c-risk{color:var(--risk-ink)} .c-ok{color:var(--ok-ink)} .c-med{color:var(--med-ink)}
+.wrap{max-width:1080px;margin:0 auto;padding-inline:20px;padding-block:24px 110px}
+@media (max-width:520px){ .wrap{padding-inline:16px} }
+
+/* ---------- hero ---------- */
+.hero{padding-block:8px 28px;border-bottom:1px solid var(--rule);display:grid;gap:18px}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.kicker{font-family:var(--f-mono);font-size:12px;letter-spacing:.14em;color:var(--ink3);text-transform:uppercase}
+.themebtn{font:inherit;font-size:12.5px;color:var(--ink2);background:var(--surf);border:1px solid var(--rule2);border-radius:999px;padding:4px 12px;cursor:pointer}
+.themebtn:hover{color:var(--ink)}
+h1{font-family:var(--f-head);font-weight:700;font-size:clamp(32px,5.2vw,52px);line-height:1.14;margin:4px 0 0;letter-spacing:.01em;text-wrap:balance}
+h1 .soft{color:var(--ink3);font-weight:600}
+.sub{font-size:17.5px;line-height:1.72;color:var(--ink2);max-width:62em;margin:0}
+.thesis{max-width:64em;margin:0;padding:14px 18px;border-left:3px solid var(--un);background:var(--un-soft);border-radius:0 8px 8px 0;font-size:15.5px}
+.patch{border:1px solid var(--rule2);border-radius:10px;overflow:hidden;background:var(--surf);box-shadow:var(--shadow)}
+.patch .jacks{height:14px;background:
+  repeating-linear-gradient(90deg,var(--rule2) 0 2px,transparent 2px 9px) 0 5px/100% 4px no-repeat, var(--surf2);border-bottom:1px solid var(--rule)}
+.patch dl{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));}
+.patch dl div{padding:10px 14px;border-right:1px solid var(--rule);border-top:1px solid var(--rule);min-width:0}
+.patch dt{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;color:var(--ink3);text-transform:uppercase}
+.patch dd{margin:2px 0 0;font-size:13.5px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.patch dd .no{color:var(--risk-ink);font-weight:600}
+.statstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+.statstrip div{background:var(--surf);padding:12px 14px;display:grid;gap:2px;align-content:start}
+.statstrip b{font-family:var(--f-mono);font-weight:500;font-size:18px;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.statstrip span{font-size:12.5px;line-height:1.45;color:var(--ink3)}
+.statstrip .warn b{color:var(--risk-ink)}
+
+/* ---------- TOC ---------- */
+nav.toc{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--rule);margin-inline:-20px;padding:8px 20px;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{flex:none;font-size:13px;color:var(--ink2);text-decoration:none;padding:5px 10px;border-radius:999px;white-space:nowrap}
+nav.toc a .n{font-family:var(--f-mono);font-size:11px;color:var(--ink3);margin-right:4px}
+nav.toc a:hover,nav.toc a.on{background:var(--surf3);color:var(--ink)}
+@media (max-width:520px){ nav.toc{margin-inline:-16px;padding-inline:16px} }
+
+/* ---------- sections ---------- */
+section{padding-block:46px 8px;scroll-margin-top:56px}
+h2{font-family:var(--f-head);font-weight:700;font-size:clamp(24px,3.2vw,31px);line-height:1.3;margin:0 0 8px;text-wrap:balance;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+h2 .no{font-family:var(--f-mono);font-weight:600;font-size:.56em;color:var(--ink3);letter-spacing:.06em}
+h3{font-family:var(--f-head);font-weight:600;font-size:20px;line-height:1.4;margin:32px 0 8px;text-wrap:balance}
+h4{font-size:14px;font-weight:600;margin:0 0 6px;letter-spacing:.02em}
+p{margin:0 0 14px}
+.lede{color:var(--ink2);font-size:16.5px;max-width:62em}
+.prose{max-width:50em}
+ul.tight,ol.tight{margin:0 0 14px;padding-left:1.25em}
+ul.tight li,ol.tight li{margin:5px 0}
+
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:18px 0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:18px 0}
+.card{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;min-width:0}
+.card p:last-child,.card ul:last-child{margin-bottom:0}
+.card h4{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink3);font-weight:600}
+.card.rt{border-top:3px solid var(--rt)} .card.cut{border-top:3px solid var(--cut)} .card.rec{border-top:3px solid var(--rec)}
+.card.sf{border-top:3px solid var(--sf)} .card.un{border-top:3px solid var(--un)} .card.ok{border-top:3px solid var(--ok)} .card.risk{border-top:3px solid var(--risk)}
+
+.tag{display:inline-block;font-size:12px;line-height:1.55;padding:0 7px;border-radius:5px;font-weight:600;white-space:nowrap;vertical-align:1px}
+.tag.sf{background:var(--sf-soft);color:var(--sf-ink)}
+.tag.un{background:var(--un-soft);color:var(--un-ink)}
+.tag.rt{background:var(--rt-soft);color:var(--rt-ink)}
+.tag.cut{background:var(--cut-soft);color:var(--cut-ink)}
+.tag.rec{background:var(--rec-soft);color:var(--rec-ink)}
+.tag.risk{background:var(--risk-soft);color:var(--risk-ink)}
+.tag.med{background:var(--med-soft);color:var(--med-ink)}
+.tag.low{background:var(--low-soft);color:var(--low-ink)}
+.tag.ok{background:var(--ok-soft);color:var(--ok-ink)}
+.tag.mine{background:var(--surf3);color:var(--ink2)}
+
+.callout{border:1px solid var(--rule);border-left:3px solid var(--sf);background:var(--surf);border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0;font-size:15px}
+.callout.warn{border-left-color:var(--risk)}
+.callout.mine{border-left-color:var(--ok)}
+.callout.un{border-left-color:var(--un)}
+.callout.code{border-left-color:var(--rt)}
+.callout p:last-child,.callout ul:last-child{margin-bottom:0}
+.callout .lab{font-family:var(--f-mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink3);display:block;margin-bottom:2px}
+
+/* equations */
+.eq{font-family:var(--f-math);font-size:18px;line-height:1.7;background:var(--surf);border:1px solid var(--rule);border-radius:8px;padding:12px 16px;margin:12px 0;overflow-x:auto;white-space:nowrap}
+.eq .no{float:right;font-family:var(--f-mono);font-size:12px;color:var(--ink3);margin-left:18px;font-style:normal}
+.eq i{font-style:italic}
+.eq .hl-un{color:var(--un-ink)} .eq .hl-sf{color:var(--sf-ink)} .eq .hl-rec{color:var(--rec-ink)} .eq .hl-cut{color:var(--cut-ink)}
+.eqnote{font-size:14px;color:var(--ink2);margin:-4px 0 14px}
+@media (max-width:520px){ .eq{font-size:16px;padding:10px 12px} .eq .no{float:none;display:block;margin:0 0 2px} }
+
+/* figures */
+figure{margin:20px 0;background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:16px;min-width:0}
+figure svg{display:block;width:100%;height:auto;max-width:100%}
+figcaption{font-size:13.5px;line-height:1.6;color:var(--ink2);margin-top:10px}
+figcaption b{color:var(--ink)}
+.svgtxt{font-family:var(--f-body);font-size:12px;fill:currentColor}
+.svgmono{font-family:var(--f-mono);font-size:11px;fill:currentColor}
+
+/* controls */
+.ctrls{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin:4px 0 12px}
+.seg{display:inline-flex;border:1px solid var(--rule2);border-radius:8px;overflow:hidden;flex-wrap:wrap}
+.seg button{font:inherit;font-size:13px;padding:5px 11px;background:var(--surf);color:var(--ink2);border:0;border-right:1px solid var(--rule);cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--surf3);color:var(--ink);font-weight:600}
+.seg button:hover{color:var(--ink)}
+label.sl{display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--ink2);flex:1 1 260px;min-width:0}
+label.sl input[type=range]{flex:1;min-width:120px;accent-color:var(--un)}
+label.sl output{font-family:var(--f-mono);font-size:12.5px;color:var(--ink);min-width:4.5em;text-align:right}
+label.ck{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;color:var(--ink2);cursor:pointer}
+.readout{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:8px;overflow:hidden;margin:10px 0}
+.readout div{background:var(--surf2);padding:8px 11px}
+.readout span{display:block;font-size:11.5px;color:var(--ink3);line-height:1.35}
+.readout b{font-family:var(--f-mono);font-weight:500;font-size:15px;font-variant-numeric:tabular-nums}
+
+/* tables */
+.tbl-wrap{overflow-x:auto;margin:14px 0;border:1px solid var(--rule);border-radius:10px;background:var(--surf)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;border-bottom:1px solid var(--rule);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td.l,th.l{text-align:left;white-space:normal}
+thead th{font-weight:600;color:var(--ink2);background:var(--surf2);font-size:12.5px}
+tbody tr:last-child td{border-bottom:0}
+td.best{font-weight:600;color:var(--ink)}
+td .d{display:block;font-size:11px;color:var(--ink3)}
+td.up{background:var(--ok-soft)} td.dn{background:var(--risk-soft)}
+tr.ours td{background:color-mix(in srgb,var(--un-soft) 60%,transparent)}
+tr.sep td{border-top:2px solid var(--rule2)}
+tr.grp td{background:var(--surf2);color:var(--ink3);font-family:var(--f-mono);font-size:11.5px;letter-spacing:.1em}
+.mono-num{font-family:var(--f-mono);font-size:12.5px}
+.bar-in{display:inline-block;height:8px;border-radius:2px;vertical-align:1px;margin-right:6px}
+
+/* doubts */
+.doubts{display:grid;gap:10px;margin:14px 0}
+details.dbt{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:0}
+details.dbt[open]{border-color:var(--rule2)}
+details.dbt summary{list-style:none;cursor:pointer;padding:12px 16px;display:flex;gap:10px;align-items:baseline}
+details.dbt summary::-webkit-details-marker{display:none}
+details.dbt summary .id{font-family:var(--f-mono);font-size:12px;color:var(--ink3);flex:none}
+details.dbt summary .t{flex:1;font-weight:600;line-height:1.55}
+details.dbt summary::after{content:"+";font-family:var(--f-mono);color:var(--ink3);flex:none}
+details.dbt[open] summary::after{content:"−"}
+details.dbt .body{padding:0 16px 14px 16px;font-size:15px;color:var(--ink2)}
+details.dbt .body p:last-child{margin-bottom:0}
+details.dbt.h{border-left:3px solid var(--risk)} details.dbt.m{border-left:3px solid var(--med)} details.dbt.l{border-left:3px solid var(--low)}
+
+/* code */
+pre.code{font-family:var(--f-mono);font-size:12.8px;line-height:1.6;background:var(--surf2);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;overflow-x:auto;margin:14px 0;color:var(--ink)}
+pre.code .cm{color:var(--ink3)} pre.code .k{color:var(--sf-ink)} pre.code .f{color:var(--un-ink)} pre.code .r{color:var(--rec-ink)}
+
+/* legend chips */
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--ink2);margin:6px 0}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:14px;height:10px;border-radius:2px}
+
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--rule);font-size:13px;color:var(--ink3)}
+.foot a{color:var(--ink2)}
+.two-col{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:820px){ .two-col{grid-template-columns:1fr} }
+.small{font-size:13.5px;color:var(--ink2)}
+.hs{overflow-x:auto;-webkit-overflow-scrolling:touch}
+@media (max-width:760px){ .hs svg.wide{min-width:700px} .hs{margin-inline:-6px;padding-bottom:4px} .hs::after{content:"← 可左右滑动 →";display:block;text-align:center;font-size:11px;color:var(--ink3);font-family:var(--f-mono);position:sticky;left:0;width:100%} }
+.tip{position:fixed;pointer-events:none;z-index:50;background:var(--surf3);border:1px solid var(--rule2);color:var(--ink);font-size:12.5px;line-height:1.5;padding:6px 9px;border-radius:7px;box-shadow:var(--shadow);max-width:280px;opacity:0;transition:opacity .12s}
+.tip.on{opacity:1}
+.pill{display:inline-block;font-family:var(--f-mono);font-size:11.5px;border:1px solid var(--rule2);border-radius:999px;padding:0 8px;color:var(--ink2);white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="topbar">
+    <span class="kicker">arXiv 2609.32518v1 · 2026-09-26 · cs.CV · 精读于 2026-09-29</span>
+    <button class="themebtn" id="themeBtn" type="button" aria-label="切换浅色/深色">◐ 主题</button>
+  </div>
+  <h1>UnStep <span class="soft">— 免训练，比蒸馏步数还少 · 精读</span></h1>
+  <p class="sub">Self Forcing 这类“每块 4 步”的因果视频模型，在 H100 上只有 17 FPS。UnStep 不重新训练，只改推理，分三步走。第一步把运行时的零碎开销榨干：编译、注意力调用、RoPE、VAE 解码。第二步<span class="c-cut">砍计算</span>：后续块从 4 步减到 2 步，KV 缓存限制在 9 帧。第三步用两个不花时间的小改动把掉的分<span class="c-rec">补回来</span>：一是原本只用来写缓存的那次 t=0 前向，改成一次 σ=0.02 的“微去噪”；二是把注意力 V/O 投影矩阵最弱的 8% 奇异方向剪掉。最终 49.8 FPS，VBench 84.56，原版为 84.31。</p>
+
+  <div class="patch">
+    <div class="jacks" aria-hidden="true"></div>
+    <dl>
+      <div><dt>全称</dt><dd>UnStep: Training-Free Acceleration of Causal Video Diffusion with Fewer Steps Than Distillation</dd></div>
+      <div><dt>单位</dt><dd>Meta Superintelligence Labs（一作 Youssef Mansour，共 7 位作者）</dd></div>
+      <div><dt>代码</dt><dd><a href="https://github.com/facebookresearch/UnStep">facebookresearch/UnStep</a>，CC BY-NC 4.0。<span class="no">只含默认 T2V 两步路径</span>，没有 1 步、I2V、长视频的配置，也没有基线测速脚本</dd></div>
+      <div><dt>底座</dt><dd>Wan2.1-T2V-1.3B 的 Self Forcing 权重；另外测了 Causal Forcing、LongLive 1.0 两个权重</dd></div>
+      <div><dt>输出</dt><dd>832×480，81 帧 @16 fps，即 21 个 latent 帧，分 7 块、每块 3 帧</dd></div>
+      <div><dt>调参</dt><dd>所有超参都在同一个设置上选定：Self Forcing + H100 + VBench 5s T2V（946 条提示）。选定后固定，直接用到其他设置</dd></div>
+      <div><dt>测速口径</dt><dd>batch 1。计入 DiT、KV 和整段 VAE 解码；不计文本编码和每张卡的第一个 clip（用于编译预热）</dd></div>
+      <div><dt>训练</dt><dd>无，零梯度更新</dd></div>
+    </dl>
+  </div>
+
+  <p class="thesis"><b>一句话：</b>UnStep 不是新的采样器，而是套在推理外面的一层包装，由三层叠成。<span class="c-rt">① 工程层</span>：不改输出，17 → 32.2 FPS。<span class="c-cut">② 砍计算层</span>：2 步 + 9 帧 KV，32.2 → 49.8 FPS，VBench 掉 0.47。<span class="c-rec">③ 补分层</span>：σ=0.02 的缓存精修加 V/O 截断 SVD，不花时间，VBench 回升 0.69。如果按每段视频省下的毫秒来算，<b>省下的时间有 72% 来自第 ① 层</b>，单是 torch.compile 就占 36%。</p>
+
+  <div class="statstrip">
+    <div><b>17.0 → 49.8 FPS</b><span>H100 端到端吞吐（5 秒 clip，含 VAE）。GB200 上 63.7，1 步变体 59.6 / 77.4</span></div>
+    <div><b>35 → 23</b><span>每段视频的 DiT 前向次数：首块 4+1，后 6 块各 2+1</span></div>
+    <div><b>84.31 → 84.56</b><span>VBench Total，5 次重跑取均值。同 seed 重跑的标准差 0.10</span></div>
+    <div><b>72%</b><span>总共省下 3138 ms，其中来自编译和工程栈的比例。由 81/FPS 换算，数字是我算的</span></div>
+    <div class="warn"><b>−0.34 / −0.20</b><span>同一配置从 H100 换到 GB200 后，CF / SF 的 VBench Total 漂移。CF 的漂移比它宣称的 +0.11 提升还大，SF 的漂移与其 +0.25 同一量级</span></div>
+  </div>
+</header>
+
+<nav class="toc" aria-label="目录">
+  <a href="#s1"><span class="n">01</span>定位</a>
+  <a href="#s2"><span class="n">02</span>原版怎么跑</a>
+  <a href="#s3"><span class="n">03</span>时间账本</a>
+  <a href="#s4"><span class="n">04</span>工程栈</a>
+  <a href="#s5"><span class="n">05</span>少步</a>
+  <a href="#s6"><span class="n">06</span>KV 窗口</a>
+  <a href="#s7"><span class="n">07</span>缓存精修</a>
+  <a href="#s8"><span class="n">08</span>V/O SVD</a>
+  <a href="#s9"><span class="n">09</span>玩具模型</a>
+  <a href="#s10"><span class="n">10</span>实验逐表</a>
+  <a href="#s11"><span class="n">11</span>存疑</a>
+  <a href="#s12"><span class="n">12</span>结论与启示</a>
+</nav>
+
+<!-- ============================ 01 ============================ -->
+<section id="s1">
+  <h2><span class="no">01</span>它在解决什么，三层各干了什么</h2>
+  <p class="lede">Wan 2.1 这类双向视频扩散模型要跑 50 步，而且要看完整段才能出第一帧，没法流式。因果蒸馏（CausVid → Self Forcing → Causal Forcing）把它改成“逐块生成、每块 4 步”：每生成 3 个 latent 帧（约 12 帧画面）就能交付一块。但 4 步在 H100 上仍只有 17 FPS。已有的提速办法有三类：再蒸馏到 1–2 步（rCM、Causal-rCM、Causal Forcing++、One-Forcing）、换小 VAE 解码器（DiagDistill）、稀疏或短窗注意力（Light / Sparse / Hybrid Forcing 等）。它们<b>都要训练</b>，速度和质量的折中在训练时就定死了。UnStep 的主张是：这些全部放到推理时做，同一个权重想跑 2 步或 1 步，推理时再决定。</p>
+
+  <figure>
+    <div class="hs"><svg class="wide" viewBox="0 0 960 300" role="img" aria-label="UnStep 三层结构：原版 17 FPS，加工程栈到 32.2 FPS，砍计算到 49.8 FPS 但 VBench 掉到 83.87，补分后 VBench 回到 84.56。下方时间条显示每段视频 4765 毫秒被省下的部分：编译 1116、其余工程 1133、2 步 687、窗口 202，剩余 1627 毫秒。">
+      <defs>
+        <marker id="aO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+      </defs>
+      <g class="svgtxt">
+        <rect x="10" y="14" width="200" height="104" rx="9" style="fill:var(--sf-soft);stroke:var(--sf)"/>
+        <text x="110" y="37" text-anchor="middle" style="fill:var(--ink);font-weight:600">原版 Self Forcing</text>
+        <text x="110" y="56" text-anchor="middle" style="fill:var(--ink3)">FA3 · 每块 4 步 · 全历史 KV</text>
+        <text x="110" y="86" text-anchor="middle" class="svgmono" style="font-size:20px;fill:var(--sf-ink)">17.0 FPS</text>
+        <text x="110" y="107" text-anchor="middle" class="svgmono" style="fill:var(--ink2)">VBench 84.31</text>
+
+        <rect x="257" y="14" width="200" height="104" rx="9" style="fill:var(--rt-soft);stroke:var(--rt)"/>
+        <text x="357" y="37" text-anchor="middle" style="fill:var(--ink);font-weight:600">① + 工程栈</text>
+        <text x="357" y="56" text-anchor="middle" style="fill:var(--ink3)">编译 · 索引 · 定长 FA · RoPE · VAE</text>
+        <text x="357" y="86" text-anchor="middle" class="svgmono" style="font-size:20px;fill:var(--rt-ink)">32.2 FPS</text>
+        <text x="357" y="107" text-anchor="middle" class="svgmono" style="fill:var(--ink2)">VBench 84.34 ≈</text>
+
+        <rect x="504" y="14" width="200" height="104" rx="9" style="fill:var(--cut-soft);stroke:var(--cut)"/>
+        <text x="604" y="37" text-anchor="middle" style="fill:var(--ink);font-weight:600">② + 砍计算</text>
+        <text x="604" y="56" text-anchor="middle" style="fill:var(--ink3)">后续块 2 步 · KV 限 9 帧</text>
+        <text x="604" y="86" text-anchor="middle" class="svgmono" style="font-size:20px;fill:var(--cut-ink)">49.8 FPS</text>
+        <text x="604" y="107" text-anchor="middle" class="svgmono" style="fill:var(--risk-ink)">VBench 83.87 ↓0.47</text>
+
+        <rect x="751" y="14" width="200" height="104" rx="9" style="fill:var(--rec-soft);stroke:var(--rec)"/>
+        <text x="851" y="37" text-anchor="middle" style="fill:var(--ink);font-weight:600">③ + 补分</text>
+        <text x="851" y="56" text-anchor="middle" style="fill:var(--ink3)">σ=0.02 缓存精修 · V/O SVD</text>
+        <text x="851" y="86" text-anchor="middle" class="svgmono" style="font-size:20px;fill:var(--rec-ink)">49.8 FPS</text>
+        <text x="851" y="107" text-anchor="middle" class="svgmono" style="fill:var(--ok-ink)">VBench 84.56 ↑0.69</text>
+
+        <g style="color:var(--ink3)">
+          <line x1="212" y1="66" x2="254" y2="66" stroke="currentColor" marker-end="url(#aO)"/>
+          <line x1="459" y1="66" x2="501" y2="66" stroke="currentColor" marker-end="url(#aO)"/>
+          <line x1="706" y1="66" x2="748" y2="66" stroke="currentColor" marker-end="url(#aO)"/>
+        </g>
+
+        <text x="10" y="160" style="fill:var(--ink2)">每段 5 秒视频的耗时（ms，= 81 帧 / FPS）：原版 4765 ms 被切掉了哪些</text>
+        <!-- time bar, scale 940/4765 -->
+        <rect x="10" y="176" width="220.2" height="30" style="fill:var(--rt);opacity:.85"/>
+        <rect x="230.2" y="176" width="223.5" height="30" style="fill:var(--rt);opacity:.5"/>
+        <rect x="453.7" y="176" width="135.5" height="30" style="fill:var(--cut);opacity:.85"/>
+        <rect x="589.2" y="176" width="39.8" height="30" style="fill:var(--cut);opacity:.5"/>
+        <rect x="629" y="176" width="321" height="30" style="fill:var(--un-soft);stroke:var(--un)"/>
+        <text x="120" y="196" text-anchor="middle" class="svgmono" style="fill:#fff">torch.compile −1116</text>
+        <text x="342" y="196" text-anchor="middle" class="svgmono" style="fill:#fff">其余工程 −1133</text>
+        <text x="521" y="196" text-anchor="middle" class="svgmono" style="fill:#fff">2 步 −687</text>
+        <text x="609" y="226" text-anchor="middle" class="svgmono" style="fill:var(--cut-ink)">窗口 −202</text>
+        <text x="789" y="196" text-anchor="middle" class="svgmono" style="fill:var(--un-ink)">UnStep 实际 1627 ms</text>
+        <!-- brackets -->
+        <path d="M10,250 V258 H453.7 V250" style="fill:none;stroke:var(--rt)"/>
+        <text x="232" y="278" text-anchor="middle" style="fill:var(--rt-ink);font-weight:600">工程：省下时间的 72%（其中编译 36%）</text>
+        <path d="M453.7,250 V258 H629 V250" style="fill:none;stroke:var(--cut)"/>
+        <text x="541" y="278" text-anchor="middle" style="fill:var(--cut-ink);font-weight:600">砍计算：28%</text>
+        <text x="789" y="278" text-anchor="middle" style="fill:var(--rec-ink)">补分层：0 ms</text>
+      </g>
+    </svg></div>
+    <figcaption><b>图 1 · 三层结构和时间账本。</b>上排的 FPS 和 VBench 来自论文 Table 1。下排是我把 FPS 换算成“每段视频毫秒数”后的拆分。论文按 FPS 增量叙述：工程栈 +10 FPS，砍计算 +18 FPS。这样读会觉得砍计算是主力。但 FPS 是时间的倒数，越往后省同样的毫秒，FPS 涨得越多。按毫秒看，工程层才是大头。§03 有可交互的版本。</figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card rt"><h4>① 工程层 · 不改数学</h4><p>去掉少步模型里“藏不住”的开销：KV 位置索引放到 CPU，避免 GPU 同步；FlashAttention 从变长接口换成定长；RoPE 用 Triton 融合并缓存系数；VAE 用 fp16 + channels_last_3d + 卷积 autotune。多步模型里这些开销被 50 次 DiT 淹没了，4 步模型里它们就露出来了。</p></div>
+    <div class="card cut"><h4>② 砍计算层 · 掉分</h4><p>首块保留 4 步当“锚”，后 6 块每块只跑 2 步。KV 缓存只留开头 3 帧（sink）加最近 6 帧，不再随视频变长。前向次数从 35 降到 23，每次前向看的 token 也更少。</p></div>
+    <div class="card rec"><h4>③ 补分层 · 零成本</h4><p>Self Forcing 每块本来就要多跑一次 t=0 前向写 KV 缓存，输出直接丢掉。UnStep 先给它的输入加 2% 的噪声，再把输出拿来当最终结果。另外把第 8–29 层注意力的 V、O 矩阵替换成秩 92% 的 SVD 重建。两件事都不增加计算。</p></div>
+  </div>
+
+  <div class="callout">
+    <span class="lab">和其他免训练加速的区别</span>
+    <p>Block Cascading 改的是块调度。Dummy Head / HeadCast 让部分注意力头少看历史。FlowCache 和 history-guided cache 复用跨步的计算，Surprise Forcing 决定何时跳过计算，Forcing-KV 做分头的 KV 压缩。UnStep 用的是一个<b>固定</b>的短调度加固定窗口，再用两个补偿机制把分拉回来，外面还叠了一层工程栈。它与上面这些方法大体正交，但论文没有做任何叠加实验。</p>
+  </div>
+</section>
+
+<!-- ============================ 02 ============================ -->
+<section id="s2">
+  <h2><span class="no">02</span>先看原版 Self Forcing 的推理是怎么跑的</h2>
+  <p class="lede">不理解原版的每块“4 + 1”，就看不懂 UnStep 省在哪、补在哪。下面三个细节是全文的地基。</p>
+
+  <div class="grid3">
+    <div class="card sf"><h4>细节 1 · 形状</h4><p>81 帧 832×480 的视频，经 Wan VAE 压缩（时间 4 倍、空间 8 倍，首帧单独编码）得到 <span class="mono">21 × 16 × 60 × 104</span> 的 latent，切成 7 块、每块 3 帧。每个 latent 帧经 1×2×2 patch 后是 30×52 = <b>1560 个 token</b>，一块是 4680 个。</p></div>
+    <div class="card sf"><h4>细节 2 · 每步都重加噪</h4><p>每块从纯噪声开始，经 σ = 1 → 0.9375 → 0.8333 → 0.625 四个噪声水平（原始 1000/750/500/250 经 shift-5 映射）。每步都是先预测干净估计 x̂₀，再用<b>新的</b>高斯噪声重加噪到下一个 σ。这是一致性模型式的多步采样，不是在积分一条 ODE。</p></div>
+    <div class="card sf"><h4>细节 3 · 第 5 次前向</h4><p>4 步走完后，拿 x̂₀ 以 t=0 再跑一次 DiT。这次的<b>输出直接丢掉</b>，目的只是把这块“干净版”的 K/V 写进缓存，给后面的块看。所以每块 5 次前向，7 块共 35 次。</p></div>
+  </div>
+
+  <p class="prose">论文把一步采样写成三行（式 1–3）。这三行是理解 §07 缓存精修的钥匙：</p>
+  <div class="eq">
+    x̃<sub>i</sub> = (1 − σ<sub>i</sub>) x<sub>i</sub> + σ<sub>i</sub> ε<sub>i</sub>,&nbsp;&nbsp; ε<sub>i</sub> ~ 𝒩(0, I)<span class="no">(1) 放到噪声水平 σ</span><br>
+    v<sub>i</sub> = f<sub>θ</sub>(x̃<sub>i</sub>, t<sub>i</sub>)<span class="no">(2) DiT 预测速度 v = ε − x₀</span><br>
+    x<sub>i+1</sub> = x̃<sub>i</sub> − σ<sub>i</sub> v<sub>i</sub><span class="no">(3) 换算回干净估计 x̂₀</span>
+  </div>
+  <p class="eqnote">同一个 σ<sub>i</sub> 既控制 (1) 加多少噪声，也控制 (3) 减多少速度。原版的缓存 pass 用 σ=0，(1)(3) 都是恒等变换：输入原样进，输出原样出，这次前向唯一的作用是写 KV。<b>UnStep 的第一个补分手段，就是把这里的 σ 从 0 改成 0.02。</b></p>
+
+  <figure>
+    <div class="ctrls">
+      <div class="seg" id="schedSeg" role="group" aria-label="调度">
+        <button type="button" data-m="sf" aria-pressed="true">原版 Self Forcing</button>
+        <button type="button" data-m="u2" aria-pressed="false">UnStep 2 步（代码实际）</button>
+        <button type="button" data-m="u2p" aria-pressed="false">UnStep 2 步（按论文文字“交替”）</button>
+        <button type="button" data-m="u1" aria-pressed="false">UnStep 1 步</button>
+      </div>
+    </div>
+    <div class="hs"><svg class="wide" id="figSched" viewBox="0 0 960 340" role="img" aria-label="7 个块、每块的去噪步和缓存 pass 的噪声水平"></svg></div>
+    <div class="readout" id="schedRO"></div>
+    <figcaption><b>图 2 · 每块跑几次前向、各在哪个噪声水平。</b>每个方块是一次 DiT 前向，方块里是输入的噪声水平 σ。最后一格是 t=0 的缓存 pass：原版里它<span class="c-vae">只写缓存</span>，UnStep 里它变成 <span class="c-rec">σ=0.02 的精修，并且是最终输出</span>。“按论文文字”那一档，是我根据论文 A.2 的描述（后续块在 index 2 和 3 之间交替）画的；“代码实际”取自 <span class="mono">unstep/wrapper.py</span> 的逐块表。两者不一样，见 §05。1 步变体的配置不在公开代码里，按论文 A.2 画。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================ 03 ============================ -->
+<section id="s3">
+  <h2><span class="no">03</span>时间账本：省下的时间到底从哪来</h2>
+  <p class="lede">论文 Table 1 是一张累积消融表，每行加一个组件，报告 FPS 和 VBench。另外 §3.1 正文给了工程栈内部四个子项的中间 FPS。把这些 FPS 都换算成“每段视频的毫秒数”，就能看清账怎么算。</p>
+
+  <figure>
+    <div class="ctrls">
+      <div class="seg" id="waterSeg" role="group" aria-label="视角">
+        <button type="button" data-m="ms" aria-pressed="true">按每段视频省下的毫秒</button>
+        <button type="button" data-m="fps" aria-pressed="false">按 FPS 增量（论文口径）</button>
+      </div>
+    </div>
+    <div class="hs"><svg class="wide" id="figWater" viewBox="0 0 960 380" role="img" aria-label="逐项耗时瀑布图"></svg></div>
+    <figcaption><b>图 3 · 瀑布图。</b>数据来自 Table 1 和 §3.1 正文里的中间 FPS（24.5 / 26.7 / 29.5 / 32.2）。每段视频 81 帧，毫秒数 = 81 000 / FPS。两种视角下的排序完全不同。<b>按 FPS 看</b>，“2 步”一项 +12.1 FPS，是最大单项。<b>按毫秒看</b>，torch.compile 省 1116 ms，是“2 步”（687 ms）的 1.6 倍。torch.compile 是任何人都会加的标准操作，论文把它放在 C0 和 C1 之间一个没有编号的行里。</figcaption>
+  </figure>
+
+  <h3>一个三参数的耗时模型：剩下的 1.6 秒花在哪</h3>
+  <p class="prose">论文给了四个工程栈完成后的配置，它们只在前向次数和注意力长度上不同：C2（4 步全历史）、C3（2 步全历史）、C4（2 步 + 窗口）、1 步变体。我用最简单的三参数模型（V、α、β）去拟合这四个点：</p>
+  <div class="eq">T<sub>clip</sub> ≈ V + α · N<sub>前向</sub> + β · Σ<sub>前向</sub>（该次前向看到的 KV 帧数）<span class="no">我的拟合</span></div>
+  <p class="eqnote">拟合结果：α ≈ 29.2 ms/次前向（线性层等与上下文无关的部分），β ≈ 2.05 ms/每多看一个 latent 帧（注意力），V ≈ 631 ms（VAE 整段解码加其他固定开销）。四个配置的残差都小于 4 ms。量级也说得通：一次前向的线性层约 2 × 1.3 B × 4680 ≈ 12 TFLOP，看 9 帧时注意力约 12 TFLOP，在 H100 上各需 15–25 ms。</p>
+
+  <figure>
+    <div class="ctrls">
+      <span class="small">后续块步数</span>
+      <div class="seg" id="amdSteps" role="group" aria-label="后续块步数">
+        <button type="button" data-v="1" aria-pressed="false">1</button>
+        <button type="button" data-v="2" aria-pressed="true">2</button>
+        <button type="button" data-v="3" aria-pressed="false">3</button>
+        <button type="button" data-v="4" aria-pressed="false">4</button>
+      </div>
+      <span class="small">KV</span>
+      <div class="seg" id="amdWin" role="group" aria-label="KV 策略">
+        <button type="button" data-v="full" aria-pressed="false">全历史</button>
+        <button type="button" data-v="win" aria-pressed="true">9 帧窗口</button>
+      </div>
+    </div>
+    <div class="ctrls">
+      <label class="sl">VAE + 固定开销 <input type="range" id="amdV" min="100" max="900" step="10" value="630"><output id="amdVo">630 ms</output></label>
+    </div>
+    <div class="hs"><svg class="wide" id="figAmdahl" viewBox="0 0 960 190" role="img" aria-label="耗时分解条"></svg></div>
+    <div class="readout" id="amdRO"></div>
+    <figcaption><b>图 4 · 拖一拖。</b>默认值（2 步 + 窗口 + 630 ms）对应 UnStep，模型预测 49.8 FPS，与实测一致。可以试两件事。其一，切到 1 步：DiT 部分从约 1.0 s 降到 0.72 s，<b>“VAE + 固定开销”这一块占到 47%</b>。其二，把这一块拉到 150 ms 左右（相当于换成 DiagDistill / Flash-VAED 那类小解码器，这里假设 V 全部是 VAE）：2 步就能到约 70 FPS。这说明 UnStep 之后的瓶颈已经转到解码器上，继续砍步数的回报越来越小。<span class="tag mine">此模型是我拟合的，不是论文内容</span></figcaption>
+  </figure>
+</section>
+
+<!-- ============================ 04 ============================ -->
+<section id="s4">
+  <h2><span class="no">04</span>工程栈：少步模型里露出来的“杂费”</h2>
+  <p class="lede">多步模型里，50 次 DiT 前向占绝对大头，KV 索引、RoPE、VAE 这些杂费看不出来。步数砍到 4 次、2 次以后，杂费就成了可观的一块。这一层的原则是<b>数学上不改输出</b>（除了精度），所以 VBench 基本不动：84.31 → 84.34。</p>
+
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>位置</th><th class="l">原版 Self Forcing 在干什么</th><th class="l">UnStep 改成</th><th class="l">为什么快</th><th>实测</th></tr></thead>
+    <tbody>
+      <tr><td>整体编译</td><td class="l">FA3，eager 执行</td><td class="l">对 DiT 和 VAE 解码器做标准 torch.compile（UnStep 最终用的模式是 <span class="mono">max-autotune-no-cudagraphs</span>）</td><td class="l">算子融合、kernel 选择。这是标准操作，论文把它算作 C0 之后的一个无编号行</td><td class="mono-num">17.0 → 22.2</td></tr>
+      <tr><td>DiT · KV 索引</td><td class="l">缓存的全局/局部写入位置存成 GPU 标量，Python 每次读都要 CPU–GPU 同步</td><td class="l">索引放在 CPU 上（它只依赖 token 计数，不依赖 K/V 的数值）</td><td class="l">去掉每层每步的同步气泡</td><td class="mono-num" rowspan="2">→ 24.5</td></tr>
+      <tr><td>DiT · 注意力调用</td><td class="l">变长 FlashAttention，每次调用都要重建 cu_seqlens 等长度张量，batch=1 时也一样</td><td class="l">batch=1 用定长 <span class="mono">flash_attn_func</span>，长度直接从张量形状读</td><td class="l">省掉每次调用的小张量分配和构造 kernel</td></tr>
+      <tr><td>DiT · RoPE</td><td class="l">float64 复数乘法，中间张量拼接、堆叠；每次调用都重算每个 token 的系数</td><td class="l">Triton 单 kernel，float32 旋转；sin/cos 表按（起始帧, 网格尺寸）缓存，所有层和步共用</td><td class="l">一次读写完成，不写中间张量，kernel 启动次数少</td><td class="mono-num">→ 26.7</td></tr>
+      <tr><td>VAE · 精度与布局</td><td class="l">bf16，默认内存布局；每解码一个时间片就重新分配更大的输出并拷贝</td><td class="l">fp16 + <span class="mono">channels_last_3d</span>（通道放最内层），输出一次性预分配；解码函数经编译，首帧单独解码，其余按 5 帧块缓存解码</td><td class="l">H100 上有更快的卷积 kernel，也避免了反复拷贝</td><td class="mono-num">→ 29.5</td></tr>
+      <tr><td>VAE · 卷积算法</td><td class="l">默认算法</td><td class="l">cuDNN benchmark（上限 32 次试探），预热时挑最快的</td><td class="l">按具体形状选 kernel</td><td class="mono-num">→ 32.2</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="callout warn">
+    <span class="lab">这里的“流式 50 FPS”其实是离线吞吐</span>
+    <p>公开代码里的类名是 <span class="mono">OfflineSelfForcingWrapper</span>。流程是：7 块 latent 全部生成完，再对整段视频做一次 VAE 解码（解码函数经过编译），计时区间覆盖这两部分。所以“第一帧画面”要等整段都跑完才出来，<b>首块延迟、逐块延迟都没有报告</b>。原版 Self Forcing 的推理脚本也是最后统一解码，所以 17 vs 49.8 这个比较本身是公平的。但对交互式场景，真正要紧的是“按下按键后多久看到画面”。换成逐块解码后，VAE 那一层的编译策略和收益都会变。</p>
+  </div>
+  <div class="callout code">
+    <span class="lab">代码里一个论文没写的细节</span>
+    <p>UnStep 把时间步标签截成整数喂给 DiT：937.5 → 937，833.33 → 833。上游代码传的是浮点数。影响极小（σ 查表只偏移约 0.0005），但严格说，第 ① 层并非逐位等价。</p>
+  </div>
+</section>
+
+<!-- ============================ 05 ============================ -->
+<section id="s5">
+  <h2><span class="no">05</span>少步：为什么 4 步蒸馏的模型能只跑 2 步</h2>
+  <p class="lede">关键在细节 2：Self Forcing 的采样器每一步都是“预测 x̂₀ → 用新噪声重加噪”。Self Forcing 的 DMD 训练在 4 个 σ 中随机选一个退出步，拿那一步的 x̂₀ 算损失，所以模型在每个 σ 上都被训练成“一步给出能看的样本”。跳过中间两步，相当于把 σ=1 预测的 x̂₀ 直接重加噪到 0.625，再预测一次。</p>
+
+  <div class="two-col">
+    <div>
+      <p class="prose"><b>代价在哪。</b>训练时，σ=0.625 这一步的输入是由 σ=0.833 的 x̂₀ 重加噪得到的，质量更好。跳步后，输入改由 σ=1 的 x̂₀ 得到，更粗糙，分布有轻微偏移。这是“少步掉分”的主要来源：VBench −0.43（84.34 → 83.91），它同时是除 torch.compile 之外最大的单项提速（−687 ms）。</p>
+      <p class="prose"><b>首块为什么保留 4 步。</b>沿用 Causal Forcing++、One-Forcing 的常见做法：首块是后面所有块的上下文“锚”，质量差了会被一路继承。首块只占 7 块中的 1 块，保留它的成本不高。</p>
+      <p class="prose"><b>1 步变体。</b>后续块只跑 σ=1 那一步，再接缓存 pass，共 17 次前向，59.6 FPS，VBench 83.34。注意它并不是全程 1 步：首块仍是 4+1。</p>
+    </div>
+    <div class="card cut">
+      <h4>论文文字 vs 公开代码</h4>
+      <p><b>论文 A.2：</b>后续块用 index 0，再接 index 2 或 3，“在两者间交替，因为这比总用 2 或总用 3 更好”。</p>
+      <p><b>代码 <span class="mono">wrapper.py</span>：</b></p>
+<pre class="code" style="margin:6px 0 10px">later_schedule = (0, 3)          <span class="cm"># σ 1 → 0.625</span>
+block_schedule_overrides = (
+    (3, (0, 2)), (4, (0, 2)),
+    (5, (0, 2)),)                <span class="cm"># σ 1 → 0.833</span></pre>
+      <p>即块 1、2、6 用 0.625，块 3、4、5 用 0.833，<b>并不交替</b>。块 3 恰好是 KV 开始驱逐的第一块（§06）。这是在 7 块、5 秒的设置上手调出来的表。30 秒视频有 41 块，块 7–40 全部落回 (0, 3)，这张“调好的表”对长视频基本不起作用。论文也没有报告“总用 2 / 总用 3”各自的数字。代码里有一个 <span class="mono">--disable-block-schedule-overrides</span> 开关可以跑“总用 (0, 3)”的对照，但论文没给结果。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 06 ============================ -->
+<section id="s6">
+  <h2><span class="no">06</span>KV 窗口：每块到底还能看见什么</h2>
+  <p class="lede">原版的 KV 缓存随视频增长，最后一块能看全部 21 帧（32 760 个 token）。UnStep 学 StreamingLLM / LongLive，只留开头 3 帧作 sink，外加最近 6 帧，上限 9 帧（14 040 个 token）。这一项 +5.5 FPS（−202 ms），VBench −0.04。</p>
+
+  <figure>
+    <div class="ctrls">
+      <div class="seg" id="kvSeg" role="group" aria-label="层类型">
+        <button type="button" data-m="full" aria-pressed="false">原版（全历史）</button>
+        <button type="button" data-m="w9" aria-pressed="true">UnStep · 9 帧层（12 层）</button>
+        <button type="button" data-m="w8" aria-pressed="false">UnStep · 8 帧层（18 层）</button>
+      </div>
+    </div>
+    <div class="hs"><svg class="wide" id="figKV" viewBox="0 0 960 330" role="img" aria-label="每块注意力可见的 latent 帧"></svg></div>
+    <div class="legend" id="kvLeg"></div>
+    <figcaption><b>图 5 · 行 = 正在生成的块，列 = latent 帧（1 帧 ≈ 4 帧画面 ≈ 0.25 s）。</b>“最近 6 帧”<b>包含当前块自己的 3 帧</b>。所以缓存满了以后，每块真正能看的历史只有 sink（开头 9 帧画面，约 0.56 s）加上一块（12 帧画面，约 0.75 s）。驱逐从块 3 开始。8 帧层的读取范围是 <span class="mono">[sink₁, sink₂ | 最近 6]</span>，<b>第 0 帧被丢掉</b>，这是上游代码按“最后 8 帧”切片带来的副作用，不是单独设的参数。所以块 2 在还没发生驱逐时，就已经看不到第 0 帧了。RoPE 用绝对位置，不重排，例如块 6 的 query 在位置 18–20，key 在 {0,1,2,15…20}。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="hs"><svg class="wide" id="figLayers" viewBox="0 0 960 150" role="img" aria-label="30 层的窗口大小和 SVD 设置"></svg></div>
+    <figcaption><b>图 6 · 30 层 DiT 的逐层设置（取自代码）。</b>上排是 KV 读取窗口：9 帧或 8 帧。代码配置串为 <span class="mono">"8-29:8;8:9;15:9;23:9;29:9"</span>，后写的覆盖先写的。下排是 V/O 截断 SVD：第 0–7 层不动，第 8–29 层保留 92%。论文只说“部分层用 8 帧”，没说是哪些层。</figcaption>
+  </figure>
+
+  <div class="callout un">
+    <span class="lab">对世界模型的含义</span>
+    <p>这相当于“开头约 0.56 秒 + 最近 0.75 秒”的记忆。VBench 5s 很难惩罚这种短记忆：只有块 3–6 受影响，而且评测看的是整体观感。§10 的 VBench-Long 评测把跨片段一致性的权重设成了 0，只看每 2 秒片段内部的一致性。所以“回头看是否还是原来那个场景”这种世界模型最关心的能力，在这篇论文里<b>没有被测</b>。</p>
+  </div>
+</section>
+
+<!-- ============================ 07 ============================ -->
+<section id="s7">
+  <h2><span class="no">07</span>补分手段一：把“抄缓存”的那次前向改成微去噪</h2>
+  <p class="lede">这是全文最巧也最需要细看的一处。先用人话说一遍：原版每块最后那次 t=0 前向像个抄写员，把定稿抄进缓存，抄完的纸就扔了。UnStep 让抄写员先在定稿上撒一层 2% 的细噪，再让模型“擦一遍”（模型以为自己看的是干净图），擦完的这份当作最终定稿交出去；缓存里存的则是撒过噪的那一版。</p>
+
+  <figure>
+    <div class="hs"><svg class="wide" viewBox="0 0 960 330" role="img" aria-label="原版与 UnStep 的缓存 pass 对比：原版把 x0 原样送入 t=0 前向，只写缓存、输出丢弃；UnStep 先加 2% 噪声，前向输出减去 0.02 倍速度作为最终输出，缓存由加噪后的输入写入。">
+      <defs>
+        <marker id="aC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+      </defs>
+      <g class="svgtxt">
+        <text x="10" y="22" style="fill:var(--sf-ink);font-weight:600">原版 Self Forcing</text>
+        <rect x="10" y="40" width="150" height="56" rx="8" style="fill:var(--surf2);stroke:var(--rule2)"/>
+        <text x="85" y="63" text-anchor="middle" style="fill:var(--ink)">x̂₀（最后一步</text><text x="85" y="82" text-anchor="middle" style="fill:var(--ink)">σ=0.625 的输出）</text>
+        <rect x="250" y="40" width="170" height="56" rx="8" style="fill:var(--sf-soft);stroke:var(--sf)"/>
+        <text x="335" y="63" text-anchor="middle" style="fill:var(--ink);font-weight:600">DiT(x̂₀, t=0)</text><text x="335" y="82" text-anchor="middle" class="svgmono" style="fill:var(--ink3)">σ=0：(1)(3) 为恒等</text>
+        <rect x="510" y="40" width="160" height="56" rx="8" style="fill:var(--surf2);stroke:var(--rule2);stroke-dasharray:4 3"/>
+        <text x="590" y="63" text-anchor="middle" style="fill:var(--ink3)">输出 = 输入</text><text x="590" y="82" text-anchor="middle" style="fill:var(--ink3)">→ 丢弃</text>
+        <rect x="760" y="40" width="190" height="56" rx="8" style="fill:var(--surf2);stroke:var(--vae)"/>
+        <text x="855" y="63" text-anchor="middle" style="fill:var(--ink)">KV 缓存 ← x̂₀ 的 K/V</text><text x="855" y="82" text-anchor="middle" style="fill:var(--ink3)">干净上下文</text>
+        <g style="color:var(--ink3)">
+          <line x1="162" y1="68" x2="247" y2="68" stroke="currentColor" marker-end="url(#aC)"/>
+          <line x1="422" y1="68" x2="507" y2="68" stroke="currentColor" marker-end="url(#aC)"/>
+          <path d="M335,98 V120 H855 V99" style="fill:none;stroke:currentColor" marker-end="url(#aC)"/>
+          <path d="M85,98 V140 H200" style="fill:none;stroke:var(--sf);color:var(--sf)" marker-end="url(#aC)"/>
+        </g>
+        <text x="206" y="144" style="fill:var(--sf-ink)">x̂₀ 直接作为这块的输出 → VAE</text>
+
+        <line x1="10" y1="168" x2="950" y2="168" style="stroke:var(--rule)"/>
+
+        <text x="10" y="192" style="fill:var(--un-ink);font-weight:600">UnStep</text>
+        <rect x="10" y="210" width="150" height="56" rx="8" style="fill:var(--surf2);stroke:var(--rule2)"/>
+        <text x="85" y="233" text-anchor="middle" style="fill:var(--ink)">x̂₀（最后一步</text><text x="85" y="252" text-anchor="middle" style="fill:var(--ink)">σ=0.625 或 0.833）</text>
+        <rect x="200" y="210" width="170" height="56" rx="8" style="fill:var(--un-soft);stroke:var(--un)"/>
+        <text x="285" y="233" text-anchor="middle" style="fill:var(--ink);font-weight:600">x̃ = 0.98·x̂₀ + 0.02·ε</text><text x="285" y="252" text-anchor="middle" class="svgmono" style="fill:var(--ink3)">新鲜噪声，式 (1)</text>
+        <rect x="410" y="210" width="170" height="56" rx="8" style="fill:var(--rec-soft);stroke:var(--rec)"/>
+        <text x="495" y="233" text-anchor="middle" style="fill:var(--ink);font-weight:600">v = DiT(x̃, t=0)</text><text x="495" y="252" text-anchor="middle" class="svgmono" style="fill:var(--ink3)">标签仍写 t=0</text>
+        <rect x="620" y="210" width="150" height="56" rx="8" style="fill:var(--rec-soft);stroke:var(--rec)"/>
+        <text x="695" y="233" text-anchor="middle" style="fill:var(--ink);font-weight:600">x̃ − 0.02·v</text><text x="695" y="252" text-anchor="middle" class="svgmono" style="fill:var(--ink3)">式 (3) → 输出</text>
+        <rect x="800" y="210" width="150" height="56" rx="8" style="fill:var(--surf2);stroke:var(--vae)"/>
+        <text x="875" y="233" text-anchor="middle" style="fill:var(--ink)">这块的输出</text><text x="875" y="252" text-anchor="middle" style="fill:var(--ink3)">→ VAE</text>
+        <g style="color:var(--ink3)">
+          <line x1="162" y1="238" x2="197" y2="238" stroke="currentColor" marker-end="url(#aC)"/>
+          <line x1="372" y1="238" x2="407" y2="238" stroke="currentColor" marker-end="url(#aC)"/>
+          <line x1="582" y1="238" x2="617" y2="238" stroke="currentColor" marker-end="url(#aC)"/>
+          <line x1="772" y1="238" x2="797" y2="238" stroke="currentColor" marker-end="url(#aC)"/>
+          <path d="M495,268 V300 H640" style="fill:none;stroke:var(--un);color:var(--un)" marker-end="url(#aC)"/>
+        </g>
+        <text x="646" y="304" style="fill:var(--un-ink)">KV 缓存 ← x̃ 的 K/V（带 2% 噪声的上下文）</text>
+      </g>
+    </svg></div>
+    <figcaption><b>图 7 · 同一次前向，两种用法。</b>UnStep 没有新增任何前向，只改了这次前向的输入和输出去向。代码里的实现方式是在上游调度器的 <span class="mono">add_noise</span> 中插入一句：当 <span class="mono">t==0</span> 时把 σ 替换成 0.02（先用 AST 校验上游源码没变，才会装上）。由速度换算 x̂₀ 时，同样用 σ=0.02。</figcaption>
+  </figure>
+
+  <h3>它其实是“第 3 步”，只是标签写成了 t=0</h3>
+  <p class="prose">把 2 步和这次精修连起来看，后续块实际走的是 σ：1 → 0.625（块 3–5 为 0.833）→ <b>0.02</b> 三级调度。最后一级的时间步标签写的是 t=0，而与 σ=0.02 相符的标签应是 t≈20。论文的理由是：标签保持 t=0，写进缓存的 K/V 就更接近 Self Forcing 训练时见过的“t=0 干净上下文”。所以严格说，UnStep 是“2 个带标签的步 + 1 个借来的免费步”。它之所以免费，是因为 Self Forcing 恰好有一次本来就要付费的缓存前向。有些模型直接复用最后一个去噪步的 KV、不单独跑缓存 pass，对它们来说这一步就不再免费。</p>
+
+  <div class="callout mine">
+    <span class="lab">我的分析 · 网络如果真的相信自己在 t=0，会发生什么</span>
+    <p>Flow matching 的速度目标是 v = ε − x₀。在 σ=0 时噪声不可知，所以贝叶斯最优预测是 v ≈ −x̃。代入式 (3)：x<sub>out</sub> = x̃ + 0.02·x̃ = 1.02·x̃ ≈ x̂₀ + 0.0204·ε。<b>结果只是加了噪，并没有去噪。</b>我在“高斯数据 + 最优线性速度场”（A 随 σ 从 σ=1 的 +I 变到 σ→0 的 −I）里做了验算：在 (1, 5/8) 调度下，这一步使 σ=0.02 时的轨迹误差上升约 4.2×10⁻⁴，数据方差从 0.1 取到 10 结果都一样。换成别的调度数值会变，但我试过的所有情形里曲线都单调上升，任何 σ&gt;0 都没有好处。</p>
+    <p>所以它的收益只可能来自两处。<b>(a) 非线性“擦除”</b>：网络在 t=0 标签下仍能察觉 x̃ 里的高频噪声和伪影，顺手擦掉一部分，相当于一次强度极低的 SDEdit。<b>(b) 带噪上下文</b>：写进 KV 的上下文带 2% 噪声，后续块不会过度依赖前一块的瑕疵，这与“上下文加噪可抑制自回归误差累积”的已知经验一致。上游 Self Forcing 的训练代码里有一个 <span class="mono">context_noise</span> 参数，作用是给上下文加噪并配上相应的时间步标签，默认值为 0；推理时它只改缓存 pass 的标签，不加噪。UnStep 则是在推理时给上下文加 2% 的噪声，而标签仍然写 t=0。代码里 (a) 和 (b) 被同一个 σ 绑死，<b>没法单独开关</b>，论文也没有拆开做实验，却把功劳全归给了 (a)。</p>
+  </div>
+
+  <figure>
+    <div class="ctrls">
+      <div class="seg" id="sigSeg" role="group" aria-label="指标">
+        <button type="button" data-m="vb" aria-pressed="true">VBench Total（Fig 7a）</button>
+        <button type="button" data-m="mse" aria-pressed="false">与 4 步轨迹的 MSE（Fig 6a）</button>
+      </div>
+    </div>
+    <div class="hs"><svg class="wide" id="figSigma" viewBox="0 0 960 320" role="img" aria-label="clean-cache 噪声水平 σ 的扫描"></svg></div>
+    <figcaption id="sigCap"><b>图 8 · σ 扫描。</b>数据是我从 arXiv HTML 的矢量 SVG 路径里读出来的，精度约 ±0.003（VBench）/ ±0.00002（MSE）。</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <div class="card rec">
+      <h4>读图要点</h4>
+      <ul class="tight">
+        <li>VBench 在 σ=0.01 → 0.02 → 0.03 上依次为 84.50 → <b>84.56</b> → 84.50，峰值附近还算平滑。σ=0 那一点是 84.32，表示“只有 SVD、没有精修”。</li>
+        <li>DiT 轨迹 MSE 从 0.0340（σ=0）降到 0.0319（σ=0.02），<b>只降了 6.3%</b>。玩具曲线与它几乎重合，原因见 §09：玩具参数看起来是照着这条曲线挑的。</li>
+      </ul>
+    </div>
+    <div class="card risk">
+      <h4>反例：满 4 步时它会伤质量（Table 5）</h4>
+      <ul class="tight">
+        <li>保留原版 4 步、只加精修：VBench <b>84.31 → 83.88（−0.43）</b>；在 9 帧窗口下也是 84.03 → 83.59。</li>
+        <li>它是专门给 2 步输出打的补丁，与玩具模型的预测一致：满调度时最优 σ=0。</li>
+        <li>这也说明它补的是 2 步输出特有的某种偏差，换一个模型或换一个调度，σ 都要重调。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 08 ============================ -->
+<section id="s8">
+  <h2><span class="no">08</span>补分手段二：V/O 投影的截断 SVD</h2>
+  <p class="lede">对第 8–29 层自注意力的 V 投影和 O 投影（每个都是 1536×1536），做 SVD，只保留最大的 1413 个奇异方向，也就是剪掉最弱的 123 个（8%）。然后<b>乘回稠密矩阵</b>放回原位。参数量、FLOPs 都不变，这不是压缩，是一次“谱编辑”。</p>
+
+  <div class="eq">
+    W = U S V<sup>⊤</sup>,&nbsp;&nbsp; Ŵ<sub>r</sub> = U<sub>r</sub> S<sub>r</sub> V<sub>r</sub><sup>⊤</sup>,&nbsp;&nbsp; r = round(0.92 × 1536) = <span class="hl-rec">1413</span><span class="no">(4)(5)(14)</span>
+  </div>
+  <p class="eqnote">实现上，在 fp32 中分解、重建，拷回偏置，再转成 bf16。共改动 22 层 × 2 = 44 个矩阵；Q、K 和交叉注意力都不动。</p>
+
+  <div class="grid3">
+    <div class="card rec"><h4>为什么只动 V/O</h4><p>注意力权重 softmax(QK<sup>⊤</sup>/√d) 只取决于 Q 和 K。在同一层、输入和缓存 key 不变的前提下（论文原话），不动 Q/K，“看哪里”就不变；动 V/O，改的只是“取回什么、怎么写回残差流”。但残差流一变，后续层的 Q/K、之后写入缓存的 key 都会间接跟着变，所以这只是局部的保证。</p></div>
+    <div class="card rec"><h4>人话</h4><p>在每层注意力的“读出”（V）和“写回”（O）上各装一个低通滤波器，把能量最弱的 8% 方向清零。这些方向可能携带细碎的高频成分。整体效果类似于给注意力分支对残差流的贡献加了一点阻尼。</p></div>
+    <div class="card rec"><h4>动机来源</h4><p>LASER（Sharma 等，ICLR’24）发现，在 LLM 的<b>后层</b>做选择性降秩，能提升部分推理任务。UnStep 借用了“后层才动”这一条，但把对象换成了注意力的 V/O，任务也从 LLM 推理换成了视频生成。这个迁移本身没有额外论证。</p></div>
+  </div>
+
+  <figure>
+    <div class="ctrls">
+      <div class="seg" id="rankSeg" role="group" aria-label="指标">
+        <button type="button" data-m="vb" aria-pressed="true">VBench Total（Fig 7b）</button>
+        <button type="button" data-m="mse" aria-pressed="false">与 4 步轨迹的 MSE（Fig 6b）</button>
+      </div>
+    </div>
+    <div class="hs"><svg class="wide" id="figRank" viewBox="0 0 960 320" role="img" aria-label="V/O 保留秩比例的扫描"></svg></div>
+    <figcaption id="rankCap"><b>图 9 · 保留比例扫描</b>（σ 固定为 0.02）。同样从矢量 SVG 读出。</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <div class="card risk">
+      <h4>一个单点尖峰</h4>
+      <p>0.92 处是 84.56。两侧邻点 0.90 和 0.94 都是 84.43，低了 0.13；0.88 处 84.30，1.00 处 84.33。在 1536 维里多留或少留 31 个方向，就让 VBench 陡升陡降，这不太像一条光滑的超参曲线，更像在 7 个点里挑中了一个噪声峰。每个点是 5 次同 seed 重跑的均值（标准误约 0.045），而这 5 次只能平均掉 GPU 非确定性，平均不掉 seed 和提示带来的抽样方差。</p>
+    </div>
+    <div class="card rec">
+      <h4>SVD 单独也能补 +0.45</h4>
+      <p>Fig 7a 的 σ=0 点就是“只有 SVD、没有精修”，为 84.32；只有精修、没有 SVD 的 C5 是 84.33。两者<b>单独各补约 +0.45</b>，叠加后只有 +0.69，是次可加的。Table 1 记的“精修 +0.46、SVD +0.23”只是累积顺序的产物。满 4 步时，SVD 单独用在全注意力下是 84.31 → 84.18，在 9 帧窗口下是 84.03 → 84.10（Table 5），基本无益。它主要也是给 2 步用的补丁。</p>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <span class="lab">Fig 6 两条 DiT 曲线对不上</span>
+    <p>附录 E.3 说：Fig 6a 在 p=1 下扫 σ，Fig 6b 在 σ=0.02 下扫 p，参照都是“4 步、σ=0、p=1”。那么 (σ=0.02, p=1) 这个配置在两张图里都出现了。它在 6a 里的 MSE 是 <b>0.0319</b>，在 6b 里却是 <b>0.0390</b>，高了约 23%。更麻烦的是，6b 的最优点 (p=0.92) 为 0.0370，仍比 6a 里不加 SVD 的 0.0319 差。如果两次测量口径相同，说明加 SVD 反而让输出离 4 步轨迹更远，这与“截断能消除短调度误差”的说法相反。论文没有说明两次测量用了哪些提示、哪一块、是否同批。</p>
+  </div>
+</section>
+
+<!-- ============================ 09 ============================ -->
+<section id="s9">
+  <h2><span class="no">09</span>玩具模型：可以复现，但它解释的是另一件事</h2>
+  <p class="lede">论文 §5 和附录 E 用线性玩具模型给两个补分手段提供“直觉”。模型设定：把 DiT 换成 f(x,t) = Ax，A 对称，0 ⪯ A ≺ I，<b>并且与 t 无关</b>。于是式 (1)–(3) 的一步更新变成 x<sub>next</sub> = (I − sA)[(1 − s)x + sε]。“误差”定义为在同一组噪声下，短调度输出与长调度输出之间的距离，即逐路径 MSE。</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>命题 1（精修）</h4>
+      <p>R<sub>clean</sub>(σ) = E‖x<sub>short</sub> − x<sub>full</sub>‖² − 2gσ + ρ(σ)，其中 |ρ| ≤ kσ²，并且对短调度有 g &gt; 0，所以 σ* &gt; ⅓·min(1, g/k) &gt; 0。对满调度 σ* = 0。</p>
+    </div>
+    <div class="card">
+      <h4>命题 2（SVD）</h4>
+      <p>令 A = bI + W，截断 W 得到 A<sub>r</sub> = bI + Ŵ<sub>r</sub>。则 R<sub>svd</sub>(r) 在 r = q = rank(A) &lt; d 处取得唯一最小值；对满调度，最优是 r = d。</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <span class="lab">人话：两个补丁在玩具里其实是同一件事——补收缩</span>
+    <p>每走一步，前面带过来的信号（包括初始噪声）都要乘一次 q(s) = (1−s)(1−sa) &lt; 1。短调度少乘了几次，初始噪声残留得更多，输出“偏大”。精修又乘了一次 (1−σ)(1−σa)，这就是收缩。SVD 那边，W 在 A 的零空间里特征值是 −b；截断掉这些方向后，A<sub>r</sub> 在零空间的特征值从 0 抬到 b，每一步在那些方向上收缩得更多。<b>两个命题证明的都是“少走几步的输出偏大，乘一个略小于 1 的数会更接近长调度”</b>。</p>
+  </div>
+
+  <h3>实验室 A · 精修的玩具（Fig 6a）</h3>
+  <figure>
+    <div class="ctrls">
+      <div class="seg" id="toyPreset" role="group" aria-label="参数预设">
+        <button type="button" data-m="paper" aria-pressed="true">论文 Fig 6a 参数</button>
+        <button type="button" data-m="real3" aria-pressed="false">真实调度 · 短 (1, 5/8)</button>
+        <button type="button" data-m="real2" aria-pressed="false">真实调度 · 短 (1, 5/6)</button>
+      </div>
+    </div>
+    <div class="ctrls">
+      <label class="sl">a（A = aI）<input type="range" id="toyA" min="0.02" max="0.8" step="0.01" value="0.1"><output id="toyAo">0.10</output></label>
+      <label class="sl">‖z‖²/d<input type="range" id="toyZ" min="0.5" max="10" step="0.01" value="7.57"><output id="toyZo">7.57</output></label>
+    </div>
+    <div class="ctrls">
+      <label class="ck"><input type="checkbox" id="toyShrink" checked> 纯收缩 x ← m(σ)·x（不加噪）</label>
+      <label class="ck"><input type="checkbox" id="toyGauss" checked> 换成高斯最优速度场</label>
+      <label class="ck"><input type="checkbox" id="toyDiT" checked> 叠加 DiT 实测点</label>
+    </div>
+    <div class="hs"><svg class="wide" id="figToyA" viewBox="0 0 960 330" role="img" aria-label="玩具风险曲线"></svg></div>
+    <div class="readout" id="toyARO"></div>
+    <figcaption><b>图 10 · 浏览器里实时计算附录 E 式 (33)。</b>“论文参数”一档严格复现 Fig 6a：R(0)=0.03396，最小值 0.03183 在 σ=0.0182，R(0.05)=0.03832。几件可以亲手验证的事：<br>① <b>纯收缩</b>（同样乘以 (1−σ)(1−σa)，但不加噪）比重加噪更好，最优 0.03144 &lt; 0.03183。在这个模型里，“加噪”只是成本，收益全来自“收缩”。<br>② 切到<b>真实调度</b>、把 ‖z‖²/d 设为 1（高维标准高斯应有的值）后，最优 σ 随 a 漂移：短调度 (1, 5/8) 下约 0.002–0.09，(1, 5/6) 下约 0.10–0.27（a 取 0.02–0.8）。论文参数下的 0.018 与 DiT 的 0.02 对上，靠的是参数选择。<br>③ <b>高斯最优速度场</b>下（t=0 标签对应 A=−I），曲线从 0 开始单调上升，精修只会加噪。</figcaption>
+  </figure>
+
+  <h3>实验室 B · SVD 的玩具（Fig 6b）</h3>
+  <figure>
+    <div class="ctrls">
+      <label class="sl">q/d = rank(A)/d<input type="range" id="toyQ" min="0.8" max="0.98" step="0.002" value="0.92"><output id="toyQo">0.920</output></label>
+      <label class="sl">b<input type="range" id="toyB" min="0.01" max="0.1" step="0.001" value="0.05"><output id="toyBo">0.050</output></label>
+      <label class="sl">h<input type="range" id="toyH" min="0.3" max="0.8" step="0.001" value="0.534"><output id="toyHo">0.534</output></label>
+    </div>
+    <div class="hs"><svg class="wide" id="figToyB" viewBox="0 0 960 320" role="img" aria-label="SVD 玩具风险曲线"></svg></div>
+    <div class="readout" id="toyBRO"></div>
+    <figcaption><b>图 11 · 附录 E 式 (35) + (43)。</b>d=500，满调度 (1, 15/16, 5/6, 5/8)，短调度 (1, 5/8)。默认参数复现论文：最小值 0.03736 在 p=0.920，R(1)=0.03903，R(0.86)=0.04479，κ≈0.0209。拖动 q/d 可以看到，<b>最优 p 始终等于 q/d</b>。论文取 q = 460 = 0.92 × 500，所以玩具的最优点和实际选定的 0.92 重合，是因为 0.92 本来就是输入的参数，不是模型推出来的。</figcaption>
+  </figure>
+
+  <div class="callout mine">
+    <span class="lab">小结 · 玩具模型证明了什么，没证明什么</span>
+    <ul class="tight">
+      <li><b>复现通过</b>：两条玩具曲线的所有数值都和论文一致（我用 Python 独立算过一遍，这里的 JS 又算了一遍）。</li>
+      <li><b>参数像是照着 DiT 曲线挑的</b>：论文没这么说，但证据不少。‖z‖²/d=7.57，高维标准高斯的 ‖z‖²/d 集中在 1 附近，7.57 几乎不可能出现。噪声层级 (0.131, 0.015, 0.0033) 不是真实调度。Fig 6b 的 q/d 直接等于 0.92。6a 的玩具 R(0)=0.03396 与 DiT 的 0.0340 相等，6b 的玩具 R(1)=0.03903 与 DiT 的 0.03905 相等。可是两个玩具在共同的 (σ=0, p=1) 点上并不一致（0.0340 对 0.0390）。所以“玩具与 DiT 吻合”更像拟合，而不是预测。</li>
+      <li><b>机制对不上</b>：玩具的 A 与 t 无关且落在 [0, I) 内，不对应任何数据分布的 flow-matching 速度场（真实速度场在 σ→0 时趋于 −I）。在玩具里，收益来自“收缩”而非“重加噪”。</li>
+      <li><b>度量不是质量</b>：逐路径 MSE 衡量的是“离 4 步输出有多近”。而每步都重加噪的采样器，只需分布对上，不需要逐路径对上。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================ 10 ============================ -->
+<section id="s10">
+  <h2><span class="no">10</span>实验逐表</h2>
+  <p class="lede">主设置：Self Forcing（Wan2.1-1.3B），T2V，832×480，5 秒，batch 1，单卡 H100，VBench 5s T2V 全部 946 条提示。UnStep 的分数都是 5 次重跑的均值。除特别标注外，下面的数字都来自论文正文或附录表格。</p>
+
+  <h3>10.1 Table 1 · 累积消融（附毫秒换算）</h3>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>配置</th><th>FPS</th><th>ms/段 <span class="dim">(我算)</span></th><th>省下 ms</th><th>Total</th><th>Quality</th><th>Semantic</th></tr></thead>
+    <tbody>
+      <tr><td>C0 · Self Forcing + FA3</td><td>17.0</td><td>4765</td><td>—</td><td>84.31</td><td>85.28</td><td>80.44</td></tr>
+      <tr><td>+ torch.compile <span class="dim">（无编号行）</span></td><td>22.2</td><td>3649</td><td class="c-rt">1116</td><td>84.28</td><td>85.26</td><td>80.35</td></tr>
+      <tr><td class="dim">　+ KV 索引上 CPU + 定长 FA <span class="dim">（正文中间值）</span></td><td class="dim">24.5</td><td class="dim">3306</td><td class="dim">343</td><td class="dim">—</td><td class="dim">—</td><td class="dim">—</td></tr>
+      <tr><td>C1 · + Triton RoPE</td><td>26.7</td><td>3034</td><td class="c-rt">272</td><td>84.34</td><td>85.24</td><td>80.72</td></tr>
+      <tr><td class="dim">　+ VAE fp16 / channels_last_3d <span class="dim">（正文中间值）</span></td><td class="dim">29.5</td><td class="dim">2746</td><td class="dim">288</td><td class="dim">—</td><td class="dim">—</td><td class="dim">—</td></tr>
+      <tr><td>C2 · + 卷积 autotune</td><td>32.2</td><td>2516</td><td class="c-rt">230</td><td>84.34</td><td>85.26</td><td>80.68</td></tr>
+      <tr class="sep"><td>C3 · + 后续块 2 步</td><td>44.3</td><td>1828</td><td class="c-cut">687</td><td class="dn">83.91</td><td>84.68</td><td>80.82</td></tr>
+      <tr><td>C4 · + 9 帧 KV 窗口</td><td>49.8</td><td>1627</td><td class="c-cut">202</td><td class="dn">83.87</td><td>84.67</td><td>80.71</td></tr>
+      <tr class="sep"><td>C5 · + 缓存精修 σ=0.02</td><td>49.8</td><td>1627</td><td>0</td><td class="up">84.33</td><td>84.91</td><td>81.99</td></tr>
+      <tr class="ours"><td><b>C6 · + V/O 截断 SVD（UnStep）</b></td><td><b>49.8</b></td><td><b>1627</b></td><td>0</td><td class="up"><b>84.56</b></td><td>85.20</td><td>82.02</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small">核对：Total = (4·Quality + Semantic)/5，每一行在四舍五入范围内都对得上（例如 C6：(4×85.20 + 82.02)/5 = 84.564）。注意 C5 → C6 的 Quality 从 84.91 回到 85.20，但仍低于 C0 的 85.28。Total 的净增益全部来自 Semantic。</p>
+
+  <h3>10.2 Fig 1 · 速度–质量散点（由 Table 7 / 8 / 9 重建）</h3>
+  <figure>
+    <div class="ctrls">
+      <div class="seg" id="scSeg" role="group" aria-label="GPU">
+        <button type="button" data-m="h100" aria-pressed="true">H100</button>
+        <button type="button" data-m="gb200" aria-pressed="false">GB200</button>
+      </div>
+      <label class="ck"><input type="checkbox" id="scC2" checked> 加上“只做工程栈的 Self Forcing”（Table 1 C2）</label>
+      <label class="ck"><input type="checkbox" id="scOrig" checked> 原版 SF / CF（17 FPS）</label>
+    </div>
+    <div class="hs"><svg class="wide" id="figScatter" viewBox="0 0 960 440" role="img" aria-label="速度与 VBench 散点图"></svg></div>
+    <div class="legend" id="scLeg"></div>
+    <figcaption><b>图 12 · 竞品点的 FPS 和 VBench 都“取自原论文”</b>，只有 One-Forcing 和 Causal Forcing++ 的 H100 吞吐是作者自己测的。空心紫点是我加的对照，数据来自论文 Table 1 的 C2：<b>只给 Self Forcing 加工程栈</b>，不砍步、不开窗、不补分，就已经是 32.2 FPS / 84.34。它比图中所有多步训练式方法都快，只有专门蒸馏到 1 步的 rCM（32.3 FPS，VBench 82.65）略快一点。分组依论文 §4.2 正文，Table 7 则把 Reward Forcing 标成 KV 注意力类。17–25 FPS 区间的点太密，只标了一部分名称，其余请悬停查看。</figcaption>
+  </figure>
+
+  <h3>10.3 Table 2 · 换权重（配置不变）</h3>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>权重</th><th>FPS</th><th>Total</th><th>Quality</th><th>Semantic</th><th>ΔTotal</th></tr></thead>
+    <tbody>
+      <tr><td>Self Forcing</td><td>17.0</td><td>84.31</td><td>85.28</td><td>80.44</td><td rowspan="2" class="mono-num">+0.25</td></tr>
+      <tr class="ours"><td>+ UnStep</td><td>49.8</td><td>84.56</td><td>85.20</td><td>82.02</td></tr>
+      <tr class="sep"><td>Causal Forcing</td><td>17.0</td><td>84.82</td><td>85.64</td><td>81.55</td><td rowspan="2" class="mono-num">+0.11</td></tr>
+      <tr class="ours"><td>+ UnStep</td><td>49.8</td><td>84.93</td><td>85.79</td><td>81.46</td></tr>
+      <tr class="sep"><td>LongLive 1.0</td><td>17.0</td><td>83.31</td><td>83.64</td><td>81.98</td><td rowspan="2" class="mono-num">+0.11</td></tr>
+      <tr class="ours"><td>+ UnStep</td><td>49.8</td><td>83.42</td><td>83.82</td><td>81.81</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small">三个基线都是 17.0 FPS，三个 UnStep 都是 49.8 FPS。同一架构、同一配置，大概率复用了同一次测量。但 LongLive 1.0 原生就用短窗注意力 + frame sink，它自己的论文报告单卡 H100 为 <a href="https://huggingface.co/papers/2509.22622">20.7 FPS</a>，这里拿 17.0 当它的基线并不合适。另外，LongLive 的 VBench 复现值（83.31）低于其原文，作者在附录 C.3 里承认了这一点。</p>
+
+  <h3>10.4 Table 10 · 16 个维度的变化</h3>
+  <figure>
+    <div class="ctrls">
+      <div class="seg" id="dimSeg" role="group" aria-label="权重">
+        <button type="button" data-m="sf" aria-pressed="true">Self Forcing</button>
+        <button type="button" data-m="cf" aria-pressed="false">Causal Forcing</button>
+      </div>
+    </div>
+    <div class="hs"><svg class="wide" id="figDims" viewBox="0 0 960 590" role="img" aria-label="VBench 16 个维度的变化量"></svg></div>
+    <figcaption><b>图 13 · UnStep 减去原版（分），数据取自 Table 10。</b>两个权重上 dynamic degree（运动量，RAFT 光流）都在降：SF −4.04，CF −1.39。temporal flickering、motion smoothness 这类“画面越静越高”的指标都在升。语义维度的变化从 0.09 到 4.08 不等。SF 上 9 项中有 8 项为正，CF 上是 4 正 5 负。每个维度只有约 80–100 条提示。</figcaption>
+  </figure>
+
+  <h3>10.5 I2V 与 30 秒长视频（Fig 5，从矢量图读出）</h3>
+  <div class="grid2">
+    <div class="tbl-wrap" style="margin:0"><table>
+      <thead><tr><th>VBench-I2V（1118 条）</th><th>SF 17.0 FPS</th><th>+UnStep 49.8</th><th>Δ</th></tr></thead>
+      <tbody>
+        <tr><td>Total</td><td>85.37</td><td>85.31</td><td class="mono-num">−0.06</td></tr>
+        <tr><td>Quality</td><td>78.85</td><td>78.56</td><td class="mono-num">−0.29</td></tr>
+        <tr><td>I2V（主体/背景保真 + 相机）</td><td>91.90</td><td>92.06</td><td class="mono-num">+0.16</td></tr>
+      </tbody>
+    </table></div>
+    <div class="tbl-wrap" style="margin:0"><table>
+      <thead><tr><th>VBench-Long（40 条 × 30 s）</th><th>SF 16.6 FPS</th><th>+UnStep 51.2</th><th>Δ</th></tr></thead>
+      <tbody>
+        <tr><td>Temporal Quality</td><td>87.94</td><td>88.55</td><td class="mono-num">+0.61</td></tr>
+        <tr><td>Framewise Quality</td><td>65.68</td><td>65.49</td><td class="mono-num">−0.19</td></tr>
+        <tr><td>Text Alignment</td><td>28.49</td><td>29.47</td><td class="mono-num">+0.98</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+  <p class="small">读数精度约 ±0.03。核对：I2V 的 Total 等于 (Quality + I2V)/2，两列都成立。附录 Fig 8/9 的细分柱状图在 arXiv HTML 里没有渲染出来，所以细分维度我读不到。VBench-Long 按场景切成 2 秒片段打分，<b>跨片段一致性项的权重设为 0</b>（附录 B.3），因此这组数字不反映 30 秒尺度上的漂移。30 秒时，UnStep 的 51.2 FPS 比 5 秒时略快，因为 4 步首块的成本被摊到了更多块上；原版掉到 16.6 FPS，是因为其缓存维持在 5 秒满容量的时间更长。</p>
+
+  <h3>10.6 两张被低估的表：满步反例和跨硬件漂移</h3>
+  <div class="grid2">
+    <div class="tbl-wrap" style="margin:0"><table>
+      <thead><tr><th>Table 5 · 保留 4 步</th><th>基线</th><th>+SVD</th><th>+精修</th><th>+两者</th></tr></thead>
+      <tbody>
+        <tr><td>全历史注意力</td><td>84.31</td><td class="dn">84.18</td><td class="dn">83.88</td><td class="dn">83.83</td></tr>
+        <tr><td>9 帧窗口</td><td>84.03</td><td class="up">84.10</td><td class="dn">83.59</td><td class="dn">83.53</td></tr>
+      </tbody>
+    </table></div>
+    <div class="tbl-wrap" style="margin:0"><table>
+      <thead><tr><th>同一配置 · 换 GPU</th><th>H100 (FA3)</th><th>GB200 (FA2)</th><th>漂移</th></tr></thead>
+      <tbody>
+        <tr><td>SF + UnStep 2 步</td><td>84.56</td><td>84.36</td><td class="dn mono-num">−0.20</td></tr>
+        <tr><td>CF + UnStep 2 步</td><td>84.93</td><td>84.59</td><td class="dn mono-num">−0.34</td></tr>
+        <tr><td>SF + UnStep 1 步</td><td>83.34</td><td>83.49</td><td class="up mono-num">+0.15</td></tr>
+        <tr><td>CF + UnStep 1 步</td><td>83.10</td><td>83.16</td><td class="up mono-num">+0.06</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+  <p class="small">左表还藏着一个信息：在 4 步下，9 帧窗口让 VBench 掉 0.28（84.31 → 84.03）；在 Table 1 的 2 步下只掉 0.04。右表中，只换了 GPU 和注意力 kernel（FA3 → FA2），分数就漂移 −0.34 到 +0.15。两张表合起来，给出了这套评测里“同一件事的效应”有多不稳定的量级，参考 §11 的 D2。</p>
+
+  <h3>10.7 1 步对比（Table 8，H100）</h3>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>方法</th><th>FPS</th><th>Total</th><th>Quality</th><th>Semantic</th><th class="l">备注</th></tr></thead>
+    <tbody>
+      <tr class="ours"><td>SF + UnStep, 1 步</td><td>59.6</td><td>83.34</td><td>83.84</td><td>81.34</td><td class="l">首块仍 4+1，共 17 次前向</td></tr>
+      <tr class="ours"><td>CF + UnStep, 1 步</td><td>59.6</td><td>83.10</td><td>83.81</td><td>80.27</td><td class="l"></td></tr>
+      <tr><td>rCM, 1 步</td><td>32.3</td><td>82.65</td><td>83.60</td><td>78.82</td><td class="l">FPS 取自原文</td></tr>
+      <tr><td>One-Forcing（chunkwise）</td><td>25.2</td><td>81.60</td><td>83.65</td><td>73.41</td><td class="l">FPS 由作者测</td></tr>
+      <tr><td>One-Forcing（framewise）</td><td>20.7</td><td class="best">83.76</td><td class="best">85.22</td><td>77.91</td><td class="l">质量高于 UnStep 1 步</td></tr>
+      <tr><td>Causal Forcing++, 1 步</td><td>20.4</td><td>83.35</td><td>84.50</td><td>78.75</td><td class="l">FPS 由作者测（原文只报 A800 上 DiT 部分）</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============================ 11 ============================ -->
+<section id="s11">
+  <h2><span class="no">11</span>存疑清单</h2>
+  <p class="lede">按“如果成立，会不会改变主要结论”分级。<span class="tag risk">高</span> 会改变结论；<span class="tag med">中</span> 影响适用范围或解释；<span class="tag low">低</span> 是细节。每条都给出了依据的出处：论文表格、公开代码，或我的复算。</p>
+  <div class="ctrls">
+    <div class="seg" id="dbF" role="group" aria-label="筛选">
+      <button type="button" data-f="all" aria-pressed="true">全部 15</button>
+      <button type="button" data-f="h" aria-pressed="false">高 2</button>
+      <button type="button" data-f="m" aria-pressed="false">中 8</button>
+      <button type="button" data-f="l" aria-pressed="false">低 5</button>
+    </div>
+    <button type="button" class="themebtn" id="dbOpen">全部展开 / 收起</button>
+  </div>
+  <div class="doubts" id="dbList">
+    <details class="dbt h" data-s="h" open><summary><span class="id">D1</span><span class="t">提速的七成来自工程栈；Fig 1 的“快近一倍”不是同栈比较</span></summary><div class="body">
+      <p>按每段视频的毫秒数算，C0 → C6 共省 3138 ms：torch.compile 1116 ms（36%），其余工程 1133 ms（36%），少步加窗口 889 ms（28%）。Fig 1 / Table 7 里竞品的 FPS 都取自各自论文，软件栈和测速口径各不相同；UnStep 自己用的是 PyTorch 2.15 nightly + CUDA 13.3 + FA3 + max-autotune 编译。<b>只给 Self Forcing 加工程栈（C2，32.2 FPS / 84.34），就已经快过图中所有多步训练式方法</b>。其中最快的是 DiagDistill，31.0 FPS。只有 1 步的 rCM 以 32.3 FPS 持平，而它的质量要低得多（82.65）。</p>
+      <p>所以 Fig 1 主要说明“工程栈很值钱”，不能说明“免训练少步 + 补偿”优于 rCM、Causal-rCM、DiagDistill 这类训练式方法：它们套上同样的工程栈也会变快。DiagDistill 的小解码器还正好能和 UnStep 叠加（§03 的模型显示“VAE + 固定开销”约占剩余时间的 39%）。<b>缺的实验</b>：把同一工程栈套到 2–3 个训练式基线上再比。</p>
+    </div></details>
+
+    <details class="dbt h" data-s="h" open><summary><span class="id">D2</span><span class="t">“质量略升”在噪声范围内，而且全部超参都是在测试集上挑的</span></summary><div class="body">
+      <p>σ=0.02、92%、逐块调度表、逐层窗口，都是在同一套 946 条 VBench 提示、同一套 seed 上扫出来的，又在同一套上报告，没有留出集。Table 6 的标准差 0.10 是“同 seed 重跑”的 GPU 非确定性，不包含 seed 和提示的抽样方差。</p>
+      <p>论文自己的数据给出了更现实的噪声尺度。<b>只换 GPU</b>（H100/FA3 → GB200/FA2）：SF 2 步 −0.20，CF 2 步 −0.34，SF 1 步 +0.15。<b>同一个窗口</b>：4 步下 −0.28，2 步下 −0.04。而宣称的提升是 SF +0.25、CF +0.11、LongLive +0.11。再加上 Fig 7b 在 0.92 处的单点尖峰（两侧 ±0.02 就低 0.13），更站得住的结论是“质量持平”，而不是“略升”。</p>
+    </div></details>
+
+    <details class="dbt m" data-s="m"><summary><span class="id">D3</span><span class="t">分数涨在语义维度，运动反而变少</span></summary><div class="body">
+      <p>SF 的 +0.25 Total 全部来自 Semantic（+1.58），Quality 反而 −0.08。dynamic degree 从 73.83 降到 69.79（−4.04），CF 也降了 1.39。与此同时，“越静越高”的指标在涨：SF 上 temporal flickering、motion smoothness、subject consistency 都是正的；CF 上 flickering +1.66、smoothness +1.12，但 subject consistency −0.32。</p>
+      <p>一个加速方法没有提升文本对齐的机制。SF 的 9 个语义子维度里有 8 个为正，方向相当一致。但同一配置在 CF 上是 4 正 5 负（multiple objects +4.08，spatial −2.38，object class −1.88），语义聚合 −0.09，没能复现。每个子维度只有约 80–100 条提示。更一致的解读是：UnStep 让视频略“静”了一点（与 §09 的“补收缩”机制也吻合）。对需要响应动作的世界模型，这是必须单独测的副作用。</p>
+    </div></details>
+
+    <details class="dbt m" data-s="m"><summary><span class="id">D4</span><span class="t">“流式 50 FPS”是离线整段吞吐，不是逐块延迟</span></summary><div class="body">
+      <p>代码类名是 <span class="mono">OfflineSelfForcingWrapper</span>。流程是 7 块全部生成完，再对整段做一次编译好的 VAE 解码，计时区间覆盖两者。首块延迟、逐块延迟、动作到画面的延迟都没有报告。我的耗时模型粗估：首块 DiT 约 0.18 s，但真正流式还要逐块解码，届时 VAE 的编译策略和收益都会变。与原版比较时口径一致，所以加速比没问题；问题在于“流式”这个词给人的暗示。</p>
+    </div></details>
+
+    <details class="dbt m" data-s="m"><summary><span class="id">D5</span><span class="t">9 帧 KV 只剩 sink + 上一块，而长程一致性没被测</span></summary><div class="body">
+      <p>“最近 6 帧”包含当前块自己，所以缓存满后，每块只能看到开头约 0.56 s 和上一块约 0.75 s。8 帧层连第 0 帧也读不到。30 秒视频有 41 块，RoPE 绝对位置一直涨到 122，而 Self Forcing 和 Causal Forcing 只在 21 帧上训练过，也从没在窗口注意力下训练过（LongLive 训练过）。</p>
+      <p>VBench-Long 按 2 秒片段打分，并把跨片段一致性项的权重设为 0。所以“离开一个场景再回来，它还认不认得”这种世界模型最关心的能力，这篇论文<b>没有测</b>。</p>
+    </div></details>
+
+    <details class="dbt m" data-s="m"><summary><span class="id">D6</span><span class="t">缓存精修的两种效应没有拆开；在最优线性速度场下，它只会加噪</span></summary><div class="body">
+      <p>精修同时改了两件事：(a) 输出变成“加 2% 噪声后再擦一遍”的结果；(b) 写进 KV 的上下文带了 2% 噪声。代码用同一个 σ 绑定两者，无法分开。论文把功劳全记在 (a) 上。但若网络真的相信自己处在 t=0，贝叶斯最优的速度是 v ≈ −x̃，输出 ≈ 1.02·x̃，这等于只加噪。我在高斯数据加最优速度场的设定下验算过，风险只升不降。</p>
+      <p>所以收益要么来自网络的非线性擦除，要么来自 (b) 的上下文加噪。两者都说得通，但论文都没有给证据。另外，标签写 t=0 而不是与 σ 相符的 t≈20，这个选择本身也没做对照。</p>
+    </div></details>
+
+    <details class="dbt m" data-s="m"><summary><span class="id">D7</span><span class="t">玩具模型：数值能复现，但参数是拟合的，机制也对不上</span></summary><div class="body">
+      <p>两条玩具曲线我都复现了（§09）。问题有三个。<b>参数像是拟合的</b>：6a 的 R(0) 恰好等于 DiT 的 0.0340，6b 的 R(1) 恰好等于 DiT 的 0.0390，而两个玩具在共同点上彼此并不一致；‖z‖²/d=7.57，对高维标准高斯几乎不可能；噪声层级 (1, .131, .015, .0033) 不是真实调度，换成真实调度后，最优 σ 随 a 在约 0.002–0.27 之间漂移；Fig 6b 的 q/d=0.92 直接决定了最优点。<b>机制</b>：两个补丁在玩具里都只是“补收缩”，纯收缩不加噪反而更好（0.03144 &lt; 0.03183）。<b>假设</b>：A 与 t 无关且落在 [0, I) 内，不对应任何数据分布的 flow-matching 速度场。</p>
+      <p>论文措辞是“提供直觉”，这没问题；但 Fig 6 把玩具曲线和 DiT 曲线画在一起，读者会以为这是定量验证。</p>
+    </div></details>
+
+    <details class="dbt m" data-s="m"><summary><span class="id">D8</span><span class="t">Fig 6 两条 DiT 曲线在同一配置点上不一致</span></summary><div class="body">
+      <p>(σ=0.02, p=1) 在 Fig 6a 里 MSE 为 0.0319，在 Fig 6b 里是 0.0390。6b 的最优点 0.0370 也比 6a 里不加 SVD 的 0.0319 差。按附录 E.3 的描述两者应当可比；如果确实可比，那么 SVD 让输出离 4 步轨迹更远，与“截断能消除短调度误差”的叙述矛盾。DiT MSE 用了哪些提示、哪一块、几条，论文都没写（只说“5 次配对运行取平均”）。</p>
+    </div></details>
+
+    <details class="dbt m" data-s="m"><summary><span class="id">D9</span><span class="t">论文说“交替”，代码是逐块手调表，且对长视频基本不起作用</span></summary><div class="body">
+      <p>附录 A.2 说后续块在 index 2 和 3 之间交替。代码是块 1、2、6 → (0, 3)，块 3、4、5 → (0, 2)。块 3 恰好是开始驱逐的第一块，论文对此没有任何解释，也没有报告“总用 2 / 总用 3”各自的数字。这张表是按 7 块的 5 秒设置调的，30 秒视频的块 7–40 全部落回 (0, 3)。代码里有 <span class="mono">--disable-block-schedule-overrides</span> 开关，能跑“总用 (0, 3)”的对照，但论文没报告结果。</p>
+    </div></details>
+
+    <details class="dbt m" data-s="m"><summary><span class="id">D10</span><span class="t">可复现性缺口：只有默认路径能跑，基线 FPS 可能是复用的</span></summary><div class="body">
+      <p>仓库只包含默认的 T2V 两步路径，21 帧、832×480、batch 1 都是硬编码。没有 1 步、I2V、30 秒的配置，也没有基线测速脚本，而正文说“全部复现说明都在仓库里”。Table 2 的三个基线 FPS 完全相同（17.0），LongLive 原文却报告 20.7 FPS。另一个小坑：论文 B.4 的口径是“去掉每张卡第一个 clip 后的均值”，对应单独的测速脚本 <span class="mono">run_speed_probe.sh</span> 输出的 <span class="mono">warm_mean_excluding_first</span>。完整生成脚本的汇总只打印 <span class="mono">raw_mean</span>，以及一个只统计 ≥30 FPS 的 <span class="mono">healthy_ge30_fps</span>，复现时要用对脚本。</p>
+    </div></details>
+
+    <details class="dbt l" data-s="l"><summary><span class="id">D11</span><span class="t">累积消融的归因依赖顺序</span></summary><div class="body">
+      <p>SVD 单独用（Fig 7a 的 σ=0 点，84.32）和精修单独用（C5，84.33）各补约 +0.45，叠加只有 +0.69。Table 1 写的“精修 +0.46、SVD +0.23”只是加入顺序的结果。</p>
+    </div></details>
+
+    <details class="dbt l" data-s="l"><summary><span class="id">D12</span><span class="t">“1 步”变体并非全程 1 步，质量也不是 1 步里最好的</span></summary><div class="body">
+      <p>首块仍是 4+1，全片共 17 次前向。在 1 步组里，One-Forcing（framewise）的 Total 83.76、Quality 85.22，都高于 UnStep 1 步的 83.34 / 83.84。论文说“质量相当”，这个说法偏宽松；UnStep 1 步的真正优势在速度。</p>
+    </div></details>
+
+    <details class="dbt l" data-s="l"><summary><span class="id">D13</span><span class="t">时间步被截成整数（未说明）</span></summary><div class="body">
+      <p>代码把 937.5 截成 937，833.33 截成 833，上游传的是浮点数。影响很小，但说明工程层并非严格“不改数学”。</p>
+    </div></details>
+
+    <details class="dbt l" data-s="l"><summary><span class="id">D14</span><span class="t">SVD 的对象和层范围缺少对照，LASER 的迁移没有论证</span></summary><div class="body">
+      <p>只有保留比例给了扫描（Fig 7b）。第 8–29 层这个范围是借 LASER 的结论来论证的；为什么动 V/O 而不动 MLP、换别的层范围会怎样，都没有报告对照实验。LASER 的证据来自 LLM 推理任务里的 MLP 降秩。另外，重建后是稠密矩阵，不省算力，这一点论文写得很清楚，但标题里的“加速”与这部分无关。</p>
+    </div></details>
+
+    <details class="dbt l" data-s="l"><summary><span class="id">D15</span><span class="t">“零样本迁移”的范围很窄</span></summary><div class="body">
+      <p>三个权重都是 Wan2.1-1.3B，分辨率、块大小、调度族都相同。满 4 步时精修伤质量 −0.43、SVD 在 ±0.13 以内（Table 5），说明它们与“2 步输出的特定偏差”绑定，换 backbone、分辨率或调度大概率要重调。论文的 Limitations 部分对此是承认的。</p>
+    </div></details>
+  </div>
+</section>
+
+<!-- ============================ 12 ============================ -->
+<section id="s12">
+  <h2><span class="no">12</span>结论与启示</h2>
+  <div class="callout un">
+    <span class="lab">我的判断</span>
+    <p>UnStep 最扎实的贡献是<b>工程账</b>：在少步因果模型里，编译、注意力调用、RoPE、VAE 这些“杂费”占原版耗时的近一半（2249 / 4765 ms ≈ 47%），占全部省下时间的 72%，而且可以在基本不改输出的前提下拿掉。这部分对任何 Wan-1.3B 系的流式模型都直接可用。“砍到 2 步 + 开窗”是已知手段；“把 t=0 缓存 pass 改成免费的第三步”是真正的小巧思，但论文的玩具理论没有把它为什么有效解释到点上。“质量不降”这个结论站得住；“质量略升”站不住，因为落在噪声内，又是在测试集上调的参；另外运动量略有下降。</p>
+  </div>
+
+  <div class="grid2">
+    <div class="card ok">
+      <h4>做对的地方</h4>
+      <ul class="tight">
+        <li>代码开源，而且写得认真：替换 <span class="mono">add_noise</span> 之前先做 AST 校验，RNG 协议固定，还配了测试。测速口径（CUDA 同步、哪些不计）写得很清楚。</li>
+        <li>给了反例：Table 5 显示满 4 步时精修明显伤质量（−0.43），SVD 基本无益；Limitations 承认只在单一设置上调参。</li>
+        <li>946 条提示全跑，重跑 5 次并报告标准差；给了 16 维细分，dynamic degree 下降正是从这里看出来的。</li>
+        <li>免训练，推理时可在 1 步和 2 步之间切换，部署上的灵活性是真实的。</li>
+        <li>同一配置零样本用到 3 个权重、I2V、30 秒、GB200，都没有崩。</li>
+      </ul>
+    </div>
+    <div class="card un">
+      <h4>对交互式世界模型方向的启示</h4>
+      <ul class="tight">
+        <li><b>先做工程栈。</b>大量 Self Forcing 衍生的世界模型都是 Wan-1.3B 系的 4 步因果模型，这一层的约 2 倍收益几乎是白拿的。</li>
+        <li><b>VAE 是下一个瓶颈。</b>按我的拟合，UnStep 之后“VAE + 固定开销”约占 39%，1 步时约 47%。交互场景还必须逐块解码，更需要小解码器或因果解码器。</li>
+        <li><b>缓存 pass 的 σ 是一个免费的推理旋钮</b>，但要在自己的指标（动作响应、长程一致性）上重扫，并把“输出精修”和“上下文加噪”分开测。</li>
+        <li><b>9 帧窗口不适合需要空间记忆的场景</b>，要么配显式记忆，要么至少别把回访一致性交给“sink + 上一块”。</li>
+        <li><b>测速请报逐块延迟</b>（动作到画面），不要只报离线整段 FPS。</li>
+        <li><b>警惕“越静越高”的指标</b>：对动作条件模型，dynamic degree 下降可能意味着动作响应变弱。</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>最值钱的后续实验</h3>
+  <ol class="tight prose">
+    <li><b>同栈对比</b>：把同一工程栈套到 rCM 2 步、Causal-rCM、DiagDistill 上，再画一次 Fig 1。</li>
+    <li><b>留出集 + 多 seed</b>：在一半提示上调 σ、p 和调度，在另一半上报告，并给出 seed 方差。</li>
+    <li><b>拆开精修</b>：“只精修输出（缓存用干净 x̂₀）”对“只给缓存加噪（输出用 x̂₀）”，再加一个“纯收缩 x ← 0.98x”的对照（玩具模型预测它更好）。</li>
+    <li><b>标签对照</b>：t=0 对 t≈20（与 σ=0.02 相符）。</li>
+    <li><b>真实流式</b>：逐块解码，报告首块延迟和逐块延迟。</li>
+    <li><b>长程与运动</b>：打开 VBench-Long 的跨片段项，做回访一致性测试，补运动/动作响应指标和小规模人评。</li>
+  </ol>
+</section>
+
+<footer class="foot">
+  <p><b>数据来源与做法。</b>正文、表格、公式来自论文 v1（<a href="https://arxiv.org/abs/2609.32518">arXiv 2609.32518</a>）。Fig 5 / 6 / 7 的数值是我在 <a href="https://arxiv.org/html/2609.32518v1">arXiv HTML 版</a>里读取 SVG 路径坐标、按刻度线标定后换算出来的，Fig 8 / 9 在 HTML 版里没有渲染。实现细节（逐块调度、逐层窗口、精修的实现方式、测速流程、整数时间步）来自 <a href="https://github.com/facebookresearch/UnStep">facebookresearch/UnStep</a>（2026-09-29 查阅）的 <span class="mono">unstep/wrapper.py</span>、<span class="mono">wrapper_runtime.py</span>、<span class="mono">clean_sigma.py</span>、<span class="mono">run_wrapper_generation.py</span>。LongLive 的 20.7 FPS 取自其 <a href="https://huggingface.co/papers/2509.22622">论文页</a>。</p>
+  <p><b>我的计算。</b>毫秒换算 = 81 000 / FPS。三参数耗时模型（V、α、β）用 C2、C3、C4 和 1 步变体四个点做最小二乘，残差都小于 4 ms。玩具模型按附录 E 的式 (33)(35)(43) 先用 Python 独立实现一遍，本页 JS 又在浏览器里实时重算一遍，两者都与论文数值一致。“高斯最优速度场”对照是我补充的推导，不属于论文内容。</p>
+  <p>本页是读者笔记，不代表作者本人的解读；与论文冲突时以论文为准。</p>
+</footer>
+</div>
+<div class="tip" id="tip" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+"use strict";
+const NS="http://www.w3.org/2000/svg";
+function el(tag,attrs,parent,text){const e=document.createElementNS(NS,tag);if(attrs)for(const k in attrs){e.setAttribute(k,attrs[k]);}if(text!=null)e.textContent=text;if(parent)parent.appendChild(e);return e;}
+function clear(n){while(n.firstChild)n.removeChild(n.firstChild);}
+function $(s,r){return (r||document).querySelector(s);}
+function $$(s,r){return Array.from((r||document).querySelectorAll(s));}
+function segBind(root,attr,cb){$$('button',root).forEach(b=>b.addEventListener('click',()=>{$$('button',root).forEach(x=>x.setAttribute('aria-pressed',x===b?'true':'false'));cb(b.dataset[attr]);}));}
+function segSet(root,attr,val){$$('button',root).forEach(x=>x.setAttribute('aria-pressed',x.dataset[attr]===val?'true':'false'));}
+const fmt=(v,d)=>(v<0?'−':'')+Math.abs(v).toFixed(d);
+const sgn=(v,d)=>(v>0?'+':v<0?'−':'±')+Math.abs(v).toFixed(d);
+function ro(box,items){box.innerHTML=items.map(([k,v])=>'<div><span>'+k+'</span><b>'+v+'</b></div>').join('');}
+
+/* ---------- tooltip ---------- */
+const tip=$('#tip');
+function tipOn(e,html){tip.innerHTML=html;tip.classList.add('on');tipMove(e);}
+function tipMove(e){const x=e.clientX,y=e.clientY;const w=tip.offsetWidth,h=tip.offsetHeight;tip.style.left=Math.min(window.innerWidth-w-8,x+14)+'px';tip.style.top=Math.max(8,y-h-10)+'px';}
+function tipOff(){tip.classList.remove('on');}
+function hover(node,html){node.style.cursor='default';node.addEventListener('mouseenter',e=>tipOn(e,html));node.addEventListener('mousemove',tipMove);node.addEventListener('mouseleave',tipOff);node.addEventListener('touchstart',e=>{tipOn(e.touches[0],html);},{passive:true});}
+document.addEventListener('touchstart',e=>{if(!(e.target instanceof SVGElement))tipOff();},{passive:true});
+
+/* ---------- theme ---------- */
+const root=document.documentElement;
+try{const t=localStorage.getItem('unstep-theme');if(t==='light'||t==='dark')root.setAttribute('data-theme',t);}catch(e){}
+$('#themeBtn').addEventListener('click',()=>{
+  const cur=root.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  const nx=cur==='light'?'dark':'light';root.setAttribute('data-theme',nx);
+  try{localStorage.setItem('unstep-theme',nx);}catch(e){}
+});
+
+/* ---------- toc highlight ---------- */
+const tocLinks=$$('nav.toc a');
+if('IntersectionObserver' in window){
+  const io=new IntersectionObserver(es=>{es.forEach(en=>{if(en.isIntersecting){const id=en.target.id;tocLinks.forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+id));}});},{rootMargin:'-40% 0px -55% 0px'});
+  $$('section[id]').forEach(s=>io.observe(s));
+}
+
+/* ---------- generic axes ---------- */
+function axes(svg,o){
+  // o: {x0,x1,y0,y1,xmin,xmax,ymin,ymax,xt:[..],yt:[..],xf,yf,xlab,ylab}
+  const sx=v=>o.x0+(v-o.xmin)/(o.xmax-o.xmin)*(o.x1-o.x0);
+  const sy=v=>o.y1-(v-o.ymin)/(o.ymax-o.ymin)*(o.y1-o.y0);
+  o.yt.forEach(v=>{el('line',{x1:o.x0,x2:o.x1,y1:sy(v),y2:sy(v),style:'stroke:var(--grid)'},svg);el('text',{x:o.x0-8,y:sy(v)+4,'text-anchor':'end',class:'svgmono',style:'fill:var(--ink3)'},svg,o.yf(v));});
+  o.xt.forEach(v=>{el('line',{x1:sx(v),x2:sx(v),y1:o.y1,y2:o.y1+4,style:'stroke:var(--axis)'},svg);el('text',{x:sx(v),y:o.y1+18,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},svg,o.xf(v));});
+  el('line',{x1:o.x0,x2:o.x1,y1:o.y1,y2:o.y1,style:'stroke:var(--axis)'},svg);
+  el('line',{x1:o.x0,x2:o.x0,y1:o.y0,y2:o.y1,style:'stroke:var(--axis)'},svg);
+  if(o.xlab)el('text',{x:(o.x0+o.x1)/2,y:o.y1+38,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink2)'},svg,o.xlab);
+  if(o.ylab){const t=el('text',{x:0,y:0,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink2)',transform:'translate('+(o.x0-54)+','+((o.y0+o.y1)/2)+') rotate(-90)'},svg,o.ylab);}
+  return {sx,sy};
+}
+function pathD(pts){return pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');}
+
+/* ============ §02 schedule ============ */
+(function(){
+  const SIG=[1,0.9375,0.8333,0.625];
+  const LAB=['1.000','0.938','0.833','0.625'];
+  function sched(m){
+    const out=[];
+    for(let k=0;k<7;k++){
+      let idx;
+      if(m==='sf'||k===0) idx=[0,1,2,3];
+      else if(m==='u1') idx=[0];
+      else if(m==='u2') idx=(k>=3&&k<=5)?[0,2]:[0,3];
+      else idx=(k%2===1)?[0,3]:[0,2];
+      out.push(idx);
+    }
+    return out;
+  }
+  const svg=$('#figSched'),box=$('#schedRO');
+  function draw(m){
+    clear(svg);
+    const S=sched(m),un=m!=='sf';
+    const x0=96,cw=122,bw=106,bh=34,gap=7,y0=62;
+    el('text',{x:10,y:y0+14,class:'svgtxt',style:'fill:var(--ink3)'},svg,'前向次序');
+    el('text',{x:10,y:y0+30,class:'svgtxt',style:'fill:var(--ink3)'},svg,'↓');
+    let nf=0,nd=0;
+    S.forEach((idx,k)=>{
+      const cx=x0+k*cw;
+      el('text',{x:cx+bw/2,y:22,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink);font-weight:600'},svg,'块 '+k);
+      el('text',{x:cx+bw/2,y:40,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},svg,'latent '+(3*k)+'–'+(3*k+2));
+      idx.forEach((ii,r)=>{
+        const y=y0+r*(bh+gap);
+        const op=0.35+0.65*SIG[ii];
+        const col=un?'var(--un)':'var(--sf)';
+        el('rect',{x:cx,y:y,width:bw,height:bh,rx:6,style:'fill:'+col+';opacity:'+op.toFixed(2)},svg);
+        el('text',{x:cx+bw/2,y:y+22,'text-anchor':'middle',class:'svgmono',style:'fill:#fff;font-size:12px'},svg,'σ='+LAB[ii]);
+        nf++;nd++;
+      });
+      const y=y0+idx.length*(bh+gap);
+      el('rect',{x:cx,y:y,width:bw,height:bh,rx:6,style:un?'fill:var(--rec-soft);stroke:var(--rec);stroke-width:1.5':'fill:var(--surf2);stroke:var(--vae);stroke-dasharray:4 3'},svg);
+      el('text',{x:cx+bw/2,y:y+15,'text-anchor':'middle',class:'svgmono',style:'fill:'+(un?'var(--rec-ink)':'var(--vae-ink)')+';font-size:10.5px'},svg,un?'t=0 · σ=0.02':'t=0 · σ=0');
+      el('text',{x:cx+bw/2,y:y+28,'text-anchor':'middle',class:'svgtxt',style:'fill:'+(un?'var(--rec-ink)':'var(--vae-ink)')+';font-size:10.5px'},svg,un?'精修 + 写缓存 + 输出':'只写缓存');
+      nf++;
+      el('text',{x:cx+bw/2,y:y+bh+18,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},svg,(idx.length+1)+' 次');
+    });
+    // eviction marker
+    if(m!=='sf'){
+      const cx=x0+3*cw-8;
+      el('line',{x1:cx,x2:cx,y1:48,y2:300,style:'stroke:var(--cut);stroke-dasharray:3 4'},svg);
+      el('text',{x:cx+4,y:314,class:'svgtxt',style:'fill:var(--cut-ink);font-size:11px'},svg,'← 块 3 起 KV 开始驱逐');
+    }
+    ro(box,[['DiT 前向总数',nf+(m==='sf'?'':'  （原版 35）')],['其中去噪步',String(nd)],['缓存 pass',un?'7（兼作精修）':'7（只写缓存）'],['首块','4 步 + 1'],['后续块',m==='sf'?'4 步 + 1':m==='u1'?'1 步 + 1':'2 步 + 1']]);
+  }
+  segBind($('#schedSeg'),'m',draw); draw('sf');
+})();
+
+/* ============ §03 waterfall ============ */
+(function(){
+  const IT=[
+    ['原版 Self Forcing + FA3',17.0,'sf',true],
+    ['torch.compile',22.2,'rt'],
+    ['KV 索引上 CPU + 定长 FlashAttention',24.5,'rt'],
+    ['Triton 融合 RoPE + 系数缓存',26.7,'rt'],
+    ['VAE fp16 + channels_last_3d + 预分配',29.5,'rt'],
+    ['卷积 autotune（cuDNN benchmark）',32.2,'rt'],
+    ['后续块 4 → 2 步',44.3,'cut'],
+    ['KV 窗口 9 帧',49.8,'cut'],
+    ['缓存精修 σ=0.02',49.8,'rec'],
+    ['V/O 截断 SVD',49.8,'rec'],
+    ['UnStep 合计',49.8,'un',true]
+  ];
+  const svg=$('#figWater');
+  function draw(m){
+    clear(svg);
+    const x0=300,x1=900,y0=14,rh=31;
+    const ms=f=>81000/f;
+    const max=m==='ms'?5000:55;
+    const sx=v=>x0+v/max*(x1-x0);
+    const ticks=m==='ms'?[0,1000,2000,3000,4000,5000]:[0,10,20,30,40,50];
+    ticks.forEach(t=>{el('line',{x1:sx(t),x2:sx(t),y1:y0,y2:y0+IT.length*rh,style:'stroke:var(--grid)'},svg);el('text',{x:sx(t),y:y0+IT.length*rh+16,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},svg,m==='ms'?t+' ms':t+' FPS');});
+    const total=ms(17)-ms(49.8);
+    IT.forEach((it,i)=>{
+      const y=y0+i*rh;const prev=i>0?IT[i-1][1]:it[1];
+      el('text',{x:x0-10,y:y+19,'text-anchor':'end',class:'svgtxt',style:'fill:'+(it[3]?'var(--ink)':'var(--ink2)')+';font-weight:'+(it[3]?600:400)},svg,it[0]);
+      let a,b,lab;
+      if(it[3]){ if(m==='ms'){a=0;b=ms(it[1]);lab=Math.round(b)+' ms';}else{a=0;b=it[1];lab=it[1].toFixed(1)+' FPS';} }
+      else if(m==='ms'){a=ms(it[1]);b=ms(prev);const d=b-a;lab=d<0.5?'0 ms':'−'+Math.round(d)+' ms  ('+(d/total*100).toFixed(0)+'%)';}
+      else {a=prev;b=it[1];const d=b-a;lab=d<0.05?'+0 FPS':'+'+d.toFixed(1)+' FPS';}
+      const w=Math.max(sx(b)-sx(a),it[3]?0:2);
+      const r=el('rect',{x:sx(a),y:y+5,width:Math.max(w,2),height:rh-10,rx:3,style:'fill:var(--'+it[2]+');opacity:'+(it[3]?0.55:0.9)},svg);
+      hover(r,'<b>'+it[0]+'</b><br>'+(it[3]?'':'之后 ')+it[1].toFixed(1)+' FPS · '+Math.round(ms(it[1]))+' ms/段');
+      const right=Math.max(sx(a),sx(b));
+      if(right>x1-150&&!it[3]) el('text',{x:Math.min(sx(a),sx(b))-8,y:y+19,'text-anchor':'end',class:'svgmono',style:'fill:var(--ink2)'},svg,lab);
+      else el('text',{x:right+8,y:y+19,class:'svgmono',style:'fill:var(--ink2)'},svg,lab);
+      if(!it[3]&&i<IT.length-1&&m==='ms'){el('line',{x1:sx(a),x2:sx(a),y1:y+rh-5,y2:y+rh+5,style:'stroke:var(--rule2)'},svg);}
+    });
+    // group braces
+    const gy=(i)=>y0+i*rh;
+    [[1,5,'rt','工程栈'],[6,7,'cut','砍计算'],[8,9,'rec','补分']].forEach(([a,b,c,l])=>{
+      el('line',{x1:22,x2:22,y1:gy(a)+5,y2:gy(b)+rh-5,style:'stroke:var(--'+c+');stroke-width:3'},svg);
+      const cy=(gy(a)+gy(b)+rh)/2;
+      el('text',{x:0,y:0,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--'+c+'-ink);font-size:11px',transform:'translate(12,'+cy+') rotate(-90)'},svg,l);
+    });
+  }
+  segBind($('#waterSeg'),'m',draw); draw('ms');
+})();
+
+/* ============ §03 Amdahl ============ */
+(function(){
+  const A=29.228,B=2.046,EFF=(12*9+18*8)/30;
+  let steps=2,win='win';
+  const svg=$('#figAmdahl'),box=$('#amdRO'),vs=$('#amdV'),vo=$('#amdVo');
+  const MEAS={'4full':[32.2,'C2'],'2full':[44.3,'C3'],'2win':[49.8,'C4–C6（UnStep）'],'1win':[59.6,'1 步变体']};
+  function cfg(n,w){let N=5,S=15;for(let k=1;k<7;k++){const kv=w==='full'?3*(k+1):(k===1?6:EFF);N+=n+1;S+=(n+1)*kv;}return [N,S];}
+  function draw(){
+    const V=+vs.value;vo.textContent=V+' ms';
+    const [N,S]=cfg(steps,win);const lin=A*N,att=B*S,T=V+lin+att,fps=81000/T;
+    clear(svg);
+    const x0=20,x1=940,max=3000,sx=v=>x0+v/max*(x1-x0),y=40,h=46;
+    [0,500,1000,1500,2000,2500,3000].forEach(t=>{el('line',{x1:sx(t),x2:sx(t),y1:y-6,y2:y+h+6,style:'stroke:var(--grid)'},svg);el('text',{x:sx(t),y:y+h+22,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},svg,t+' ms');});
+    const segs=[['线性层等 α·N',lin,'un'],['注意力 β·ΣKV',att,'cut'],['VAE + 固定开销 V',V,'vae']];
+    let acc=0;segs.forEach(([l,v,c])=>{const r=el('rect',{x:sx(acc),y:y,width:Math.max(sx(acc+v)-sx(acc),1),height:h,style:'fill:var(--'+c+');opacity:.85'},svg);hover(r,'<b>'+l+'</b><br>'+Math.round(v)+' ms（'+(v/T*100).toFixed(0)+'%）');if(sx(acc+v)-sx(acc)>90)el('text',{x:(sx(acc)+sx(acc+v))/2,y:y+28,'text-anchor':'middle',class:'svgmono',style:'fill:#fff'},svg,Math.round(v)+' ms');acc+=v;});
+    el('text',{x:sx(T)+8,y:y+28,class:'svgmono',style:'fill:var(--ink);font-size:13px'},svg,'= '+Math.round(T)+' ms → '+fps.toFixed(1)+' FPS');
+    // measured markers
+    Object.entries(MEAS).forEach(([k,[f,l]],i)=>{const t=81000/f;const mx=sx(t);const ly=y+h+50+(i%2)*16;el('line',{x1:mx,x2:mx,y1:y+h+30,y2:ly-10,style:'stroke:var(--ink3)'},svg);el('text',{x:mx,y:ly,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3);font-size:10px'},svg,l+' · '+f+' FPS');});
+    el('text',{x:x0,y:22,class:'svgtxt',style:'fill:var(--ink2)'},svg,'每段 5 秒视频的耗时构成（模型预测）；下方刻度为论文实测配置');
+    const key=steps+win;const meas=MEAS[key];
+    ro(box,[['DiT 前向次数',String(N)],['预测耗时',Math.round(T)+' ms'],['预测 FPS',fps.toFixed(1)],['DiT 占比',((lin+att)/T*100).toFixed(0)+'%'],['VAE+固定 占比',(V/T*100).toFixed(0)+'%'],['论文实测',meas&&Math.abs(V-631)<=20?meas[0].toFixed(1)+' FPS':'—']]);
+  }
+  segBind($('#amdSteps'),'v',v=>{steps=+v;draw();});
+  segBind($('#amdWin'),'v',v=>{win=v;draw();});
+  vs.addEventListener('input',draw); draw();
+})();
+
+/* ============ §06 KV map ============ */
+(function(){
+  const svg=$('#figKV'),leg=$('#kvLeg');
+  const C={cur:'var(--un)',sink:'var(--sink)',recent:'var(--recent)',gone:'var(--evict)',fut:'transparent'};
+  leg.innerHTML=[['cur','当前块（自己也在窗口里）'],['sink','sink 帧（被读取）'],['recent','历史帧（被读取）'],['gone','已生成但读不到']].map(([k,l])=>'<span><i style="background:'+C[k]+(k==='gone'?';border:1px dashed var(--ink3)':'')+'"></i>'+l+'</span>').join('')+'<span><i style="border:1px solid var(--rule2)"></i>尚未生成</span>';
+  function state(m,k,f){
+    const cur0=3*k,cur1=3*k+2;
+    if(f>cur1)return 'fut';
+    if(f>=cur0)return 'cur';
+    if(m==='full')return f<3?'sink':'recent';
+    // buffer
+    let buf;
+    const n=3*(k+1);
+    if(n<=9){buf=[];for(let i=0;i<n;i++)buf.push(i);}
+    else{buf=[0,1,2];for(let i=3*k-3;i<=cur1;i++)buf.push(i);}
+    const read=m==='w8'?buf.slice(Math.max(0,buf.length-8)):buf;
+    if(read.indexOf(f)<0)return 'gone';
+    return f<3?'sink':'recent';
+  }
+  function draw(m){
+    clear(svg);
+    const x0=96,y0=40,cw=34,ch=33;
+    for(let f=0;f<21;f++){el('text',{x:x0+f*cw+cw/2,y:y0-10,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},svg,String(f));}
+    el('text',{x:x0+21*cw+14,y:y0-10,class:'svgtxt',style:'fill:var(--ink3)'},svg,'读取帧数');
+    for(let k=0;k<7;k++){
+      const y=y0+k*ch;
+      el('text',{x:x0-12,y:y+21,'text-anchor':'end',class:'svgtxt',style:'fill:var(--ink)'},svg,'块 '+k);
+      let nread=0;
+      for(let f=0;f<21;f++){
+        const s=state(m,k,f);if(s==='cur'||s==='sink'||s==='recent')nread++;
+        const r=el('rect',{x:x0+f*cw+2,y:y+3,width:cw-4,height:ch-6,rx:4,style:s==='fut'?'fill:none;stroke:var(--rule2)':s==='gone'?'fill:var(--evict);opacity:.55;stroke:var(--ink3);stroke-dasharray:2 2':'fill:'+C[s]+';opacity:.88'},svg);
+        hover(r,'块 '+k+' · latent 帧 '+f+'<br>'+({cur:'当前块',sink:'sink（被读取）',recent:'历史帧（被读取）',gone:'已生成但读不到',fut:'尚未生成'})[s]);
+      }
+      el('text',{x:x0+21*cw+14,y:y+21,class:'svgmono',style:'fill:var(--ink2)'},svg,nread+' 帧 · '+(nread*1560).toLocaleString()+' tok');
+    }
+    const note={full:'原版：缓存随视频增长，块 6 读 21 帧 = 32 760 token。',w9:'9 帧层：块 3 起驱逐，只剩 sink 0–2 + 上一块 + 当前块。',w8:'8 帧层：读取缓冲区的最后 8 格，第 0 帧从块 2 起就读不到了。'}[m];
+    el('text',{x:x0,y:y0+7*ch+24,class:'svgtxt',style:'fill:var(--ink2)'},svg,note);
+  }
+  segBind($('#kvSeg'),'m',draw); draw('w9');
+})();
+
+/* ============ §06 layers ============ */
+(function(){
+  const svg=$('#figLayers');
+  const W9=new Set([0,1,2,3,4,5,6,7,8,15,23,29]);
+  const x0=110,cw=27.5,y1=30,y2=86,h=32;
+  el('text',{x:x0-10,y:y1+21,'text-anchor':'end',class:'svgtxt',style:'fill:var(--ink2)'},svg,'KV 读取窗口');
+  el('text',{x:x0-10,y:y2+21,'text-anchor':'end',class:'svgtxt',style:'fill:var(--ink2)'},svg,'V/O SVD');
+  for(let l=0;l<30;l++){
+    const x=x0+l*cw;const w9=W9.has(l);const svd=l>=8;
+    const a=el('rect',{x:x+1.5,y:y1,width:cw-3,height:h,rx:3,style:'fill:'+(w9?'var(--recent)':'var(--cut)')+';opacity:'+(w9?.75:.85)},svg);
+    el('text',{x:x+cw/2,y:y1+21,'text-anchor':'middle',class:'svgmono',style:'fill:#fff;font-size:11px'},svg,w9?'9':'8');
+    hover(a,'第 '+l+' 层：读取 '+(w9?'9 帧（3 sink + 6 最近）':'8 帧（sink₁,₂ + 6 最近）'));
+    const b=el('rect',{x:x+1.5,y:y2,width:cw-3,height:h,rx:3,style:svd?'fill:var(--rec);opacity:.85':'fill:none;stroke:var(--rule2)'},svg);
+    el('text',{x:x+cw/2,y:y2+21,'text-anchor':'middle',class:'svgmono',style:'fill:'+(svd?'#fff':'var(--ink3)')+';font-size:9.5px'},svg,svd?'.92':'1');
+    hover(b,'第 '+l+' 层：V/O '+(svd?'保留 1413/1536 个奇异方向':'不动'));
+    if(l%5===0||l===29)el('text',{x:x+cw/2,y:y2+h+16,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},svg,String(l));
+  }
+})();
+
+/* ============ toy model maths ============ */
+function coeffs(aFn,levels){const c={};levels.forEach(([j,s])=>{const A=aFn(s);const q=(1-s)*(1-s*A),v=s*(1-s*A);for(const k in c)c[k]*=q;c[j]=v;});return c;}
+const TOY_PRE={
+  paper:{F:[[0,1],[1,.131],[2,.015],[3,.0033]],J:[[0,1],[3,.131]]},
+  real3:{F:[[0,1],[1,15/16],[2,5/6],[3,5/8]],J:[[0,1],[3,5/8]]},
+  real2:{F:[[0,1],[1,15/16],[2,5/6],[3,5/8]],J:[[0,1],[2,5/6]]}
+};
+function riskClean(sig,a,z2,pre,mode){
+  // mode: 'renoise' | 'shrink'
+  const cf=coeffs(()=>a,pre.F),cs=coeffs(()=>a,pre.J);
+  const m=(1-sig)*(1-a*sig);const keys=new Set([...Object.keys(cf),...Object.keys(cs)]);let R=0;
+  keys.forEach(k=>{const w=k==='0'?z2:1;const d=m*(cs[k]||0)-(cf[k]||0);R+=w*d*d;});
+  if(mode==='renoise')R+=sig*sig*(1-a*sig)*(1-a*sig);
+  return R;
+}
+function riskGauss(sig,lam,pre){
+  const Af=s=>(s-(1-s)*lam)/((1-s)*(1-s)*lam+s*s);
+  const cf=coeffs(Af,pre.F),cs=coeffs(Af,pre.J);
+  const m=(1-sig)*(1+sig);const keys=new Set([...Object.keys(cf),...Object.keys(cs)]);let R=0;
+  keys.forEach(k=>{const d=m*(cs[k]||0)-(cf[k]||0);R+=d*d;});
+  return R+sig*sig*(1+sig)*(1+sig);
+}
+function argmin(f,lo,hi,n){let bx=lo,bv=Infinity;for(let i=0;i<=n;i++){const x=lo+(hi-lo)*i/n;const v=f(x);if(v<bv){bv=v;bx=x;}}return [bx,bv];}
+const DIT6A=[[0,.03400],[.005,.03303],[.01,.03222],[.015,.03199],[.02,.03186],[.025,.03211],[.03,.03272],[.04,.03502],[.05,.03824]];
+const DIT6B=[[.86,.04602],[.88,.04143],[.90,.03867],[.92,.03705],[.94,.03771],[.96,.03843],[.98,.03860],[1.0,.03905]];
+const VB7A=[[0,84.321],[.01,84.496],[.02,84.560],[.03,84.504],[.04,84.465],[.05,84.394]];
+const VB7B=[[.88,84.302],[.90,84.429],[.92,84.560],[.94,84.426],[.96,84.370],[.98,84.344],[1.0,84.330]];
+function svdCurve(qd,b,h){
+  const d=500,q=Math.round(qd*d),k=Math.max(1,q-30);
+  const pre=TOY_PRE.real3;
+  const Aeig=[];for(let l=1;l<=d;l++){let w;if(l<=k)w=h;else if(l<=q)w=b+(h-b)*Math.pow((q-l+0.5)/(q-k),1/3);else w=-b;Aeig.push(l<=q?b+w:0);}
+  const err=(am,ar)=>{const cs=coeffs(()=>am,pre.J),cf=coeffs(()=>ar,pre.F);let e=0;new Set([...Object.keys(cs),...Object.keys(cf)]).forEach(j=>{const x=(cs[j]||0)-(cf[j]||0);e+=x*x;});return e;};
+  const ek=Aeig.map(a=>err(a,a)),ed=Aeig.map(a=>err(b,a));
+  const pk=[0];ek.forEach(v=>pk.push(pk[pk.length-1]+v));
+  const sd=new Array(d+1).fill(0);for(let i=d-1;i>=0;i--)sd[i]=sd[i+1]+ed[i];
+  const pts=[];for(let r=Math.round(0.8*d);r<=d;r++){pts.push([r/d,(pk[r]+sd[r])/d]);}
+  const kappa=ek[d-1]-ed[d-1];
+  return {pts,q,kappa};
+}
+
+/* ============ §07 sigma sweep ============ */
+(function(){
+  const svg=$('#figSigma'),cap=$('#sigCap');
+  function draw(m){
+    clear(svg);
+    if(m==='vb'){
+      const ax=axes(svg,{x0:90,x1:900,y0:20,y1:260,xmin:0,xmax:0.05,ymin:84.25,ymax:84.62,xt:[0,.01,.02,.03,.04,.05],yt:[84.3,84.4,84.5,84.6],xf:v=>v.toFixed(2),yf:v=>v.toFixed(1),xlab:'缓存精修的噪声水平 σ（V/O 保留 0.92）',ylab:'VBench Total'});
+      el('line',{x1:90,x2:900,y1:ax.sy(84.31),y2:ax.sy(84.31),style:'stroke:var(--sf);stroke-dasharray:5 4'},svg);
+      el('text',{x:896,y:ax.sy(84.31)+16,'text-anchor':'end',class:'svgtxt',style:'fill:var(--sf-ink)'},svg,'原版 Self Forcing 84.31');
+      el('path',{d:pathD(VB7A.map(p=>[ax.sx(p[0]),ax.sy(p[1])])),style:'fill:none;stroke:var(--rec);stroke-width:2'},svg);
+      VB7A.forEach(p=>{const c=el('circle',{cx:ax.sx(p[0]),cy:ax.sy(p[1]),r:p[0]===.02?6:4.5,style:'fill:var(--rec)'},svg);hover(c,'σ='+p[0]+' → VBench '+p[1].toFixed(2));el('text',{x:ax.sx(p[0]),y:ax.sy(p[1])-11,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink2)'},svg,p[1].toFixed(2));});
+      el('text',{x:ax.sx(0)+10,y:ax.sy(84.321)+22,class:'svgtxt',style:'fill:var(--ink3);font-size:11px'},svg,'σ=0：只有 SVD，没有精修');
+      el('text',{x:ax.sx(0.001),y:252,class:'svgtxt',style:'fill:var(--risk-ink);font-size:11px'},svg,'（C4：两者都没有 = 83.87，在图外下方）');
+      cap.innerHTML='<b>图 8 · VBench Total vs σ（Fig 7a，V/O 保留 0.92 固定）。</b>从 arXiv HTML 的矢量路径读出，精度约 ±0.003。峰值在 0.02，两侧 0.01 / 0.03 各低 0.06，比 Fig 7b 平滑。σ=0 那一点（84.32）本身就是一组“只有 SVD”的消融。';
+    }else{
+      const pre=TOY_PRE.paper;
+      const ax=axes(svg,{x0:90,x1:900,y0:20,y1:260,xmin:0,xmax:0.05,ymin:0.031,ymax:0.039,xt:[0,.01,.02,.03,.04,.05],yt:[.032,.034,.036,.038],xf:v=>v.toFixed(2),yf:v=>v.toFixed(3),xlab:'缓存精修的噪声水平 σ（p=1，不加 SVD）',ylab:'与 4 步轨迹的 MSE'});
+      const pts=[];for(let i=0;i<=200;i++){const s=0.05*i/200;pts.push([ax.sx(s),ax.sy(riskClean(s,0.1,7.57,pre,'renoise'))]);}
+      el('path',{d:pathD(pts),style:'fill:none;stroke:var(--un);stroke-width:2'},svg);
+      el('path',{d:pathD(DIT6A.map(p=>[ax.sx(p[0]),ax.sy(p[1])])),style:'fill:none;stroke:var(--ink2);stroke-width:1.4'},svg);
+      DIT6A.forEach(p=>{const c=el('rect',{x:ax.sx(p[0])-4,y:ax.sy(p[1])-4,width:8,height:8,transform:'rotate(45 '+ax.sx(p[0])+' '+ax.sy(p[1])+')',style:'fill:var(--ink2)'},svg);hover(c,'DiT 实测：σ='+p[0]+' → MSE '+p[1].toFixed(5));});
+      const [bs,bv]=argmin(s=>riskClean(s,0.1,7.57,pre,'renoise'),0,0.05,2000);
+      el('circle',{cx:ax.sx(bs),cy:ax.sy(bv),r:6,style:'fill:none;stroke:var(--un);stroke-width:2'},svg);
+      el('text',{x:ax.sx(bs)+10,y:ax.sy(bv)+22,class:'svgmono',style:'fill:var(--un-ink)'},svg,'玩具最小 σ='+bs.toFixed(4)+'，R='+bv.toFixed(5));
+      el('line',{x1:620,x2:650,y1:40,y2:40,style:'stroke:var(--un);stroke-width:2'},svg);el('text',{x:656,y:44,class:'svgtxt',style:'fill:var(--ink2)'},svg,'玩具模型（浏览器实时计算式 33）');
+      el('line',{x1:620,x2:650,y1:62,y2:62,style:'stroke:var(--ink2);stroke-width:1.4'},svg);el('text',{x:656,y:66,class:'svgtxt',style:'fill:var(--ink2)'},svg,'DiT 实测（从矢量图读出）');
+      cap.innerHTML='<b>图 8 · 轨迹 MSE vs σ（Fig 6a）。</b>玩具曲线由本页按附录 E 的式 (33) 实时计算（a=0.1，‖z‖²/d=7.57，层级 1 / 0.131 / 0.015 / 0.0033），与论文图完全重合。DiT 从 0.0340 降到 0.0319（−6.3%）。两条曲线贴得这么近，原因见 §09：玩具参数看起来是照着这条 DiT 曲线挑的。';
+    }
+  }
+  segBind($('#sigSeg'),'m',draw); draw('vb');
+})();
+
+/* ============ §08 rank sweep ============ */
+(function(){
+  const svg=$('#figRank'),cap=$('#rankCap');
+  function draw(m){
+    clear(svg);
+    if(m==='vb'){
+      const ax=axes(svg,{x0:90,x1:900,y0:20,y1:260,xmin:.87,xmax:1.01,ymin:84.25,ymax:84.62,xt:[.88,.90,.92,.94,.96,.98,1.0],yt:[84.3,84.4,84.5,84.6],xf:v=>v.toFixed(2),yf:v=>v.toFixed(1),xlab:'V/O 保留的奇异方向比例 p（σ=0.02）',ylab:'VBench Total'});
+      el('line',{x1:90,x2:900,y1:ax.sy(84.31),y2:ax.sy(84.31),style:'stroke:var(--sf);stroke-dasharray:5 4'},svg);
+      el('text',{x:896,y:ax.sy(84.31)+16,'text-anchor':'end',class:'svgtxt',style:'fill:var(--sf-ink)'},svg,'原版 84.31');
+      el('rect',{x:ax.sx(.9),y:20,width:ax.sx(.94)-ax.sx(.9),height:240,style:'fill:var(--risk-soft)'},svg);
+      el('text',{x:ax.sx(.92),y:252,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--risk-ink);font-size:11px'},svg,'±0.02（±31 个方向）内 −0.13');
+      el('path',{d:pathD(VB7B.map(p=>[ax.sx(p[0]),ax.sy(p[1])])),style:'fill:none;stroke:var(--rec);stroke-width:2'},svg);
+      VB7B.forEach(p=>{const c=el('circle',{cx:ax.sx(p[0]),cy:ax.sy(p[1]),r:p[0]===.92?6:4.5,style:'fill:var(--rec)'},svg);hover(c,'p='+p[0].toFixed(2)+'（r='+Math.round(1536*p[0])+'）→ '+p[1].toFixed(2));el('text',{x:ax.sx(p[0]),y:ax.sy(p[1])-11,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink2)'},svg,p[1].toFixed(2));});
+      cap.innerHTML='<b>图 9 · VBench Total vs 保留比例（Fig 7b，σ=0.02 固定）。</b>p=1.00 的 84.33 就是 C5。0.92 处是一个孤立的尖峰。';
+    }else{
+      const ax=axes(svg,{x0:90,x1:900,y0:20,y1:260,xmin:.855,xmax:1.005,ymin:0.030,ymax:0.047,xt:[.86,.88,.90,.92,.94,.96,.98,1.0],yt:[.032,.036,.040,.044],xf:v=>v.toFixed(2),yf:v=>v.toFixed(3),xlab:'V/O 保留比例 p（σ=0.02）',ylab:'与 4 步轨迹的 MSE'});
+      const cv=svdCurve(.92,.05,.534).pts.filter(p=>p[0]>=.859);
+      el('path',{d:pathD(cv.map(p=>[ax.sx(p[0]),ax.sy(p[1])])),style:'fill:none;stroke:var(--un);stroke-width:2'},svg);
+      el('path',{d:pathD(DIT6B.map(p=>[ax.sx(p[0]),ax.sy(p[1])])),style:'fill:none;stroke:var(--ink2);stroke-width:1.4'},svg);
+      DIT6B.forEach(p=>{const c=el('rect',{x:ax.sx(p[0])-4,y:ax.sy(p[1])-4,width:8,height:8,transform:'rotate(45 '+ax.sx(p[0])+' '+ax.sy(p[1])+')',style:'fill:var(--ink2)'},svg);hover(c,'DiT 实测：p='+p[0].toFixed(2)+' → MSE '+p[1].toFixed(5));});
+      // inconsistency marker
+      const yx=ax.sy(.03186);
+      el('circle',{cx:ax.sx(1.0),cy:yx,r:7,style:'fill:none;stroke:var(--risk);stroke-width:2'},svg);
+      el('line',{x1:ax.sx(1.0),x2:ax.sx(1.0),y1:yx-7,y2:ax.sy(.03905)+6,style:'stroke:var(--risk);stroke-dasharray:3 3'},svg);
+      el('text',{x:ax.sx(1.0)-12,y:yx+4,'text-anchor':'end',class:'svgtxt',style:'fill:var(--risk-ink)'},svg,'Fig 6a 里同一配置 (σ=0.02, p=1) 是 0.0319');
+      el('text',{x:ax.sx(1.0)-12,y:ax.sy(.03905)-8,'text-anchor':'end',class:'svgtxt',style:'fill:var(--ink2)'},svg,'这里是 0.0390');
+      el('line',{x1:560,x2:590,y1:40,y2:40,style:'stroke:var(--un);stroke-width:2'},svg);el('text',{x:596,y:44,class:'svgtxt',style:'fill:var(--ink2)'},svg,'玩具模型（实时计算式 35 / 43，q/d=0.92）');
+      el('line',{x1:560,x2:590,y1:62,y2:62,style:'stroke:var(--ink2);stroke-width:1.4'},svg);el('text',{x:596,y:66,class:'svgtxt',style:'fill:var(--ink2)'},svg,'DiT 实测（从矢量图读出）');
+      cap.innerHTML='<b>图 9 · 轨迹 MSE vs 保留比例（Fig 6b）。</b>DiT 的最小值 0.0370 在 0.92。红圈是 Fig 6a 在同一配置下的读数，两处相差约 23%，论文没有解释（§11 D8）。';
+    }
+  }
+  segBind($('#rankSeg'),'m',draw); draw('vb');
+})();
+
+/* ============ §09 toy lab A ============ */
+(function(){
+  const svg=$('#figToyA'),box=$('#toyARO');
+  const sa=$('#toyA'),sz=$('#toyZ'),cs=$('#toyShrink'),cg=$('#toyGauss'),cd=$('#toyDiT');
+  let preset='paper';
+  function draw(){
+    const a=+sa.value,z2=+sz.value;$('#toyAo').textContent=a.toFixed(2);$('#toyZo').textContent=z2.toFixed(2);
+    const pre=TOY_PRE[preset];
+    const fR=s=>riskClean(s,a,z2,pre,'renoise'),fS=s=>riskClean(s,a,z2,pre,'shrink'),fG=s=>riskGauss(s,1.0,pre);
+    const [s1,r1]=argmin(fR,0,1,4000);
+    const xmax=preset==='paper'?0.05:Math.min(1,Math.max(0.1,Math.ceil(s1*2.4*100)/100));
+    const [s2,r2]=argmin(fS,0,xmax,2000);
+    const R0=fR(0),G0=fG(0);
+    const N=240,xs=[];for(let i=0;i<=N;i++)xs.push(xmax*i/N);
+    const cR=xs.map(s=>[s,fR(s)/R0]),cS=xs.map(s=>[s,fS(s)/R0]),cG=xs.map(s=>[s,fG(s)/G0]);
+    let lo=Infinity,hi=-Infinity;[cR].concat(cs.checked?[cS]:[]).forEach(c=>c.forEach(p=>{lo=Math.min(lo,p[1]);hi=Math.max(hi,p[1]);}));
+    hi=Math.max(hi,1.05);lo=Math.min(lo,0.95);if(cg.checked)hi=Math.max(hi,Math.min(1.6,Math.max(...cG.map(p=>p[1]))));
+    const span=hi-lo;lo-=span*0.05;hi+=span*0.08;
+    clear(svg);
+    const nt=5,ytk=[];for(let i=0;i<=nt;i++)ytk.push(lo+(hi-lo)*i/nt);
+    const xtk=[];for(let i=0;i<=5;i++)xtk.push(xmax*i/5);
+    const ax=axes(svg,{x0:90,x1:900,y0:20,y1:262,xmin:0,xmax:xmax,ymin:lo,ymax:hi,xt:xtk,yt:ytk,xf:v=>v.toFixed(xmax<0.1?3:2),yf:v=>v.toFixed(3),xlab:'σ（缓存精修的噪声水平）',ylab:'风险 / 风险(σ=0)'});
+    el('line',{x1:90,x2:900,y1:ax.sy(1),y2:ax.sy(1),style:'stroke:var(--axis);stroke-dasharray:4 4'},svg);
+    const clip=c=>c.filter(p=>p[1]>=lo&&p[1]<=hi);
+    if(cg.checked)el('path',{d:pathD(clip(cG).map(p=>[ax.sx(p[0]),ax.sy(p[1])])),style:'fill:none;stroke:var(--sf);stroke-width:2;stroke-dasharray:6 4'},svg);
+    if(cs.checked)el('path',{d:pathD(clip(cS).map(p=>[ax.sx(p[0]),ax.sy(p[1])])),style:'fill:none;stroke:var(--rec);stroke-width:2'},svg);
+    el('path',{d:pathD(clip(cR).map(p=>[ax.sx(p[0]),ax.sy(p[1])])),style:'fill:none;stroke:var(--un);stroke-width:2.4'},svg);
+    if(s1<=xmax)el('circle',{cx:ax.sx(s1),cy:ax.sy(r1/R0),r:6,style:'fill:none;stroke:var(--un);stroke-width:2'},svg);
+    if(cs.checked)el('circle',{cx:ax.sx(s2),cy:ax.sy(r2/R0),r:5,style:'fill:none;stroke:var(--rec);stroke-width:2'},svg);
+    if(cd.checked&&preset==='paper'){DIT6A.forEach(p=>{const x=ax.sx(p[0]),y=ax.sy(p[1]/DIT6A[0][1]);if(p[1]/DIT6A[0][1]>=lo&&p[1]/DIT6A[0][1]<=hi)el('rect',{x:x-4,y:y-4,width:8,height:8,transform:'rotate(45 '+x+' '+y+')',style:'fill:var(--ink2)'},svg);});}
+    const L=[['var(--un)','重加噪精修（论文式 33）',''],['var(--rec)','纯收缩：乘同样的 m(σ)，不加噪',cs.checked?'':'off'],['var(--sf)','若 A 为高斯最优速度场（λ=1）',cg.checked?'':'off']];
+    L.forEach((l,i)=>{if(l[2]==='off')return;el('line',{x1:560,x2:590,y1:36+i*20,y2:36+i*20,style:'stroke:'+l[0]+';stroke-width:2'+(i===2?';stroke-dasharray:6 4':'')},svg);el('text',{x:596,y:40+i*20,class:'svgtxt',style:'fill:var(--ink2)'},svg,l[1]);});
+    if(cd.checked&&preset==='paper'){el('rect',{x:571,y:92,width:8,height:8,transform:'rotate(45 575 96)',style:'fill:var(--ink2)'},svg);el('text',{x:596,y:100,class:'svgtxt',style:'fill:var(--ink2)'},svg,'DiT 实测（归一化）');}
+    const gmin=argmin(fG,0,xmax,1000)[0];
+    ro(box,[['最优 σ（重加噪）',s1.toFixed(4)],['R(0)',R0.toFixed(5)],['R(σ*)',r1.toFixed(5)+'（'+sgn((r1/R0-1)*100,1)+'%）'],['纯收缩最优 R',r2.toFixed(5)],['高斯最优速度场下 σ*',gmin<1e-9?'0（单调上升）':gmin.toFixed(3)]]);
+  }
+  segBind($('#toyPreset'),'m',m=>{preset=m;if(m==='paper'){sa.value=0.1;sz.value=7.57;}else{sa.value=0.1;sz.value=1.0;}draw();});
+  [sa,sz].forEach(s=>s.addEventListener('input',draw));[cs,cg,cd].forEach(c=>c.addEventListener('change',draw));
+  draw();
+})();
+
+/* ============ §09 toy lab B ============ */
+(function(){
+  const svg=$('#figToyB'),box=$('#toyBRO');
+  const sq=$('#toyQ'),sb=$('#toyB'),sh=$('#toyH');
+  function draw(){
+    const qd=+sq.value,b=+sb.value,h=+sh.value;
+    $('#toyQo').textContent=qd.toFixed(3);$('#toyBo').textContent=b.toFixed(3);$('#toyHo').textContent=h.toFixed(3);
+    const {pts,q,kappa}=svdCurve(qd,b,h);
+    let bi=0;pts.forEach((p,i)=>{if(p[1]<pts[bi][1])bi=i;});
+    let lo=Math.min(...pts.map(p=>p[1])),hi=Math.max(...pts.map(p=>p[1]));
+    DIT6B.forEach(p=>{lo=Math.min(lo,p[1]);});
+    const span=hi-lo;lo-=span*0.06;hi+=span*0.06;
+    clear(svg);
+    const yt=[];for(let i=0;i<=4;i++)yt.push(lo+(hi-lo)*i/4);
+    const ax=axes(svg,{x0:90,x1:900,y0:20,y1:255,xmin:.8,xmax:1.0,ymin:lo,ymax:hi,xt:[.8,.84,.88,.92,.96,1.0],yt:yt,xf:v=>v.toFixed(2),yf:v=>v.toFixed(4),xlab:'保留比例 p = r/d（d=500）',ylab:'R_svd(r)/d'});
+    el('line',{x1:ax.sx(q/500),x2:ax.sx(q/500),y1:20,y2:255,style:'stroke:var(--rt);stroke-dasharray:4 4'},svg);
+    el('text',{x:ax.sx(q/500)-6,y:34,'text-anchor':'end',class:'svgtxt',style:'fill:var(--rt-ink)'},svg,'输入：q/d = '+(q/500).toFixed(3));
+    el('path',{d:pathD(pts.map(p=>[ax.sx(p[0]),ax.sy(p[1])])),style:'fill:none;stroke:var(--un);stroke-width:2.2'},svg);
+    el('circle',{cx:ax.sx(pts[bi][0]),cy:ax.sy(pts[bi][1]),r:6,style:'fill:none;stroke:var(--un);stroke-width:2'},svg);
+    DIT6B.forEach(p=>{const x=ax.sx(p[0]),y=ax.sy(p[1]);if(p[1]>=lo&&p[1]<=hi)el('rect',{x:x-3.5,y:y-3.5,width:7,height:7,transform:'rotate(45 '+x+' '+y+')',style:'fill:var(--ink3)'},svg);});
+    el('text',{x:ax.sx(.8)+8,y:ax.sy(lo)-8,class:'svgtxt',style:'fill:var(--ink3);font-size:11px'},svg,'灰色菱形：DiT 实测（Fig 6b，仅作参照）');
+    ro(box,[['玩具最优 p',pts[bi][0].toFixed(3)],['输入 q/d',(q/500).toFixed(3)],['R(最优)',pts[bi][1].toFixed(5)],['R(p=1)',pts[pts.length-1][1].toFixed(5)],['κ',kappa.toFixed(4)+(kappa>0?'':'（≤0，前提不成立）')]]);
+  }
+  [sq,sb,sh].forEach(s=>s.addEventListener('input',draw)); draw();
+})();
+
+/* ============ §10 scatter ============ */
+(function(){
+  const G={ours:['UnStep（本文）','var(--un)'],steps:['少步 / 改采样','var(--sf)'],attn:['稀疏 / 短窗注意力','var(--rt)'],dec:['小解码器','var(--vae)'],one:['专为 1 步蒸馏','var(--cut)'],gbq:['NVFP4 量化','var(--cut)'],gbs:['块调度搜索','var(--sf)'],ref:['原版 / 对照','var(--ink3)']};
+  // [name, fps, total, group, label: [dx,dy,anchor] | null]
+  const H=[
+    ['SF + UnStep · 2 步',49.8,84.56,'ours',[-12,4,'end']],['CF + UnStep · 2 步',49.8,84.93,'ours',[-12,4,'end']],['SF + UnStep · 1 步',59.6,83.34,'ours',[-12,4,'end']],['CF + UnStep · 1 步',59.6,83.10,'ours',[-12,4,'end']],
+    ['DiagDistill',31.0,84.48,'dec',[8,-8,'start']],['Hybrid Forcing',29.5,83.60,'attn',[9,4,'start']],['Causal-rCM',25.6,84.24,'steps',[9,-7,'start']],['Dummy Forcing',24.3,83.90,'attn',null],['Reward Forcing',23.1,84.13,'steps',null],['rCM · 2 步',23.0,84.09,'steps',null],['DSA',22.6,83.73,'steps',null],['Ms. Forcing',21.9,83.89,'attn',null],['MAG',21.7,83.52,'attn',null],['Sparse Forcing',19.9,83.99,'attn',null],['Light Forcing',18.9,84.50,'attn',[9,-6,'start']],['In-Context Forcing',18.4,84.34,'steps',null],['AnyFlow',17.4,84.31,'steps',null],
+    ['rCM · 1 步',32.3,82.65,'one',[9,4,'start']],['One-Forcing（chunkwise）',25.2,81.60,'one',[9,4,'start']],['One-Forcing（framewise）',20.7,83.76,'one',null],['Causal Forcing++ · 1 步',20.4,83.35,'one',[0,18,'middle']]
+  ];
+  const GB=[['SF + UnStep · 2 步',63.7,84.36,'ours',[-12,4,'end']],['CF + UnStep · 2 步',63.7,84.59,'ours',[-12,4,'end']],['SF + UnStep · 1 步',77.4,83.49,'ours',[-12,4,'end']],['CF + UnStep · 1 步',77.4,83.16,'ours',[-12,4,'end']],['Flex-Forcing 12-6-3',45.6,84.29,'gbs',[9,4,'start']],['Flex-Forcing 7-7-7',48.9,83.92,'gbs',[9,4,'start']],['Flex-Forcing 3×7',41.5,83.91,'gbs',[9,4,'start']],['LongLive 2.0',45.7,83.14,'gbq',[9,4,'start']]];
+  const svg=$('#figScatter'),leg=$('#scLeg');let gpu='h100';
+  function draw(){
+    clear(svg);
+    const showC2=$('#scC2').checked,showO=$('#scOrig').checked;
+    const D=(gpu==='h100'?H:GB).slice();
+    if(gpu==='h100'){if(showO){D.push(['原版 Self Forcing',17.0,84.31,'ref',[0,20,'start']]);D.push(['原版 Causal Forcing',17.0,84.82,'ref',[10,4,'start']]);} if(showC2)D.push(['SF + 只做工程栈（C2）',32.2,84.34,'c2',[12,5,'start']]);}
+    const xr=gpu==='h100'?[15,63]:[38,80];
+    const ax=axes(svg,{x0:80,x1:920,y0:20,y1:370,xmin:xr[0],xmax:xr[1],ymin:81.3,ymax:85.2,xt:gpu==='h100'?[20,30,40,50,60]:[40,50,60,70,80],yt:[81.5,82,82.5,83,83.5,84,84.5,85],xf:v=>v+' FPS',yf:v=>v.toFixed(1),xlab:'端到端吞吐（FPS，batch 1，含 VAE）',ylab:'VBench 5s T2V Total'});
+    if(gpu==='h100'&&showC2){el('line',{x1:ax.sx(32.2),x2:ax.sx(32.2),y1:20,y2:370,style:'stroke:var(--rt);stroke-dasharray:3 5;opacity:.7'},svg);el('text',{x:ax.sx(32.2)+6,y:30,class:'svgtxt',style:'fill:var(--rt-ink);font-size:11px'},svg,'只加工程栈就到这里 →');}
+    D.forEach(d=>{
+      const x=ax.sx(d[1]),y=ax.sy(d[2]);const g=d[3];
+      let n;
+      if(g==='c2')n=el('circle',{cx:x,cy:y,r:8,style:'fill:var(--surf);stroke:var(--rt);stroke-width:2.5'},svg);
+      else if(g==='ref')n=el('circle',{cx:x,cy:y,r:6,style:'fill:var(--surf);stroke:var(--ink3);stroke-width:2'},svg);
+      else if(g==='ours')n=el('path',{d:'M'+x+','+(y-8)+' L'+(x+7)+','+(y+5)+' L'+(x-7)+','+(y+5)+' Z',style:'fill:var(--un)'},svg);
+      else n=el('circle',{cx:x,cy:y,r:5.5,style:'fill:'+G[g][1]+';opacity:.9'},svg);
+      hover(n,'<b>'+d[0]+'</b><br>'+d[1].toFixed(1)+' FPS · VBench '+d[2].toFixed(2));
+      if(d[4]){const [dx,dy,an]=d[4];el('text',{x:x+dx,y:y+dy,'text-anchor':an,class:'svgtxt',style:'fill:'+(g==='c2'?'var(--rt-ink)':'var(--ink2)')+';font-size:10.5px;font-weight:'+(g==='c2'||g==='ours'?600:400)},svg,d[0]);}
+    });
+    const keys=gpu==='h100'?['ours','steps','attn','dec','one','ref']:['ours','gbs','gbq'];
+    leg.innerHTML=keys.map(k=>'<span><i style="background:'+G[k][1]+(k==='ref'?';background:none;border:2px solid var(--ink3);border-radius:50%;width:11px;height:11px':k==='ours'?';clip-path:polygon(50% 0,100% 100%,0 100%)':';border-radius:50%;width:11px;height:11px')+'"></i>'+G[k][0]+'</span>').join('')+(gpu==='h100'&&showC2?'<span><i style="background:none;border:2px solid var(--rt);border-radius:50%;width:12px;height:12px"></i>只做工程栈的 SF（我加的对照，数据来自 Table 1）</span>':'');
+  }
+  segBind($('#scSeg'),'m',m=>{gpu=m;draw();});
+  $('#scC2').addEventListener('change',draw);$('#scOrig').addEventListener('change',draw);
+  draw();
+})();
+
+/* ============ §10 dims ============ */
+(function(){
+  const D=[
+    ['Subject consistency','q',0.31,-0.32],['Background consistency','q',0.05,0.31],['Temporal flickering','q',0.22,1.66],['Motion smoothness','q',0.59,1.12],['Dynamic degree','q',-4.04,-1.39],['Aesthetic quality','q',0.34,0.04],['Imaging quality','q',0.00,-1.10],
+    ['Object class','s',2.95,-1.88],['Multiple objects','s',1.80,4.08],['Human action','s',-1.65,-0.75],['Color','s',2.81,0.89],['Spatial relationship','s',1.59,-2.38],['Scene','s',2.77,-0.46],['Appearance style','s',0.49,-0.73],['Temporal style','s',1.17,0.09],['Overall consistency','s',2.30,0.32]
+  ];
+  const AGG={sf:[['Quality 聚合',-0.08],['Semantic 聚合',1.58],['Total',0.25]],cf:[['Quality 聚合',0.16],['Semantic 聚合',-0.09],['Total',0.11]]};
+  const svg=$('#figDims');
+  function draw(m){
+    clear(svg);
+    const x0=250,x1=900,mid=(x0+x1)/2,sc=(x1-x0)/2/5,rh=24,y0=20;
+    const sx=v=>mid+v*sc;
+    [-4,-2,0,2,4].forEach(t=>{el('line',{x1:sx(t),x2:sx(t),y1:y0,y2:y0+(D.length+AGG.sf.length+3)*rh,style:'stroke:'+(t===0?'var(--axis)':'var(--grid)')},svg);el('text',{x:sx(t),y:y0+(D.length+AGG.sf.length+3)*rh+14,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},svg,(t>0?'+':'')+t);});
+    let row=0;
+    const put=(lab,v,kind,strong)=>{
+      const y=y0+row*rh;row++;
+      el('text',{x:x0-10,y:y+16,'text-anchor':'end',class:'svgtxt',style:'fill:'+(strong?'var(--ink)':'var(--ink2)')+';font-weight:'+(strong?600:400)},svg,lab);
+      const col=kind==='agg'?'var(--un)':v>=0?'var(--ok)':'var(--risk)';
+      const r=el('rect',{x:Math.min(sx(0),sx(v)),y:y+4,width:Math.max(Math.abs(sx(v)-sx(0)),1.5),height:rh-8,rx:2,style:'fill:'+col+';opacity:.85'},svg);
+      hover(r,lab+'：'+sgn(v,2));
+      el('text',{x:v>=0?sx(v)+6:sx(v)-6,y:y+16,'text-anchor':v>=0?'start':'end',class:'svgmono',style:'fill:var(--ink2)'},svg,sgn(v,2));
+    };
+    const hdr=t=>{const y=y0+row*rh;row++;el('text',{x:x0-10,y:y+16,'text-anchor':'end',class:'svgmono',style:'fill:var(--ink3);font-size:10.5px;letter-spacing:.12em'},svg,t);};
+    const k=m==='sf'?2:3;
+    hdr('— QUALITY —');
+    D.filter(d=>d[1]==='q').forEach(d=>put(d[0],d[k],'dim',d[0]==='Dynamic degree'));
+    hdr('— SEMANTIC —');
+    D.filter(d=>d[1]==='s').forEach(d=>put(d[0],d[k],'dim',false));
+    hdr('— 聚合 —');
+    AGG[m].forEach(a=>put(a[0],a[1],'agg',true));
+  }
+  segBind($('#dimSeg'),'m',draw); draw('sf');
+})();
+
+/* ============ §11 doubts ============ */
+(function(){
+  segBind($('#dbF'),'f',f=>{$$('#dbList details').forEach(d=>{d.hidden=!(f==='all'||d.dataset.s===f);});});
+  let open=false;$('#dbOpen').addEventListener('click',()=>{open=!open;$$('#dbList details').forEach(d=>{if(!d.hidden)d.open=open;});});
+})();
+})();
+</script>
+</body>
+</html>

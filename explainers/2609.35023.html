@@ -1,0 +1,1377 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Proxy2World 精读</title>
+<meta name="description" content="Proxy2World（arXiv 2609.35023）精读：不用任何「白盒–视频」配对数据，只靠普通 RGBD 视频训练，再用「前几步深度条件 + 后续 RGB-深度联合生成」的混合去噪，把低模白盒变成写实视频。包括去噪调度探索器、噪声里的布局演示、米制尺度与 Hilbert 伪彩深度实验室、Table 1 口径拆解、Fig 5b 数值还原与存疑清单。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=Noto+Serif+SC:wght@600;700&family=STIX+Two+Text:ital@0;1&display=swap">
+<style>
+/* ============================================================
+   Proxy2World 精读 — tokens（深色优先；浅色为纸面）
+   角色色：q   = RGB 流 / 本文方法（暖橙）     h   = 深度流 / 深度条件阶段（青）
+           g   = 相机网格（紫）                 px  = 白盒 proxy（石板蓝灰）
+           ref = 参考首帧（品红）               base= 对比基线（冷蓝）
+           risk / med / low = 存疑·高 / 中 / 低   ok = 复算通过
+   图表系列色取自 dataviz 参考调色板前三槽（蓝/橙/青），已用 validator 针对本页表面色校验
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0e1115; --surf:#141920; --surf2:#1a2028; --surf3:#232b35;
+  --rule:#252f3a; --rule2:#394553;
+  --ink:#e6ebf0; --ink2:#a9b3be; --ink3:#7c8793;
+  --q:#d95926; --q-ink:#f3a07a; --q-soft:rgba(217,89,38,.17);
+  --h:#199e70; --h-ink:#6fd3ab; --h-soft:rgba(25,158,112,.17);
+  --g:#9085e9; --g-ink:#bdb4f5; --g-soft:rgba(144,133,233,.17);
+  --px:#8093a8; --px-ink:#b5c3d2; --px-soft:rgba(128,147,168,.17);
+  --ref:#d55181; --ref-ink:#ee93b5; --ref-soft:rgba(213,81,129,.16);
+  --base:#3987e5; --base-ink:#8fbcf2; --base-soft:rgba(57,135,229,.16);
+  --risk:#e5544c; --risk-ink:#f68a83; --risk-soft:rgba(229,84,76,.15);
+  --med:#d4b144; --med-ink:#ecd07a; --med-soft:rgba(212,177,68,.15);
+  --low:#7f8a97; --low-ink:#b3bcc6; --low-soft:rgba(127,138,151,.15);
+  --ok:#3dba80; --ok-ink:#72d8a7; --ok-soft:rgba(61,186,128,.14);
+  --grid:#1f2730; --axis:#3c4755;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 32px rgba(0,0,0,.30);
+  --f-head:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --f-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --f-math:"STIX Two Text","Times New Roman",Georgia,serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#eef1f4; --surf:#ffffff; --surf2:#e9edf1; --surf3:#dde3e9;
+    --rule:#d6dce3; --rule2:#b7c0cb;
+    --ink:#121821; --ink2:#3e4854; --ink3:#65707c;
+    --q:#eb6834; --q-ink:#a8461c; --q-soft:rgba(235,104,52,.11);
+    --h:#1baf7a; --h-ink:#0d7552; --h-soft:rgba(27,175,122,.11);
+    --g:#6b52cf; --g-ink:#533ca8; --g-soft:rgba(107,82,207,.10);
+    --px:#5d6f84; --px-ink:#44546a; --px-soft:rgba(93,111,132,.11);
+    --ref:#c23d6f; --ref-ink:#9a2b55; --ref-soft:rgba(194,61,111,.10);
+    --base:#2a78d6; --base-ink:#1d5aa6; --base-soft:rgba(42,120,214,.10);
+    --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+    --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+    --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.12);
+    --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.10);
+    --grid:#e4e9ee; --axis:#b7c0cb;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#eef1f4; --surf:#ffffff; --surf2:#e9edf1; --surf3:#dde3e9;
+  --rule:#d6dce3; --rule2:#b7c0cb;
+  --ink:#121821; --ink2:#3e4854; --ink3:#65707c;
+  --q:#eb6834; --q-ink:#a8461c; --q-soft:rgba(235,104,52,.11);
+  --h:#1baf7a; --h-ink:#0d7552; --h-soft:rgba(27,175,122,.11);
+  --g:#6b52cf; --g-ink:#533ca8; --g-soft:rgba(107,82,207,.10);
+  --px:#5d6f84; --px-ink:#44546a; --px-soft:rgba(93,111,132,.11);
+  --ref:#c23d6f; --ref-ink:#9a2b55; --ref-soft:rgba(194,61,111,.10);
+  --base:#2a78d6; --base-ink:#1d5aa6; --base-soft:rgba(42,120,214,.10);
+  --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+  --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+  --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.12);
+  --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.10);
+  --grid:#e4e9ee; --axis:#b7c0cb;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.78;}
+a{color:var(--base-ink);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:2px solid var(--base);outline-offset:2px;border-radius:4px}
+b,strong{font-weight:600;color:var(--ink)}
+sub,sup{font-size:.72em;line-height:0}
+.tnum{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono);font-size:.9em}
+.mv{font-family:var(--f-math);font-style:italic;font-size:1.07em;white-space:nowrap}
+.dim{color:var(--ink3)}
+.c-q{color:var(--q-ink)} .c-h{color:var(--h-ink)} .c-g{color:var(--g-ink)} .c-px{color:var(--px-ink)} .c-ref{color:var(--ref-ink)} .c-base{color:var(--base-ink)}
+.c-risk{color:var(--risk-ink)} .c-ok{color:var(--ok-ink)} .c-med{color:var(--med-ink)}
+.wrap{max-width:1080px;margin:0 auto;padding-inline:20px;padding-block:24px 120px}
+@media (max-width:520px){ .wrap{padding-inline:16px} body{font-size:15.5px} }
+
+/* ---------- hero ---------- */
+.hero{padding-block:8px 28px;border-bottom:1px solid var(--rule);display:grid;gap:18px}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.kicker{font-family:var(--f-mono);font-size:12px;letter-spacing:.14em;color:var(--ink3);text-transform:uppercase}
+.themebtn{font:inherit;font-size:12.5px;color:var(--ink2);background:var(--surf);border:1px solid var(--rule2);border-radius:999px;padding:4px 12px;cursor:pointer}
+.themebtn:hover{color:var(--ink)}
+h1{font-family:var(--f-head);font-weight:700;font-size:clamp(30px,5.2vw,50px);line-height:1.16;margin:4px 0 0;letter-spacing:.01em;text-wrap:balance}
+h1 .soft{color:var(--ink3);font-weight:600}
+.sub{font-size:17px;line-height:1.75;color:var(--ink2);max-width:62em;margin:0}
+.thesis{max-width:64em;margin:0;padding:14px 18px;border-left:3px solid var(--q);background:var(--q-soft);border-radius:0 8px 8px 0;font-size:15.5px}
+.patch{border:1px solid var(--rule2);border-radius:10px;overflow:hidden;background:var(--surf);box-shadow:var(--shadow)}
+.patch .jacks{height:14px;background:repeating-linear-gradient(90deg,var(--rule2) 0 2px,transparent 2px 9px) 0 5px/100% 4px no-repeat, var(--surf2);border-bottom:1px solid var(--rule)}
+.patch dl{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));}
+.patch dl div{padding:10px 14px;border-right:1px solid var(--rule);border-top:1px solid var(--rule);min-width:0}
+.patch dt{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;color:var(--ink3);text-transform:uppercase}
+.patch dd{margin:2px 0 0;font-size:13.5px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.patch dd .no{color:var(--risk-ink);font-weight:600}
+.statstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+.statstrip div{background:var(--surf);padding:12px 14px;display:grid;gap:2px;align-content:start}
+.statstrip b{font-family:var(--f-mono);font-weight:500;font-size:19px;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.statstrip span{font-size:12.5px;line-height:1.45;color:var(--ink3)}
+.statstrip .warn b{color:var(--risk-ink)}
+.statstrip .good b{color:var(--h-ink)}
+
+/* ---------- TOC ---------- */
+nav.toc{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--rule);margin-inline:-20px;padding:8px 20px;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
+@media (max-width:520px){ nav.toc{margin-inline:-16px;padding-inline:16px} }
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{flex:none;font-size:13px;color:var(--ink3);text-decoration:none;padding:4px 10px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+nav.toc a:hover{color:var(--ink)}
+nav.toc a.on{color:var(--ink);border-color:var(--rule2);background:var(--surf)}
+nav.toc a .n{font-family:var(--f-mono);font-size:11px;margin-right:5px;color:var(--ink3)}
+
+/* ---------- sections ---------- */
+section{padding-top:46px;scroll-margin-top:44px}
+.sec-head{display:grid;gap:4px;margin-bottom:14px}
+.sec-num{font-family:var(--f-mono);font-size:12px;letter-spacing:.14em;color:var(--ink3)}
+h2{font-family:var(--f-head);font-weight:700;font-size:clamp(23px,3.2vw,31px);line-height:1.3;margin:0;text-wrap:balance}
+h3{font-family:var(--f-head);font-weight:600;font-size:19.5px;line-height:1.4;margin:30px 0 8px}
+h4{font-size:15.5px;margin:18px 0 4px;font-weight:600}
+p{margin:0 0 14px;max-width:48em}
+.lead{font-size:17px;color:var(--ink2)}
+ul,ol{margin:0 0 14px;padding-left:1.35em;max-width:48em}
+li{margin:3px 0}
+li::marker{color:var(--ink3)}
+hr.sep{border:0;border-top:1px dashed var(--rule2);margin:26px 0}
+
+/* ---------- blocks ---------- */
+.card{background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px;margin:14px 0 18px}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:14px 0 18px}
+.card h4{margin-top:0}
+.card p:last-child,.card ul:last-child{margin-bottom:0}
+.tag{display:inline-block;font-family:var(--f-mono);font-size:11px;letter-spacing:.06em;padding:1px 8px;border-radius:999px;border:1px solid var(--rule2);color:var(--ink2);vertical-align:2px;white-space:nowrap}
+.tag.q{border-color:var(--q);color:var(--q-ink);background:var(--q-soft)}
+.tag.h{border-color:var(--h);color:var(--h-ink);background:var(--h-soft)}
+.tag.g{border-color:var(--g);color:var(--g-ink);background:var(--g-soft)}
+.tag.px{border-color:var(--px);color:var(--px-ink);background:var(--px-soft)}
+.tag.ref{border-color:var(--ref);color:var(--ref-ink);background:var(--ref-soft)}
+.tag.risk{border-color:var(--risk);color:var(--risk-ink);background:var(--risk-soft)}
+.tag.med{border-color:var(--med);color:var(--med-ink);background:var(--med-soft)}
+.tag.low{border-color:var(--low);color:var(--low-ink);background:var(--low-soft)}
+.tag.ok{border-color:var(--ok);color:var(--ok-ink);background:var(--ok-soft)}
+.note{border-left:3px solid var(--rule2);padding:8px 14px;margin:12px 0 16px;background:var(--surf2);border-radius:0 8px 8px 0;font-size:14.5px;color:var(--ink2);max-width:52em}
+.note.warn{border-color:var(--risk);background:var(--risk-soft)}
+.note.mine{border-color:var(--g);background:var(--g-soft)}
+.note.good{border-color:var(--ok);background:var(--ok-soft)}
+.note b{color:var(--ink)}
+.eq{font-family:var(--f-math);font-size:18px;background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:12px 16px;margin:10px 0 14px;overflow-x:auto;white-space:nowrap;max-width:52em}
+.eq .lbl{font-family:var(--f-body);font-size:12.5px;color:var(--ink3);margin-left:14px;font-style:normal}
+.eq i{font-style:italic}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:14px;margin:0}
+.kv dt{color:var(--ink3);font-family:var(--f-mono);font-size:12.5px;padding-top:2px}
+.kv dd{margin:0}
+
+/* ---------- figures ---------- */
+figure{margin:18px 0 22px}
+figcaption{font-size:13.5px;color:var(--ink3);margin-top:8px;line-height:1.6;max-width:56em}
+figcaption b{color:var(--ink2)}
+.fig{background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:14px;box-shadow:var(--shadow)}
+.scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.scrollx > svg{min-width:640px}
+svg{display:block;width:100%;height:auto;font-family:var(--f-body)}
+svg text{fill:var(--ink2);font-size:12px}
+svg .t-ink{fill:var(--ink)} svg .t-2{fill:var(--ink2)} svg .t-3{fill:var(--ink3)}
+svg .mono{font-family:var(--f-mono);font-size:11px}
+svg .gridl{stroke:var(--grid);stroke-width:1}
+svg .axisl{stroke:var(--axis);stroke-width:1}
+.ctrl{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin:0 0 12px;font-size:13.5px;color:var(--ink2)}
+.ctrl label{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ctrl input[type=range]{width:min(260px,62vw);accent-color:var(--q)}
+.ctrl output{font-family:var(--f-mono);font-size:13px;color:var(--ink);min-width:4.5em;display:inline-block}
+.seg{display:inline-flex;border:1px solid var(--rule2);border-radius:999px;overflow:hidden;background:var(--surf2)}
+.seg button{font:inherit;font-size:12.5px;color:var(--ink2);background:transparent;border:0;padding:4px 11px;cursor:pointer;white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--surf);color:var(--ink);box-shadow:inset 0 0 0 1px var(--rule2)}
+.readout{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:10px;overflow:hidden;margin-top:12px}
+.readout div{background:var(--surf2);padding:9px 12px}
+.readout b{display:block;font-family:var(--f-mono);font-weight:500;font-size:16.5px;font-variant-numeric:tabular-nums;color:var(--ink)}
+.readout span{font-size:12px;color:var(--ink3);line-height:1.4;display:block}
+.readout .hl b{color:var(--q-ink)}
+.readout .hh b{color:var(--h-ink)}
+.readout .hr b{color:var(--risk-ink)}
+canvas{display:block;max-width:100%;border-radius:8px}
+.canvrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.canvrow figure{margin:0}
+.canvrow figcaption{margin-top:4px;font-size:12.5px}
+
+/* ---------- tables ---------- */
+.tbl-wrap{overflow-x:auto;border:1px solid var(--rule);border-radius:12px;background:var(--surf);box-shadow:var(--shadow);margin:12px 0 8px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;border-bottom:1px solid var(--rule);text-align:right;white-space:nowrap}
+th{font-weight:600;color:var(--ink2);font-size:12.5px;background:var(--surf2);position:sticky;top:0}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--ink)}
+th .arr{font-size:10px;color:var(--ink3);margin-left:3px}
+td:first-child,th:first-child{text-align:left}
+tr.grp td{background:var(--surf2);color:var(--ink3);font-size:12px;letter-spacing:.06em;text-align:left;padding:5px 10px}
+tr.ours td{background:var(--q-soft)}
+tr.ours td:first-child{box-shadow:inset 3px 0 0 var(--q)}
+td.best{font-weight:600;color:var(--ink)}
+td.best::after{content:"◆";font-size:8px;color:var(--q-ink);margin-left:4px;vertical-align:2px}
+.icons{display:inline-flex;gap:3px;vertical-align:-3px}
+.icons svg{width:17px;height:17px;display:inline-block}
+.icons .on{color:var(--ink)} .icons .off{color:var(--rule2)}
+.icons .on.ref{color:var(--ref-ink)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px}
+.chips button{font:inherit;font-size:12.5px;padding:4px 12px;border-radius:999px;border:1px solid var(--rule2);background:var(--surf);color:var(--ink2);cursor:pointer}
+.chips button[aria-pressed="true"]{border-color:var(--q);color:var(--ink);background:var(--q-soft)}
+table.simple{font-size:13.5px}
+table.simple td,table.simple th{white-space:normal;text-align:left;vertical-align:top}
+
+/* ---------- doubts ---------- */
+.doubts{display:grid;gap:10px;margin:14px 0}
+details.dbt{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:0;box-shadow:var(--shadow)}
+details.dbt summary{list-style:none;cursor:pointer;padding:11px 14px;display:grid;grid-template-columns:auto auto 1fr auto;gap:10px;align-items:baseline}
+details.dbt summary::-webkit-details-marker{display:none}
+details.dbt summary .i{font-family:var(--f-mono);font-size:12px;color:var(--ink3)}
+details.dbt summary .ttl{font-weight:600;line-height:1.5}
+details.dbt summary .chev{color:var(--ink3);font-size:12px;transition:transform .15s}
+details.dbt[open] summary .chev{transform:rotate(90deg)}
+details.dbt .body{padding:0 14px 12px 14px;border-top:1px dashed var(--rule);font-size:14.5px}
+details.dbt .body p{margin:10px 0 8px}
+details.dbt.risk{border-left:3px solid var(--risk)}
+details.dbt.med{border-left:3px solid var(--med)}
+details.dbt.low{border-left:3px solid var(--low)}
+.legendrow{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13px;color:var(--ink2);margin:6px 0}
+.legendrow span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+
+/* ---------- tooltip ---------- */
+#tip{position:fixed;z-index:50;pointer-events:none;background:var(--surf);border:1px solid var(--rule2);border-radius:8px;padding:8px 10px;font-size:12.5px;line-height:1.5;color:var(--ink);box-shadow:var(--shadow);max-width:280px;opacity:0;transition:opacity .08s}
+#tip .tt{font-weight:600;margin-bottom:2px}
+#tip .row{display:flex;justify-content:space-between;gap:14px;color:var(--ink2)}
+#tip .row b{font-family:var(--f-mono);font-weight:500;color:var(--ink)}
+
+footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--rule);font-size:13px;color:var(--ink3)}
+footer p{max-width:60em}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-t" viewBox="0 0 16 16"><path d="M3 3h10v2.4H9.3V13H6.7V5.4H3z" fill="currentColor"/></symbol>
+    <symbol id="i-img" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3 12l3.4-4 2.4 2.6 1.6-1.8L13 12z" fill="currentColor"/><circle cx="10.8" cy="5.6" r="1.3" fill="currentColor"/></symbol>
+    <symbol id="i-cam" viewBox="0 0 16 16"><rect x="1" y="4" width="10" height="8" rx="1.5" fill="currentColor"/><path d="M11.5 7l3.5-2v6l-3.5-2z" fill="currentColor"/></symbol>
+    <symbol id="i-cube" viewBox="0 0 16 16"><path d="M8 1.6l5.8 3.2v6.4L8 14.4 2.2 11.2V4.8z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M2.4 4.9L8 8l5.6-3.1M8 8v6.2" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--ink3)"/></marker>
+    <marker id="ahq" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--q)"/></marker>
+    <marker id="ahh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--h)"/></marker>
+    <marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--g)"/></marker>
+    <linearGradient id="gdepth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:#1b2a6b"/><stop offset=".45" style="stop-color:#1f7fa8"/><stop offset=".75" style="stop-color:#39c79a"/><stop offset="1" style="stop-color:#d9f06a"/></linearGradient>
+    <linearGradient id="grgb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:#8cb3d9"/><stop offset=".5" style="stop-color:#d8b58a"/><stop offset="1" style="stop-color:#7a5a3a"/></linearGradient>
+  </defs>
+</svg>
+<div id="tip" role="tooltip"></div>
+
+<div class="wrap">
+<header class="hero">
+  <div class="topbar">
+    <span class="kicker">精读 · arXiv 2609.35023 · cs.CV · 2026-09-28</span>
+    <button class="themebtn" id="themebtn" type="button">主题：跟随系统</button>
+  </div>
+  <h1>Proxy2World <span class="soft">— 没见过白盒，也能照着白盒画世界</span></h1>
+  <p class="sub">用低模、方块、甚至残缺的「白盒」摆好布局、写好角色动作，再让视频模型负责外观、光照和细节。难点是配对数据做不出来。这篇论文完全不用（白盒，真实视频）配对：只用普通带位姿的 RGBD 视频，教一个 14B 视频模型学会两种模式，推理时在同一条去噪轨迹上把它们拼起来。</p>
+  <p class="thesis"><b>一句话判断：</b>核心机制和「控制信号只在前几步生效」（ControlNet 的 guidance end、SDEdit）同源。新的地方在三点：放开条件后，模型切到的是「RGB + 深度联合生成」，而不是无条件生成；这两种模式用普通 RGBD 视频就能训出来；相机和深度被拉到同一个米制尺度。想法干净，可以迁移。但实验对比的口径不齐（主力行多了参考首帧），核心旋钮 τ 怎么选、敏不敏感都没交代，而正文说放在附录的细节在 v1 里并不存在。</p>
+  <div class="patch">
+    <div class="jacks"></div>
+    <dl>
+      <div><dt>作者 / 单位</dt><dd>Hongli Xu, Weilong Yan, Anbang Wang, Chunyu Zou, Siyu Hong, Jingwei Huang†（Tencent；项目页写 Tencent IEG）</dd></div>
+      <div><dt>代码 / Benchmark</dt><dd><span class="no">均未发布</span>（项目页标注 Coming soon）</dd></div>
+      <div><dt>基座</dt><dd>Wan2.2-I2V-A14B（高噪 / 低噪双专家 MoE），VAE 与文本编码器冻结</dd></div>
+      <div><dt>训练数据</dt><dd>120,624 段 RGBD：DL3DV + RealEstate10K + 游戏数据（引 OmniWorld）；81 帧 · 480×832 · 16 FPS</dd></div>
+      <div><dt>训练</dt><dd>48 GPU；高噪专家 50k 步、低噪专家 35k 步；AdamW lr 1e-5；两任务各采样 50%</dd></div>
+      <div><dt>推理</dt><dd>40 步 Euler · flow shift 3.0 · CFG 3.5 · τ* = 0.925（论文：3 步深度条件 + 37 步联合）</dd></div>
+      <div><dt>评测</dt><dd>自建 ProxyBench：25 场景 / 300 段，评测用其中 78 段；人评 10 人 × 10 段</dd></div>
+      <div><dt>篇幅</dt><dd>13 页（含参考文献）；<span class="no">无附录</span>，正文却说「详细协议见附录」</dd></div>
+    </dl>
+  </div>
+  <div class="statstrip">
+    <div class="good"><b>0 对</b><span>训练用的（白盒, 视频）配对数据</span></div>
+    <div><b>3 / 40</b><span>τ* 下真正把白盒深度当条件的步数；噪声水平 t ≥ 0.974</span></div>
+    <div><b>65,520</b><span>每步 token 数（RGB、深度各 32,760）；我估算每步算力约为原 Wan2.2 的 3.0×</span></div>
+    <div><b>1 / 10</b><span>人评排名第一（10 人 × 10 段，只报名次）</span></div>
+    <div class="warn"><b>+21.4 / +26.7</b><span>同一模型从 T2V 换到 TI2V（多一张参考首帧），Adh / Ref 胜率的涨幅</span></div>
+    <div class="warn"><b>161%</b><span>Fig 5b 三根 Preference 柱子加起来，定义不明</span></div>
+  </div>
+</header>
+
+<nav class="toc" id="toc" aria-label="目录">
+  <a href="#s1"><span class="n">01</span>一分钟版</a>
+  <a href="#s2"><span class="n">02</span>问题设定</a>
+  <a href="#s3"><span class="n">03</span>三种条件信号</a>
+  <a href="#s4"><span class="n">04</span>训练</a>
+  <a href="#s5"><span class="n">05</span>混合去噪</a>
+  <a href="#s6"><span class="n">06</span>读 Table 1</a>
+  <a href="#s7"><span class="n">07</span>消融与人评</a>
+  <a href="#s8"><span class="n">08</span>存疑</a>
+  <a href="#s9"><span class="n">09</span>做对的</a>
+  <a href="#s10"><span class="n">10</span>对 CWM 渲染器</a>
+  <a href="#s11"><span class="n">11</span>后续实验</a>
+</nav>
+
+<!-- ============================ S1 ============================ -->
+<section id="s1">
+  <div class="sec-head"><span class="sec-num">01 · TL;DR</span><h2>一分钟版</h2></div>
+  <div class="grid2">
+    <div class="card">
+      <h4>想解决什么</h4>
+      <p>游戏关卡设计、影视预演里常见这样的流程：先用灰色方块和低模人偶搭一个「白盒」（whitebox / blockout），写好镜头轨迹和角色动作脚本（比如「骑士放下吊桥、推开城门、走进大厅」），再交给美术去做。这篇论文想让视频模型来当那个美术：<b>布局、占位、动作照白盒来，外观、光照、细节由模型发挥</b>。</p>
+      <p>卡点在数据上。「合适的白盒」没有唯一答案：哪些物体要建、简化到什么程度、哪些可以省略，都是设计师的主观抽象。所以没法自动地大规模构造（白盒，真实视频）配对。</p>
+    </div>
+    <div class="card">
+      <h4>怎么做</h4>
+      <p><b>训练时完全不碰白盒。</b>只用普通的带位姿 RGBD 视频，让同一个 DiT 学两门课：<span class="tag h">课 1</span> 给定干净深度，生成 RGB；<span class="tag q">课 2</span> RGB 和深度一起从噪声生成。两门课都一直带着相机网格条件。</p>
+      <p><b>推理时把两门课拼接起来。</b>前几步用课 1，把白盒渲染出的深度当干净条件，定下布局。之后切到课 2，深度变成要生成的变量，模型可以把人偶修成人、把方块修成房子。切换点由 τ 控制。</p>
+    </div>
+    <div class="card">
+      <h4>结果（论文口径）</h4>
+      <p>在 ProxyBench 的 78 段上，混合模式 TI2V 的 VLM「细化」胜率最高（77.96%），「遵循」胜率第三（64.18%，低于 Cosmos-Depth 的 72.26% 和自家纯深度模式的 68.79%）。人评排名第一。消融显示：去掉米制尺度对齐，相机误差最大；去掉联合 RGBD 学习，相机误差和人评都变差。</p>
+    </div>
+    <div class="card" style="border-color:var(--risk)">
+      <h4 class="c-risk">要小心的地方</h4>
+      <ul>
+        <li>默认配置下，真正「看」白盒的只有 40 步里的前 3 步，噪声水平 t ∈ [0.974, 1]（<a href="#s5">§5</a>）。</li>
+        <li>最亮眼的对比（vs Cosmos / VACE / Coarse2Real）是「我们有参考首帧、对方没有」。输入对齐后遵循度明显落后（<a href="#s6">§6</a>）。</li>
+        <li>τ* 怎么选的、换个值会怎样，都没说。评测指标定义、VLM prompt、ProxyBench 的构建方式、参考首帧的来源，全部指向一个不存在的附录（<a href="#s8">§8</a>）。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ S2 ============================ -->
+<section id="s2">
+  <div class="sec-head"><span class="sec-num">02 · SETUP</span><h2>问题设定：白盒到底以什么形式进入模型</h2></div>
+  <p class="lead">先说最容易误解的一点：<b>白盒进入模型时，只剩一段逐帧深度视频</b>。没有物体类别，没有实例 ID，没有法线，也没有白盒的 RGB 渲染。角色动作只表现为深度图里一团人偶形状在移动。</p>
+
+  <figure class="fig">
+    <div class="scrollx">
+    <svg viewBox="0 0 960 304" role="img" aria-label="Proxy2World 输入输出流程图">
+      <!-- proxy scene -->
+      <g transform="translate(18,34)">
+        <text x="0" y="-12" class="t-ink" style="font-weight:600">白盒 S + 交互脚本 A</text>
+        <g fill="var(--px-soft)" stroke="var(--px)" stroke-width="1.3">
+          <path d="M10 118 L90 78 L170 118 L90 158 Z"/>
+          <path d="M30 104 L60 89 L60 49 L30 64 Z"/><path d="M60 89 L90 104 L90 64 L60 49 Z"/><path d="M30 64 L60 49 L90 64 L60 79 Z"/>
+          <path d="M110 108 L130 98 L130 38 L110 48 Z"/><path d="M130 98 L150 108 L150 48 L130 38 Z"/><path d="M110 48 L130 38 L150 48 L130 58 Z"/>
+        </g>
+        <g fill="var(--px-ink)"><circle cx="96" cy="100" r="4.5"/><rect x="92.5" y="105" width="7" height="16" rx="3.5"/></g>
+        <path d="M100 124 q18 6 30 -2" fill="none" stroke="var(--px-ink)" stroke-dasharray="3 3" marker-end="url(#ah)"/>
+        <text x="4" y="182" class="t-3">低模 / 基本体 / 可残缺</text>
+        <text x="4" y="198" class="t-3">人偶沿脚本移动、门会开</text>
+      </g>
+      <!-- camera path -->
+      <g transform="translate(18,236)">
+        <path d="M6 30 C 50 -6, 110 44, 170 8" fill="none" stroke="var(--g)" stroke-width="2" stroke-dasharray="5 4"/>
+        <rect x="0" y="23" width="12" height="9" rx="2" fill="var(--g)"/><rect x="164" y="2" width="12" height="9" rx="2" fill="var(--g)"/>
+        <text x="0" y="56" class="t-2">相机轨迹 C = {(Kᵢ, Rᵢ, tᵢ)}</text>
+      </g>
+      <!-- arrows to render -->
+      <path d="M200 118 H262" stroke="var(--ink3)" marker-end="url(#ah)"/>
+      <text x="204" y="110" class="mono t-3">R_depth</text>
+      <!-- depth frames -->
+      <g transform="translate(270,70)">
+        <rect x="14" y="0" width="86" height="54" rx="3" fill="url(#gdepth)" opacity=".5"/>
+        <rect x="7" y="7" width="86" height="54" rx="3" fill="url(#gdepth)" opacity=".75"/>
+        <rect x="0" y="14" width="86" height="54" rx="3" fill="url(#gdepth)"/>
+        <path d="M18 68 L18 40 L34 32 L34 68 M52 68 L52 26 L64 20 L64 68" stroke="#0b1433" stroke-width="2" fill="none" opacity=".55"/>
+        <text x="0" y="90" class="t-ink" style="font-weight:600">Dˢ → 伪彩 H(Dˢ)</text>
+        <text x="0" y="106" class="t-3">唯一携带白盒信息的通道</text>
+      </g>
+      <!-- grid frames -->
+      <path d="M200 258 C 230 258, 240 236, 262 232" stroke="var(--g)" fill="none" marker-end="url(#ahg)"/>
+      <g transform="translate(270,196)">
+        <rect x="0" y="0" width="86" height="54" rx="3" fill="#0b0d12" stroke="var(--g)"/>
+        <g stroke="#57d36b" stroke-width="1" opacity=".9"><path d="M8 50 L30 14 M28 50 L40 14 M48 50 L50 14 M68 50 L60 14 M80 44 L70 14 M4 40 H82 M10 30 H76 M16 22 H70"/></g>
+        <text x="0" y="72" class="t-ink" style="font-weight:600">G = R_grid(𝒢, C)</text>
+        <text x="0" y="88" class="t-3">固定米制网格的投影视频</text>
+      </g>
+      <!-- text + ref -->
+      <g transform="translate(400,4)">
+        <rect x="0" y="0" width="150" height="42" rx="8" fill="var(--surf2)" stroke="var(--rule2)"/>
+        <text x="10" y="17" class="t-ink" style="font-weight:600">文本 y</text>
+        <text x="10" y="34" class="t-3">“骑士放下吊桥……”</text>
+        <rect x="0" y="48" width="150" height="56" rx="8" fill="var(--ref-soft)" stroke="var(--ref)" stroke-dasharray="5 4"/>
+        <text x="10" y="66" class="t-ink" style="font-weight:600">参考首帧 I_ref（可选）</text>
+        <text x="10" y="82" class="t-3">须与白盒首帧视角对齐</text>
+        <text x="10" y="97" class="t-3">来源论文未交代</text>
+      </g>
+      <!-- model -->
+      <path d="M360 118 H588" stroke="var(--h)" marker-end="url(#ahh)"/>
+      <path d="M360 226 C 470 226, 520 170, 588 160" stroke="var(--g)" fill="none" marker-end="url(#ahg)"/>
+      <path d="M552 25 C 572 30, 574 88, 588 96" stroke="var(--ink3)" fill="none" marker-end="url(#ah)"/>
+      <path d="M552 80 C 570 84, 576 104, 588 108" stroke="var(--ref)" fill="none" marker-end="url(#ah)"/>
+      <rect x="592" y="84" width="170" height="104" rx="12" fill="var(--q-soft)" stroke="var(--q)" stroke-width="1.5"/>
+      <text x="677" y="116" text-anchor="middle" class="t-ink" style="font-weight:700;font-size:14px">Proxy2World</text>
+      <text x="677" y="136" text-anchor="middle" class="t-2">共享 DiT · 两种模式</text>
+      <text x="677" y="154" text-anchor="middle" class="t-2">混合去噪（旋钮 τ）</text>
+      <text x="677" y="172" text-anchor="middle" class="mono t-3">Wan2.2-I2V-A14B 初始化</text>
+      <!-- outputs -->
+      <path d="M766 116 H812" stroke="var(--q)" marker-end="url(#ahq)"/>
+      <path d="M766 160 H812" stroke="var(--h)" marker-end="url(#ahh)"/>
+      <g transform="translate(818,74)">
+        <rect x="0" y="0" width="92" height="56" rx="3" fill="url(#grgb)"/>
+        <text x="0" y="72" class="t-ink" style="font-weight:600">RGB 视频 Q</text>
+        <rect x="0" y="86" width="92" height="42" rx="3" fill="url(#gdepth)"/>
+        <text x="0" y="146" class="t-2">生成的深度伪彩（副产物）</text>
+      </g>
+      <text x="480" y="292" class="t-3">Q ∼ p_θ(Q | Dˢ, C, I_ref, y) · 81 帧 · 480×832 · 约 5 秒</text>
+    </svg>
+    </div>
+    <figcaption><b>图 2-1　输入与输出。</b>白盒 S、交互脚本 A、相机轨迹 C 先被渲染成深度视频 Dˢ（论文式 1），再转成伪彩色。相机轨迹另外渲染成一段「网格视频」。文本 y 和可选的参考首帧 I_ref 走 Wan2.2 原有的通道。模型输出 RGB 视频，同时生成一段深度伪彩。</figcaption>
+  </figure>
+
+  <h3>三件事决定了后面的一切</h3>
+  <ol>
+    <li><b>标题里的 “without seeing them” 是字面意思。</b>训练集里没有任何白盒。深度全部来自真实场景和游戏录像（第 4 节）。模型推理时第一次见到「人偶形状的深度」。</li>
+    <li><b>严格服从深度，和自然外观是冲突的。</b>如果从头到尾都严格服从白盒深度，模型会忠实地把人偶的圆柱四肢、方块房子一起画出来（论文 Fig 5a 的 τ=0 列）。如果只给相机，外观自然了，角色却会跑到别处（τ=1 列）。整篇论文要解决的就是在两者之间找平衡。</li>
+    <li><b>参考首帧 I_ref 是可选的，但影响很大。</b>它要和白盒的第一视角对齐，相当于第一帧的「精装修」已经给好了。论文没说 ProxyBench 里的参考首帧是怎么来的（推测是用某个图像模型按白盒首帧生成的）。第 6 节会看到，有没有它，比有没有白盒对分数的影响还大。</li>
+  </ol>
+
+  <div class="grid2">
+    <div class="card">
+      <h4><span class="tag h">训练时</span>　模型见到的深度</h4>
+      <p>来自 DL3DV、RealEstate10K 的真实场景深度，以及游戏数据的深度。深度精细、贴合真实物体表面，并且和 RGB 一一对应。论文没说 DL3DV / RE10K 的深度是用什么估计的，只说它们和相机「共享一个任意尺度」，再用 DA3 对齐到米制。</p>
+    </div>
+    <div class="card">
+      <h4><span class="tag px">推理时</span>　喂进去的深度</h4>
+      <p>从白盒渲染出来的深度：圆柱四肢、平板墙、缺失的几何（缺失处深度为空或是远处背景）。在粗尺度上（哪里有墙、地面在哪、有一团东西在往左走）和真实深度相似；在细尺度上则完全是分布外的。<b>整个方法押注的就是这个「粗像细不像」。</b></p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ S3 ============================ -->
+<section id="s3">
+  <div class="sec-head"><span class="sec-num">03 · SIGNALS</span><h2>三种条件信号：相机网格、米制尺度、伪彩深度</h2></div>
+  <p class="lead">论文把「相机怎么动」和「场景长什么样」分成两路条件，两路都做成视频的样子，塞进同一个冻结的视频 VAE。这样做不用改骨干网络，但要求两路信号的<b>尺度</b>严格一致。</p>
+
+  <h3>3.1　相机网格：把相机轨迹画成一段视频</h3>
+  <div class="grid2">
+    <div>
+      <p>做法沿用 OmniDirector：在世界坐标系里放一个<b>固定的空间网格 𝒢</b>，沿着给定轨迹把它渲染出来，得到网格视频 <span class="mv">G = R<sub>grid</sub>(𝒢, C)</span>（式 3）。网格线在画面里怎么移动、汇聚、产生视差，就编码了相机怎么移动。这段视频不包含任何场景表面信息。</p>
+      <p>编码后的网格潜变量 <span class="mv">z<sup>g</sup></span> 始终是干净的（不加噪），按通道拼接到 RGB 流和深度流的每一个位置上（§4）。所以三种推理模式里它都在。</p>
+      <p class="dim" style="font-size:14px">和 Plücker 射线、相机 token 这类做法比，好处是零结构改动：它就是一段视频，VAE 直接编码。代价是网格的物理间距是固定的，<b>网格的运动只有在米制单位下才有确定含义</b>，这引出 3.2。</p>
+    </div>
+    <figure class="fig" style="margin:0">
+      <svg viewBox="0 0 420 240" role="img" aria-label="相机网格示意">
+        <rect x="0" y="0" width="420" height="240" rx="8" fill="#0b0d12"/>
+        <g stroke="#57d36b" stroke-width="1.2" opacity=".85" id="gridlines"></g>
+        <text x="12" y="22" style="fill:#9fb3a3;font-size:12px">网格视频的一帧（示意，按下方滑块平移相机）</text>
+      </svg>
+      <div class="ctrl" style="margin:10px 0 0"><label>相机横移 <input type="range" id="gridT" min="-1.5" max="1.5" step="0.01" value="0"><output id="gridTo">0.00 m</output></label></div>
+      <figcaption>近处网格线动得多，远处动得少，这就是视差。同样平移 1 米，网格位移多少像素是确定的，前提是网格和轨迹都用米。</figcaption>
+    </figure>
+  </div>
+
+  <h3>3.2　米制尺度对齐：为什么「单位」会直接伤相机控制</h3>
+  <p>RealEstate10K 和 DL3DV 的位姿来自 SfM / SLAM，<b>尺度是任意的</b>：同样叫「平移 1」，有的片段对应 10 厘米，有的对应 5 米。论文的办法（式 4）是：用 DA3 估第一帧的米制深度，把整段深度对齐过去，得到一个片段级系数 <span class="mv">s</span>，然后把<b>同一个 s</b> 同时乘到深度和相机平移上。</p>
+  <div class="eq"><i>D</i><sub>i</sub><sup>metric</sup> = <i>s</i>·<i>D</i><sub>i</sub>,　　<i>t</i><sub>i</sub><sup>metric</sup> = <i>s</i>·<i>t</i><sub>i</sub><span class="lbl">式 4：一个系数同时管深度和平移，相对几何不变</span></div>
+  <p>为什么需要它？考虑只给相机、不给深度的情况：τ=1，或者联合模式里深度本身也在生成。模型要把「网格说相机走了多少」换算成「画面里的门该挪多少像素」，就必须知道门有多远。这只能靠外观去猜（门大约 2 米高），而<b>外观暗含的是米制尺度</b>。如果训练片段的平移单位是任意的，同样的网格运动在不同片段里对应的真实位移差一个未知倍数 u，模型只能学到一个平均的换算，误差就是这个倍数的离散程度。</p>
+
+  <figure class="fig">
+    <div class="ctrl">
+      <span>度量对齐</span>
+      <span class="seg" id="alignSeg"><button type="button" aria-pressed="false" data-v="off">关（SfM 原始单位）</button><button type="button" aria-pressed="true" data-v="on">开（DA3 对齐到米）</button></span>
+      <label>SfM 尺度离散范围 ×÷ <input type="range" id="uSpread" min="1" max="30" step="0.5" value="10"><output id="uSpreadO">10</output></label>
+    </div>
+    <div class="scrollx"><svg id="scalePlot" viewBox="0 0 640 330" role="img" aria-label="尺度对齐演示散点图"></svg></div>
+    <div class="readout">
+      <div class="hl"><b id="scaleErr">—</b><span>用单一换算时的典型误差倍数（log 残差的几何标准差）</span></div>
+      <div><b id="scaleWorst">—</b><span>90% 片段的误差倍数上界</span></div>
+      <div><b>60</b><span>模拟的训练片段数（随机深度 1.5–30 m、平移 0.3–2 m）</span></div>
+    </div>
+    <figcaption><b>图 3-1　对齐前后：「网格暗示的像素位移」和「实际像素位移」。</b>横轴按「网格给出的平移 ÷ 从外观估出的米制深度」计算，纵轴是片段里真实的像素位移（f = 500 px）。对齐后，点落在对角线附近（我给 DA3 的尺度误差假设了约 15% 的对数正态抖动）。不对齐时，每个片段差一个 u 倍，点云沿对角线方向散开。这是示意模型，不是论文数据；论文的实测是 Fig 5b：去掉对齐后 nATE 从 0.062 升到 0.098（§7）。</figcaption>
+  </figure>
+  <div class="note mine"><b>我的补充：</b>如果深度和平移<i>同时</i>处在同一个任意单位里，「平移 ÷ 深度」这个比值其实不受 u 影响。所以在「给定深度」的课 1 里，问题并不大。真正受伤的是两种情况：一是深度靠生成、靠外观推断的情形（τ=1 和联合阶段）；二是伪彩映射 H 是固定的绝对映射，「0.3 米」这个颜色会同时出现在桌面特写和整间屋子上，颜色的语义被搅乱。这也解释了为什么消融里受伤最重的是相机误差。</div>
+
+  <h3>3.3　伪彩深度：把一个数塞进三个颜色通道</h3>
+  <p>视频 VAE 只认 RGB，深度要变成图片才能编码。论文沿用 Vision Banana 的做法（式 5）：<span class="mv">H = h(f(D))</span>。其中 <span class="mv">f</span> 把米制距离非线性地压到有界区间，近处分辨率更高；<span class="mv">h</span> 沿 RGB 立方体里一条<b>类 Hilbert 曲线</b>取颜色。这样一个深度值对应一个颜色，而且理论上可逆。映射在所有帧、所有场景之间固定不变，所以绝对尺度信息保留了下来，真实深度和白盒深度也共用同一套表示。</p>
+  <p>为什么不用灰度？灰度只用了一条对角线，三个通道存的是同一个数。Hilbert 曲线在立方体里来回折叠，把「一维长度」拉长了几十倍，同样的颜色误差对应的深度误差就小得多。代价是<b>折叠处相邻的两段曲线在颜色空间里很近，在深度上却可能相隔很远</b>：颜色一旦被扰动越过那条缝，解码出的深度会整段跳走。下面的实验室可以直接看这个取舍。</p>
+
+  <figure class="fig">
+    <div class="ctrl">
+      <span>Hilbert 阶数</span>
+      <span class="seg" id="hOrderSeg"><button type="button" aria-pressed="false" data-v="2">2 阶（4³）</button><button type="button" aria-pressed="true" data-v="3">3 阶（8³）</button><button type="button" aria-pressed="false" data-v="4">4 阶（16³）</button></span>
+      <label>颜色噪声 σ（模拟 VAE 重建 / 生成误差）<input type="range" id="hSigma" min="0" max="0.06" step="0.0025" value="0.02"><output id="hSigmaO">0.020</output></label>
+    </div>
+    <canvas id="cbar" width="900" height="30" style="width:100%;height:30px" aria-label="Hilbert 伪彩色条"></canvas>
+    <canvas id="gbar" width="900" height="14" style="width:100%;height:14px;margin-top:3px" aria-label="灰度色条"></canvas>
+    <svg id="cbarAxis" viewBox="0 0 900 22" style="margin-top:2px" aria-hidden="true"></svg>
+    <div class="canvrow" style="margin-top:10px">
+      <figure><canvas id="hPlot" width="300" height="300" style="width:100%;max-width:300px;aspect-ratio:1"></canvas><figcaption><b>Hilbert 伪彩</b>：横轴真实深度码，纵轴解码值</figcaption></figure>
+      <figure><canvas id="gPlot" width="300" height="300" style="width:100%;max-width:300px;aspect-ratio:1"></canvas><figcaption><b>灰度</b>（三通道同值）：同样的噪声</figcaption></figure>
+      <div class="readout" style="margin:0;align-content:start;grid-template-columns:1fr 1fr">
+        <div class="hh"><b id="hMed">—</b><span>Hilbert 中位误差（按 4 m 处换算）</span></div>
+        <div><b id="gMed">—</b><span>灰度中位误差（4 m 处）</span></div>
+        <div class="hr"><b id="hJump">—</b><span>Hilbert 跳变率（误差 &gt; 量程 5%）</span></div>
+        <div><b id="gJump">—</b><span>灰度跳变率</span></div>
+        <div class="hr"><b id="hMax">—</b><span>Hilbert 最大误差（占量程）</span></div>
+        <div><b id="gMax">—</b><span>灰度最大误差</span></div>
+      </div>
+    </div>
+    <figcaption><b>图 3-2　Hilbert 伪彩深度实验室（浏览器里实时计算，每次 1500 个样本）。</b>这里用标准三维 Hilbert 曲线加 f(d) = d/(d+4 m) 来模拟。论文只说「类 Hilbert 路径」和「非线性压缩」，<b>具体的曲线阶数和 f 都没给</b>。解码方式是找曲线上离该颜色最近的点。在 σ ≈ 0.02（约 5/255）时，3 阶曲线的中位误差比灰度小约 40 倍，几乎不跳变；σ 到 0.03 左右，开始出现整段跳走的像素。我用 20,000 个样本离线复算：σ=0.03 时约 1.5% 的样本误差超过量程的 1%，σ=0.05 时约 13%。</figcaption>
+  </figure>
+  <div class="note"><b>这对论文意味着什么：</b>作为<i>输入条件</i>，这个编码很合适，因为白盒深度是干净渲染的，只经过一次 VAE 编码。作为<i>输出</i>，生成出来的深度伪彩要解码回米制深度，就会碰上折叠处的跳变，物体边缘这类 VAE 误差大的地方尤其明显。论文说这个映射「可逆、可以恢复米制深度」，但没有评估解码出的深度质量，也没说评测里是否用到了它（§8 第 13 条）。</div>
+</section>
+
+<!-- ============================ S4 ============================ -->
+<section id="s4">
+  <div class="sec-head"><span class="sec-num">04 · TRAINING</span><h2>训练：一个 DiT，同时学两门课</h2></div>
+  <p class="lead">关键设计是给 RGB 和深度<b>各配一个噪声水平</b>，<span class="mv">t<sub>q</sub></span> 和 <span class="mv">t<sub>h</sub></span>。两门课的区别只在于深度那一路的噪声水平是 0 还是 t。</p>
+
+  <figure class="fig">
+    <div class="ctrl"><span>训练模式</span>
+      <span class="seg" id="modeSeg"><button type="button" aria-pressed="true" data-v="d2r">课 1：深度 → RGB　(t, 0)</button><button type="button" aria-pressed="false" data-v="joint">课 2：联合 RGBD　(t, t)</button></span>
+    </div>
+    <div class="scrollx">
+    <svg id="archSvg" viewBox="0 0 980 360" role="img" aria-label="Proxy2World 训练结构">
+      <!-- inputs -->
+      <g font-size="12">
+        <rect x="14" y="36" width="96" height="44" rx="6" fill="url(#grgb)"/><text x="62" y="98" text-anchor="middle" class="t-ink" style="font-weight:600">RGB 视频 Q</text>
+        <rect x="14" y="146" width="96" height="44" rx="6" fill="#0b0d12" stroke="var(--g)"/><g stroke="#57d36b" opacity=".85"><path d="M22 186 L40 152 M40 186 L52 152 M62 186 L62 152 M84 186 L74 152 M18 176 H106 M24 166 H100"/></g><text x="62" y="208" text-anchor="middle" class="t-ink" style="font-weight:600">相机网格 G</text>
+        <rect x="14" y="256" width="96" height="44" rx="6" fill="url(#gdepth)"/><text x="62" y="318" text-anchor="middle" class="t-ink" style="font-weight:600">深度伪彩 H</text>
+      </g>
+      <!-- VAE -->
+      <g>
+        <rect x="136" y="40" width="70" height="36" rx="6" fill="var(--surf2)" stroke="var(--rule2)"/><text x="171" y="63" text-anchor="middle" class="t-2">VAE 编码 🔒</text>
+        <rect x="136" y="150" width="70" height="36" rx="6" fill="var(--surf2)" stroke="var(--rule2)"/><text x="171" y="173" text-anchor="middle" class="t-2">VAE 编码 🔒</text>
+        <rect x="136" y="260" width="70" height="36" rx="6" fill="var(--surf2)" stroke="var(--rule2)"/><text x="171" y="283" text-anchor="middle" class="t-2">VAE 编码 🔒</text>
+        <path d="M110 58 H134 M110 168 H134 M110 278 H134" stroke="var(--ink3)" marker-end="url(#ah)"/>
+      </g>
+      <!-- latents + noise -->
+      <text x="226" y="52" class="t-ink mv" style="font-size:15px">z₀ᵠ</text>
+      <text x="171" y="204" text-anchor="middle" class="t-ink" style="font-size:12.5px">zᵍ：干净，不加噪</text>
+      <text x="226" y="274" class="t-ink mv" style="font-size:15px">z₀ʰ</text>
+      <path d="M206 58 H268" stroke="var(--q)" marker-end="url(#ahq)"/>
+      <path d="M206 278 H268" stroke="var(--h)" marker-end="url(#ahh)"/>
+      <circle cx="284" cy="58" r="14" fill="var(--q-soft)" stroke="var(--q)"/><text x="284" y="63" text-anchor="middle" class="t-ink" style="font-size:16px">+</text>
+      <text x="284" y="30" text-anchor="middle" class="t-2">ε<tspan dy="-5" font-size="9">q</tspan><tspan dy="5">, t</tspan><tspan dy="3" font-size="9">q</tspan><tspan dy="-3"> = t</tspan></text>
+      <g id="hNoise">
+        <circle cx="284" cy="278" r="14" fill="var(--h-soft)" stroke="var(--h)"/><text x="284" y="283" text-anchor="middle" class="t-ink" style="font-size:16px">+</text>
+      </g>
+      <text id="thLabel" x="258" y="312" text-anchor="middle" class="t-2" style="font-weight:600">t_h = 0（深度保持干净）</text>
+      <!-- camera broadcast -->
+      <path d="M206 168 C 300 168, 300 110, 348 96" stroke="var(--g)" fill="none" marker-end="url(#ahg)"/>
+      <path d="M206 168 C 300 168, 300 228, 348 244" stroke="var(--g)" fill="none" marker-end="url(#ahg)"/>
+      <!-- ref + mask -->
+      <rect x="234" y="190" width="112" height="30" rx="6" fill="var(--ref-soft)" stroke="var(--ref)" stroke-dasharray="4 3"/>
+      <text x="290" y="209" text-anchor="middle" class="t-2" style="font-size:11.5px">参考帧 + 时序掩码</text>
+      <path d="M346 198 C 356 180, 356 120, 360 104" stroke="var(--ref)" fill="none" stroke-dasharray="3 3"/>
+      <path d="M346 212 C 356 230, 356 236, 360 240" stroke="var(--ref)" fill="none" stroke-dasharray="3 3"/>
+      <path d="M298 58 H348" stroke="var(--q)" marker-end="url(#ahq)"/>
+      <path d="M298 278 H348" stroke="var(--h)" marker-end="url(#ahh)"/>
+      <!-- channel concat -->
+      <g>
+        <rect x="352" y="44" width="34" height="68" rx="4" fill="var(--surf2)" stroke="var(--rule2)"/>
+        <rect x="357" y="50" width="7" height="56" fill="var(--q)"/><rect x="366" y="50" width="7" height="56" fill="var(--g)"/><rect x="375" y="50" width="6" height="56" fill="var(--ref)" opacity=".7"/>
+        <rect x="352" y="232" width="34" height="68" rx="4" fill="var(--surf2)" stroke="var(--rule2)"/>
+        <rect x="357" y="238" width="7" height="56" fill="var(--h)"/><rect x="366" y="238" width="7" height="56" fill="var(--g)"/><rect x="375" y="238" width="6" height="56" fill="var(--ref)" opacity=".7"/>
+        <text x="369" y="130" text-anchor="middle" class="t-3" style="font-size:11px">通道拼接</text>
+        <text x="369" y="318" text-anchor="middle" class="t-3" style="font-size:11px">通道拼接</text>
+      </g>
+      <!-- patchify -->
+      <path d="M386 78 H410" stroke="var(--ink3)" marker-end="url(#ah)"/><path d="M386 266 H410" stroke="var(--ink3)" marker-end="url(#ah)"/>
+      <rect x="412" y="58" width="92" height="40" rx="6" fill="var(--q-soft)" stroke="var(--q)"/><text x="458" y="76" text-anchor="middle" class="t-ink" style="font-size:12px">Patchifier RGB</text><text x="458" y="91" text-anchor="middle" class="t-3" style="font-size:10.5px">🔥 可训练</text>
+      <rect x="412" y="246" width="92" height="40" rx="6" fill="var(--h-soft)" stroke="var(--h)"/><text x="458" y="264" text-anchor="middle" class="t-ink" style="font-size:12px">Patchifier 深度</text><text x="458" y="279" text-anchor="middle" class="t-3" style="font-size:10.5px">🔥 可训练（新加）</text>
+      <!-- tokens -->
+      <g id="tokQ"><rect x="526" y="68" width="14" height="20" rx="2" fill="var(--q)"/><rect x="543" y="68" width="14" height="20" rx="2" fill="var(--q)"/><rect x="560" y="68" width="14" height="20" rx="2" fill="var(--q)"/><rect x="577" y="68" width="14" height="20" rx="2" fill="var(--q)"/></g>
+      <g id="tokH"><rect x="526" y="256" width="14" height="20" rx="2" fill="var(--h)"/><rect x="543" y="256" width="14" height="20" rx="2" fill="var(--h)"/><rect x="560" y="256" width="14" height="20" rx="2" fill="var(--h)"/><rect x="577" y="256" width="14" height="20" rx="2" fill="var(--h)"/></g>
+      <text x="558" y="112" text-anchor="middle" class="mono t-3">32,760 tok</text>
+      <text x="558" y="244" text-anchor="middle" class="mono t-3">32,760 tok</text>
+      <path d="M504 78 H522 M504 266 H522" stroke="var(--ink3)"/>
+      <path d="M594 78 C 620 78, 620 150, 642 162" stroke="var(--q)" fill="none" marker-end="url(#ahq)"/>
+      <path d="M594 266 C 620 266, 620 200, 642 190" stroke="var(--h)" fill="none" marker-end="url(#ahh)"/>
+      <text x="612" y="180" text-anchor="middle" class="t-3" style="font-size:11px">序列拼接</text>
+      <!-- DiT -->
+      <rect x="646" y="112" width="142" height="128" rx="12" fill="var(--surf2)" stroke="var(--rule2)" stroke-width="1.5"/>
+      <text x="717" y="146" text-anchor="middle" class="t-ink" style="font-weight:700;font-size:14px">共享 DiT 🔥</text>
+      <text x="717" y="166" text-anchor="middle" class="t-2" style="font-size:11px">65,520 token 全注意力</text>
+      <text x="717" y="184" text-anchor="middle" class="t-2" style="font-size:10.5px">逐 token 时间步 t_q, t_h</text>
+      <text x="717" y="202" text-anchor="middle" class="t-3" style="font-size:11px">高噪 / 低噪两个专家</text>
+      <text x="717" y="218" text-anchor="middle" class="t-3" style="font-size:11px">各自训练（50k / 35k 步）</text>
+      <!-- outputs -->
+      <path d="M788 150 C 810 140, 812 84, 830 80" stroke="var(--q)" fill="none" marker-end="url(#ahq)"/>
+      <path d="M788 204 C 810 214, 812 266, 830 270" stroke="var(--h)" fill="none" marker-end="url(#ahh)"/>
+      <rect x="834" y="60" width="130" height="42" rx="6" fill="var(--q-soft)" stroke="var(--q)"/><text x="899" y="78" text-anchor="middle" class="t-ink" style="font-size:12px">Unpatchify → v_θ^q</text><text x="899" y="94" text-anchor="middle" class="t-2" style="font-size:11.5px">损失权重 w_q = 1</text>
+      <g id="hOut">
+        <rect x="834" y="250" width="130" height="42" rx="6" fill="var(--h-soft)" stroke="var(--h)"/><text x="899" y="268" text-anchor="middle" class="t-ink" style="font-size:12px">Unpatchify → v_θ^h</text>
+        <text id="whLabel" x="899" y="284" text-anchor="middle" class="t-2" style="font-size:11.5px">损失权重 w_h = 0</text>
+      </g>
+      <path id="hStrike" d="M836 252 L962 290" stroke="var(--risk)" stroke-width="2"/>
+      <text x="899" y="130" text-anchor="middle" class="t-3" style="font-size:11px">目标 u = ε − z₀</text>
+      <text x="14" y="350" class="t-3" style="font-size:11.5px" id="modeCaption">课 1：深度 token 是干净的「条件」，只监督 RGB。推理时，白盒深度就从这个口子喂进去。</text>
+    </svg>
+    </div>
+    <figcaption><b>图 4-1　结构（按论文 Fig 2A 重画并补上 token 数）。</b>RGB、深度伪彩、网格三路视频都用同一个冻结的 Wan VAE 编码。RGB 潜变量和深度潜变量各自按通道拼上干净的网格潜变量（以及 I2V 原有的参考帧 + 时序掩码），分别经过各自的 patch embedding，再<b>沿序列维</b>拼接，送进同一个 DiT 做全注意力。训练的参数包括两套 patch embedding、DiT 主体和输出投影。切换上方按钮看两门课的区别。</figcaption>
+  </figure>
+
+  <h3>用人话读式 7–8</h3>
+  <div class="eq"><i>z</i><sub>t<sub>m</sub></sub><sup>m</sup> = (1 − <i>t</i><sub>m</sub>) <i>z</i><sub>0</sub><sup>m</sup> + <i>t</i><sub>m</sub> ε<sup>m</sup>,　 目标速度 <i>u</i><sup>m</sup> = ε<sup>m</sup> − <i>z</i><sub>0</sub><sup>m</sup>,　 m ∈ {q, h}<span class="lbl">式 7：rectified flow，t=0 是干净数据，t=1 是纯噪声</span></div>
+  <div class="eq">ℒ = 𝔼 [ Σ<sub>m</sub> <i>w</i><sub>m</sub> ‖ <i>v</i><sub>θ</sub><sup>m</sup>(<i>z</i><sup>q</sup><sub>t<sub>q</sub></sub>, <i>z</i><sup>h</sup><sub>t<sub>h</sub></sub>, <i>t</i><sub>q</sub>, <i>t</i><sub>h</sub>; <i>z</i><sup>g</sup>, c) − <i>u</i><sup>m</sup> ‖² ]<span class="lbl">式 8</span></div>
+  <ul>
+    <li><b>课 1（深度 → RGB）</b>：<span class="mv">(t<sub>q</sub>, t<sub>h</sub>) = (t, 0)</span>，<span class="mv">(w<sub>q</sub>, w<sub>h</sub>) = (1, 0)</span>。深度是干净的，模型只需要把 RGB 从噪声里「画」出来，并且和这张深度对得上。这就是一个 depth-ControlNet，只不过条件不是通过旁路注入，而是作为 token 和 RGB 一起做注意力。</li>
+    <li><b>课 2（联合 RGBD）</b>：<span class="mv">(t, t)</span>，<span class="mv">(1, 1)</span>。两路同时加同样程度的噪声，同时去噪，学的是 RGB 和几何的联合分布。只给相机的时候，模型会自己「想出」一个几何，再照着它画。</li>
+    <li>两门课在训练中各占一半，参数完全共享。注意：<b>训练里从来没有出现过 <span class="mv">t<sub>q</sub> ≠ t<sub>h</sub></span> 且 <span class="mv">t<sub>h</sub> ≠ 0</span> 的组合</b>。推理时的切换设计正好只用到这两种训练过的组合，这一点做得很干净（§5）。</li>
+  </ul>
+  <div class="note"><b>概念上的前辈：</b>「每个模态单独一个时间步，同一个网络既能做条件生成又能做联合生成」，这个思路最早系统化于 UniDiffuser（Bao et al., 2023）。Diffusion Forcing 的「逐 token 噪声水平」也属于同一脉络。论文没有引用这两篇。它的贡献更多在于把这个思路落到 14B 视频模型加深度这个场景，并用于白盒控制。</div>
+
+  <h3>代价：token 翻倍，算力大约翻三倍</h3>
+  <div class="grid2">
+    <div class="card">
+      <h4>我按 Wan2.2-A14B 的配置算的</h4>
+      <dl class="kv">
+        <dt>潜空间</dt><dd>81 帧 → 21 个潜帧；480×832 → 60×104；patch 1×2×2 → 每帧 1,560 token</dd>
+        <dt>每路</dt><dd class="tnum">21 × 1,560 = 32,760 token</dd>
+        <dt>RGB+深度</dt><dd class="tnum">65,520 token</dd>
+        <dt>线性层</dt><dd>随 token 数线性增长，×2</dd>
+        <dt>自注意力</dt><dd>随 token 数平方增长，×4</dd>
+        <dt>每步合计</dt><dd class="tnum"><b>约 2.98×</b>（1.80 → 5.35 PFLOPs，每个专家按 14B 参数、40 层、d=5120 计）</dd>
+        <dt>每段视频</dt><dd class="tnum">40 步 × CFG 两路 ≈ 4.3×10¹⁷ FLOPs（原版约 1.4×10¹⁷）</dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h4>意味着什么</h4>
+      <p>即使在「深度 → RGB」阶段，深度 token 也要参与每一步的全注意力。它们是干净的条件，但因为要和变化中的 RGB token 互相注意，没法简单地缓存。所以三种模式的单步成本都在同一个量级。</p>
+      <p>论文没有报告推理耗时。对「世界模型」这个定位来说，这是一个 81 帧、双向、离线、每步约 3 倍算力的生成器，离交互或流式还很远。结论里也承认「长时程交互生成留待未来」。</p>
+      <p class="dim" style="font-size:13.5px">以上是量级估算：忽略了文本交叉注意力、adaLN、VAE，以及 FlashAttention 实现上的常数差异。</p>
+    </div>
+  </div>
+
+  <h3>训练细节清单（论文给了的 / 没给的）</h3>
+  <div class="grid2">
+    <div class="card"><h4 class="c-ok">给了</h4>
+      <ul>
+        <li>数据：120,624 段；DL3DV、RealEstate10K、游戏数据（「gampeplay dataset」，引文是 OmniWorld）；81 帧 / 480×832 / 16 FPS</li>
+        <li>冻结 VAE 和文本编码器；训练 patch embedding、DiT、输出投影</li>
+        <li>AdamW，lr 1e-5，wd 0.01，48 GPU；高噪专家 50k 步、低噪专家 35k 步</li>
+        <li>两任务等权采样；噪声水平在各专家的 shifted-flow 离散网格上均匀采样</li>
+        <li>参考帧 dropout 0.5，所以同一个 checkpoint 既能做 TI2V 也能做 T2V</li>
+      </ul>
+    </div>
+    <div class="card"><h4 class="c-risk">没给</h4>
+      <ul>
+        <li>DL3DV / RE10K 的深度用什么估计（只引了一篇自监督深度估计论文，说深度和相机「共享任意尺度」）</li>
+        <li>三个数据集各占多少；游戏数据是否已经是米制</li>
+        <li>batch size、总样本数、训练时长</li>
+        <li>CFG 的无条件分支丢掉哪些条件（只丢文本，还是连深度 / 网格也丢）</li>
+        <li>网格 𝒢 的具体形状、间距、范围</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note"><b>一个值得注意的数据事实：</b>DL3DV 和 RealEstate10K 基本都是<b>静态场景</b>。角色走动、门打开这类动态深度，主要只能从游戏数据里学到。白盒里的「角色动作」能不能被跟上，很大程度取决于这部分数据的占比和质量，论文没有给出。</div>
+</section>
+
+<!-- ============================ S5 ============================ -->
+<section id="s5">
+  <div class="sec-head"><span class="sec-num">05 · INFERENCE</span><h2>混合去噪：前 3 步定骨架，后 37 步长血肉</h2></div>
+  <p class="lead">推理时把两门课接在同一条去噪轨迹上。<span class="mv">τ ∈ [0, 1]</span> 是「分给联合精修的步数占比」。在 40 步的调度 <span class="mv">1 = t<sub>0</sub> &gt; … &gt; t<sub>40</sub> = 0</span> 上，切换点是 <span class="mv">k<sub>s</sub> = ⌊(1 − τ)N⌋</span>，对应的噪声水平是 <span class="mv">t<sub>s</sub> = t<sub>k<sub>s</sub></sub></span>。</p>
+
+  <div class="grid3">
+    <div class="card" style="border-top:3px solid var(--h)">
+      <h4>① 白盒定骨架　<span class="mono dim">t &gt; t<sub>s</sub></span></h4>
+      <p>白盒深度编码成 <span class="mv">z<sup>h,S</sup></span>，在这一阶段<b>固定不变、当作干净条件</b>。RGB 从纯噪声出发，用课 1 更新：</p>
+      <div class="eq" style="font-size:15px;margin:6px 0">d<i>z</i><sup>q</sup>/d<i>t</i> = <i>v</i><sub>θ</sub><sup>q</sup>(<i>z</i><sup>q</sup><sub>t</sub>, <i>z</i><sup>h,S</sup>, <i>t</i>, 0; <i>z</i><sup>g</sup>, c)</div>
+      <p class="dim" style="font-size:13.5px">式 9。只更新 RGB，深度一动不动。</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--ref)">
+      <h4>② 切换　<span class="mono dim">t = t<sub>s</sub></span></h4>
+      <p>RGB 潜变量原样保留。深度那一路<b>用白盒深度加噪到 t<sub>s</sub></b> 来初始化：</p>
+      <div class="eq" style="font-size:15px;margin:6px 0"><i>z</i><sup>h</sup><sub>t<sub>s</sub></sub> = (1 − <i>t</i><sub>s</sub>) <i>z</i><sup>h,S</sup> + <i>t</i><sub>s</sub> ε<sup>h</sup></div>
+      <p class="dim" style="font-size:13.5px">式 10。此刻两路的噪声水平相同，都是 t<sub>s</sub>，正好落在课 2 训练过的 (t, t) 组合上。</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--q)">
+      <h4>③ 联合精修　<span class="mono dim">t ≤ t<sub>s</sub></span></h4>
+      <p>深度也变成要生成的变量，两路一起按课 2 更新。白盒不再作为约束，相机网格仍然一直在：</p>
+      <div class="eq" style="font-size:15px;margin:6px 0">d<i>z</i><sup>m</sup>/d<i>t</i> = <i>v</i><sub>θ</sub><sup>m</sup>(<i>z</i><sup>q</sup><sub>t</sub>, <i>z</i><sup>h</sup><sub>t</sub>, <i>t</i>, <i>t</i>; <i>z</i><sup>g</sup>, c)</div>
+      <p class="dim" style="font-size:13.5px">式 11。m ∈ {q, h}。</p>
+    </div>
+  </div>
+
+  <h3>调度探索器：τ* = 0.925 到底意味着什么</h3>
+  <figure class="fig">
+    <div class="ctrl">
+      <label>τ <input type="range" id="tau" min="0" max="1" step="0.025" value="0.925"><output id="tauO">0.925</output></label>
+      <span>flow shift</span><span class="seg" id="shiftSeg"><button type="button" aria-pressed="true" data-v="3">3.0（论文）</button><button type="button" aria-pressed="false" data-v="5">5.0（Wan2.2 I2V 默认）</button></span>
+      <span>k<sub>s</sub> 取整</span><span class="seg" id="roundSeg"><button type="button" aria-pressed="true" data-v="round">按论文说法（=3 步）</button><button type="button" aria-pressed="false" data-v="float">浮点 floor 直译</button></span>
+    </div>
+    <div class="scrollx"><svg id="schedSvg" viewBox="0 0 900 300" role="img" aria-label="40 步去噪调度图"></svg></div>
+    <div class="legendrow"><span><i class="sw" style="background:var(--h)"></i>① 白盒深度条件（课 1）</span><span><i class="sw" style="background:var(--q)"></i>③ 联合 RGBD（课 2）</span><span><i class="sw" style="background:var(--surf3);border:1px solid var(--rule2)"></i>Wan2.2 高噪专家负责的区间（t ≥ 0.900）</span></div>
+    <div class="readout">
+      <div class="hh"><b id="rKs">—</b><span>白盒条件步数 k<sub>s</sub></span></div>
+      <div class="hl"><b id="rTs">—</b><span>切换时的噪声水平 t<sub>s</sub></span></div>
+      <div><b id="rAmp">—</b><span>此刻信号幅度 1 − t<sub>s</sub></span></div>
+      <div class="hr"><b id="rSnr">—</b><span>单个潜变量坐标的信噪比</span></div>
+      <div class="hh"><b id="rPat">—</b><span>把 210 万维整体当作一个「图样」时的信噪比（上界估计）</span></div>
+      <div><b id="rExp">—</b><span>切换发生在哪个专家内</span></div>
+    </div>
+    <figcaption><b>图 5-1　40 步调度。</b>柱高是每一步的噪声水平 t<sub>k</sub>，计算方式为 t = shift·σ/(1+(shift−1)·σ)，σ 在 1 到 0 之间均匀取值。默认 τ*=0.925 时，白盒深度只参与<b>前 3 步</b>，也就是 t 从 1 降到 0.974 这一段。这 3 步全在高噪专家的区间里；高噪专家本身负责前 10–11 步。<b>取整的小坑：</b>在 IEEE 双精度下，(1 − 0.925) × 40 = 2.9999999999999982，floor 之后是 2 而不是 3。如果实现真的照写 ⌊(1−τ)N⌋，实际只有 2 步。「按论文说法」一档用的是四舍五入，对应论文写的 3 步；「浮点 floor 直译」一档复现这个坑。「图样信噪比」= 维数 × (1−t)²/t²，维数为 16 通道 × 21 × 60 × 104。</figcaption>
+  </figure>
+
+  <h3>只看 3 步够吗？噪声里其实藏着布局</h3>
+  <p>t = 0.974 时，信号幅度只有 2.6%。按单个坐标算，信噪比约 −31 dB，看起来就是纯噪声。那布局是怎么被「定下来」的？关键在于<b>布局是一个覆盖整幅画面、在 21 帧里基本一致的低频图样</b>。模型不需要逐像素认出信号，只需要判断「整体更像哪种布局」。这就像匹配滤波：把几百万个微弱但方向一致的证据加起来，总信噪比可以很高。下面这个玩具演示了这一点：左边是 t 时刻的「潜变量」，右边是把它大半径模糊之后的样子。</p>
+  <figure class="fig">
+    <div class="ctrl">
+      <label>噪声水平 t <input type="range" id="nzT" min="0.80" max="1" step="0.001" value="0.974"><output id="nzTO">0.974</output></label>
+      <label>模糊半径 <input type="range" id="nzR" min="0" max="40" step="1" value="20"><output id="nzRO">20 px</output></label>
+      <span class="seg" id="nzPreset"><button type="button" data-v="0.9828">第 2 步</button><button type="button" data-v="0.9737">第 3 步（τ*）</button><button type="button" data-v="0.9">高噪专家边界</button><button type="button" data-v="0.8">t = 0.8</button></span>
+    </div>
+    <div class="canvrow">
+      <figure><canvas id="nzClean" width="384" height="216" style="width:100%"></canvas><figcaption>白盒布局（干净，示意）</figcaption></figure>
+      <figure><canvas id="nzMix" width="384" height="216" style="width:100%"></canvas><figcaption>(1−t)·布局 + t·噪声</figcaption></figure>
+      <figure><canvas id="nzBlur" width="384" height="216" style="width:100%"></canvas><figcaption>同一张图，大半径模糊后</figcaption></figure>
+    </div>
+    <div class="readout"><div class="hh"><b id="nzCorr">—</b><span>模糊后的图与干净布局的相关系数</span></div><div><b id="nzSnr">—</b><span>单像素信噪比</span></div><div><b>82,944</b><span>这张玩具图的像素数；真实视频潜变量约为它的 25 倍</span></div></div>
+    <figcaption><b>图 5-2　布局藏在噪声里（玩具演示）。</b>把一张单位方差的「布局图」和高斯噪声按 rectified flow 的方式混合。t = 0.974 时，中间那张肉眼看不出任何东西，但模糊之后大块结构的位置就浮现出来了。真实潜变量的维数约是这张图的 25 倍（16 通道 × 21 帧），可用的「证据」更多，网络也比一个方框模糊器聪明得多。<b>这说明低频布局可以在前 3 步被植入，但细节（手臂、门把、窄栏杆）不可能在这个阶段被定下来。</b>这正是作者想要的效果：细节交给后面的联合精修去修正。</figcaption>
+  </figure>
+
+  <div class="note mine"><b>顺带澄清一个容易想歪的点：</b>式 10 用加噪的白盒深度来初始化深度流。t<sub>s</sub> = 0.974 时，白盒在这一路里同样只剩 2.6% 的幅度。所以联合阶段「知道」白盒布局，靠的是两股同样微弱、但同样是整体图样的信号：前 3 步写进 RGB 潜变量里的布局，以及加噪后白盒深度的残留。两者各贡献多少，论文没做消融。一个很便宜的实验是把式 10 里的 z<sup>h,S</sup> 换成纯噪声，看遵循度掉多少（§11）。</div>
+
+  <h3>τ 的三个档位（论文 Fig 5a 的描述）</h3>
+  <div class="grid3">
+    <div class="card" style="border-top:3px solid var(--h)"><h4>τ = 0　全程深度条件</h4><p>布局和角色位置最准，相机误差最低（Table 1：nATE<sub>t</sub> 0.0302）。但人偶的圆柱体形和方块轮廓会被原样画出来，角色显得僵硬、比例失调。VLM 细化胜率只有 31.71%，全表最低。</p></div>
+    <div class="card" style="border-top:3px solid var(--q)"><h4>τ = τ* = 0.925　3 步 + 37 步</h4><p>主要的空间关系保住了，角色被修成自然的人形，场景细节更丰富。Fig 5a 里 τ* 和 τ=0 的构图几乎一样，背景建筑则被自由改写，比如窗换成拱门。<b>论文只展示了这三个点，没有中间档位的扫描。</b></p></div>
+    <div class="card" style="border-top:3px solid var(--base)"><h4>τ = 1　只给相机</h4><p>外观最自然，但角色位置、场景结构都会偏离白盒。Fig 5a 里整个构图都变了。它等价于一个带参考首帧的相机控制视频模型，和 Lyra、SCoPE 同一类。</p></div>
+  </div>
+
+  <div class="note"><b>和已有技巧的关系：</b>「条件只在前若干步生效」是图像生成里的常用旋钮，比如 diffusers 里 ControlNet 的 <span class="mono">control_guidance_end</span>，思路上也接近 SDEdit 的「从中间噪声开始」。Proxy2World 的不同之处在于，条件撤掉之后，模型不是退化成无条件生成，而是进入<b>同样训练过的</b>「RGB+深度联合生成 + 相机条件」模式，并且继续生成几何。这是它比「直接给 VACE 设个 guidance end」更有道理的地方。可惜论文恰好没有做这个最直接的对照（§8 第 2 条）。</div>
+</section>
+
+<!-- ============================ S6 ============================ -->
+<section id="s6">
+  <div class="sec-head"><span class="sec-num">06 · RESULTS</span><h2>读 Table 1：先看每一行拿到了什么输入</h2></div>
+  <p class="lead">Table 1 用四个小图标标注每个方法拿到了哪些输入：文本、参考首帧、相机轨迹、白盒。灰色表示没用。PDF 抽出来的文字里看不出颜色，我在 arXiv HTML 版里逐个核对了图标颜色（<span class="mono">#000000</span> 表示用了，<span class="mono">#D1D1D1</span> 表示没用）。<b>这些图标决定了哪些行之间的比较是公平的。</b></p>
+
+  <div class="grid2">
+    <div class="card"><h4>指标（论文交代了的部分）</h4>
+      <ul>
+        <li><b>nATE<sub>t</sub> / nATE<sub>r</sub></b>：用 VIPE 从生成视频里估位姿，和目标轨迹比较，得到归一化的平移 / 旋转误差。</li>
+        <li><b>Reproj.</b>：重投影误差，排除动态物体。</li>
+        <li><b>Geo. / Temp. Align</b>：与白盒的几何 / 时序一致性。<span class="c-risk">计算方式未给出。</span></li>
+        <li><b>Adh. / Ref. WR</b>：Gemini（论文写作「Gemini-v3.7-flash」）两两比较，平局算半胜，对所有对手取平均胜率。Adherence 看布局和角色行为有没有保住，Refinement 看几何、外观、运动有没有被合理地丰富。</li>
+        <li><b>Human Rank</b>：10 人 × 10 段的总体偏好名次。</li>
+      </ul>
+    </div>
+    <div class="card"><h4>我核对的</h4>
+      <ul>
+        <li><span class="tag ok">一致</span>　10 行的 Adh 胜率平均值是 49.999，Ref 平均值是 50.001。这说明是 10 个方法之间的<b>完整循环赛</b>（含 4 个自家变体），数字自洽。</li>
+        <li><span class="tag ok">一致</span>　正文的 +27.2%、+10.63、+6.52、−47.3%、−77.2%、+28.3% 我全部复算，都对得上。</li>
+        <li><span class="tag med">量级</span>　每个方法约有 9 × 78 = 702 次比较。按独立样本算，胜率的标准误约 ±1.9 个百分点；同一序列内的相关性会让实际不确定性更大。</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="chips" id="tblChips" role="group" aria-label="筛选">
+    <button type="button" aria-pressed="true" data-f="all">全部 10 行</button>
+    <button type="button" aria-pressed="false" data-f="noref">只看没有参考首帧的（T2V 口径）</button>
+    <button type="button" aria-pressed="false" data-f="ref">只看有参考首帧的</button>
+  </div>
+  <div class="tbl-wrap">
+  <table id="t1">
+    <thead><tr>
+      <th>方法</th><th>输入 <span class="dim" style="font-weight:400">文·图·机·盒</span></th>
+      <th class="sortable" data-k="nt" data-dir="asc">nATE<sub>t</sub>↓<span class="arr"></span></th>
+      <th class="sortable" data-k="nr" data-dir="asc">nATE<sub>r</sub>↓<span class="arr"></span></th>
+      <th class="sortable" data-k="rp" data-dir="asc">Reproj↓<span class="arr"></span></th>
+      <th class="sortable" data-k="ga" data-dir="desc">Geo↑<span class="arr"></span></th>
+      <th class="sortable" data-k="ta" data-dir="desc">Temp↑<span class="arr"></span></th>
+      <th class="sortable" data-k="adh" data-dir="desc">Adh WR↑<span class="arr"></span></th>
+      <th class="sortable" data-k="ref" data-dir="desc">Ref WR↑<span class="arr"></span></th>
+      <th class="sortable" data-k="hr" data-dir="asc">人评名次↓<span class="arr"></span></th>
+    </tr></thead>
+    <tbody id="t1b"></tbody>
+  </table>
+  </div>
+  <p class="dim" style="font-size:13px">◆ 表示当前可见行里该列最好的值。点击表头可以排序，再点一次恢复原顺序。<b>浅橙底</b>是论文自家变体，四个变体共用一个 checkpoint。</p>
+
+  <h3>「遵循 vs 细化」平面：实心点才有参考首帧</h3>
+  <figure class="fig">
+    <div class="scrollx"><svg id="scatter" viewBox="0 0 720 470" role="img" aria-label="Adherence 与 Refinement 胜率散点图"></svg></div>
+    <div class="legendrow"><span><i class="sw" style="background:var(--q)"></i>本文变体</span><span><i class="sw" style="background:var(--base)"></i>基线</span><span>● 实心 = 输入含参考首帧（TI2V）</span><span>○ 空心 = 无参考首帧</span></div>
+    <figcaption><b>图 6-1　两个 VLM 胜率的散点。</b>三根箭头是三组「只改一个变量」的干净对照。<b>加参考首帧</b>那一根最长。论文正文拿「Ours TI2V τ*」对比 Cosmos、VACE、Coarse2Real 这三个空心点，其中混进了参考首帧的效应。只在空心点之间比，Ours T2V τ* 的细化胜率最高（51.30），遵循胜率在 5 个方法里排第 4（42.81，只比 Coarse2Real 的 40.03 高）。</figcaption>
+  </figure>
+
+  <div class="grid3">
+    <div class="card" style="border-top:3px solid var(--px)">
+      <h4>A · 加白盒　<span class="dim mono" style="font-size:12px">TI2V：τ=1 → τ*</span></h4>
+      <ul>
+        <li>Geo 0.534 → 0.680（<b>+27.2%</b>）</li>
+        <li>Adh +10.63　Ref +6.52</li>
+        <li>nATE<sub>t</sub> 0.0681 → 0.0659（基本持平）</li>
+        <li>Reproj 1.956 → <span class="c-risk">2.524</span>（变差）</li>
+        <li>人评 5 → 1</li>
+      </ul>
+      <p class="dim" style="font-size:13.5px">最干净的一组对照：同一个 checkpoint、同样的输入，只差有没有白盒。白盒确实有用，但 3D 一致性（重投影误差）反而变差，论文没解释。</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--q)">
+      <h4>B · 放开深度　<span class="dim mono" style="font-size:12px">T2V：τ=0 → τ*</span></h4>
+      <ul>
+        <li>Adh <span class="c-risk">−25.98</span>　Ref <b>+19.59</b></li>
+        <li>Geo −8.6%</li>
+        <li>nATE<sub>t</sub> <span class="c-risk">×2.86</span>　nATE<sub>r</sub> <span class="c-risk">×2.66</span></li>
+        <li>人评 6 → 2</li>
+      </ul>
+      <p class="dim" style="font-size:13.5px">这是 τ 的真实代价：换来 20 个点的细化胜率，付出 26 个点的遵循胜率和近 3 倍的相机误差。人评更喜欢放开之后的结果。注意：表里 τ=0 这一行的相机图标是灰的，和方法部分「相机网格全程保留」的说法矛盾。</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--ref)">
+      <h4>C · 加参考首帧　<span class="dim mono" style="font-size:12px">τ*：T2V → TI2V</span></h4>
+      <ul>
+        <li>Adh <b>+21.37</b>　Ref <b>+26.66</b></li>
+        <li>Geo −4.1%</li>
+        <li>nATE<sub>t</sub> 0.0863 → 0.0659</li>
+        <li>Reproj 2.067 → <span class="c-risk">2.524</span></li>
+        <li>人评 2 → 1</li>
+      </ul>
+      <p class="dim" style="font-size:13.5px">一张参考图带来的 VLM 胜率提升，比白盒本身（A 组）还大。而参考首帧从哪来，论文没交代。</p>
+    </div>
+  </div>
+
+  <div class="note warn"><b>所以正文这句话要打折扣：</b>「Cosmos-Depth 的 VLM 遵循度更高（72.26 vs 64.18），但我们的细化胜率高得多（77.96 vs 40.28）」。按 Table 1 的图标，Cosmos 和 VACE 只拿到文本和白盒深度，<b>既没有参考首帧，也没有相机轨迹</b>。输入对齐到 T2V 后，差距变成细化 51.30 vs 40.28（+11），遵循 42.81 vs 72.26（<b>−29</b>）。VACE 本身支持参考图 / 首帧输入，给它补上参考首帧再比，才是公平的比法。</div>
+
+  <h3>几个基线数字也值得怀疑</h3>
+  <ul>
+    <li><b>FantasyWorld</b> 的 nATE<sub>t</sub> 是 0.2966，nATE<sub>r</sub> 是 0.3472，比其他相机控制方法差 3 到 7 倍，接近「完全没跟上轨迹」。<b>Coarse2Real</b> 的 nATE<sub>r</sub> 是 0.3152。这种量级更像是坐标约定或尺度约定没对齐，不像方法本身的能力上限。基线怎么适配的写在「附录」里，而附录不存在。</li>
+    <li><b>Coarse2Real</b> 原本是用配对合成数据训练、面向人群仿真的粗到真渲染器，输入是粗仿真渲染。它在 ProxyBench 上吃的是什么（深度？RGB 渲染？），论文没说。</li>
+    <li><b>Lyra 2.0</b> 的相机精度（0.0418 / 0.0413）其实优于 Ours TI2V τ*（0.0659 / 0.0558）。「混合模式在相机上也更好」这个说法不成立。论文正文也没这么说，只是把相机误差放在表里、不作讨论。</li>
+  </ul>
+</section>
+
+<!-- ============================ S7 ============================ -->
+<section id="s7">
+  <div class="sec-head"><span class="sec-num">07 · ABLATION</span><h2>消融与人评：Fig 5b 的数值还原</h2></div>
+  <p>Fig 5b 在论文里是一张双纵轴柱状图，没有标数值。arXiv HTML 版里它是 pgfplots 生成的 SVG，我按柱子的路径高度和刻度线的位置换算出了数值：左轴刻度 0.04 对应 34.36 个单位，右轴 100% 对应 103.09 个单位。下面把两个量拆成两张单轴图。</p>
+  <div class="grid2">
+    <figure class="fig" style="margin:0"><svg id="abl1" viewBox="0 0 380 250" role="img" aria-label="消融：相机误差"></svg><figcaption><b>nATE ↓</b>（论文没说是 t、r 还是两者的平均）</figcaption></figure>
+    <figure class="fig" style="margin:0"><svg id="abl2" viewBox="0 0 380 250" role="img" aria-label="消融：偏好"></svg><figcaption><b>Preference ↑</b>（人评；定义未给）</figcaption></figure>
+  </div>
+  <ul>
+    <li><b>去掉米制对齐</b>：nATE 0.062 → 0.098（+58%），偏好 75% → 32%。和 §3.2 的机制分析一致，是最伤的一项。</li>
+    <li><b>去掉联合 RGBD</b>（精修阶段改成只生成 RGB、只给相机）：nATE 0.071，偏好 54%。论文据此认为「光把深度约束撤掉还不够，得同时生成几何」。</li>
+    <li><span class="c-risk"><b>但三个 Preference 加起来是 161%。</b></span>所以它既不是「三选一的份额」，也不是三者之间的循环赛胜率（那样平均值必须是 50%）。可能是和某个共同参照比较的胜率，也可能是「可接受」的比例。定义缺失，样本量也缺失。</li>
+    <li>「Full model」的 nATE 是 0.062，和 Table 1 里 TI2V τ* 的 (0.0659 + 0.0558) / 2 = 0.0609 接近，但不相等。消融用的是哪个子集、哪种 nATE，都没说。</li>
+    <li><b>「w/o joint RGBD」是怎么实现的？</b>有两种可能，论文都没排除：一是<b>重新训练</b>一个「深度→RGB + 只给相机的纯 RGB」模型，那就要交代训练预算是否相同；二是<b>同一个 checkpoint</b> 在精修阶段直接去掉深度 token，那模型从没见过这种输入，这个消融对照组本身就处在分布外，不公平。</li>
+  </ul>
+
+  <h3>人评和 VLM 评分在多大程度上一致</h3>
+  <p>我用 Table 1 的 10 个方法算了人评名次和各指标之间的 Spearman 秩相关（人评按「越好越大」取反）：</p>
+  <div class="tbl-wrap" style="max-width:560px">
+    <table class="simple">
+      <thead><tr><th>指标</th><th>与人评的 Spearman ρ</th><th>读法</th></tr></thead>
+      <tbody>
+        <tr><td>Adh + Ref（两个胜率相加）</td><td class="tnum"><b>0.84</b></td><td>人评更像是「两者兼顾」</td></tr>
+        <tr><td>Adh WR</td><td class="tnum">0.73</td><td></td></tr>
+        <tr><td>Geo Align</td><td class="tnum">0.61</td><td></td></tr>
+        <tr><td>Ref WR</td><td class="tnum">0.50</td><td>单看细化，只有中等相关</td></tr>
+        <tr><td>−nATE<sub>t</sub></td><td class="tnum">0.16</td><td>人几乎不看相机精度</td></tr>
+        <tr><td>−Reproj</td><td class="tnum">0.08</td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>n = 10 时，ρ 的抽样波动很大，这些只能当作方向性参考。更要紧的是人评本身的规模：<b>10 个人、10 段视频，只报名次</b>，没有置信区间，没有显著性检验，也没说是否盲评、是否打乱顺序。第一名和第二名都是自家变体，两者的差距是否显著无从判断。</p>
+</section>
+
+<!-- ============================ S8 ============================ -->
+<section id="s8">
+  <div class="sec-head"><span class="sec-num">08 · DOUBTS</span><h2>存疑清单（16 条，按严重程度排）</h2></div>
+  <p class="dim">分级是我的判断：「高」会影响核心结论能不能成立；「中」影响结论的强度或可复现性；「低」是细节。每一条都写了证据和能解决它的实验。点击展开。</p>
+  <div class="legendrow"><span><span class="tag risk">高</span> 3 条</span><span><span class="tag med">中</span> 8 条</span><span><span class="tag low">低</span> 5 条</span></div>
+  <div class="doubts">
+
+  <details class="dbt risk" open><summary><span class="i">01</span><span class="tag risk">高</span><span class="ttl">主力对比混进了参考首帧：和 VACE、Cosmos、Coarse2Real 比的时候，只有「我们」拿到了参考首帧</span><span class="chev">▶</span></summary><div class="body">
+    <p><b>证据：</b>Table 1 的输入图标（HTML 版颜色值）显示，VACE-Depth、Cosmos-Depth 只用了「文本 + 白盒」，Coarse2Real 用了「文本 + 相机 + 白盒」，三者都没有参考首帧。正文重点讨论的是「Ours TI2V τ*」，它四样全有。同一个模型从 T2V 换成 TI2V，Adh 涨 +21.37、Ref 涨 +26.66，比加白盒（+10.63 / +6.52）还多。Fig 4 的定性对比里，VACE、Cosmos、Coarse2Real 的画面色调和首帧完全不同，也印证了这一点。</p>
+    <p><b>影响：</b>「细化胜率 77.96 vs 40.28」里有很大一部分来自参考首帧。输入对齐到 T2V 后是 51.30 vs 40.28，而遵循胜率是 42.81 vs 72.26。另外，参考首帧本身从哪来（哪个模型、按什么条件生成），论文没说。如果它已经是「按白盒首帧精装修」好的图，那 TI2V 的第一帧细化其实是那个图像模型的功劳。</p>
+    <p><b>怎么解决：</b>给 VACE 补上参考首帧再比（VACE 支持参考图 / 首帧），或者全表统一用 T2V；公开参考首帧的生成流程。</p>
+  </div></details>
+
+  <details class="dbt risk"><summary><span class="i">02</span><span class="tag risk">高</span><span class="ttl">缺最关键的对照：把「深度只在前 k 步生效」这一招直接用到 VACE / Cosmos 上，会怎样？</span><span class="chev">▶</span></summary><div class="body">
+    <p><b>证据：</b>论文的核心卖点是「平衡」。但「控制只作用于前若干步」在 ControlNet 生态里是现成的旋钮（<span class="mono">control_guidance_end</span>），VACE 也有 context scale 可以按步调。表里的 VACE / Cosmos 都是全程强制深度，所以它们落在「高遵循、低细化」一端，和自家的 τ=0 一样。</p>
+    <p><b>影响：</b>分不清收益来自哪里：是来自新的训练方式（课 1 + 课 2 + 放开后切到联合 RGBD），还是仅仅来自「条件只给前几步」这个调度。另一个也没做的对照是：只训练联合 RGBD（课 2），前几步用 replacement 的方式把白盒深度塞进深度流，也就是 RePaint 式的条件采样。这能检验课 1 是否必要。</p>
+    <p><b>怎么解决：</b>VACE-Depth 加 guidance end（前 3 / 5 / 10 步），和 Ours 画在同一张 Adh–Ref 图上。再加一个「只有课 2 + replacement」的消融。</p>
+  </div></details>
+
+  <details class="dbt risk"><summary><span class="i">03</span><span class="tag risk">高</span><span class="ttl">「详细协议见附录」，但 v1 没有附录</span><span class="chev">▶</span></summary><div class="body">
+    <p><b>证据：</b>第 4.1 节末尾写「Detailed protocols are provided in the appendix」。arXiv v1 的 PDF 一共 13 页，第 10–13 页是参考文献，后面什么也没有。HTML 版的章节列表同样只到参考文献。</p>
+    <p><b>因此无从核查的内容：</b>Geo / Temp Align 的计算方式；nATE 怎么归一化；VLM 的 prompt、是否交换左右顺序、看的是哪些帧；人评流程；ProxyBench 的「agent-driven」构建流程；78 / 300 的挑选标准；每个基线的适配方式；参考首帧的来源。</p>
+    <p><b>怎么解决：</b>等 v2 或代码发布（项目页目前都标注 Coming soon）。在那之前，Table 1 里所有「operator-based」指标都只能当作不透明的数字来看。</p>
+  </div></details>
+
+  <details class="dbt med"><summary><span class="i">04</span><span class="tag med">中</span><span class="ttl">τ* = 0.925 怎么选的？只报告了 3 个 τ，没有敏感性曲线</span><span class="chev">▶</span></summary><div class="body">
+    <p><b>证据：</b>只报告了 τ = 0、τ*、1 三个点。τ* 对应「前 3 步」，粒度是每步 0.025：τ=0.95 是 2 步，τ=0.9 是 4 步。§5 的分析表明，这几步决定的是最粗的布局，结果对 k<sub>s</sub> 很可能相当敏感。论文没说 τ* 是不是在 ProxyBench 这个测试集上选的。</p>
+    <p><b>怎么解决：</b>τ 从 0 到 1 全扫一遍，画出 Adh、Ref、nATE 随 τ 变化的曲线；τ* 在留出的场景上选。</p>
+  </div></details>
+
+  <details class="dbt med"><summary><span class="i">05</span><span class="tag med">中</span><span class="ttl">混合模式在相机精度和 3D 一致性上并不占优</span><span class="chev">▶</span></summary><div class="body">
+    <p><b>证据：</b>T2V 下从 τ=0 到 τ*，nATE<sub>t</sub> 从 0.0302 升到 0.0863（×2.86）。TI2V τ* 的 nATE（0.0659 / 0.0558）不如 Lyra 2.0（0.0418 / 0.0413），也不如 Cosmos-Depth（0.0446 / 0.0362）。它的重投影误差 2.524 在自家四个变体里最差。方法部分说「相机网格在联合阶段继续约束视角」，但数字表明，撤掉深度以后，相机网格一个信号撑不住原来的精度。</p>
+    <p><b>影响：</b>对需要精确机位的应用（游戏过场、预演）来说，这是实打实的代价。「better balance」只在两个 VLM 胜率的平面上成立。</p>
+  </div></details>
+
+  <details class="dbt med"><summary><span class="i">06</span><span class="tag med">中</span><span class="ttl">Fig 5b 消融的定义不清：Preference 加起来 161%；nATE 是哪种；「w/o joint RGBD」怎么实现的</span><span class="chev">▶</span></summary><div class="body">
+    <p><b>证据：</b>从 SVG 还原出来的数值是 nATE 0.098 / 0.071 / 0.062，Preference 32% / 54% / 75%（§7）。三个偏好加起来 161%，而且图上没有误差棒，也没有样本量。「w/o metric scale alignment」必须重新训练一个模型，训练预算是否相同没说。「w/o joint RGBD」如果是同一个 checkpoint 直接删掉深度 token，那这个对照组本身就处在分布外。</p>
+    <p><b>怎么解决：</b>给出偏好的定义、样本量和置信区间，说明各消融模型的训练预算。</p>
+  </div></details>
+
+  <details class="dbt med"><summary><span class="i">07</span><span class="tag med">中</span><span class="ttl">人评规模很小，而且只报名次：10 人 × 10 段</span><span class="chev">▶</span></summary><div class="body">
+    <p><b>证据：</b>10 段只占评测集 78 段的 13%。只给了名次，没有得分、置信区间或显著性，也没说是否盲评、是否打乱顺序。第一、二名都是自家变体。人评和 VLM 的一致性一般：和 Ref WR 的 Spearman 只有 0.50（§7）。</p>
+  </div></details>
+
+  <details class="dbt med"><summary><span class="i">08</span><span class="tag med">中</span><span class="ttl">声称能适应「不同抽象层级」的白盒，却没有按层级拆开的结果；ProxyBench 是自建的，也还没发布</span><span class="chev">▶</span></summary><div class="body">
+    <p><b>证据：</b>引言把「能否适应不同抽象层级」列为中心问题之一，相关工作也说「enabling transfer to low-poly, primitive, and incomplete proxies」。但实验只报告了 78 段的总平均，没有按低模 / 基本体 / 残缺分组。ProxyBench 由作者自己构建（「agent-driven」，流程没写），78 段的挑选标准是「强调交互、平衡运动类型」，比较模糊。基准和方法出自同一个团队、同时发布，而基准本身还没公开。</p>
+  </div></details>
+
+  <details class="dbt med"><summary><span class="i">09</span><span class="tag med">中</span><span class="ttl">Table 1 里 τ=0 这一行的相机图标是灰的，和方法描述矛盾</span><span class="chev">▶</span></summary><div class="body">
+    <p><b>证据：</b>§3.4 写的是「Camera-grid guidance is retained throughout both stages」，三种模式应该都带相机网格。但 Table 1 里「Ours (T2V, τ=0)」的输入图标只有文本和白盒亮着，相机是灰的（<span class="mono">#D1D1D1</span>），和 VACE、Cosmos 一样。要么 τ=0 这一行其实没给相机网格，那 τ=0 和 τ* 之间就同时变了两个量；要么图标标错了。</p>
+  </div></details>
+
+  <details class="dbt med"><summary><span class="i">10</span><span class="tag med">中</span><span class="ttl">部分基线的相机误差大得反常</span><span class="chev">▶</span></summary><div class="body">
+    <p><b>证据：</b>FantasyWorld 的 nATE<sub>t</sub> / nATE<sub>r</sub> 是 0.2966 / 0.3472，Coarse2Real 的 nATE<sub>r</sub> 是 0.3152，比其他方法高一个量级。这种量级常见于坐标系约定（OpenCV 和 OpenGL、c2w 和 w2c）或平移尺度没对齐的情况。Coarse2Real 原本面向人群仿真的粗渲染，适配到 ProxyBench 的方式没有说明。</p>
+    <p><b>影响：</b>基线弱会放大「我们更好」的印象。好在最关键的比较（vs Cosmos / VACE）不受这一条影响。</p>
+  </div></details>
+
+  <details class="dbt med"><summary><span class="i">11</span><span class="tag med">中</span><span class="ttl">没报告推理代价；「world model」的定位和一个离线双向生成器之间有落差</span><span class="chev">▶</span></summary><div class="body">
+    <p><b>证据：</b>token 数翻倍（65,520），我估算每步算力约为原 Wan2.2 的 3 倍。一次生成 81 帧、40 步、带 CFG，不是自回归，也不能边交互边生成。结论承认「长时程交互生成留待未来」。标题和引言用的是 world generation / world model 的叙事，项目页也展示了游戏玩法和 UGC，但这些都是离线渲染出来的片段。</p>
+  </div></details>
+
+  <details class="dbt low"><summary><span class="i">12</span><span class="tag low">低</span><span class="ttl">⌊(1 − 0.925) × 40⌋ 在浮点里等于 2，不是 3</span><span class="chev">▶</span></summary><div class="body">
+    <p><b>证据：</b>在 IEEE 754 双精度下，1 − 0.925 = 0.07499999999999996，乘以 40 得 2.9999999999999982，floor 之后是 2。论文正文写的是「three geometry-conditioned steps」。如果代码逐字实现了 k<sub>s</sub> = ⌊(1−τ)N⌋，实际只跑 2 步。复现时要留意：用 round、加一个 ε，或者直接指定 k<sub>s</sub>。</p>
+  </div></details>
+
+  <details class="dbt low"><summary><span class="i">13</span><span class="tag low">低</span><span class="ttl">Hilbert 伪彩的「可逆」很脆弱；生成出来的深度质量没有评估</span><span class="chev">▶</span></summary><div class="body">
+    <p><b>证据：</b>§3.3 的模拟显示，3 阶曲线在颜色噪声 σ ≥ 0.03 时开始出现整段跳变，σ = 0.05 时约 13% 的样本误差超过量程的 1%。论文把生成的深度伪彩当作副产物输出，还说它「可以恢复米制深度」，但没有任何关于解码深度质量的数字。这一条不影响 RGB 结果。如果有人想拿它的深度输出做下游任务，需要注意。</p>
+  </div></details>
+
+  <details class="dbt low"><summary><span class="i">14</span><span class="tag low">低</span><span class="ttl">训练数据的细节：以静态场景为主；深度来源不明；有一处引用很奇怪</span><span class="chev">▶</span></summary><div class="body">
+    <p><b>证据：</b>三个数据源里，DL3DV 和 RE10K 都是静态场景，动态主体只能靠游戏数据来学，但各数据源占多少没有给。「深度和相机共享任意尺度」这句话引用的是一篇合成到真实的自监督深度估计论文（Yan et al., 2025，第一作者与本文二作同名），但没说训练深度是不是由它生成的。</p>
+  </div></details>
+
+  <details class="dbt low"><summary><span class="i">15</span><span class="tag low">低</span><span class="ttl">相关工作漏掉了几篇最接近的前作</span><span class="chev">▶</span></summary><div class="body">
+    <ul>
+      <li><b>LooseControl</b>（Bhat, Mitra, Wonka, 2023）：用场景边界和 3D 包围盒这类「松散深度」控制图像生成，处理的正是「粗几何作为条件、细节交给模型」这个问题。</li>
+      <li><b>CineMaster</b>（2025）：用 3D 包围盒加相机轨迹控制文生视频，和白盒控制非常接近。</li>
+      <li><b>UniDiffuser</b>（Bao et al., 2023）：每个模态一个时间步，一个网络同时学条件生成和联合生成，是 §4 设计的直接前辈。</li>
+      <li><b>ControlNet 的 guidance end / SDEdit</b>：「条件只在前若干步生效」的思路来源。</li>
+    </ul>
+    <p>这些前作不否定本文的组合创新，但会改变读者对「新意在哪」的判断。</p>
+  </div></details>
+
+  <details class="dbt low"><summary><span class="i">16</span><span class="tag low">低</span><span class="ttl">笔误和小不一致</span><span class="chev">▶</span></summary><div class="body">
+    <ul>
+      <li>Fig 3 的交互时间轴标到 0s / 6s / 12s，而 ProxyBench 的序列是 5 秒，模型也只生成 81 帧 ≈ 5.1 秒。</li>
+      <li>「gampeplay dataset」「we istead」「Rerpoj.」（Fig 3）。</li>
+      <li>评测用的「Gemini-v3.7-flash」，引用的却是 2023 年的 Gemini 技术报告。</li>
+      <li>Fig 5b 在原文里是双纵轴图，读者很难对数值。</li>
+    </ul>
+  </div></details>
+  </div>
+</section>
+
+<!-- ============================ S9 ============================ -->
+<section id="s9">
+  <div class="sec-head"><span class="sec-num">09 · CREDIT</span><h2>做对了的地方</h2></div>
+  <div class="grid2">
+    <div class="card"><ul>
+      <li><b>完全绕开配对数据。</b>课 1 + 课 2 + 中途切换，训练只需要随处可得的 RGBD 视频。这个配方简单，可迁移，而且不依赖任何白盒风格，换成胶囊骨架、包围盒也同样适用。</li>
+      <li><b>切换点设计得很干净。</b>推理只用训练中出现过的 (t, 0) 和 (t, t) 两种噪声组合，切换那一刻两路噪声水平相等。没有引入训练时从未见过的异步噪声。</li>
+      <li><b>米制尺度对齐。</b>动机清楚、代价很低（一次 DA3 前向），而且有消融支撑。用「网格视频」表示相机的做法，都应该配上这一步。</li>
+    </ul></div>
+    <div class="card"><ul>
+      <li><b>一个 checkpoint，三种控制强度。</b>τ 可以直接当成用户旋钮：只给相机、白盒、精细深度，不需要为每种白盒单独训练。</li>
+      <li><b>数字自洽。</b>VLM 胜率是完整的循环赛（均值恰为 50%），正文里的百分比全部可以复算。</li>
+      <li><b>Table 1 标了输入图标。</b>正是这个细节让口径问题看得出来。这点值得肯定，只是正文的讨论没有顺着它展开。</li>
+      <li>论文以 CC BY 4.0 发布。</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============================ S10 ============================ -->
+<section id="s10">
+  <div class="sec-head"><span class="sec-num">10 · FOR US</span><h2>对 CWM 渲染器路线意味着什么</h2></div>
+  <p>对照你在 <span class="mono">papers/cwm-renderer-candidates-2609.md</span> 里整理的需求：CWM（<a href="2608.25927.html">精读</a>）要的是「固定 log 深度 + 语义 ID」的白盒视频、逐实体的结构化文本、首帧锚图，并且最终要做成自回归实时渲染。</p>
+  <div class="tbl-wrap">
+    <table class="simple">
+      <thead><tr><th style="width:18%">维度</th><th style="width:41%">Proxy2World</th><th>对 CWM 的含义</th></tr></thead>
+      <tbody>
+        <tr><td>条件形态</td><td>只有深度（Hilbert 伪彩）+ 相机网格；没有语义、实例 ID，也没有实体和文本的绑定</td><td>不够用。CWM 需要「哪个 ID 是哪个实体」，要借 PWM（<a href="2609.10540.html">精读</a>）的身份槽，或者 DAR / Marionette 的 ID 通道</td></tr>
+        <tr><td>训练数据</td><td><b>不要配对</b>，普通 RGBD 视频即可</td><td><b>最值得借鉴的一点。</b>CWM 目前靠 GTA V 5.6 小时的配对录制。换成这个配方，任何带深度（或可以估深度）的视频都能用，数据规模就不再受配对的限制</td></tr>
+        <tr><td>生成方式</td><td>14B MoE、双向、81 帧、40 步、每步约 3 倍算力</td><td>不能直接当实时渲染器。更适合当老师或数据生成器：用它批量产出（白盒，视频）配对，再蒸馏一个因果学生</td></tr>
+        <tr><td>τ 旋钮</td><td>依赖 40 步的细粒度：前 3 步给条件</td><td>蒸馏到 3–4 步以后，「前 3/40 步」没有对应的粒度。可以让学生的第一步带深度、之后不带，或者训练时把 τ 当作一个输入条件</td></tr>
+        <tr><td>首帧锚图</td><td>TI2V 比 T2V 高 20 多个胜率点</td><td>和 CWM 用 GPT Image 2 做锚图的设计一致，说明锚图非常值钱。评测时也要把锚图的效应单独拆出来，否则会高估渲染器本身的能力</td></tr>
+        <tr><td>米制对齐</td><td>DA3 对齐深度和平移</td><td>CWM 的白盒来自程序，本来就是精确的米制，可以直接受益。如果训练数据混入 SfM 视频，一定要做这一步</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note good"><b>建议在候选清单里的定位：</b>放在「第三梯队：老师 / 设计参考」，和 Marionette、DAR 并列。它的配方（不用配对数据的两模式训练 + 中途切换）应该被吸收进「正式方案」的训练流程：用课 1 + 课 2 训出 Wan2.2-5B 双向老师，再按 Magpie / AlayaRenderer-Flash 的路线自蒸馏出因果学生。代码目前没发布，以上都要等开源后再确认。</div>
+</section>
+
+<!-- ============================ S11 ============================ -->
+<section id="s11">
+  <div class="sec-head"><span class="sec-num">11 · NEXT</span><h2>最值得补的实验，以及我复算过的数字</h2></div>
+  <div class="grid2">
+    <div class="card"><h4>后续实验（按性价比排）</h4>
+      <ol>
+        <li><b>输入对齐重跑 Table 1</b>：全部 T2V，或者给 VACE 也补上参考首帧。</li>
+        <li><b>给基线套同一个调度</b>：VACE-Depth / Cosmos 只在前 k 步使用深度，和 Ours 画在同一张 Adh–Ref 图上。</li>
+        <li><b>τ 全扫</b>（步长 0.025）：画出 Adh、Ref、nATE、Reproj 随 τ 的变化，τ* 在留出场景上选。</li>
+        <li><b>拆开「布局靠什么传过去」</b>：式 10 里的 z<sup>h,S</sup> 换成纯噪声，以及切换时把 RGB 潜变量换成同 t 的新噪声，分别看遵循度掉多少。</li>
+        <li><b>按白盒抽象层级分组报告</b>：低模、基本体、残缺。</li>
+        <li><b>事件级保真</b>：「门在第几秒打开」「角色何时到达」这类时间误差。VLM 胜率反映不了这些。</li>
+        <li><b>推理代价</b>：耗时、显存，以及蒸馏到少步之后 τ 该怎么对应。</li>
+      </ol>
+    </div>
+    <div class="card"><h4>复算记录</h4>
+      <dl class="kv">
+        <dt>t<sub>3</sub>（shift 3）</dt><dd class="tnum">0.9737（Wan 式 σ 网格：0.9733）</dd>
+        <dt>高噪专家</dt><dd>shift 3 下是 k = 0…9 或 0…10，取决于 σ 网格和边界那一步怎么算；shift 5 下是 0…14</dd>
+        <dt>(1−0.925)·40</dt><dd class="tnum mono">2.9999999999999982 → floor 2</dd>
+        <dt>单坐标 SNR</dt><dd class="tnum">7.3×10⁻⁴（−31.4 dB）@ t=0.9737</dd>
+        <dt>图样 SNR</dt><dd class="tnum">≈ 1.5×10³（+31.9 dB），维数 2,096,640</dd>
+        <dt>token</dt><dd class="tnum">32,760 / 路；65,520 合计；每步 FLOPs 比 2.98×</dd>
+        <dt>WR 均值</dt><dd class="tnum">Adh 49.999，Ref 50.001（循环赛自洽）</dd>
+        <dt>正文百分比</dt><dd class="tnum">+27.25%、+10.63、+6.52、−47.28%、−77.19%、+28.33%，全部对得上</dd>
+        <dt>Fig 5b</dt><dd class="tnum">nATE 0.098 / 0.071 / 0.062；Pref 32.0 / 54.0 / 75.0%</dd>
+        <dt>Spearman</dt><dd class="tnum">人评 vs Adh 0.73、Ref 0.50、Adh+Ref 0.84、nATE<sub>t</sub> 0.16</dd>
+        <dt>Hilbert 3 阶</dt><dd class="tnum">σ=0.02：中位误差 2×10⁻⁴（灰度 7.7×10⁻³）；σ=0.05：13% 样本误差 &gt; 1% 量程</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p><b>来源：</b><a href="https://arxiv.org/abs/2609.35023">arXiv:2609.35023v1</a>（PDF 与 HTML 版；Table 1 图标颜色和 Fig 5b 数值来自 HTML 版的 DOM / SVG）· <a href="https://dumdumgura.github.io/proxy2world/">项目页</a> · Wan2.2 <span class="mono">wan/configs/wan_i2v_A14B.py</span>（shift 5.0 / boundary 0.900 / 40 步 / guide 3.5）。</p>
+  <p>本页是读者笔记，不是作者的说法。标注为「我的补充」「我估算」「示意」的内容是我自己的推导或玩具模型，和论文不一致的地方以论文为准。页面里的交互实验全部在浏览器本地计算，不依赖外部数据。</p>
+</footer>
+</div>
+
+<script>
+(function(){
+'use strict';
+var $=function(s){return document.querySelector(s);};
+var NS='http://www.w3.org/2000/svg';
+function css(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+function el(tag,attrs,parent){var e=document.createElementNS(NS,tag);for(var k in attrs){e.setAttribute(k,attrs[k]);}if(parent)parent.appendChild(e);return e;}
+function txt(parent,x,y,s,attrs){var t=el('text',Object.assign({x:x,y:y},attrs||{}),parent);t.textContent=s;return t;}
+function clear(n){while(n.firstChild)n.removeChild(n.firstChild);}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function gauss(r){var u=0;while(u===0)u=r();var v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function fmt(x,d){return (Math.round(x*Math.pow(10,d))/Math.pow(10,d)).toFixed(d);}
+var rerenders=[];
+
+/* ---------------- theme ---------------- */
+var root=document.documentElement, tb=$('#themebtn');
+var themeNames={auto:'主题：跟随系统',light:'主题：浅色',dark:'主题：深色'};
+function applyTheme(m){ if(m==='auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme',m); tb.textContent=themeNames[m]; tb.dataset.mode=m; rerenders.forEach(function(f){try{f();}catch(e){}}); }
+var saved='auto'; try{ saved=localStorage.getItem('p2w-theme')||'auto'; }catch(e){}
+applyTheme(saved);
+tb.addEventListener('click',function(){ var order=['auto','light','dark']; var m=order[(order.indexOf(tb.dataset.mode)+1)%3]; try{localStorage.setItem('p2w-theme',m);}catch(e){} applyTheme(m); });
+if(window.matchMedia){ var mq=matchMedia('(prefers-color-scheme: dark)'); var h=function(){ if(tb.dataset.mode==='auto') rerenders.forEach(function(f){try{f();}catch(e){}}); }; if(mq.addEventListener) mq.addEventListener('change',h); }
+
+/* ---------------- tooltip ---------------- */
+var tip=$('#tip');
+function showTip(e,html){ tip.innerHTML=html; tip.style.opacity=1; moveTip(e); }
+function moveTip(e){ var pad=14, x=e.clientX+pad, y=e.clientY+pad; var r=tip.getBoundingClientRect(); if(x+r.width>innerWidth-8) x=e.clientX-r.width-pad; if(y+r.height>innerHeight-8) y=e.clientY-r.height-pad; if(x<4)x=4; if(y<4)y=4; tip.style.left=x+'px'; tip.style.top=y+'px'; }
+function hideTip(){ tip.style.opacity=0; }
+function bindTip(node,htmlFn){ node.addEventListener('pointerenter',function(e){showTip(e,htmlFn());}); node.addEventListener('pointermove',moveTip); node.addEventListener('pointerleave',hideTip); }
+function row(k,v){return '<div class="row"><span>'+k+'</span><b>'+v+'</b></div>';}
+
+/* ---------------- segmented controls ---------------- */
+function seg(sel,cb){ var box=$(sel); box.addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b)return; box.querySelectorAll('button').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false');}); cb(b.dataset.v); }); }
+function segVal(sel){ var b=$(sel).querySelector('[aria-pressed="true"]'); return b?b.dataset.v:null; }
+
+/* ================= 3.1 camera grid ================= */
+(function(){
+  var g=$('#gridlines'), s=$('#gridT'), o=$('#gridTo');
+  var f=300, cx=210, cy=96, hgt=1.5;
+  function draw(){
+    var T=parseFloat(s.value); o.textContent=fmt(T,2)+' m'; clear(g);
+    var Zs=[1.6,2,2.5,3,4,5,6.5,8,11,15,22,34];
+    Zs.forEach(function(Z){ var v=cy+f*hgt/Z; if(v>240)return; var u0=cx+f*(-9-T)/Z, u1=cx+f*(9-T)/Z; el('line',{x1:Math.max(-50,u0),y1:v,x2:Math.min(470,u1),y2:v,'stroke-opacity':Math.max(.25,Math.min(1,3/Z+.2))},g); });
+    for(var X=-9;X<=9;X+=1){ var Z0=1.6, Z1=40; var ua=cx+f*(X-T)/Z0, va=cy+f*hgt/Z0, ub=cx+f*(X-T)/Z1, vb=cy+f*hgt/Z1; el('line',{x1:ua,y1:va,x2:ub,y2:vb},g); }
+    // a vertical wall grid at Z=9
+    var Zw=9; for(var X2=-6;X2<=6;X2+=1.5){ var uw=cx+f*(X2-T)/Zw; el('line',{x1:uw,y1:cy+f*hgt/Zw,x2:uw,y2:cy-f*3/Zw,'stroke-opacity':.45},g); }
+    for(var Yw=0;Yw<=3;Yw+=1){ var vw=cy+f*(hgt-Yw)/Zw; el('line',{x1:cx+f*(-6-T)/Zw,y1:vw,x2:cx+f*(6-T)/Zw,y2:vw,'stroke-opacity':.45},g); }
+  }
+  s.addEventListener('input',draw); draw();
+})();
+
+/* ================= 3.2 metric scale demo ================= */
+(function(){
+  var svg=$('#scalePlot'), sp=$('#uSpread'), spo=$('#uSpreadO');
+  var W=640,H=330, x0=62,x1=620,y0=16,y1=282;
+  var xd=[0.1,30000], yd=[2,2000];
+  function lx(v){return x0+(Math.log10(v)-Math.log10(xd[0]))/(Math.log10(xd[1])-Math.log10(xd[0]))*(x1-x0);}
+  function ly(v){return y1-(Math.log10(v)-Math.log10(yd[0]))/(Math.log10(yd[1])-Math.log10(yd[0]))*(y1-y0);}
+  function draw(){
+    var aligned=segVal('#alignSeg')==='on', S=parseFloat(sp.value); spo.textContent=S+'×';
+    clear(svg);
+    [0.1,1,10,100,1000,10000].forEach(function(v){ var X=lx(v); el('line',{x1:X,y1:y0,x2:X,y2:y1,class:'gridl'},svg); txt(svg,X,y1+16,v>=1000?(v/1000)+'k':String(v),{'text-anchor':'middle',class:'mono t-3'}); });
+    [2,10,100,1000].forEach(function(v){ var Y=ly(v); el('line',{x1:x0,y1:Y,x2:x1,y2:Y,class:'gridl'},svg); txt(svg,x0-6,Y+4,String(v),{'text-anchor':'end',class:'mono t-3'}); });
+    el('line',{x1:x0,y1:y1,x2:x1,y2:y1,class:'axisl'},svg); el('line',{x1:x0,y1:y0,x2:x0,y2:y1,class:'axisl'},svg);
+    // diagonal y=x within domain
+    var a=Math.max(xd[0],yd[0]), b=Math.min(xd[1],yd[1]);
+    el('line',{x1:lx(a),y1:ly(a),x2:lx(b),y2:ly(b),stroke:'var(--ink3)','stroke-dasharray':'5 4'},svg);
+    txt(svg,lx(b)+4,ly(b)+14,'y = x（换算完全正确）',{class:'t-3',style:'font-size:11px'});
+    txt(svg,(x0+x1)/2,H-8,'网格暗示的像素位移（按外观估的米制深度换算，px，对数轴）',{'text-anchor':'middle',class:'t-2'});
+    var ty=txt(svg,16,(y0+y1)/2,'片段里实际的像素位移（px）',{'text-anchor':'middle',class:'t-2',transform:'rotate(-90 16 '+((y0+y1)/2)+')'});
+    var r=mulberry32(7), res=[], pts=[];
+    for(var i=0;i<60;i++){
+      var Z=Math.exp(Math.log(1.5)+r()*(Math.log(30)-Math.log(1.5)));
+      var T=0.3+r()*1.7;
+      var uu=r(), gz=gauss(r), gd=gauss(r);
+      var u = aligned? Math.exp(0.15*gz) : Math.exp((uu*2-1)*Math.log(S));
+      var Zest=Z*Math.exp(0.10*gd);
+      var y=500*T/Z, x=500*(T/u)/Zest;
+      pts.push([x,y,u,Z,T]); res.push(Math.log(y/x));
+    }
+    var m=res.reduce(function(s,v){return s+v;},0)/res.length;
+    var sd=Math.sqrt(res.reduce(function(s,v){return s+(v-m)*(v-m);},0)/res.length);
+    var abs=res.map(function(v){return Math.abs(v-m);}).sort(function(p,q){return p-q;});
+    var q90=abs[Math.floor(0.9*abs.length)];
+    var col=aligned?'var(--h)':'var(--q)';
+    pts.forEach(function(p){ var c=el('circle',{cx:lx(Math.max(xd[0],Math.min(xd[1],p[0]))),cy:ly(p[1]),r:5.2,fill:col,'fill-opacity':.8,stroke:'var(--surf)','stroke-width':1.5},svg);
+      bindTip(c,function(){return '<div class="tt">一个模拟片段</div>'+row('真实平移',fmt(p[4],2)+' m')+row('主体深度',fmt(p[3],1)+' m')+row('单位倍数 u',fmt(p[2],2)+'×')+row('网格暗示',fmt(p[0],1)+' px')+row('实际位移',fmt(p[1],1)+' px');}); });
+    $('#scaleErr').textContent=fmt(Math.exp(sd),2)+'×';
+    $('#scaleWorst').textContent=fmt(Math.exp(q90),2)+'×';
+  }
+  seg('#alignSeg',draw); sp.addEventListener('input',draw); draw();
+})();
+
+/* ================= 3.3 Hilbert lab ================= */
+(function(){
+  function d2xyz(h,p){ var n=3, X=[0,0,0], i, j;
+    for(i=0;i<p;i++) for(j=0;j<n;j++){ var bit=(h>>(i*n+(n-1-j)))&1; X[j]|=bit<<i; }
+    var N=2<<(p-1), t=X[n-1]>>1; for(i=n-1;i>0;i--) X[i]^=X[i-1]; X[0]^=t;
+    var Q=2; while(Q!==N){ var P=Q-1; for(i=n-1;i>=0;i--){ if(X[i]&Q) X[0]^=P; else { t=(X[0]^X[i])&P; X[0]^=t; X[i]^=t; } } Q<<=1; }
+    return X; }
+  var cache={};
+  function curve(p){ if(cache[p])return cache[p]; var M=1<<(3*p), s=(1<<p)-1, V=new Float64Array(M*3);
+    for(var h=0;h<M;h++){ var X=d2xyz(h,p); V[h*3]=X[0]/s; V[h*3+1]=X[1]/s; V[h*3+2]=X[2]/s; }
+    return (cache[p]={V:V,M:M}); }
+  function enc(c,u){ var nseg=c.M-1, s=u*nseg, i=Math.min(Math.floor(s),nseg-1), a=s-i, V=c.V;
+    return [V[i*3]+(V[i*3+3]-V[i*3])*a, V[i*3+1]+(V[i*3+4]-V[i*3+1])*a, V[i*3+2]+(V[i*3+5]-V[i*3+2])*a]; }
+  function dec(c,r,g,b){ var V=c.V, nseg=c.M-1, best=1e9, bu=0;
+    for(var k=0;k<nseg;k++){ var ax=V[k*3],ay=V[k*3+1],az=V[k*3+2], dx=V[k*3+3]-ax, dy=V[k*3+4]-ay, dz=V[k*3+5]-az;
+      var L2=dx*dx+dy*dy+dz*dz, t=((r-ax)*dx+(g-ay)*dy+(b-az)*dz)/L2; if(t<0)t=0; else if(t>1)t=1;
+      var qx=ax+t*dx-r, qy=ay+t*dy-g, qz=az+t*dz-b, d=qx*qx+qy*qy+qz*qz; if(d<best){best=d; bu=k+t;} }
+    return bu/nseg; }
+  var cbar=$('#cbar'), gbar=$('#gbar'), axis=$('#cbarAxis'), hp=$('#hPlot'), gp=$('#gPlot'), sg=$('#hSigma'), sgo=$('#hSigmaO');
+  function clamp01(v){return v<0?0:v>1?1:v;}
+  function drawBars(c){ var ctx=cbar.getContext('2d'), W=cbar.width, H=cbar.height, img=ctx.createImageData(W,H);
+    for(var x=0;x<W;x++){ var rgb=enc(c,x/(W-1)); for(var y=0;y<H;y++){ var o=(y*W+x)*4; img.data[o]=rgb[0]*255; img.data[o+1]=rgb[1]*255; img.data[o+2]=rgb[2]*255; img.data[o+3]=255; } }
+    ctx.putImageData(img,0,0);
+    var g2=gbar.getContext('2d'), W2=gbar.width, H2=gbar.height, im2=g2.createImageData(W2,H2);
+    for(var x2=0;x2<W2;x2++){ var v=x2/(W2-1)*255; for(var y2=0;y2<H2;y2++){ var o2=(y2*W2+x2)*4; im2.data[o2]=v; im2.data[o2+1]=v; im2.data[o2+2]=v; im2.data[o2+3]=255; } }
+    g2.putImageData(im2,0,0);
+    clear(axis); [0.5,1,2,4,8,16,50].forEach(function(d){ var u=d/(d+4), X=u*900; el('line',{x1:X,y1:0,x2:X,y2:5,stroke:'var(--ink3)'},axis); txt(axis,X,17,d+' m',{'text-anchor':'middle',class:'mono t-3'}); });
+    txt(axis,2,17,'近',{class:'t-3'}); txt(axis,898,17,'远',{'text-anchor':'end',class:'t-3'});
+  }
+  function plot(cv,pairs,jumpTh){ var ctx=cv.getContext('2d'), W=cv.width, H=cv.height, pad=24;
+    ctx.fillStyle=css('--surf2'); ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle=css('--rule2'); ctx.lineWidth=1; ctx.strokeRect(pad,pad/2,W-pad*1.5,H-pad*1.5);
+    ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(pad,H-pad); ctx.lineTo(W-pad/2,pad/2); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=css('--ink3'); ctx.font='11px '+css('--f-mono'); ctx.fillText('真实',W/2-12,H-6); ctx.save(); ctx.translate(11,H/2+14); ctx.rotate(-Math.PI/2); ctx.fillText('解码',0,0); ctx.restore();
+    var ink=css('--ink2'), bad=css('--risk');
+    for(var i=0;i<pairs.length;i++){ var u=pairs[i][0], v=pairs[i][1], jump=Math.abs(v-u)>jumpTh; ctx.fillStyle=jump?bad:ink; ctx.globalAlpha=jump?.95:.35; var X=pad+u*(W-pad*1.5), Y=(H-pad)-v*(H-pad*1.5); ctx.fillRect(X-1.2,Y-1.2,jump?3.2:2.4,jump?3.2:2.4); }
+    ctx.globalAlpha=1; }
+  function stats(errs){ var s=errs.slice().sort(function(a,b){return a-b;}); return {med:s[Math.floor(s.length/2)], max:s[s.length-1], jump:errs.filter(function(e){return e>0.05;}).length/errs.length}; }
+  function toLen(du){ var m=du*64/4; return m<0.01? fmt(m*1000,1)+' mm' : m<1? fmt(m*100,1)+' cm' : fmt(m,2)+' m'; }
+  function run(){
+    var p=parseInt(segVal('#hOrderSeg'),10), sigma=parseFloat(sg.value); sgo.textContent=fmt(sigma,4).replace(/0$/,'');
+    var c=curve(p); drawBars(c);
+    var r=mulberry32(11), N=1500, hp_=[], gp_=[], he=[], ge=[];
+    for(var i=0;i<N;i++){ var u=r(); var rgb=enc(c,u);
+      var R=clamp01(rgb[0]+sigma*gauss(r)), G=clamp01(rgb[1]+sigma*gauss(r)), B=clamp01(rgb[2]+sigma*gauss(r));
+      var uh=dec(c,R,G,B); hp_.push([u,uh]); he.push(Math.abs(uh-u));
+      var gr=(clamp01(u+sigma*gauss(r))+clamp01(u+sigma*gauss(r))+clamp01(u+sigma*gauss(r)))/3; gp_.push([u,gr]); ge.push(Math.abs(gr-u)); }
+    plot(hp,hp_,0.05); plot(gp,gp_,0.05);
+    var hs=stats(he), gs=stats(ge);
+    $('#hMed').textContent=toLen(hs.med); $('#gMed').textContent=toLen(gs.med);
+    $('#hJump').textContent=fmt(hs.jump*100,1)+'%'; $('#gJump').textContent=fmt(gs.jump*100,1)+'%';
+    $('#hMax').textContent=fmt(hs.max*100,1)+'%'; $('#gMax').textContent=fmt(gs.max*100,1)+'%';
+  }
+  var pending=null; function sched(){ if(pending)cancelAnimationFrame(pending); pending=requestAnimationFrame(run); }
+  seg('#hOrderSeg',sched); sg.addEventListener('input',sched); rerenders.push(run); run();
+})();
+
+/* ================= 4 architecture mode ================= */
+(function(){
+  function set(m){ var d=m==='d2r';
+    $('#thLabel').textContent=d?'t_h = 0（深度保持干净）':'t_h = t（和 RGB 同样加噪）';
+    $('#hNoise').style.opacity=d?.22:1;
+    $('#whLabel').textContent=d?'损失权重 w_h = 0':'损失权重 w_h = 1';
+    $('#hStrike').style.display=d?'':'none';
+    $('#tokH').style.opacity=d?1:.55;
+    $('#modeCaption').textContent=d?'课 1：深度 token 是干净的「条件」，只监督 RGB。推理时白盒深度就从这个口子喂进去。':'课 2：两路同噪声水平、同时去噪、同时监督。模型学的是 RGB 与几何的联合分布，只给相机时它会自己「想出」几何。';
+  }
+  seg('#modeSeg',set); set('d2r');
+})();
+
+/* ================= 5 schedule explorer ================= */
+(function(){
+  var svg=$('#schedSvg'), ts=$('#tau'), to=$('#tauO'), N=40, DIMS=16*21*60*104;
+  var x0=56,x1=884,y0=46,y1=240;
+  function tsched(shift){ var t=[]; for(var k=0;k<=N;k++){ var s=1-k/N; t.push(shift*s/(1+(shift-1)*s)); } return t; }
+  function Y(t){return y1-t*(y1-y0);}
+  function draw(){
+    var tau=parseFloat(ts.value), shift=parseFloat(segVal('#shiftSeg')), mode=segVal('#roundSeg');
+    to.textContent=fmt(tau,3);
+    var raw=(1-tau)*N, ks= mode==='float'? Math.floor(raw) : Math.round(raw);
+    var t=tsched(shift); clear(svg);
+    var bw=(x1-x0)/N;
+    // expert band
+    var hiEnd=0; for(var k=0;k<N;k++){ if(t[k]>=0.9) hiEnd=k+1; }
+    el('rect',{x:x0,y:6,width:hiEnd*bw,height:y1-6,fill:'var(--surf3)',opacity:.55},svg);
+    txt(svg,x0+4,19,'高噪专家（'+hiEnd+' 步）',{class:'t-3',style:'font-size:11px'});
+    [0,0.25,0.5,0.75,1].forEach(function(v){ el('line',{x1:x0,y1:Y(v),x2:x1,y2:Y(v),class:'gridl'},svg); txt(svg,x0-6,Y(v)+4,v.toFixed(2),{'text-anchor':'end',class:'mono t-3'}); });
+    el('line',{x1:x0,y1:Y(0.9),x2:x1,y2:Y(0.9),stroke:'var(--ink3)','stroke-dasharray':'4 4'},svg);
+    txt(svg,x1,Y(0.9)-5,'专家切换边界 t = 0.900',{'text-anchor':'end',class:'t-3',style:'font-size:11px'});
+    for(var k2=0;k2<N;k2++){ (function(k){ var grounding=k<ks; var b=el('rect',{x:x0+k*bw+1.5,y:Y(t[k]),width:bw-3,height:y1-Y(t[k]),rx:2,fill:grounding?'var(--h)':'var(--q)',opacity:grounding?1:.85},svg);
+      bindTip(b,function(){ return '<div class="tt">第 '+k+' 步</div>'+row('噪声水平 t',fmt(t[k],4))+row('模式',grounding?'① 白盒深度条件':'③ 联合 RGBD')+row('专家',t[k]>=0.9?'高噪':'低噪')+row('信号幅度 1−t',fmt(1-t[k],4)); }); })(k2); }
+    el('line',{x1:x0,y1:y1,x2:x1,y2:y1,class:'axisl'},svg);
+    for(var k3=0;k3<=N;k3+=5){ txt(svg,x0+k3*bw,y1+16,String(k3),{'text-anchor':'middle',class:'mono t-3'}); }
+    txt(svg,(x0+x1)/2,y1+34,'去噪步 k（0 = 纯噪声端）',{'text-anchor':'middle',class:'t-2'});
+    txt(svg,14,(y0+y1)/2,'噪声水平 t',{'text-anchor':'middle',class:'t-2',transform:'rotate(-90 14 '+((y0+y1)/2)+')'});
+    if(ks>0 && ks<N){ var X=x0+ks*bw; el('line',{x1:X,y1:24,x2:X,y2:y1,stroke:'var(--ref)','stroke-width':2},svg);
+      txt(svg,X+6,36,'切换：k_s = '+ks+'，t_s = '+fmt(t[ks],4),{class:'t-ink',style:'font-size:12px;font-weight:600'}); }
+    // readouts
+    var rKs=$('#rKs'), rTs=$('#rTs'), rAmp=$('#rAmp'), rSnr=$('#rSnr'), rPat=$('#rPat'), rExp=$('#rExp');
+    rKs.textContent=ks+' / '+N+(mode==='float'&&Math.round(raw)!==ks?'（按论文说法应为 '+Math.round(raw)+'）':'');
+    if(ks<=0){ rTs.textContent='1.0000'; rAmp.textContent='0'; rSnr.textContent='−∞'; rPat.textContent='—'; rExp.textContent='不切换：从纯噪声开始，等价于只给相机'; return; }
+    if(ks>=N){ rTs.textContent='—'; rAmp.textContent='—'; rSnr.textContent='—'; rPat.textContent='—'; rExp.textContent='不切换：全程深度条件（τ=0）'; return; }
+    var tsv=t[ks], a=1-tsv, snr=a*a/(tsv*tsv);
+    rTs.textContent=fmt(tsv,4); rAmp.textContent=fmt(a,4)+'（'+fmt(a*100,1)+'%）';
+    rSnr.textContent=fmt(10*Math.log10(snr),1)+' dB'; rPat.textContent=(10*Math.log10(snr*DIMS)>=0?'+':'')+fmt(10*Math.log10(snr*DIMS),1)+' dB';
+    rExp.textContent=tsv>=0.9?'高噪专家内部（第 '+ks+' 步 < '+hiEnd+'）':'低噪专家';
+  }
+  ts.addEventListener('input',draw); seg('#shiftSeg',draw); seg('#roundSeg',draw); draw();
+})();
+
+/* ================= 5 noise-layout toy ================= */
+(function(){
+  var W=384,H=216, cC=$('#nzClean'), cM=$('#nzMix'), cB=$('#nzBlur'), sT=$('#nzT'), sR=$('#nzR');
+  // layout
+  var off=document.createElement('canvas'); off.width=W; off.height=H; var o=off.getContext('2d');
+  var g=o.createLinearGradient(0,0,0,120); g.addColorStop(0,'#dcdcdc'); g.addColorStop(1,'#bdbdbd'); o.fillStyle=g; o.fillRect(0,0,W,120);
+  var g2=o.createLinearGradient(0,120,0,H); g2.addColorStop(0,'#6a6a6a'); g2.addColorStop(1,'#2a2a2a'); o.fillStyle=g2; o.fillRect(0,120,W,H-120);
+  o.fillStyle='#1c1c1c'; o.fillRect(24,34,120,112); o.fillStyle='#303030'; o.fillRect(144,64,40,82);
+  o.fillStyle='#262626'; o.fillRect(292,14,54,136); o.beginPath(); o.moveTo(286,14); o.lineTo(319,-6); o.lineTo(352,14); o.fill();
+  o.fillStyle='#8a8a8a'; o.fillRect(184,126,108,10);
+  o.fillStyle='#f4f4f4'; o.beginPath(); o.arc(236,108,7,0,7); o.fill(); o.fillRect(229,116,14,34); o.fillRect(229,150,5,20); o.fillRect(238,150,5,20);
+  var d=o.getImageData(0,0,W,H).data, n=W*H, X=new Float32Array(n), m=0, v=0, i;
+  for(i=0;i<n;i++){ X[i]=d[i*4]/255; m+=X[i]; } m/=n; for(i=0;i<n;i++){ X[i]-=m; v+=X[i]*X[i]; } v=Math.sqrt(v/n); for(i=0;i<n;i++) X[i]/=v;
+  var r=mulberry32(3), E=new Float32Array(n); for(i=0;i<n;i++) E[i]=gauss(r);
+  function show(cv,A,norm){ var ctx=cv.getContext('2d'), img=ctx.createImageData(W,H), mm=0, ss=0, k; for(k=0;k<n;k++){ mm+=A[k]; } mm/=n; for(k=0;k<n;k++){ ss+=(A[k]-mm)*(A[k]-mm); } ss=Math.sqrt(ss/n)||1;
+    for(k=0;k<n;k++){ var val=norm?(A[k]-mm)/ss:A[k]; var c=128+52*val; c=c<0?0:c>255?255:c; img.data[k*4]=c; img.data[k*4+1]=c; img.data[k*4+2]=c; img.data[k*4+3]=255; } ctx.putImageData(img,0,0); }
+  function blur(A,rad){ if(rad<=0) return A; var I=new Float64Array((W+1)*(H+1)), x, y; for(y=0;y<H;y++){ var rs=0; for(x=0;x<W;x++){ rs+=A[y*W+x]; I[(y+1)*(W+1)+x+1]=I[y*(W+1)+x+1]+rs; } }
+    var B=new Float32Array(n); for(y=0;y<H;y++){ var ya=Math.max(0,y-rad), yb=Math.min(H,y+rad+1); for(x=0;x<W;x++){ var xa=Math.max(0,x-rad), xb=Math.min(W,x+rad+1); var s=I[yb*(W+1)+xb]-I[ya*(W+1)+xb]-I[yb*(W+1)+xa]+I[ya*(W+1)+xa]; B[y*W+x]=s/((yb-ya)*(xb-xa)); } } return B; }
+  function corr(A,Bv){ var ma=0,mb=0,k; for(k=0;k<n;k++){ma+=A[k];mb+=Bv[k];} ma/=n; mb/=n; var sab=0,saa=0,sbb=0; for(k=0;k<n;k++){ var a=A[k]-ma, b=Bv[k]-mb; sab+=a*b; saa+=a*a; sbb+=b*b; } return sab/Math.sqrt(saa*sbb); }
+  show(cC,X,false);
+  function run(){ var t=parseFloat(sT.value), rad=parseInt(sR.value,10); $('#nzTO').textContent=fmt(t,4); $('#nzRO').textContent=rad+' px';
+    var M=new Float32Array(n); for(var k=0;k<n;k++) M[k]=(1-t)*X[k]+t*E[k];
+    show(cM,M,true); var B=blur(M,rad); show(cB,B,true);
+    $('#nzCorr').textContent=fmt(corr(B,X),2); var s=(1-t)/t; $('#nzSnr').textContent=(s>0?fmt(20*Math.log10(s),1):'−∞')+' dB'; }
+  var pend=null; function sch(){ if(pend)cancelAnimationFrame(pend); pend=requestAnimationFrame(run); }
+  sT.addEventListener('input',sch); sR.addEventListener('input',sch);
+  $('#nzPreset').addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b)return; sT.value=b.dataset.v; sch(); });
+  run();
+})();
+
+/* ================= 6 Table 1 ================= */
+var T1=[
+ {n:'Lyra 2.0',g:'相机条件',inp:[1,1,1,0],nt:0.0418,nr:0.0413,rp:2.171,ga:0.4965,ta:0.7068,adh:32.21,ref:39.48,hr:10},
+ {n:'SCoPE / RayPE',g:'相机条件',inp:[1,1,1,0],nt:0.1066,nr:0.1229,rp:4.338,ga:0.4508,ta:0.5780,adh:29.51,ref:47.06,hr:9},
+ {n:'FantasyWorld',g:'相机条件',inp:[1,1,1,0],nt:0.2966,nr:0.3472,rp:2.449,ga:0.4711,ta:0.6158,adh:36.51,ref:50.25,hr:7},
+ {n:'Ours TI2V, τ=1',g:'相机条件',inp:[1,1,1,0],nt:0.0681,nr:0.0524,rp:1.956,ga:0.5340,ta:0.7033,adh:53.55,ref:71.44,hr:5,ours:1,s:'camTI2V'},
+ {n:'VACE-Depth',g:'深度条件',inp:[1,0,0,1],nt:0.0764,nr:0.0584,rp:6.264,ga:0.7576,ta:0.7335,adh:60.14,ref:45.32,hr:4},
+ {n:'Cosmos-Depth',g:'深度条件',inp:[1,0,0,1],nt:0.0446,nr:0.0362,rp:3.259,ga:0.7713,ta:0.7504,adh:72.26,ref:40.28,hr:3},
+ {n:'Ours T2V, τ=0',g:'深度条件',inp:[1,0,0,1],nt:0.0302,nr:0.0270,rp:2.280,ga:0.7749,ta:0.7645,adh:68.79,ref:31.71,hr:6,ours:1,s:'depT2V'},
+ {n:'Coarse2Real',g:'白盒条件',inp:[1,0,1,1],nt:0.1637,nr:0.3152,rp:5.312,ga:0.5520,ta:0.6616,adh:40.03,ref:45.21,hr:8},
+ {n:'Ours T2V, τ*',g:'白盒条件',inp:[1,0,1,1],nt:0.0863,nr:0.0719,rp:2.067,ga:0.7084,ta:0.7126,adh:42.81,ref:51.30,hr:2,ours:1,s:'mixT2V'},
+ {n:'Ours TI2V, τ*',g:'白盒条件',inp:[1,1,1,1],nt:0.0659,nr:0.0558,rp:2.524,ga:0.6795,ta:0.7173,adh:64.18,ref:77.96,hr:1,ours:1,s:'mixTI2V'}
+];
+(function(){
+  var tb=$('#t1b'), filt='all', sortK=null, sortDir=1;
+  var cols=[['nt',4,'asc'],['nr',4,'asc'],['rp',3,'asc'],['ga',4,'desc'],['ta',4,'desc'],['adh',2,'desc'],['ref',2,'desc'],['hr',0,'asc']];
+  var icoIds=['i-t','i-img','i-cam','i-cube'], icoNames=['文本','参考首帧','相机轨迹','白盒'];
+  function icons(inp){ return '<span class="icons">'+inp.map(function(on,i){ return '<svg class="'+(on?'on':'off')+(i===1&&on?' ref':'')+'" aria-label="'+icoNames[i]+(on?'：用了':'：没用')+'"><title>'+icoNames[i]+(on?'（用了）':'（没用）')+'</title><use href="#'+icoIds[i]+'"/></svg>'; }).join('')+'</span>'; }
+  function render(){
+    var rows=T1.filter(function(r){ return filt==='all' || (filt==='ref'? r.inp[1]===1 : r.inp[1]===0); });
+    var best={}; cols.forEach(function(c){ var vals=rows.map(function(r){return r[c[0]];}); best[c[0]]= c[2]==='asc'? Math.min.apply(null,vals) : Math.max.apply(null,vals); });
+    if(sortK){ rows=rows.slice().sort(function(a,b){ return (a[sortK]-b[sortK])*sortDir; }); }
+    var html='', lastG=null;
+    rows.forEach(function(r){ if(!sortK && r.g!==lastG){ html+='<tr class="grp"><td colspan="10">'+r.g+'方法</td></tr>'; lastG=r.g; }
+      html+='<tr class="'+(r.ours?'ours':'')+'"><td>'+r.n+'</td><td style="text-align:left">'+icons(r.inp)+'</td>'+cols.map(function(c){ var v=r[c[0]]; return '<td class="'+(v===best[c[0]]&&rows.length>1?'best':'')+'">'+(c[1]?v.toFixed(c[1]):v)+'</td>'; }).join('')+'</tr>'; });
+    tb.innerHTML=html;
+    document.querySelectorAll('#t1 th.sortable').forEach(function(th){ th.querySelector('.arr').textContent= th.dataset.k===sortK? (sortDir===1?'▲':'▼') : ''; });
+  }
+  document.querySelectorAll('#t1 th.sortable').forEach(function(th){ th.addEventListener('click',function(){ var k=th.dataset.k, pref=th.dataset.dir==='asc'?1:-1;
+    if(sortK!==k){ sortK=k; sortDir=pref; } else if(sortDir===pref){ sortDir=-pref; } else { sortK=null; } render(); }); });
+  $('#tblChips').addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b)return; $('#tblChips').querySelectorAll('button').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false');}); filt=b.dataset.f; render(); });
+  render();
+})();
+
+/* ================= 6 scatter ================= */
+(function(){
+  var svg=$('#scatter'), x0=62,x1=700,y0=18,y1=412, xd=[25,80], yd=[25,85];
+  function X(v){return x0+(v-xd[0])/(xd[1]-xd[0])*(x1-x0);} function Y(v){return y1-(v-yd[0])/(yd[1]-yd[0])*(y1-y0);}
+  var lab={ 'Lyra 2.0':[8,18,'start'], 'SCoPE / RayPE':[0,22,'middle'], 'FantasyWorld':[-10,-10,'end'], 'Ours TI2V, τ=1':[-11,-6,'end'], 'VACE-Depth':[10,4,'start'], 'Cosmos-Depth':[10,4,'start'], 'Ours T2V, τ=0':[10,4,'start'], 'Coarse2Real':[0,22,'middle'], 'Ours T2V, τ*':[10,-8,'start'], 'Ours TI2V, τ*':[11,4,'start'] };
+  function draw(){ clear(svg);
+    for(var v=30;v<=80;v+=10){ el('line',{x1:X(v),y1:y0,x2:X(v),y2:y1,class:'gridl'},svg); txt(svg,X(v),y1+16,String(v),{'text-anchor':'middle',class:'mono t-3'}); }
+    for(var w=30;w<=80;w+=10){ el('line',{x1:x0,y1:Y(w),x2:x1,y2:Y(w),class:'gridl'},svg); txt(svg,x0-6,Y(w)+4,String(w),{'text-anchor':'end',class:'mono t-3'}); }
+    el('line',{x1:x0,y1:y1,x2:x1,y2:y1,class:'axisl'},svg); el('line',{x1:x0,y1:y0,x2:x0,y2:y1,class:'axisl'},svg);
+    el('line',{x1:X(50),y1:y0,x2:X(50),y2:y1,stroke:'var(--rule2)','stroke-dasharray':'2 4'},svg); el('line',{x1:x0,y1:Y(50),x2:x1,y2:Y(50),stroke:'var(--rule2)','stroke-dasharray':'2 4'},svg);
+    txt(svg,(x0+x1)/2,y1+38,'Adherence 胜率（%）→ 越往右越遵循白盒',{'text-anchor':'middle',class:'t-2'});
+    txt(svg,16,(y0+y1)/2,'Refinement 胜率（%）→ 越往上细化越好',{'text-anchor':'middle',class:'t-2',transform:'rotate(-90 16 '+((y0+y1)/2)+')'});
+    var by={}; T1.forEach(function(r){ if(r.s) by[r.s]=r; });
+    function arrow(a,b,label,col,dx,dy,anc){ var ax=X(a.adh),ay=Y(a.ref),bx=X(b.adh),by_=Y(b.ref), L=Math.hypot(bx-ax,by_-ay), ux=(bx-ax)/L, uy=(by_-ay)/L;
+      el('line',{x1:ax+ux*11,y1:ay+uy*11,x2:bx-ux*12,y2:by_-uy*12,stroke:col,'stroke-width':2,'stroke-dasharray':'6 4','marker-end':'url(#ah)'},svg);
+      var t=txt(svg,(ax+bx)/2+dx,(ay+by_)/2+dy,label,{class:'t-ink','text-anchor':anc||'start',style:'font-size:12px;font-weight:600'}); return t; }
+    arrow(by.camTI2V,by.mixTI2V,'A 加白盒：Adh +10.6，Ref +6.5','var(--px)',-150,-18);
+    arrow(by.depT2V,by.mixT2V,'B 放开深度：Adh −26.0，Ref +19.6','var(--ink3)',11,48,'end');
+    arrow(by.mixT2V,by.mixTI2V,'C 加参考首帧：Adh +21.4，Ref +26.7','var(--ref)',14,30);
+    T1.forEach(function(r){ var cx=X(r.adh), cy=Y(r.ref), col=r.ours?'var(--q)':'var(--base)', filled=r.inp[1]===1;
+      var c=el('circle',{cx:cx,cy:cy,r:7,fill:filled?col:'var(--surf)',stroke:filled?'var(--surf)':col,'stroke-width':filled?2:2.5,style:'cursor:default'},svg);
+      var hit=el('circle',{cx:cx,cy:cy,r:14,fill:'transparent'},svg);
+      var L=lab[r.n]; txt(svg,cx+L[0],cy+L[1],r.n,{'text-anchor':L[2],class:r.ours?'t-ink':'t-2',style:'font-size:12px'+(r.ours?';font-weight:600':'')});
+      bindTip(hit,function(){ return '<div class="tt">'+r.n+'</div>'+row('参考首帧',r.inp[1]?'有':'无')+row('Adh WR',r.adh.toFixed(2))+row('Ref WR',r.ref.toFixed(2))+row('Geo Align',r.ga.toFixed(4))+row('nATE_t',r.nt.toFixed(4))+row('人评名次',r.hr); }); });
+  }
+  draw();
+})();
+
+/* ================= 7 ablation bars ================= */
+(function(){
+  var data=[['w/o 米制对齐',0.098,32.0],['w/o 联合 RGBD',0.071,54.0],['完整模型',0.062,75.0]];
+  function bars(sel,idx,max,ticks,fmtv,unit){ var svg=$(sel), x0=48,x1=368,y0=18,y1=192; clear(svg);
+    ticks.forEach(function(v){ var yy=y1-v/max*(y1-y0); el('line',{x1:x0,y1:yy,x2:x1,y2:yy,class:'gridl'},svg); txt(svg,x0-6,yy+4,fmtv(v),{'text-anchor':'end',class:'mono t-3'}); });
+    el('line',{x1:x0,y1:y1,x2:x1,y2:y1,class:'axisl'},svg);
+    var bw=56, gap=(x1-x0-3*bw)/4;
+    data.forEach(function(d,i){ var v=d[idx], h=v/max*(y1-y0), x=x0+gap+i*(bw+gap), full=i===2;
+      var p=el('path',{d:'M'+x+' '+y1+' V'+(y1-h+4)+' q0 -4 4 -4 H'+(x+bw-4)+' q4 0 4 4 V'+y1+' Z',fill:full?'var(--q)':'var(--base)',opacity:full?1:.8},svg);
+      txt(svg,x+bw/2,y1-h-7,fmtv(v)+unit,{'text-anchor':'middle',class:'t-ink mono',style:'font-size:12px'});
+      txt(svg,x+bw/2,y1+18,d[0],{'text-anchor':'middle',class:'t-2',style:'font-size:11.5px'});
+      bindTip(p,function(){ return '<div class="tt">'+d[0]+'</div>'+row('nATE',d[1].toFixed(3))+row('Preference',d[2].toFixed(1)+'%')+'<div style="color:var(--ink3);margin-top:3px">由 HTML 版 SVG 柱高换算</div>'; }); });
+    txt(svg,x0,238,'数值为我从 SVG 路径还原，误差约 ±0.001 / ±0.5%',{class:'t-3',style:'font-size:11px'});
+  }
+  bars('#abl1',1,0.12,[0,0.04,0.08,0.12],function(v){return v.toFixed(v===0?0:3).replace(/0+$/,'').replace(/\.$/,'');},'');
+  bars('#abl2',2,100,[0,25,50,75,100],function(v){return String(Math.round(v));},'%');
+})();
+
+/* ================= TOC ================= */
+(function(){
+  var links=[].slice.call(document.querySelectorAll('nav.toc a')), map={};
+  links.forEach(function(a){ map[a.getAttribute('href').slice(1)]=a; });
+  if(!('IntersectionObserver' in window)) return;
+  var io=new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ links.forEach(function(a){a.classList.remove('on');}); var a=map[e.target.id]; if(a){ a.classList.add('on'); var nav=a.parentNode; nav.scrollLeft=Math.max(0,a.offsetLeft-nav.clientWidth/2+a.offsetWidth/2); } } }); },{rootMargin:'-45% 0px -50% 0px'});
+  document.querySelectorAll('section[id]').forEach(function(s){ io.observe(s); });
+})();
+})();
+</script>
+</body>
+</html>

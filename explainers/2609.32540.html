@@ -1,0 +1,1655 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FlashForward 精读</title>
+<meta name="description" content="FlashForward（arXiv 2609.32540）精读：同阶段 in-flight KV 复用 + 稀疏干净锚点的少步自回归视频扩散；调度模拟器、锚点窗口、前向计数模型、流式前瞻、全部数字复算与存疑清单。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=Noto+Serif+SC:wght@600;700&family=STIX+Two+Text:ital@0;1&display=swap">
+<style>
+/* ============================================================
+   FlashForward 精读 — tokens（深色优先：机房 / 流水线示波器；浅色：纸面）
+   方法色（全页固定，跟随实体）：
+     ff = FlashForward（蓝）  hiar = HiAR（橙）  sf = Self-Forcing（青）
+     cf = Causal Forcing（黄） stream = FF 流式 5 卡（品红） bidir = 双向基线（中性灰，参照线）
+   概念色（仅图解）：plan = 规划器 / 锚点（紫）  op = 普通去噪前向（钢灰）  waste = 仅建缓存前向（红，斜线）
+   存疑：risk = 高  med = 中  low = 低  ok = 已复算通过
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#111317; --surf:#171a1f; --surf2:#1d2128; --surf3:#272c35;
+  --rule:#2a3039; --rule2:#3c4450;
+  --ink:#e7eaee; --ink2:#aab2bc; --ink3:#7d8691;
+  --ff:#3987e5; --ff-ink:#8ab8f0; --ff-soft:rgba(57,135,229,.17);
+  --hiar:#d95926; --hiar-ink:#f0a27f; --hiar-soft:rgba(217,89,38,.17);
+  --sf:#199e70; --sf-ink:#6fd1a9; --sf-soft:rgba(25,158,112,.17);
+  --cf:#c98500; --cf-ink:#e8c060; --cf-soft:rgba(201,133,0,.17);
+  --stream:#d55181; --stream-ink:#f0a0c0; --stream-soft:rgba(213,81,129,.17);
+  --bidir:#7b828c;
+  --plan:#9085e9; --plan-ink:#bdb5f7; --plan-soft:rgba(144,133,233,.18); --plan2:#6a5fc4;
+  --op:#5f6b7a; --op-hi:#8d9aab;
+  --waste:#e5544c;
+  --risk:#e5544c; --risk-ink:#f68a83; --risk-soft:rgba(229,84,76,.15);
+  --med:#d4b144; --med-ink:#ecd07a; --med-soft:rgba(212,177,68,.15);
+  --low:#7f8a97; --low-ink:#b3bcc6; --low-soft:rgba(127,138,151,.15);
+  --ok:#3dba80; --ok-ink:#72d8a7; --ok-soft:rgba(61,186,128,.14);
+  --grid:#20262e; --axis:#3c4755;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 32px rgba(0,0,0,.30);
+  --f-head:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --f-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --f-math:"STIX Two Text","Times New Roman",Georgia,serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#f2f3f0; --surf:#fbfbf9; --surf2:#eceee9; --surf3:#e0e3dd;
+    --rule:#d8dbd4; --rule2:#b9beb6;
+    --ink:#13161b; --ink2:#414852; --ink3:#69717b;
+    --ff:#2a78d6; --ff-ink:#1c5cab; --ff-soft:rgba(42,120,214,.11);
+    --hiar:#eb6834; --hiar-ink:#a8461a; --hiar-soft:rgba(235,104,52,.12);
+    --sf:#1baf7a; --sf-ink:#0e7a55; --sf-soft:rgba(27,175,122,.12);
+    --cf:#eda100; --cf-ink:#855b00; --cf-soft:rgba(237,161,0,.14);
+    --stream:#e87ba4; --stream-ink:#a83a66; --stream-soft:rgba(232,123,164,.14);
+    --bidir:#8b9097;
+    --plan:#5b49c4; --plan-ink:#4a3aa7; --plan-soft:rgba(91,73,196,.11); --plan2:#8f82e0;
+    --op:#9aa3ae; --op-hi:#5f6b7a;
+    --waste:#c6382f;
+    --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+    --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+    --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.12);
+    --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.10);
+    --grid:#e6e8e3; --axis:#b9beb6;
+    --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f2f3f0; --surf:#fbfbf9; --surf2:#eceee9; --surf3:#e0e3dd;
+  --rule:#d8dbd4; --rule2:#b9beb6;
+  --ink:#13161b; --ink2:#414852; --ink3:#69717b;
+  --ff:#2a78d6; --ff-ink:#1c5cab; --ff-soft:rgba(42,120,214,.11);
+  --hiar:#eb6834; --hiar-ink:#a8461a; --hiar-soft:rgba(235,104,52,.12);
+  --sf:#1baf7a; --sf-ink:#0e7a55; --sf-soft:rgba(27,175,122,.12);
+  --cf:#eda100; --cf-ink:#855b00; --cf-soft:rgba(237,161,0,.14);
+  --stream:#e87ba4; --stream-ink:#a83a66; --stream-soft:rgba(232,123,164,.14);
+  --bidir:#8b9097;
+  --plan:#5b49c4; --plan-ink:#4a3aa7; --plan-soft:rgba(91,73,196,.11); --plan2:#8f82e0;
+  --op:#9aa3ae; --op-hi:#5f6b7a;
+  --waste:#c6382f;
+  --risk:#c6382f; --risk-ink:#a22a22; --risk-soft:rgba(198,56,47,.10);
+  --med:#9b7a0e; --med-ink:#7a5f06; --med-soft:rgba(155,122,14,.12);
+  --low:#6b7683; --low-ink:#4f5965; --low-soft:rgba(107,118,131,.12);
+  --ok:#17875a; --ok-ink:#0f6a45; --ok-soft:rgba(23,135,90,.10);
+  --grid:#e6e8e3; --axis:#b9beb6;
+  --shadow:0 1px 2px rgba(15,20,28,.06), 0 10px 26px rgba(15,20,28,.08);
+}
+:root[data-theme="dark"]{ color-scheme: dark; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.75;}
+a{color:var(--ff-ink);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:2px solid var(--ff);outline-offset:2px;border-radius:4px}
+b,strong{font-weight:600;color:var(--ink)}
+sub,sup{font-size:.72em;line-height:0}
+.tnum{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono);font-size:.9em}
+.mv{font-family:var(--f-math);font-style:italic;font-size:1.07em;white-space:nowrap}
+.dim{color:var(--ink3)}
+.c-ff{color:var(--ff-ink)} .c-hiar{color:var(--hiar-ink)} .c-sf{color:var(--sf-ink)} .c-cf{color:var(--cf-ink)} .c-plan{color:var(--plan-ink)} .c-stream{color:var(--stream-ink)}
+.c-risk{color:var(--risk-ink)} .c-ok{color:var(--ok-ink)} .c-med{color:var(--med-ink)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:1px;margin-right:5px}
+.dot.ff{background:var(--ff)} .dot.hiar{background:var(--hiar)} .dot.sf{background:var(--sf)} .dot.cf{background:var(--cf)} .dot.plan{background:var(--plan)} .dot.stream{background:var(--stream)} .dot.bidir{background:var(--bidir)}
+.wrap{max-width:1100px;margin:0 auto;padding-inline:20px;padding-block:24px 110px}
+@media (max-width:520px){ .wrap{padding-inline:16px} }
+
+/* ---------- hero ---------- */
+.hero{padding-block:8px 28px;border-bottom:1px solid var(--rule);display:grid;gap:18px}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.kicker{font-family:var(--f-mono);font-size:12px;letter-spacing:.14em;color:var(--ink3);text-transform:uppercase}
+.themebtn{font:inherit;font-size:12.5px;color:var(--ink2);background:var(--surf);border:1px solid var(--rule2);border-radius:999px;padding:4px 12px;cursor:pointer}
+.themebtn:hover{color:var(--ink)}
+h1{font-family:var(--f-head);font-weight:700;font-size:clamp(31px,5vw,50px);line-height:1.16;margin:4px 0 0;letter-spacing:.01em;text-wrap:balance}
+h1 .soft{color:var(--ink3);font-weight:600;font-size:.62em;display:block;margin-top:6px}
+.sub{font-size:17px;line-height:1.72;color:var(--ink2);max-width:62em;margin:0}
+.thesis{max-width:66em;margin:0;padding:14px 18px;border-left:3px solid var(--ff);background:var(--ff-soft);border-radius:0 8px 8px 0;font-size:15.5px}
+.thesis .lab{font-family:var(--f-mono);font-size:11px;letter-spacing:.13em;color:var(--ink3);display:block;margin-bottom:2px}
+.patch{border:1px solid var(--rule2);border-radius:10px;overflow:hidden;background:var(--surf);box-shadow:var(--shadow)}
+.patch .rail{height:14px;background:linear-gradient(90deg,var(--plan) 0 8%,transparent 8% 10%,var(--op) 10% 30%,transparent 30% 31%,var(--op) 31% 51%,transparent 51% 52%,var(--op) 52% 72%,transparent 72% 73%,var(--op) 73% 93%,transparent 93%) 0 4px/100% 6px no-repeat,var(--surf2);border-bottom:1px solid var(--rule)}
+.patch dl{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));}
+.patch dl div{padding:10px 14px;border-right:1px solid var(--rule);border-top:1px solid var(--rule);min-width:0}
+.patch dt{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;color:var(--ink3);text-transform:uppercase}
+.patch dd{margin:2px 0 0;font-size:13.5px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.patch dd .no{color:var(--risk-ink);font-weight:600}
+.statstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(136px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+.statstrip div{background:var(--surf);padding:12px 14px;display:grid;gap:2px;align-content:start}
+.statstrip b{font-family:var(--f-mono);font-weight:500;font-size:18px;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.statstrip span{font-size:12.5px;line-height:1.45;color:var(--ink3)}
+.statstrip .warn b{color:var(--risk-ink)}
+.statstrip .good b{color:var(--ff-ink)}
+
+/* ---------- TOC ---------- */
+nav.toc{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--rule);margin-inline:-20px;padding:8px 20px;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{flex:none;font-size:13px;color:var(--ink2);text-decoration:none;padding:5px 10px;border-radius:999px;white-space:nowrap}
+nav.toc a .n{font-family:var(--f-mono);font-size:11px;color:var(--ink3);margin-right:4px}
+nav.toc a:hover,nav.toc a.on{background:var(--surf3);color:var(--ink)}
+@media (max-width:520px){ nav.toc{margin-inline:-16px;padding-inline:16px} }
+
+/* ---------- sections ---------- */
+section{padding-block:46px 8px;scroll-margin-top:56px}
+h2{font-family:var(--f-head);font-weight:700;font-size:clamp(24px,3.2vw,31px);line-height:1.3;margin:0 0 8px;text-wrap:balance;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+h2 .no{font-family:var(--f-mono);font-weight:600;font-size:.56em;color:var(--ink3);letter-spacing:.06em}
+h3{font-family:var(--f-head);font-weight:600;font-size:20px;line-height:1.4;margin:32px 0 8px;text-wrap:balance}
+h4{font-size:14px;font-weight:600;margin:0 0 6px;letter-spacing:.02em}
+p{margin:0 0 14px}
+.lede{color:var(--ink2);font-size:16.5px;max-width:62em}
+.prose{max-width:50em}
+ul.tight,ol.tight{margin:0 0 14px;padding-left:1.25em}
+ul.tight li,ol.tight li{margin:5px 0}
+
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:18px 0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:18px 0}
+.card{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;min-width:0}
+.card p:last-child,.card ul:last-child{margin-bottom:0}
+.card h4{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink3);font-weight:600}
+.card .big{font-family:var(--f-head);font-size:18px;font-weight:600;margin:0 0 6px;line-height:1.45}
+.card.ff{border-top:3px solid var(--ff)} .card.hiar{border-top:3px solid var(--hiar)} .card.sf{border-top:3px solid var(--sf)} .card.plan{border-top:3px solid var(--plan)} .card.ok{border-top:3px solid var(--ok)} .card.risk{border-top:3px solid var(--risk)}
+
+.tag{display:inline-block;font-size:12px;line-height:1.55;padding:0 7px;border-radius:5px;font-weight:600;white-space:nowrap;vertical-align:1px}
+.tag.ff{background:var(--ff-soft);color:var(--ff-ink)}
+.tag.hiar{background:var(--hiar-soft);color:var(--hiar-ink)}
+.tag.sf{background:var(--sf-soft);color:var(--sf-ink)}
+.tag.plan{background:var(--plan-soft);color:var(--plan-ink)}
+.tag.risk{background:var(--risk-soft);color:var(--risk-ink)}
+.tag.med{background:var(--med-soft);color:var(--med-ink)}
+.tag.low{background:var(--low-soft);color:var(--low-ink)}
+.tag.ok{background:var(--ok-soft);color:var(--ok-ink)}
+.tag.mine{background:var(--surf3);color:var(--ink2)}
+
+.callout{border:1px solid var(--rule);border-left:3px solid var(--ff);background:var(--surf);border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0;font-size:15px}
+.callout.warn{border-left-color:var(--risk)}
+.callout.mine{border-left-color:var(--ok)}
+.callout.plan{border-left-color:var(--plan)}
+.callout.hiar{border-left-color:var(--hiar)}
+.callout p:last-child,.callout ul:last-child{margin-bottom:0}
+.callout .lab{font-family:var(--f-mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink3);display:block;margin-bottom:2px}
+
+/* equations */
+.eq{font-family:var(--f-math);font-size:18px;line-height:1.6;background:var(--surf);border:1px solid var(--rule);border-radius:8px;padding:12px 16px;margin:12px 0;overflow-x:auto;white-space:nowrap}
+.eq .no{float:right;font-family:var(--f-mono);font-size:12px;color:var(--ink3);margin-left:18px;font-style:normal}
+.eq i{font-style:italic}
+.eq .hl-ff{color:var(--ff-ink)} .eq .hl-plan{color:var(--plan-ink)} .eq .hl-hiar{color:var(--hiar-ink)} .eq .hl-sf{color:var(--sf-ink)}
+.eqnote{font-size:14px;color:var(--ink2);margin:-4px 0 14px}
+@media (max-width:520px){ .eq{font-size:16px;padding:10px 12px} .eq .no{float:none;display:block;margin:0 0 2px} }
+
+/* figures */
+figure{margin:20px 0;background:var(--surf);border:1px solid var(--rule);border-radius:12px;padding:16px;min-width:0;position:relative}
+figure svg{display:block;width:100%;height:auto;max-width:100%}
+figcaption{font-size:13.5px;line-height:1.6;color:var(--ink2);margin-top:10px}
+figcaption b{color:var(--ink)}
+.svgtxt{font-family:var(--f-body);font-size:12px;fill:currentColor}
+.svgmono{font-family:var(--f-mono);font-size:11px;fill:currentColor}
+
+/* controls */
+.ctrls{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin:4px 0 12px}
+.ctrls .lbl{font-size:12.5px;color:var(--ink3);font-family:var(--f-mono);letter-spacing:.06em}
+.seg{display:inline-flex;border:1px solid var(--rule2);border-radius:8px;overflow:hidden;flex-wrap:wrap}
+.seg button{font:inherit;font-size:13px;padding:5px 11px;background:var(--surf);color:var(--ink2);border:0;border-right:1px solid var(--rule);cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--surf3);color:var(--ink);font-weight:600}
+.seg button:hover{color:var(--ink)}
+.btn{font:inherit;font-size:13px;padding:5px 12px;background:var(--surf);color:var(--ink);border:1px solid var(--rule2);border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:var(--surf3)}
+label.sl{display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--ink2);flex:1 1 260px;min-width:0}
+label.sl input[type=range]{flex:1;min-width:120px;accent-color:var(--ff)}
+label.sl output{font-family:var(--f-mono);font-size:13px;color:var(--ink);min-width:3.2em;text-align:right}
+label.ck{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;color:var(--ink2);cursor:pointer}
+.readout{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:8px;overflow:hidden;margin:10px 0}
+.readout div{background:var(--surf2);padding:8px 11px;min-width:0}
+.readout span{display:block;font-size:11.5px;color:var(--ink3);line-height:1.35}
+.readout b{font-family:var(--f-mono);font-weight:500;font-size:15px;font-variant-numeric:tabular-nums}
+#stOut,#tlOut,#calcOut{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+@media (max-width:520px){ #stOut,#tlOut,#calcOut{grid-template-columns:1fr 1fr} }
+
+/* tables */
+.tbl-wrap{overflow-x:auto;margin:14px 0;border:1px solid var(--rule);border-radius:10px;background:var(--surf)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;border-bottom:1px solid var(--rule);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td.l,th.l{text-align:left;white-space:normal}
+thead th{font-weight:600;color:var(--ink2);background:var(--surf2);font-size:12.5px}
+tbody tr:last-child td{border-bottom:0}
+td.best{font-weight:600;color:var(--ink)}
+td .d,th .d{display:block;font-size:11px;color:var(--ink3);font-weight:400}
+td.up{background:var(--ok-soft)} td.dn{background:var(--risk-soft)} td.na{color:var(--risk-ink);font-weight:600}
+tr.ours td{background:var(--ff-soft)}
+tr.sep td{border-top:2px solid var(--rule2)}
+tr.dimrow td{color:var(--ink3)}
+.bar-in{display:inline-block;height:8px;border-radius:0 3px 3px 0;vertical-align:middle;margin-left:6px;background:var(--op)}
+
+/* doubts */
+.dfilter{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+.doubts{display:grid;gap:10px;margin:14px 0}
+details.dbt{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:0}
+details.dbt[open]{border-color:var(--rule2)}
+details.dbt summary{list-style:none;cursor:pointer;padding:12px 16px;display:flex;gap:10px;align-items:baseline}
+details.dbt summary::-webkit-details-marker{display:none}
+details.dbt summary .id{font-family:var(--f-mono);font-size:12px;color:var(--ink3);flex:none}
+details.dbt summary .t{flex:1;font-weight:600;line-height:1.55}
+details.dbt summary::after{content:"+";font-family:var(--f-mono);color:var(--ink3);flex:none}
+details.dbt[open] summary::after{content:"−"}
+details.dbt .body{padding:0 16px 14px 16px;font-size:15px;color:var(--ink2)}
+details.dbt .body p:last-child{margin-bottom:0}
+details.dbt .body .fix{font-size:14px;border-top:1px dashed var(--rule2);padding-top:8px;margin-top:8px}
+details.dbt.h{border-left:3px solid var(--risk)} details.dbt.m{border-left:3px solid var(--med)} details.dbt.l{border-left:3px solid var(--low)}
+
+/* legend */
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--ink2);margin:6px 0}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:16px;height:10px;border-radius:2px}
+.legend i.hatch{background:repeating-linear-gradient(135deg,var(--waste) 0 2px,transparent 2px 5px);border:1px solid var(--waste)}
+.legend i.phatch{background:repeating-linear-gradient(135deg,var(--plan) 0 2px,transparent 2px 5px);border:1px solid var(--plan)}
+
+/* tooltip */
+.tip{position:absolute;pointer-events:none;z-index:30;background:var(--surf3);color:var(--ink);border:1px solid var(--rule2);border-radius:8px;padding:7px 10px;font-size:12.5px;line-height:1.5;box-shadow:var(--shadow);max-width:300px;opacity:0;transition:opacity .08s}
+.tip.on{opacity:1}
+.tip b{font-family:var(--f-mono);font-weight:500}
+
+/* scheduler */
+.sched rect.op{transition:opacity .12s}
+.sched rect.op.fut{opacity:.16}
+.sched rect.op.dep{stroke:var(--ink);stroke-width:1.6}
+.sched rect.op.focus{stroke:var(--ink);stroke-width:2.4}
+.sched .cursor{stroke:var(--ink);stroke-width:1.2;stroke-dasharray:3 3}
+
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--rule);font-size:13px;color:var(--ink3)}
+.two-col{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:820px){ .two-col{grid-template-columns:1fr} }
+.small{font-size:13.5px;color:var(--ink2)}
+.hs{overflow-x:auto;-webkit-overflow-scrolling:touch}
+@media (max-width:760px){ .hs svg.wide{min-width:720px} .hs{padding-bottom:4px} .swipe{display:block!important} }
+.swipe{display:none;text-align:center;font-size:11px;color:var(--ink3);font-family:var(--f-mono);margin-top:4px}
+.kbd{font-family:var(--f-mono);font-size:12px;border:1px solid var(--rule2);border-bottom-width:2px;border-radius:4px;padding:0 5px;color:var(--ink2)}
+.vlist{display:grid;gap:8px;margin:14px 0;padding:0;list-style:none}
+.vlist li{background:var(--surf);border:1px solid var(--rule);border-radius:8px;padding:9px 14px 9px 40px;position:relative;font-size:14.5px;color:var(--ink2)}
+.vlist li::before{content:"✓";position:absolute;left:14px;top:9px;color:var(--ok-ink);font-weight:700}
+.vlist li.x::before{content:"≈";color:var(--med-ink)}
+.vlist li b{color:var(--ink)}
+.pill{display:inline-block;font-family:var(--f-mono);font-size:11.5px;padding:0 6px;border:1px solid var(--rule2);border-radius:999px;color:var(--ink2);vertical-align:1px}
+.budget{display:flex;gap:2px;border-radius:8px;overflow:hidden;margin:12px 0 6px;font-size:12.5px;font-family:var(--f-mono)}
+.budget span{padding:7px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
+.budget .b-plan{background:var(--plan-soft);border-bottom:3px solid var(--plan)}
+.budget .b-hist{background:var(--ff-soft);border-bottom:3px solid color-mix(in srgb,var(--ff) 55%,transparent)}
+.budget .b-cur{background:var(--ff-soft);border-bottom:3px solid var(--ff)}
+.pack{display:flex;gap:2px;border-radius:8px;overflow:hidden;margin:12px 0 6px;font-size:11.5px;font-family:var(--f-mono)}
+.pack span{padding:7px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink);min-width:0}
+.pack .p0{background:var(--plan-soft);border-bottom:3px solid var(--plan)}
+.pack .ps{background:repeating-linear-gradient(135deg,var(--plan-soft) 0 4px,transparent 4px 8px);border-bottom:3px solid var(--plan2)}
+.pack .rs{background:var(--ff-soft);border-bottom:3px solid var(--ff)}
+.pack .rb{background:var(--surf3);border-bottom:3px solid var(--op-hi)}
+.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:14px 0;counter-reset:st}
+.flow div{background:var(--surf);border:1px solid var(--rule);border-radius:10px;padding:10px 12px;font-size:14px;color:var(--ink2);position:relative}
+.flow div::before{counter-increment:st;content:counter(st);font-family:var(--f-mono);font-size:11px;color:var(--ink3);display:block}
+.flow div b{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="topbar">
+    <span class="kicker">arXiv 2609.32540 · 精读 · Meta × NTU S-Lab</span>
+    <button class="themebtn" id="themeBtn" type="button" aria-label="切换浅色/深色">◐ 主题</button>
+  </div>
+  <h1>FlashForward 精读<span class="soft">顺手算出的 KV，直接交给下一块</span></h1>
+  <p class="sub">论文全名 <i>In-Flight KV Cache with Clean Anchors for Faster Autoregressive Video Diffusion</i>。它盯住少步自回归视频扩散里一个容易被忽略的开销：为了让后面的块“记住”前面的块，现有方法要额外跑模型前向来建 KV 缓存。本页用人话拆开它的做法，复算了论文里几乎所有数字，把调度、锚点窗口和流式前瞻做成可以动手玩的图，并列出我认为存疑的地方。</p>
+  <p class="thesis"><span class="lab">一句话</span>每一次去噪前向，本来就会算出当前块的 KV。FlashForward 让下一块直接读前一块<b>在同一去噪步</b>留下的这份 KV（in-flight KV），于是：① 不再需要“只建缓存、不推进画面”的额外前向；② 相邻块之间只剩同一步之间的依赖，4 张卡可以各管一步，像流水线一样同时处理 4 个块。代价是历史永远是带噪的半成品，画面会漂、会闪。作者再加一个<span class="c-plan"><b>规划器</b></span>：提前自回归地生成每隔 10 个潜帧一个的稀疏干净锚点，从过去和未来两侧稳住结构；最终所有输出帧仍由<span class="c-ff"><b>渲染器</b></span>生成。</p>
+  <div class="patch">
+    <div class="rail" aria-hidden="true"></div>
+    <dl>
+      <div><dt>论文</dt><dd>arXiv 2609.32540v1，2026-09-26 提交</dd></div>
+      <div><dt>作者</dt><dd>Yikai Wang、Xiao Han 等 11 人（Meta）；Chen Change Loy（NTU S-Lab）</dd></div>
+      <div><dt>骨干</dt><dd>Wan2.1-T2V-1.3B（质量 + 测速）；Wan2.1-T2V-14B <b>只做测速</b></dd></div>
+      <div><dt>训练数据</dt><dd>256K Shutterstock 真实视频，20 s 片段，字幕自动生成</dd></div>
+      <div><dt>蒸馏</dt><dd>DMD；教师 Wan2.1-T2V-14B（CFG 3.0）；学生 4 步、无 CFG</dd></div>
+      <div><dt>代码 / 权重</dt><dd><span class="no">未公开</span>（2026-09-29 查项目页与检索）</dd></div>
+      <div><dt>项目页</dt><dd><a href="https://yikai-wang.github.io/FlashForward" target="_blank" rel="noopener">yikai-wang.github.io/FlashForward</a></dd></div>
+    </dl>
+  </div>
+  <div class="statstrip">
+    <div class="good"><b>1.16–1.69×</b><span>比 HiAR 快（≤ 4 卡，≥ 20 s，四组模型 × 分辨率）</span></div>
+    <div class="good"><b>1.42–2.92×</b><span>比 Self-Forcing 快（同口径）</span></div>
+    <div><b>123 · 134 · 212</b><span>20 s 视频的块前向总数：FF · SF · HiAR</span></div>
+    <div class="warn"><b>慢 1.9–4.2%</b><span>单卡时 FF 比 SF 还慢一点：加速全部来自多卡流水线</span></div>
+    <div><b>0.838</b><span>VBench Total（1.3B·480p·20 s）；对手数字抄自 HiAR 论文</span></div>
+    <div><b>0.8404 → 0.8395</b><span>VBench-Long Total，20 s → 65 s 几乎不掉</span></div>
+    <div class="warn"><b>4 组里 3 组无质量评测</b><span>质量只评了 1.3B·480p；14B 两组明确只是调度计时</span></div>
+  </div>
+</header>
+
+<nav class="toc" aria-label="目录">
+  <a href="#s1"><span class="n">01</span>定位</a>
+  <a href="#s2"><span class="n">02</span>补课</a>
+  <a href="#s3"><span class="n">03</span>状态契约</a>
+  <a href="#s4"><span class="n">04</span>调度模拟器</a>
+  <a href="#s5"><span class="n">05</span>一次前向</a>
+  <a href="#s6"><span class="n">06</span>锚点窗口</a>
+  <a href="#s7"><span class="n">07</span>为何重画锚点</a>
+  <a href="#s8"><span class="n">08</span>训练</a>
+  <a href="#s9"><span class="n">09</span>速度</a>
+  <a href="#s10"><span class="n">10</span>流式与前瞻</a>
+  <a href="#s11"><span class="n">11</span>质量</a>
+  <a href="#s12"><span class="n">12</span>复算清单</a>
+  <a href="#s13"><span class="n">13</span>存疑</a>
+  <a href="#s14"><span class="n">14</span>结论与启示</a>
+</nav>
+
+<!-- =============================== 01 =============================== -->
+<section id="s1">
+  <h2><span class="no">01</span>一句话与定位</h2>
+  <p class="lede">自回归视频扩散把长视频切成一个个短“块”，一块一块地生成，每块再走几步去噪。现在大家把去噪压到了 4 步左右，于是一个原本不起眼的开销变得显眼：为了让后面的块“记住”前面的块，很多方法要额外跑一次模型前向，只为算出一份 KV 缓存，而这次前向不推进任何输出画面。FlashForward 的出发点很朴素：这份 KV，每一步去噪时其实已经算过了。</p>
+
+  <div class="grid3">
+    <div class="card sf">
+      <h4><span class="dot sf"></span>Self-Forcing · 干净历史</h4>
+      <p class="big">做完再“拍一张干净照片”</p>
+      <p>前一块 4 步去噪全部做完后，把干净结果再送进模型一次（σ = 0），只为拿到干净的 K/V。后一块必须等这次前向结束才能开始，所以块与块之间完全串行。20 s 视频：27 块 × 4 步 + 26 次重编码 = <b>134</b> 次块前向。</p>
+    </div>
+    <div class="card hiar">
+      <h4><span class="dot hiar"></span>HiAR · 稍干净的历史</h4>
+      <p class="big">按“步”流水，但每一步都要重拍</p>
+      <p>把顺序反过来：第 i 块做第 k 步时，参考第 i−1 块“刚做完第 k 步”的状态（噪声 σ<sub>k−1</sub>）。这样相邻块错开一格就能同时跑在 4 张卡上；但那个状态要在本卡上重新编码一次，每块每一步多一次前向：27×4 + 26×4 = <b>212</b> 次。</p>
+    </div>
+    <div class="card ff">
+      <h4><span class="dot ff"></span>FlashForward · 同阶段历史 + 干净锚点</h4>
+      <p class="big">直接读对方做这一步时顺手留下的 KV</p>
+      <p>第 i 块做第 k 步时，读第 i−1 块在同一个第 k 步留下的 KV，这是它自己去噪时本来就算出来的，零额外前向，依赖正好沿对角线流水。参考物永远是带噪的半成品，所以另请<span class="c-plan">规划器</span>每 10 个潜帧先画一个干净锚点：3 个锚点 block × 5 + 27 × 4 = <b>123</b> 次。</p>
+    </div>
+  </div>
+
+  <div class="callout mine">
+    <span class="lab">我的理解 · 换个角度看渲染器</span>
+    <p>每一块在第 k 步只依赖“更早的块在同一第 k 步”的 KV。所以把全片所有块的第 k 步放在一起，就等于一次带“块因果 + 5 块滑窗”掩码的全片前向。论文训练时就是这么算的（Alg. 3 第 14 行），正文也写明推理时“可以一次处理整段”。由此有两个直接推论：</p>
+    <ul class="tight">
+      <li><b>渲染器从来没见过任何一块“做完”的样子。</b>它能看到的前一块，最干净也只是第 4 步输入时的 σ = 0.624，仍有 62% 是噪声。前面块的误差因此很难传过来，这是它不漂的原因；块与块在细节上的衔接也因此没有保证，这是它离不开锚点的原因（§03、存疑 #3）。</li>
+      <li><b>真正“依赖已完成内容”的自回归只剩规划器。</b>它相当于一个步长放大 10 倍、只生成稀疏锚点的 Self-Forcing。</li>
+    </ul>
+    <p>所以 FlashForward 可以理解为<b>“稀疏关键帧自回归 + 局部因果注意力的全片少步去噪”</b>，wavefront 流水线是后者一种适合流式输出的调度方式。这个视角能同时解释它为什么快、为什么不漂、为什么离不开锚点。</p>
+  </div>
+
+  <h3>在谱系里的位置</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>方法</th><th class="l">前驱记忆的噪声水平</th><th class="l">什么时候能用</th><th>仅建缓存前向</th><th>块间执行</th><th>20 s 块前向总数</th></tr></thead>
+      <tbody>
+        <tr><td><span class="dot sf"></span>Self-Forcing</td><td class="l">σ<sub>0</sub> = 0（干净）</td><td class="l">块做完并重编码之后</td><td>每块 1 次</td><td>串行</td><td>134</td></tr>
+        <tr class="dimrow"><td>N-C-Causal-rCM</td><td class="l">σ<sub>1</sub>（最后一步的输入）</td><td class="l">最后一步之后</td><td>0</td><td>串行</td><td>108<sup>*</sup></td></tr>
+        <tr><td><span class="dot hiar"></span>HiAR</td><td class="l">σ<sub>k−1</sub>（本步<b>输出</b>的噪声级）</td><td class="l">每一步重编码之后</td><td>每块 S = 4 次</td><td>流水重叠</td><td>212</td></tr>
+        <tr class="ours"><td><span class="dot ff"></span><b>FlashForward</b></td><td class="l">σ<sub>k</sub>（本步<b>输入</b>的噪声级）</td><td class="l">每一步去噪一结束</td><td>0（规划器每 block 1 次）</td><td>流水重叠</td><td>123</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">前五列转述自论文 Tab. 1（原表噪声列写作 σ<sub>1</sub> → σ<sub>0</sub>、σ<sub>k</sub> → σ<sub>k−1</sub>，“输入 / 输出噪声级”是我的解读）；最后一列按论文式 (3) 计算。<sup>*</sup>N-C-Causal-rCM 那一格是我按同一口径算的（27 × 4），论文没有测它的延迟。</p>
+  <p>相关工作里最接近的是 <b>Macro-from-Micro Planning</b>（MMPL，arXiv 2508.03334）：同样先规划稀疏关键帧，再在多卡上并行填充区间。FlashForward 把“填充”换成了可以流式输出的 wavefront，并且锚点只当条件、不放进输出（§07）。论文只在相关工作和未来工作里提到它，没有做定量比较。</p>
+</section>
+
+<!-- =============================== 02 =============================== -->
+<section id="s2">
+  <h2><span class="no">02</span>先补课：潜帧、块、阶段、KV</h2>
+  <p class="lede">后面的图都建立在这几个词上。数字按论文的实际配置（Wan2.1 · 16 fps · 4 步）。</p>
+  <div class="grid3">
+    <div class="card"><h4>潜帧 latent frame</h4><p>Wan 的因果 VAE 在时间上压 4 倍：第 0 个潜帧对应 1 帧，之后每个潜帧对应 4 帧。81 潜帧 = 1 + 80 × 4 = 321 帧 ≈ 20 s；141 ≈ 35 s；261 ≈ 65 s。<b>1 个潜帧 ≈ 0.25 s。</b></p></div>
+    <div class="card"><h4>块 chunk</h4><p>3 个潜帧 ≈ 0.75 s。按 Wan 的 8× 空间压缩和 2×2 patch，480p 下每个潜帧 1560 个 token，一块 4680 个<span class="dim">（按架构算的，论文没写）</span>。20 s 视频 = 27 块。</p></div>
+    <div class="card"><h4>阶段 stage k</h4><p>4 步去噪，k = 4, 3, 2, 1；输入噪声 σ ≈ 0.999, 0.937, 0.833, 0.624，最后一步走到 0。这正是 Self-Forcing 的 4 步表（[1000, 750, 500, 250] 经 shift = 5 映射）。</p></div>
+    <div class="card"><h4>前向 forward</h4><p>把一块送进 DiT 跑一遍。“推进输出”的前向预测速度 v̂ 并走一步；“仅建缓存”的前向只为拿到 K/V，不改变任何输出潜变量。论文的所有速度账都按“块前向”记。</p></div>
+    <div class="card"><h4>KV 缓存</h4><p>注意力里每个 token 产生 Key 和 Value，后面的块用自己的 Query 去查。深层的 K/V 已经混合了这一块当时看到的上下文，所以它不只是“原始内容”，还带着模型对这一块“应该长什么样”的判断。噪声态的 KV 之所以还有用，靠的就是这一点。</p></div>
+    <div class="card"><h4>轮 round</h4><p>流水线里每张卡各做一次块前向的时间片。论文的延迟模型基本就是“轮数 × 每轮时间”。§09 里我拿它对照了实测表：长视频下与 HiAR、SF 相差几个百分点；对 FF 的偏差大一些（1.3B·480p 低估，65 s 约 −11%；720p 与 14B 高估，短视频时最多约 +50%）。</p></div>
+  </div>
+
+  <div class="eq">x<sub>σ</sub> = (1 − σ)·x<sub>0</sub> + σ·ε,&nbsp;&nbsp; v = ε − x<sub>0</sub>,&nbsp;&nbsp; x<sub>k−1</sub> = x<sub>k</sub> − (σ<sub>k</sub> − σ<sub>k−1</sub>)·v̂<span class="no">式 (5) · Alg. 1</span></div>
+  <p class="eqnote">FlashForward 在推理和训练 rollout 里都用确定性的 Euler 步。Self-Forcing 原版是“预测 x̂<sub>0</sub>，再用新噪声加噪到下一级”，两者是不同的采样器，论文没讨论这个差别。</p>
+
+  <figure>
+    <div class="hs">
+    <svg class="wide" viewBox="0 0 1000 214" role="img" aria-label="Self-Forcing 每块 4 次去噪加 1 次重编码，下一块要等重编码结束">
+      <defs>
+        <pattern id="hatchW" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2.4" height="6" style="fill:var(--waste)"/></pattern>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink2)"/></marker>
+      </defs>
+      <text x="10" y="62" class="svgtxt" style="fill:var(--ink2);font-weight:600">块 i</text>
+      <text x="10" y="162" class="svgtxt" style="fill:var(--ink2);font-weight:600">块 i+1</text>
+      <g>
+        <rect x="70" y="36" width="82" height="46" rx="6" style="fill:var(--surf2);stroke:var(--op-hi)"/><text x="111" y="55" text-anchor="middle" class="svgtxt">去噪 k=4</text><text x="111" y="72" text-anchor="middle" class="svgmono" style="fill:var(--ink3)">σ 0.999</text>
+        <rect x="160" y="36" width="82" height="46" rx="6" style="fill:var(--surf2);stroke:var(--op-hi)"/><text x="201" y="55" text-anchor="middle" class="svgtxt">去噪 k=3</text><text x="201" y="72" text-anchor="middle" class="svgmono" style="fill:var(--ink3)">σ 0.937</text>
+        <rect x="250" y="36" width="82" height="46" rx="6" style="fill:var(--surf2);stroke:var(--op-hi)"/><text x="291" y="55" text-anchor="middle" class="svgtxt">去噪 k=2</text><text x="291" y="72" text-anchor="middle" class="svgmono" style="fill:var(--ink3)">σ 0.833</text>
+        <rect x="340" y="36" width="82" height="46" rx="6" style="fill:var(--surf2);stroke:var(--op-hi)"/><text x="381" y="55" text-anchor="middle" class="svgtxt">去噪 k=1</text><text x="381" y="72" text-anchor="middle" class="svgmono" style="fill:var(--ink3)">σ 0.624</text>
+        <rect x="430" y="36" width="96" height="46" rx="6" style="fill:url(#hatchW);stroke:var(--waste)"/><rect x="436" y="44" width="84" height="30" rx="4" style="fill:var(--surf);opacity:.86"/><text x="478" y="56" text-anchor="middle" class="svgtxt" style="font-weight:600">重编码</text><text x="478" y="70" text-anchor="middle" class="svgmono" style="fill:var(--ink3)">σ=0 只为 KV</text>
+      </g>
+      <path d="M526,59 C566,59 552,104 566,134" style="fill:none;stroke:var(--ink2);stroke-width:1.5" marker-end="url(#arr)"/>
+      <text x="560" y="98" class="svgtxt" style="fill:var(--ink2)">干净 KV 写入缓存后，下一块才能开始</text>
+      <g>
+        <rect x="560" y="136" width="82" height="46" rx="6" style="fill:var(--surf2);stroke:var(--op-hi)"/><text x="601" y="155" text-anchor="middle" class="svgtxt">去噪 k=4</text><text x="601" y="172" text-anchor="middle" class="svgmono" style="fill:var(--ink3)">σ 0.999</text>
+        <rect x="650" y="136" width="82" height="46" rx="6" style="fill:var(--surf2);stroke:var(--op-hi)"/><text x="691" y="155" text-anchor="middle" class="svgtxt">去噪 k=3</text>
+        <rect x="740" y="136" width="82" height="46" rx="6" style="fill:var(--surf2);stroke:var(--op-hi)"/><text x="781" y="155" text-anchor="middle" class="svgtxt">去噪 k=2</text>
+        <rect x="830" y="136" width="82" height="46" rx="6" style="fill:var(--surf2);stroke:var(--op-hi)"/><text x="871" y="155" text-anchor="middle" class="svgtxt">去噪 k=1</text>
+        <rect x="920" y="136" width="70" height="46" rx="6" style="fill:url(#hatchW);stroke:var(--waste);opacity:.45"/>
+      </g>
+      <path d="M70,98 L70,106 L526,106 L526,98" style="fill:none;stroke:var(--ink3)"/>
+      <text x="298" y="124" text-anchor="middle" class="svgtxt" style="fill:var(--ink3)">每块 5 次前向，只有 4 次推进输出（建缓存占 1/5，而且挡在块与块之间）</text>
+      <text x="10" y="206" class="svgmono" style="fill:var(--ink3)">时间 →</text>
+    </svg>
+    </div>
+    <span class="swipe">← 可左右滑动 →</span>
+    <figcaption><b>Self-Forcing 为什么慢在“块与块之间”。</b>红色斜线格是“仅建缓存”的前向：把做完的块在 σ = 0 下再过一遍模型，只为得到干净的 K/V。4 步去噪时它占 1/5 的算力，而且是串行边界，后一块没法提前开始。HiAR 把它换成“每一步都重编码一次”，换来并行但多花了算力；FlashForward 把它整个去掉。</figcaption>
+  </figure>
+</section>
+
+<!-- =============================== 03 =============================== -->
+<section id="s3">
+  <h2><span class="no">03</span>状态契约：前一块在你眼里有多“脏”</h2>
+  <p class="lede">论文把问题归结为<b>跨块状态契约</b>：前一块对外发布什么表示、在什么噪声水平、什么时候后面的块可以用。这个契约同时决定两件事：模型能看到多少信息，以及计算的依赖图（能不能并行、要不要额外前向）。下图把三种契约放在一起：第 i 块在每一步去噪时，它看到的第 i−1 块是什么噪声水平。</p>
+  <figure>
+    <div class="legend" id="noiseLegend"></div>
+    <div class="hs"><svg id="figNoise" class="wide" viewBox="0 0 760 320" role="img" aria-label="三种契约下，每一步看到的前驱噪声水平"></svg></div><span class="swipe">← 可左右滑动 →</span>
+    <figcaption><b>第 i 块在每一步看到的前驱噪声水平。</b>灰色虚线是本块这一步结束后的噪声水平。HiAR 论文的式 (8) 认为：前驱至少要和它一样干净（落在虚线上或下方），模型才“知道”前一块在这一步之后长什么样。<span class="c-ff">FlashForward</span> 的每个点都在虚线上方（红色区域）：最后一步把本块从 σ = 0.624 推到 0 时，它看到的前一块仍是 σ = 0.624。</figcaption>
+  </figure>
+
+  <p>HiAR 论文把“带噪上下文”拆成三部分，这个拆法很适合理解三种契约的取舍：</p>
+  <div class="eq">c = (1 − σ<sub>c</sub>)·<span class="hl-ff">x<sub>0</sub><sup>(i−1)</sup></span> + (1 − σ<sub>c</sub>)·<span class="hl-hiar">δ<sup>(i−1)</sup></span> + σ<sub>c</sub>·η<span class="no">HiAR 式 (7)</span></div>
+  <p class="eqnote"><span class="c-ff">蓝色</span>是前一块的真实内容，<span class="c-hiar">橙色</span>是它累积的预测误差，η 是噪声。上下文越脏（σ<sub>c</sub> 越大），误差被压得越低，但真实信号也按同样比例变弱。Self-Forcing 取 σ<sub>c</sub> = 0（误差原样传下去，所以会漂）；HiAR 取 σ<sub>k−1</sub>，刚好卡在它自己的因果条件上；FlashForward 取 σ<sub>k</sub>，再往“脏”的方向多走一格。</p>
+
+  <div class="callout hiar">
+    <span class="lab">一个被忽略的先例</span>
+    <p>HiAR 论文的表 2 其实已经测过 FlashForward 这份契约，它叫 <span class="mv">t<sub>c</sub> = t<sub>j</sub></span>（用本步输入噪声级的上下文）。结果：漂移最低（Drift 0.184；HiAR 默认 0.257；Self-Forcing 0.355），但 Quality 从 0.846 掉到 0.799，Semantic 从 0.723 掉到 0.692，运动平滑度从 0.988 掉到 0.978。</p>
+    <p>FlashForward 自己的消融（表 3 下）更极端：只用同阶段历史时，视频闪得太厉害，VBench 连“时间闪烁”这一项都算不出来。两份证据指向同一个结论：<b>同阶段契约单独用不行。</b>FlashForward 的贡献在于意识到：这份契约能省掉全部重编码，而且天然形成流水线；再用干净锚点把质量补回来。论文在说“同阶段历史单独使用会传播外观和运动的不确定性”时引用了 HiAR（[5, 65]），但没有点明 HiAR 表 2 已经测过这份契约，也没给出那组数值。</p>
+  </div>
+</section>
+
+<!-- =============================== 04 =============================== -->
+<section id="s4">
+  <h2><span class="no">04</span>调度模拟器：同一段视频，三种契约各要多少轮</h2>
+  <p class="lede">横轴是时间，单位是“一次块前向”；每一行是一张卡。三种方法共用同一把时间尺，条越短越快。把鼠标移到任意一格（手机上点一下），会高亮它依赖的格子；按播放可以看流水线怎么填满。</p>
+  <figure class="sched">
+    <div class="ctrls">
+      <span class="lbl">视频长度</span>
+      <div class="seg" id="schedLen"><button data-v="7" aria-pressed="false">5 s · 7 块</button><button data-v="27" aria-pressed="true">20 s · 27 块</button><button data-v="47" aria-pressed="false">35 s · 47 块</button></div>
+      <span class="lbl">FF 规划器</span>
+      <div class="seg" id="schedPlan"><button data-v="one" aria-pressed="true">单卡序言</button><button data-v="cp" aria-pressed="false">4 卡上下文并行</button><button data-v="stream" aria-pressed="false">第 5 张卡流式</button></div>
+    </div>
+    <div class="ctrls">
+      <button class="btn" id="schedPlay" type="button">▶ 播放</button>
+      <label class="sl" id="schedGammaWrap" hidden>规划器 CP 加速 γ<sub>plan</sub><input type="range" id="schedGamma" min="0.5" max="4" step="0.1" value="1.8"><output id="schedGammaOut">1.8</output></label>
+      <label class="sl">时间<input type="range" id="schedT" min="0" max="100" step="0.1" value="100"><output id="schedTOut"></output></label>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--op)"></i>去噪前向（推进输出；FF 同时发布本步 KV）</span>
+      <span><i class="hatch"></i>仅建缓存前向（不推进输出）</span>
+      <span><i style="background:var(--plan)"></i>规划器去噪</span>
+      <span><i class="phatch"></i>规划器干净 KV 提取</span>
+    </div>
+    <div class="hs"><svg id="figSched" class="wide" viewBox="0 0 1000 400" role="img" aria-label="三种方法的多卡调度甘特图"></svg></div>
+    <span class="swipe">← 可左右滑动 →</span>
+    <div class="tbl-wrap" id="schedOut"></div>
+    <div class="tip" id="schedTip"></div>
+    <figcaption><b>读图要点。</b>FlashForward 的第 r 张卡负责第 k = 4 − r 步，第 n 轮处理第 n − r 块。节点 (i, k) 只依赖两样东西：(i, k+1)，即同一块上一步，由左边那张卡上一轮刚送来；(i−1…i−5, k)，即本卡自己前几轮写进本地历史库的 KV。所以<b>同阶段历史 KV 从不跨卡</b>，卡间只传一块 3 潜帧的潜变量；只有规划器产出的锚点 KV 需要分发到各张渲染卡。HiAR 用的是同一条对角线，但每张卡要在两次去噪之间插一次“重编码前一块”，每卡 2N − 1 次前向。HiAR 原文把这两次融合成一次 6 潜帧的调用，FlashForward 的计数仍按 2 次块前向算。Self-Forcing 是一条串行链；论文 4 卡时用上下文并行把每次前向切薄，但在 1.3B·480p 下反而更慢（20 s：4 卡 20.25 s，单卡 17.44 s）。</figcaption>
+  </figure>
+
+  <div class="eq">W<sub>FF</sub> = N<sub>P</sub>(S+1) + N<sub>R</sub>·S,&nbsp;&nbsp; W<sub>SF</sub> = N<sub>C</sub>·S + (N<sub>C</sub> − 1),&nbsp;&nbsp; W<sub>HiAR</sub> = N<sub>C</sub>·S + (N<sub>C</sub> − 1)·S<span class="no">式 (3)</span></div>
+  <div class="eq">R<sub>FF</sub> = N<sub>R</sub> + N<sub>P</sub>(S+1)/γ<sub>plan</sub> + (S − 1),&nbsp;&nbsp; R<sub>HiAR</sub> = 2N<sub>C</sub> − 1 + (S − 1),&nbsp;&nbsp; R<sub>SF</sub> = W<sub>SF</sub>/γ<sub>SF</sub><span class="no">式 (4)</span></div>
+  <p class="eqnote">W 是单卡总工作量（块前向个数），R 是 S = 4 张卡上的轮数，N<sub>P</sub> 是规划器 block 数，N<sub>R</sub> = N<sub>C</sub> 是块数，γ 是上下文并行相对单卡的加速比。20 s 时 W = 123 / 134 / 212；4 卡、γ<sub>plan</sub> = 1 时 R<sub>FF</sub> = 45，R<sub>HiAR</sub> = 56。</p>
+</section>
+
+<!-- =============================== 05 =============================== -->
+<section id="s5">
+  <h2><span class="no">05</span>渲染器的一次前向：读什么、写什么</h2>
+  <p class="lede">这是整篇论文最核心的一个操作（式 2）：一次普通的渲染器前向，既推进了当前块，又顺手把本块的 KV 留给后面的块。没有任何只为建缓存而跑的前向。</p>
+  <figure>
+    <div class="hs">
+    <svg class="wide" viewBox="0 0 1000 300" role="img" aria-label="渲染器一次前向的输入输出">
+      <defs>
+        <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink2)"/></marker>
+      </defs>
+      <rect x="20" y="16" width="250" height="62" rx="8" style="fill:var(--plan-soft);stroke:var(--plan);stroke-width:1.5"/>
+      <text x="36" y="41" class="svgtxt" style="font-weight:600;font-size:13.5px">锚点窗口 A<tspan dy="3" font-size="10">Γ(i)</tspan></text>
+      <text x="36" y="63" class="svgtxt" style="fill:var(--ink2)">3 个干净锚点的 KV · σ = 0 · 过去+未来</text>
+      <rect x="20" y="112" width="250" height="62" rx="8" style="fill:var(--ff-soft);stroke:var(--ff);stroke-width:1.5"/>
+      <text x="36" y="137" class="svgtxt" style="font-weight:600;font-size:13.5px">当前块 x<tspan dy="3" font-size="10">i,k</tspan></text>
+      <text x="36" y="159" class="svgtxt" style="fill:var(--ink2)">3 个潜帧 · 噪声 σ<tspan dy="3" font-size="9">k</tspan></text>
+      <rect x="20" y="208" width="250" height="62" rx="8" style="fill:var(--surf2);stroke:var(--op-hi);stroke-width:1.5"/>
+      <text x="36" y="233" class="svgtxt" style="font-weight:600;font-size:13.5px">第 k 步历史库 B<tspan dy="3" font-size="10">k</tspan></text>
+      <text x="36" y="255" class="svgtxt" style="fill:var(--ink2)">≤ 5 个前面块在第 k 步留下的 KV · σ<tspan dy="3" font-size="9">k</tspan></text>
+
+      <path d="M270,47 C315,47 315,112 358,116" style="fill:none;stroke:var(--plan);stroke-width:1.6" marker-end="url(#arr2)"/>
+      <path d="M270,143 L358,143" style="fill:none;stroke:var(--ff);stroke-width:1.6" marker-end="url(#arr2)"/>
+      <path d="M270,239 C315,239 315,174 358,170" style="fill:none;stroke:var(--op-hi);stroke-width:1.6" marker-end="url(#arr2)"/>
+
+      <rect x="360" y="84" width="250" height="120" rx="10" style="fill:var(--surf2);stroke:var(--ink2);stroke-width:1.5"/>
+      <text x="485" y="112" text-anchor="middle" class="svgtxt" style="font-weight:600;font-size:14px">渲染器前向（第 k 步）</text>
+      <text x="485" y="136" text-anchor="middle" class="svgmono" style="fill:var(--ink2)">F^R_θ(x_i,k, c, τ_k ; A, B_k)</text>
+      <text x="485" y="162" text-anchor="middle" class="svgtxt" style="fill:var(--ink2)">Q：当前块</text>
+      <text x="485" y="182" text-anchor="middle" class="svgtxt" style="fill:var(--ink2)">K/V：锚点 + 历史 + 自己</text>
+
+      <path d="M610,118 C650,118 655,78 698,78" style="fill:none;stroke:var(--ink2);stroke-width:1.6" marker-end="url(#arr2)"/>
+      <path d="M610,170 C650,170 655,212 698,212" style="fill:none;stroke:var(--ink2);stroke-width:1.6" marker-end="url(#arr2)"/>
+
+      <rect x="700" y="40" width="280" height="76" rx="8" style="fill:var(--surf);stroke:var(--ff);stroke-width:1.5"/>
+      <text x="716" y="63" class="svgtxt" style="font-weight:600;font-size:13.5px">速度 v̂ → Euler 一步</text>
+      <text x="716" y="84" class="svgmono" style="fill:var(--ink2)">x_i,k−1 = x_i,k − (σ_k − σ_k−1)·v̂</text>
+      <text x="716" y="104" class="svgtxt" style="fill:var(--ink3)">→ 发给下一张卡（第 k−1 步）</text>
+      <rect x="700" y="176" width="280" height="76" rx="8" style="fill:var(--surf);stroke:var(--op-hi);stroke-width:1.5"/>
+      <text x="716" y="199" class="svgtxt" style="font-weight:600;font-size:13.5px">本块的 K, V（顺手产出）</text>
+      <text x="716" y="220" class="svgtxt" style="fill:var(--ink2)">写入本卡的第 k 步历史库</text>
+      <text x="716" y="240" class="svgtxt" style="fill:var(--ink3)">只保留最近 H = 5 块（Tail_H）</text>
+
+      <path d="M840,252 L840,288 L145,288 L145,272" style="fill:none;stroke:var(--op-hi);stroke-width:1.4;stroke-dasharray:5 4" marker-end="url(#arr2)"/>
+      <text x="492" y="282" text-anchor="middle" class="svgtxt" style="fill:var(--ink2)">下一块 i+1 在同一步直接读取，不需要任何额外前向</text>
+    </svg>
+    </div>
+    <span class="swipe">← 可左右滑动 →</span>
+    <figcaption><b>对应论文 Fig. 2(b) 与式 (2)。</b>一次前向同时产出两样东西：推进当前块的速度 v̂，以及留给后面块的 K/V。历史库 B<sub>k</sub> 只存放同一步的 KV，所以 4 个阶段各有一个历史库，正好各放在负责该阶段的那张卡上。</figcaption>
+  </figure>
+
+  <p>每块能看的上下文和两个基线一样，都是 21 个潜帧位置（W<sub>ctx</sub> = 21）：</p>
+  <div class="budget" aria-label="上下文预算 21 个潜帧"><span class="b-plan" style="flex:3">锚点 3</span><span class="b-hist" style="flex:15">同阶段历史 15（5 块）</span><span class="b-cur" style="flex:3">当前 3</span></div>
+  <p class="small">规划器也是 21：已完成的锚点最多 18 个（6 个 block）+ 当前 block 3 个。论文由此推出 H = ⌊(21 − 3 − 3)/3⌋ = 5、H<sub>P</sub> = ⌊(21 − 3)/3⌋ = 6。</p>
+
+  <h3>两种记忆，两个时间尺度</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th></th><th class="l"><span class="dot plan"></span>稀疏干净锚点 KV</th><th class="l"><span class="dot ff"></span>密集同阶段历史</th></tr></thead>
+      <tbody>
+        <tr><td>谁产生</td><td class="l">规划器，每个 block 生成完后做 1 次 σ = 0 的提取前向</td><td class="l">渲染器每次去噪顺手产生</td></tr>
+        <tr><td>多干净</td><td class="l">σ = 0</td><td class="l">σ<sub>k</sub>：0.999 → 0.937 → 0.833 → 0.624</td></tr>
+        <tr><td>方向</td><td class="l">过去 + 未来两侧</td><td class="l">只有过去</td></tr>
+        <tr><td>时间跨度</td><td class="l">窗口 20 个潜帧 ≈ 5 s；规划器自身记忆 18 个锚点 ≈ 45 s</td><td class="l">5 块 = 15 个潜帧 ≈ 3.75 s</td></tr>
+        <tr><td>负责</td><td class="l">粗结构、外观、长程一致</td><td class="l">细节运动、最近的演化</td></tr>
+        <tr><td>代价</td><td class="l">N<sub>P</sub>(S + 1) 次规划器前向（20 s：15 次）</td><td class="l">0</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>两者缺一不可的证据在表 3 下：只用同阶段历史时，VBench 的时间闪烁项算不出来，Total 和 Quality 都没有分（Semantic 0.732）；只用“干净历史 + 未来锚点”时 Total 0.826，而且回到了 Self-Forcing 式的高延迟；两者合用得 0.838。但表里<b>没有“只有锚点、没有密集历史”这一行</b>。如果只靠锚点就够，所有块彼此独立，可以完全并行，比 wavefront 还快；这一行缺失，同阶段历史到底贡献多少就说不清（存疑 #7）。</p>
+</section>
+
+<!-- =============================== 06 =============================== -->
+<section id="s6">
+  <h2><span class="no">06</span>规划器与锚点窗口 Γ(i)</h2>
+  <p class="lede">锚点每隔 Δ = 10 个潜帧放一个（约 2.5 s），外加最后一个位置。规划器每次生成 3 个锚点（一个 block），走 4 步去噪，再做 1 次 σ = 0 的干净 KV 提取，然后自回归地做下一个 block。渲染器的第 i 块只读一个 3 锚点的局部窗口，窗口把这块“夹”在中间。</p>
+  <div class="eq">P = { mΔ | mΔ &lt; L } ∪ { L − 1 },&nbsp;&nbsp; Γ(i) = { 2uΔ, (2u+1)Δ, (2u+2)Δ },&nbsp; u = ⌊3i / 2Δ⌋<span class="no">式 (1) · §3</span></div>
+  <figure>
+    <div class="ctrls">
+      <span class="lbl">视频长度</span>
+      <div class="seg" id="tlLen"><button data-v="21" aria-pressed="false">5 s</button><button data-v="81" aria-pressed="true">20 s</button><button data-v="141" aria-pressed="false">35 s</button><button data-v="261" aria-pressed="false">65 s</button></div>
+      <label class="sl">渲染器第 i 块<input type="range" id="tlI" min="0" max="26" step="1" value="2"><output id="tlIOut">2</output></label>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--plan)"></i>锚点（深浅 = 所属规划器 block）</span>
+      <span><i style="background:var(--ff)"></i>当前块</span>
+      <span><i style="background:color-mix(in srgb,var(--ff) 40%,transparent)"></i>同阶段历史（≤ 5 块）</span>
+      <span><i style="background:var(--plan-soft);border:1px solid var(--plan)"></i>本块读取的锚点</span>
+    </div>
+    <div class="hs"><svg id="figTL" class="wide" viewBox="0 0 1000 210" role="img" aria-label="锚点、规划器 block 与渲染器块的时间线"></svg></div>
+    <span class="swipe">← 可左右滑动 →</span>
+    <div class="readout" id="tlOut"></div>
+    <figcaption><b>拖动滑块看任意一块读什么。</b>20 s（81 潜帧）时 9 个锚点 {0, 10, …, 80} 分成 3 个规划器 block；4 个窗口 {0,10,20}、{20,30,40}、{40,50,60}、{60,70,80} 相邻共用端点，分别管 7、7、6、7 块，对应论文说的“每个窗口管 6 到 7 块”。“最少前瞻”是渲染这一块之前，规划器必须已经定下来的内容比这块领先多远（按 block 粒度）。这对交互很关键，见 §10。</figcaption>
+  </figure>
+  <ul class="tight">
+    <li><b>规划器 = 大步长的 Self-Forcing。</b>block 之间用干净 KV（先做完、再提取），历史最多 6 个 block（18 个锚点 ≈ 45 s）。一次规划跳 30 个潜帧，渲染器一次只跳 3 个，自回归深度约少 10 倍。</li>
+    <li><b>锚点只当条件，不进输出。</b>渲染器会把锚点位置也重新生成一遍。直接把锚点拼进视频会出现周期性色差，§07 讲原因。</li>
+    <li><b>“两侧”并不总成立。</b>按公式，第 13 块（潜帧 39–41）用窗口 {20, 30, 40}，潜帧 41 落在窗口右端之外。每 20 个潜帧最多有 1 个位置这样，影响很小，但和“窗口夹住每个区域”的说法不完全一致（存疑 #16）。</li>
+    <li><b>四组测试长度都恰好对齐。</b>21、81、141、261 潜帧时 L − 1 都是 10 的倍数，锚点数 3、9、15、27 都能被 3 整除，所以规划器 block（1、3、5、9 个）都是满的。任意长度下的边界处理，论文只说“用可用的边界侧锚点”。</li>
+  </ul>
+</section>
+
+<!-- =============================== 07 =============================== -->
+<section id="s7">
+  <h2><span class="no">07</span>为什么锚点位置还要重画一遍</h2>
+  <p class="lede">看起来更省的做法是：锚点位置直接用规划器生成的潜变量，渲染器只填中间。作者试了两种这样的“拼接”方案：锚点 KV 用规划器算的，或者把锚点潜变量送进渲染器算 KV。两种都出现周期性色差，每 2.5 s 一次。最终方案里，锚点只当条件，所有输出位置都由渲染器生成。</p>
+  <p>其实拼接本来也省不了多少：渲染器按 3 个潜帧一块往前走，锚点只占 81 个位置里的 9 个，而且它们分散在不同的块里，一块都跳不过去。</p>
+
+  <h3>表 6(a)：接缝统计（越低越好）</h3>
+  <div class="tbl-wrap">
+    <table id="tblSeam">
+      <thead><tr><th>去噪步数</th><th class="l">最终锚点来源</th><th class="l">锚点 KV 来源</th><th class="l">锚点接缝</th><th class="l">块接缝</th><th class="l">块内</th><th class="l">周期总和</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p class="small">论文定义：各列是归一化的相邻帧亮度跳变。“锚点接缝”在锚点/非锚点交界处测，“块接缝”在远离锚点的渲染块边界测，“块内”是两者都不是的过渡；“周期总和”把一个锚点周期内所有过渡超出“块内”的部分加起来。</p>
+  <ul class="tight">
+    <li><b>50 步（单因素比较）：</b>把锚点 KV 换成渲染器版，只小幅改善（锚点接缝 3.93 → 3.34）；把最终锚点换成渲染器输出，改善大得多（3.93 → 1.83）。所以“谁来画最终那一帧”比“KV 从哪来”更要紧。</li>
+    <li><b>4 步（部署配置）：</b>锚点接缝 6.20 → 2.43（−61%），周期总和 9.55 → 5.61。注意这两行同时换了两个因素。</li>
+    <li><b>我注意到：</b>FF 自己的 4 步结果里，块接缝 2.50 与锚点接缝 2.43 相当，都约是块内过渡 1.26 的 2 倍；拼接变体的块接缝反而只有 1.68。论文只讨论了锚点接缝。这个度量的“块内”还混有同一潜帧内部的过渡（每个潜帧解码出 4 帧，其中 3 次过渡在潜帧内部），所以 2 倍不能直接当成“块边界很糟”，但也说明块边界不是无缝的（存疑 #3）。</li>
+  </ul>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>表 6(b)：拼接为什么会错位</h4>
+      <div class="tbl-wrap" style="margin:6px 0 10px">
+        <table>
+          <thead><tr><th>检查点</th><th>锚点帧</th><th>渲染帧</th><th>差</th></tr></thead>
+          <tbody>
+            <tr><td>50 步 SFT</td><td>87.804</td><td>87.898</td><td>−0.094</td></tr>
+            <tr><td>4 步蒸馏 · 冻结骨干</td><td>98.192</td><td>99.364</td><td>−1.172</td></tr>
+            <tr><td>4 步蒸馏 · 放开骨干</td><td>130.043</td><td>136.287</td><td>−6.244</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">平均亮度。SFT 后两者几乎一样；蒸馏后差距放大约 12 倍（1.172 / 0.094），放开骨干后再放大约 5 倍（6.244 / 1.172）。渲染器的亮度涨得比规划器多，锚点一拼进去就显得偏暗。</p>
+    </div>
+    <div class="card">
+      <h4>表 6(c)：换成真实视频的锚点呢？</h4>
+      <div class="tbl-wrap" style="margin:6px 0 10px">
+        <table>
+          <thead><tr><th>锚点来源</th><th>锚点偏移</th><th>块中对照</th><th>色度占比</th><th>配对 t</th></tr></thead>
+          <tbody>
+            <tr><td>真实视频编码</td><td>9.47</td><td>0.52</td><td>49%</td><td>4.34</td></tr>
+            <tr><td>规划器生成</td><td>3.00</td><td>0.37</td><td>47%</td><td>11.51</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">用真实视频的锚点去拼接，接缝还在，而且更大。所以问题不只是“规划器画得不好”，而是两个角色的输出接口本身不匹配；将近一半的偏移是色度，不只是亮度。</p>
+    </div>
+  </div>
+
+  <div class="callout mine">
+    <span class="lab">我的补充 · 表 6 还透露了一件论文没讨论的事</span>
+    <p>平均亮度本身从 SFT 后的约 88 升到了蒸馏后的 130–136。论文没给单位，若是 0–255 灰度，约 +50%。这是拼接变体的统计，但训练配方与最终模型相同。再加上表 6(c) 里真实锚点的接缝比生成锚点大三倍，可以推断：蒸馏后渲染器的输出统计已经明显偏离真实视频。DMD 配 CFG 3.0 的教师容易把画面推向更亮、更饱和，而 VBench 的美学和成像质量分可能偏爱这类画面。论文没有报告亮度或饱和度漂移（存疑 #9）。</p>
+  </div>
+</section>
+
+<!-- =============================== 08 =============================== -->
+<section id="s8">
+  <h2><span class="no">08</span>训练：一个骨干、两个角色、两个阶段</h2>
+  <p class="lede">规划器和渲染器共享 Wan2.1-1.3B 的全部权重，只靠两样小东西区分角色：一个角色嵌入向量（每个角色一个，零初始化，和时间步嵌入一起经 AdaLN 注入），以及一套 rank-256 的 LoRA（作用在自注意力的 Q、K、V、O 和交叉注意力的 Q、O 上）。VAE 冻结。</p>
+  <p class="small">推理测速时，两套 LoRA 各自合并进骨干，变成两个完整权重的模型。4 卡版本在“规划器 → 渲染器”交界处换一次权重：1.3B 需 0.10–0.13 s，14B 需 0.13–0.17 s，都计入了延迟。流式版本两个模型各自常驻在自己的卡上。</p>
+
+  <h3>阶段一：打包 SFT（真实视频，1,800 步）</h3>
+  <p>一个 20 s 训练片段（81 个潜帧）在<b>一次前向</b>里同时训练两个角色。按正文逐项数，打包序列有 155 个潜帧位置（论文没给总数，这是我数的）：</p>
+  <div class="pack" aria-label="打包序列组成">
+    <span class="p0" style="flex:9">P₀ 干净锚点 9</span>
+    <span class="ps" style="flex:9">P_σ 带噪锚点 9</span>
+    <span class="rs" style="flex:81">I_σ 渲染器目标 81（全部位置）</span>
+    <span class="rb" style="flex:56">重定基 4 × (干净 6 + 带噪 8) = 56</span>
+  </div>
+  <ul class="tight">
+    <li><b>注意力掩码：</b>规划器 block 看自己和更早 block 的干净副本（teacher forcing）；渲染器第 i 块看自己、前 ≤ 5 块（同一 σ），以及 Γ(i) 选出的干净锚点；4 条重定基序列彼此隔离。<b>唯一的跨角色连接</b>是渲染器读干净锚点。</li>
+    <li><b>噪声：</b>每个片段只采一个 σ，所有带噪副本共用；同一个潜变量的不同副本共用同一个 ε；干净副本只提供 KV。</li>
+    <li><b>损失：</b>规划器 9 个、渲染器 81 个、重定基 32 个位置的速度 MSE，各自取平均后相加；文本 10% dropout。</li>
+    <li><b>为什么要 20 s 片段：</b>5 s 片段只有 3 个锚点，也就是 1 个 block，规划器学不到 block 之间的自回归。蒸馏类方法受教师 5 s 窗口所限，而 SFT 直接用真实视频，片段多长都可以。</li>
+    <li><b>时间重定基：</b>从 {1, …, 9} 里采 4 个不同的偏移 o，裁出帧 [4o, 4o + 281)，重置因果 VAE 后重新编码成 71 个潜帧，取局部位置 {0, 10, …, 70} 的 8 个锚点（block 大小 3 + 3 + 2）。作用是给稀疏的规划器多一些样本，并让锚点相对内容的“相位”变化；每段重新编码时，第一个潜帧都是只含 1 帧的“首帧潜变量”。</li>
+    <li><b>超参：</b>AdamW（β₁ = 0，β₂ = 0.999，wd 0.01），梯度裁剪 1.0，lr 1e-5（前 100 步 warmup 后恒定），batch 128，EMA 0.999。1,800 × 128 ≈ 23 万个片段，约为 256K 数据集的 0.9 个 epoch（我算的）。</li>
+  </ul>
+
+  <h3>阶段二：self-rollout DMD 蒸馏（100 次生成器更新）</h3>
+  <div class="flow">
+    <div><b>采样出口步 k*</b> ~ U{1,2,3,4}。比 k* 更早的步不留梯度（沿用 Self-Forcing 的随机截断）。</div>
+    <div><b>规划器 rollout</b>：3 个 block {0,10,20}、{30,40,50}、{60,70,80}，每个 block 后做一次 σ = 0 的 KV 提取；后面的 block 读它时 detach。</div>
+    <div><b>渲染器</b>：每一步对全部 81 个潜帧做一次打包前向（块因果掩码），到 k* 停下，得到 x̂₀。</div>
+    <div><b>切 tile 打分</b>：[0,21) [21,41) [41,61) [61,81)。后三个前面各加一个“图像头”：把前一段最后一帧解码再重新编码，加同一噪声水平（独立采样）的噪声，预测结果丢弃。</div>
+    <div><b>两个分数网络</b>：真实分数 Wan2.1-14B（CFG 3.0），critic Wan2.1-1.3B + LoRA（guidance 1.0），逐 tile 给出 DMD 目标。</div>
+    <div><b>梯度路径</b>：后面的块 → 前面的块；渲染器 → 规划器，只经过“k* 时渲染器读锚点 KV”这一条路。</div>
+  </div>
+  <p class="small">600 步，生成器 : critic = 1 : 5，所以生成器只更新 100 次；batch 128；生成器 lr 1e-5，critic LoRA lr 1e-6；EMA 0.999；学生时间步 (999, 937, 833, 624)。</p>
+
+  <div class="callout mine">
+    <span class="lab">我读出的三点</span>
+    <ul class="tight">
+      <li><b>规划器在阶段二没有直接的损失。</b>它只通过“渲染器读锚点”间接受训，锚点本身的分布可以漂，只要渲染器觉得好用。表 6(b) 的亮度差说明它确实漂了。</li>
+      <li><b>DMD 基本不监督 5 s 以上的一致性。</b>教师每次只看 20 个潜帧加一个带噪图像头。长程一致主要靠 SFT 阶段的真实 20 s 视频和规划器结构。</li>
+      <li><b>100 次生成器更新很少。</b>HiAR 训了 20k 步（batch 64）。HiAR 还发现这类 self-rollout DMD 越训越容易塌成低运动，所以另加了 forward-KL 正则；FF 没有任何防塌缩项，也没报告运动量（存疑 #2）。</li>
+    </ul>
+  </div>
+
+  <h3>训练消融（表 3 上）</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>累加配置</th><th>SFT Total</th><th>Quality</th><th>Semantic</th><th>蒸馏后 Total</th><th>Quality</th><th>Semantic</th></tr></thead>
+      <tbody>
+        <tr><td>双角色 SFT</td><td>0.8172</td><td>0.8371</td><td>0.7376</td><td>0.8184</td><td>0.8332</td><td>0.7593</td></tr>
+        <tr><td>+ 时间重定基</td><td class="dn">0.8150</td><td>0.8345</td><td>0.7371</td><td>0.8198</td><td>0.8338</td><td>0.7638</td></tr>
+        <tr class="ours"><td>+ 角色嵌入与 LoRA</td><td>0.8205</td><td>0.8377</td><td>0.7516</td><td class="best">0.8380</td><td class="best">0.8593</td><td class="dn">0.7528</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">SFT 列用 50 步采样，蒸馏列用 4 步。“时间重定基提供了更好的初始化”：它让 SFT 阶段 Total −0.0022，蒸馏后 +0.0014，都在单次运行的噪声范围内。角色 LoRA 带来的 +0.018 几乎全在 Quality（+0.0255），Semantic 反而 −0.011。</p>
+</section>
+
+<!-- =============================== 09 =============================== -->
+<section id="s9">
+  <h2><span class="no">09</span>速度：实测、模型与口径</h2>
+  <p class="lede">测量口径（附录 A.2）：只计去噪路径，从第一次规划器或基线前向开始，到最后一张卡拿到全部潜变量为止。规划器前向、缓存操作、同步通信、权重切换都算在内；文本编码和 VAE 解码不算。每格是 20 个视频的均值，取最慢的那张卡。1.3B 在 H100 上测，14B 在 GB300 上测（14B 只测速）。</p>
+
+  <figure>
+    <div class="ctrls">
+      <span class="lbl">设置</span>
+      <div class="seg" id="latPreset">
+        <button data-v="s13_480_1" aria-pressed="false">1.3B·480p·单卡</button>
+        <button data-v="s13_480" aria-pressed="true">1.3B·480p·4 卡</button>
+        <button data-v="s13_720" aria-pressed="false">1.3B·720p·4 卡</button>
+        <button data-v="s14_480" aria-pressed="false">14B·480p·4 卡</button>
+        <button data-v="s14_720" aria-pressed="false">14B·720p·4 卡</button>
+      </div>
+      <label class="ck"><input type="checkbox" id="latBidir"> 显示双向基线</label>
+    </div>
+    <div class="legend" id="latLegend"></div>
+    <div class="hs"><svg id="figLat" class="wide" viewBox="0 0 760 340" role="img" aria-label="去噪路径延迟随视频时长的变化"></svg></div><span class="swipe">← 可左右滑动 →</span>
+    <div class="tip" id="latTip"></div>
+    <figcaption><b>去噪路径延迟（秒，越低越好）随视频时长的变化，数据来自表 4。</b>“FF（4 卡）”取两种规划器分配里较快的那个（480p 通常是单卡规划器，720p 是上下文并行）。“FF 流式”多用 1 张卡专门跑规划器。1.3B·480p 下 SF 的 4 卡上下文并行反而比单卡慢，论文在比较时用的是它的单卡数字。</figcaption>
+  </figure>
+  <div class="tbl-wrap"><table id="tblLat"><thead></thead><tbody></tbody></table></div>
+  <p class="small" id="latNote"></p>
+
+  <h3>前向计数模型：自己算一遍</h3>
+  <p>论文的式 (3)(4) 把延迟近似成“轮数 × 每轮时间”。下面的计算器用 HiAR 4 卡 65 s 的实测值反推每轮时间，再预测其他格子。可以调 γ（上下文并行的加速比）看盈亏平衡点在哪。</p>
+  <figure>
+    <div class="ctrls">
+      <span class="lbl">设置</span>
+      <div class="seg" id="calcPreset">
+        <button data-v="s13_480" aria-pressed="true">1.3B·480p</button>
+        <button data-v="s13_720" aria-pressed="false">1.3B·720p</button>
+        <button data-v="s14_480" aria-pressed="false">14B·480p</button>
+        <button data-v="s14_720" aria-pressed="false">14B·720p</button>
+      </div>
+      <span class="lbl">时长</span>
+      <div class="seg" id="calcLen"><button data-v="21" aria-pressed="false">5 s</button><button data-v="81" aria-pressed="true">20 s</button><button data-v="141" aria-pressed="false">35 s</button><button data-v="261" aria-pressed="false">65 s</button></div>
+    </div>
+    <div class="ctrls">
+      <label class="sl">规划器 γ<sub>plan</sub><input type="range" id="calcGp" min="0.5" max="4" step="0.05" value="1"><output id="calcGpOut">1.00</output></label>
+      <label class="sl">SF 的 γ<sub>SF</sub><input type="range" id="calcGs" min="0.5" max="4" step="0.05" value="1"><output id="calcGsOut">1.00</output></label>
+    </div>
+    <div class="tbl-wrap"><table id="tblCalc"><thead><tr><th>方法</th><th>单卡总前向 W</th><th>4 卡轮数 R</th><th>预测（s）</th><th>实测（s）</th><th>预测 / 实测</th></tr></thead><tbody></tbody></table></div>
+    <div class="readout" id="calcOut"></div>
+    <figcaption><b>怎么读。</b>每轮时间 t = HiAR 4 卡 65 s 实测 ÷ 176 轮。γ<sub>SF</sub> = 1 表示 SF 用单卡；论文实测的 4 卡 CP 在 1.3B·480p 约相当于 γ ≈ 0.9，在 14B·720p 约相当于 γ ≈ 2.8（我按同一模型反推）。<b>盈亏平衡</b>：FF 比 HiAR 快，需要 γ<sub>plan</sub> 大于读数里的阈值（γ<sub>plan</sub> 小于 1 时直接用单卡规划器，等价于 γ = 1）；FF 比 SF 快，需要 γ<sub>SF</sub> 小于另一个阈值。模型在长视频下对 HiAR、SF 相当准。对 FF 偏差大一些：720p 和 14B 下会高估（前几块和规划器的上下文短、前向更便宜，大负载下这点更明显）；1.3B·480p 下反而低估，65 s 约 −11%。</figcaption>
+  </figure>
+
+  <h3>我反推的 γ<sub>plan</sub></h3>
+  <p>FF 与 FF-CP 的差别只在规划器那一段：<span class="mv">T<sub>FF</sub> − T<sub>FF-CP</sub> = T<sub>plan</sub>(1 − 1/γ<sub>plan</sub>)</span>。流式实验里单独测过规划器全程耗时 T<sub>plan</sub>（9 个 block：480p 5.617 s，720p 17.956 s；论文没写是哪个模型，按量级应是 1.3B）。代入 1.3B·65 s 的两对数字：480p 得 γ<sub>plan</sub> ≈ 0.88（CP 反而更慢），720p 得 γ<sub>plan</sub> ≈ 1.74。两者都高于 261 潜帧时的阈值 0.52，与论文的结论一致：480p 用单卡规划器更快，720p 用 CP 更快，两者都快过 HiAR。</p>
+
+  <h3>延迟 ≠ 成本</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>1.3B·480p·65 s</th><th>卡数</th><th>延迟（s）</th><th>GPU·秒</th><th>相对 SF 单卡</th></tr></thead>
+      <tbody>
+        <tr><td><span class="dot sf"></span>Self-Forcing</td><td>1</td><td>57.89</td><td>57.9</td><td>1.00×</td></tr>
+        <tr><td><span class="dot ff"></span>FlashForward</td><td>1</td><td>59.64</td><td>59.6</td><td>1.03×</td></tr>
+        <tr><td><span class="dot stream"></span>FlashForward 流式</td><td>5</td><td>14.53</td><td>72.7</td><td>1.26×</td></tr>
+        <tr><td><span class="dot ff"></span>FlashForward</td><td>4</td><td>21.29</td><td>85.2</td><td>1.47×</td></tr>
+        <tr><td><span class="dot hiar"></span>HiAR</td><td>1</td><td>94.74</td><td>94.7</td><td>1.64×</td></tr>
+        <tr><td><span class="dot hiar"></span>HiAR</td><td>4</td><td>24.67</td><td>98.7</td><td>1.70×</td></tr>
+        <tr><td><span class="dot sf"></span>Self-Forcing（CP）</td><td>4</td><td>65.14</td><td>260.6</td><td>4.50×</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">GPU·秒 = 延迟 × 卡数（我算的）。FF 优化的是<b>单条视频的墙钟延迟</b>：4 卡时每条视频花的 GPU·秒比 SF 单卡多 47%。如果是离线批量生成，4 张卡各跑一个 SF 的总吞吐更高。流式版本因为规划器与渲染器重叠，成本反而比 4 卡版低。显存方面（表 5），FF 的每卡峰值与 HiAR 相差不超过 0.3 GiB；14B·720p 时每卡约 113 GiB，超过 80 GB 的 H100，这可能也是 14B 改在 GB300 上测的原因（论文没说）。</p>
+</section>
+
+<!-- =============================== 10 =============================== -->
+<section id="s10">
+  <h2><span class="no">10</span>流式与前瞻：规划器跟得上吗，要提前多久</h2>
+  <p class="lede">主表的 4 卡配置先让 4 张卡一起跑完整个规划器，再切到渲染器，这是为了和基线用同样的卡数。部署时可以单独给规划器 1 张卡：第一个锚点 block 一出来，渲染就开始，后面的 block 与渲染并行生成。</p>
+  <div class="grid3">
+    <div class="card plan"><h4>论文实测</h4><p>480p（论文没写模型，按量级应是 1.3B）：规划器全程从 1 个 block 的 0.510 s 涨到 9 个 block 的 5.617 s，渲染器等锚点的时间却一直是 0.506–0.509 s，约等于第一个 block 的耗时。720p：1.067 → 17.956 s，等待 1.051–1.066 s。9 个 block 时，只有 9%（480p）和 6%（720p）的规划时间暴露在关键路径上。</p></div>
+    <div class="card"><h4>流式加速</h4><p>相对 4 卡 FF（单卡规划器）：1.3B 在 20–65 s 上快 1.18–1.47×；14B 快 1.15–1.36×（14B 的 5 卡跨了两台 GB300，每个锚点 block 都要过节点间链路）。</p></div>
+    <div class="card ff"><h4>我算的</h4><p>1.3B·480p·65 s 流式：1041 帧只用 14.53 s，约 72 帧/秒，是实时播放（16 fps）的 4.5 倍（只算去噪）。</p></div>
+  </div>
+
+  <figure>
+    <div class="ctrls">
+      <span class="lbl">锚点步长 Δ</span>
+      <div class="seg" id="stDelta"><button data-v="5" aria-pressed="false">5</button><button data-v="10" aria-pressed="true">10（论文）</button><button data-v="15" aria-pressed="false">15</button><button data-v="20" aria-pressed="false">20</button></div>
+      <span class="lbl">时长</span>
+      <div class="seg" id="stLen"><button data-v="81" aria-pressed="false">20 s</button><button data-v="141" aria-pressed="false">35 s</button><button data-v="261" aria-pressed="true">65 s</button></div>
+    </div>
+    <div class="readout" id="stOut"></div>
+    <div class="legend">
+      <span><i style="background:var(--plan)"></i>最少必需前瞻（规划器恰好按需生成）</span>
+      <span><i style="background:var(--ink2);height:2px"></i>实际前瞻（规划器不限速，一直往前跑）</span>
+      <span><i style="background:var(--risk-soft);border:1px solid var(--risk)"></i>渲染器在等锚点</span>
+    </div>
+    <div class="hs"><svg id="figStream" class="wide" viewBox="0 0 760 300" role="img" aria-label="每一块渲染时，规划器已经定下来的内容领先多少秒"></svg></div><span class="swipe">← 可左右滑动 →</span>
+    <div class="tip" id="stTip"></div>
+    <figcaption><b>模拟器：1 张卡跑规划器（每个 block 4 次去噪 + 1 次提取 = 5 轮），4 张卡跑渲染器（稳态每轮出 1 块）。</b>纵轴是渲染第 i 块时，已经定下的锚点比这块领先多少秒。Δ = 10 时规划器每 5 轮产出 30 个潜帧的锚点，渲染器要 10 轮才用完，规划器有 2 倍富余；Δ = 5 时两者速度持平：渲染器在开头要等几轮（20 s 时共 3 轮），之后规划器再没有任何余量。模型假设规划器和渲染器的单次前向一样贵。</figcaption>
+  </figure>
+
+  <h3>这对交互式世界模型意味着什么</h3>
+  <p>论文说的“流式”指边生成边输出，不是交互。两者的区别恰好落在锚点上：渲染器的每一块都要读<b>未来</b>的锚点，所以渲染某一块之前，规划器必须已经定下它之后若干秒的内容。按 Δ = 10、按需生成算，这个“最少前瞻”在 0.5–9.5 s 之间周期变化（上图紫色柱）；如果规划器不限速，实际前瞻会越跑越远。</p>
+  <ul class="tight">
+    <li>用户的动作要影响画面，得先影响规划器的下一个 block，再等渲染器走到那里。响应延迟是秒级，而游戏类交互通常要求百毫秒级。</li>
+    <li>Self-Forcing 论文批评滚动扩散“过早承诺未来帧、削弱实时控制的响应”，FF 的未来锚点是同一个问题的稀疏版本。</li>
+    <li>同阶段 KV 复用本身和交互不冲突，冲突的是“未来”锚点。一个值得试的方向是只用过去的稀疏干净锚点，见 §14。</li>
+  </ul>
+</section>
+
+<!-- =============================== 11 =============================== -->
+<section id="s11">
+  <h2><span class="no">11</span>质量：分数、来源和缺的那几列</h2>
+  <p class="lede">质量只在 1.3B·480p 上评。两套评测：VBench-1.0（20 s 视频，照 HiAR 的做法）和 VBench-Long（20 / 35 / 65 s，四个方法由作者统一跑）。</p>
+
+  <h3>VBench-1.0（表 2 上）与被删掉的两列</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>模型</th><th>Total ↑</th><th>Quality ↑</th><th>Semantic ↑</th><th style="background:var(--risk-soft)">Dynamic ↑<span class="d">HiAR 原表有，FF 表无</span></th><th style="background:var(--risk-soft)">Drift ↓<span class="d">HiAR 原表有，FF 表无</span></th></tr></thead>
+      <tbody>
+        <tr class="dimrow"><td>LTX-Video（5 s）</td><td>0.766</td><td>0.789</td><td>0.685</td><td>0.458</td><td>–</td></tr>
+        <tr class="dimrow"><td>Wan2.1-T2V-1.3B（5 s）</td><td>0.802</td><td>0.813</td><td>0.766</td><td>0.690</td><td>–</td></tr>
+        <tr class="dimrow"><td>NOVA</td><td>0.773</td><td>0.777</td><td>0.757</td><td>0.444</td><td>–</td></tr>
+        <tr class="dimrow"><td>Pyramid Flow</td><td>0.775</td><td>0.804</td><td>0.670</td><td>0.161</td><td>–</td></tr>
+        <tr class="dimrow"><td>SkyReels-V2-1.3B</td><td>0.788</td><td>0.808</td><td>0.707</td><td>0.333</td><td>–</td></tr>
+        <tr class="dimrow"><td>MAGI-1-4.5B</td><td>0.757</td><td>0.785</td><td>0.647</td><td>0.486</td><td>–</td></tr>
+        <tr class="sep"><td>CausVid</td><td>0.764</td><td>0.771</td><td>0.740</td><td>0.621</td><td>0.842</td></tr>
+        <tr><td><span class="dot sf"></span>Self-Forcing</td><td>0.805</td><td>0.829</td><td>0.708</td><td>0.542</td><td>0.355</td></tr>
+        <tr><td><span class="dot cf"></span>Causal Forcing</td><td>0.810</td><td>0.837</td><td>0.701</td><td>0.672</td><td>0.615</td></tr>
+        <tr><td><span class="dot hiar"></span>HiAR</td><td>0.821</td><td>0.846</td><td>0.723</td><td class="best">0.686</td><td class="best">0.257</td></tr>
+        <tr class="ours"><td><span class="dot ff"></span><b>FlashForward</b></td><td class="best">0.838</td><td class="best">0.859</td><td class="best">0.753</td><td class="na">未报告</td><td class="na">未报告</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">前三列：10 个基线逐格与 HiAR 论文表 1 一致（我核对过），FF 这一行是作者自己跑的。后两列取自 HiAR 论文表 1，Drift 是 HiAR 自定义的漂移指标。蒸馏类 AR 方法和 FF 的 Total 都满足 VBench 的加权 (4 × Quality + Semantic) / 5；LTX-Video、Wan2.1、Pyramid Flow 三行差 0.002 左右，原表（HiAR 表 1）即如此。</p>
+
+  <h3>VBench-Long：时长拉长后掉多少</h3>
+  <figure>
+    <div class="ctrls">
+      <span class="lbl">指标</span>
+      <div class="seg" id="vblMetric"><button data-v="T" aria-pressed="true">Total</button><button data-v="Q" aria-pressed="false">Quality</button><button data-v="S" aria-pressed="false">Semantic</button></div>
+    </div>
+    <div class="legend" id="vblLegend"></div>
+    <div class="hs"><svg id="figVBL" class="wide" viewBox="0 0 760 320" role="img" aria-label="VBench-Long 分数随视频时长变化"></svg></div><span class="swipe">← 可左右滑动 →</span>
+    <div class="tip" id="vblTip"></div>
+    <figcaption><b>表 2 下，纵轴不从 0 开始。</b>FF 的 Total 从 20 s 到 65 s 只掉 0.0009，HiAR 掉 0.0046，SF 掉 0.045，Causal Forcing 掉 0.064。Semantic 上 HiAR 在 20 s 时反而比 FF 高（0.7565 vs 0.7481）。值得留意：在作者统一跑的 20 s 结果里，SF（0.8258）和 HiAR（0.8265）几乎打平，而抄来的 VBench-1.0 表里两者差 0.016。</figcaption>
+  </figure>
+  <div class="tbl-wrap"><table id="tblVBL"><thead></thead><tbody></tbody></table></div>
+
+  <h3>条件消融（表 3 下）</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>跨块条件</th><th>Total</th><th>Quality</th><th>Semantic</th><th class="l">说明</th></tr></thead>
+      <tbody>
+        <tr><td>只有同阶段历史</td><td class="na">失败</td><td class="na">失败</td><td>0.732</td><td class="l">闪得太厉害，VBench 算不出时间闪烁分</td></tr>
+        <tr><td>干净历史 + 未来锚点</td><td>0.826</td><td>0.849</td><td>0.735</td><td class="l">相当于换了生成顺序的 Self-Forcing，延迟高</td></tr>
+        <tr class="ours"><td>同阶段历史 + 干净锚点（FF）</td><td class="best">0.838</td><td class="best">0.859</td><td class="best">0.753</td><td class="l">最终方案</td></tr>
+        <tr class="dimrow"><td>只有锚点、没有密集历史</td><td>—</td><td>—</td><td>—</td><td class="l"><b>缺失</b>（存疑 #7）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">定性结论（Fig. 5）：SF 累积色偏；HiAR 不崩但会变形，浣熊的脸和耳朵变了、织毛衣的人变成娃娃脸、披风下的手臂一直模糊；FF 保持一致且保留运动，锚点帧和非锚点帧看不出差别。这些只有图，没有对应的数值指标。</p>
+</section>
+
+<!-- =============================== 12 =============================== -->
+<section id="s12">
+  <h2><span class="no">12</span>我复算 / 核验过的</h2>
+  <p class="lede">对照论文正文、附录和表格逐项算过。“≈”表示吻合但有保留。</p>
+  <ul class="vlist">
+    <li><b>所有速度区间</b>都能从表 4 复算：比 HiAR 1.16–1.69×、比 SF 1.42–2.92×（各方法取 ≤ 4 卡最快配置）；65 s 时比双向快 3.54–8.44×、比 SF 快 1.49–3.06×、比 HiAR 快 1.16–1.68×（4 卡口径）；单卡比 HiAR 快 1.54–1.59×、比 SF 慢 1.9–4.2%；流式 1.18–1.47×（1.3B）和 1.15–1.36×（14B）；图 4 的 12 个 n× 标签。</li>
+    <li><b>式 (3)</b> 的 123 / 134 / 212；<b>式 (4)</b> 的阈值：γ<sub>plan</sub> 需大于 0.83 / 0.58 / 0.54 / 0.52，γ<sub>SF</sub> 需小于 2.27 / 2.98 / 3.12 / 3.21（21 / 81 / 141 / 261 潜帧）。</li>
+    <li><b>“16 格里 14 格最快”</b>及两个例外（1.3B·480p·5 s HiAR 2.06 s；14B·720p·5 s SF 15.84 s）；5 s 时双向基线在五个设置里都最快。</li>
+    <li class="x"><b>VBench Total = (4 × Quality + Semantic) / 5</b> 对表 2 下、表 3 的每一行，以及表 2 上的蒸馏类方法和 FF 都成立；表 2 上的 LTX-Video、Wan2.1、Pyramid Flow 三行差约 0.002，是从 HiAR 表 1 原样带过来的。</li>
+    <li><b>表 2 上 10 个基线</b>的 Total / Quality / Semantic 与 HiAR 论文表 1 逐格一致；HiAR 原表的 Dynamic 与 Drift 两列没有被带过来。</li>
+    <li><b>流式暴露比例</b>：0.509 / 5.617 = 9.1%，1.066 / 17.956 = 5.9%。</li>
+    <li><b>Γ(i) 的窗口分配</b>：81 潜帧时四个窗口各管 7 / 7 / 6 / 7 块，对应“每个窗口 6–7 块”。规划器一次跳 30 个潜帧，渲染器一次跳 3 个。</li>
+    <li><b>学生时间步</b> (999, 937, 833, 624) 就是 Self-Forcing 的 [1000, 750, 500, 250] 经 shift = 5 映射的结果。</li>
+    <li><b>时长换算</b>：21 / 81 / 141 / 261 潜帧 = 81 / 321 / 561 / 1041 帧 ≈ 5 / 20 / 35 / 65 s。上下文 3 + 15 + 3 = 21；规划器 18 + 3 = 21；H = 5、H<sub>P</sub> = 6。</li>
+    <li><b>表 6(b)</b> 的差值，以及“扩大一个数量级”（12.5×）、“再扩大数倍”（5.3×）的说法。</li>
+    <li class="x"><b>轮数模型对实测</b>：取每轮 0.140 s（1.3B·480p·H100），HiAR 4 卡 56 / 96 / 176 轮 → 7.85 / 13.46 / 24.67 s（实测 7.67 / 13.31 / 24.67）；SF 单卡 134 / 434 次 → 18.8 / 60.8 s（实测 17.44 / 57.89）；FF 4 卡 45 轮 → 6.31 s（实测 6.32），但 65 s 时 135 轮 → 18.9 s，实测 21.29 s，高出约 13%。</li>
+    <li class="x"><b>反推 γ<sub>plan</sub></b>：1.3B·65 s 时 480p ≈ 0.88、720p ≈ 1.74，与“480p 单卡规划器快、720p CP 快”一致。</li>
+    <li><b>HiAR 的论文事实</b>（arXiv 2603.08703）：上下文取本步输出噪声级 t<sub>j+1</sub>；表 2 测过 t<sub>c</sub> = t<sub>j</sub>（Quality 0.799，Drift 0.184，Smooth 0.978）；把写缓存和下一块去噪融合为一次调用；训练 5 s 片段、20k 步、教师 Wan2.1-14B。<b>Self-Forcing</b>（arXiv 2506.08009）：DMD 真实分数 Wan2.1-T2V-14B、CFG 3.0，data-free，5 s。</li>
+  </ul>
+</section>
+
+<!-- =============================== 13 =============================== -->
+<section id="s13">
+  <h2><span class="no">13</span>存疑清单</h2>
+  <p class="lede">按严重程度分三档。<span class="tag risk">高</span>动摇论文的主要结论；<span class="tag med">中</span>削弱某项结论，或影响复现与使用；<span class="tag low">低</span>口径或表述问题。每条都尽量给出能消除疑问的实验。</p>
+  <div class="dfilter">
+    <div class="seg" id="dbFilter"><button data-v="all" aria-pressed="true">全部 19</button><button data-v="h" aria-pressed="false">高 2</button><button data-v="m" aria-pressed="false">中 10</button><button data-v="l" aria-pressed="false">低 7</button></div>
+    <button type="button" class="btn" id="dbOpen">全部展开 / 收起</button>
+  </div>
+  <div class="doubts" id="doubts">
+
+    <details class="dbt h" open><summary><span class="id">#1</span><span class="t"><span class="tag risk">高</span> 质量领先无法归因于“状态契约”：数据和训练时长跟基线不一样</span></summary><div class="body">
+      <p>FF 的训练与三个基线差别很大。FF 用 256K 条真实 Shutterstock 视频，在 20 s 片段上做 SFT，再做 20 s 的 self-rollout DMD。Self-Forcing 和 HiAR 是 data-free 的（只用教师生成的 ODE 对，DMD 只需要提示词），Causal Forcing 用的也是 Wan 生成的视频和 ODE 轨迹；三者都没用真实视频，训练片段都是 5 s（见 Self-Forcing 附录 A、HiAR 实现细节）。</p>
+      <p>长视频上的稳定性（VBench-Long 20 → 65 s 几乎不掉），很可能主要来自“见过 20 s 真实视频”和“20 s 自展开蒸馏”，而不一定来自同阶段 KV 本身。论文里唯一控制了训练配方的对照是表 3 下的“干净历史 + 未来锚点”：0.826 对 0.838，差 0.012，单次运行，没有方差。</p>
+      <p class="fix"><b>怎样消除：</b>用同一份数据、同样的 20 s 配方重训 HiAR（最好也重训 SF），再比较质量。</p>
+    </div></details>
+
+    <details class="dbt h" open><summary><span class="id">#2</span><span class="t"><span class="tag risk">高</span> 没有运动和漂移指标；照搬 HiAR 的表时删掉了 Dynamic 与 Drift 两列</span></summary><div class="body">
+      <p>表 2 上半的 10 个基线，Total / Quality / Semantic 与 HiAR 论文表 1 逐格一致。但 HiAR 原表还有 Dynamic（动态程度）和 Drift（漂移）两列，恰好是 HiAR 的强项（Dynamic 0.686，SF 0.542；Drift 0.257，最低）。FF 的表里没有这两列，FF 自己也没报告。</p>
+      <p>这两项恰恰是这类方法最该看的。HiAR 发现，带噪上下文加 self-rollout DMD 越训越容易走“低运动捷径”；静止的视频在一致性、闪烁、平滑度上都得高分，会把 Quality 抬上去。FF 没有任何防塌缩项（HiAR 用了 forward-KL 正则），生成器只更新 100 步。在作者统一跑的 VBench-Long 上，FF 对 HiAR 的领先全部来自 Quality（20 s：Quality +0.0195，Semantic −0.0084）。“保持运动”目前只有定性图支持。</p>
+      <p class="fix"><b>怎样消除：</b>补 VBench 16 个分项（至少 Dynamic Degree、Motion Smoothness、Temporal Flickering），以及 HiAR 的 Drift 或光流幅度统计。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#3</span><span class="t"><span class="tag med">中</span> 块边界的细节衔接没有保证，论文没有讨论</span></summary><div class="body">
+      <p>同阶段契约下，第 i 块最后一步（σ 0.624 → 0）只能看到第 i−1 块 σ = 0.624 的状态。高频细节是在最后一步定下来的，而这一步里相邻两块彼此看不到对方的结果。这正是 HiAR 式 (8) 说的违反“时间因果性”；HiAR 的同契约消融里，运动平滑度确实从 0.988 降到 0.978。</p>
+      <p>FF 自己的表 6(a) 也有迹象：最终 4 步模型的块接缝 2.50、锚点接缝 2.43，都约为块内过渡 1.26 的 2 倍，而块边界每 0.75 s 就有一个。正文只说锚点帧与非锚点帧“没有可见差异”。需要说明：这个度量的“块内”混有同一潜帧内部的过渡，2 倍不能直接换算成可见程度；SF 和 HiAR 也没有同一指标可比。</p>
+      <p class="fix"><b>怎样消除：</b>分别报告块边界处、块内跨潜帧处、潜帧内部三类过渡的 LPIPS 或光流残差，并给出 SF、HiAR 的同一指标。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#4</span><span class="t"><span class="tag med">中</span> 4 组测速设置里有 3 组没有质量证据，其中 14B 两组明确没有训练</span></summary><div class="body">
+      <p>附录 A.2 写明，14B 的行是“systems-only timing”：用 14B 骨干实例化同样的张量形状、掩码、缓存路径和调度，没有训练 14B 的 FlashForward。1.3B 在 720p 也没有质量评测（Wan2.1-1.3B 本身主要面向 480p），论文没说这一组是否有训练好的模型。</p>
+      <p>所以“跨 1.3B / 14B、480p / 720p 都更快”至少在 14B 上是调度开销的比较，不是训练好的模型之间的比较。论文有披露，但摘要和 Fig. 4 很容易让人以为有 14B 模型。同阶段噪声历史在更大模型、更高分辨率下是否同样可用，还是开放问题。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#5</span><span class="t"><span class="tag med">中</span> “长程一致”的定量证据偏弱</span></summary><div class="body">
+      <p>作者在 Fig. 5 里指出 HiAR 的浣熊脸和耳朵变了、织毛衣的人变成娃娃脸；可 HiAR 的 VBench-Long Total 从 20 s 到 65 s 只掉了 0.0046。说明 VBench-Long 对这类身份漂移不敏感，拿它支撑“更好的时间一致性”说服力有限。</p>
+      <p>论文没有身份一致性曲线（例如每一段与首段的 DINO 或人脸相似度随时间的变化），没有人评；所有质量数字都是单次运行，没有置信区间。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#6</span><span class="t"><span class="tag med">中</span> 规划器要外推到训练没见过的长度，位置编码怎么给没说</span></summary><div class="body">
+      <p>训练时每个片段只有 81 个潜帧、3 个规划器 block，规划器最多看到 2 个历史 block（6 个锚点）。推理 65 s 时有 261 个潜帧、9 个 block，历史上限 H<sub>P</sub> = 6 个 block（18 个锚点），这种上下文长度在训练中从未出现。</p>
+      <p>论文没交代 RoPE 的时间位置怎么分配：是绝对位置 0–260，还是滑窗后重置？这决定了方法能不能复现，也决定了能不能继续往更长外推。65 s 的分数不错，但机制没有解释。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#7</span><span class="t"><span class="tag med">中</span> 关键消融缺失：“只有锚点”，以及 Δ、H、窗口大小</span></summary><div class="body">
+      <p>表 3 下只有三行：只有同阶段历史（失败）、干净历史 + 锚点（0.826）、同阶段历史 + 锚点（0.838）。缺“只有锚点、没有密集历史”这一行。如果只靠锚点就够，所有块彼此独立，可以完全并行，比 wavefront 更快；如果不够，才能证明同阶段历史的价值。</p>
+      <p>锚点步长 Δ = 10、历史长度 H = 5、3 锚点窗口都是固定的，没做质量消融；Δ 的选择理由只来自速率匹配，而那个论证本身也不严（#14）。另外，“干净历史 + 锚点”反而比“噪声历史 + 锚点”差 0.012，这个反直觉的结果没有解释。HiAR 的“干净上下文放大误差”也许能解释，但没有验证，而且是单次运行。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#8</span><span class="t"><span class="tag med">中</span> VBench-1.0 表的数字来源混合，评测协议没写</span></summary><div class="body">
+      <p>10 个基线的数字直接抄自 HiAR，FF 那一行是作者自己跑的。提示词是否经过 LLM 扩写、每个提示词采几个样本、种子怎么定，都没有说明；而 VBench 对提示词扩写很敏感（Self-Forcing 论文明确用 Qwen 扩写了测试提示词）。</p>
+      <p>在作者统一跑的 VBench-Long 20 s 里，SF 0.8258、HiAR 0.8265，几乎打平；抄来的表里两者差 0.016。混合来源的表只能粗看。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#9</span><span class="t"><span class="tag med">中</span> 蒸馏后亮度大幅上升，输出统计偏离真实视频</span></summary><div class="body">
+      <p>表 6(b) 里，锚点帧和渲染帧的平均亮度从 SFT 后的约 88，升到蒸馏后（放开骨干）的 130–136。论文没给单位，若是 0–255 灰度，约 +50%。这些是拼接变体的统计，但训练配方与最终模型相同。</p>
+      <p>表 6(c) 指向同一方向：用真实视频编码的锚点去拼接，接缝 9.47，反而比生成锚点的 3.00 大三倍，说明渲染器的输出已经明显偏离真实视频的统计。DMD 配 CFG 3.0 的教师容易把画面推向更亮、更饱和，VBench 的美学和成像质量分可能偏爱这种画面。论文没有报告亮度、饱和度随时间或随训练的变化。</p>
+      <p class="fix"><b>怎样消除：</b>报告亮度均值和 HSV 饱和度（HiAR 的 Drift 包含饱和度，不含亮度），以及与真实视频分布的距离（如 FVD）。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#10</span><span class="t"><span class="tag med">中</span> 延迟口径：只算去噪；首帧被规划器序言拖慢；快不等于省</span></summary><div class="body">
+      <p><b>① 只算去噪。</b>计时只覆盖去噪路径，文本编码和 VAE 解码都不算。去噪压到 6 s 这个量级后，解码 1041 帧这类固定开销的占比会上升，端到端加速会小于表中数字。</p>
+      <p><b>② 首帧延迟。</b>4 卡非流式配置要先跑完整个规划器 rollout：65 s 视频要做 45 次串行的规划器前向，全都发生在第一块画面出来之前。论文承认这会拉长 TTFF，但没有列出任何方法的首帧延迟。流式 5 卡版本把这段降到约 1 个 block（480p 约 0.51 s）。</p>
+      <p><b>③ 成本。</b>单卡时 FF 比 SF 慢 1.9–4.2%。4 卡 FF 生成一条 65 s 1.3B·480p 视频花 85 GPU·秒，SF 单卡 58 GPU·秒。离线批量生成时，4 张卡各跑一个 SF 的吞吐更高。FF 优化的是单条视频的墙钟延迟（§09）。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#11</span><span class="t"><span class="tag med">中</span> 缺少与最接近方法的定量比较，也没点明 HiAR 已测过同一契约</span></summary><div class="body">
+      <p>MMPL（先规划关键帧再多卡并行填充）、Diagonal Distillation（同样用带噪上下文提速）、Rolling Forcing、LongLive 都是速度或长视频方向的直接竞争者，论文没有与它们做定量比较（LongLive 只在训练细节里借用了它的图像头做法）。N-C-Causal-rCM 出现在表 1，但没测延迟和质量。</p>
+      <p>HiAR 表 2 已经测过 t<sub>c</sub> = t<sub>j</sub>，也就是 FF 的同阶段历史。FF 在讨论同阶段历史的缺点时引用了 HiAR（[5, 65]），但没有点明 HiAR 已经测过这份契约及其结果（Quality 0.799、Drift 0.184），读者看不出这个设计点已有先例。</p>
+    </div></details>
+
+    <details class="dbt m"><summary><span class="id">#12</span><span class="t"><span class="tag med">中</span> 目前无法复现</span></summary><div class="body">
+      <p>截至 2026-09-29 没有代码和权重；训练数据是非公开的 Shutterstock 256K；训练用了多少 GPU·时没有报告。项目页有交互演示和对比视频，但没有仓库链接。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">#13</span><span class="t"><span class="tag low">低</span> 附录把单卡总工作量之比当作 4 卡的理论上限</span></summary><div class="body">
+      <p>A.2.2 说：81 潜帧时原始计数给出 212 / 123 = 1.72× 的优势，实测 1.21–1.68×，14B·720p 的 1.68× 已接近理论值 1.72×。但 212 / 123 是单卡总工作量之比。4 卡上该用轮数模型：R<sub>HiAR</sub> = 56，R<sub>FF</sub> = 27 + 15/γ + 3；即使 γ = 4（完美 CP），上限也只有 56 / 33.75 ≈ 1.66×。实测 1.68× 反而略超这个上限，说明两种方法的单次前向成本并不相同（例如规划器和前几块的上下文短、更便宜）。结论不受影响，“接近理论值”的说法混用了口径。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">#14</span><span class="t"><span class="tag low">低</span> “速率匹配”论证不严：Δ = 10 时规划器有 2 倍富余</span></summary><div class="body">
+      <p>A.1 说：一个规划器 block 要 5 轮，而一个 3 锚点窗口够渲染器用 6–7 轮，所以规划器跟得上。但相邻窗口共用端点，一个 block 的 3 个新锚点实际覆盖 30 个潜帧，渲染器要 10 轮才能用完。所以 Δ = 10 时规划器有 2 倍富余，产耗真正持平在 Δ ≈ 5（§10 的模拟器能直接看到）。“规划器能保持领先”的结论成立，“Δ = 10 是匹配出来的”说法不准确；Δ 对质量的影响也没测。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">#15</span><span class="t"><span class="tag low">低</span> 计时用的 HiAR 是哪种实现，没有说明</span></summary><div class="body">
+      <p>HiAR 原文把“写入前一块缓存”和“去噪下一块”融合成一次 6 潜帧的调用（每个阶段 N + 2 次调用）。FF 的式 (3)(4) 把它记为 2 次块前向。按 FLOPs 这大体公平；但在 1.3B·480p 这种小负载下，融合调用的墙钟时间可能明显少于 2 倍。论文没说计时用的 HiAR 是否融合。</p>
+      <p>从实测看，没有压低基线的迹象：FF 测到的 HiAR 4 卡比 SF 单卡快 2.27×，高于 HiAR 论文自报的约 1.8×。受影响更大的是次要结论“单卡时 FF 比 HiAR 快 1.54–1.59×”。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">#16</span><span class="t"><span class="tag low">低</span> 几处公式与叙述的小不一致</span></summary><div class="body">
+      <ul class="tight">
+        <li>Γ(i) 不总是“两侧”：第 13 块（潜帧 39–41）的窗口是 {20, 30, 40}，潜帧 41 在窗口之外。</li>
+        <li>式 (1) 的锚点集合包含 {L − 1}，Alg. 1 却写 M ← ⌊(L − 1)/Δ⌋ + 1，两者只在 L − 1 能被 Δ 整除时一致；论文所有测试长度恰好都能整除。</li>
+        <li>H 的公式用 B<sub>P</sub> 表示锚点窗口大小，只是数值上碰巧都等于 3。</li>
+      </ul>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">#17</span><span class="t"><span class="tag low">低</span> Fig. 1(a) 给 Self-Forcing 标的是较慢的那个配置</span></summary><div class="body">
+      <p>图 1(a) 标“Clean history 4 GPUs: 480p 65.1 s”，这是 SF 用 4 卡上下文并行的时间；SF 单卡只要 57.9 s。正文“每个方法取 ≤ 4 卡最快配置”的口径是对的（1.42–2.92× 用的就是单卡 SF），只是图注口径不一致，视觉上把差距放大了。</p>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">#18</span><span class="t"><span class="tag low">低</span> 表 3 上与表 6(a) 的解读偏乐观</span></summary><div class="body">
+      <ul class="tight">
+        <li>“时间重定基提供了更好的初始化”：它让 SFT 阶段 Total −0.0022、蒸馏后 +0.0014，都在单次运行的噪声范围内。</li>
+        <li>角色 LoRA 让蒸馏后 Quality +0.0255，Semantic 却 −0.011；而且三行是累加的，拆不开各自的贡献。</li>
+        <li>表 6(a) 的 4 步“部署对比”同时换了最终锚点来源和锚点 KV 来源两个因素，只有 50 步那三行是单因素比较。</li>
+      </ul>
+    </div></details>
+
+    <details class="dbt l"><summary><span class="id">#19</span><span class="t"><span class="tag low">低</span> 双向基线只能当算力参照</span></summary><div class="body">
+      <p>“Bidirectional” 在 65 s 时是一次性全注意力生成 261 个潜帧。Wan 1.3B 只在约 5 s 的片段上训练，一次生成 65 s 远超其训练范围，论文也没评它的质量，这一行只能当算力参照。它用几步采样也没有说明；从 5 s 单卡 3.31 s 推断，应该是少步。</p>
+    </div></details>
+  </div>
+</section>
+
+<!-- =============================== 14 =============================== -->
+<section id="s14">
+  <h2><span class="no">14</span>结论、做对的地方、对世界模型方向的启示</h2>
+  <h3>结论</h3>
+  <p class="prose">FlashForward 的核心是一个干净的系统观察：在少步 AR 扩散里，把跨块契约从“干净 / 稍干净”改成“同一步”，所有只为建缓存的前向都会消失，依赖图也自动变成 S 张卡的流水线。在“单条视频的墙钟延迟”上它确实赢了：≥ 20 s、≤ 4 卡时比 HiAR 快 1.16–1.69×，比 SF 快 1.42–2.92×，这些数字我全部复算过。代价是渲染器再也看不到任何干净的前文，所以作者引入规划器和稀疏干净锚点，把系统变成了“稀疏关键帧自回归 + 局部全片去噪”。</p>
+  <p class="prose">质量方面的结论（VBench 更高、65 s 不掉）目前证据偏弱：训练数据和时长与基线不同，没有运动和漂移指标，14B 与 720p 没有模型。速度结论可信，质量结论要等同配方对照和运动指标。</p>
+
+  <h3>做对的地方</h3>
+  <ul class="tight prose">
+    <li><b>“跨块状态契约”这个视角很干净。</b>把“记什么、多干净、何时可用”放在一张表里，就能直接推出计算图。</li>
+    <li><b>系统测量认真。</b>20 个视频取平均、取最慢的卡、记录所有卡的峰值显存，把权重切换时间也算进去；所有 AR 方法用同样的块大小和上下文预算；两种规划器分配都报了；5 s 和单卡时输给别人也如实写出。</li>
+    <li><b>有可检验的模型。</b>前向计数模型加盈亏平衡分析，并在 16 个格子上检验（两两预测 15/16 正确）。</li>
+    <li><b>表 6(c) 是个漂亮的隔离实验。</b>用真实视频锚点做对照，把“规划器画得差”和“输出接口不匹配”分开。</li>
+    <li><b>流式版本直接测了 anchor_wait</b>，验证了规划器不在关键路径上。</li>
+    <li><b>锚点只当条件、所有位置由渲染器生成。</b>决定简单，而且不额外花前向。</li>
+  </ul>
+
+  <h3>对交互式世界模型的启示</h3>
+  <ol class="tight prose">
+    <li><b>同阶段 KV 复用对任何少步 AR 世界模型都是“免费的流水线”。</b>动作条件、相机条件都不改变这个依赖结构。但它需要一个干净的结构来源来补回质量。</li>
+    <li><b>未来锚点和交互天然冲突。</b>渲染某一块之前，规划器必须已经定下它之后 0.5–9.5 s 的锚点（§10）。动作要影响画面，得先影响规划器的下一个 block，响应延迟是秒级。</li>
+    <li><b>值得试的替代：只用过去的稀疏干净锚点。</b>每隔 K 块做一次干净重编码，再配同阶段密集历史。这样不需要未来规划器，仍保留大部分流水线收益（K = 7 时每 28 次去噪前向多 1 次，约 +4%）。这是我的推测，论文没测。</li>
+    <li><b>多用户服务看单卡效率。</b>FF 单卡约等于 SF，它的优势只在“一条流独占多卡、要求低延迟”的场景。</li>
+    <li><b>评测要补块边界、动态程度和身份一致性曲线。</b>VBench-Long 的 Total 基本看不出这些问题。</li>
+  </ol>
+
+  <h3>最值钱的后续实验</h3>
+  <ol class="tight prose">
+    <li>同数据、同 20 s 配方重训 HiAR 和 SF（#1）。</li>
+    <li>补 Dynamic Degree、Drift、VBench 16 分项、亮度和饱和度（#2、#9）。</li>
+    <li>“只有锚点”消融；Δ ∈ {5, 10, 20} × H 的质量扫描（#7）。</li>
+    <li>块边界、块内跨潜帧、潜帧内部三类过渡的 LPIPS / 光流残差对比（#3）。</li>
+    <li>含 VAE 的端到端延迟，以及所有方法的首帧延迟（#10）。</li>
+    <li>65 s 上的身份一致性曲线、小规模人评、3 个种子的置信区间（#5）。</li>
+    <li>只用过去锚点、没有未来规划器的交互版本。</li>
+  </ol>
+
+  <div class="foot">
+    <p><b>信息来源：</b>FlashForward 论文 v1 全文，含附录 A–C（<a href="https://arxiv.org/abs/2609.32540" target="_blank" rel="noopener">arXiv 2609.32540</a>）；HiAR（<a href="https://arxiv.org/abs/2603.08703" target="_blank" rel="noopener">arXiv 2603.08703</a>）表 1、表 2、§3；Self-Forcing（<a href="https://arxiv.org/abs/2506.08009" target="_blank" rel="noopener">arXiv 2506.08009</a>）附录 A 与表 3；<a href="https://yikai-wang.github.io/FlashForward" target="_blank" rel="noopener">项目页</a>。</p>
+    <p>本页由读者整理，不是作者的说法；与论文冲突时以论文为准。标注“我算的”“我的理解”的内容是整理者的推导。整理于 2026-09-29。</p>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function(){
+"use strict";
+const NS="http://www.w3.org/2000/svg";
+function el(tag,attrs,parent,text){const e=document.createElementNS(NS,tag);if(attrs)for(const k in attrs){e.setAttribute(k,attrs[k]);}if(text!=null)e.textContent=text;if(parent)parent.appendChild(e);return e;}
+function clear(n){while(n.firstChild)n.removeChild(n.firstChild);}
+function $(s,r){return (r||document).querySelector(s);}
+function $$(s,r){return Array.from((r||document).querySelectorAll(s));}
+function segBind(root,cb){$$('button',root).forEach(b=>b.addEventListener('click',()=>{$$('button',root).forEach(x=>x.setAttribute('aria-pressed',x===b?'true':'false'));cb(b.dataset.v);}));}
+function segVal(root){const b=$('button[aria-pressed="true"]',root);return b?b.dataset.v:null;}
+const f2=v=>v.toFixed(2), f1=v=>v.toFixed(1), f3=v=>v.toFixed(3), f4=v=>v.toFixed(4);
+function tipAt(tip,evt,html){
+  const fig=tip.parentElement; tip.innerHTML=html; tip.classList.add('on');
+  const r=fig.getBoundingClientRect(); const tw=tip.offsetWidth, th=tip.offsetHeight;
+  let x=evt.clientX-r.left+14, y=evt.clientY-r.top+14;
+  if(x+tw>r.width-6) x=evt.clientX-r.left-tw-14;
+  if(x<6) x=6;
+  if(y+th>r.height-6) y=evt.clientY-r.top-th-14;
+  tip.style.left=x+'px'; tip.style.top=y+'px';
+}
+function tipOff(tip){tip.classList.remove('on');}
+function ensureTip(fig){let t=$('.tip',fig);if(!t){t=document.createElement('div');t.className='tip';fig.appendChild(t);}return t;}
+/* marker shapes (secondary encoding) */
+function marker(g,shape,x,y,color,size){
+  const s=size||4.5, st=`fill:${color};stroke:var(--surf);stroke-width:1.5`;
+  if(shape==='circle') return el('circle',{cx:x,cy:y,r:s,style:st},g);
+  if(shape==='square') return el('rect',{x:x-s,y:y-s,width:2*s,height:2*s,rx:1.2,style:st},g);
+  if(shape==='tri') return el('path',{d:`M${x},${y-s*1.25} L${x+s*1.15},${y+s*.85} L${x-s*1.15},${y+s*.85} Z`,style:st},g);
+  if(shape==='diamond') return el('path',{d:`M${x},${y-s*1.3} L${x+s*1.2},${y} L${x},${y+s*1.3} L${x-s*1.2},${y} Z`,style:st},g);
+  return el('circle',{cx:x,cy:y,r:s*.8,style:st},g);
+}
+function spreadLabels(items,minGap,lo,hi){ // items: {y}, mutates .ly
+  items.sort((a,b)=>a.y-b.y); items.forEach(it=>it.ly=it.y);
+  for(let pass=0;pass<30;pass++){let moved=false;
+    for(let i=1;i<items.length;i++){const d=items[i].ly-items[i-1].ly;if(d<minGap){const push=(minGap-d)/2;items[i-1].ly-=push;items[i].ly+=push;moved=true;}}
+    items.forEach(it=>{it.ly=Math.max(lo,Math.min(hi,it.ly));});
+    if(!moved)break;}
+}
+
+/* ---------- theme ---------- */
+const root=document.documentElement;
+try{const t=localStorage.getItem('ff-theme');if(t==='light'||t==='dark')root.setAttribute('data-theme',t);}catch(e){}
+$('#themeBtn').addEventListener('click',()=>{
+  const cur=root.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  const nx=cur==='light'?'dark':'light';root.setAttribute('data-theme',nx);
+  try{localStorage.setItem('ff-theme',nx);}catch(e){}
+});
+
+/* ---------- toc highlight ---------- */
+const tocLinks=$$('nav.toc a');
+if('IntersectionObserver' in window){
+  const io=new IntersectionObserver(es=>{es.forEach(en=>{if(en.isIntersecting){const id=en.target.id;tocLinks.forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+id));}});},{rootMargin:'-40% 0px -55% 0px'});
+  $$('section[id]').forEach(s=>io.observe(s));
+}
+
+/* ---------- shared geometry of FlashForward ---------- */
+const SIG=[0,0.624,0.833,0.937,0.999]; // SIG[k] = input noise of stage k (k=1..4); SIG[0]=0
+function layout(L,D){
+  D=D||10;
+  const P=[];for(let p=0;p<L;p+=D)P.push(p);
+  if(P[P.length-1]!==L-1)P.push(L-1);
+  const M=P.length, NP=Math.ceil(M/3), N=Math.ceil(L/3);
+  const win=[],needBlk=[];
+  for(let i=0;i<N;i++){
+    const u=Math.floor(3*i/(2*D));
+    const idx=[];for(const a of [2*u,2*u+1,2*u+2]){const c=Math.min(a,M-1);if(!idx.includes(c))idx.push(c);}
+    win.push(idx); needBlk.push(Math.floor(idx[idx.length-1]/3));
+  }
+  const blkLast=[];for(let j=0;j<NP;j++){blkLast.push(P[Math.min(3*j+2,M-1)]);}
+  return {L,D,P,M,NP,N,win,needBlk,blkLast};
+}
+const lat2s=p=>p/4; // 1 latent ≈ 4 frames = 0.25 s
+
+/* ================= §03 noise chart ================= */
+(function(){
+  const svg=$('#figNoise'); if(!svg) return;
+  const fig=svg.closest('figure'); const tip=ensureTip(fig);
+  const W=760,H=320,ml=62,mr=168,mt=20,mb=52; const pw=W-ml-mr, ph=H-mt-mb;
+  const steps=[4,3,2,1];
+  const X=j=>ml+pw*(j+.5)/4, Y=v=>mt+ph*(1-v);
+  const series=[
+    {key:'ff',name:'FlashForward',c:'var(--ff)',shape:'circle',v:[0.999,0.937,0.833,0.624],note:'同阶段 σ_k'},
+    {key:'hiar',name:'HiAR',c:'var(--hiar)',shape:'square',v:[0.937,0.833,0.624,0],note:'本步输出 σ_k−1'},
+    {key:'sf',name:'Self-Forcing',c:'var(--sf)',shape:'tri',v:[0,0,0,0],note:'干净 σ = 0'}
+  ];
+  const bound=[0.937,0.833,0.624,0];
+  const lg=$('#noiseLegend'); lg.innerHTML=series.map(s=>`<span><span class="dot ${s.key}"></span>${s.name}（${s.note}）</span>`).join('')+'<span><i style="background:none;border-top:2px dashed var(--ink3);height:0;width:18px"></i>本步输出噪声（HiAR 因果边界）</span><span><i style="background:var(--risk-soft);border:1px solid var(--risk)"></i>前驱比“本步之后的自己”更脏</span>';
+  // grid
+  for(let i=0;i<=4;i++){const v=i/4;el('line',{x1:ml,x2:ml+pw,y1:Y(v),y2:Y(v),style:'stroke:var(--grid)'},svg);el('text',{x:ml-8,y:Y(v)+4,'text-anchor':'end',class:'svgmono',style:'fill:var(--ink3)'},svg,v.toFixed(2));}
+  el('text',{x:16,y:mt+ph/2,transform:`rotate(-90 16 ${mt+ph/2})`,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink3)'},svg,'前驱的噪声水平 σ');
+  // violation region: above bound, between x of first and last step
+  let d=`M${X(0)},${Y(1)} `; bound.forEach((b,j)=>{d+=`L${X(j)},${Y(b)} `;}); d+=`L${X(3)},${Y(1)} Z`;
+  el('path',{d,style:'fill:var(--risk-soft);stroke:none'},svg);
+  el('polyline',{points:bound.map((b,j)=>`${X(j)},${Y(b)}`).join(' '),style:'fill:none;stroke:var(--ink3);stroke-width:2;stroke-dasharray:6 5'},svg);
+  steps.forEach((k,j)=>{
+    el('text',{x:X(j),y:mt+ph+20,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink2)'},svg,`第 ${j+1} 步`);
+    el('text',{x:X(j),y:mt+ph+36,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3)'},svg,`k=${k}：${SIG[k].toFixed(3)}→${SIG[k-1].toFixed(3)}`);
+  });
+  const labels=[];
+  series.forEach(s=>{
+    el('polyline',{points:s.v.map((v,j)=>`${X(j)},${Y(v)}`).join(' '),style:`fill:none;stroke:${s.c};stroke-width:2.2`},svg);
+    s.v.forEach((v,j)=>marker(svg,s.shape,X(j),Y(v),s.c,4.6));
+    labels.push({y:Y(s.v[3]),s});
+  });
+  spreadLabels(labels,15,mt+4,mt+ph+6);
+  labels.forEach(l=>{el('text',{x:X(3)+14,y:l.ly+4,class:'svgtxt',style:'fill:var(--ink);font-weight:600'},svg,l.s.name);});
+  el('text',{x:X(3)+14,y:Y(0.624)-14,class:'svgmono',style:'fill:var(--ff-ink)'},svg,'σ = 0.624');
+  // hit bands
+  steps.forEach((k,j)=>{
+    const r=el('rect',{x:ml+pw*j/4,y:mt,width:pw/4,height:ph,style:'fill:transparent;cursor:crosshair'},svg);
+    const html=`<b>第 ${j+1} 步（k=${k}）</b>：本块 σ ${SIG[k].toFixed(3)} → ${SIG[k-1].toFixed(3)}<br>`+series.map(s=>`<span class="dot ${s.key}"></span>${s.name}：前驱 σ = <b>${s.v[j].toFixed(3)}</b>`).join('<br>')+(j===3?'<br><span class="dim">最后一步：FF 的前驱仍有 62% 是噪声，信号只占 37.6%。</span>':'');
+    r.addEventListener('pointermove',e=>tipAt(tip,e,html)); r.addEventListener('pointerleave',()=>tipOff(tip));
+  });
+})();
+
+/* ================= §04 scheduler ================= */
+(function(){
+  const svg=$('#figSched'); if(!svg) return;
+  const fig=svg.closest('figure'); const tip=$('#schedTip');
+  const S=4;
+  let N=27, plan='one', gamma=1.8, tcur=null, playing=false, raf=0;
+  let ops=[], byId={}, Tmax=1, panels=[];
+
+  function build(){
+    ops=[];byId={};let id=0;
+    const L=3*N, lay=layout(L,10), NP=lay.NP;
+    const add=o=>{o.id=id++;ops.push(o);byId[o.id]=o;return o;};
+    const res={sf:{},hiar:{},ff:{}};
+    // ---- SF: one lane
+    {let t=0;const D={},E={};
+     for(let i=0;i<N;i++){
+       for(let k=4;k>=1;k--){const deps=[];if(k<4)deps.push(D[i+','+(k+1)].id);else for(let q=i-1;q>=Math.max(0,i-6);q--)deps.push(E[q].id);
+         D[i+','+k]=add({m:'sf',lane:0,t0:t,dur:1,type:'d',i,k,deps});t++;}
+       if(i<N-1){E[i]=add({m:'sf',lane:0,t0:t,dur:1,type:'e',i,k:0,deps:[D[i+',1'].id]});t++;}
+     }
+     res.sf={T:t,lanes:1,fin:i=>D[i+',1'].t0+1};}
+    // ---- HiAR: 4 lanes, lane r = stage 4-r
+    {const D={},E={};let T=0;
+     for(let r=0;r<S;r++){const k=S-r;
+       for(let i=0;i<N;i++){
+         if(i>=1){const e=add({m:'hiar',lane:r,t0:r+2*i-1,dur:1,type:'e',i:i-1,k,deps:[D[(i-1)+','+k].id]});E[(i-1)+','+k]=e;}
+         const deps=[];if(r>0)deps.push(D[i+','+(k+1)].id);for(let q=i-1;q>=Math.max(0,i-6);q--)deps.push(E[q+','+k].id);
+         const d=add({m:'hiar',lane:r,t0:r+2*i,dur:1,type:'d',i,k,deps});D[i+','+k]=d;T=Math.max(T,d.t0+1);
+       }}
+     res.hiar={T,lanes:4,fin:i=>D[i+',1'].t0+1};}
+    // ---- FF
+    {const D={},X={};let T=0;const lanes=plan==='stream'?5:4; const off=plan==='stream'?1:0;
+     // planner
+     const pdur=plan==='cp'?1/gamma:1; let pt=0; const blkReady=[];
+     for(let j=0;j<NP;j++){
+       let prev=null;
+       for(let k=4;k>=0;k--){
+         const deps=[];if(prev)deps.push(prev.id);else for(let q=j-1;q>=Math.max(0,j-6);q--)deps.push(X[q].id);
+         const type=k>0?'p':'x';
+         if(plan==='cp'){let first=null;for(let r=0;r<4;r++){const o=add({m:'ff',lane:r+off,t0:pt,dur:pdur,type,j,k,deps,group:null});if(!first)first=o;else o.group=first.id;}prev=ops[ops.length-4];prev.cp=true;}
+         else{prev=add({m:'ff',lane:plan==='stream'?0:0,t0:pt,dur:pdur,type,j,k,deps});}
+         if(k===0)X[j]=prev;
+         pt+=pdur;
+       }
+       blkReady.push(pt);
+     }
+     const P0=pt;
+     // renderer start times
+     const s=[];for(let i=0;i<N;i++){
+       const ready=plan==='stream'?blkReady[lay.needBlk[i]]:P0;
+       s.push(Math.max(i?s[i-1]+1:0,ready));}
+     for(let r=0;r<S;r++){const k=S-r;
+       for(let i=0;i<N;i++){
+         const deps=[];if(r>0)deps.push(D[i+','+(k+1)].id);for(let q=i-1;q>=Math.max(0,i-5);q--)deps.push(D[q+','+k].id);
+         const blks=[...new Set(lay.win[i].map(a=>Math.floor(a/3)))];blks.forEach(b=>deps.push(X[b].id));
+         const d=add({m:'ff',lane:r+off,t0:s[i]+r,dur:1,type:'d',i,k,deps,win:lay.win[i].map(a=>lay.P[a])});D[i+','+k]=d;T=Math.max(T,d.t0+1);
+       }}
+     res.ff={T,lanes,fin:i=>D[i+',1'].t0+1,P0,NP,stream:plan==='stream'};}
+    return res;
+  }
+  let R=null;
+  function draw(){
+    R=build(); clear(svg);
+    Tmax=Math.max(R.sf.T,R.hiar.T,R.ff.T);
+    const Wd=1000, lx=104, pw=Wd-lx-12, sx=pw/Tmax, lh=15, lg=3, th=22, pg=16;
+    const defs=el('defs',null,svg);
+    const p1=el('pattern',{id:'schHatch',width:5,height:5,patternUnits:'userSpaceOnUse',patternTransform:'rotate(45)'},defs);el('rect',{width:2,height:5,style:'fill:var(--waste)'},p1);
+    const p2=el('pattern',{id:'schPHatch',width:5,height:5,patternUnits:'userSpaceOnUse',patternTransform:'rotate(45)'},defs);el('rect',{width:2,height:5,style:'fill:var(--plan)'},p2);
+    let y=4; panels=[];
+    const defsP=[
+      {m:'sf',title:'Self-Forcing · 干净历史（串行链）',dot:'sf',lanes:['1 卡']},
+      {m:'hiar',title:'HiAR · 本步输出噪声级（4 卡流水 + 每步重编码）',dot:'hiar',lanes:['GPU0 k=4','GPU1 k=3','GPU2 k=2','GPU3 k=1']},
+      {m:'ff',title:'FlashForward · 同阶段 KV + 锚点（4 卡流水）',dot:'ff',lanes:R.ff.stream?['GPU4 规划器','GPU0 k=4','GPU1 k=3','GPU2 k=2','GPU3 k=1']:['GPU0 k=4','GPU1 k=3','GPU2 k=2','GPU3 k=1']}
+    ];
+    const laneY={};
+    defsP.forEach(p=>{
+      el('circle',{cx:8,cy:y+9,r:4.5,style:`fill:var(--${p.dot})`},svg);
+      el('text',{x:18,y:y+13,class:'svgtxt',style:'fill:var(--ink);font-weight:600'},svg,p.title);
+      const endT=R[p.m].T; el('text',{x:lx+endT*sx,y:y+13,'text-anchor':'end',class:'svgmono',style:'fill:var(--ink2)'},svg,endT%1?endT.toFixed(1)+' 轮':endT+' 轮');
+      y+=th; laneY[p.m]=[];
+      p.lanes.forEach((ln,li)=>{
+        el('rect',{x:lx,y:y,width:pw,height:lh,style:'fill:var(--surf2)'},svg);
+        el('text',{x:lx-6,y:y+11,'text-anchor':'end',class:'svgmono',style:'fill:var(--ink3);font-size:10px'},svg,ln);
+        laneY[p.m].push(y); y+=lh+lg;
+      });
+      panels.push({m:p.m,y0:laneY[p.m][0],y1:y});
+      y+=pg;
+    });
+    // time axis
+    const step=Tmax>150?20:Tmax>60?10:5;
+    for(let t=0;t<=Tmax;t+=step){el('line',{x1:lx+t*sx,x2:lx+t*sx,y1:y-10,y2:y-4,style:'stroke:var(--axis)'},svg);el('text',{x:lx+t*sx,y:y+8,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3);font-size:10px'},svg,t);}
+    el('text',{x:lx-18,y:y+8,'text-anchor':'end',class:'svgmono',style:'fill:var(--ink3);font-size:10px'},svg,'轮 →');
+    y+=16;
+    svg.setAttribute('viewBox',`0 0 ${Wd} ${y}`);
+    // ops
+    const g=el('g',null,svg);
+    ops.forEach(o=>{
+      const yy=laneY[o.m][o.lane];
+      const fill=o.type==='d'?'var(--op)':o.type==='e'?'url(#schHatch)':o.type==='p'?'var(--plan)':'url(#schPHatch)';
+      const stroke=o.type==='e'?'var(--waste)':o.type==='x'?'var(--plan)':'none';
+      const w=Math.max(o.dur*sx-(sx>3?1:0.3),0.6);
+      o.el=el('rect',{x:lx+o.t0*sx,y:yy+1,width:w,height:lh-2,rx:sx>6?2:0.5,class:'op',style:`fill:${fill};stroke:${stroke};stroke-width:${stroke==='none'?0:.8}`},g);
+      if(sx>=15&&o.type==='d'){el('text',{x:lx+o.t0*sx+w/2,y:yy+11,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink);font-size:9.5px;pointer-events:none'},g,o.i);}
+      o.el.addEventListener('pointerenter',e=>focus(o,e));
+      o.el.addEventListener('pointermove',e=>tipAt(tip,e,desc(o)));
+      o.el.addEventListener('pointerleave',()=>unfocus());
+    });
+    cursor=el('line',{x1:lx,x2:lx,y1:0,y2:y-20,class:'cursor'},svg);
+    geo={lx,sx};
+    const sl=$('#schedT'); sl.max=Tmax; sl.step=Tmax>100?0.5:0.1;
+    if(tcur==null||tcur>Tmax) tcur=Tmax; sl.value=tcur;
+    setT(tcur);
+  }
+  let cursor=null, geo={lx:0,sx:1};
+  function desc(o){
+    const sg=k=>`σ ${SIG[k].toFixed(3)}→${SIG[k-1].toFixed(3)}`;
+    const tt=`<span class="dim">轮 ${(+o.t0.toFixed(2))}–${(+(o.t0+o.dur).toFixed(2))}</span>`;
+    if(o.m==='sf'){ if(o.type==='d') return `<b>Self-Forcing</b> · 块 ${o.i} · 第 ${5-o.k} 步（${sg(o.k)}）<br>读：前 ≤ 6 块的干净 KV<br>${tt}`;
+      return `<b>Self-Forcing</b> · 块 ${o.i} · <span class="c-risk">仅建缓存</span><br>σ = 0 重编码，不推进输出；下一块要等它<br>${tt}`;}
+    if(o.m==='hiar'){ if(o.type==='d') return `<b>HiAR</b> · GPU${4-o.k} · 块 ${o.i} · 第 ${5-o.k} 步（${sg(o.k)}）<br>读：前 ≤ 6 块在 σ ${SIG[o.k-1].toFixed(3)} 的 KV（本卡刚重编码的）<br>${tt}`;
+      return `<b>HiAR</b> · GPU${4-o.k} · <span class="c-risk">仅建缓存</span><br>把块 ${o.i} 刚做完第 ${5-o.k} 步的结果在 σ ${SIG[o.k-1].toFixed(3)} 重编码，只为下一块<br>${tt}`;}
+    if(o.type==='p') return `<b>规划器</b> · block ${o.j} · 第 ${5-o.k} 步<br>锚点 {${[0,1,2].map(a=>(3*o.j+a)*10).filter(p=>p<3*N).join(', ')}}${o.dur<1?'<br>4 卡上下文并行，γ = '+gamma.toFixed(1):''}<br>${tt}`;
+    if(o.type==='x') return `<b>规划器</b> · block ${o.j} · σ = 0 提取干净锚点 KV<br>（每个 block 1 次，整段视频只有 ${R.ff.NP} 次）<br>${tt}`;
+    return `<b>FlashForward</b> · GPU${4-o.k} · 块 ${o.i} · 第 ${5-o.k} 步（${sg(o.k)}）<br>读：锚点 {${o.win.join(', ')}} + 前 ≤ 5 块第 ${5-o.k} 步的 KV<br>写：本块第 ${5-o.k} 步 KV（顺手产出，无额外前向）<br>${tt}`;
+  }
+  function focus(o){ unfocus(); o.el.classList.add('focus'); o.deps.forEach(d=>{const x=byId[d];if(x){x.el.classList.add('dep');if(x.cp){ops.filter(q=>q.group===x.id).forEach(q=>q.el.classList.add('dep'));}}}); }
+  function unfocus(){ $$('.op.focus,.op.dep',svg).forEach(n=>n.classList.remove('focus','dep')); tipOff(tip); }
+  function setT(t){
+    tcur=t; $('#schedTOut').textContent=`${t>=Tmax?Tmax.toFixed(0):t.toFixed(1)} 轮`;
+    ops.forEach(o=>{o.el.classList.toggle('fut',o.t0>=t-1e-9);});
+    if(cursor){const x=geo.lx+t*geo.sx;cursor.setAttribute('x1',x);cursor.setAttribute('x2',x);cursor.style.opacity=t>=Tmax?0:1;}
+    // readout (compact table)
+    const cnt=m=>{const o=ops.filter(q=>q.m===m);return {d:o.filter(q=>q.type==='d').length,e:o.filter(q=>q.type==='e').length,p:o.filter(q=>(q.type==='p'||q.type==='x')&&!q.group).length};};
+    const busy=m=>ops.filter(q=>q.m===m).reduce((a,q)=>a+q.dur,0);
+    const rows=[['sf','Self-Forcing'],['hiar','HiAR'],['ff','FlashForward']].map(([m,nm])=>{
+      const r=R[m],c=cnt(m);let done=0;for(let i=0;i<N;i++){if(r.fin(i)<=t+1e-9)done++;}
+      const util=busy(m)/(r.lanes*r.T);
+      return `<tr class="${m==='ff'?'ours':''}"><td><span class="dot ${m}"></span>${nm}</td><td>${done} / ${N}</td><td>${r.T%1?r.T.toFixed(1):r.T}（${r.lanes} 卡）</td><td>${c.d}</td><td>${c.e?'<span class="c-risk">'+c.e+'</span>':0}</td><td>${m==='ff'?c.p:'—'}</td><td>${c.d+c.e+c.p}</td><td>${(util*100).toFixed(0)}%</td></tr>`;
+    });
+    $('#schedOut').innerHTML=`<table><thead><tr><th>方法</th><th>已完成块</th><th>总轮数</th><th>去噪前向</th><th>仅建缓存</th><th>规划器</th><th>总前向</th><th>卡利用率</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+  }
+  function play(){
+    if(playing){stop();return;}
+    playing=true;$('#schedPlay').textContent='❚❚ 暂停';
+    if(tcur>=Tmax) tcur=0;
+    let last=performance.now(); const rate=Tmax/9; // whole timeline in ~9 s
+    const stepF=now=>{const dt=(now-last)/1000;last=now;let t=tcur+dt*rate;if(t>=Tmax){t=Tmax;setT(t);$('#schedT').value=t;stop();return;}setT(t);$('#schedT').value=t;raf=requestAnimationFrame(stepF);};
+    raf=requestAnimationFrame(stepF);
+  }
+  function stop(){playing=false;cancelAnimationFrame(raf);$('#schedPlay').textContent='▶ 播放';}
+  $('#schedPlay').addEventListener('click',play);
+  $('#schedT').addEventListener('input',e=>{stop();setT(+e.target.value);});
+  segBind($('#schedLen'),v=>{stop();N=+v;tcur=null;draw();});
+  segBind($('#schedPlan'),v=>{stop();plan=v;$('#schedGammaWrap').hidden=v!=='cp';tcur=null;draw();});
+  $('#schedGamma').addEventListener('input',e=>{gamma=+e.target.value;$('#schedGammaOut').textContent=gamma.toFixed(1);stop();tcur=null;draw();});
+  svg.addEventListener('pointerleave',unfocus);
+  draw();
+})();
+
+/* ================= §06 anchor timeline ================= */
+(function(){
+  const svg=$('#figTL'); if(!svg) return;
+  let L=81, i=2;
+  const sl=$('#tlI');
+  function draw(){
+    const lay=layout(L,10); const N=lay.N; if(i>N-1) i=N-1;
+    sl.max=N-1; sl.value=i; $('#tlIOut').textContent=i;
+    clear(svg);
+    const Wd=1000, lx=84, pw=Wd-lx-14, cw=pw/L, X=p=>lx+p*cw;
+    const yB=18, yA=58, yR=112, rh=24;
+    el('text',{x:lx-8,y:yA+4,'text-anchor':'end',class:'svgtxt',style:'fill:var(--ink2)'},svg,'规划器锚点');
+    el('text',{x:lx-8,y:yR+rh/2+4,'text-anchor':'end',class:'svgtxt',style:'fill:var(--ink2)'},svg,'渲染器潜帧');
+    // blocks
+    for(let j=0;j<lay.NP;j++){
+      const a0=lay.P[3*j], a1=lay.P[Math.min(3*j+2,lay.M-1)];
+      const x0=X(a0)+cw/2, x1=X(a1)+cw/2;
+      el('path',{d:`M${x0},${yB+14} L${x0},${yB+8} L${x1},${yB+8} L${x1},${yB+14}`,style:`fill:none;stroke:${j%2?'var(--plan2)':'var(--plan)'};stroke-width:1.4`},svg);
+      if(x1-x0>40||L<=81) el('text',{x:(x0+x1)/2,y:yB+3,'text-anchor':'middle',class:'svgmono',style:'fill:var(--plan-ink);font-size:10px'},svg,`block ${j}`);
+    }
+    // current chunk & history
+    const c0=3*i, c1=Math.min(3*i+2,L-1);
+    const h0=Math.max(0,i-5);
+    const winPos=lay.win[i].map(a=>lay.P[a]);
+    // curves from window anchors to chunk
+    const cx=(X(c0)+X(c1+1))/2;
+    winPos.forEach(p=>{
+      const ax=X(p)+cw/2;
+      el('path',{d:`M${ax},${yA+7} C${ax},${yA+34} ${cx},${yR-26} ${cx},${yR-2}`,style:`fill:none;stroke:var(--plan);stroke-width:1.5;${p>c1?'stroke-dasharray:5 4':''}`},svg);
+    });
+    // latents
+    for(let p=0;p<L;p++){
+      const ci=Math.floor(p/3);
+      let fill='var(--surf3)';
+      if(ci===i) fill='var(--ff)'; else if(ci>=h0&&ci<i) fill='color-mix(in srgb,var(--ff) 40%,transparent)';
+      el('rect',{x:X(p)+(cw>4?0.6:0.1),y:yR,width:Math.max(cw-(cw>4?1.2:0.2),0.5),height:rh,rx:cw>6?2:0,style:`fill:${fill}`},svg);
+    }
+    // chunk separators for small L
+    if(cw>5){for(let q=0;q<=L;q+=3){el('line',{x1:X(q),x2:X(q),y1:yR-3,y2:yR+rh+3,style:'stroke:var(--rule2);stroke-width:.8'},svg);}}
+    // anchors
+    lay.P.forEach((p,a)=>{
+      const j=Math.floor(a/3), inWin=winPos.includes(p);
+      const ax=X(p)+cw/2;
+      el('line',{x1:ax,x2:ax,y1:yR-5,y2:yR,style:'stroke:var(--plan);stroke-width:1.5'},svg);
+      if(inWin) el('circle',{cx:ax,cy:yA,r:cw>5?9:7,style:'fill:var(--plan-soft);stroke:var(--plan);stroke-width:1.2'},svg);
+      el('circle',{cx:ax,cy:yA,r:cw>5?5:3.4,style:`fill:${j%2?'var(--plan2)':'var(--plan)'}`},svg);
+      if(cw>5||inWin) el('text',{x:ax,y:yA+(inWin?24:20),'text-anchor':'middle',class:'svgmono',style:`fill:${inWin?'var(--plan-ink)':'var(--ink3)'};font-size:10px`},svg,p);
+    });
+    // time axis
+    const yT=yR+rh+22; const secs=(L-1)/4; const stepS=secs>40?10:5;
+    el('line',{x1:lx,x2:lx+pw,y1:yT-10,y2:yT-10,style:'stroke:var(--axis)'},svg);
+    for(let s=0;s<=secs+0.01;s+=stepS){const p=s*4;const x=X(p)+cw/2;el('line',{x1:x,x2:x,y1:yT-13,y2:yT-7,style:'stroke:var(--axis)'},svg);el('text',{x,y:yT+6,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3);font-size:10px'},svg,s+' s');}
+    // readout
+    const fr=p=>p===0?0:4*p-3; const ta=fr(c0)/16, tb=(4*c1+1)/16;
+    const beyond=c1>Math.max(...winPos)||c0<Math.min(...winPos);
+    const b=lay.needBlk[i], horizon=lay.blkLast[b], look=horizon-c0;
+    const nh=i-h0;
+    $('#tlOut').innerHTML=[
+      `<div><span>第 ${i} 块</span><b>潜帧 ${c0}–${c1}</b></div>`,
+      `<div><span>时间</span><b>${ta.toFixed(2)}–${tb.toFixed(2)} s</b></div>`,
+      `<div><span>锚点窗口 Γ(i)（u = ${Math.floor(3*i/20)}）</span><b>{${winPos.join(', ')}}</b></div>`,
+      `<div><span>同阶段历史</span><b>${nh? '块 '+h0+'–'+(i-1)+'（'+nh+' 块）':'无'}</b></div>`,
+      `<div><span>上下文 = 锚点 + 历史 + 当前</span><b>${winPos.length} + ${3*nh} + ${c1-c0+1} = ${winPos.length+3*nh+c1-c0+1}</b></div>`,
+      `<div><span>需规划器完成到</span><b>block ${b}（锚点至 ${horizon}）</b></div>`,
+      `<div><span>最少前瞻</span><b>${look} 潜帧 ≈ ${lat2s(look).toFixed(2)} s</b></div>`,
+      `<div><span>窗口两侧夹住本块？</span><b style="color:${beyond?'var(--risk-ink)':'var(--ok-ink)'}">${beyond?'否，有潜帧落在窗口外':'是'}</b></div>`
+    ].join('');
+  }
+  sl.addEventListener('input',e=>{i=+e.target.value;draw();});
+  segBind($('#tlLen'),v=>{L=+v;i=Math.min(i,Math.ceil(L/3)-1);draw();});
+  draw();
+})();
+
+/* ================= §07 seam table ================= */
+(function(){
+  const tb=$('#tblSeam tbody'); if(!tb) return;
+  const rows=[[50,'规划器','规划器',3.93,2.71,1.32,7.66,0],[50,'规划器','渲染器',3.34,2.37,1.29,5.99,0],[50,'渲染器（FF）','规划器',1.83,2.27,1.32,3.54,1],[4,'规划器','渲染器',6.20,1.68,1.40,9.55,0],[4,'渲染器（FF）','规划器',2.43,2.50,1.26,5.61,1]];
+  const cell=(v,max,col)=>`<td class="l"><span class="mono-num" style="display:inline-block;width:2.6em;text-align:right">${v.toFixed(2)}</span><span class="bar-in" style="width:${(v/max*110).toFixed(1)}px;background:${col}"></span></td>`;
+  tb.innerHTML=rows.map((r,ix)=>`<tr class="${r[7]?'ours':''}${ix===3?' sep':''}"><td>${r[0]}</td><td class="l">${r[1]}</td><td class="l">${r[2]}</td>${cell(r[3],6.2,'var(--plan)')}${cell(r[4],6.2,'var(--ff)')}${cell(r[5],6.2,'var(--op)')}${cell(r[6],9.55,'var(--ink3)')}</tr>`).join('');
+})();
+
+/* ================= §09 latency data ================= */
+const LAT={
+  s13_480_1:{label:'1.3B · 480p · 单卡 H100',gpu:1,bidir:[3.31,32.02,91.22,295.83],sf:[3.69,17.44,31.48,57.89],hiar:[5.57,27.86,50.41,94.74],ff:[4.56,17.77,32.80,59.64]},
+  s13_480:{label:'1.3B · 480p · 4×H100',gpu:4,bidir:[1.13,8.95,24.01,75.28],sf:[5.10,20.25,35.40,65.14],sf1:[3.69,17.44,31.48,57.89],hiar:[2.06,7.67,13.31,24.67],hiar1:[5.57,27.86,50.41,94.74],ff:[2.21,6.32,10.79,21.29],ffcp:[2.34,7.24,12.30,22.07],stream:[1.85,5.11,8.27,14.53]},
+  s13_720:{label:'1.3B · 720p · 4×H100',gpu:4,bidir:[3.74,39.59,115.79,379.17],sf:[6.04,27.17,47.71,97.68],hiar:[6.49,26.82,46.94,86.85],ff:[5.71,19.33,35.14,66.53],ffcp:[5.50,18.47,30.90,58.89],stream:[5.47,16.37,27.05,48.61]},
+  s14_480:{label:'14B · 480p · 4×GB300',gpu:4,bidir:[3.50,31.83,90.23,295.45],sf:[9.75,41.35,74.56,137.89],hiar:[5.64,22.79,39.63,73.03],ff:[4.79,15.67,27.67,53.43],ffcp:[5.23,16.66,28.10,52.18],stream:[4.72,13.40,22.35,39.43]},
+  s14_720:{label:'14B · 720p · 4×GB300',gpu:4,bidir:[12.79,154.47,454.53,1530.42],sf:[15.84,78.88,142.29,269.41],hiar:[21.72,93.25,163.66,304.35],ff:[17.19,61.39,109.89,214.83],ffcp:[16.28,55.66,97.02,181.25],stream:[17.44,53.17,88.79,160.34]}
+};
+const DUR=[5,20,35,65], LENS=[21,81,141,261];
+function best(a,b){return a.map((v,i)=>b?Math.min(v,b[i]):v);}
+
+/* ================= §09 latency chart ================= */
+(function(){
+  const svg=$('#figLat'); if(!svg) return;
+  const fig=svg.closest('figure'); const tip=$('#latTip');
+  let preset='s13_480', showB=false;
+  function seriesOf(p){
+    const d=LAT[p]; const out=[];
+    if(d.gpu===1){
+      out.push({key:'ff',name:'FlashForward',c:'var(--ff)',shape:'circle',v:d.ff});
+      out.push({key:'hiar',name:'HiAR',c:'var(--hiar)',shape:'square',v:d.hiar});
+      out.push({key:'sf',name:'Self-Forcing',c:'var(--sf)',shape:'tri',v:d.sf});
+    }else{
+      out.push({key:'stream',name:'FF 流式（5 卡）',c:'var(--stream)',shape:'diamond',v:d.stream});
+      out.push({key:'ff',name:'FF（4 卡）',c:'var(--ff)',shape:'circle',v:best(d.ff,d.ffcp)});
+      out.push({key:'hiar',name:'HiAR（4 卡）',c:'var(--hiar)',shape:'square',v:d.hiar});
+      out.push({key:'sf',name:d.sf1?'SF（单卡更快）':'SF（4 卡 CP）',c:'var(--sf)',shape:'tri',v:d.sf1?best(d.sf,d.sf1):d.sf});
+    }
+    if(showB) out.push({key:'bidir',name:'双向基线',c:'var(--bidir)',shape:'dot',v:d.bidir,dash:true});
+    return out;
+  }
+  function draw(){
+    clear(svg); const ser=seriesOf(preset);
+    const W=760,H=340,ml=58,mr=150,mt=16,mb=46,pw=W-ml-mr,ph=H-mt-mb;
+    const ymaxRaw=Math.max(...ser.flatMap(s=>s.v));
+    const niceStep=v=>{const e=Math.pow(10,Math.floor(Math.log10(v)));const f=v/e;return (f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10)*e;};
+    const st=niceStep(ymaxRaw/4*1.0); const ymax=Math.ceil(ymaxRaw/st)*st;
+    const X=d=>ml+pw*(d-0)/70, Y=v=>mt+ph*(1-v/ymax);
+    for(let v=0;v<=ymax+1e-9;v+=st){el('line',{x1:ml,x2:ml+pw,y1:Y(v),y2:Y(v),style:'stroke:var(--grid)'},svg);el('text',{x:ml-8,y:Y(v)+4,'text-anchor':'end',class:'svgmono',style:'fill:var(--ink3)'},svg,+v.toFixed(1));}
+    DUR.forEach(d=>{el('line',{x1:X(d),x2:X(d),y1:mt+ph,y2:mt+ph+5,style:'stroke:var(--axis)'},svg);el('text',{x:X(d),y:mt+ph+19,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink2)'},svg,d+' s');});
+    el('line',{x1:ml,x2:ml+pw,y1:mt+ph,y2:mt+ph,style:'stroke:var(--axis)'},svg);
+    el('text',{x:ml+pw/2,y:H-6,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink3)'},svg,'视频时长（16 fps）');
+    el('text',{x:14,y:mt+ph/2,transform:`rotate(-90 14 ${mt+ph/2})`,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink3)'},svg,'去噪路径延迟（秒）');
+    const labels=[];
+    ser.forEach(s=>{
+      el('polyline',{points:s.v.map((v,i)=>`${X(DUR[i])},${Y(v)}`).join(' '),style:`fill:none;stroke:${s.c};stroke-width:2;${s.dash?'stroke-dasharray:6 5':''}`},svg);
+      s.v.forEach((v,i)=>marker(svg,s.shape,X(DUR[i]),Y(v),s.c,4.3));
+      labels.push({y:Y(s.v[3]),s});
+    });
+    spreadLabels(labels,14,mt+4,mt+ph);
+    labels.forEach(l=>{el('text',{x:X(65)+12,y:l.ly+4,class:'svgtxt',style:'fill:var(--ink);font-weight:600'},svg,`${l.s.name} ${l.s.v[3]<100?l.s.v[3].toFixed(1):l.s.v[3].toFixed(0)}`);});
+    // legend
+    $('#latLegend').innerHTML=ser.map(s=>`<span><span class="dot ${s.key}"></span>${s.name}</span>`).join('');
+    // hit bands
+    DUR.forEach((d,i)=>{
+      const x0=i?(X(DUR[i-1])+X(d))/2:ml, x1=i<3?(X(d)+X(DUR[i+1]))/2:ml+pw;
+      const r=el('rect',{x:x0,y:mt,width:x1-x0,height:ph,style:'fill:transparent;cursor:crosshair'},svg);
+      r.addEventListener('pointermove',e=>{
+        const ff=ser.find(s=>s.key==='ff').v[i], hi=ser.find(s=>s.key==='hiar').v[i], sf=ser.find(s=>s.key==='sf').v[i];
+        const html=`<b>${d} s · ${LAT[preset].label}</b><br>`+ser.map(s=>`<span class="dot ${s.key}"></span>${s.name}：<b>${s.v[i].toFixed(2)} s</b>`).join('<br>')+`<br><span class="dim">FF 相对 HiAR ${(hi/ff).toFixed(2)}× · 相对 SF ${(sf/ff).toFixed(2)}×</span>`;
+        tipAt(tip,e,html);
+      });
+      r.addEventListener('pointerleave',()=>tipOff(tip));
+    });
+    // table
+    const d=LAT[preset]; const th=$('#tblLat thead'), tb=$('#tblLat tbody');
+    th.innerHTML=`<tr><th>${d.label}</th>${DUR.map(x=>`<th>${x} s</th>`).join('')}</tr>`;
+    const rows=[];
+    const pushRow=(name,dot,v,cls)=>rows.push({name,dot,v,cls});
+    if(d.gpu===1){pushRow('双向基线','bidir',d.bidir);pushRow('Self-Forcing','sf',d.sf);pushRow('HiAR','hiar',d.hiar);pushRow('FlashForward','ff',d.ff,'ours');}
+    else{pushRow('双向基线','bidir',d.bidir);pushRow('Self-Forcing（4 卡 CP）','sf',d.sf);if(d.sf1)pushRow('Self-Forcing（单卡）','sf',d.sf1);pushRow('HiAR','hiar',d.hiar);if(d.hiar1)pushRow('HiAR（单卡）','hiar',d.hiar1);pushRow('FlashForward（单卡规划器）','ff',d.ff,'ours');pushRow('FlashForward-CP','ff',d.ffcp,'ours');pushRow('FlashForward 流式（5 卡）','stream',d.stream);}
+    const minCol=DUR.map((_,i)=>Math.min(...rows.filter(r=>!r.name.includes('5 卡')).map(r=>r.v[i])));
+    tb.innerHTML=rows.map(r=>`<tr class="${r.cls||''}"><td><span class="dot ${r.dot}"></span>${r.name}</td>${r.v.map((v,i)=>`<td class="${v===minCol[i]?'best':''}">${v.toFixed(2)}</td>`).join('')}</tr>`).join('');
+    // note: speedups (paper's rule: each method's fastest ≤4-GPU)
+    if(d.gpu===4){
+      const ffb=best(d.ff,d.ffcp), hib=d.hiar1?best(d.hiar,d.hiar1):d.hiar, sfb=d.sf1?best(d.sf,d.sf1):d.sf;
+      $('#latNote').innerHTML=`按论文口径（各方法取 ≤ 4 卡最快配置），20 / 35 / 65 s 时 FF 比 HiAR 快 <b>${[1,2,3].map(i=>(hib[i]/ffb[i]).toFixed(2)+'×').join(' / ')}</b>，比 SF 快 <b>${[1,2,3].map(i=>(sfb[i]/ffb[i]).toFixed(2)+'×').join(' / ')}</b>；5 s 时 FF ${ffb[0]<=Math.min(hib[0],sfb[0])?'也最快':'不是最快（'+(hib[0]<sfb[0]?'HiAR':'SF')+' 更快）'}，双向基线 ${d.bidir[0].toFixed(2)} s 最快。加粗是同卡数（≤ 4 卡）下每列最快。`;
+    }else{
+      $('#latNote').innerHTML=`单卡没有流水线可用：FF 比 HiAR 快 <b>${[1,2,3].map(i=>(d.hiar[i]/d.ff[i]).toFixed(2)+'×').join(' / ')}</b>（20 / 35 / 65 s），因为省掉了大部分重编码；但比 SF 慢 <b>${[1,2,3].map(i=>((d.ff[i]/d.sf[i]-1)*100).toFixed(1)+'%').join(' / ')}</b>，因为每一步都要写 KV，而且还有规划器的开销。`;
+    }
+  }
+  segBind($('#latPreset'),v=>{preset=v;draw();});
+  $('#latBidir').addEventListener('change',e=>{showB=e.target.checked;draw();});
+  draw();
+})();
+
+/* ================= §09 calculator ================= */
+(function(){
+  const tb=$('#tblCalc tbody'); if(!tb) return;
+  const TF={s13_480:24.67/176,s13_720:86.85/176,s14_480:73.03/176,s14_720:304.35/176};
+  let preset='s13_480', L=81, gp=1, gs=1;
+  function calc(){
+    const lay=layout(L,10), N=lay.N, NP=lay.NP, S=4, t=TF[preset], d=LAT[preset], li=LENS.indexOf(L);
+    const Wff=NP*(S+1)+N*S, Wsf=N*S+(N-1), Whi=N*S+(N-1)*S;
+    const gpe=Math.max(gp,1);
+    const Rff=N+NP*(S+1)/gpe+(S-1), Rhi=2*N-1+(S-1), Rsf=Wsf/gs;
+    const pred={ff:Rff*t,hi:Rhi*t,sf:Rsf*t};
+    const measFF=gp<=1?d.ff[li]:d.ffcp[li];
+    const measSF=gs<=1.001?(d.sf1?d.sf1[li]:null):d.sf[li];
+    const row=(nm,dot,W,R,p,m,cls,note)=>`<tr class="${cls||''}"><td><span class="dot ${dot}"></span>${nm}${note?`<span class="d">${note}</span>`:''}</td><td>${W}</td><td>${R%1?R.toFixed(2):R}</td><td>${p.toFixed(2)}</td><td>${m==null?'—':m.toFixed(2)}</td><td>${m==null?'—':(()=>{const x=Math.round((p/m-1)*100);return (x>0?'+':x<0?'−':'±')+Math.abs(x)+'%';})()}</td></tr>`;
+    tb.innerHTML=row('FlashForward','ff',Wff,Rff,pred.ff,measFF,'ours',gp<=1?'单卡规划器；实测取 FF 行':'规划器 CP；实测取 FF-CP 行（其真实 γ 未知）')+
+      row('HiAR','hiar',Whi,Rhi,pred.hi,d.hiar[li],'','4 卡流水，每步重编码')+
+      row('Self-Forcing','sf',Wsf,Rsf,pred.sf,measSF,'',gs<=1.001?'单卡'+(d.sf1?'':'（该设置论文未测单卡）'):'4 卡 CP；实测取 4 卡行');
+    const gStarPlan=NP*(S+1)/(2*N-1-N), gStarSF=Wsf/Rff;
+    $('#calcOut').innerHTML=[
+      `<div><span>每轮时间 t（由 HiAR 65 s 反推）</span><b>${t.toFixed(3)} s</b></div>`,
+      `<div><span>N 块 · M 锚点 · N_P block</span><b>${N} · ${lay.M} · ${NP}</b></div>`,
+      `<div><span>FF 快过 HiAR 需 γ_plan &gt;</span><b>${gStarPlan.toFixed(2)}</b></div>`,
+      `<div><span>FF 快过 SF 需 γ_SF &lt;</span><b>${gStarSF.toFixed(2)}</b></div>`,
+      `<div><span>预测：FF 相对 HiAR</span><b>${(pred.hi/pred.ff).toFixed(2)}×</b></div>`,
+      `<div><span>预测：FF 相对 SF</span><b>${(pred.sf/pred.ff).toFixed(2)}×</b></div>`,
+      `<div><span>单卡总工作量比 HiAR / FF</span><b>${(Whi/Wff).toFixed(2)}×</b></div>`
+    ].join('');
+  }
+  segBind($('#calcPreset'),v=>{preset=v;calc();});
+  segBind($('#calcLen'),v=>{L=+v;calc();});
+  $('#calcGp').addEventListener('input',e=>{gp=+e.target.value;$('#calcGpOut').textContent=gp.toFixed(2);calc();});
+  $('#calcGs').addEventListener('input',e=>{gs=+e.target.value;$('#calcGsOut').textContent=gs.toFixed(2);calc();});
+  calc();
+})();
+
+/* ================= §10 streaming simulator ================= */
+(function(){
+  const svg=$('#figStream'); if(!svg) return;
+  const tip=$('#stTip');
+  let D=10, L=261;
+  function sim(){
+    const lay=layout(L,D), N=lay.N, NP=lay.NP, S=4;
+    const ready=[];for(let j=0;j<NP;j++)ready.push(5*(j+1));
+    const s=[],wait=[];
+    for(let i=0;i<N;i++){const need=ready[lay.needBlk[i]];const earliest=i?s[i-1]+1:0;const st=Math.max(earliest,need);s.push(st);wait.push(i?st-earliest:st);}
+    const totStream=s[N-1]+S, totFour=5*NP+N+S-1;
+    const minLook=[],actLook=[];
+    for(let i=0;i<N;i++){
+      minLook.push(lat2s(lay.blkLast[lay.needBlk[i]]-3*i));
+      const done=Math.min(NP,Math.floor(s[i]/5)); const hz=lay.blkLast[Math.max(done-1,lay.needBlk[i])];
+      actLook.push(lat2s(Math.max(hz-3*i,0)));
+    }
+    return {lay,N,NP,s,wait,totStream,totFour,minLook,actLook};
+  }
+  function draw(){
+    const r=sim(); clear(svg);
+    const stalls=r.wait.slice(1).reduce((a,b)=>a+b,0);
+    const inner=r.minLook.slice(0,Math.max(1,r.N-3));
+    $('#stOut').innerHTML=[
+      `<div><span>锚点数 · 规划器 block 数</span><b>${r.lay.M} · ${r.NP}</b></div>`,
+      `<div><span>规划器前向（每 block 5 次）</span><b>${5*r.NP}</b></div>`,
+      `<div><span>4 卡非流式总轮数</span><b>${r.totFour}</b></div>`,
+      `<div><span>5 卡流式总轮数</span><b>${r.totStream}</b></div>`,
+      `<div><span>流式预测加速</span><b>${(r.totFour/r.totStream).toFixed(2)}×</b></div>`,
+      `<div><span>渲染器中途等锚点</span><b style="color:${stalls?'var(--risk-ink)':'var(--ok-ink)'}">${stalls} 轮</b></div>`,
+      `<div><span>规划器卡利用率（流式）</span><b>${(5*r.NP/r.totStream*100).toFixed(0)}%</b></div>`,
+      `<div><span>最少前瞻 最小 / 最大</span><b>${Math.min(...inner).toFixed(2)} / ${Math.max(...r.minLook).toFixed(2)} s</b></div>`
+    ].join('');
+    const W=760,H=300,ml=52,mr=16,mt=16,mb=44,pw=W-ml-mr,ph=H-mt-mb;
+    const ymax=Math.ceil(Math.max(...r.actLook,...r.minLook)/5)*5||5;
+    const bw=pw/r.N, X=i=>ml+i*bw, Y=v=>mt+ph*(1-v/ymax);
+    for(let v=0;v<=ymax;v+=5){el('line',{x1:ml,x2:ml+pw,y1:Y(v),y2:Y(v),style:'stroke:var(--grid)'},svg);el('text',{x:ml-8,y:Y(v)+4,'text-anchor':'end',class:'svgmono',style:'fill:var(--ink3)'},svg,v+' s');}
+    // stall bands
+    r.wait.forEach((w,i)=>{if(i&&w>0){el('rect',{x:X(i),y:mt,width:bw,height:ph,style:'fill:var(--risk-soft)'},svg);}});
+    // bars
+    r.minLook.forEach((v,i)=>{el('rect',{x:X(i)+bw*.12,y:Y(v),width:Math.max(bw*.76,0.8),height:Math.max(Y(0)-Y(v),0.5),rx:bw>6?2:0,style:'fill:var(--plan);opacity:.85'},svg);});
+    el('polyline',{points:r.actLook.map((v,i)=>`${X(i)+bw/2},${Y(v)}`).join(' '),style:'fill:none;stroke:var(--ink2);stroke-width:1.6'},svg);
+    el('line',{x1:ml,x2:ml+pw,y1:Y(0),y2:Y(0),style:'stroke:var(--axis)'},svg);
+    const stepI=r.N>60?10:r.N>30?5:3;
+    for(let i=0;i<r.N;i+=stepI){el('text',{x:X(i)+bw/2,y:mt+ph+16,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink3);font-size:10px'},svg,i);}
+    el('text',{x:ml+pw/2,y:H-6,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink3)'},svg,'渲染器第 i 块');
+    el('text',{x:12,y:mt+ph/2,transform:`rotate(-90 12 ${mt+ph/2})`,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink3)'},svg,'前瞻（秒）');
+    r.minLook.forEach((v,i)=>{
+      const h=el('rect',{x:X(i),y:mt,width:bw,height:ph,style:'fill:transparent'},svg);
+      h.addEventListener('pointermove',e=>{
+        const b=r.lay.needBlk[i];
+        tipAt(tip,e,`<b>第 ${i} 块</b>（潜帧 ${3*i}–${Math.min(3*i+2,L-1)}）<br>需要 block ${b}（锚点至 ${r.lay.blkLast[b]}），第 ${5*(b+1)} 轮就绪<br>开始于第 ${r.s[i]} 轮${i&&r.wait[i]?'，<span class="c-risk">等了 '+r.wait[i]+' 轮</span>':''}<br>最少前瞻 <b>${v.toFixed(2)} s</b> · 实际前瞻 <b>${r.actLook[i].toFixed(2)} s</b>`);
+      });
+      h.addEventListener('pointerleave',()=>tipOff(tip));
+    });
+  }
+  segBind($('#stDelta'),v=>{D=+v;draw();});
+  segBind($('#stLen'),v=>{L=+v;draw();});
+  draw();
+})();
+
+/* ================= §11 VBench-Long ================= */
+(function(){
+  const svg=$('#figVBL'); if(!svg) return;
+  const tip=$('#vblTip');
+  const D={
+    ff:{name:'FlashForward',c:'var(--ff)',shape:'circle',T:[0.8404,0.8401,0.8395],Q:[0.8635,0.8636,0.8617],S:[0.7481,0.7460,0.7505]},
+    hiar:{name:'HiAR',c:'var(--hiar)',shape:'square',T:[0.8265,0.8230,0.8219],Q:[0.8440,0.8452,0.8419],S:[0.7565,0.7339,0.7418]},
+    sf:{name:'Self-Forcing',c:'var(--sf)',shape:'tri',T:[0.8258,0.8087,0.7806],Q:[0.8460,0.8330,0.8186],S:[0.7452,0.7116,0.6288]},
+    cf:{name:'Causal Forcing',c:'var(--cf)',shape:'diamond',T:[0.8178,0.7906,0.7539],Q:[0.8515,0.8343,0.8145],S:[0.6833,0.6159,0.5113]}
+  };
+  const keys=['ff','hiar','sf','cf'], dur=[20,35,65];
+  $('#vblLegend').innerHTML=keys.map(k=>`<span><span class="dot ${k}"></span>${D[k].name}</span>`).join('');
+  let met='T';
+  function draw(){
+    clear(svg);
+    const W=760,H=320,ml=62,mr=170,mt=16,mb=44,pw=W-ml-mr,ph=H-mt-mb;
+    const all=keys.flatMap(k=>D[k][met]); const st=met==='S'?0.05:0.02;
+    const lo=Math.floor((Math.min(...all)-st*0.3)/st)*st, hi=Math.ceil((Math.max(...all)+st*0.3)/st)*st;
+    const X=d=>ml+pw*(d-15)/55, Y=v=>mt+ph*(1-(v-lo)/(hi-lo));
+    for(let v=lo;v<=hi+1e-9;v+=st){el('line',{x1:ml,x2:ml+pw,y1:Y(v),y2:Y(v),style:'stroke:var(--grid)'},svg);el('text',{x:ml-8,y:Y(v)+4,'text-anchor':'end',class:'svgmono',style:'fill:var(--ink3)'},svg,v.toFixed(2));}
+    dur.forEach(d=>{el('text',{x:X(d),y:mt+ph+19,'text-anchor':'middle',class:'svgmono',style:'fill:var(--ink2)'},svg,d+' s');});
+    el('line',{x1:ml,x2:ml+pw,y1:mt+ph,y2:mt+ph,style:'stroke:var(--axis)'},svg);
+    el('text',{x:ml+pw/2,y:H-6,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink3)'},svg,'视频时长');
+    el('text',{x:14,y:mt+ph/2,transform:`rotate(-90 14 ${mt+ph/2})`,'text-anchor':'middle',class:'svgtxt',style:'fill:var(--ink3)'},svg,{T:'VBench-Long Total',Q:'Quality',S:'Semantic'}[met]+'（轴不从 0 开始）');
+    const labels=[];
+    keys.forEach(k=>{const s=D[k];
+      el('polyline',{points:s[met].map((v,i)=>`${X(dur[i])},${Y(v)}`).join(' '),style:`fill:none;stroke:${s.c};stroke-width:2`},svg);
+      s[met].forEach((v,i)=>marker(svg,s.shape,X(dur[i]),Y(v),s.c,4.4));
+      labels.push({y:Y(s[met][2]),k});
+    });
+    spreadLabels(labels,15,mt+4,mt+ph);
+    labels.forEach(l=>{const s=D[l.k];el('text',{x:X(65)+12,y:l.ly+4,class:'svgtxt',style:'fill:var(--ink);font-weight:600'},svg,`${s.name} ${s[met][2].toFixed(4)}`);});
+    dur.forEach((d,i)=>{
+      const x0=i?(X(dur[i-1])+X(d))/2:ml, x1=i<2?(X(d)+X(dur[i+1]))/2:ml+pw;
+      const r=el('rect',{x:x0,y:mt,width:x1-x0,height:ph,style:'fill:transparent;cursor:crosshair'},svg);
+      r.addEventListener('pointermove',e=>tipAt(tip,e,`<b>${d} s · ${{T:'Total',Q:'Quality',S:'Semantic'}[met]}</b><br>`+keys.map(k=>`<span class="dot ${k}"></span>${D[k].name}：<b>${D[k][met][i].toFixed(4)}</b>`).join('<br>')));
+      r.addEventListener('pointerleave',()=>tipOff(tip));
+    });
+    const th=$('#tblVBL thead'), tb=$('#tblVBL tbody');
+    th.innerHTML=`<tr><th>${{T:'Total',Q:'Quality',S:'Semantic'}[met]}</th><th>20 s</th><th>35 s</th><th>65 s</th><th>65 s − 20 s</th></tr>`;
+    tb.innerHTML=keys.map(k=>{const v=D[k][met];const dd=v[2]-v[0];return `<tr class="${k==='ff'?'ours':''}"><td><span class="dot ${k}"></span>${D[k].name}</td>${v.map(x=>`<td>${x.toFixed(4)}</td>`).join('')}<td class="${dd<-0.02?'dn':''}">${dd>=0?'+':'−'}${Math.abs(dd).toFixed(4)}</td></tr>`;}).join('');
+  }
+  segBind($('#vblMetric'),v=>{met=v;draw();});
+  draw();
+})();
+
+/* ================= §13 doubts ================= */
+(function(){
+  const box=$('#doubts'); if(!box) return;
+  segBind($('#dbFilter'),v=>{$$('details.dbt',box).forEach(d=>{d.hidden=!(v==='all'||d.classList.contains(v));});});
+  $('#dbOpen').addEventListener('click',()=>{const ds=$$('details.dbt',box).filter(d=>!d.hidden);const anyClosed=ds.some(d=>!d.open);ds.forEach(d=>d.open=anyClosed);});
+})();
+
+})();
+</script>
+</body>
+</html>
