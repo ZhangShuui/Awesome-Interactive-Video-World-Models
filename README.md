@@ -89,6 +89,24 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* Level-of-Token Diffusion. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.05816)] · ⚡`realtime`
+* **`HLA-WM`**, Hybrid Linear Attention for Long-Horizon Video World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.05739)] · 🧠`memory`
+* **`Kandinsky 6.0 Video`**, Foundation Models for Synchronized Video and Audio Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.05608)] · ⚡`realtime`
+* **`SemCam`**, Semantic Camera Motion Control for Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.05141)] · 🧠`memory`
+* How Does Geometry Enter Generated Motion?. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.05135)] · ⚡`realtime`
+* **`PWM`**, Personalized World Models with Online Reinforcement Learning. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.04920)] · 🕹️`control`
+* **`ProAR`**, Learning Prospective Reasoning with Autoregressive Video Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.03664)] · 🧠`memory`
+* **`LoGo`**, Local-Global Rewards for Consistent Long-Horizon Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.03636)] · 🧠`memory`
+* **`DuoMatching`**, Joint-Marginal Distribution Matching for Few-Step Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.03543)] · ⚡`realtime`
+* Weave Forcing: Compositional Memory Routing for Interactive Long Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.03510)] · 🧠`memory`
+* **`VDOT++`**, Unified Few-Step Video Generation via Unbalanced Optimal Transport Distillation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.03221)] · ⚡`realtime`
+* Contextual Flow Matching: Adaptive Step Selection in Flow Models for Efficient Visual Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.03202)] · ⚡`realtime`
+* In-Distribution Forcing for Long Video Generation at Test Time. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.03120)] · ⚡`realtime`
+* Custom Forcing: Training-Free Subject Customization for Autoregressive Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.02914)] · ⚡`realtime`
+* **`TRAC`**, Trajectory-aware Reuse and Adaptive Correction for Efficient Autoregressive Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.02779)] · ⚡`realtime`
+* **`SymRegFlow`**, Symmetry-Regularized Flow Matching for Video World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.02726)] · 🧠`memory`
+* **`SpectralCache`**, Accelerating Diffusion-Based World Models via Spectral Feature Caching. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.02660)] · ⚡`realtime`
+* Spatial Memory Intelligence: Endowing World Models with Understanding-Driven Long-Term Memory. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.02521)] · 🧠`memory`
 * **`ROWBench`**, Do Video Models Render What the Program Specifies?. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.02205)] · 🧠`memory`
 * **`DMAD`**, Distribution Matching as Adversarial Distillation for Fast Visual Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.02188)] · ⚡`realtime`
 * 4Director: Controlling Video World Models with Rigid 3D Geometry. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.02160)] · 🧠`memory`
