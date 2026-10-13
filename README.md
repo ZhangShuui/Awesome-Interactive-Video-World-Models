@@ -89,6 +89,11 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* **`GLIMPSE`**, Global-Local Indexing with Multi-Precision Spectral Encoding for Explorable Video World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.13706)] · 🧠`memory`
+* Golden Anchor for Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.13217)] · 🕹️`control`
+* **`PreCoG`**, Preview-Edit for Efficient Video Correction in Generation-Time. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.13174)] · 🧠`memory`
+* **`ForcingBooster`**, Adaptive Patch-wise Denoising for Fast Autoregressive Video Diffusion. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.12625)] · ⚡`realtime`
+* **`DiffusionART`**, Efficient, Stable and Scalable Reinforcement of Diffusion Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.12572)] · 🧠`memory`
 * **`WorldGuide`**, Goal-Directed Video World Model for Procedural Task Execution. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.12459)] · 🧠`memory`
 * **`LEGO`**, A Lifting-Free Approach for Exocentric-to-Egocentric Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.12442)] · 🧠`memory`
 * **`WorldCast`**, Distributed Multiplayer World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.12412)] · ⚡`realtime`
@@ -104,6 +109,7 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * Learning to Retrieve: Internalizing Memory Retrieval for Video World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.11444)] · 🧠`memory`
 * iCATS: Fast Video Generation via Interaction-Aware Sparse Attention and Timestep-Adaptive Sparsity. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.11302)] · ⚡`realtime`
 * **`IntactWorld`**, Joint World Modeling with Intact Features. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.11174)] · 🧠`memory`
+* **`CORAL-KV`**, Compact Cross-Layer Prediction and Residual Coding for Autoregressive Video KV Caches. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.12514)] · ⚡`realtime`
 * **`Fluid-Gen-Zero`**, Grounding Pretrained Video Generators in Physics without Training. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.10984)] · 🧠`memory`
 * **`MESSENGER`**, Memory-Enhanced Sequential Scene Flow Estimation via Autoregressive Next-Frame Forecasting. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.10759)] · 🧠`memory`
 * **`GRACE`**, Generation-aware latent compression for efficient video generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.10524)] · ⚡`realtime`
