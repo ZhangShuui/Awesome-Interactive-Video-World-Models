@@ -89,6 +89,41 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* Speculative Sampling in Interactive Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.20556)] · ⚡`realtime`
+* Are We Overthinking One-Step Generation?. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.20331)] · ⚡`realtime`
+* **`PAWA`**, Panoramic Action-conditioned World Modeling for Multiple Agents. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.20240)] · 🕹️`control`
+* Glance Forcing: Making Bidirectional Diffusion Autoregressive at a Glance. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.20220)] · ⚡`realtime`
+* **`RepForcing`**, Representation-Space Initialization for Autoregressive Video Distillation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.20111)] · ⚡`realtime`
+* **`StateCraft`**, Augmenting Video World Models with Abstract-State Reasoning. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.19795)] · 🧠`memory`
+* **`SceneAE`**, Scene Generation and Reconstruction in Queryable 3D-Anchored Latent Space. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.19708)] · 🧠`memory`
+* Long-horizon Video Generation with Slot Memory Addressed By Region Tokens. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.19257)] · 🧠`memory`
+* **`WorldMemBench`**, A Comprehensive Benchmark for Memory of Video World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.19063)] · 🧠`memory` 📊`benchmarks`
+* **`GAD`**, Geometry Attention Distillation for Consistent Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.18779)] · ⚡`realtime` 🧠`memory`
+* Simplifying and Improving On-Policy Distillation for Few-Step Diffusion. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.18472)] · ⚡`realtime`
+* **`LongForcing`**, Scaling Temporal Manifold Matching for Long-Horizon World Rollout. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.18289)] · 🌍`systems` 🧠`memory`
+* **`VARI`**, Robust Text-to-Video Generation via Group-Structured Intent Alignment. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.18189)] · ⚡`realtime`
+* **`FlowCred`**, Hierarchical Credit Assignment and Functional Coordination for Joint Text-to-Video Post-Training. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.18142)] · 🧠`memory`
+* **`LinMorph`**, Learning to Morph Weights for Efficient Video DiT Linearization. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.17914)] · ⚡`realtime`
+* 4LC: 4D Latent Cache for Efficient Conditioning in Dynamic World Modeling. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.17625)] · ⚡`realtime`
+* **`World-T3`**, Test-Time Training as Persistent Memory for Real-Time Video World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.17434)] · ⚡`realtime` 🧠`memory`
+* **`Multics`**, Generative Multi-Player World Model with Hierarchical Communication. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.17201)] · 🕹️`control`
+* **`REEL`**, Learning to Retrieve, Evaluate, and Evolve Visual Memory for Any Long-Horizon Multi-Shot Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.16632)] · 🧠`memory`
+* Tikhonov-Stabilized Bezier Representation Forecasting for Training-free Diffusion Acceleration. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.16448)] · ⚡`realtime`
+* **`RAR`**, Rate-Adaptive Rollout for Time-Consistent Interactive World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.16302)] · 🧠`memory`
+* **`VGGA`**, Geometry-Grounded Autoencoder for Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.16204)] · 🧠`memory`
+* **`Frequency-Step Cache`**, Separating Synchronization and Repair for Efficient Autoregressive Video Diffusion. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.15922)] · ⚡`realtime`
+* **`Totem`**, Object-Centric 3D Memory for World-Consistent Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.15807)] · 🧠`memory`
+* A Plausible Future Is Not a Causal Future: Can Video Models Generate How the World Unfolds?. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.15562)] · 🧠`memory`
+* **`TempoKV`**, Predictive KV Cache Quantization for Autoregressive Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.15324)] · ⚡`realtime`
+* **`TIDE`**, Trajectory-Informed Skill Distillation for Efficient Text-to-Video Prompt Optimization. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.15098)] · ⚡`realtime`
+* **`LightVAE`**, Towards Compact and Efficient Video Autoencoders. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.14726)] · ⚡`realtime`
+* **`Demiurge`**, Forging Navigable 4D Worlds via Autoregressive Video Rerendering. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.14685)] · 🌍`systems`
+* Competition Domains Matter: Selective Head Globalization for Training-Free Sparse Attention in Video Diffusion Transformers. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.14672)] · ⚡`realtime`
+* **`TGuide`**, Faster Autoregressive Video Diffusion via Historical Trajectory Guidance. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.14657)] · ⚡`realtime`
+* Prospective Forcing: Learning to Look Ahead for Autoregressive Long Video Diffusion. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.14654)] · ⚡`realtime`
+* **`FrameFold`**, Response-Guided KV Cache Consolidation for Autoregressive Long Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.14568)] · ⚡`realtime`
+* Adversarial Gradient Forcing for Robust Few-Step Autoregressive Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.14553)] · ⚡`realtime`
+* **`TrajCFG`**, Token-Wise Classifier-Free Guidance via Denoising Trajectory Feedback. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.14153)] · 🧠`memory`
 * **`GLIMPSE`**, Global-Local Indexing with Multi-Precision Spectral Encoding for Explorable Video World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.13706)] · 🧠`memory`
 * Golden Anchor for Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.13217)] · 🕹️`control`
 * **`PreCoG`**, Preview-Edit for Efficient Video Correction in Generation-Time. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.13174)] · 🧠`memory`
