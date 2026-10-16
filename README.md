@@ -89,6 +89,15 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* Speculative Forcing for Efficient Autoregressive Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.22347)] · ⚡`realtime`
+* **`AVC-Reward`**, Event-Centric Audio-Video Consistency Evaluation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.22321)] · 🧠`memory` 📊`benchmarks`
+* **`Velox`**, Spatial Memory Makes World Models Efficient. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.22311)] · 🧠`memory`
+* **`Mallea`**, Building, Steering, and Memorizing Worlds with Coding Agent. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.21283)] · 🧠`memory`
+* Sparse Attention for Video Generation Acceleration via Growing Sparsity and Reduced Search. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.21129)] · ⚡`realtime`
+* Temporal Specification Guidance for Text-to-Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.20822)] · 🧠`memory`
+* **`RIGen`**, Beyond Action Following with Reciprocal Interaction in Generative Gameplay. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.20811)] · 🌍`systems`
+* **`WorldCast`**, Exploring Intelligent Visual Generation in World State Prediction. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.20731)] · ⚡`realtime`
+* **`Orbia`**, Do Generated Videos Form a Consistent 3D World?. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.20693)] · 🧠`memory`
 * Speculative Sampling in Interactive Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.20556)] · ⚡`realtime`
 * Are We Overthinking One-Step Generation?. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.20331)] · ⚡`realtime`
 * **`PAWA`**, Panoramic Action-conditioned World Modeling for Multiple Agents. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.20240)] · 🕹️`control`
