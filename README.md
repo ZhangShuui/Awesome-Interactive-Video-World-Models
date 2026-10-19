@@ -89,6 +89,12 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* Learning to Correct Geometry in Generated Videos. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.23856)] · 🧠`memory`
+* Persistent Planar Memory for Video World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.23795)] · 🧠`memory`
+* Agentic Physics-Grounded Video Generation via Memory-Augmented In-Context Reasoning. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.23677)] · 🧠`memory`
+* Execution Before Memory: Diagnosing Memory Failures in Video World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.23542)] · 🧠`memory`
+* **`Momentum`**, Persistent Dynamics for Video World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.23423)] · 🧠`memory`
+* Sink-Sparse Hybrid Attention for Efficient Inference in T2I/T2V Diffusion Transformers. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.22975)] · ⚡`realtime`
 * Speculative Forcing for Efficient Autoregressive Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.22347)] · ⚡`realtime`
 * **`AVC-Reward`**, Event-Centric Audio-Video Consistency Evaluation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.22321)] · 🧠`memory` 📊`benchmarks`
 * **`Velox`**, Spatial Memory Makes World Models Efficient. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.22311)] · 🧠`memory`
@@ -104,6 +110,7 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 * Glance Forcing: Making Bidirectional Diffusion Autoregressive at a Glance. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.20220)] · ⚡`realtime`
 * **`RepForcing`**, Representation-Space Initialization for Autoregressive Video Distillation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.20111)] · ⚡`realtime`
 * **`StateCraft`**, Augmenting Video World Models with Abstract-State Reasoning. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.19795)] · 🧠`memory`
+* Generative World Simulation with DAO and JING. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.19726)] · 🧠`memory`
 * **`SceneAE`**, Scene Generation and Reconstruction in Queryable 3D-Anchored Latent Space. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.19708)] · 🧠`memory`
 * Long-horizon Video Generation with Slot Memory Addressed By Region Tokens. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.19257)] · 🧠`memory`
 * **`WorldMemBench`**, A Comprehensive Benchmark for Memory of Video World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.19063)] · 🧠`memory` 📊`benchmarks`
