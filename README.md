@@ -89,6 +89,18 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* State World Models: Execute the Rules, Generate the Pixels. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.26811)] · 🕹️`control`
+* Dynamics-Aware Sparse Attention for Efficient Autoregressive Video Diffusion. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.26262)] · ⚡`realtime`
+* **`RECAP`**, Reciprocal Sparse Attention and Hierarchical Caching for Efficient Video Diffusion. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.26244)] · ⚡`realtime`
+* **`TriTD`**, Tri-Partite Trajectory-Distribution Distillation for Real-Time Autoregressive Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.26165)] · ⚡`realtime`
+* **`TamedFlow`**, Trajectory-Aware Distillation\\for Teacher-Assisted Diffusion Sampling. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.26025)] · ⚡`realtime`
+* **`ActionRoPE`**, action as coordinates for spatially consistent control in planar-camera game world models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.25861)] · 🌍`systems` 🧠`memory`
+* Frechet Forcing: Training Long-Horizon Streaming World Models from Short Clips. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.25666)] · 🌍`systems` ⚡`realtime` 🧠`memory`
+* **`FluidGen`**, Physics-Aware Fluid Video Generation via Motion-Guided Post-Training. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.25660)] · 🧠`memory`
+* Clean Forcing: Drift-Resistant Autoregressive Video Diffusion with a Frozen Base. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.25634)] · 🧠`memory`
+* **`ViMoLa`**, Discrete Motion Tokens for Language-Guided Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.25595)] · 🕹️`control`
+* **`GeoART`**, Geometry-Aware Refinement via Test-Time Scaling for Camera-Conditioned Video Diffusion. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.25273)] · 🕹️`control`
+* **`CorrFlow`**, Self-Correcting Flow Matching. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.24750)] · 🧠`memory`
 * Learning to Correct Geometry in Generated Videos. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.23856)] · 🧠`memory`
 * Persistent Planar Memory for Video World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.23795)] · 🧠`memory`
 * Agentic Physics-Grounded Video Generation via Memory-Augmented In-Context Reasoning. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.23677)] · 🧠`memory`
