@@ -89,6 +89,21 @@ Venue labels show `arXiv YYMM` when a paper has no published venue recorded yet.
 ---
 
 <!-- BEGIN:LIST -->
+* Rethinking Video Autoencoders for Interactive World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.30129)] · ⚡`realtime`
+* **`Attn-Forcing`**, Learning Full-Context Attention Proxies for Streaming Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.30036)] · ⚡`realtime`
+* Looking Ahead: Modeling Future Evolution in Autoregressive Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.29989)] · ⚡`realtime`
+* **`CausalAlign`**, Causal Alignment of Video Generation Models for Consistent Ego-Motion. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.29915)] · 🧠`memory`
+* Sparsity Should Be ALLOTted by Output: Training-Free Allocation of Block-Sparse Attention for Video Diffusion Transformers. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.29441)] · ⚡`realtime`
+* **`LiveAct`**, Towards Real-Time Multi-Agent World Models with Heterogeneous Action Interfaces. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.29408)] · ⚡`realtime`
+* **`AEON`**, Unifying Video and 3D World Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.28631)] · 🧠`memory`
+* **`SolarRenderer`**, Few-Step Generative Reference Rendering. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.28630)] · ⚡`realtime`
+* **`OverSeer`**, Multi-Agent World Models Beyond What Agents See. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.28554)] · 🧠`memory`
+* **`StreamEval`**, Evaluating Interactive Streaming Video Generation Models. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.28402)] · ⚡`realtime` 📊`benchmarks`
+* Offline Makes Online Better: Calibrated Cache Compression for Video Generation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.28192)] · ⚡`realtime`
+* **`MoDDiT`**, Simple Token Routing in Diffusion Transformers. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.28086)] · ⚡`realtime`
+* **`Matrix-Game 4.0`**, Harnessing Video Models for Real-Time Playable Game Worlds. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.27999)] · 🌍`systems` ⚡`realtime`
+* Recast the Past: Stable Long Video Generation with Full Context Memory. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.27986)] · 🧠`memory`
+* Decoupling Action from Egocentric Observation for World Simulation. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.27946)] · 🧠`memory`
 * State World Models: Execute the Rules, Generate the Pixels. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.26811)] · 🕹️`control`
 * Dynamics-Aware Sparse Attention for Efficient Autoregressive Video Diffusion. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.26262)] · ⚡`realtime`
 * **`RECAP`**, Reciprocal Sparse Attention and Hierarchical Caching for Efficient Video Diffusion. **`arXiv 2026.10`** [[Paper](https://arxiv.org/abs/2610.26244)] · ⚡`realtime`
